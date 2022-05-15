@@ -22,5 +22,12 @@ app.use((req, res, next) => {
 // GET /feed/posts
 app.use('/feed', feedRoutes);
 
+app.use((req, res, next) => {
+    console.log(req.body);
+    res.status(404).send('<h1>Page Not Found</h1>');
+});
+
 const port = process.env.port || 8080;
-app.listen(port);
+app.listen(port, () => {
+    console.log('Starting service');
+});
