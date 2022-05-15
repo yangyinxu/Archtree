@@ -22,4 +22,5 @@ app.use((req, res, next) => {
 // GET /feed/posts
 app.use('/feed', feedRoutes);
 
-app.listen(8080);
+const port = process.env.port || 8080;
+app.listen(port);
