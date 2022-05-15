@@ -5,6 +5,8 @@ const feedRoutes = require('./routes/feedRoute');
 
 const app = express();
 
+console.log(`Service environment: ${process.env.NODE_ENV}`);
+
 // use body parser to parse request body in JSON format
 app.use(bodyParser.json());
 
