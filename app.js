@@ -27,6 +27,11 @@ app.use((req, res, next) => {
 // GET /feed/posts
 app.use('/feed', feedRoutes);
 
+// home page
+app.get('/', (req, res, next) => {
+    res.status(200).send('<h1>Home Page</h1>');
+});
+
 // catch unexpected requests
 app.use((req, res, next) => {
     console.log(req.body);
