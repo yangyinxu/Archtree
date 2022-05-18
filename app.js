@@ -33,9 +33,11 @@ app.use((req, res, next) => {
     res.status(404).send('<h1>Page Not Found</h1>');
 });
 
+const MONGO_DB_URL = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0.ibqp4.mongodb.net/${process.env.MONGO_DEFAULT_DATABASE}?retryWrites=true&w=majority`;
 const port = process.env.port || 8080;
 mongoose
-    .connect(process.env.MONGO_DB_CONNECTION_URL)
+    .connect
+    (MONGO_DB_URL)
     .then(result => {
         app.listen(port, () => {
             console.log('Starting service');
