@@ -1,7 +1,10 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
+const mongoose = require('mongoose');
 
 const feedRoutes = require('./routes/feedRoute');
+const { LoggerLevel } = require('mongodb');
 
 const app = express();
 
@@ -24,12 +27,17 @@ app.use((req, res, next) => {
 // GET /feed/posts
 app.use('/feed', feedRoutes);
 
+// catch unexpected requests
 app.use((req, res, next) => {
     console.log(req.body);
     res.status(404).send('<h1>Page Not Found</h1>');
 });
 
 const port = process.env.port || 8080;
-app.listen(port, () => {
-    console.log('Starting service');
-});
+mongoose
+    .connect(process.env.MONGO_DB_CONNECTION_URL)
+    .then(result => {
+        app.listen(port, () => {
+            console.log('Starting service');
+        });
+    });
