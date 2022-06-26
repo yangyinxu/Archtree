@@ -3,7 +3,9 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 
-const feedRoutes = require('./routes/feedRoute');
+const feedRoutes = require('./routes/feedRoutes');
+const authRoutes = require('./routes/authRoutes');
+
 const { LoggerLevel } = require('mongodb');
 
 const app = express();
@@ -24,8 +26,11 @@ app.use((req, res, next) => {
     next();
 });
 
-// GET /feed/posts
+// forward to /feed router
 app.use('/feed', feedRoutes);
+
+// forward to /auth router
+app.use('/auth', authRoutes);
 
 // home page
 app.get('/', (req, res, next) => {
@@ -33,9 +38,17 @@ app.get('/', (req, res, next) => {
 });
 
 // catch unexpected requests
-app.use((req, res, next) => {
-    console.log(req.body);
-    res.status(404).send('<h1>Page Not Found</h1>');
+app.use((error, req, res, next) => {
+    console.log(error);
+    const status = error.statusCode || 500;
+    const message = error.message;
+    const data = error.data;
+    
+    if (data == null) {
+        res.status(404).send('<h1>Page Not Found</h1>');
+    } else {
+        res.status(status).json({ message: message, data: data });
+    }
 });
 
 const MONGO_DB_URL = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0.ibqp4.mongodb.net/${process.env.MONGO_DEFAULT_DATABASE}?retryWrites=true&w=majority`;

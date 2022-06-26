@@ -4,8 +4,13 @@ exports.getPosts = (req, res, next) => {
         {
             posts: [
                 {
+                    _id: '1',
                     title: 'First post',
-                    content: 'This is the first post!'
+                    content: 'This is the first post!',
+                    creator: {
+                        name: "testCreator"
+                    },
+                    createdAt: new Date()
                 }
             ]
         }
@@ -20,14 +25,14 @@ exports.createPost = (req, res, next) => {
 
     // TODO: Create post in DB
     // note: 201 means "success - resource created"
-    res.status(201).json(
-        {
-            message: 'Post created successfully!',
-            post: {
-                id: new Date().toISOString,
-                title: title,
-                content: content
-            }
+    res.status(201).json({
+        message: 'Post created successfully!',
+        post: {
+            _id: new Date().toISOString,
+            title: title,
+            content: content,
+            creator: { name: "testCreator" },
+            createdat: new Date()
         }
-    );
+    });
 }
