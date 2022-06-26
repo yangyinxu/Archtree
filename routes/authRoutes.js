@@ -13,7 +13,7 @@ router.put('/signup', [
         .custom((value, { req }) => {
             // check if the user has registered
             return User.findOne({ email: value }).then(userDoc => {
-                if (userdoc) {
+                if (userDoc) {
                     return Promise.reject('email address already exists!');
                 }
             });
@@ -22,5 +22,7 @@ router.put('/signup', [
     body('password').trim().isLength({ min: 5 }),
     body('name').trim().not().isEmpty()
 ], authController.signup);
+
+router.post('/login');
 
 module.exports = router;
