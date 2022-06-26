@@ -59,5 +59,6 @@ mongoose
     .then(result => {
         app.listen(port, () => {
             console.log('Starting service');
-        });
-    });
+      });
+    })
+    .catch(error => console.log(error));
