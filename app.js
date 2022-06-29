@@ -44,11 +44,7 @@ app.use((error, req, res, next) => {
     const message = error.message;
     const data = error.data;
     
-    if (data == null) {
-        res.status(404).send('<h1>Page Not Found</h1>');
-    } else {
-        res.status(status).json({ message: message, data: data });
-    }
+    res.status(status).json({ message: message, data: data });
 });
 
 const MONGO_DB_URL = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0.ibqp4.mongodb.net/${process.env.MONGO_DEFAULT_DATABASE}?retryWrites=true&w=majority`;
