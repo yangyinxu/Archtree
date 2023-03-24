@@ -3,6 +3,8 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 
+const fs = require('fs');
+
 const feedRoutes = require('./routes/feedRoutes');
 const authRoutes = require('./routes/authRoutes');
 
@@ -34,7 +36,18 @@ app.use('/auth', authRoutes);
 
 // home page
 app.get('/', (req, res, next) => {
-    res.status(200).send('<h1>Home Page</h1>');
+    fs.readFile('index.html', (err, data) => {
+        if (err) {
+          // Handle error
+          res.writeHead(500, {'Content-Type': 'text/plain'});
+          res.end('Internal Server Error');
+          return;
+        }
+  
+        // Set the response header and send the file contents
+        res.writeHead(200, {'Content-Type': 'text/html'});
+        res.end(data);
+      });
 });
 
 // catch unexpected requests
@@ -51,12 +64,15 @@ app.use((error, req, res, next) => {
     }
 });
 
+console.log('Connecting to MongoDb');
 const MONGO_DB_URL = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0.ibqp4.mongodb.net/${process.env.MONGO_DEFAULT_DATABASE}?retryWrites=true&w=majority`;
 const port = process.env.port || 8080;
+console.log(`Port: ${port}`);
 mongoose
     .connect
     (MONGO_DB_URL)
     .then(result => {
+        console.log('Connected to MongoDb');
         app.listen(port, () => {
             console.log('Starting service');
       });
