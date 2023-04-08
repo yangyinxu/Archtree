@@ -1,12 +1,13 @@
-const express = require('express');
-const { body } = require('express-validator/check');
+import express, { Router } from 'express';
+import { body } from 'express-validator';
+import { RequestHandler } from 'express';
 
-const User = require('../models/user');
-const authController = require('../controllers/authController');
+import User from '../models/user';
+import { signup, login } from '../controllers/authController';
 
-const router = express.Router();
+const router: Router = express.Router();
 
-router.put('/signup', [
+const signupValidation: RequestHandler[] = [
     body('email')
         .isEmail()
         .withMessage('Please enter a valid email.')
@@ -21,8 +22,10 @@ router.put('/signup', [
         .normalizeEmail(),
     body('password').trim().isLength({ min: 5 }),
     body('name').trim().not().isEmpty()
-], authController.signup);
+];
 
-router.post('/login', authController.login);
+router.put('/signup', signupValidation, signup);
 
-module.exports = router;
+router.post('/login', login);
+
+export default router;
