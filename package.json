@@ -2,11 +2,11 @@
   "name": "archtree",
   "version": "1.0.0",
   "description": "",
-  "main": "app.js",
+  "main": "src/app.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "NODE_ENV=production ts-node --esm app.ts",
-    "dev": "NODE_ENV=develop ts-node --esm app.ts"
+    "start": "NODE_ENV=production ts-node --esm src/app.ts",
+    "dev": "NODE_ENV=develop ts-node --esm src/app.ts"
   },
   "author": "Yangyin Xu",
   "license": "ISC",
