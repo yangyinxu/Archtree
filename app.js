@@ -57,11 +57,7 @@ app.use((error, req, res, next) => {
     const message = error.message;
     const data = error.data;
     
-    if (data == null) {
-        res.status(404).send('<h1>Page Not Found</h1>');
-    } else {
-        res.status(status).json({ message: message, data: data });
-    }
+    res.status(status).json({ message: message, data: data });
 });
 
 console.log('Connecting to MongoDb');
