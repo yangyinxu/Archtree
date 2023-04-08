@@ -4,6 +4,7 @@ dotenv.config();
 import express, { Application, Request, Response, NextFunction } from 'express';
 import bodyParser from 'body-parser';
 import mongoose from 'mongoose';
+import fs from 'fs';
 
 import feedRoutes from './routes/feedRoutes';
 import authRoutes from './routes/authRoutes';
@@ -36,7 +37,18 @@ app.use('/auth', authRoutes);
 
 // home page
 app.get('/', (req, res, next) => {
-    res.status(200).send('<h1>Home Page</h1>');
+    fs.readFile('index.html', (err, data) => {
+        if (err) {
+          // Handle error
+          res.writeHead(500, {'Content-Type': 'text/plain'});
+          res.end('Internal Server Error');
+          return;
+        }
+  
+        // Set the response header and send the file contents
+        res.writeHead(200, {'Content-Type': 'text/html'});
+        res.end(data);
+      });
 });
 
 // catch unexpected requests
