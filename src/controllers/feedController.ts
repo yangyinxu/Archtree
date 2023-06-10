@@ -37,6 +37,7 @@ export const getPosts: RequestHandler = (req, res, next) => {
 };
 
 export const createPost: RequestHandler = (req, res, next) => {
+    // use express-validator to validate the input
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(422).json({
@@ -47,6 +48,8 @@ export const createPost: RequestHandler = (req, res, next) => {
 
     const postData: CreatePostData = req.body;
     
+    // create a new post
+    // TODO: replace with actual imageUrl and creator
     const post: PostDocument = new Post({
         title: postData.title,
         content: postData.content,
@@ -54,6 +57,7 @@ export const createPost: RequestHandler = (req, res, next) => {
         creator: { name: "testCreator"}
     });
 
+    // save the post to the database
     post.save()
         .then((result: PostDocument) => {
             console.log(result);
