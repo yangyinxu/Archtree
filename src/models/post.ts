@@ -1,30 +1,29 @@
-import { Schema, model, Document } from 'mongoose';
+import mongoDb, { ObjectId } from 'mongodb';
+import { getDb } from '../app';
 
-export interface PostDocument extends Document {
-    title: string;
-    imageUrl: string;
-    content: string;
-    creator: string;
+class Post {
+    constructor(
+        public title: string,
+        public content: string,
+        public imageUrls: string[],
+        public userId: ObjectId,
+        public createdAt: Date
+        
+    ) {
+        this.title = title;
+        this.content = content;
+        this.userId = userId;
+        this.createdAt = createdAt;
+    }
+
+    save() {
+        // save post to database
+        const db = getDb();
+
+        return db!
+            .collection('posts')
+            .insertOne(this);
+    }
 }
 
-const postSchema = new Schema<PostDocument>({
-    title: {
-        type: String,
-        required: true,
-    },
-    imageUrl: {
-        type: String,
-        required: true,
-    },
-    content: {
-        type: String,
-        required: true,
-    },
-    creator: {
-        type: Schema.Types.ObjectId,
-        ref: 'User',
-        required: true,
-    },
-}, { timestamps: true });
-
-export default model<PostDocument>('Post', postSchema);
+export default Post;

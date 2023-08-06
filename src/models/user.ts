@@ -1,43 +1,46 @@
-import mongoose, { Schema, Document, Model, Types } from 'mongoose';
-import PostModel from './post';
+import { ObjectId } from 'mongodb';
+import { getDb } from '../app';
+import Post from './post';
 
-// what is wrong this code?
-// I want to use the PostModel in the posts property of the UserDocument
-// but I get the error:
-// Type 'PostModel' is not assignable to type 'ObjectId[] | PostModel[]'.
-export interface UserDocument extends Document {
-    email: string;
-    password: string;
-    name: string;
-    status: string;
-    posts: Types.ObjectId[] | typeof PostModel[];
+class User {
+    constructor(
+        public email: string,
+        public password: string,
+        public username: string,
+        public posts: Post[]
+    ) {
+        this.email = email;
+        this.password = password;
+        this.username = username;
+        this.posts = posts;
+    }
+
+    save() {
+        // save user to database
+        const db = getDb();
+
+        return db!
+            .collection('users')
+            .insertOne(this);
+    }
+
+    static findById(userId: string) {
+        const db = getDb();
+
+        return db!
+            .collection('users')
+            .find({ _id: new ObjectId(userId)})
+            .next();
+    }
+
+    static findByEmail(email: string) {
+        const db = getDb();
+
+        return db!
+            .collection('users')
+            .find({ email: email })
+            .next();
+    }
 }
-
-export interface UserModel extends Model<UserDocument> {}
-
-const userSchema: Schema = new Schema({
-    email: {
-        type: String,
-        required: true
-    },
-    password: {
-        type: String,
-        required: true
-    },
-    name: {
-        type: String,
-        required: true
-    },
-    status: {
-        type: String,
-        default: 'New User'
-    },
-    posts: [{
-        type: Schema.Types.ObjectId,
-        ref: 'Post'
-    }]
-});
-
-const User: UserModel = mongoose.model<UserDocument, UserModel>('User', userSchema);
 
 export default User;

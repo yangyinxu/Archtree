@@ -1,16 +1,14 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
 import express, { Application, Request, Response, NextFunction } from 'express';
 import bodyParser from 'body-parser';
-import mongoose from 'mongoose';
+
+import * as dotenv from "dotenv";
+import * as mongoDb from 'mongodb';
 
 import path, { dirname } from 'path';
 
+import adminRoutes from './routes/adminRoutes';
 import feedRoutes from './routes/feedRoutes';
 import authRoutes from './routes/authRoutes';
-
-import { LoggerLevel } from 'mongodb';
 
 const app: Application = express();
 
@@ -30,6 +28,8 @@ app.use((req, res, next) => {
     next();
 });
 
+app.use('/admin', adminRoutes);
+
 // forward to /feed router
 app.use('/feed', feedRoutes);
 
@@ -43,6 +43,7 @@ app.get('/', (req, res, next) => {
 
 // catch unexpected requests
 app.use((error: any, req: Request, res: Response, next: NextFunction) => {
+    console.log(`Caught unexpected request: ${req.originalUrl}`);
     console.log(error);
     const status: number = error.statusCode || 500;
     const message: string = error.message;
@@ -51,17 +52,44 @@ app.use((error: any, req: Request, res: Response, next: NextFunction) => {
     res.status(status).json({ message: message, data: data });
 });
 
-const MONGO_DB_URL: string = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}@cluster0.ibqp4.mongodb.net/${process.env.MONGO_DEFAULT_DATABASE}?retryWrites=true&w=majority`;
-const port: string | number = process.env.port || 8080;
-
 // Connection will fail if:
 //  1. environment variables have not been configured
 //  2. you are on a VPN
-mongoose
-    .connect(MONGO_DB_URL)
-    .then(result => {
-        app.listen(port, () => {
-            console.log('Starting service on port ' + port + '...');
+let _db: mongoDb.Db;
+const port: string | number = process.env.port || 8080;
+export async function connectToDatabase() {
+    dotenv.config();
+
+    const client: mongoDb.MongoClient = new mongoDb.MongoClient(process.env.DB_CONN_STRING!);
+
+    await client
+        .connect()
+        .then(client => {
+            _db = client.db(process.env.DB_NAME);
+            console.log(`Successfully connected to MongoDB: ${_db.databaseName}`);
+
+            app.listen(port, () => {
+                console.log('Starting service on port ' + port + '...');
+            });
+        })
+        .catch(error => {
+            console.log(`Error connecting to MongoDB: ${error}`);
+            throw error;
         });
-    })
-    .catch(error => console.log(error));
+}
+
+export const getDb = (): mongoDb.Db | null => {
+    try {
+      if (_db) {
+        return _db;
+      } else {
+        throw new Error('No database found from cache!');
+      }
+    } catch (error) {
+      console.log(error);
+      return null;
+    }
+  };
+
+// the app should connect to the database as soon as it starts
+exports.mongoConnect = connectToDatabase();
