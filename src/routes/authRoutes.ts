@@ -11,17 +11,18 @@ const signupValidation: RequestHandler[] = [
     body('email')
         .isEmail()
         .withMessage('Please enter a valid email.')
-        .custom((value, { req }) => {
+        .custom((email, { req }) => {
             // check if the user has registered
-            return User.findOne({ email: value }).then(userDoc => {
-                if (userDoc) {
-                    return Promise.reject('email address already exists!');
-                }
-            });
+            return User.findByEmail(email)
+                .then(userDoc => {
+                    if (userDoc) {
+                        return Promise.reject('email address already exists!');
+                    }
+                });
         })
         .normalizeEmail(),
     body('password').trim().isLength({ min: 5 }),
-    body('name').trim().not().isEmpty()
+    body('username').trim().not().isEmpty()
 ];
 
 router.put('/signup', signupValidation, signup);

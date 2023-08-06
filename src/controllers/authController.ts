@@ -24,25 +24,32 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
     }
 
     const email = req.body.email;
-    const name = req.body.name;
+    const username = req.body.username;
     const password = req.body.password;
-
     const hashedPassword = await bcrypt.hash(password, 12);
 
     // create a new user
-    const user = new User({
-      email: email,
-      password: hashedPassword,
-      name: name
-    });
+    const user = new User(
+      email,
+      hashedPassword,
+      username,
+      []
+    );
 
-    const result = await user.save();
-
-    // return 201 status code for successful creation
-    res.status(201).json({
-      message: 'User created',
-      userId: result._id.toString()
-    });
+    user.save()
+      .then(result => {
+        // return 201 status code for successful creation
+        res.status(201).json({
+          message: 'User created',
+          userId: result.insertedId.toString()
+        });
+      })
+      .catch(err => {
+        console.log(err);
+        res.status(500).json({
+          message: 'Creating the user failed.'
+        });
+      });
   } catch (error: any) {
     // return 500 status code for server error
     if (!error.statusCode) {
@@ -54,11 +61,11 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const email = req.body.email;
-    const password = req.body.password;
+    const email: string = req.body.email;
+    const password: string = req.body.password;
     let loadedUser;
 
-    const user = await User.findOne({ email: email });
+    const user = await User.findByEmail(email);
     // if the user does not exist, throw an error
     if (!user) {
       const error: ErrorWithStatusCode = new Error('A user with this email could not be found.');
