@@ -1,5 +1,6 @@
 import { getDb } from '../app';
 
+// Product Model
 class Product {
     title: String;
     price: Number;
