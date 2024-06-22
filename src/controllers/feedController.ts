@@ -1,41 +1,72 @@
-import { RequestHandler } from 'express';
+import { RequestHandler, Request, Response, NextFunction } from 'express';
 import { validationResult } from 'express-validator';
 import Post from '../models/post';
 import { ObjectId } from 'mongodb';
+import { getDb } from '../app';
 
-interface PostData {
-    _id: string;
+interface CreatePostData {
+    creatorId: string;
     title: string;
-    content: string;
-    creator: {
-        name: string;
-    };
+    description: string;
+    mainImageUrl: string;
+    imageUrls: string[];
     createdAt: Date;
 }
 
-interface CreatePostData {
-    title: string;
-    content: string;
+// Get a single post
+export const getPost: RequestHandler = async (req: Request, res: Response, next: () => void) => {
+    let postId: ObjectId;
+    try {
+        postId = ObjectId.createFromHexString(req.query.postId as string); // Convert string to ObjectId
+    } catch (error) {
+        console.error('Invalid postId:', req.query.postId);
+        return res.status(400).json({ error: 'Invalid postId' });
+    }
+
+    try {
+        const db = getDb();
+        db!.collection('posts')
+            .findOne({ _id: postId })
+            .then(post => {
+                res.status(200).json({
+                    post
+                });
+            })
+            .catch(error => {
+                console.log(error);
+            });
+    } catch (error) {
+        return res.status(500).json({ error: 'Unexpected error' });
+    }
 }
 
+// Get all posts
 export const getPosts: RequestHandler = (req, res, next) => {
-    const posts: PostData[] = [
-        {
-            _id: '1',
-            title: 'First post',
-            content: 'This is the first post!',
-            creator: {
-                name: "testCreator"
-            },
-            createdAt: new Date()
-        }
-    ];
+    // use express-validator to validate the input
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(422).json({
+            message: 'Validation failed, entered data is incorrect.',
+            errors: errors.array()
+        });
+    }
 
-    res.status(200).json({
-        posts
-    });
+    // Fetch all posts from the database
+    const db = getDb();
+    db!.collection('posts')
+        .find()
+        .toArray()
+        .then(posts => {
+            res.status(200).json({
+                posts
+            });
+        })
+        .catch(error => {
+            console.log(error);
+        });
 };
 
+// Create a new post
 export const createPost: RequestHandler = (req, res, next) => {
     // use express-validator to validate the input
     const errors = validationResult(req);
@@ -47,14 +78,16 @@ export const createPost: RequestHandler = (req, res, next) => {
     }
 
     const postData: CreatePostData = req.body;
-    
+
     // create a new post
-    // TODO: replace with actual imageUrl and creator
+    // Convert the creatorId string to an ObjectId
+    const creatorId = ObjectId.createFromHexString(postData.creatorId);
     const post: Post = new Post(
         postData.title,
-        postData.content,
-        ['https://culverduck.com/wp-content/uploads/2020/11/duck-animate-1-500x500.png'],
-        new ObjectId('5f9f3b9b9b0b3b1f0c3b3b1f'),
+        postData.description,
+        postData.mainImageUrl,
+        postData.imageUrls,
+        creatorId,
         new Date()
     );
 
@@ -71,3 +104,29 @@ export const createPost: RequestHandler = (req, res, next) => {
             console.log(error);
         });
 };
+
+// Delete a post by id
+export const deletePost: RequestHandler = async (req, res, next) => {
+    let postId: ObjectId;
+    try {
+        postId = ObjectId.createFromHexString(req.query.postId as string); // Convert string to ObjectId
+    } catch (error) {
+        console.error('Invalid postId:', req.query.postId);
+        return res.status(400).json({ error: 'Invalid postId' });
+    }
+
+    try {
+        const db = getDb();
+        db!.collection('posts')
+            .deleteOne({ _id: postId })
+            .then(result => {
+                console.log(result);
+                res.status(200).json({ message: 'Post deleted successfully!' });
+            })
+            .catch(error => {
+                console.log(error);
+            });
+    } catch (error) {
+        return res.status(500).json({ error: 'Unexpected error' });
+    }
+}

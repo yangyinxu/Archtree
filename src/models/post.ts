@@ -4,14 +4,16 @@ import { getDb } from '../app';
 class Post {
     constructor(
         public title: string,
-        public content: string,
+        public description: string,
+        public mainImageUrl: string,
         public imageUrls: string[],
         public userId: ObjectId,
         public createdAt: Date
-        
     ) {
         this.title = title;
-        this.content = content;
+        this.description = description;
+        this.mainImageUrl = mainImageUrl;
+        this.imageUrls = imageUrls;
         this.userId = userId;
         this.createdAt = createdAt;
     }
