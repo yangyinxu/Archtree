@@ -4,11 +4,13 @@ import { SimpleDate } from '../models/simpleDate';
 
 export class Album {
     title: string;
+    coverArtUrl: string;
     songIds: string;
     releaseDate: SimpleDate;
 
-    constructor(title: string, songIds: string, releaseDate: SimpleDate) {
+    constructor(title: string, coverArtUrl: string, songIds: string, releaseDate: SimpleDate) {
         this.title = title;
+        this.coverArtUrl = coverArtUrl;
         this.songIds = songIds;
         this.releaseDate = releaseDate;
     }
@@ -21,12 +23,6 @@ export class Album {
         return db!
             .collection('albums')
             .insertOne(this)
-            .then((result: any) => {
-                console.log(result);
-            })
-            .catch((error: any) => {
-                console.log(error);
-            });
     }
 
     // fetch an album by its id

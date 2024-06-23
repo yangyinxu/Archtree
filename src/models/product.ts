@@ -34,14 +34,6 @@ class Product {
         return db!
             .collection('products')
             .insertOne(this)
-            // how to resolve this issue?
-            // Parameter 'result' implicitly has an 'any' type.
-            .then((result: any) => {
-                console.log(result);
-            }
-            ).catch((error: any) => {
-                console.log(error);
-            });
     }
 }
 

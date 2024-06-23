@@ -35,12 +35,6 @@ export class Artist {
         return db!
             .collection('artists')
             .insertOne(this)
-            .then((result: any) => {
-                console.log(result);
-            })
-            .catch((error: any) => {
-                console.log(error);
-            });
     }
 
     // fetch an artist by its id

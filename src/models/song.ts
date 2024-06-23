@@ -9,9 +9,7 @@ export class Song {
     albumId: string;
     releaseDate: SimpleDate;
     duration: string;
-    // Use the Format class in the Song class
-    format: Format;
-    
+    format: AudioFormat;
     coverArtUrl: string;
 
     constructor(
@@ -21,7 +19,7 @@ export class Song {
         albumId: string,
         releaseDate: SimpleDate,
         duration: string,
-        format: Format,
+        format: AudioFormat,
         coverArtUrl: string
     ) {
         this.title = title;
@@ -42,12 +40,6 @@ export class Song {
         return db!
             .collection('songs')
             .insertOne(this)
-            .then((result: any) => {
-                console.log(result);
-            })
-            .catch((error: any) => {
-                console.log(error);
-            });
     }
 
     // fetch a song by its id
@@ -101,8 +93,7 @@ export class Song {
     }
 }
 
-// Inner Format class
-export class Format {
+export class AudioFormat {
     type: string; // e.g., "MP3", "WAV", "FLAC"
     bitrate?: number; // in kbps for audio formats that support bitrates
 
@@ -115,7 +106,7 @@ export class Format {
 
     // convert the format json to a Format object
     static fromJson(json: any) {
-        return new Format(json.type, json.bitrate);
+        return new AudioFormat(json.type, json.bitrate);
     }
 
     toString(): string {
