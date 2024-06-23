@@ -1,20 +1,34 @@
 import { getDb } from '../app';
 import { ObjectId } from 'mongodb';
 
-// create a new model for the song
 export class Song {
     title: string;
-    artist: string;
-    genre: string;
+    artistIds: [string];
+    genres: [string];
     albumId: string;
-    year: number;
+    releaseDate: Date;
+    duration: string;
+    format: string;
+    coverArtUrl: string;
 
-    constructor(title: string, artist: string, genre: string, albumId: string, year: number) {
+    constructor(
+        title: string, 
+        artistIds: [string], 
+        genres: [string], 
+        albumId: string, 
+        releaseDate: Date,
+        duration: string,
+        format: string,
+        coverArtUrl: string
+    ) {
         this.title = title;
-        this.artist = artist;
-        this.genre = genre;
+        this.artistIds = artistIds;
+        this.genres = genres;
         this.albumId = albumId;
-        this.year = year;
+        this.releaseDate = releaseDate;
+        this.duration = duration;
+        this.format = format;
+        this.coverArtUrl = coverArtUrl;
     }
 
     // save a song to the mongodb database

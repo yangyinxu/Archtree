@@ -3,22 +3,32 @@ import { Song } from '../models/song';
 
 // Create a new song via the model and save it to the db
 export const postSong = (req: Request, res: Response, next: NextFunction) => {
+    //title: string, artistIds: [string], genres: [string], albumId: string, releaseDate: Date, duration: string, format: string, coverArtUrl: string
     const title: string = req.body.title;
-    const artist: string = req.body.artist;
-    const genre: string = req.body.genre;
+    const artistIds: [string] = req.body.artistIds;
+    const genres: [string] = req.body.genres;
     const albumId: string = req.body.albumId;
-    const year: number = req.body.year;
+    const releaseDate: Date = req.body.releaseDate;
+    const duration: string = req.body.duration;
+    const format: string = req.body.format;
+    const coverArtUrl: string = req.body.coverArtUrl;
 
     // Create a new song
     const song = new Song(
         title,
-        artist,
-        genre,
+        artistIds,
+        genres,
         albumId,
-        year
+        releaseDate,
+        duration,
+        format,
+        coverArtUrl
     );
 
     // Save the song to the db
+    // TODO: Add the songId to the album and artist
+    // TODO: Remove the songId from the album and artist if the song is deleted
+
     song.save()
         .then((result: any) => {
             console.log(result);
