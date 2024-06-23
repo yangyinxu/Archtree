@@ -10,6 +10,7 @@ import fs from 'fs';
 
 import adminRoutes from './routes/adminRoutes';
 import authRoutes from './routes/authRoutes';
+import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import videoRoutes from './routes/videoRoutes';
 
@@ -35,6 +36,8 @@ app.use('/admin', adminRoutes);
 
 // forward to /auth router
 app.use('/auth', authRoutes);
+
+app.use('/content', contentRoutes);
 
 // forward to /feed router
 app.use('/feed', feedRoutes);

@@ -5,7 +5,7 @@ import { ObjectId } from 'mongodb';
 import { getDb } from '../app';
 
 interface CreatePostData {
-    creatorId: string;
+    userId: string;
     title: string;
     description: string;
     mainImageUrl: string;
@@ -79,15 +79,15 @@ export const createPost: RequestHandler = (req, res, next) => {
 
     const postData: CreatePostData = req.body;
 
-    // create a new post
-    // Convert the creatorId string to an ObjectId
-    const creatorId = ObjectId.createFromHexString(postData.creatorId);
+    // Create a new post
+    // Convert the userId string to an ObjectId
+    const userId = ObjectId.createFromHexString(postData.userId);
     const post: Post = new Post(
         postData.title,
         postData.description,
         postData.mainImageUrl,
         postData.imageUrls,
-        creatorId,
+        userId,
         new Date()
     );
 
