@@ -1,12 +1,13 @@
 import { getDb } from '../app';
 import { ObjectId } from 'mongodb';
+import { SimpleDate } from '../models/simpleDate';
 
 export class Album {
     title: string;
     songIds: string;
-    releaseDate: Date;
+    releaseDate: SimpleDate;
 
-    constructor(title: string, songIds: string, releaseDate: Date) {
+    constructor(title: string, songIds: string, releaseDate: SimpleDate) {
         this.title = title;
         this.songIds = songIds;
         this.releaseDate = releaseDate;

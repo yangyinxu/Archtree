@@ -1,24 +1,27 @@
 import { getDb } from '../app';
 import { ObjectId } from 'mongodb';
+import { SimpleDate } from '../models/simpleDate';
 
 export class Song {
     title: string;
     artistIds: [string];
     genres: [string];
     albumId: string;
-    releaseDate: Date;
+    releaseDate: SimpleDate;
     duration: string;
-    format: string;
+    // Use the Format class in the Song class
+    format: Format;
+    
     coverArtUrl: string;
 
     constructor(
-        title: string, 
-        artistIds: [string], 
-        genres: [string], 
-        albumId: string, 
-        releaseDate: Date,
+        title: string,
+        artistIds: [string],
+        genres: [string],
+        albumId: string,
+        releaseDate: SimpleDate,
         duration: string,
-        format: string,
+        format: Format,
         coverArtUrl: string
     ) {
         this.title = title;
@@ -95,5 +98,27 @@ export class Song {
             .catch((error: any) => {
                 console.log(error);
             });
+    }
+}
+
+// Inner Format class
+export class Format {
+    type: string; // e.g., "MP3", "WAV", "FLAC"
+    bitrate?: number; // in kbps for audio formats that support bitrates
+
+    constructor(type: string, bitrate?: number) {
+        this.type = type;
+        if (bitrate !== undefined) {
+            this.bitrate = bitrate;
+        }
+    }
+
+    // convert the format json to a Format object
+    static fromJson(json: any) {
+        return new Format(json.type, json.bitrate);
+    }
+
+    toString(): string {
+        return this.bitrate ? `${this.type} (${this.bitrate} kbps)` : this.type;
     }
 }

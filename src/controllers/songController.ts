@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { Song } from '../models/song';
+import { Song, Format } from '../models/song';
+import { SimpleDate } from '../models/simpleDate';
 
 // Create a new song via the model and save it to the db
 export const postSong = (req: Request, res: Response, next: NextFunction) => {
@@ -8,9 +9,9 @@ export const postSong = (req: Request, res: Response, next: NextFunction) => {
     const artistIds: [string] = req.body.artistIds;
     const genres: [string] = req.body.genres;
     const albumId: string = req.body.albumId;
-    const releaseDate: Date = req.body.releaseDate;
+    const releaseDate: SimpleDate = SimpleDate.fromJson(req.body.releaseDate);
     const duration: string = req.body.duration;
-    const format: string = req.body.format;
+    const format: Format = Format.fromJson(req.body.format);
     const coverArtUrl: string = req.body.coverArtUrl;
 
     // Create a new song
