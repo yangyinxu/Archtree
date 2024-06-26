@@ -5,10 +5,10 @@ import { SimpleDate } from '../models/simpleDate';
 export class Album {
     title: string;
     coverArtUrl: string;
-    songIds: string;
+    songIds: [string];
     releaseDate: SimpleDate;
 
-    constructor(title: string, coverArtUrl: string, songIds: string, releaseDate: SimpleDate) {
+    constructor(title: string, coverArtUrl: string, songIds: [string], releaseDate: SimpleDate) {
         this.title = title;
         this.coverArtUrl = coverArtUrl;
         this.songIds = songIds;

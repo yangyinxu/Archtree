@@ -6,7 +6,7 @@ import { SimpleDate } from '../models/simpleDate';
 export const postAlbum = (req: Request, res: Response, next: NextFunction) => {
     const title: string = req.body.title;
     const coverArtUrl: string = req.body.coverArtUrl;
-    const songIds: string = req.body.songIds;
+    const songIds: [string] = req.body.songIds;
     const releaseDate: SimpleDate = SimpleDate.fromJson(req.body.releaseDate);
 
     // Create a new album
