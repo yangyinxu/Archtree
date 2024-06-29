@@ -9,7 +9,7 @@ export class Artist {
     bio: string;
     coverArtUrl: string;
     albumIds: [string];
-    songIds: [string];
+    audioTrackIds: [string];
 
     constructor(
         name: string,  
@@ -17,14 +17,14 @@ export class Artist {
         bio: string,
         coverArtUrl: string,
         albumIds: [string], 
-        songIds: [string]
+        audioTrackIds: [string]
     ) {
         this.name = name;
         this.birthDate = birthDate;
         this.bio = bio;
         this.coverArtUrl = coverArtUrl;
         this.albumIds = albumIds;
-        this.songIds = songIds;
+        this.audioTrackIds = audioTrackIds;
     }
 
     // save an artist to the mongodb database

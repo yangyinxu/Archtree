@@ -10,7 +10,7 @@ export const postArtist = (req: Request, res: Response, next: NextFunction) => {
     const bio: string = req.body.bio;
     const coverArtUrl: string = req.body.coverArtUrl;
     const albumIds: [string] = req.body.albumIds;
-    const songIds: [string] = req.body.songIds;
+    const audioTrackIds: [string] = req.body.audioTrackIds;
 
     // Create a new artist
     const artist = new Artist(
@@ -19,7 +19,7 @@ export const postArtist = (req: Request, res: Response, next: NextFunction) => {
         bio,
         coverArtUrl,
         albumIds,
-        songIds
+        audioTrackIds
     );
 
     // Save the artist to the db

@@ -1,8 +1,10 @@
 import { getDb } from '../app';
 import { ObjectId } from 'mongodb';
-import { SimpleDate } from '../models/simpleDate';
+import { SimpleDate } from './simpleDate';
 
-export class Song {
+const collectionId = 'audioTracks';
+
+export class AudioTrack {
     title: string;
     artistIds: [string];
     genres: [string];
@@ -32,58 +34,58 @@ export class Song {
         this.coverArtUrl = coverArtUrl;
     }
 
-    // save a song to the mongodb database
+    // save an audio track to the mongodb database
     save() {
         const db = getDb();
 
-        // insert the song into the database
+        // insert the audio track into the database
         return db!
-            .collection('songs')
+            .collection(collectionId)
             .insertOne(this)
     }
 
-    // fetch a song by its id
-    static findById(songId: string) {
+    // fetch an audio track by its id
+    static findById(audioTrackId: string) {
         const db = getDb();
 
-        // convert the song id to an ObjectId
-        const songObjectId = ObjectId.createFromHexString(songId);
+        // convert the audio track id to an ObjectId
+        const audioTrackObjectId = ObjectId.createFromHexString(audioTrackId);
 
-        // fetch the song from the database
+        // fetch the audio track from the database
         return db!
-            .collection('songs')
-            .find({ _id: songObjectId })
+            .collection(collectionId)
+            .find({ _id: audioTrackObjectId })
             .next();
     }
 
-    // fetch all songs from the database
+    // fetch all audio tracks from the database
     static fetchAll() {
         const db = getDb();
 
-        // fetch all songs from the database
+        // fetch all audio tracks from the database
         return db!
-            .collection('songs')
+            .collection(collectionId)
             .find()
             .toArray()
-            .then((songs: any) => {
-                return songs;
+            .then((audioTracks: any) => {
+                return audioTracks;
             })
             .catch((error: any) => {
                 console.log(error);
             });
     }
 
-    // Delete a song by id
-    static deleteById(songId: string) {
+    // Delete an audio track by id
+    static deleteById(audioTrackId: string) {
         const db = getDb();
 
-        // convert the song id to an ObjectId
-        const songObjectId = ObjectId.createFromHexString(songId);
+        // convert the audio track id to an ObjectId
+        const audioTrackObjectId = ObjectId.createFromHexString(audioTrackId);
 
-        // delete the song from the database
+        // delete the audio track from the database
         return db!
-            .collection('songs')
-            .deleteOne({ _id: songObjectId })
+            .collection(collectionId)
+            .deleteOne({ _id: audioTrackObjectId })
             .then((result: any) => {
                 console.log(result);
             })
