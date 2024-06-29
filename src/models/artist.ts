@@ -1,26 +1,30 @@
 import { getDb } from '../app';
 import { ObjectId } from 'mongodb';
+import { SimpleDate } from '../models/simpleDate';
 
 // define the Artist class
 export class Artist {
     name: string;
-    birthDate: Date;
+    birthDate: SimpleDate;
     bio: string;
+    coverArtUrl: string;
     albumIds: [string];
-    songIds: [string];
+    audioTrackIds: [string];
 
     constructor(
         name: string,  
-        birthDate: Date,
+        birthDate: SimpleDate,
         bio: string,
+        coverArtUrl: string,
         albumIds: [string], 
-        songIds: [string]
+        audioTrackIds: [string]
     ) {
         this.name = name;
         this.birthDate = birthDate;
         this.bio = bio;
+        this.coverArtUrl = coverArtUrl;
         this.albumIds = albumIds;
-        this.songIds = songIds;
+        this.audioTrackIds = audioTrackIds;
     }
 
     // save an artist to the mongodb database
@@ -31,12 +35,6 @@ export class Artist {
         return db!
             .collection('artists')
             .insertOne(this)
-            .then((result: any) => {
-                console.log(result);
-            })
-            .catch((error: any) => {
-                console.log(error);
-            });
     }
 
     // fetch an artist by its id

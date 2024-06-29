@@ -1,21 +1,25 @@
 import { Request, Response, NextFunction } from 'express';
 import { Artist } from '../models/artist';
+import { SimpleDate } from '../models/simpleDate';
 
 // Create a new artist via the model and save it to the db
 export const postArtist = (req: Request, res: Response, next: NextFunction) => {
     const name: string = req.body.name;
-    const birthDate: Date = req.body.birthDate;
+    // Convert the birthDate to a SimpleDate object with SimpleDate.fromJson()
+    const birthDate: SimpleDate = SimpleDate.fromJson(req.body.birthDate);
     const bio: string = req.body.bio;
+    const coverArtUrl: string = req.body.coverArtUrl;
     const albumIds: [string] = req.body.albumIds;
-    const songIds: [string] = req.body.songIds;
+    const audioTrackIds: [string] = req.body.audioTrackIds;
 
     // Create a new artist
     const artist = new Artist(
         name,
         birthDate,
         bio,
+        coverArtUrl,
         albumIds,
-        songIds
+        audioTrackIds
     );
 
     // Save the artist to the db

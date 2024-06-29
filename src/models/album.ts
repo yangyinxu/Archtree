@@ -1,14 +1,17 @@
 import { getDb } from '../app';
 import { ObjectId } from 'mongodb';
+import { SimpleDate } from '../models/simpleDate';
 
 export class Album {
     title: string;
-    songIds: string;
-    releaseDate: Date;
+    coverArtUrl: string;
+    audioTrackIds: [string];
+    releaseDate: SimpleDate;
 
-    constructor(title: string, songIds: string, releaseDate: Date) {
+    constructor(title: string, coverArtUrl: string, audioTrackIds: [string], releaseDate: SimpleDate) {
         this.title = title;
-        this.songIds = songIds;
+        this.coverArtUrl = coverArtUrl;
+        this.audioTrackIds = audioTrackIds;
         this.releaseDate = releaseDate;
     }
 
@@ -20,12 +23,6 @@ export class Album {
         return db!
             .collection('albums')
             .insertOne(this)
-            .then((result: any) => {
-                console.log(result);
-            })
-            .catch((error: any) => {
-                console.log(error);
-            });
     }
 
     // fetch an album by its id
@@ -57,7 +54,7 @@ export class Album {
     }
 
     // Add delete album method
-    // Note: Albums cannot be deleted if there are songs associated with them
-    //  - This is because songs are associated with albums via the albumId field
-    // Note 2: When an album is deleted, this albumid should be deleted from the artist's albumsId array
+    // Note: Albums cannot be deleted if there are audio tracks associated with them
+    //  - This is because audio tracks are associated with albums via the albumId field
+    // Note 2: When an album is deleted, this albumId should be deleted from the artist's albumsId array
 }

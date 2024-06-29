@@ -1,17 +1,19 @@
 import { Request, Response, NextFunction } from 'express';
 import { Album } from '../models/album';
-import { Artist } from '../models/artist';
+import { SimpleDate } from '../models/simpleDate';
 
 // Create a new album via the model and save it to the db
 export const postAlbum = (req: Request, res: Response, next: NextFunction) => {
     const title: string = req.body.title;
-    const songIds: string = req.body.songIds;
-    const releaseDate: Date = req.body.releaseDate;
+    const coverArtUrl: string = req.body.coverArtUrl;
+    const audioTrackIds: [string] = req.body.audioTrackIds;
+    const releaseDate: SimpleDate = SimpleDate.fromJson(req.body.releaseDate);
 
     // Create a new album
     const album = new Album(
         title,
-        songIds,
+        coverArtUrl,
+        audioTrackIds,
         releaseDate
     );
 

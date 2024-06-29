@@ -1,24 +1,24 @@
 import express, { Router } from 'express';
 
-import * as songController from '../controllers/songController';
+import * as audioTrackController from '../controllers/audioTrackController';
 import * as albumController from '../controllers/albumController';
 import * as artistController from '../controllers/artistController';
 
 const router: Router = express.Router();
 
 // ----------------------------
-// Post data of a song
-router.post('/song', songController.postSong);
+// Post data of an audio track
+router.post('/audioTrack', audioTrackController.postAudioTrack);
 
-// Get one song by id
-router.get('/song/:songId', songController.getSongById);
+// Get one audio track by id
+router.get('/audioTrack/:audioTrackId', audioTrackController.getAudioTrackById);
 
-// Delete a song by id
-router.delete('/song/:songId', songController.deleteSong);
+// Delete an audio track by id
+router.delete('/audioTrack/:audioTrackId', audioTrackController.deleteAudioTrack);
 
 // ----------------------------
-// Get all songs
-router.get('/songs', songController.getSongs);
+// Get all audio tracks
+router.get('/audioTracks', audioTrackController.getAudioTracks);
 
 // ----------------------------
 // Post data of an album

@@ -24,7 +24,7 @@ class Post {
 
         return db!
             .collection('posts')
-            .insertOne(this);
+            .insertOne(this)
     }
 }
 
