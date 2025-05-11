@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
+import { getS3 } from '../app';
 
 // Create a new audio track via the model and save it to the db
 export const postAudioTrack = (req: Request, res: Response, next: NextFunction) => {
@@ -47,7 +48,21 @@ export const postAudioTrack = (req: Request, res: Response, next: NextFunction) 
 export const getAudioTrackById = (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
 
+    // Fetch the audio track from AWS S3
+    getS3().getObject({
+        Bucket: process.env.S3_BUCKET_NAME!,
+        Key: audioTrackId
+    }, (err: any, data: any) => {
+        if (err) {
+            console.log(err);
+            res.status(500).send('Error fetching audio track from AWS S3');
+        } else {
+            res.status(200).send(data.Body);
+        }
+    });
+
     // Fetch the audio track from the db
+    /*
     AudioTrack.findById(audioTrackId)
         .then((audioTrack: any) => {
             res.status(200).json({
@@ -57,6 +72,7 @@ export const getAudioTrackById = (req: Request, res: Response, next: NextFunctio
         .catch((error: any) => {
             console.log(error);
         });
+    */
 };
 
 // Get all audio tracks via the model and return them
@@ -88,3 +104,10 @@ export const deleteAudioTrack = (req: Request, res: Response, next: NextFunction
             console.log(error);
         });
 };
+
+// Get an audio track from AWS S3
+export const getAudioFile = (req: Request, res: Response, next: NextFunction) => {
+    const audioTrackId: string = req.params.audioTrackId;
+
+    
+}

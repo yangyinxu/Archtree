@@ -11,10 +11,11 @@
   "author": "Yangyin Xu",
   "license": "ISC",
   "dependencies": {
+    "aws-sdk": "^2.1659.0",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.0",
     "dotenv": "^16.0.3",
-    "express": "^4.18.1",
+    "express": "^4.19.2",
     "express-validator": "^6.14.0",
     "jsonwebtoken": "^8.5.1",
     "mongodb": "^4.16.0",
