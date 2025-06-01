@@ -5,7 +5,6 @@
   "main": "src/app.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npx tsc",
     "start": "NODE_ENV=production npx tsx src/app.ts",
     "dev": "NODE_ENV=develop npx tsx src/app.ts"
   },
