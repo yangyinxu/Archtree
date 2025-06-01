@@ -124,7 +124,12 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
         const stream = s3.getObject({ ...params, Range: `bytes=${start}-${end}` }).createReadStream();
         stream.on('error', (error: any) => {
             console.error('Error streaming audio track:', error);
-            res.status(500).send('Error streaming audio track');
+            if (!res.headersSent) {
+                res.status(500).send('Error streaming audio track');
+            } else {
+                // If headers already sent, just destroy the connection
+                res.destroy();
+            }
         });
         stream.pipe(res);
     });
