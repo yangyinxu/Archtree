@@ -16,6 +16,13 @@ router.get('/audioTrack/:audioTrackId', audioTrackController.getAudioTrackById);
 // Delete an audio track by id
 router.delete('/audioTrack/:audioTrackId', audioTrackController.deleteAudioTrack);
 
+// Get an audio file from AWS by audio track id
+router.get('/audioTrack/aws/:audioTrackId', audioTrackController.getAudioFile);
+
+// ----------------------------
+// Stream an audio track by id
+router.get('/audioTrack/stream/:audioTrackId', audioTrackController.streamAudioTrack);
+
 // ----------------------------
 // Get all audio tracks
 router.get('/audioTracks', audioTrackController.getAudioTracks);

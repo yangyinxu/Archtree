@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
+import { getS3 } from '../app';
 
 // Create a new audio track via the model and save it to the db
 export const postAudioTrack = (req: Request, res: Response, next: NextFunction) => {
@@ -47,7 +48,21 @@ export const postAudioTrack = (req: Request, res: Response, next: NextFunction) 
 export const getAudioTrackById = (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
 
+    // Fetch the audio track from AWS S3
+    getS3().getObject({
+        Bucket: process.env.S3_BUCKET_NAME!,
+        Key: audioTrackId
+    }, (err: any, data: any) => {
+        if (err) {
+            console.log(err);
+            res.status(500).send('Error fetching audio track from AWS S3');
+        } else {
+            res.status(200).send(data.Body);
+        }
+    });
+
     // Fetch the audio track from the db
+    /*
     AudioTrack.findById(audioTrackId)
         .then((audioTrack: any) => {
             res.status(200).json({
@@ -57,6 +72,62 @@ export const getAudioTrackById = (req: Request, res: Response, next: NextFunctio
         .catch((error: any) => {
             console.log(error);
         });
+    */
+};
+
+// Stream an audio track by id from AWS S3 with support for HTTP Range requests
+export const streamAudioTrack = (req: Request, res: Response, next: NextFunction) => {
+    const audioTrackId: string = req.params.audioTrackId;
+    const s3 = getS3();
+    const params = {
+        Bucket: process.env.S3_BUCKET_NAME!,
+        Key: audioTrackId
+    };
+
+    // Check for Range header
+    const range = req.headers.range;
+    s3.headObject(params, (err: any, metadata: any) => {
+        if (err || !metadata.ContentLength) {
+            console.error('Error getting metadata:', err);
+            res.status(500).send('Error streaming audio track');
+            return;
+        }
+
+        const fileSize = metadata.ContentLength;
+        let start = 0;
+        let end = fileSize - 1;
+
+        if (range) {
+            const match = /bytes=(\d+)-(\d*)/.exec(range);
+            if (match) {
+                start = parseInt(match[1], 10);
+                if (match[2]) {
+                    end = parseInt(match[2], 10);
+                }
+            }
+            // Ensure start and end are within bounds
+            if (start > end || end >= fileSize) {
+                res.status(416).setHeader('Content-Range', `bytes */${fileSize}`).end();
+                return;
+            }
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+        } else {
+            res.status(200);
+        }
+
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Content-Length', end - start + 1);
+        res.setHeader('Content-Disposition', `inline; filename="${audioTrackId}"`);
+
+        const stream = s3.getObject({ ...params, Range: `bytes=${start}-${end}` }).createReadStream();
+        stream.on('error', (error: any) => {
+            console.error('Error streaming audio track:', error);
+            res.status(500).send('Error streaming audio track');
+        });
+        stream.pipe(res);
+    });
 };
 
 // Get all audio tracks via the model and return them
@@ -88,3 +159,10 @@ export const deleteAudioTrack = (req: Request, res: Response, next: NextFunction
             console.log(error);
         });
 };
+
+// Get an audio track from AWS S3
+export const getAudioFile = (req: Request, res: Response, next: NextFunction) => {
+    const audioTrackId: string = req.params.audioTrackId;
+
+    
+}

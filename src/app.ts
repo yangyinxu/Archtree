@@ -13,6 +13,7 @@ import authRoutes from './routes/authRoutes';
 import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import videoRoutes from './routes/videoRoutes';
+import AWS from 'aws-sdk';
 
 const app: Application = express();
 
@@ -113,3 +114,16 @@ export const getDb = (): mongoDb.Db | null => {
 
 // the app should connect to the database as soon as it starts
 exports.mongoConnect = connectToDatabase();
+
+// Configure AWS SDK
+AWS.config.update({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION
+});
+
+const s3 = new AWS.S3();
+
+export const getS3 = () => {
+  return s3;
+};
