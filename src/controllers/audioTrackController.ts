@@ -89,7 +89,8 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
     s3.headObject(params, (err: any, metadata: any) => {
         if (err || !metadata.ContentLength) {
             console.error('Error getting metadata:', err);
-            res.status(500).send('Error streaming audio track');
+            console.error('Error details:', err);
+            res.status(500).json({ message: 'Error streaming audio track', error: err });
             return;
         }
 
@@ -125,7 +126,7 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
         stream.on('error', (error: any) => {
             console.error('Error streaming audio track:', error);
             if (!res.headersSent) {
-                res.status(500).send('Error streaming audio track' + error.message);
+                res.status(500).send('Error streaming audio track');
             } else {
                 // If headers already sent, just destroy the connection
                 res.destroy();
