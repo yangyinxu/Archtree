@@ -125,7 +125,7 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
         stream.on('error', (error: any) => {
             console.error('Error streaming audio track:', error);
             if (!res.headersSent) {
-                res.status(500).send('Error streaming audio track');
+                res.status(500).send('Error streaming audio track' + error.message);
             } else {
                 // If headers already sent, just destroy the connection
                 res.destroy();
