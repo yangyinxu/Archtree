@@ -5,10 +5,13 @@ phases:
     runtime-versions:
       nodejs: 22
     commands:
-      - npm install
+      - npm ci
   build:
     commands:
-      - npm start
+      - npm run build --if-present
+  post_build:
+    commands:
+      - echo "Build phase completed. Runtime startup is handled by the deployment target."
 
 artifacts:
   files:

@@ -79,7 +79,7 @@ app.use((error: any, req: Request, res: Response, next: NextFunction) => {
 //  1. environment variables have not been configured
 //  2. you are on a VPN
 let _db: mongoDb.Db;
-const port: string | number = process.env.port || 8080;
+const port: string | number = process.env.PORT || process.env.port || 8080;
 export async function connectToDatabase() {
   dotenv.config();
 
