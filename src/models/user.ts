@@ -21,7 +21,7 @@ class User {
 
         return db!
             .collection('users')
-            .insertOne(this);
+            .insertOne(this)
     }
 
     static findById(userId: string) {
