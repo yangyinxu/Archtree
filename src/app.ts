@@ -19,6 +19,8 @@ console.log(`Service environment: ${process.env.NODE_ENV}`);
 
 // use body parser to parse request body in JSON format
 app.use(bodyParser.json());
+// parse browser form submissions
+app.use(bodyParser.urlencoded({ extended: false }));
 
 // add response headers to avoid CORS error
 app.use((req, res, next) => {
@@ -82,7 +84,7 @@ export async function connectToDatabase() {
   await client
     .connect()
     .then(client => {
-      _db = client.db(process.env.DB_NAME);
+      _db = client.db(process.env.DB_NAME || 'archtreeDb');
       console.log(`Successfully connected to MongoDB: ${_db.databaseName}`);
 
       app.listen(port, () => {

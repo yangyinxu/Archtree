@@ -5,8 +5,8 @@
   "main": "src/app.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "NODE_ENV=production ts-node --esm src/app.ts",
-    "dev": "NODE_ENV=develop ts-node --esm src/app.ts"
+    "start": "NODE_ENV=production tsx src/app.ts",
+    "dev": "NODE_ENV=develop tsx src/app.ts"
   },
   "author": "Yangyin Xu",
   "license": "ISC",
@@ -25,7 +25,8 @@
     "@types/bcryptjs": "^2.4.2",
     "@types/express": "^4.17.17",
     "@types/jsonwebtoken": "^9.0.1",
-    "nodemon": "^2.0.16"
+    "nodemon": "^2.0.16",
+    "tsx": "^4.23.1"
   },
   "engines": {
     "npm": ">=8.0.0 <10.0.0",
