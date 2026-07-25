@@ -46,7 +46,7 @@ Security:
 
 ## AWS CodeBuild
 
-This repo includes `buildspec.yaml` with CI-oriented behavior:
+This repo includes `buildspec.yml` with CI-oriented behavior:
 
 - `install`: `npm ci`
 - `build`: `npm run build --if-present`
@@ -95,5 +95,5 @@ Delete:
 ## Troubleshooting
 
 - `EADDRINUSE`: another process is already using the chosen port.
-- Buildspec path errors (`buildspect.yml` not found): check AWS buildspec override settings in CodeBuild/CodePipeline and set path to `buildspec.yaml`.
+- Buildspec path errors (`buildspect.yml` not found): check AWS buildspec override settings in CodeBuild/CodePipeline and set path to `buildspec.yml`.
 - S3 upload/delete errors: verify IAM permissions and required S3 environment variables.
