@@ -7,12 +7,14 @@ export class Album {
     coverArtUrl: string;
     audioTrackIds: [string];
     releaseDate: SimpleDate;
+    createdBy: string;
 
-    constructor(title: string, coverArtUrl: string, audioTrackIds: [string], releaseDate: SimpleDate) {
+    constructor(title: string, coverArtUrl: string, audioTrackIds: [string], releaseDate: SimpleDate, createdBy: string) {
         this.title = title;
         this.coverArtUrl = coverArtUrl;
         this.audioTrackIds = audioTrackIds;
         this.releaseDate = releaseDate;
+        this.createdBy = createdBy;
     }
 
     // save an album to the mongodb database
@@ -51,6 +53,44 @@ export class Album {
             .then((albums: any) => {
                 return albums;
             });
+    }
+
+    static searchByTitle(query: string, limit: number = 10) {
+        const db = getDb();
+
+        return db!
+            .collection('albums')
+            .find({ title: { $regex: query, $options: 'i' } })
+            .limit(limit)
+            .toArray();
+    }
+
+    static fetchByCreator(createdBy: string, limit: number = 50) {
+        const db = getDb();
+
+        return db!
+            .collection('albums')
+            .find({ createdBy })
+            .limit(limit)
+            .toArray();
+    }
+
+    static updateById(albumId: string, update: Record<string, unknown>) {
+        const db = getDb();
+        const albumObjectId = ObjectId.createFromHexString(albumId);
+
+        return db!
+            .collection('albums')
+            .updateOne({ _id: albumObjectId }, { $set: update });
+    }
+
+    static deleteById(albumId: string) {
+        const db = getDb();
+        const albumObjectId = ObjectId.createFromHexString(albumId);
+
+        return db!
+            .collection('albums')
+            .deleteOne({ _id: albumObjectId });
     }
 
     // Add delete album method

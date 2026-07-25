@@ -2,9 +2,15 @@ import { Request, Response, NextFunction } from 'express';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
 import { getS3 } from '../app';
+import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 
 // Create a new audio track via the model and save it to the db
 export const postAudioTrack = (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.auth) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+
     const title: string = req.body.title;
     const artistIds: [string] = req.body.artistIds;
     const genres: [string] = req.body.genres;
@@ -23,7 +29,8 @@ export const postAudioTrack = (req: Request, res: Response, next: NextFunction) 
         releaseDate,
         duration,
         format,
-        coverArtUrl
+        coverArtUrl,
+        authReq.auth.userId
     );
 
     // Save the audio track to the db
@@ -40,8 +47,39 @@ export const postAudioTrack = (req: Request, res: Response, next: NextFunction) 
         })
         .catch((err: any) => {
             console.log(err);
+            res.status(500).json({ message: 'Failed to create audio track.' });
         });
 
+};
+
+export const updateAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
+    const authReq = req as AuthenticatedRequest;
+    if (!authReq.auth) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const audioTrackId: string = req.params.audioTrackId;
+    const audioTrack = await AudioTrack.findById(audioTrackId);
+    if (!audioTrack) {
+        return res.status(404).json({ message: 'Audio track not found.' });
+    }
+
+    if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
+        return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
+    }
+
+    const updatePayload: Record<string, unknown> = {};
+    if (req.body.title !== undefined) updatePayload.title = req.body.title;
+    if (req.body.artistIds !== undefined) updatePayload.artistIds = req.body.artistIds;
+    if (req.body.genres !== undefined) updatePayload.genres = req.body.genres;
+    if (req.body.albumId !== undefined) updatePayload.albumId = req.body.albumId;
+    if (req.body.duration !== undefined) updatePayload.duration = req.body.duration;
+    if (req.body.coverArtUrl !== undefined) updatePayload.coverArtUrl = req.body.coverArtUrl;
+    if (req.body.releaseDate !== undefined) updatePayload.releaseDate = SimpleDate.fromJson(req.body.releaseDate);
+    if (req.body.format !== undefined) updatePayload.format = AudioFormat.fromJson(req.body.format);
+
+    await AudioTrack.updateById(audioTrackId, updatePayload);
+    return res.status(200).json({ message: 'Audio track updated successfully.' });
 };
 
 // Get an audio track via the model and return it
@@ -151,19 +189,45 @@ export const getAudioTracks = (req: Request, res: Response, next: NextFunction) 
 };
 
 // Delete an audio track by id
-export const deleteAudioTrack = (req: Request, res: Response, next: NextFunction) => {
-    const audioTrackId: string = req.params.audioTrackId;
+export const deleteAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
 
-    // Delete the audio track from the db
-    AudioTrack.deleteById(audioTrackId)
-        .then((result: any) => {
-            res.status(200).json({
-                message: `Audio Track Deleted Successfully`
-            });
-        })
-        .catch((error: any) => {
-            console.log(error);
+        const audioTrackId: string = req.params.audioTrackId;
+        const audioTrack = await AudioTrack.findById(audioTrackId);
+
+        if (!audioTrack) {
+            return res.status(404).json({ message: 'Audio track not found.' });
+        }
+
+        if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
+            return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
+        }
+
+        await AudioTrack.deleteById(audioTrackId);
+
+        let s3CleanupWarning: string | undefined;
+        try {
+            await getS3().deleteObject({
+                Bucket: process.env.S3_BUCKET_NAME!,
+                Key: audioTrackId
+            }).promise();
+        } catch (s3Error) {
+            console.log('S3 cleanup failed for audioTrackId:', audioTrackId, s3Error);
+            s3CleanupWarning = 'Track metadata was deleted, but deleting the S3 file failed.';
+        }
+
+        return res.status(200).json({
+            message: 'Audio track deleted successfully.',
+            s3CleanupWarning
         });
+    } catch (error: any) {
+        console.log(error);
+        return res.status(500).json({ message: 'Failed to delete audio track.' });
+    }
 };
 
 // Get an audio track from AWS S3
@@ -172,3 +236,43 @@ export const getAudioFile = (req: Request, res: Response, next: NextFunction) =>
 
     
 }
+
+export const uploadAudioTrackFile = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        const audioTrackId: string = req.params.audioTrackId;
+        const audioTrack = await AudioTrack.findById(audioTrackId);
+
+        if (!audioTrack) {
+            return res.status(404).json({ message: 'Audio track not found.' });
+        }
+
+        if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
+            return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
+        }
+
+        const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
+        if (!uploadFile) {
+            return res.status(400).json({ message: 'Missing audio file. Use multipart form field: audioFile.' });
+        }
+
+        await getS3().upload({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: audioTrackId,
+            Body: uploadFile.buffer,
+            ContentType: uploadFile.mimetype || 'audio/mpeg'
+        }).promise();
+
+        return res.status(200).json({
+            message: 'Audio file uploaded successfully.',
+            audioTrackId
+        });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({ message: 'Failed to upload audio file.' });
+    }
+};

@@ -10,6 +10,7 @@ export class Artist {
     coverArtUrl: string;
     albumIds: [string];
     audioTrackIds: [string];
+    createdBy: string;
 
     constructor(
         name: string,  
@@ -17,7 +18,8 @@ export class Artist {
         bio: string,
         coverArtUrl: string,
         albumIds: [string], 
-        audioTrackIds: [string]
+        audioTrackIds: [string],
+        createdBy: string
     ) {
         this.name = name;
         this.birthDate = birthDate;
@@ -25,6 +27,7 @@ export class Artist {
         this.coverArtUrl = coverArtUrl;
         this.albumIds = albumIds;
         this.audioTrackIds = audioTrackIds;
+        this.createdBy = createdBy;
     }
 
     // save an artist to the mongodb database
@@ -63,5 +66,43 @@ export class Artist {
             .then((artists: any) => {
                 return artists;
             });
+    }
+
+    static searchByName(query: string, limit: number = 10) {
+        const db = getDb();
+
+        return db!
+            .collection('artists')
+            .find({ name: { $regex: query, $options: 'i' } })
+            .limit(limit)
+            .toArray();
+    }
+
+    static fetchByCreator(createdBy: string, limit: number = 50) {
+        const db = getDb();
+
+        return db!
+            .collection('artists')
+            .find({ createdBy })
+            .limit(limit)
+            .toArray();
+    }
+
+    static updateById(artistId: string, update: Record<string, unknown>) {
+        const db = getDb();
+        const artistObjectId = ObjectId.createFromHexString(artistId);
+
+        return db!
+            .collection('artists')
+            .updateOne({ _id: artistObjectId }, { $set: update });
+    }
+
+    static deleteById(artistId: string) {
+        const db = getDb();
+        const artistObjectId = ObjectId.createFromHexString(artistId);
+
+        return db!
+            .collection('artists')
+            .deleteOne({ _id: artistObjectId });
     }
 }
