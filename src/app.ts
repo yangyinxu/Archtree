@@ -64,6 +64,11 @@ app.get('/', (req, res, next) => {
   res.sendFile(path.join(__dirname + '/index.html'));
 });
 
+// health endpoint for load balancers and service monitoring
+app.get('/health', (req, res, next) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 // catch unexpected requests
 app.use((error: any, req: Request, res: Response, next: NextFunction) => {
   console.log(`Caught unexpected request: ${req.originalUrl}`);
