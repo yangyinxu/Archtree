@@ -7,12 +7,14 @@ class User {
         public email: string,
         public password: string,
         public username: string,
-        public posts: Post[]
+        public posts: Post[],
+        public role: string = 'user'
     ) {
         this.email = email;
         this.password = password;
         this.username = username;
         this.posts = posts;
+        this.role = role;
     }
 
     save() {

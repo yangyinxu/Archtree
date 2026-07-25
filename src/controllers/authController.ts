@@ -12,6 +12,17 @@ interface ErrorWithStatusCode extends Error {
   data?: any;
 }
 
+const oneHourMs = 60 * 60 * 1000;
+
+const setSessionCookie = (res: Response, token: string) => {
+  const expiresAt = new Date(Date.now() + oneHourMs).toUTCString();
+  res.setHeader('Set-Cookie', `session_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt}`);
+};
+
+const clearSessionCookie = (res: Response) => {
+  res.setHeader('Set-Cookie', 'session_token=; Path=/; HttpOnly; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+};
+
 const getJwtSecret = () => {
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) {
@@ -22,14 +33,15 @@ const getJwtSecret = () => {
   return jwtSecret;
 };
 
-const createUser = async (email: string, username: string, password: string) => {
+const createUser = async (email: string, username: string, password: string, role: string = 'user') => {
   const hashedPassword = await bcrypt.hash(password, 12);
 
   const user = new User(
     email,
     hashedPassword,
     username,
-    []
+    [],
+    role
   );
 
   return user.save();
@@ -82,12 +94,14 @@ const renderSignupHtml = (params: {
     <button type="submit">Sign Up</button>
   </form>
   <p>API endpoint is also available at <code>PUT /auth/signup</code>.</p>
+  <p><a href="/auth/login-web">Already have an account? Log in</a></p>
 </body>
 </html>`;
 };
 
 const renderLoginHtml = (params: {
   email?: string;
+  returnTo?: string;
   errorMessage?: string;
   successMessage?: string;
   token?: string;
@@ -98,6 +112,7 @@ const renderLoginHtml = (params: {
   const successMessage = params.successMessage ? `<p style="color:#0a7a33;">${escapeHtml(params.successMessage)}</p>` : '';
   const token = params.token ? `<pre style="white-space:pre-wrap;word-break:break-word;background:#f5f5f5;padding:12px;border-radius:8px;">${escapeHtml(params.token)}</pre>` : '';
   const userId = params.userId ? `<p><strong>User ID:</strong> ${escapeHtml(params.userId)}</p>` : '';
+  const returnTo = escapeHtml(params.returnTo ?? '/');
 
   return `<!DOCTYPE html>
 <html>
@@ -119,6 +134,7 @@ const renderLoginHtml = (params: {
   ${userId}
   ${token}
   <form method="POST" action="/auth/login-web">
+    <input type="hidden" name="returnTo" value="${returnTo}" />
     <label>Email</label>
     <input type="email" name="email" value="${email}" required />
     <label>Password</label>
@@ -126,6 +142,7 @@ const renderLoginHtml = (params: {
     <button type="submit">Log In</button>
   </form>
   <p>API endpoint is also available at <code>POST /auth/login</code>.</p>
+  <p><a href="/auth/signup-web">Need an account? Sign up</a></p>
 </body>
 </html>`;
 };
@@ -148,7 +165,8 @@ const authenticateUser = async (email: string, password: string) => {
   const token = jwt.sign(
     {
       email: user.email,
-      userId: user._id.toString()
+      userId: user._id.toString(),
+      role: user.role ?? 'user'
     },
     getJwtSecret(),
     {
@@ -158,7 +176,8 @@ const authenticateUser = async (email: string, password: string) => {
 
   return {
     userId: user._id.toString(),
-    token
+    token,
+    role: user.role ?? 'user'
   };
 };
 
@@ -167,7 +186,8 @@ export const renderSignupPage = (req: Request, res: Response) => {
 };
 
 export const renderLoginPage = (req: Request, res: Response) => {
-  res.status(200).send(renderLoginHtml({}));
+  const returnTo = String(req.query.returnTo ?? '/');
+  res.status(200).send(renderLoginHtml({ returnTo }));
 };
 
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
@@ -255,7 +275,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     // return 200 status code for successful login
     res.status(200).json({
       token: authResult.token,
-      userId: authResult.userId
+      userId: authResult.userId,
+      role: authResult.role
     });
   } catch (error: any) {
     if (!error.statusCode) {
@@ -268,10 +289,12 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 export const loginFromWeb = async (req: Request, res: Response) => {
   const email = String(req.body.email ?? '').trim().toLowerCase();
   const password = String(req.body.password ?? '');
+  const returnTo = String(req.body.returnTo ?? '/');
 
   if (!email || !password) {
     res.status(422).send(renderLoginHtml({
       email,
+      returnTo,
       errorMessage: 'Email and password are required.'
     }));
     return;
@@ -279,18 +302,20 @@ export const loginFromWeb = async (req: Request, res: Response) => {
 
   try {
     const authResult = await authenticateUser(email, password);
-    res.status(200).send(renderLoginHtml({
-      email,
-      successMessage: 'Login successful. Token generated below for testing.',
-      userId: authResult.userId,
-      token: authResult.token
-    }));
+    setSessionCookie(res, authResult.token);
+    res.redirect(returnTo || '/');
   } catch (error: any) {
     const message = error?.message || 'Login failed.';
     const statusCode = error?.statusCode ?? 401;
     res.status(statusCode).send(renderLoginHtml({
       email,
+      returnTo,
       errorMessage: message
     }));
   }
+};
+
+export const logoutFromWeb = (req: Request, res: Response) => {
+  clearSessionCookie(res);
+  res.redirect('/');
 };

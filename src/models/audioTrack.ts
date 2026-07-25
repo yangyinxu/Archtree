@@ -13,6 +13,7 @@ export class AudioTrack {
     duration: string;
     format: AudioFormat;
     coverArtUrl: string;
+    createdBy: string;
 
     constructor(
         title: string,
@@ -22,7 +23,8 @@ export class AudioTrack {
         releaseDate: SimpleDate,
         duration: string,
         format: AudioFormat,
-        coverArtUrl: string
+        coverArtUrl: string,
+        createdBy: string
     ) {
         this.title = title;
         this.artistIds = artistIds;
@@ -32,6 +34,7 @@ export class AudioTrack {
         this.duration = duration;
         this.format = format;
         this.coverArtUrl = coverArtUrl;
+        this.createdBy = createdBy;
     }
 
     // save an audio track to the mongodb database
@@ -92,6 +95,35 @@ export class AudioTrack {
             .catch((error: any) => {
                 console.log(error);
             });
+    }
+
+    static updateById(audioTrackId: string, update: Record<string, unknown>) {
+        const db = getDb();
+        const audioTrackObjectId = ObjectId.createFromHexString(audioTrackId);
+
+        return db!
+            .collection(collectionId)
+            .updateOne({ _id: audioTrackObjectId }, { $set: update });
+    }
+
+    static searchByTitle(query: string, limit: number = 10) {
+        const db = getDb();
+
+        return db!
+            .collection(collectionId)
+            .find({ title: { $regex: query, $options: 'i' } })
+            .limit(limit)
+            .toArray();
+    }
+
+    static fetchByCreator(createdBy: string, limit: number = 50) {
+        const db = getDb();
+
+        return db!
+            .collection(collectionId)
+            .find({ createdBy })
+            .limit(limit)
+            .toArray();
     }
 }
 

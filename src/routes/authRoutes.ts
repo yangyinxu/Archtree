@@ -3,7 +3,7 @@ import { body } from 'express-validator';
 import { RequestHandler } from 'express';
 
 import User from '../models/user';
-import { signup, login, renderSignupPage, signupFromWeb, renderLoginPage, loginFromWeb } from '../controllers/authController';
+import { signup, login, renderSignupPage, signupFromWeb, renderLoginPage, loginFromWeb, logoutFromWeb } from '../controllers/authController';
 
 const router: Router = express.Router();
 
@@ -34,6 +34,8 @@ router.post('/signup-web', signupValidation, signupFromWeb);
 router.get('/login-web', renderLoginPage);
 
 router.post('/login-web', loginFromWeb);
+
+router.post('/logout-web', logoutFromWeb);
 
 router.post('/login', login);
 
