@@ -99,3 +99,6 @@ Delete:
 - `EADDRINUSE`: another process is already using the chosen port.
 - Buildspec path errors (`buildspect.yml` not found): check AWS buildspec override settings in CodeBuild/CodePipeline and set path to `buildspec.yml`.
 - S3 upload/delete errors: verify IAM permissions and required S3 environment variables.
+- `413 Request Entity Too Large`: increase upload limits in both places:
+   - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`)
+   - App multer limit via `MAX_AUDIO_UPLOAD_MB`
