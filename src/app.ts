@@ -71,11 +71,15 @@ app.get('/health', (req, res, next) => {
 
 // catch unexpected requests
 app.use((error: any, req: Request, res: Response, next: NextFunction) => {
-  console.log(`Caught unexpected request: ${req.originalUrl}`);
-  console.log(error);
   const status: number = error.statusCode || 500;
   const message: string = error.message;
   const data: any = error.data;
+
+  // Only log server-side failures as unexpected errors.
+  if (status >= 500) {
+    console.log(`Caught unexpected request: ${req.originalUrl}`);
+    console.log(error);
+  }
 
   res.status(status).json({ message: message, data: data });
 });
