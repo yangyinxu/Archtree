@@ -50,7 +50,9 @@ This repo includes `buildspec.yml` with CI-oriented behavior:
 
 - `install`: `npm ci`
 - `build`: `npm run build --if-present`
-- `post_build`: informational echo only
+- `post_build`: removes `node_modules` before artifact packaging
+
+Artifact packaging intentionally excludes `node_modules` so Elastic Beanstalk performs a clean dependency install on each instance.
 
 Important:
 - Build phase should not run `npm start`.

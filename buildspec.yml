@@ -11,8 +11,11 @@ phases:
       - npm run build --if-present
   post_build:
     commands:
+      - rm -rf node_modules
       - echo "Build phase completed. Runtime startup is handled by the deployment target."
 
 artifacts:
   files:
     - '**/*'
+  exclude-paths:
+    - 'node_modules/**/*'
