@@ -10,9 +10,10 @@ import { requireAuth } from '../middleware/authMiddleware';
 import { requireAuthForWeb } from '../middleware/authMiddleware';
 
 const router: Router = express.Router();
+const maxAudioUploadMb = Math.max(1, Number(process.env.MAX_AUDIO_UPLOAD_MB ?? 200));
 const upload = multer({
 	storage: multer.memoryStorage(),
-	limits: { fileSize: 50 * 1024 * 1024 }
+	limits: { fileSize: maxAudioUploadMb * 1024 * 1024 }
 });
 
 // ----------------------------
