@@ -10,6 +10,7 @@ import { getS3 } from '../app';
 import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3';
 import { parseBuffer } from 'music-metadata';
 import { ObjectId } from 'mongodb';
+import { normalizeUtf8Text } from '../utils/textEncoding';
 
 const escapeHtml = (value: string) => {
     return value
@@ -1355,9 +1356,10 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         const bitrate = bitrateRaw ? Number(bitrateRaw) : undefined;
         const audioTrackObjectId = new ObjectId();
         const audioTrackId = audioTrackObjectId.toHexString();
+        const originalFileName = normalizeUtf8Text(uploadFile.originalname);
 
         const track = new AudioTrack(
-            String(req.body.title ?? ''),
+            normalizeUtf8Text(String(req.body.title ?? '')),
             parseCsv(String(req.body.artistIds ?? '')),
             parseCsv(String(req.body.genres ?? '')),
             albumId,
@@ -1366,7 +1368,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             new AudioFormat(formatType, Number.isNaN(bitrate as number) ? undefined : bitrate),
             String(req.body.coverArtUrl ?? ''),
             authReq.auth.userId,
-            uploadFile.originalname,
+            originalFileName,
             uploadFile.mimetype || 'audio/mpeg',
             audioTrackObjectId
         );
@@ -1565,7 +1567,7 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
         }));
 
         await AudioTrack.updateById(audioTrackId, {
-            originalFileName: uploadFile.originalname,
+            originalFileName: normalizeUtf8Text(uploadFile.originalname),
             contentType: uploadFile.mimetype || 'audio/mpeg'
         });
 
@@ -1600,11 +1602,12 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
         const failures: string[] = [];
 
         for (const uploadFile of uploadFiles) {
+            const originalFileName = normalizeUtf8Text(uploadFile.originalname);
             const isAudioFile = uploadFile.mimetype.startsWith('audio/')
                 || uploadFile.mimetype === 'video/mp4'
                 || uploadFile.mimetype === 'application/ogg';
             if (!isAudioFile) {
-                failures.push(uploadFile.originalname);
+                failures.push(originalFileName);
                 continue;
             }
 
@@ -1618,7 +1621,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                     skipCovers: true
                 });
             } catch (metadataError) {
-                console.log(`Unable to read audio metadata for ${uploadFile.originalname}:`, metadataError);
+                console.log(`Unable to read audio metadata for ${originalFileName}:`, metadataError);
             }
 
             const embeddedGenres = Array.isArray(metadata?.common?.genre) ? metadata.common.genre.map(String) : [];
@@ -1626,20 +1629,21 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
             const bitrate = Number(metadata?.format?.bitrate);
             const audioTrackObjectId = new ObjectId();
             const audioTrackId = audioTrackObjectId.toHexString();
+            const metadataTitle = normalizeUtf8Text(String(metadata?.common?.title ?? ''));
             const track = new AudioTrack(
-                String(metadata?.common?.title ?? titleFromFileName(uploadFile.originalname) ?? 'Untitled Track'),
+                metadataTitle || titleFromFileName(originalFileName) || 'Untitled Track',
                 [] as unknown as [string],
                 embeddedGenres as unknown as [string],
                 albumId,
                 Number.isFinite(releaseYear) && releaseYear > 0 ? new SimpleDate(releaseYear, 1, 1) : new SimpleDate(),
                 formatDuration(metadata?.format?.duration),
                 new AudioFormat(
-                    inferAudioFormat(uploadFile.originalname, uploadFile.mimetype, metadata?.format?.container),
+                    inferAudioFormat(originalFileName, uploadFile.mimetype, metadata?.format?.container),
                     Number.isFinite(bitrate) && bitrate > 0 ? Math.round(bitrate / 1000) : undefined
                 ),
                 '',
                 authReq.auth.userId,
-                uploadFile.originalname,
+                originalFileName,
                 uploadFile.mimetype || 'audio/mpeg',
                 audioTrackObjectId
             );
@@ -1654,7 +1658,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                 await track.save();
                 uploadedTrackIds.push(audioTrackId);
             } catch (uploadError) {
-                console.log(`Unable to upload ${uploadFile.originalname}:`, uploadError);
+                console.log(`Unable to upload ${originalFileName}:`, uploadError);
                 await Promise.allSettled([
                     AudioTrack.deleteById(audioTrackId),
                     getS3().send(new DeleteObjectCommand({
@@ -1662,7 +1666,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                         Key: audioTrackId
                     }))
                 ]);
-                failures.push(uploadFile.originalname);
+                failures.push(originalFileName);
             }
         }
 
