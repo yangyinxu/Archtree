@@ -6,6 +6,54 @@
   const carouselNames = new Map(compositionData.carousels.map((carousel) => [carousel.id, carousel.name]));
   const albumTitles = new Map(compositionData.albums.map((album) => [album.id, album.title]));
   const trackTitles = new Map(compositionData.audioTracks.map((track) => [track.id, track.title]));
+  const uploadResultsKey = 'archtree.bulkUploadResults';
+  const uploadResultsPanel = document.getElementById('bulk-upload-results');
+
+  const renderUploadResults = (results) => {
+    if (!uploadResultsPanel || !results) return;
+
+    const grid = uploadResultsPanel.querySelector('.upload-results__grid');
+    grid.replaceChildren();
+
+    const addResultList = (title, entries, className, renderEntry) => {
+      if (entries.length === 0) return;
+      const section = document.createElement('div');
+      section.className = className;
+      const heading = document.createElement('h3');
+      heading.textContent = `${title} (${entries.length})`;
+      const list = document.createElement('ul');
+      entries.forEach((entry) => list.append(renderEntry(entry)));
+      section.append(heading, list);
+      grid.append(section);
+    };
+
+    addResultList('Succeeded', results.succeeded || [], 'upload-results__success', (fileName) => {
+      const item = document.createElement('li');
+      item.textContent = fileName;
+      return item;
+    });
+    addResultList('Failed', results.failed || [], 'upload-results__failure', (failure) => {
+      const item = document.createElement('li');
+      const fileName = document.createElement('strong');
+      fileName.textContent = failure.name;
+      const reason = document.createElement('small');
+      reason.textContent = failure.error;
+      item.append(fileName, document.createElement('br'), reason);
+      return item;
+    });
+
+    uploadResultsPanel.hidden = grid.children.length === 0;
+  };
+
+  try {
+    const storedUploadResults = sessionStorage.getItem(uploadResultsKey);
+    if (storedUploadResults) {
+      sessionStorage.removeItem(uploadResultsKey);
+      renderUploadResults(JSON.parse(storedUploadResults));
+    }
+  } catch (error) {
+    // Upload completion still works when session storage is unavailable.
+  }
 
   document.querySelectorAll('.carousel-mode').forEach((selector) => {
     const form = selector.closest('form');
@@ -180,44 +228,84 @@
       progressLabel.textContent = message;
     };
 
-    bulkUploadForm.addEventListener('submit', (event) => {
+    const uploadFile = (file, albumId, fileIndex, fileCount, onProgress) => {
+      return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        const formData = new FormData();
+        formData.append('audioFiles', file);
+        if (albumId) formData.append('albumId', albumId);
+
+        request.open('POST', bulkUploadForm.action);
+        request.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        request.upload.addEventListener('progress', (progressEvent) => {
+          if (progressEvent.lengthComputable) {
+            onProgress(progressEvent.loaded / progressEvent.total);
+          }
+        });
+        request.addEventListener('load', () => {
+          let response = {};
+          try {
+            response = JSON.parse(request.responseText);
+          } catch (error) {
+            // Proxy and other non-JSON responses use the HTTP status message.
+          }
+
+          if (request.status >= 200 && request.status < 300) {
+            resolve(response);
+            return;
+          }
+          reject(new Error(response.message || `Upload ${fileIndex + 1} of ${fileCount} failed.`));
+        });
+        request.addEventListener('error', () => {
+          reject(new Error(`Upload ${fileIndex + 1} of ${fileCount} failed before reaching the server.`));
+        });
+        request.send(formData);
+      });
+    };
+
+    bulkUploadForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const files = bulkUploadForm.querySelector('input[name="audioFiles"]').files;
       if (!files || files.length === 0) return;
 
       button.disabled = true;
       showStatus('Starting upload…', 0);
-      const request = new XMLHttpRequest();
-      request.open('POST', bulkUploadForm.action);
-      request.upload.addEventListener('progress', (progressEvent) => {
-        if (!progressEvent.lengthComputable) {
-          showStatus('Uploading…', 0);
-          return;
-        }
-        const percentage = Math.round((progressEvent.loaded / progressEvent.total) * 100);
-        showStatus('Uploading… ' + percentage + '%', percentage);
-      });
-      request.addEventListener('load', () => {
-        if (request.status >= 200 && request.status < 400) {
-          showStatus('Upload complete. Saving track details…', 100);
-          window.location.assign(request.responseURL || '/content/manage');
-          return;
+      const albumId = bulkUploadForm.querySelector('select[name="albumId"]').value;
+      const failures = [];
+      const succeeded = [];
+
+      for (let index = 0; index < files.length; index += 1) {
+        try {
+          await uploadFile(files[index], albumId, index, files.length, (fileProgress) => {
+            const percentage = Math.round(((index + fileProgress) / files.length) * 100);
+            showStatus(`Uploading ${index + 1} of ${files.length}… ${percentage}%`, percentage);
+          });
+          succeeded.push(files[index].name);
+        } catch (error) {
+          failures.push({
+            name: files[index].name,
+            error: error.message
+          });
         }
 
-        let errorMessage = 'Upload failed. Please try again.';
+        showStatus(`Processed ${index + 1} of ${files.length} files…`, Math.round(((index + 1) / files.length) * 100));
+      }
+
+      const results = { succeeded, failed: failures };
+      if (succeeded.length > 0) {
         try {
-          errorMessage = JSON.parse(request.responseText).message || errorMessage;
+          sessionStorage.setItem(uploadResultsKey, JSON.stringify(results));
         } catch (error) {
-          // Non-JSON responses, including proxy errors, use the default message.
+          // The count summary still appears when session storage is unavailable.
         }
-        showStatus(errorMessage, 0);
-        button.disabled = false;
-      });
-      request.addEventListener('error', () => {
-        showStatus('Upload failed before reaching the server. Please try again.', 0);
-        button.disabled = false;
-      });
-      request.send(new FormData(bulkUploadForm));
+        const message = `${succeeded.length} audio track${succeeded.length === 1 ? '' : 's'} created and uploaded.${failures.length > 0 ? ` ${failures.length} failed.` : ''}`;
+        window.location.assign(`/content/manage?message=${encodeURIComponent(message)}`);
+        return;
+      }
+
+      renderUploadResults(results);
+      showStatus(failures[0]?.error || 'Every upload failed. Please try again.', 0);
+      button.disabled = false;
     });
   }
 

@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { getDb } from '../infrastructure/database';
+import { reconcileAudioStorage } from '../services/audioReconciliationService';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
+import { renderAudioStorageAuditPage } from '../views/admin/audioStorageAuditView';
 
 const Product = require('../models/product');
 
@@ -51,4 +54,21 @@ export const postAddProduct = (req: Request, res: Response, next: () => void) =>
         .catch((err: any) => {
             console.log(err);
         });
+};
+
+export const getAudioStorageReconciliation = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const report = await reconcileAudioStorage();
+        res.setHeader('Cache-Control', 'no-store');
+        const preferredFormat = req.query.format === 'json'
+            ? 'json'
+            : req.accepts(['html', 'json']);
+        if (preferredFormat === 'html') {
+            const auth = (req as AuthenticatedRequest).auth;
+            return res.status(200).send(renderAudioStorageAuditPage(report, auth?.email ?? 'Administrator'));
+        }
+        return res.status(200).json(report);
+    } catch (error) {
+        return next(error);
+    }
 };

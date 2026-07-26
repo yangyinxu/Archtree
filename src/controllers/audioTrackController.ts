@@ -4,14 +4,16 @@ import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
 import { getS3 } from '../infrastructure/s3';
 import {
-    DeleteObjectCommand,
     GetObjectCommand,
-    HeadObjectCommand,
-    PutObjectCommand
+    HeadObjectCommand
 } from '@aws-sdk/client-s3';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import { ObjectId } from 'mongodb';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import {
+    deleteAudioObjectAndTrack,
+    uploadAudioObject
+} from '../services/audioStorageService';
 
 const parseJsonField = (value: unknown) => {
     if (typeof value !== 'string') return value;
@@ -77,31 +79,20 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     );
 
     try {
-        await getS3().send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: audioTrackId,
-            Body: uploadFile.buffer,
-            ContentType: uploadFile.mimetype || 'audio/mpeg'
-        }));
-        try {
-            await track.save();
-        } catch (databaseError) {
-            await getS3().send(new DeleteObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME!,
-                Key: audioTrackId
-            })).catch((cleanupError) => {
-                console.log('Unable to clean up S3 file after track creation failed:', cleanupError);
-            });
-            throw databaseError;
-        }
+        await track.save();
+        await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId);
 
         return res.status(201).json({
             message: `Audio Track ${title} Added Successfully`,
-            audioTrackId
+            audioTrackId,
+            uploadStatus: 'ready'
         });
     } catch (error) {
         console.log(error);
-        return res.status(500).json({ message: 'Failed to create and upload audio track.' });
+        return res.status(500).json({
+            message: 'Failed to create and upload audio track. The upload attempt remains recorded for reconciliation.',
+            audioTrackId
+        });
     }
 };
 
@@ -271,22 +262,17 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
             return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
         }
 
-        await AudioTrack.deleteById(audioTrackId);
-
-        let s3CleanupWarning: string | undefined;
         try {
-            await getS3().send(new DeleteObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME!,
-                Key: audioTrackId
-            }));
+            await deleteAudioObjectAndTrack(audioTrackId);
         } catch (s3Error) {
-            console.log('S3 cleanup failed for audioTrackId:', audioTrackId, s3Error);
-            s3CleanupWarning = 'Track metadata was deleted, but deleting the S3 file failed.';
+            console.log('Audio track deletion failed for audioTrackId:', audioTrackId, s3Error);
+            return res.status(502).json({
+                message: 'The S3 file could not be deleted. Track metadata was retained for reconciliation.'
+            });
         }
 
         return res.status(200).json({
-            message: 'Audio track deleted successfully.',
-            s3CleanupWarning
+            message: 'Audio track deleted successfully.'
         });
     } catch (error: any) {
         console.log(error);
@@ -324,20 +310,12 @@ export const uploadAudioTrackFile = async (req: Request, res: Response, next: Ne
             return res.status(400).json({ message: 'Missing audio file. Use multipart form field: audioFile.' });
         }
 
-        await getS3().send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: audioTrackId,
-            Body: uploadFile.buffer,
-            ContentType: uploadFile.mimetype || 'audio/mpeg'
-        }));
-        await AudioTrack.updateById(audioTrackId, {
-            originalFileName: normalizeUtf8Text(uploadFile.originalname),
-            contentType: uploadFile.mimetype || 'audio/mpeg'
-        });
+        await uploadAudioObject(audioTrackId, uploadFile, String(audioTrack.createdBy ?? authReq.auth.userId));
 
         return res.status(200).json({
             message: 'Audio file uploaded successfully.',
-            audioTrackId
+            audioTrackId,
+            uploadStatus: 'ready'
         });
     } catch (error) {
         console.log(error);

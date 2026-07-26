@@ -13,6 +13,7 @@ import videoRoutes from './routes/videoRoutes';
 import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddleware';
 import { connectToDatabase } from './infrastructure/database';
 import { escapeHtml } from './views/html';
+import { maxAudioUploadMb } from './middleware/audioUpload';
 
 const app: Application = express();
 
@@ -102,8 +103,11 @@ app.get('/health', (req, res, next) => {
 
 // catch unexpected requests
 app.use((error: any, req: Request, res: Response, next: NextFunction) => {
-  const status: number = error.statusCode || 500;
-  const message: string = error.message;
+  const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
+  const status: number = isFileTooLarge ? 413 : error.statusCode || 500;
+  const message: string = isFileTooLarge
+    ? `Audio file is too large. The maximum size per file is ${maxAudioUploadMb} MB.`
+    : error.message;
   const data: any = error.data;
 
   // Only log server-side failures as unexpected errors.

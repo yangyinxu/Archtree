@@ -342,6 +342,35 @@ button[data-danger]:hover {
   background: var(--danger-soft);
 }
 
+.upload-results {
+  margin-bottom: 16px;
+}
+
+.upload-results h2,
+.upload-results h3 {
+  margin-bottom: 8px;
+}
+
+.upload-results__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+}
+
+.upload-results ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.upload-results__success h3 {
+  color: var(--success);
+}
+
+.upload-results__failure h3,
+.upload-results__failure small {
+  color: var(--danger);
+}
+
 .empty-state {
   border: 1px dashed #bcc6be;
   border-radius: var(--radius);
@@ -407,6 +436,20 @@ button[data-danger]:hover {
 .pill--muted {
   color: #58635e;
   background: #e8ebe7;
+}
+
+.pill--warning {
+  color: #7a4b08;
+  background: #fff0c7;
+}
+
+.pill--danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.status-error {
+  color: var(--danger);
 }
 
 .storage-summary {

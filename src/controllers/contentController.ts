@@ -6,8 +6,6 @@ import { SimpleDate } from '../models/simpleDate';
 import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
-import { getS3 } from '../infrastructure/s3';
-import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { parseBuffer } from 'music-metadata';
 import { ObjectId } from 'mongodb';
 import { normalizeUtf8Text } from '../utils/textEncoding';
@@ -23,6 +21,10 @@ import {
     inferAudioFormat,
     titleFromFileName
 } from '../services/audioMetadataService';
+import {
+    deleteAudioObjectAndTrack,
+    uploadAudioObject
+} from '../services/audioStorageService';
 
 const parseCsv = (value: string) => {
     return value
@@ -104,6 +106,7 @@ const renderNestedList = (items: string[]) => {
 
 const renderManagePage = (params: {
     userEmail: string;
+    isAdmin?: boolean;
     message?: string;
     searchQuery?: string;
     selectedUploadTrackId?: string;
@@ -238,11 +241,16 @@ const renderManagePage = (params: {
     </div>
     <div class="header-actions">
       <a class="button" href="/content/manage/audio-tracks">My Audio Tracks</a>
+      ${params.isAdmin ? '<a class="button button--secondary" href="/admin/audio-storage/reconciliation">Audit Audio Storage</a>' : ''}
       <a class="button button--secondary" href="/">Home</a>
       <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
     </div>
   </header>
   ${messageBlock}
+  <section class="card upload-results" id="bulk-upload-results" role="status" aria-live="polite" hidden>
+    <h2>Upload results</h2>
+    <div class="upload-results__grid"></div>
+  </section>
   ${s3StorageBlock}
   <nav class="manager-nav" aria-label="Content Manager sections">
     <a href="#search">Search</a>
@@ -712,6 +720,7 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
 
         return res.status(200).send(renderManagePage({
             userEmail: authReq.auth.email,
+            isAdmin: authReq.auth.role === 'admin',
             message,
             selectedUploadTrackId,
             ownedArtists,
@@ -759,6 +768,7 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
 
         return res.status(200).send(renderManagePage({
             userEmail: authReq.auth.email,
+            isAdmin: authReq.auth.role === 'admin',
             searchQuery: rawQuery,
             selectedUploadTrackId,
             artists,
@@ -975,24 +985,8 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             audioTrackObjectId
         );
 
-        await getS3().send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: audioTrackId,
-            Body: uploadFile.buffer,
-            ContentType: uploadFile.mimetype || 'audio/mpeg'
-        }));
-
-        try {
-            await track.save();
-        } catch (databaseError) {
-            await getS3().send(new DeleteObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME!,
-                Key: audioTrackId
-            })).catch((cleanupError) => {
-                console.log('Unable to clean up S3 file after track creation failed:', cleanupError);
-            });
-            throw databaseError;
-        }
+        await track.save();
+        await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId);
 
         if (album) {
             const albumTrackIds = uniqueStrings([
@@ -1066,17 +1060,12 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Forbidden: only creator or admin can delete this audio track.');
         }
 
-        await AudioTrack.deleteById(audioTrackId);
-
         try {
-            await getS3().send(new DeleteObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME!,
-                Key: audioTrackId
-            }));
+            await deleteAudioObjectAndTrack(audioTrackId);
             return redirectWithMessage(res, 'Audio track deleted successfully.');
         } catch (s3Error) {
-            console.log('S3 cleanup failed for audioTrackId:', audioTrackId, s3Error);
-            return redirectWithMessage(res, 'Audio track deleted, but S3 file cleanup failed.');
+            console.log('Audio track deletion failed for audioTrackId:', audioTrackId, s3Error);
+            return redirectWithMessage(res, 'The uploaded file could not be deleted. Track metadata was retained for reconciliation.');
         }
     } catch (error) {
         return next(error);
@@ -1117,23 +1106,28 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
             return redirectWithMessage(res, 'Forbidden: only creator or admin can delete every selected track.');
         }
 
-        await Promise.all(selectedTrackIds.map((trackId) => AudioTrack.deleteById(trackId)));
-        const remainingTrackIds = uniqueStrings(
-            (Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []).map(String)
-        ).filter((trackId) => !selectedTrackIds.includes(trackId));
-        await Album.updateById(albumId, { audioTrackIds: remainingTrackIds as [string] });
-
-        const s3Results = await Promise.allSettled(selectedTrackIds.map((trackId) => getS3().send(new DeleteObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: trackId
-        }))));
-        const failedS3Deletes = s3Results.filter((result) => result.status === 'rejected').length;
-        if (failedS3Deletes > 0) {
-            console.log(`S3 cleanup failed for ${failedS3Deletes} deleted audio track(s).`, s3Results);
-            return redirectWithMessage(res, `${selectedTrackIds.length} audio track(s) deleted, but ${failedS3Deletes} uploaded file(s) could not be removed.`);
+        const deletedTrackIds: string[] = [];
+        const failedTrackIds: string[] = [];
+        for (const trackId of selectedTrackIds) {
+            try {
+                await deleteAudioObjectAndTrack(trackId);
+                deletedTrackIds.push(trackId);
+            } catch (deleteError) {
+                console.log(`Unable to delete audio track ${trackId}:`, deleteError);
+                failedTrackIds.push(trackId);
+            }
         }
 
-        return redirectWithMessage(res, `${selectedTrackIds.length} audio track(s) deleted successfully.`);
+        const remainingTrackIds = uniqueStrings(
+            (Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []).map(String)
+        ).filter((trackId) => !deletedTrackIds.includes(trackId));
+        await Album.updateById(albumId, { audioTrackIds: remainingTrackIds as [string] });
+
+        if (failedTrackIds.length > 0) {
+            return redirectWithMessage(res, `${deletedTrackIds.length} audio track(s) deleted. ${failedTrackIds.length} could not be deleted and remain recorded for reconciliation.`);
+        }
+
+        return redirectWithMessage(res, `${deletedTrackIds.length} audio track(s) deleted successfully.`);
     } catch (error) {
         return next(error);
     }
@@ -1161,17 +1155,7 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Missing audio file.');
         }
 
-        await getS3().send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: audioTrackId,
-            Body: uploadFile.buffer,
-            ContentType: uploadFile.mimetype || 'audio/mpeg'
-        }));
-
-        await AudioTrack.updateById(audioTrackId, {
-            originalFileName: normalizeUtf8Text(uploadFile.originalname),
-            contentType: uploadFile.mimetype || 'audio/mpeg'
-        });
+        await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId);
 
         return redirectWithMessage(res, 'Audio file uploaded successfully.');
     } catch (error) {
@@ -1251,23 +1235,11 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
             );
 
             try {
-                await getS3().send(new PutObjectCommand({
-                    Bucket: process.env.S3_BUCKET_NAME!,
-                    Key: audioTrackId,
-                    Body: uploadFile.buffer,
-                    ContentType: uploadFile.mimetype || 'audio/mpeg'
-                }));
                 await track.save();
+                await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId);
                 uploadedTrackIds.push(audioTrackId);
             } catch (uploadError) {
                 console.log(`Unable to upload ${originalFileName}:`, uploadError);
-                await Promise.allSettled([
-                    AudioTrack.deleteById(audioTrackId),
-                    getS3().send(new DeleteObjectCommand({
-                        Bucket: process.env.S3_BUCKET_NAME!,
-                        Key: audioTrackId
-                    }))
-                ]);
                 failures.push(originalFileName);
             }
         }
@@ -1281,6 +1253,13 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
         }
 
         const message = `${uploadedTrackIds.length} audio track${uploadedTrackIds.length === 1 ? '' : 's'} created and uploaded.${failures.length > 0 ? ` ${failures.length} file${failures.length === 1 ? '' : 's'} failed.` : ''}`;
+        if (req.get('X-Requested-With') === 'XMLHttpRequest') {
+            return res.status(uploadedTrackIds.length > 0 ? 200 : 422).json({
+                message,
+                uploadedCount: uploadedTrackIds.length,
+                failureCount: failures.length
+            });
+        }
         return redirectWithMessage(res, message);
     } catch (error) {
         return next(error);
