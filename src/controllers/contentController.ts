@@ -73,6 +73,27 @@ const renderSectionList = (title: string, items: any[], formatter: (item: any) =
     return `<h3>${title}</h3><ul>${content}</ul>`;
 };
 
+const contentId = (item: any) => String(item?._id ?? '');
+
+const renderReferencedItem = (item: any, label: string, prefillType?: string) => {
+    const id = escapeHtml(contentId(item));
+    const editLink = prefillType && id
+        ? ` <a href="/content/manage?prefillType=${encodeURIComponent(prefillType)}&prefillId=${encodeURIComponent(contentId(item))}">Edit</a>`
+        : '';
+
+    return `${escapeHtml(label)} (<code>${id}</code>)${editLink}`;
+};
+
+const renderMissingReference = (id: string) => {
+    return `Unavailable content (<code>${escapeHtml(id)}</code>)`;
+};
+
+const renderNestedList = (items: string[]) => {
+    return items.length > 0
+        ? `<ul class="linked-content">${items.map((item) => `<li>${item}</li>`).join('')}</ul>`
+        : '<p class="empty-linked-content">None linked</p>';
+};
+
 const renderManagePage = (params: {
     userEmail: string;
     message?: string;
@@ -125,6 +146,12 @@ const renderManagePage = (params: {
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 960px; margin: 32px auto; padding: 0 16px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
     .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
+    .content-hierarchy { display: grid; gap: 16px; }
+    .hierarchy-item { border-bottom: 1px solid #eee; padding-bottom: 12px; }
+    .hierarchy-item:last-child { border-bottom: 0; padding-bottom: 0; }
+    .hierarchy-item > strong { display: block; }
+    .linked-content { margin: 6px 0 0 18px; padding-left: 18px; }
+    .empty-linked-content { color: #666; font-size: 14px; margin: 6px 0 0; }
     form { display: grid; gap: 8px; }
     input { padding: 8px; font-size: 14px; }
     button { padding: 8px 12px; cursor: pointer; }
@@ -151,9 +178,43 @@ const renderManagePage = (params: {
 
   <h2>My Content</h2>
   <div class="card">
-    ${renderSectionList('My Artists', ownedArtists, (item) => `${escapeHtml(item.name ?? '')} (<code>${escapeHtml(String(item._id ?? ''))}</code>)`)}
-    ${renderSectionList('My Albums', ownedAlbums, (item) => `${escapeHtml(item.title ?? '')} (<code>${escapeHtml(String(item._id ?? ''))}</code>)`)}
-        ${renderSectionList('My Audio Tracks', ownedAudioTracks, (item) => {
+    <h3>My Artists</h3>
+    <div class="content-hierarchy">
+      ${ownedArtists.length > 0 ? ownedArtists.map((artist) => {
+          const linkedAlbumIds = uniqueStrings(Array.isArray(artist.albumIds) ? artist.albumIds.map(String) : []);
+          const albumsById = new Map(ownedAlbums.map((album) => [contentId(album), album]));
+          const linkedAlbums = linkedAlbumIds.map((albumId) => {
+              const album = albumsById.get(albumId);
+              if (!album) return renderMissingReference(albumId);
+
+              return renderReferencedItem(album, String(album.title ?? ''), 'album');
+          });
+
+          return `<div class="hierarchy-item"><strong>${renderReferencedItem(artist, String(artist.name ?? ''), 'artist')}</strong><span>${linkedAlbumIds.length} linked album${linkedAlbumIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedAlbums)}</div>`;
+      }).join('') : '<p class="empty-linked-content">No artists yet.</p>'}
+    </div>
+
+    <h3>My Albums</h3>
+    <div class="content-hierarchy">
+      ${ownedAlbums.length > 0 ? ownedAlbums.map((album) => {
+          const albumId = contentId(album);
+          const linkedTrackIds = uniqueStrings([
+              ...(Array.isArray(album.audioTrackIds) ? album.audioTrackIds.map(String) : []),
+              ...ownedAudioTracks.filter((track) => String(track.albumId ?? '') === albumId).map(contentId)
+          ]);
+          const tracksById = new Map(ownedAudioTracks.map((track) => [contentId(track), track]));
+          const linkedTracks = linkedTrackIds.map((trackId) => {
+              const track = tracksById.get(trackId);
+              if (!track) return renderMissingReference(trackId);
+
+              return renderReferencedItem(track, String(track.title ?? ''), 'audioTrack');
+          });
+
+          return `<div class="hierarchy-item"><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked track${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}</div>`;
+      }).join('') : '<p class="empty-linked-content">No albums yet.</p>'}
+    </div>
+
+    ${renderSectionList('My Audio Tracks', ownedAudioTracks, (item) => {
             const id = escapeHtml(String(item._id ?? ''));
             return `${escapeHtml(item.title ?? '')} (<code>${id}</code>) - <a href="/content/manage?uploadAudioTrackId=${id}">Use for upload</a>`;
         })}
@@ -163,12 +224,26 @@ const renderManagePage = (params: {
                 const itemCount = Number(Array.isArray(item.items) ? item.items.length : 0);
                 return `${title} [${slug}] - ${itemCount} page items`;
         })}
-        ${renderSectionList('My Carousels', ownedCarousels, (item) => {
-                const id = escapeHtml(String(item._id ?? ''));
-                const name = escapeHtml(String(item.name ?? ''));
-                const itemCount = Number(Array.isArray(item.items) ? item.items.length : 0);
-                return `${name} (<code>${id}</code>) - ${itemCount} items`;
-        })}
+        <h3>My Carousels</h3>
+        <div class="content-hierarchy">
+          ${ownedCarousels.length > 0 ? ownedCarousels.map((carousel) => {
+              const items = Array.isArray(carousel.items) ? [...carousel.items].sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0)) : [];
+              const albumsById = new Map(ownedAlbums.map((album) => [contentId(album), album]));
+              const tracksById = new Map(ownedAudioTracks.map((track) => [contentId(track), track]));
+              const carouselItems = items.map((item: any) => {
+                  const itemId = String(item.contentId ?? '');
+                  if (item.contentType === 'album' && albumsById.has(itemId)) {
+                      return `Album: ${renderReferencedItem(albumsById.get(itemId), String(albumsById.get(itemId).title ?? ''), 'album')}`;
+                  }
+                  if (item.contentType === 'audioTrack' && tracksById.has(itemId)) {
+                      return `Track: ${renderReferencedItem(tracksById.get(itemId), String(tracksById.get(itemId).title ?? ''), 'audioTrack')}`;
+                  }
+                  return `${escapeHtml(String(item.contentType ?? 'Content'))}: ${renderMissingReference(itemId)}`;
+              });
+
+              return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><span>${items.length} item${items.length === 1 ? '' : 's'}</span>${renderNestedList(carouselItems)}</div>`;
+          }).join('') : '<p class="empty-linked-content">No carousels yet.</p>'}
+        </div>
   </div>
 
     <h2>Composition</h2>
