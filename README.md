@@ -4,7 +4,7 @@ Archtree is an Express + TypeScript backend for authentication, content manageme
 
 ## Tech Stack
 
-- Node.js 22
+- Node.js 24
 - Express
 - TypeScript (runtime via tsx)
 - MongoDB
