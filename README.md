@@ -30,6 +30,7 @@ Required variables:
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region
 - `S3_BUCKET_NAME`: target S3 bucket for audio uploads
+- `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
 
 Security:
@@ -74,6 +75,7 @@ Web content management:
 - `GET /content/manage/search`
 - Create/update/delete forms for artists, albums, and audio tracks
 - Audio file upload form for a selected track
+- S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 
 Session behavior:
 - Browser and API login tokens last 30 days by default. Set `SESSION_DAYS` to a whole number from 1 to 90 to override it. `WEB_SESSION_DAYS` remains supported as a backwards-compatible fallback.

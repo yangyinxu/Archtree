@@ -108,6 +108,84 @@ const inferAudioFormat = (fileName: string, mimeType: string, container?: string
     return mimeType.replace(/^audio\//i, '').toUpperCase() || 'AUDIO';
 };
 
+type S3StorageSummary = {
+    objectCount: number;
+    totalBytes: number;
+    estimatedMonthlyStorageCost: number;
+    storageCostPerGbMonth: number;
+};
+
+type S3StorageSummaryResult = {
+    summary: S3StorageSummary | null;
+    errorCode?: string;
+};
+
+let cachedS3StorageSummary: { value: S3StorageSummary; expiresAt: number } | null = null;
+const s3StorageSummaryCacheMs = 5 * 60 * 1000;
+
+const getS3StorageSummary = async (): Promise<S3StorageSummary> => {
+    if (cachedS3StorageSummary && cachedS3StorageSummary.expiresAt > Date.now()) {
+        return cachedS3StorageSummary.value;
+    }
+
+    const bucket = String(process.env.S3_BUCKET_NAME ?? '').trim();
+    if (!bucket) {
+        throw new Error('S3_BUCKET_NAME is not configured.');
+    }
+
+    let continuationToken: string | undefined;
+    let objectCount = 0;
+    let totalBytes = 0;
+    do {
+        const page: any = await getS3().listObjectsV2({
+            Bucket: bucket,
+            ContinuationToken: continuationToken
+        }).promise();
+        const objects = Array.isArray(page.Contents) ? page.Contents : [];
+        objectCount += objects.length;
+        totalBytes += objects.reduce((sum: number, object: any) => sum + Number(object.Size ?? 0), 0);
+        continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    const configuredRate = Number(process.env.S3_STORAGE_COST_PER_GB_MONTH ?? 0.023);
+    const storageCostPerGbMonth = Number.isFinite(configuredRate) && configuredRate >= 0
+        ? configuredRate
+        : 0.023;
+    const summary = {
+        objectCount,
+        totalBytes,
+        estimatedMonthlyStorageCost: (totalBytes / (1024 ** 3)) * storageCostPerGbMonth,
+        storageCostPerGbMonth
+    };
+    cachedS3StorageSummary = {
+        value: summary,
+        expiresAt: Date.now() + s3StorageSummaryCacheMs
+    };
+
+    return summary;
+};
+
+const loadS3StorageSummary = async (): Promise<S3StorageSummaryResult> => {
+    try {
+        return { summary: await getS3StorageSummary() };
+    } catch (error: any) {
+        const errorCode = String(error?.code ?? error?.name ?? 'UnknownError');
+        console.log('Unable to load S3 storage summary:', {
+            errorCode,
+            message: error?.message,
+            statusCode: error?.statusCode
+        });
+        return { summary: null, errorCode };
+    }
+};
+
+const formatStorageSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 ** 3) return `${(bytes / (1024 ** 2)).toFixed(1)} MB`;
+    return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
+};
+
 const renderSectionList = (title: string, items: any[], formatter: (item: any) => string) => {
     const content = items.length > 0
         ? items.map((item) => `<li>${formatter(item)}</li>`).join('')
@@ -150,6 +228,8 @@ const renderManagePage = (params: {
     ownedAudioTracks?: any[];
     ownedPages?: any[];
     ownedCarousels?: any[];
+    s3StorageSummary?: S3StorageSummary | null;
+    s3StorageSummaryError?: string;
     prefillArtistId?: string;
     prefillAlbumId?: string;
     prefillAudioTrackId?: string;
@@ -172,6 +252,11 @@ const renderManagePage = (params: {
     const ownedAudioTracks = params.ownedAudioTracks ?? [];
     const ownedPages = params.ownedPages ?? [];
     const ownedCarousels = params.ownedCarousels ?? [];
+    const s3StorageSummary = params.s3StorageSummary ?? null;
+    const s3StorageSummaryError = params.s3StorageSummaryError ?? '';
+    const s3StorageBlock = s3StorageSummary
+        ? `<div class="storage-summary"><strong>S3 storage</strong><span>${formatStorageSize(s3StorageSummary.totalBytes)} across ${s3StorageSummary.objectCount} object${s3StorageSummary.objectCount === 1 ? '' : 's'}</span><span>Estimated storage: $${s3StorageSummary.estimatedMonthlyStorageCost.toFixed(2)}/month</span><small>Storage-only estimate at $${s3StorageSummary.storageCostPerGbMonth.toFixed(3)}/GB-month; excludes requests, transfer, and taxes.</small></div>`
+        : `<div class="storage-summary"><strong>S3 storage</strong><span>Usage unavailable${s3StorageSummaryError ? ` (${escapeHtml(s3StorageSummaryError)})` : ''}. Confirm the app has S3 ListBucket permission and that S3_BUCKET_NAME/AWS_REGION match the bucket.</span></div>`;
     const pageOptions = ownedPages.map((page) => {
         const slug = String(page.slug ?? '');
         return `<option value="${escapeHtml(slug)}">${escapeHtml(String(page.title ?? slug))} (${escapeHtml(slug)})</option>`;
@@ -229,6 +314,8 @@ const renderManagePage = (params: {
     .drag-item.dragging { opacity: .45; }
     .drag-item.drag-over { border-color: #2276d2; }
     .drag-help { color: #666; font-size: 13px; margin: 6px 0; }
+    .storage-summary { align-items: baseline; background: #f5f8fc; border: 1px solid #d6e3f5; border-radius: 10px; display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0; padding: 12px 14px; }
+    .storage-summary small { color: #596579; flex-basis: 100%; }
     h2, h3 { margin-bottom: 8px; }
     code { background: #f3f3f3; padding: 2px 5px; border-radius: 4px; }
   </style>
@@ -238,6 +325,7 @@ const renderManagePage = (params: {
   <p>Signed in as <strong>${escapeHtml(params.userEmail)}</strong></p>
   <p><a href="/">Home</a> | <form style="display:inline;" method="POST" action="/auth/logout-web"><button type="submit">Log out</button></form></p>
   ${messageBlock}
+  ${s3StorageBlock}
 
   <div class="card">
     <h2>Unified Search</h2>
@@ -722,12 +810,13 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
         }
 
         const ownedByUser = authReq.auth.userId;
-        const [ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels] = await Promise.all([
+        const [ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels, s3StorageSummaryResult] = await Promise.all([
             Artist.fetchByCreator(ownedByUser),
             Album.fetchByCreator(ownedByUser),
             AudioTrack.fetchByCreator(ownedByUser),
             Page.fetchByCreator(ownedByUser),
-            Carousel.fetchByCreator(ownedByUser)
+            Carousel.fetchByCreator(ownedByUser),
+            loadS3StorageSummary()
         ]);
 
         const queryMessage = String(req.query.message ?? '');
@@ -790,6 +879,8 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
             ownedAudioTracks,
             ownedPages,
             ownedCarousels,
+            s3StorageSummary: s3StorageSummaryResult.summary,
+            s3StorageSummaryError: s3StorageSummaryResult.errorCode,
             prefillArtistId,
             prefillAlbumId,
             prefillAudioTrackId,
@@ -814,7 +905,7 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
         const parsedLimit = Number(req.query.limit ?? 10);
         const limit = Number.isNaN(parsedLimit) ? 10 : Math.max(1, Math.min(parsedLimit, 50));
 
-        const [artists, albums, audioTracks, ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels] = await Promise.all([
+        const [artists, albums, audioTracks, ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels, s3StorageSummaryResult] = await Promise.all([
             rawQuery ? Artist.searchByName(rawQuery, limit) : Promise.resolve([]),
             rawQuery ? Album.searchByTitle(rawQuery, limit) : Promise.resolve([]),
             rawQuery ? AudioTrack.searchByTitle(rawQuery, limit) : Promise.resolve([]),
@@ -822,7 +913,8 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
             Album.fetchByCreator(authReq.auth.userId),
             AudioTrack.fetchByCreator(authReq.auth.userId),
             Page.fetchByCreator(authReq.auth.userId),
-            Carousel.fetchByCreator(authReq.auth.userId)
+            Carousel.fetchByCreator(authReq.auth.userId),
+            loadS3StorageSummary()
         ]);
 
         return res.status(200).send(renderManagePage({
@@ -836,7 +928,9 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
             ownedAlbums,
             ownedAudioTracks,
             ownedPages,
-            ownedCarousels
+            ownedCarousels,
+            s3StorageSummary: s3StorageSummaryResult.summary,
+            s3StorageSummaryError: s3StorageSummaryResult.errorCode
         }));
     } catch (error) {
         return next(error);
