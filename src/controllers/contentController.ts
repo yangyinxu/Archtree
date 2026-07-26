@@ -313,6 +313,9 @@ const renderManagePage = (params: {
     .drag-item.dragging { opacity: .45; }
     .drag-item.drag-over { border-color: var(--brand); }
     .drag-help { color: var(--muted); font-size: 13px; margin: 6px 0; }
+    .move-item-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .move-item-choice { align-items: center; display: flex; gap: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); padding: 9px 10px; }
+    .move-item-choice input { flex: 0 0 auto; margin: 0; }
     .manager-nav { display: flex; gap: 8px; margin: 18px 0 24px; overflow-x: auto; padding-bottom: 4px; }
     .manager-nav a { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); padding: 7px 12px; font-size: 13px; font-weight: 700; text-decoration: none; }
     .card h3:not(:first-child) { margin-top: 24px; }
@@ -486,13 +489,13 @@ const renderManagePage = (params: {
         </div>
 
         <div class="card">
-            <h3>Move Item Between Carousels</h3>
-            <form method="POST" action="/content/manage/composition/carousel/move-item">
-                <select name="sourceCarouselId" required><option value="" disabled selected>Source carousel</option>${carouselOptions}</select>
-                <input name="fromIndex" placeholder="Source index" required />
-                <select name="targetCarouselId" required><option value="" disabled selected>Target carousel</option>${carouselOptions}</select>
-                <input name="toIndex" placeholder="Target index" required />
-                <button type="submit">Move Item</button>
+            <h3>Move Items Between Carousels</h3>
+            <form class="move-carousel-items" method="POST" action="/content/manage/composition/carousel/move-item">
+                <select class="move-source-carousel" name="sourceCarouselId" required><option value="" disabled selected>Select source carousel</option>${carouselOptions}</select>
+                <p class="drag-help">Select the items to move. They will keep their order and be added to the end of the destination carousel.</p>
+                <ul class="move-item-list" aria-live="polite"><li class="empty-linked-content">Choose a source carousel to see its items.</li></ul>
+                <select class="move-target-carousel" name="targetCarouselId" required><option value="" disabled selected>Select destination carousel</option>${carouselOptions}</select>
+                <button class="move-selected-items" type="submit" disabled>Move Selected Items</button>
             </form>
 
             <h3>Delete Carousel</h3>
@@ -578,6 +581,59 @@ const renderManagePage = (params: {
           saveButton.disabled = fromInput.value === toInput.value;
           target.classList.remove('drag-over');
         });
+      });
+
+      document.querySelectorAll('.move-carousel-items').forEach((form) => {
+        const sourceSelector = form.querySelector('.move-source-carousel');
+        const targetSelector = form.querySelector('.move-target-carousel');
+        const itemList = form.querySelector('.move-item-list');
+        const submitButton = form.querySelector('.move-selected-items');
+
+        const updateButton = () => {
+          submitButton.disabled = !sourceSelector.value
+            || !targetSelector.value
+            || sourceSelector.value === targetSelector.value
+            || itemList.querySelectorAll('input[name="fromIndexes"]:checked').length === 0;
+        };
+
+        const renderMoveChoices = () => {
+          itemList.replaceChildren();
+          [...targetSelector.options].forEach((option) => {
+            option.disabled = Boolean(option.value) && option.value === sourceSelector.value;
+          });
+          if (targetSelector.value === sourceSelector.value) targetSelector.value = '';
+
+          const source = compositionData.carousels.find((carousel) => carousel.id === sourceSelector.value);
+          const items = source ? [...source.items].sort((a, b) => a.order - b.order) : [];
+          if (items.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'empty-linked-content';
+            empty.textContent = source ? 'This carousel has no items.' : 'Choose a source carousel to see its items.';
+            itemList.append(empty);
+            updateButton();
+            return;
+          }
+
+          items.forEach((item, index) => {
+            const listItem = document.createElement('li');
+            const label = document.createElement('label');
+            label.className = 'move-item-choice';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.name = 'fromIndexes';
+            checkbox.value = String(index);
+            const text = document.createElement('span');
+            text.textContent = labelForCarouselItem(item);
+            label.append(checkbox, text);
+            listItem.append(label);
+            itemList.append(listItem);
+          });
+          updateButton();
+        };
+
+        sourceSelector.addEventListener('change', renderMoveChoices);
+        targetSelector.addEventListener('change', updateButton);
+        itemList.addEventListener('change', updateButton);
       });
     </script>
 

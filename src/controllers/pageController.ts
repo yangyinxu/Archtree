@@ -745,10 +745,14 @@ export const moveCarouselItemBetweenCarouselsWeb = async (req: Request, res: Res
 
         const sourceCarouselId = String(req.body.sourceCarouselId ?? '').trim();
         const targetCarouselId = String(req.body.targetCarouselId ?? '').trim();
-        const fromIndex = parseRequiredIndex(req.body.fromIndex);
-        const toIndex = parseRequiredIndex(req.body.toIndex);
+        const rawFromIndexes: unknown[] = Array.isArray(req.body.fromIndexes)
+            ? req.body.fromIndexes as unknown[]
+            : req.body.fromIndexes !== undefined ? [req.body.fromIndexes] : [];
+        const fromIndexes = [...new Set<number>(rawFromIndexes
+            .map((value: unknown) => parseRequiredIndex(value))
+            .filter((value): value is number => value !== null))];
 
-        if (!validateObjectId(sourceCarouselId) || !validateObjectId(targetCarouselId) || fromIndex === null || toIndex === null) {
+        if (!validateObjectId(sourceCarouselId) || !validateObjectId(targetCarouselId) || sourceCarouselId === targetCarouselId || fromIndexes.length === 0) {
             return redirectWithMessage(res, 'Invalid move parameters.');
         }
 
@@ -762,12 +766,12 @@ export const moveCarouselItemBetweenCarouselsWeb = async (req: Request, res: Res
             return redirectWithMessage(res, 'Forbidden: only creator or admin can modify these carousels.');
         }
 
-        const result = await Carousel.moveItemBetweenCarousels(sourceCarouselId, targetCarouselId, fromIndex, toIndex, authReq.auth.userId);
+        const result = await Carousel.moveItemsBetweenCarousels(sourceCarouselId, targetCarouselId, fromIndexes, authReq.auth.userId);
         if (!result) {
             return redirectWithMessage(res, 'Invalid move operation.');
         }
 
-        return redirectWithMessage(res, 'Carousel item moved successfully.');
+        return redirectWithMessage(res, `${fromIndexes.length} carousel item${fromIndexes.length === 1 ? '' : 's'} moved successfully.`);
     } catch (error) {
         return next(error);
     }
