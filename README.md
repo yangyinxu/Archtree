@@ -101,5 +101,5 @@ Delete:
 - Buildspec path errors (`buildspect.yml` not found): check AWS buildspec override settings in CodeBuild/CodePipeline and set path to `buildspec.yml`.
 - S3 upload/delete errors: verify IAM permissions and required S3 environment variables.
 - `413 Request Entity Too Large`: increase upload limits in both places:
-   - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`)
-   - App multer limit via `MAX_AUDIO_UPLOAD_MB`
+  - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`, currently 1 GB total per request)
+  - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 200 MB)

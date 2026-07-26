@@ -627,11 +627,72 @@ const renderManagePage = (params: {
             <hr />
             <h3>Bulk Upload Audio Files</h3>
             <p>Select up to 20 files. A track is created for each file using its embedded metadata when available.</p>
-            <form method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data">
+            <form id="bulk-audio-upload-form" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data">
                 <select name="albumId"><option value="">No album</option>${albumOptions}</select>
                 <input type="file" name="audioFiles" accept="audio/*" multiple required />
                 <button type="submit">Create and Upload Audio Files</button>
+                <div id="bulk-upload-status" role="status" aria-live="polite" hidden>
+                    <progress id="bulk-upload-progress" max="100" value="0">0%</progress>
+                    <span id="bulk-upload-progress-label">0%</span>
+                </div>
             </form>
+            <script>
+              (() => {
+                const form = document.getElementById('bulk-audio-upload-form');
+                if (!form) return;
+
+                const status = document.getElementById('bulk-upload-status');
+                const progress = document.getElementById('bulk-upload-progress');
+                const label = document.getElementById('bulk-upload-progress-label');
+                const button = form.querySelector('button[type="submit"]');
+
+                const showStatus = (message, percentage) => {
+                  status.hidden = false;
+                  if (typeof percentage === 'number') progress.value = percentage;
+                  label.textContent = message;
+                };
+
+                form.addEventListener('submit', (event) => {
+                  event.preventDefault();
+                  const files = form.querySelector('input[name="audioFiles"]').files;
+                  if (!files || files.length === 0) return;
+
+                  button.disabled = true;
+                  showStatus('Starting upload…', 0);
+                  const request = new XMLHttpRequest();
+                  request.open('POST', form.action);
+                  request.upload.addEventListener('progress', (progressEvent) => {
+                    if (!progressEvent.lengthComputable) {
+                      showStatus('Uploading…', 0);
+                      return;
+                    }
+                    const percentage = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+                    showStatus('Uploading… ' + percentage + '%', percentage);
+                  });
+                  request.addEventListener('load', () => {
+                    if (request.status >= 200 && request.status < 400) {
+                      showStatus('Upload complete. Saving track details…', 100);
+                      window.location.assign(request.responseURL || '/content/manage');
+                      return;
+                    }
+
+                    let errorMessage = 'Upload failed. Please try again.';
+                    try {
+                      errorMessage = JSON.parse(request.responseText).message || errorMessage;
+                    } catch (error) {
+                      // Non-JSON responses, including proxy errors, use the default message.
+                    }
+                    showStatus(errorMessage, 0);
+                    button.disabled = false;
+                  });
+                  request.addEventListener('error', () => {
+                    showStatus('Upload failed before reaching the server. Please try again.', 0);
+                    button.disabled = false;
+                  });
+                  request.send(new FormData(form));
+                });
+              })();
+            </script>
             <hr />
             <h3>Upload Audio File</h3>
             <form method="POST" action="/content/manage/audioTrack/upload" enctype="multipart/form-data">
