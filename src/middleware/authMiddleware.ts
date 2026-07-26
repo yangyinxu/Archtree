@@ -133,3 +133,15 @@ export const ensureOwnerOrAdmin = (req: AuthenticatedRequest, ownerId: string) =
 
     return req.auth.userId === ownerId;
 };
+
+export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+    const auth = (req as AuthenticatedRequest).auth;
+    if (!auth) {
+        return res.status(401).json({ message: 'Missing or invalid credentials.' });
+    }
+    if (auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
+
+    return next();
+};

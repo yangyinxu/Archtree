@@ -9,7 +9,8 @@ const ensureIndexes = (db: mongoDb.Db) => {
     db.collection('users').createIndex({ email: 1 }, { unique: true }),
     db.collection('pages').createIndex({ createdBy: 1, updatedAt: -1 }),
     db.collection('carousels').createIndex({ createdBy: 1, updatedAt: -1 }),
-    db.collection('audioTracks').createIndex({ artistIds: 1 })
+    db.collection('audioTracks').createIndex({ artistIds: 1 }),
+    db.collection('audioTracks').createIndex({ uploadStatus: 1, uploadUpdatedAt: -1 })
   ];
 
   Promise.allSettled(indexes).then((results) => {

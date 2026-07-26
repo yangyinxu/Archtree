@@ -1,10 +1,16 @@
 import express, { Router } from 'express';
 
-import { getAddProduct, postAddProduct } from '../controllers/adminController';
+import {
+    getAddProduct,
+    getAudioStorageReconciliation,
+    postAddProduct
+} from '../controllers/adminController';
+import { requireAdmin, requireAuth } from '../middleware/authMiddleware';
 
 const router: Router = express.Router();
 
 router.get('/product', getAddProduct);
 router.post('/product', postAddProduct);
+router.get('/audio-storage/reconciliation', requireAuth, requireAdmin, getAudioStorageReconciliation);
 
 export default router;

@@ -4,6 +4,8 @@ import { SimpleDate } from './simpleDate';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 
 const collectionId = 'audioTracks';
+export type AudioUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
+
 const normalizeAudioTrackText = (track: any) => {
     if (!track) return track;
     if (typeof track.title === 'string') track.title = normalizeUtf8Text(track.title);
@@ -24,6 +26,10 @@ export class AudioTrack {
     createdBy: string;
     originalFileName?: string;
     contentType?: string;
+    s3Key?: string;
+    uploadStatus: AudioUploadStatus;
+    uploadUpdatedAt: Date;
+    uploadError?: string | null;
 
     constructor(
         title: string,
@@ -51,6 +57,10 @@ export class AudioTrack {
         this.createdBy = createdBy;
         this.originalFileName = originalFileName;
         this.contentType = contentType;
+        this.s3Key = id?.toHexString();
+        this.uploadStatus = 'pending';
+        this.uploadUpdatedAt = new Date();
+        this.uploadError = null;
     }
 
     // save an audio track to the mongodb database
@@ -105,13 +115,7 @@ export class AudioTrack {
         // delete the audio track from the database
         return db!
             .collection(collectionId)
-            .deleteOne({ _id: audioTrackObjectId })
-            .then((result: any) => {
-                console.log(result);
-            })
-            .catch((error: any) => {
-                console.log(error);
-            });
+            .deleteOne({ _id: audioTrackObjectId });
     }
 
     static updateById(audioTrackId: string, update: Record<string, unknown>) {

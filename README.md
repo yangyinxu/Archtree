@@ -75,7 +75,7 @@ Web content management:
 - `GET /content/manage/audio-tracks`
 - `GET /content/manage/search`
 - Create/update/delete forms for artists, albums, and audio tracks
-- Single and bulk audio-track creation require audio files and upload them to S3 before saving track records
+- Single and bulk audio-track creation record filenames and a pending upload state before sending files to S3
 - Existing tracks support replacing their uploaded audio file
 - S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 
@@ -101,14 +101,24 @@ Upload:
 - API: `POST /content/audioTrack/:audioTrackId/upload`
 - Form field for file: `audioFile`
 - Authorization required; owner/admin enforced
-- New track records are saved only after their S3 upload succeeds; failed database inserts trigger S3 cleanup
+- New tracks are saved with `uploadStatus: pending` before S3 upload, then marked `ready` or `failed`.
+- S3 objects include track ID, owner ID, and encoded original filename metadata.
+- Failed or interrupted uploads remain identifiable in MongoDB and can be retried against the same track.
 
 Delete:
 
 - API: `DELETE /content/audioTrack/:audioTrackId`
 - Web: content manager delete action
-- On delete, backend attempts S3 cleanup for matching key (`audioTrackId`).
-- If S3 cleanup fails, metadata deletion still succeeds and a warning is returned/logged.
+- Track metadata is retained until the matching S3 object has been deleted.
+- Failed deletions remain marked as `deleteFailed` for reconciliation.
+
+Reconciliation:
+
+- Admin-only report: `GET /admin/audio-storage/reconciliation`
+- Browser requests receive a readable audit page; append `?format=json` for the structured report.
+- Compares every `audioTracks` record against the objects in `S3_BUCKET_NAME`.
+- Reports orphaned S3 objects, database tracks with missing objects, and pending/failed lifecycle records.
+- The report is read-only; it never deletes S3 objects automatically.
 
 ## Troubleshooting
 
@@ -117,4 +127,5 @@ Delete:
 - S3 upload/delete errors: verify IAM permissions and required S3 environment variables.
 - `413 Request Entity Too Large`: increase upload limits in both places:
   - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`, currently 1 GB total per request)
-  - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 200 MB)
+  - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 512 MB)
+  - Content Manager bulk uploads send files sequentially, keeping each request below the proxy limit and avoiding buffering the entire selection in memory at once.
