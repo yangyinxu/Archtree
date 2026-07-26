@@ -7,6 +7,7 @@ import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import { getS3 } from '../app';
+import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3';
 import { parseBuffer } from 'music-metadata';
 
 const escapeHtml = (value: string) => {
@@ -137,10 +138,10 @@ const getS3StorageSummary = async (): Promise<S3StorageSummary> => {
     let objectCount = 0;
     let totalBytes = 0;
     do {
-        const page: any = await getS3().listObjectsV2({
+        const page = await getS3().send(new ListObjectsV2Command({
             Bucket: bucket,
             ContinuationToken: continuationToken
-        }).promise();
+        }));
         const objects = Array.isArray(page.Contents) ? page.Contents : [];
         objectCount += objects.length;
         totalBytes += objects.reduce((sum: number, object: any) => sum + Number(object.Size ?? 0), 0);
@@ -1186,10 +1187,10 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
         await AudioTrack.deleteById(audioTrackId);
 
         try {
-            await getS3().deleteObject({
+            await getS3().send(new DeleteObjectCommand({
                 Bucket: process.env.S3_BUCKET_NAME!,
                 Key: audioTrackId
-            }).promise();
+            }));
             return redirectWithMessage(res, 'Audio track deleted successfully.');
         } catch (s3Error) {
             console.log('S3 cleanup failed for audioTrackId:', audioTrackId, s3Error);
@@ -1222,12 +1223,12 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Missing audio file.');
         }
 
-        await getS3().upload({
+        await getS3().send(new PutObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: audioTrackId,
             Body: uploadFile.buffer,
             ContentType: uploadFile.mimetype || 'audio/mpeg'
-        }).promise();
+        }));
 
         await AudioTrack.updateById(audioTrackId, {
             originalFileName: uploadFile.originalname,
@@ -1310,12 +1311,12 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
             try {
                 const createResult: any = await track.save();
                 audioTrackId = String(createResult.insertedId);
-                await getS3().upload({
+                await getS3().send(new PutObjectCommand({
                     Bucket: process.env.S3_BUCKET_NAME!,
                     Key: audioTrackId,
                     Body: uploadFile.buffer,
                     ContentType: uploadFile.mimetype || 'audio/mpeg'
-                }).promise();
+                }));
                 uploadedTrackIds.push(audioTrackId);
             } catch (uploadError) {
                 console.log(`Unable to upload ${uploadFile.originalname}:`, uploadError);

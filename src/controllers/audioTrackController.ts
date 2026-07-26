@@ -1,7 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
+import { Readable } from 'node:stream';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
 import { getS3 } from '../app';
+import {
+    DeleteObjectCommand,
+    GetObjectCommand,
+    HeadObjectCommand,
+    PutObjectCommand
+} from '@aws-sdk/client-s3';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 
 // Create a new audio track via the model and save it to the db
@@ -83,21 +90,21 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
 };
 
 // Get an audio track via the model and return it
-export const getAudioTrackById = (req: Request, res: Response, next: NextFunction) => {
+export const getAudioTrackById = async (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
 
     // Fetch the audio track from AWS S3
-    getS3().getObject({
-        Bucket: process.env.S3_BUCKET_NAME!,
-        Key: audioTrackId
-    }, (err: any, data: any) => {
-        if (err) {
-            console.log(err);
-            res.status(500).send('Error fetching audio track from AWS S3');
-        } else {
-            res.status(200).send(data.Body);
-        }
-    });
+    try {
+        const data = await getS3().send(new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: audioTrackId
+        }));
+        const body = await data.Body?.transformToByteArray();
+        res.status(200).send(Buffer.from(body ?? []));
+    } catch (error) {
+        console.log(error);
+        res.status(500).send('Error fetching audio track from AWS S3');
+    }
 
     // Fetch the audio track from the db
     /*
@@ -114,7 +121,7 @@ export const getAudioTrackById = (req: Request, res: Response, next: NextFunctio
 };
 
 // Stream an audio track by id from AWS S3 with support for HTTP Range requests
-export const streamAudioTrack = (req: Request, res: Response, next: NextFunction) => {
+export const streamAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
     const s3 = getS3();
     const params = {
@@ -124,11 +131,11 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
 
     // Check for Range header
     const range = req.headers.range;
-    s3.headObject(params, (err: any, metadata: any) => {
-        if (err || !metadata.ContentLength) {
-            console.error('Error getting metadata:', err);
-            console.error('Error details:', err);
-            res.status(500).json({ message: 'Error streaming audio track', error: err });
+    try {
+        const metadata = await s3.send(new HeadObjectCommand(params));
+        if (!metadata.ContentLength) {
+            console.error('Error getting metadata: missing ContentLength');
+            res.status(500).json({ message: 'Error streaming audio track' });
             return;
         }
 
@@ -160,7 +167,11 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
         res.setHeader('Content-Length', end - start + 1);
         res.setHeader('Content-Disposition', `inline; filename="${audioTrackId}"`);
 
-        const stream = s3.getObject({ ...params, Range: `bytes=${start}-${end}` }).createReadStream();
+        const object = await s3.send(new GetObjectCommand({ ...params, Range: `bytes=${start}-${end}` }));
+        const stream = object.Body as unknown as Readable | undefined;
+        if (!stream || typeof stream.pipe !== 'function') {
+            throw new Error('S3 object body is not a readable stream.');
+        }
         stream.on('error', (error: any) => {
             console.error('Error streaming audio track:', error);
             if (!res.headersSent) {
@@ -171,7 +182,14 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
             }
         });
         stream.pipe(res);
-    });
+    } catch (error) {
+        console.error('Error streaming audio track:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ message: 'Error streaming audio track', error });
+        } else {
+            res.destroy();
+        }
+    }
 };
 
 // Get all audio tracks via the model and return them
@@ -211,10 +229,10 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
 
         let s3CleanupWarning: string | undefined;
         try {
-            await getS3().deleteObject({
+            await getS3().send(new DeleteObjectCommand({
                 Bucket: process.env.S3_BUCKET_NAME!,
                 Key: audioTrackId
-            }).promise();
+            }));
         } catch (s3Error) {
             console.log('S3 cleanup failed for audioTrackId:', audioTrackId, s3Error);
             s3CleanupWarning = 'Track metadata was deleted, but deleting the S3 file failed.';
@@ -260,12 +278,12 @@ export const uploadAudioTrackFile = async (req: Request, res: Response, next: Ne
             return res.status(400).json({ message: 'Missing audio file. Use multipart form field: audioFile.' });
         }
 
-        await getS3().upload({
+        await getS3().send(new PutObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: audioTrackId,
             Body: uploadFile.buffer,
             ContentType: uploadFile.mimetype || 'audio/mpeg'
-        }).promise();
+        }));
 
         return res.status(200).json({
             message: 'Audio file uploaded successfully.',
