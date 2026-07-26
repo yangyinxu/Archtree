@@ -2,7 +2,7 @@ import { RequestHandler, Request, Response, NextFunction } from 'express';
 import { validationResult } from 'express-validator';
 import Post from '../models/post';
 import { ObjectId } from 'mongodb';
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 
 interface CreatePostData {
     userId: string;

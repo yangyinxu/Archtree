@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as mongoDb from 'mongodb';
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 import path from 'path';
 
 const gridFsCollection: string = 'fs.files';

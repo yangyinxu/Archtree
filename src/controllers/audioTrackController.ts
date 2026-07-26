@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Readable } from 'node:stream';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
-import { getS3 } from '../app';
+import { getS3 } from '../infrastructure/s3';
 import {
     DeleteObjectCommand,
     GetObjectCommand,

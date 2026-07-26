@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import {
     ArtistCarouselConfig,

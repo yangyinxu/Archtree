@@ -1,10 +1,7 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import bodyParser from 'body-parser';
 
-import * as dotenv from "dotenv";
-import * as mongoDb from 'mongodb';
-
-import path, { dirname } from 'path';
+import path from 'path';
 
 import fs from 'fs';
 
@@ -13,8 +10,9 @@ import authRoutes from './routes/authRoutes';
 import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import videoRoutes from './routes/videoRoutes';
-import { S3Client } from '@aws-sdk/client-s3';
 import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddleware';
+import { connectToDatabase } from './infrastructure/database';
+import { escapeHtml } from './views/html';
 
 const app: Application = express();
 
@@ -61,15 +59,6 @@ app.use('/init-video', function (req, res) {
 
 // forward to /video router
 app.use('/video', videoRoutes);
-
-const escapeHtml = (value: string) => {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-};
 
 // home page
 app.get('/', attachOptionalAuth, async (req, res, next) => {
@@ -126,76 +115,16 @@ app.use((error: any, req: Request, res: Response, next: NextFunction) => {
   res.status(status).json({ message: message, data: data });
 });
 
-// Connection will fail if:
-//  1. environment variables have not been configured
-//  2. you are on a VPN
-let _db: mongoDb.Db;
 const port: string | number = process.env.PORT || process.env.port || 8080;
-export async function connectToDatabase() {
-  dotenv.config();
-
-  const databaseName = String(process.env.DB_NAME ?? '').trim();
-  if (!databaseName) {
-    throw new Error('DB_NAME is required. Refusing to start with an implicit database name.');
-  }
-
-  const client: mongoDb.MongoClient = new mongoDb.MongoClient(process.env.DB_CONN_STRING!);
-
-  await client
-    .connect()
-    .then(client => {
-      _db = client.db(databaseName);
-      console.log(`Successfully connected to MongoDB: ${_db.databaseName}`);
-
-      // Initialize indexes for page composition hierarchy.
-      _db.collection('pages').createIndex({ slug: 1 }, { unique: true }).catch((error) => {
-        console.log('Failed to ensure pages.slug index:', error);
-      });
-      _db.collection('users').createIndex({ email: 1 }, { unique: true }).catch((error) => {
-        console.log('Failed to ensure users.email unique index:', error);
-      });
-      _db.collection('pages').createIndex({ createdBy: 1, updatedAt: -1 }).catch((error) => {
-        console.log('Failed to ensure pages owner index:', error);
-      });
-      _db.collection('carousels').createIndex({ createdBy: 1, updatedAt: -1 }).catch((error) => {
-        console.log('Failed to ensure carousels owner index:', error);
-      });
-      _db.collection('audioTracks').createIndex({ artistIds: 1 }).catch((error) => {
-        console.log('Failed to ensure audioTracks artist index:', error);
-      });
-
-      app.listen(port, () => {
-        console.log('Starting service on port ' + port + '...');
-      });
-    })
-    .catch(error => {
-      console.log(`Error connecting to MongoDB: ${error}`);
-      throw error;
-    });
-}
-
-export const getDb = (): mongoDb.Db | null => {
-  try {
-    if (_db) {
-      return _db;
-    } else {
-      throw new Error('No database found from cache!');
-    }
-  } catch (error) {
-    console.log(error);
-    return null;
-  }
-};
 
 // the app should connect to the database as soon as it starts
-exports.mongoConnect = connectToDatabase();
-
-// AWS SDK v3 uses the standard credential provider chain by default, which
-// includes AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY when they are set.
-const s3 = new S3Client({
-  region: process.env.AWS_REGION
-});
-
-export const getS3 = () => {
-  return s3;
-};
+connectToDatabase()
+  .then(() => {
+    app.listen(port, () => {
+      console.log('Starting service on port ' + port + '...');
+    });
+  })
+  .catch((error) => {
+    console.log(`Error connecting to MongoDB: ${error}`);
+    throw error;
+  });

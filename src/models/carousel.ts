@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb';
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 
 const collectionId = 'carousels';
 const toObjectId = (value: string) => {

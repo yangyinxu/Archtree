@@ -6,20 +6,23 @@ import { SimpleDate } from '../models/simpleDate';
 import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
-import { getS3 } from '../app';
-import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getS3 } from '../infrastructure/s3';
+import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { parseBuffer } from 'music-metadata';
 import { ObjectId } from 'mongodb';
 import { normalizeUtf8Text } from '../utils/textEncoding';
-
-const escapeHtml = (value: string) => {
-    return value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-};
+import { escapeHtml } from '../views/html';
+import { renderAudioTracksPage } from '../views/contentManager/audioTracksView';
+import {
+    formatStorageSize,
+    loadS3StorageSummary,
+    S3StorageSummary
+} from '../services/s3StorageService';
+import {
+    formatDuration,
+    inferAudioFormat,
+    titleFromFileName
+} from '../services/audioMetadataService';
 
 const parseCsv = (value: string) => {
     return value
@@ -69,124 +72,6 @@ const uniqueStrings = (values: string[]) => {
     return [...new Set(values.filter(Boolean))];
 };
 
-const titleFromFileName = (fileName: string) => {
-    return fileName
-        .replace(/\.[^.]+$/, '')
-        .trim();
-};
-
-const formatDuration = (durationInSeconds: unknown) => {
-    const totalSeconds = Math.round(Number(durationInSeconds));
-    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
-        return '';
-    }
-
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    const minutePart = String(minutes).padStart(2, '0');
-    const secondPart = String(seconds).padStart(2, '0');
-
-    return hours > 0 ? `${hours}:${minutePart}:${secondPart}` : `${minutePart}:${secondPart}`;
-};
-
-const inferAudioFormat = (fileName: string, mimeType: string, container?: string) => {
-    const normalizedContainer = String(container ?? '').trim().toUpperCase();
-    const knownContainers: Record<string, string> = {
-        MPEG: 'MP3',
-        'MPEG-4': 'M4A',
-        WAVE: 'WAV',
-        OGG: 'OGG'
-    };
-    if (normalizedContainer) {
-        return knownContainers[normalizedContainer] ?? normalizedContainer;
-    }
-
-    const extension = fileName.split('.').pop()?.trim().toUpperCase();
-    if (extension) {
-        return extension === 'MPEG' ? 'MP3' : extension;
-    }
-
-    return mimeType.replace(/^audio\//i, '').toUpperCase() || 'AUDIO';
-};
-
-type S3StorageSummary = {
-    objectCount: number;
-    totalBytes: number;
-    estimatedMonthlyStorageCost: number;
-    storageCostPerGbMonth: number;
-};
-
-type S3StorageSummaryResult = {
-    summary: S3StorageSummary | null;
-    errorCode?: string;
-};
-
-let cachedS3StorageSummary: { value: S3StorageSummary; expiresAt: number } | null = null;
-const s3StorageSummaryCacheMs = 5 * 60 * 1000;
-
-const getS3StorageSummary = async (): Promise<S3StorageSummary> => {
-    if (cachedS3StorageSummary && cachedS3StorageSummary.expiresAt > Date.now()) {
-        return cachedS3StorageSummary.value;
-    }
-
-    const bucket = String(process.env.S3_BUCKET_NAME ?? '').trim();
-    if (!bucket) {
-        throw new Error('S3_BUCKET_NAME is not configured.');
-    }
-
-    let continuationToken: string | undefined;
-    let objectCount = 0;
-    let totalBytes = 0;
-    do {
-        const page = await getS3().send(new ListObjectsV2Command({
-            Bucket: bucket,
-            ContinuationToken: continuationToken
-        }));
-        const objects = Array.isArray(page.Contents) ? page.Contents : [];
-        objectCount += objects.length;
-        totalBytes += objects.reduce((sum: number, object: any) => sum + Number(object.Size ?? 0), 0);
-        continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
-    } while (continuationToken);
-
-    const configuredRate = Number(process.env.S3_STORAGE_COST_PER_GB_MONTH ?? 0.023);
-    const storageCostPerGbMonth = Number.isFinite(configuredRate) && configuredRate >= 0
-        ? configuredRate
-        : 0.023;
-    const summary = {
-        objectCount,
-        totalBytes,
-        estimatedMonthlyStorageCost: (totalBytes / (1024 ** 3)) * storageCostPerGbMonth,
-        storageCostPerGbMonth
-    };
-    cachedS3StorageSummary = {
-        value: summary,
-        expiresAt: Date.now() + s3StorageSummaryCacheMs
-    };
-
-    return summary;
-};
-
-const loadS3StorageSummary = async (): Promise<S3StorageSummaryResult> => {
-    try {
-        return { summary: await getS3StorageSummary() };
-    } catch (error: any) {
-        const errorCode = String(error?.code ?? error?.name ?? 'UnknownError');
-        console.log('Unable to load S3 storage summary:', {
-            errorCode,
-            message: error?.message,
-            statusCode: error?.statusCode
-        });
-        return { summary: null, errorCode };
-    }
-};
-
-const formatStorageSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 ** 3) return `${(bytes / (1024 ** 2)).toFixed(1)} MB`;
-    return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
-};
 
 const renderSectionList = (title: string, items: any[], formatter: (item: any) => string) => {
     const content = items.length > 0
@@ -560,172 +445,7 @@ const renderManagePage = (params: {
         </div>
     </div>
 
-    <script>
-      const compositionData = ${compositionData};
-      const carouselNames = new Map(compositionData.carousels.map((carousel) => [carousel.id, carousel.name]));
-      const albumTitles = new Map(compositionData.albums.map((album) => [album.id, album.title]));
-      const trackTitles = new Map(compositionData.audioTracks.map((track) => [track.id, track.title]));
-
-      document.querySelectorAll('.carousel-mode').forEach((selector) => {
-        const form = selector.closest('form');
-        const config = form.querySelector('.artist-carousel-config');
-        const configFields = [...config.querySelectorAll('select, input')];
-        const updateMode = () => {
-          const isArtist = selector.value === 'artist';
-          config.hidden = !isArtist;
-          configFields.forEach((field) => {
-            field.disabled = !isArtist;
-            field.required = isArtist;
-          });
-        };
-        selector.addEventListener('change', updateMode);
-        updateMode();
-      });
-
-      document.querySelectorAll('.update-artist-carousel').forEach((form) => {
-        const selector = form.querySelector('.artist-carousel-selector');
-        selector.addEventListener('change', () => {
-          const carousel = compositionData.carousels.find((item) => item.id === selector.value);
-          if (!carousel || !carousel.artistConfig) return;
-          form.querySelector('input[name="name"]').value = carousel.name;
-          form.querySelector('select[name="artistId"]').value = carousel.artistConfig.artistId;
-          form.querySelector('select[name="artistContentType"]').value = carousel.artistConfig.contentType;
-          form.querySelector('select[name="artistSort"]').value = carousel.artistConfig.sort;
-          form.querySelector('input[name="artistLimit"]').value = String(carousel.artistConfig.limit);
-        });
-      });
-
-      document.querySelectorAll('.rename-manual-carousel').forEach((form) => {
-        const selector = form.querySelector('.manual-carousel-selector');
-        selector.addEventListener('change', () => {
-          const carousel = compositionData.carousels.find((item) => item.id === selector.value);
-          form.querySelector('input[name="name"]').value = carousel ? carousel.name : '';
-        });
-      });
-
-      const labelForCarouselItem = (item) => {
-        if (item.contentType === 'album') return 'Album: ' + (albumTitles.get(item.contentId) || item.contentId);
-        if (item.contentType === 'audioTrack') return 'Track: ' + (trackTitles.get(item.contentId) || item.contentId);
-        return item.contentType + ': ' + item.contentId;
-      };
-
-      document.querySelectorAll('.drag-reorder').forEach((form) => {
-        const kind = form.dataset.kind;
-        const selector = form.querySelector('.reorder-selector');
-        const list = form.querySelector('.drag-list');
-        const fromInput = form.querySelector('.from-index');
-        const toInput = form.querySelector('.to-index');
-        const saveButton = form.querySelector('.save-reorder');
-        let draggedItem = null;
-
-        const renderItems = () => {
-          list.replaceChildren();
-          fromInput.value = '';
-          toInput.value = '';
-          saveButton.disabled = true;
-          if (!selector.value) return;
-
-          const source = kind === 'page'
-            ? compositionData.pages.find((page) => page.slug === selector.value)
-            : compositionData.carousels.find((carousel) => carousel.id === selector.value);
-          const items = source ? [...source.items].sort((a, b) => a.order - b.order) : [];
-          items.forEach((item, index) => {
-            const element = document.createElement('li');
-            element.className = 'drag-item';
-            element.draggable = true;
-            element.dataset.originalIndex = String(index);
-            element.textContent = kind === 'page'
-              ? (carouselNames.get(item.carouselId) || item.carouselId)
-              : labelForCarouselItem(item);
-            list.append(element);
-          });
-        };
-
-        selector.addEventListener('change', renderItems);
-        list.addEventListener('dragstart', (event) => {
-          draggedItem = event.target.closest('.drag-item');
-          if (draggedItem) draggedItem.classList.add('dragging');
-        });
-        list.addEventListener('dragend', () => {
-          if (draggedItem) draggedItem.classList.remove('dragging');
-          draggedItem = null;
-          list.querySelectorAll('.drag-over').forEach((item) => item.classList.remove('drag-over'));
-        });
-        list.addEventListener('dragover', (event) => {
-          event.preventDefault();
-          const target = event.target.closest('.drag-item');
-          if (target && target !== draggedItem) target.classList.add('drag-over');
-        });
-        list.addEventListener('dragleave', (event) => {
-          const target = event.target.closest('.drag-item');
-          if (target) target.classList.remove('drag-over');
-        });
-        list.addEventListener('drop', (event) => {
-          event.preventDefault();
-          const target = event.target.closest('.drag-item');
-          if (!draggedItem || !target || target === draggedItem) return;
-          const targetBounds = target.getBoundingClientRect();
-          list.insertBefore(draggedItem, event.clientY > targetBounds.top + targetBounds.height / 2 ? target.nextSibling : target);
-          fromInput.value = draggedItem.dataset.originalIndex || '';
-          toInput.value = String([...list.children].indexOf(draggedItem));
-          saveButton.disabled = fromInput.value === toInput.value;
-          target.classList.remove('drag-over');
-        });
-      });
-
-      document.querySelectorAll('.move-carousel-items').forEach((form) => {
-        const sourceSelector = form.querySelector('.move-source-carousel');
-        const targetSelector = form.querySelector('.move-target-carousel');
-        const itemList = form.querySelector('.move-item-list');
-        const submitButton = form.querySelector('.move-selected-items');
-
-        const updateButton = () => {
-          submitButton.disabled = !sourceSelector.value
-            || !targetSelector.value
-            || sourceSelector.value === targetSelector.value
-            || itemList.querySelectorAll('input[name="fromIndexes"]:checked').length === 0;
-        };
-
-        const renderMoveChoices = () => {
-          itemList.replaceChildren();
-          [...targetSelector.options].forEach((option) => {
-            option.disabled = Boolean(option.value) && option.value === sourceSelector.value;
-          });
-          if (targetSelector.value === sourceSelector.value) targetSelector.value = '';
-
-          const source = compositionData.carousels.find((carousel) => carousel.id === sourceSelector.value);
-          const items = source ? [...source.items].sort((a, b) => a.order - b.order) : [];
-          if (items.length === 0) {
-            const empty = document.createElement('li');
-            empty.className = 'empty-linked-content';
-            empty.textContent = source ? 'This carousel has no items.' : 'Choose a source carousel to see its items.';
-            itemList.append(empty);
-            updateButton();
-            return;
-          }
-
-          items.forEach((item, index) => {
-            const listItem = document.createElement('li');
-            const label = document.createElement('label');
-            label.className = 'move-item-choice';
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.name = 'fromIndexes';
-            checkbox.value = String(index);
-            const text = document.createElement('span');
-            text.textContent = labelForCarouselItem(item);
-            label.append(checkbox, text);
-            listItem.append(label);
-            itemList.append(listItem);
-          });
-          updateButton();
-        };
-
-        sourceSelector.addEventListener('change', renderMoveChoices);
-        targetSelector.addEventListener('change', updateButton);
-        itemList.addEventListener('change', updateButton);
-      });
-    </script>
+    <script id="composition-data" type="application/json">${compositionData}</script>
 
   <div class="section-heading" id="create"><div><p class="eyebrow">New records</p><h2>Create</h2></div></div>
   <div class="grid">
@@ -885,63 +605,6 @@ const renderManagePage = (params: {
                     <span id="bulk-upload-progress-label">0%</span>
                 </div>
             </form>
-            <script>
-              (() => {
-                const form = document.getElementById('bulk-audio-upload-form');
-                if (!form) return;
-
-                const status = document.getElementById('bulk-upload-status');
-                const progress = document.getElementById('bulk-upload-progress');
-                const label = document.getElementById('bulk-upload-progress-label');
-                const button = form.querySelector('button[type="submit"]');
-
-                const showStatus = (message, percentage) => {
-                  status.hidden = false;
-                  if (typeof percentage === 'number') progress.value = percentage;
-                  label.textContent = message;
-                };
-
-                form.addEventListener('submit', (event) => {
-                  event.preventDefault();
-                  const files = form.querySelector('input[name="audioFiles"]').files;
-                  if (!files || files.length === 0) return;
-
-                  button.disabled = true;
-                  showStatus('Starting upload…', 0);
-                  const request = new XMLHttpRequest();
-                  request.open('POST', form.action);
-                  request.upload.addEventListener('progress', (progressEvent) => {
-                    if (!progressEvent.lengthComputable) {
-                      showStatus('Uploading…', 0);
-                      return;
-                    }
-                    const percentage = Math.round((progressEvent.loaded / progressEvent.total) * 100);
-                    showStatus('Uploading… ' + percentage + '%', percentage);
-                  });
-                  request.addEventListener('load', () => {
-                    if (request.status >= 200 && request.status < 400) {
-                      showStatus('Upload complete. Saving track details…', 100);
-                      window.location.assign(request.responseURL || '/content/manage');
-                      return;
-                    }
-
-                    let errorMessage = 'Upload failed. Please try again.';
-                    try {
-                      errorMessage = JSON.parse(request.responseText).message || errorMessage;
-                    } catch (error) {
-                      // Non-JSON responses, including proxy errors, use the default message.
-                    }
-                    showStatus(errorMessage, 0);
-                    button.disabled = false;
-                  });
-                  request.addEventListener('error', () => {
-                    showStatus('Upload failed before reaching the server. Please try again.', 0);
-                    button.disabled = false;
-                  });
-                  request.send(new FormData(form));
-                });
-              })();
-            </script>
             <hr />
             <h3>Upload Audio File</h3>
             <form method="POST" action="/content/manage/audioTrack/upload" enctype="multipart/form-data">
@@ -951,78 +614,8 @@ const renderManagePage = (params: {
             </form>
     </div>
   </div>
-  <script>
-    (() => {
-      const labels = {
-        slug: 'Page',
-        carouselId: 'Carousel',
-        sourceCarouselId: 'Source carousel',
-        targetCarouselId: 'Target carousel',
-        contentType: 'Content type',
-        mode: 'Carousel type',
-        artistId: 'Artist',
-        artistContentType: 'Generated content',
-        artistSort: 'Sort order',
-        artistLimit: 'Maximum items',
-        albumId: 'Album',
-        birthDate: 'Birth date',
-        releaseDate: 'Release date',
-        audioFiles: 'Audio files',
-        audioFile: 'Audio file'
-      };
-
-      document.querySelectorAll('form input, form select, form textarea').forEach((field, index) => {
-        if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button') return;
-
-        const labelText = field.dataset.label || field.getAttribute('placeholder') || labels[field.name];
-        if (!labelText) return;
-
-        const id = field.id || 'content-field-' + index;
-        field.id = id;
-        const label = document.createElement('label');
-        label.className = 'field-label';
-        label.htmlFor = id;
-        label.textContent = labelText;
-        field.before(label);
-      });
-
-      document.querySelectorAll('[data-batch-track-delete]').forEach((form) => {
-        const button = form.querySelector('.batch-delete-button');
-        const selectAllButton = form.querySelector('.select-all-tracks');
-        const trackCheckboxes = [...form.querySelectorAll('input[name="audioTrackIds"]')];
-        const selectedTracks = () => form.querySelectorAll('input[name="audioTrackIds"]:checked');
-        const updateBatchControls = () => {
-          button.disabled = selectedTracks().length === 0;
-          selectAllButton.textContent = selectedTracks().length === trackCheckboxes.length ? 'Clear selection' : 'Select all';
-        };
-        form.addEventListener('change', updateBatchControls);
-        selectAllButton.addEventListener('click', () => {
-          const selectAll = selectedTracks().length !== trackCheckboxes.length;
-          trackCheckboxes.forEach((checkbox) => {
-            checkbox.checked = selectAll;
-          });
-          updateBatchControls();
-        });
-        form.addEventListener('submit', (event) => {
-          const count = selectedTracks().length;
-          if (count === 0 || !window.confirm('Delete ' + count + ' selected audio track' + (count === 1 ? '' : 's') + '? This also removes their uploaded files.')) {
-            event.preventDefault();
-          }
-        });
-      });
-
-      document.querySelectorAll('button[data-danger]').forEach((button) => {
-        const form = button.closest('form');
-        if (!form || form.matches('[data-batch-track-delete]')) return;
-        form.addEventListener('submit', (event) => {
-          if (!window.confirm('Delete this item? This action cannot be undone.')) {
-            event.preventDefault();
-          }
-        });
-      });
-    })();
-  </script>
   </main>
+  <script src="/assets/content-manager.js"></script>
 </body>
 </html>`;
 };
@@ -1033,91 +626,6 @@ const getOwnerId = (doc: any) => {
 
 const redirectWithMessage = (res: Response, message: string) => {
     res.redirect(`/content/manage?message=${encodeURIComponent(message)}`);
-};
-
-const renderAudioTracksPage = (userEmail: string, tracks: any[]) => {
-    const trackItems = tracks.length > 0
-        ? tracks.map((track) => {
-            const id = String(track._id ?? '');
-            const editUrl = `/content/manage?prefillType=audioTrack&prefillId=${encodeURIComponent(id)}#audio-track-update-card`;
-            const albumId = String(track.albumId ?? '').trim();
-            const originalFileName = String(track.originalFileName ?? '').trim();
-            const title = String(track.title ?? 'Untitled Track');
-            return `<li data-track-item data-search="${escapeHtml(`${title} ${id} ${albumId} ${originalFileName}`.toLowerCase())}">
-              <div class="track-title-row"><strong>${escapeHtml(title)}</strong>${albumId ? '<span class="pill">In album</span>' : '<span class="pill pill--muted">Unassigned</span>'}</div>
-              <div class="item-meta">
-                <span>Track ID: <code>${escapeHtml(id)}</code></span>
-                <span>${albumId ? `Album ID: <code>${escapeHtml(albumId)}</code>` : 'No album assigned'}</span>
-                ${originalFileName ? `<span>File: ${escapeHtml(originalFileName)}</span>` : ''}
-              </div>
-              <div><a class="button button--secondary" href="${editUrl}">Edit track</a></div>
-            </li>`;
-        }).join('')
-        : '<li class="empty-state">No audio tracks yet. Create one from the Content Manager.</li>';
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Audio Tracks - Archtree</title>
-  <link rel="stylesheet" href="/assets/archtree.css" />
-  <style>
-    .track-toolbar { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 18px; }
-    .track-title-row { align-items: center; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
-    .pill--muted { color: #58635e; background: #e8ebe7; }
-    [data-track-item] { display: grid; gap: 10px; }
-    @media (max-width: 600px) { .track-toolbar { align-items: stretch; grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-  <main class="page-shell">
-    <header class="site-header">
-      <div>
-        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
-        <p class="eyebrow" style="margin-top:18px;">Audio library</p>
-        <h1 style="margin-bottom:8px;">My Audio Tracks</h1>
-        <p class="muted">Signed in as <strong>${escapeHtml(userEmail)}</strong> · ${tracks.length} track${tracks.length === 1 ? '' : 's'}</p>
-      </div>
-      <div class="header-actions">
-        <a class="button" href="/content/manage#create">Create and upload</a>
-        <a class="button button--secondary" href="/content/manage">Content Manager</a>
-        <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
-      </div>
-    </header>
-    <section class="card card--raised">
-      <div class="track-toolbar">
-        <div>
-          <label for="track-filter">Filter tracks</label>
-          <input id="track-filter" type="search" placeholder="Search title, ID, album, or filename" />
-        </div>
-        <span class="muted" id="track-filter-count">${tracks.length} shown</span>
-      </div>
-      <ul class="item-list" id="track-list">${trackItems}</ul>
-      <div class="empty-state" id="track-filter-empty" hidden>No tracks match this search.</div>
-    </section>
-  </main>
-  <script>
-    (() => {
-      const filter = document.getElementById('track-filter');
-      const items = [...document.querySelectorAll('[data-track-item]')];
-      const count = document.getElementById('track-filter-count');
-      const empty = document.getElementById('track-filter-empty');
-      filter.addEventListener('input', () => {
-        const query = filter.value.trim().toLowerCase();
-        let visible = 0;
-        items.forEach((item) => {
-          const matches = !query || item.dataset.search.includes(query);
-          item.hidden = !matches;
-          if (matches) visible += 1;
-        });
-        count.textContent = visible + ' shown';
-        empty.hidden = visible !== 0 || items.length === 0;
-      });
-    })();
-  </script>
-</body>
-</html>`;
 };
 
 export const renderAudioTracksPageForWeb = async (req: Request, res: Response, next: NextFunction) => {
