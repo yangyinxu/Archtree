@@ -2,8 +2,25 @@ import { ObjectId } from 'mongodb';
 import { getDb } from '../app';
 
 const collectionId = 'carousels';
+const toObjectId = (value: string) => {
+    try {
+        return ObjectId.createFromHexString(value);
+    } catch {
+        return null;
+    }
+};
 
 export type CarouselContentType = 'post' | 'album' | 'audioTrack';
+export type CarouselMode = 'manual' | 'artist';
+export type ArtistCarouselContentType = 'album' | 'audioTrack';
+export type ArtistCarouselSort = 'releaseDateDesc' | 'titleAsc';
+
+export interface ArtistCarouselConfig {
+    artistId: string;
+    contentType: ArtistCarouselContentType;
+    sort: ArtistCarouselSort;
+    limit: number;
+}
 
 export interface CarouselItemRef {
     contentType: CarouselContentType;
@@ -30,14 +47,27 @@ const moveByIndex = <T>(items: T[], fromIndex: number, toIndex: number) => {
 export class Carousel {
     name: string;
     items: CarouselItemRef[];
+    mode: CarouselMode;
+    artistConfig?: ArtistCarouselConfig;
     createdBy: string;
     updatedBy: string;
     createdAt: Date;
     updatedAt: Date;
 
-    constructor(name: string, items: CarouselItemRef[], createdBy: string, updatedBy: string, createdAt: Date = new Date(), updatedAt: Date = new Date()) {
+    constructor(
+        name: string,
+        items: CarouselItemRef[],
+        createdBy: string,
+        updatedBy: string,
+        mode: CarouselMode = 'manual',
+        artistConfig?: ArtistCarouselConfig,
+        createdAt: Date = new Date(),
+        updatedAt: Date = new Date()
+    ) {
         this.name = name;
         this.items = normalizeOrder(items);
+        this.mode = mode;
+        if (mode === 'artist' && artistConfig) this.artistConfig = artistConfig;
         this.createdBy = createdBy;
         this.updatedBy = updatedBy;
         this.createdAt = createdAt;
@@ -70,7 +100,8 @@ export class Carousel {
             .find({ createdBy })
             .sort({ updatedAt: -1 })
             .limit(limit)
-            .toArray();
+            .toArray()
+            .then((carousels) => this.resolveCarousels(carousels));
     }
 
     static fetchByIds(carouselIds: string[]) {
@@ -86,7 +117,78 @@ export class Carousel {
         return db!
             .collection(collectionId)
             .find({ _id: { $in: objectIds } })
-            .toArray();
+            .toArray()
+            .then((carousels) => this.resolveCarousels(carousels));
+    }
+
+    static async resolveCarousel(carousel: any) {
+        const mode: CarouselMode = carousel?.mode === 'artist' ? 'artist' : 'manual';
+        if (mode === 'manual') {
+            return {
+                ...carousel,
+                mode,
+                items: normalizeOrder(
+                    (Array.isArray(carousel?.items) ? [...carousel.items] : [])
+                        .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0))
+                )
+            };
+        }
+
+        const config = carousel?.artistConfig as ArtistCarouselConfig | undefined;
+        const artistObjectId = config ? toObjectId(config.artistId) : null;
+        if (!config || !artistObjectId) {
+            return { ...carousel, mode, items: [] };
+        }
+
+        const db = getDb();
+        const artist: any = await db!
+            .collection('artists')
+            .find({ _id: artistObjectId })
+            .next();
+        if (!artist) {
+            return { ...carousel, mode, items: [] };
+        }
+
+        let content: any[] = [];
+        if (config.contentType === 'album') {
+            const albumObjectIds = [...new Set<string>(
+                (Array.isArray(artist.albumIds) ? artist.albumIds : [])
+                    .map(String)
+                    .filter((id: string) => Boolean(toObjectId(id)))
+            )].map((id) => toObjectId(id)).filter((id): id is ObjectId => id !== null);
+            content = albumObjectIds.length > 0
+                ? await db!.collection('albums').find({ _id: { $in: albumObjectIds } }).toArray()
+                : [];
+        } else {
+            content = await db!
+                .collection('audioTracks')
+                .find({ artistIds: config.artistId })
+                .toArray();
+        }
+
+        const releaseDateValue = (item: any) => {
+            const date = item?.releaseDate ?? {};
+            return (Number(date.year ?? 0) * 10000) + (Number(date.month ?? 0) * 100) + Number(date.day ?? 0);
+        };
+        const sorted = [...content].sort((left, right) => {
+            if (config.sort === 'titleAsc') {
+                return String(left.title ?? left.name ?? '').localeCompare(String(right.title ?? right.name ?? ''));
+            }
+            return releaseDateValue(right) - releaseDateValue(left)
+                || String(left.title ?? '').localeCompare(String(right.title ?? ''));
+        });
+        const itemLimit = Math.max(1, Math.min(Number(config.limit ?? 20), 100));
+        const items = sorted.slice(0, itemLimit).map((item, order) => ({
+            contentType: config.contentType,
+            contentId: String(item._id),
+            order
+        }));
+
+        return { ...carousel, mode, items };
+    }
+
+    static resolveCarousels(carousels: any[]) {
+        return Promise.all(carousels.map((carousel) => this.resolveCarousel(carousel)));
     }
 
     static updateById(carouselId: string, update: Record<string, unknown>) {
@@ -108,7 +210,7 @@ export class Carousel {
 
     static async addItem(carouselId: string, item: Omit<CarouselItemRef, 'order'>, updatedBy: string, position?: number) {
         const existing: any = await this.findById(carouselId);
-        if (!existing) {
+        if (!existing || existing.mode === 'artist') {
             return null;
         }
 
@@ -133,7 +235,7 @@ export class Carousel {
 
     static async reorderItem(carouselId: string, fromIndex: number, toIndex: number, updatedBy: string) {
         const existing: any = await this.findById(carouselId);
-        if (!existing) {
+        if (!existing || existing.mode === 'artist') {
             return null;
         }
 
@@ -157,7 +259,7 @@ export class Carousel {
         const source: any = await this.findById(sourceCarouselId);
         const target: any = await this.findById(targetCarouselId);
 
-        if (!source || !target) {
+        if (!source || !target || source.mode === 'artist' || target.mode === 'artist') {
             return null;
         }
 
@@ -193,7 +295,7 @@ export class Carousel {
         const source: any = await this.findById(sourceCarouselId);
         const target: any = await this.findById(targetCarouselId);
 
-        if (!source || !target || sourceCarouselId === targetCarouselId) {
+        if (!source || !target || sourceCarouselId === targetCarouselId || source.mode === 'artist' || target.mode === 'artist') {
             return null;
         }
 

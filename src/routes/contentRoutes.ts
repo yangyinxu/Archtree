@@ -73,6 +73,8 @@ router.post('/manage/composition/page/reorder-item', requireAuthForWeb, pageCont
 router.post('/manage/composition/page/detach-carousel', requireAuthForWeb, pageController.detachCarouselFromPageWeb);
 
 router.post('/manage/composition/carousel/create', requireAuthForWeb, pageController.createCarouselWeb);
+router.post('/manage/composition/carousel/update-artist', requireAuthForWeb, pageController.updateArtistCarouselWeb);
+router.post('/manage/composition/carousel/rename-manual', requireAuthForWeb, pageController.renameManualCarouselWeb);
 router.post('/manage/composition/carousel/add-item', requireAuthForWeb, pageController.addCarouselItemWeb);
 router.post('/manage/composition/carousel/reorder-item', requireAuthForWeb, pageController.reorderCarouselItemsWeb);
 router.post('/manage/composition/carousel/move-item', requireAuthForWeb, pageController.moveCarouselItemBetweenCarouselsWeb);
@@ -88,6 +90,8 @@ router.post('/pages/:slug/items/reorder', requireAuth, pageController.reorderPag
 
 router.get('/carousels', requireAuth, pageController.listCarouselsByUser);
 router.post('/carousels', requireAuth, pageController.createCarousel);
+router.put('/carousels/:carouselId/artist-config', requireAuth, pageController.updateArtistCarousel);
+router.patch('/carousels/:carouselId/name', requireAuth, pageController.renameManualCarousel);
 router.post('/carousels/:carouselId/items', requireAuth, pageController.addCarouselItem);
 router.post('/carousels/:carouselId/items/reorder', requireAuth, pageController.reorderCarouselItems);
 router.post('/carousels/:sourceCarouselId/items/move', requireAuth, pageController.moveCarouselItemBetweenCarousels);

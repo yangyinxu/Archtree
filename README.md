@@ -79,6 +79,15 @@ Web content management:
 - Existing tracks support replacing their uploaded audio file
 - S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 
+Artist carousels:
+
+- Manual carousels keep an explicitly managed item list.
+- Manual carousels can be renamed without changing their items.
+- Artist carousels dynamically resolve either albums or audio tracks for one owned artist.
+- Album carousels use the artist's `albumIds`; audio-track carousels query `AudioTrack.artistIds`.
+- Dynamic results support newest-release or title sorting and a configurable limit from 1 to 100.
+- Artist carousel items cannot be manually added, reordered, or moved between carousels.
+
 Session behavior:
 - Browser and API login tokens last 30 days by default. Set `SESSION_DAYS` to a whole number from 1 to 90 to override it. `WEB_SESSION_DAYS` remains supported as a backwards-compatible fallback.
 - Web login sets an HttpOnly `session_token` cookie with the same lifetime.

@@ -265,7 +265,24 @@ const renderManagePage = (params: {
     }).join('');
     const carouselOptions = ownedCarousels.map((carousel) => {
         const id = contentId(carousel);
-        return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}</option>`;
+        const dynamicLabel = carousel.mode === 'artist' ? ' · Dynamic' : '';
+        return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}${dynamicLabel}</option>`;
+    }).join('');
+    const manualCarouselOptions = ownedCarousels
+        .filter((carousel) => carousel.mode !== 'artist')
+        .map((carousel) => {
+            const id = contentId(carousel);
+            return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}</option>`;
+        }).join('');
+    const artistCarouselOptions = ownedCarousels
+        .filter((carousel) => carousel.mode === 'artist')
+        .map((carousel) => {
+            const id = contentId(carousel);
+            return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled artist carousel'))}</option>`;
+        }).join('');
+    const artistOptions = ownedArtists.map((artist) => {
+        const id = contentId(artist);
+        return `<option value="${escapeHtml(id)}">${escapeHtml(String(artist.name ?? 'Untitled artist'))}</option>`;
     }).join('');
     const albumOptions = ownedAlbums.map((album) => {
         const id = contentId(album);
@@ -280,6 +297,8 @@ const renderManagePage = (params: {
         carousels: ownedCarousels.map((carousel) => ({
             id: contentId(carousel),
             name: String(carousel.name ?? 'Untitled carousel'),
+            mode: carousel.mode === 'artist' ? 'artist' : 'manual',
+            artistConfig: carousel.artistConfig ?? null,
             items: Array.isArray(carousel.items) ? carousel.items.map((item: any) => ({ contentId: String(item.contentId ?? ''), contentType: String(item.contentType ?? 'Content'), order: Number(item.order ?? 0) })) : []
         })),
         albums: ownedAlbums.map((album) => ({ id: contentId(album), title: String(album.title ?? '') })),
@@ -409,6 +428,10 @@ const renderManagePage = (params: {
         <div class="content-hierarchy">
           ${ownedCarousels.length > 0 ? ownedCarousels.map((carousel) => {
               const items = Array.isArray(carousel.items) ? [...carousel.items].sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0)) : [];
+              const isArtistCarousel = carousel.mode === 'artist';
+              const artistName = isArtistCarousel
+                  ? String(ownedArtists.find((artist) => contentId(artist) === String(carousel.artistConfig?.artistId ?? ''))?.name ?? 'Unavailable artist')
+                  : '';
               const albumsById = new Map(ownedAlbums.map((album) => [contentId(album), album]));
               const tracksById = new Map(ownedAudioTracks.map((track) => [contentId(track), track]));
               const carouselItems = items.map((item: any) => {
@@ -422,7 +445,10 @@ const renderManagePage = (params: {
                   return `${escapeHtml(String(item.contentType ?? 'Content'))}: ${renderMissingReference(itemId)}`;
               });
 
-              return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><span>${items.length} item${items.length === 1 ? '' : 's'}</span>${renderNestedList(carouselItems)}</div>`;
+              const dynamicSummary = isArtistCarousel
+                  ? `<span class="pill">Dynamic</span> <span>${escapeHtml(artistName)} · ${carousel.artistConfig?.contentType === 'album' ? 'Albums' : 'Audio tracks'}</span>`
+                  : '<span class="pill pill--muted">Manual</span>';
+              return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><div class="item-meta">${dynamicSummary}<span>${items.length} item${items.length === 1 ? '' : 's'}</span></div>${renderNestedList(carouselItems)}</div>`;
           }).join('') : '<p class="empty-linked-content">No carousels yet.</p>'}
         </div>
   </div>
@@ -467,12 +493,38 @@ const renderManagePage = (params: {
             <h3>Create Carousel</h3>
             <form method="POST" action="/content/manage/composition/carousel/create">
                 <input name="name" placeholder="Carousel name" required />
+                <select class="carousel-mode" name="mode" required><option value="manual">Manual carousel</option><option value="artist">Artist carousel</option></select>
+                <div class="artist-carousel-config stack" hidden>
+                    <select name="artistId"><option value="" disabled selected>Select artist</option>${artistOptions}</select>
+                    <select name="artistContentType"><option value="album">Albums</option><option value="audioTrack">Audio tracks</option></select>
+                    <select name="artistSort"><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select>
+                    <input name="artistLimit" type="number" min="1" max="100" value="20" />
+                    <p class="drag-help">Items are generated automatically from the selected artist and cannot be manually reordered.</p>
+                </div>
                 <button type="submit">Create Carousel</button>
+            </form>
+
+            <h3>Update Artist Carousel</h3>
+            <form class="update-artist-carousel" method="POST" action="/content/manage/composition/carousel/update-artist">
+                <select class="artist-carousel-selector" name="carouselId" required><option value="" disabled selected>Select artist carousel</option>${artistCarouselOptions}</select>
+                <input name="name" placeholder="Carousel name" required />
+                <select name="artistId" required><option value="" disabled selected>Select artist</option>${artistOptions}</select>
+                <select name="artistContentType" required><option value="album">Albums</option><option value="audioTrack">Audio tracks</option></select>
+                <select name="artistSort" required><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select>
+                <input name="artistLimit" type="number" min="1" max="100" value="20" required />
+                <button type="submit">Update Artist Carousel</button>
+            </form>
+
+            <h3>Rename Manual Carousel</h3>
+            <form class="rename-manual-carousel" method="POST" action="/content/manage/composition/carousel/rename-manual">
+                <select class="manual-carousel-selector" name="carouselId" required><option value="" disabled selected>Select manual carousel</option>${manualCarouselOptions}</select>
+                <input name="name" placeholder="New carousel name" required />
+                <button type="submit">Rename Carousel</button>
             </form>
 
             <h3>Add Item to Carousel</h3>
             <form method="POST" action="/content/manage/composition/carousel/add-item">
-                <select name="carouselId" required><option value="" disabled selected>Select carousel</option>${carouselOptions}</select>
+                <select name="carouselId" required><option value="" disabled selected>Select manual carousel</option>${manualCarouselOptions}</select>
                 <select name="contentType" required><option value="" disabled selected>Select content type</option><option value="post">Post</option><option value="album">Album</option><option value="audioTrack">Audio Track</option></select>
                 <input name="contentId" placeholder="Content ID" required />
                 <button type="submit">Add Carousel Item</button>
@@ -480,7 +532,7 @@ const renderManagePage = (params: {
 
             <h3>Reorder Carousel Item</h3>
             <form class="drag-reorder" data-kind="carousel" method="POST" action="/content/manage/composition/carousel/reorder-item">
-                <select class="reorder-selector" name="carouselId" required><option value="" disabled selected>Select carousel</option>${carouselOptions}</select>
+                <select class="reorder-selector" name="carouselId" required><option value="" disabled selected>Select manual carousel</option>${manualCarouselOptions}</select>
                 <p class="drag-help">Drag an item to its new position, then save.</p>
                 <ul class="drag-list" aria-label="Carousel item order"></ul>
                 <input class="from-index" type="hidden" name="fromIndex" />
@@ -492,10 +544,10 @@ const renderManagePage = (params: {
         <div class="card">
             <h3>Move Items Between Carousels</h3>
             <form class="move-carousel-items" method="POST" action="/content/manage/composition/carousel/move-item">
-                <select class="move-source-carousel" name="sourceCarouselId" required><option value="" disabled selected>Select source carousel</option>${carouselOptions}</select>
+                <select class="move-source-carousel" name="sourceCarouselId" required><option value="" disabled selected>Select source carousel</option>${manualCarouselOptions}</select>
                 <p class="drag-help">Select the items to move. They will keep their order and be added to the end of the destination carousel.</p>
                 <ul class="move-item-list" aria-live="polite"><li class="empty-linked-content">Choose a source carousel to see its items.</li></ul>
-                <select class="move-target-carousel" name="targetCarouselId" required><option value="" disabled selected>Select destination carousel</option>${carouselOptions}</select>
+                <select class="move-target-carousel" name="targetCarouselId" required><option value="" disabled selected>Select destination carousel</option>${manualCarouselOptions}</select>
                 <button class="move-selected-items" type="submit" disabled>Move Selected Items</button>
             </form>
 
@@ -513,6 +565,43 @@ const renderManagePage = (params: {
       const carouselNames = new Map(compositionData.carousels.map((carousel) => [carousel.id, carousel.name]));
       const albumTitles = new Map(compositionData.albums.map((album) => [album.id, album.title]));
       const trackTitles = new Map(compositionData.audioTracks.map((track) => [track.id, track.title]));
+
+      document.querySelectorAll('.carousel-mode').forEach((selector) => {
+        const form = selector.closest('form');
+        const config = form.querySelector('.artist-carousel-config');
+        const configFields = [...config.querySelectorAll('select, input')];
+        const updateMode = () => {
+          const isArtist = selector.value === 'artist';
+          config.hidden = !isArtist;
+          configFields.forEach((field) => {
+            field.disabled = !isArtist;
+            field.required = isArtist;
+          });
+        };
+        selector.addEventListener('change', updateMode);
+        updateMode();
+      });
+
+      document.querySelectorAll('.update-artist-carousel').forEach((form) => {
+        const selector = form.querySelector('.artist-carousel-selector');
+        selector.addEventListener('change', () => {
+          const carousel = compositionData.carousels.find((item) => item.id === selector.value);
+          if (!carousel || !carousel.artistConfig) return;
+          form.querySelector('input[name="name"]').value = carousel.name;
+          form.querySelector('select[name="artistId"]').value = carousel.artistConfig.artistId;
+          form.querySelector('select[name="artistContentType"]').value = carousel.artistConfig.contentType;
+          form.querySelector('select[name="artistSort"]').value = carousel.artistConfig.sort;
+          form.querySelector('input[name="artistLimit"]').value = String(carousel.artistConfig.limit);
+        });
+      });
+
+      document.querySelectorAll('.rename-manual-carousel').forEach((form) => {
+        const selector = form.querySelector('.manual-carousel-selector');
+        selector.addEventListener('change', () => {
+          const carousel = compositionData.carousels.find((item) => item.id === selector.value);
+          form.querySelector('input[name="name"]').value = carousel ? carousel.name : '';
+        });
+      });
 
       const labelForCarouselItem = (item) => {
         if (item.contentType === 'album') return 'Album: ' + (albumTitles.get(item.contentId) || item.contentId);
@@ -870,6 +959,11 @@ const renderManagePage = (params: {
         sourceCarouselId: 'Source carousel',
         targetCarouselId: 'Target carousel',
         contentType: 'Content type',
+        mode: 'Carousel type',
+        artistId: 'Artist',
+        artistContentType: 'Generated content',
+        artistSort: 'Sort order',
+        artistLimit: 'Maximum items',
         albumId: 'Album',
         birthDate: 'Birth date',
         releaseDate: 'Release date',

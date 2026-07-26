@@ -160,6 +160,9 @@ export async function connectToDatabase() {
       _db.collection('carousels').createIndex({ createdBy: 1, updatedAt: -1 }).catch((error) => {
         console.log('Failed to ensure carousels owner index:', error);
       });
+      _db.collection('audioTracks').createIndex({ artistIds: 1 }).catch((error) => {
+        console.log('Failed to ensure audioTracks artist index:', error);
+      });
 
       app.listen(port, () => {
         console.log('Starting service on port ' + port + '...');
