@@ -1,4 +1,4 @@
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 
 // Product Model
 class Product {

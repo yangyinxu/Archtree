@@ -1,5 +1,5 @@
 import mongoDb, { ObjectId } from 'mongodb';
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 
 class Post {
     constructor(

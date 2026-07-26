@@ -1,4 +1,4 @@
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from './simpleDate';
 import { normalizeUtf8Text } from '../utils/textEncoding';

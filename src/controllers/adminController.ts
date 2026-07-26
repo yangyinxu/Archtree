@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 
 const Product = require('../models/product');
 

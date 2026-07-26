@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb';
-import { getDb } from '../app';
+import { getDb } from '../infrastructure/database';
 import Post from './post';
 
 class User {
