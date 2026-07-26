@@ -92,13 +92,32 @@ const port: string | number = process.env.PORT || process.env.port || 8080;
 export async function connectToDatabase() {
   dotenv.config();
 
+  const databaseName = String(process.env.DB_NAME ?? '').trim();
+  if (!databaseName) {
+    throw new Error('DB_NAME is required. Refusing to start with an implicit database name.');
+  }
+
   const client: mongoDb.MongoClient = new mongoDb.MongoClient(process.env.DB_CONN_STRING!);
 
   await client
     .connect()
     .then(client => {
-      _db = client.db(process.env.DB_NAME || 'archtreeDb');
+      _db = client.db(databaseName);
       console.log(`Successfully connected to MongoDB: ${_db.databaseName}`);
+
+      // Initialize indexes for page composition hierarchy.
+      _db.collection('pages').createIndex({ slug: 1 }, { unique: true }).catch((error) => {
+        console.log('Failed to ensure pages.slug index:', error);
+      });
+      _db.collection('users').createIndex({ email: 1 }, { unique: true }).catch((error) => {
+        console.log('Failed to ensure users.email unique index:', error);
+      });
+      _db.collection('pages').createIndex({ createdBy: 1, updatedAt: -1 }).catch((error) => {
+        console.log('Failed to ensure pages owner index:', error);
+      });
+      _db.collection('carousels').createIndex({ createdBy: 1, updatedAt: -1 }).catch((error) => {
+        console.log('Failed to ensure carousels owner index:', error);
+      });
 
       app.listen(port, () => {
         console.log('Starting service on port ' + port + '...');

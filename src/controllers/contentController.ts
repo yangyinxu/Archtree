@@ -3,6 +3,8 @@ import { Artist } from '../models/artist';
 import { Album } from '../models/album';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
+import { Carousel } from '../models/carousel';
+import { Page } from '../models/page';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import { getS3 } from '../app';
 
@@ -39,6 +41,30 @@ const parseDateInput = (value: string) => {
     return new SimpleDate(year, month, day);
 };
 
+const toCsvInput = (value: unknown) => {
+    if (!Array.isArray(value)) {
+        return '';
+    }
+
+    return value.map((item) => String(item)).join(', ');
+};
+
+const toDateInputValue = (value: any) => {
+    const year = Number(value?.year);
+    const month = Number(value?.month);
+    const day = Number(value?.day);
+
+    if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day) || year <= 0 || month <= 0 || day <= 0) {
+        return '';
+    }
+
+    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+};
+
+const uniqueStrings = (values: string[]) => {
+    return [...new Set(values.filter(Boolean))];
+};
+
 const renderSectionList = (title: string, items: any[], formatter: (item: any) => string) => {
     const content = items.length > 0
         ? items.map((item) => `<li>${formatter(item)}</li>`).join('')
@@ -58,6 +84,14 @@ const renderManagePage = (params: {
     ownedArtists?: any[];
     ownedAlbums?: any[];
     ownedAudioTracks?: any[];
+    ownedPages?: any[];
+    ownedCarousels?: any[];
+    prefillArtistId?: string;
+    prefillAlbumId?: string;
+    prefillAudioTrackId?: string;
+    prefillArtist?: any | null;
+    prefillAlbum?: any | null;
+    prefillAudioTrack?: any | null;
 }) => {
     const messageBlock = params.message
         ? `<p style="padding:10px;background:#eef9ff;border:1px solid #b3e5fc;border-radius:8px;">${escapeHtml(params.message)}</p>`
@@ -72,6 +106,14 @@ const renderManagePage = (params: {
     const ownedArtists = params.ownedArtists ?? [];
     const ownedAlbums = params.ownedAlbums ?? [];
     const ownedAudioTracks = params.ownedAudioTracks ?? [];
+    const ownedPages = params.ownedPages ?? [];
+    const ownedCarousels = params.ownedCarousels ?? [];
+    const prefillArtistId = escapeHtml(params.prefillArtistId ?? '');
+    const prefillAlbumId = escapeHtml(params.prefillAlbumId ?? '');
+    const prefillAudioTrackId = escapeHtml(params.prefillAudioTrackId ?? '');
+    const prefillArtist = params.prefillArtist ?? null;
+    const prefillAlbum = params.prefillAlbum ?? null;
+    const prefillAudioTrack = params.prefillAudioTrack ?? null;
 
     return `<!DOCTYPE html>
 <html>
@@ -115,7 +157,97 @@ const renderManagePage = (params: {
             const id = escapeHtml(String(item._id ?? ''));
             return `${escapeHtml(item.title ?? '')} (<code>${id}</code>) - <a href="/content/manage?uploadAudioTrackId=${id}">Use for upload</a>`;
         })}
+        ${renderSectionList('My Pages', ownedPages, (item) => {
+                const slug = escapeHtml(String(item.slug ?? ''));
+                const title = escapeHtml(String(item.title ?? ''));
+                const itemCount = Number(Array.isArray(item.items) ? item.items.length : 0);
+                return `${title} [${slug}] - ${itemCount} page items`;
+        })}
+        ${renderSectionList('My Carousels', ownedCarousels, (item) => {
+                const id = escapeHtml(String(item._id ?? ''));
+                const name = escapeHtml(String(item.name ?? ''));
+                const itemCount = Number(Array.isArray(item.items) ? item.items.length : 0);
+                return `${name} (<code>${id}</code>) - ${itemCount} items`;
+        })}
   </div>
+
+    <h2>Composition</h2>
+    <div class="grid">
+        <div class="card">
+            <h3>Save Page (Home/Library)</h3>
+            <form method="POST" action="/content/manage/composition/page/save">
+                <input name="slug" placeholder="Slug: home or library" required />
+                <input name="title" placeholder="Page title" required />
+                <button type="submit">Save Page</button>
+            </form>
+
+            <h3>Attach Carousel to Page</h3>
+            <form method="POST" action="/content/manage/composition/page/attach-carousel">
+                <input name="slug" placeholder="Slug: home or library" required />
+                <input name="carouselId" placeholder="Carousel ID" required />
+                <input name="position" placeholder="Position (optional, 0-based)" />
+                <button type="submit">Attach Carousel</button>
+            </form>
+
+            <h3>Reorder Page Item</h3>
+            <form method="POST" action="/content/manage/composition/page/reorder-item">
+                <input name="slug" placeholder="Slug: home or library" required />
+                <input name="fromIndex" placeholder="From index" required />
+                <input name="toIndex" placeholder="To index" required />
+                <button type="submit">Reorder Page Item</button>
+            </form>
+
+            <h3>Detach Carousel from Page</h3>
+            <form method="POST" action="/content/manage/composition/page/detach-carousel">
+                <input name="slug" placeholder="Slug: home or library" required />
+                <input name="carouselId" placeholder="Carousel ID" required />
+                <button type="submit">Detach Carousel</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h3>Create Carousel</h3>
+            <form method="POST" action="/content/manage/composition/carousel/create">
+                <input name="name" placeholder="Carousel name" required />
+                <button type="submit">Create Carousel</button>
+            </form>
+
+            <h3>Add Item to Carousel</h3>
+            <form method="POST" action="/content/manage/composition/carousel/add-item">
+                <input name="carouselId" placeholder="Carousel ID" required />
+                <input name="contentType" placeholder="post | album | audioTrack" required />
+                <input name="contentId" placeholder="Content ID" required />
+                <input name="position" placeholder="Position (optional, 0-based)" />
+                <button type="submit">Add Carousel Item</button>
+            </form>
+
+            <h3>Reorder Carousel Item</h3>
+            <form method="POST" action="/content/manage/composition/carousel/reorder-item">
+                <input name="carouselId" placeholder="Carousel ID" required />
+                <input name="fromIndex" placeholder="From index" required />
+                <input name="toIndex" placeholder="To index" required />
+                <button type="submit">Reorder Carousel Item</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h3>Move Item Between Carousels</h3>
+            <form method="POST" action="/content/manage/composition/carousel/move-item">
+                <input name="sourceCarouselId" placeholder="Source carousel ID" required />
+                <input name="fromIndex" placeholder="Source index" required />
+                <input name="targetCarouselId" placeholder="Target carousel ID" required />
+                <input name="toIndex" placeholder="Target index" required />
+                <button type="submit">Move Item</button>
+            </form>
+
+            <h3>Delete Carousel</h3>
+            <form method="POST" action="/content/manage/composition/carousel/delete">
+                <input name="carouselId" placeholder="Carousel ID" required />
+                <button type="submit">Delete Carousel</button>
+            </form>
+            <p>Deleting a carousel will automatically detach it from all pages.</p>
+        </div>
+    </div>
 
   <h2>Create</h2>
   <div class="grid">
@@ -160,47 +292,106 @@ const renderManagePage = (params: {
     </div>
   </div>
 
-  <h2>Update / Delete</h2>
+    <h2>Quick Linking</h2>
+    <div class="grid">
+        <div class="card">
+            <h3>Link Track to Album</h3>
+            <form method="POST" action="/content/manage/link/track-album">
+                <input name="audioTrackId" placeholder="Audio Track ID" required />
+                <input name="albumId" placeholder="Album ID" required />
+                <button type="submit">Link Track and Album</button>
+            </form>
+            <p>Sets track.albumId and ensures album.audioTrackIds contains the track.</p>
+        </div>
+
+        <div class="card">
+            <h3>Link Album to Artist</h3>
+            <form method="POST" action="/content/manage/link/album-artist">
+                <input name="albumId" placeholder="Album ID" required />
+                <input name="artistId" placeholder="Artist ID" required />
+                <button type="submit">Link Album and Artist</button>
+            </form>
+            <p>Adds albumId into artist.albumIds if missing.</p>
+        </div>
+
+        <div class="card">
+            <h3>Link Track to Artist</h3>
+            <form method="POST" action="/content/manage/link/track-artist">
+                <input name="audioTrackId" placeholder="Audio Track ID" required />
+                <input name="artistId" placeholder="Artist ID" required />
+                <button type="submit">Link Track and Artist</button>
+            </form>
+            <p>Adds artistId into track.artistIds and trackId into artist.audioTrackIds if missing.</p>
+        </div>
+    </div>
+
+    <h2 id="update-delete">Update / Delete</h2>
   <div class="grid">
-    <div class="card">
+        <div class="card" id="artist-update-card">
       <h3>Artist</h3>
+            <form method="GET" action="/content/manage#artist-update-card">
+                <input type="hidden" name="prefillType" value="artist" />
+                <input name="prefillId" value="${prefillArtistId}" placeholder="Artist ID" required />
+                <button type="submit">Load Current</button>
+            </form>
       <form method="POST" action="/content/manage/artist/update">
-        <input name="artistId" placeholder="Artist ID" required />
-        <input name="name" placeholder="New Name (optional)" />
-        <input name="bio" placeholder="New Bio (optional)" />
-        <input name="coverArtUrl" placeholder="New Cover URL (optional)" />
+                <input name="artistId" value="${prefillArtistId}" placeholder="Artist ID" required />
+                <input name="name" value="${escapeHtml(String(prefillArtist?.name ?? ''))}" placeholder="New Name (optional)" />
+                <input name="bio" value="${escapeHtml(String(prefillArtist?.bio ?? ''))}" placeholder="New Bio (optional)" />
+                <input name="coverArtUrl" value="${escapeHtml(String(prefillArtist?.coverArtUrl ?? ''))}" placeholder="New Cover URL (optional)" />
+                <input name="albumIds" value="${escapeHtml(toCsvInput(prefillArtist?.albumIds))}" placeholder="Album IDs (comma separated)" />
+                <input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillArtist?.audioTrackIds))}" placeholder="Audio Track IDs (comma separated)" />
         <button type="submit">Update Artist</button>
       </form>
       <form method="POST" action="/content/manage/artist/delete">
-        <input name="artistId" placeholder="Artist ID" required />
+                <input name="artistId" value="${prefillArtistId}" placeholder="Artist ID" required />
         <button type="submit">Delete Artist</button>
       </form>
     </div>
 
-    <div class="card">
+        <div class="card" id="album-update-card">
       <h3>Album</h3>
+            <form method="GET" action="/content/manage#album-update-card">
+                <input type="hidden" name="prefillType" value="album" />
+                <input name="prefillId" value="${prefillAlbumId}" placeholder="Album ID" required />
+                <button type="submit">Load Current</button>
+            </form>
       <form method="POST" action="/content/manage/album/update">
-        <input name="albumId" placeholder="Album ID" required />
-        <input name="title" placeholder="New Title (optional)" />
-        <input name="coverArtUrl" placeholder="New Cover URL (optional)" />
+                <input name="albumId" value="${prefillAlbumId}" placeholder="Album ID" required />
+                <input name="title" value="${escapeHtml(String(prefillAlbum?.title ?? ''))}" placeholder="New Title (optional)" />
+                <input name="coverArtUrl" value="${escapeHtml(String(prefillAlbum?.coverArtUrl ?? ''))}" placeholder="New Cover URL (optional)" />
+                <input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Audio Track IDs (comma separated)" />
+                <input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAlbum?.releaseDate))}" type="date" />
         <button type="submit">Update Album</button>
       </form>
       <form method="POST" action="/content/manage/album/delete">
-        <input name="albumId" placeholder="Album ID" required />
+                <input name="albumId" value="${prefillAlbumId}" placeholder="Album ID" required />
         <button type="submit">Delete Album</button>
       </form>
     </div>
 
-    <div class="card">
+        <div class="card" id="audio-track-update-card">
       <h3>Audio Track</h3>
+            <form method="GET" action="/content/manage#audio-track-update-card">
+                <input type="hidden" name="prefillType" value="audioTrack" />
+                <input name="prefillId" value="${prefillAudioTrackId}" placeholder="Audio Track ID" required />
+                <button type="submit">Load Current</button>
+            </form>
       <form method="POST" action="/content/manage/audioTrack/update">
-        <input name="audioTrackId" placeholder="Audio Track ID" required />
-        <input name="title" placeholder="New Title (optional)" />
-        <input name="coverArtUrl" placeholder="New Cover URL (optional)" />
+                <input name="audioTrackId" value="${prefillAudioTrackId}" placeholder="Audio Track ID" required />
+                <input name="title" value="${escapeHtml(String(prefillAudioTrack?.title ?? ''))}" placeholder="New Title (optional)" />
+                <input name="coverArtUrl" value="${escapeHtml(String(prefillAudioTrack?.coverArtUrl ?? ''))}" placeholder="New Cover URL (optional)" />
+                <input name="artistIds" value="${escapeHtml(toCsvInput(prefillAudioTrack?.artistIds))}" placeholder="Artist IDs (comma separated)" />
+                <input name="genres" value="${escapeHtml(toCsvInput(prefillAudioTrack?.genres))}" placeholder="Genres (comma separated)" />
+                <input name="albumId" value="${escapeHtml(String(prefillAudioTrack?.albumId ?? ''))}" placeholder="Album ID" />
+                <input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAudioTrack?.releaseDate))}" type="date" />
+                <input name="duration" value="${escapeHtml(String(prefillAudioTrack?.duration ?? ''))}" placeholder="Duration (e.g. 03:30)" />
+                <input name="formatType" value="${escapeHtml(String(prefillAudioTrack?.format?.type ?? ''))}" placeholder="Format type (e.g. MP3)" />
+                <input name="formatBitrate" value="${escapeHtml(String(prefillAudioTrack?.format?.bitrate ?? ''))}" placeholder="Bitrate (e.g. 320)" />
         <button type="submit">Update Audio Track</button>
       </form>
       <form method="POST" action="/content/manage/audioTrack/delete">
-        <input name="audioTrackId" placeholder="Audio Track ID" required />
+                <input name="audioTrackId" value="${prefillAudioTrackId}" placeholder="Audio Track ID" required />
         <button type="submit">Delete Audio Track</button>
       </form>
             <hr />
@@ -232,14 +423,64 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
         }
 
         const ownedByUser = authReq.auth.userId;
-        const [ownedArtists, ownedAlbums, ownedAudioTracks] = await Promise.all([
+        const [ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels] = await Promise.all([
             Artist.fetchByCreator(ownedByUser),
             Album.fetchByCreator(ownedByUser),
-            AudioTrack.fetchByCreator(ownedByUser)
+            AudioTrack.fetchByCreator(ownedByUser),
+            Page.fetchByCreator(ownedByUser),
+            Carousel.fetchByCreator(ownedByUser)
         ]);
 
-        const message = String(req.query.message ?? '');
+        const queryMessage = String(req.query.message ?? '');
+        let message = queryMessage;
         const selectedUploadTrackId = String(req.query.uploadAudioTrackId ?? '');
+        const prefillType = String(req.query.prefillType ?? '').trim();
+        const prefillId = String(req.query.prefillId ?? '').trim();
+
+        let prefillArtist: any | null = null;
+        let prefillAlbum: any | null = null;
+        let prefillAudioTrack: any | null = null;
+        let prefillArtistId = '';
+        let prefillAlbumId = '';
+        let prefillAudioTrackId = selectedUploadTrackId;
+
+        if (prefillType && prefillId) {
+            try {
+                if (prefillType === 'artist') {
+                    const artist = await Artist.findById(prefillId);
+                    if (artist && ensureOwnerOrAdmin(authReq, getOwnerId(artist))) {
+                        prefillArtist = artist;
+                        prefillArtistId = prefillId;
+                    } else if (!message) {
+                        message = 'Unable to load artist for this ID.';
+                    }
+                }
+
+                if (prefillType === 'album') {
+                    const album = await Album.findById(prefillId);
+                    if (album && ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
+                        prefillAlbum = album;
+                        prefillAlbumId = prefillId;
+                    } else if (!message) {
+                        message = 'Unable to load album for this ID.';
+                    }
+                }
+
+                if (prefillType === 'audioTrack') {
+                    const track = await AudioTrack.findById(prefillId);
+                    if (track && ensureOwnerOrAdmin(authReq, getOwnerId(track))) {
+                        prefillAudioTrack = track;
+                        prefillAudioTrackId = prefillId;
+                    } else if (!message) {
+                        message = 'Unable to load audio track for this ID.';
+                    }
+                }
+            } catch (error) {
+                if (!message) {
+                    message = 'Unable to load current values: invalid or inaccessible ID.';
+                }
+            }
+        }
 
         return res.status(200).send(renderManagePage({
             userEmail: authReq.auth.email,
@@ -247,7 +488,15 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
             selectedUploadTrackId,
             ownedArtists,
             ownedAlbums,
-            ownedAudioTracks
+            ownedAudioTracks,
+            ownedPages,
+            ownedCarousels,
+            prefillArtistId,
+            prefillAlbumId,
+            prefillAudioTrackId,
+            prefillArtist,
+            prefillAlbum,
+            prefillAudioTrack
         }));
     } catch (error) {
         return next(error);
@@ -266,13 +515,15 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
         const parsedLimit = Number(req.query.limit ?? 10);
         const limit = Number.isNaN(parsedLimit) ? 10 : Math.max(1, Math.min(parsedLimit, 50));
 
-        const [artists, albums, audioTracks, ownedArtists, ownedAlbums, ownedAudioTracks] = await Promise.all([
+        const [artists, albums, audioTracks, ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels] = await Promise.all([
             rawQuery ? Artist.searchByName(rawQuery, limit) : Promise.resolve([]),
             rawQuery ? Album.searchByTitle(rawQuery, limit) : Promise.resolve([]),
             rawQuery ? AudioTrack.searchByTitle(rawQuery, limit) : Promise.resolve([]),
             Artist.fetchByCreator(authReq.auth.userId),
             Album.fetchByCreator(authReq.auth.userId),
-            AudioTrack.fetchByCreator(authReq.auth.userId)
+            AudioTrack.fetchByCreator(authReq.auth.userId),
+            Page.fetchByCreator(authReq.auth.userId),
+            Carousel.fetchByCreator(authReq.auth.userId)
         ]);
 
         return res.status(200).send(renderManagePage({
@@ -284,7 +535,9 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
             audioTracks,
             ownedArtists,
             ownedAlbums,
-            ownedAudioTracks
+            ownedAudioTracks,
+            ownedPages,
+            ownedCarousels
         }));
     } catch (error) {
         return next(error);
@@ -336,6 +589,8 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
         if (req.body.name) updatePayload.name = String(req.body.name);
         if (req.body.bio) updatePayload.bio = String(req.body.bio);
         if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
+        if (req.body.albumIds) updatePayload.albumIds = parseCsv(String(req.body.albumIds));
+        if (req.body.audioTrackIds) updatePayload.audioTrackIds = parseCsv(String(req.body.audioTrackIds));
 
         await Artist.updateById(artistId, updatePayload);
         return redirectWithMessage(res, 'Artist updated successfully.');
@@ -410,6 +665,8 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
         const updatePayload: Record<string, unknown> = {};
         if (req.body.title) updatePayload.title = String(req.body.title);
         if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
+        if (req.body.audioTrackIds) updatePayload.audioTrackIds = parseCsv(String(req.body.audioTrackIds));
+        if (req.body.releaseDate) updatePayload.releaseDate = parseDateInput(String(req.body.releaseDate));
 
         await Album.updateById(albumId, updatePayload);
         return redirectWithMessage(res, 'Album updated successfully.');
@@ -496,6 +753,19 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
         const updatePayload: Record<string, unknown> = {};
         if (req.body.title) updatePayload.title = String(req.body.title);
         if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
+        if (req.body.artistIds) updatePayload.artistIds = parseCsv(String(req.body.artistIds));
+        if (req.body.genres) updatePayload.genres = parseCsv(String(req.body.genres));
+        if (req.body.albumId) updatePayload.albumId = String(req.body.albumId);
+        if (req.body.releaseDate) updatePayload.releaseDate = parseDateInput(String(req.body.releaseDate));
+        if (req.body.duration) updatePayload.duration = String(req.body.duration);
+        if (req.body.formatType) {
+            const bitrateRaw = String(req.body.formatBitrate ?? '').trim();
+            const bitrate = bitrateRaw ? Number(bitrateRaw) : undefined;
+            updatePayload.format = new AudioFormat(
+                String(req.body.formatType),
+                Number.isNaN(bitrate as number) ? undefined : bitrate
+            );
+        }
 
         await AudioTrack.updateById(audioTrackId, updatePayload);
         return redirectWithMessage(res, 'Audio track updated successfully.');
@@ -568,6 +838,102 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
         }).promise();
 
         return redirectWithMessage(res, 'Audio file uploaded successfully.');
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const linkTrackToAlbumWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        }
+
+        const audioTrackId = String(req.body.audioTrackId ?? '').trim();
+        const albumId = String(req.body.albumId ?? '').trim();
+        const track = await AudioTrack.findById(audioTrackId);
+        const album = await Album.findById(albumId);
+
+        if (!track || !album) {
+            return redirectWithMessage(res, 'Track or album not found.');
+        }
+
+        if (!ensureOwnerOrAdmin(authReq, getOwnerId(track)) || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
+            return redirectWithMessage(res, 'Forbidden: only creator or admin can link these records.');
+        }
+
+        const albumTrackIds = uniqueStrings([...(Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []), audioTrackId]);
+
+        await Promise.all([
+            AudioTrack.updateById(audioTrackId, { albumId }),
+            Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] })
+        ]);
+
+        return redirectWithMessage(res, 'Track linked to album successfully.');
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const linkAlbumToArtistWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        }
+
+        const albumId = String(req.body.albumId ?? '').trim();
+        const artistId = String(req.body.artistId ?? '').trim();
+        const album = await Album.findById(albumId);
+        const artist = await Artist.findById(artistId);
+
+        if (!album || !artist) {
+            return redirectWithMessage(res, 'Album or artist not found.');
+        }
+
+        if (!ensureOwnerOrAdmin(authReq, getOwnerId(album)) || !ensureOwnerOrAdmin(authReq, getOwnerId(artist))) {
+            return redirectWithMessage(res, 'Forbidden: only creator or admin can link these records.');
+        }
+
+        const artistAlbumIds = uniqueStrings([...(Array.isArray((artist as any).albumIds) ? (artist as any).albumIds : []), albumId]);
+        await Artist.updateById(artistId, { albumIds: artistAlbumIds as [string] });
+
+        return redirectWithMessage(res, 'Album linked to artist successfully.');
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const linkTrackToArtistWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        }
+
+        const audioTrackId = String(req.body.audioTrackId ?? '').trim();
+        const artistId = String(req.body.artistId ?? '').trim();
+        const track = await AudioTrack.findById(audioTrackId);
+        const artist = await Artist.findById(artistId);
+
+        if (!track || !artist) {
+            return redirectWithMessage(res, 'Track or artist not found.');
+        }
+
+        if (!ensureOwnerOrAdmin(authReq, getOwnerId(track)) || !ensureOwnerOrAdmin(authReq, getOwnerId(artist))) {
+            return redirectWithMessage(res, 'Forbidden: only creator or admin can link these records.');
+        }
+
+        const trackArtistIds = uniqueStrings([...(Array.isArray((track as any).artistIds) ? (track as any).artistIds : []), artistId]);
+        const artistTrackIds = uniqueStrings([...(Array.isArray((artist as any).audioTrackIds) ? (artist as any).audioTrackIds : []), audioTrackId]);
+
+        await Promise.all([
+            AudioTrack.updateById(audioTrackId, { artistIds: trackArtistIds as [string] }),
+            Artist.updateById(artistId, { audioTrackIds: artistTrackIds as [string] })
+        ]);
+
+        return redirectWithMessage(res, 'Track linked to artist successfully.');
     } catch (error) {
         return next(error);
     }

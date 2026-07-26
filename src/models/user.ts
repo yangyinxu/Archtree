@@ -37,11 +37,45 @@ class User {
 
     static findByEmail(email: string) {
         const db = getDb();
+        const normalized = String(email ?? '').trim().toLowerCase();
 
         return db!
             .collection('users')
-            .find({ email: email })
+            .find({ email: { $regex: `^${normalized}$`, $options: 'i' } })
             .next();
+    }
+
+    static findByUsername(username: string) {
+        const db = getDb();
+        const normalized = String(username ?? '').trim();
+
+        return db!
+            .collection('users')
+            .find({ username: { $regex: `^${normalized}$`, $options: 'i' } })
+            .next();
+    }
+
+    static async findByIdentifier(identifier: string) {
+        const normalized = String(identifier ?? '').trim();
+        if (!normalized) {
+            return null;
+        }
+
+        if (normalized.includes('@')) {
+            const byEmail = await this.findByEmail(normalized);
+            if (byEmail) {
+                return byEmail;
+            }
+
+            return this.findByUsername(normalized);
+        }
+
+        const byUsername = await this.findByUsername(normalized);
+        if (byUsername) {
+            return byUsername;
+        }
+
+        return this.findByEmail(normalized);
     }
 }
 
