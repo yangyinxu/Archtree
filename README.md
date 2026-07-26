@@ -24,7 +24,7 @@ Notes:
 Required variables:
 
 - `DB_CONN_STRING`: MongoDB connection string
-- `DB_NAME`: MongoDB database name (default fallback is `archtreeDb`)
+- `DB_NAME`: MongoDB database name (required; no runtime fallback)
 - `JWT_SECRET`: JWT signing secret
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 operations
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations

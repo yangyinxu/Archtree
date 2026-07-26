@@ -9,6 +9,7 @@ const router: Router = express.Router();
 
 const signupValidation: RequestHandler[] = [
     body('email')
+        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
         .isEmail()
         .withMessage('Please enter a valid email.')
         .custom((email, { req }) => {

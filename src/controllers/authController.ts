@@ -33,11 +33,24 @@ const getJwtSecret = () => {
   return jwtSecret;
 };
 
+const normalizeEmail = (email: string) => {
+  return String(email ?? '').trim().toLowerCase();
+};
+
 const createUser = async (email: string, username: string, password: string, role: string = 'user') => {
+  const normalizedEmail = normalizeEmail(email);
+
+  const existing = await User.findByEmail(normalizedEmail);
+  if (existing) {
+    const error: ErrorWithStatusCode = new Error('email address already exists!');
+    error.statusCode = 409;
+    throw error;
+  }
+
   const hashedPassword = await bcrypt.hash(password, 12);
 
   const user = new User(
-    email,
+    normalizedEmail,
     hashedPassword,
     username,
     [],
@@ -45,6 +58,10 @@ const createUser = async (email: string, username: string, password: string, rol
   );
 
   return user.save();
+};
+
+const normalizeIdentifier = (value: string) => {
+  return String(value ?? '').trim();
 };
 
 const escapeHtml = (value: string) => {
@@ -100,14 +117,14 @@ const renderSignupHtml = (params: {
 };
 
 const renderLoginHtml = (params: {
-  email?: string;
+  identifier?: string;
   returnTo?: string;
   errorMessage?: string;
   successMessage?: string;
   token?: string;
   userId?: string;
 }) => {
-  const email = escapeHtml(params.email ?? '');
+  const identifier = escapeHtml(params.identifier ?? '');
   const errorMessage = params.errorMessage ? `<p style="color:#b00020;">${escapeHtml(params.errorMessage)}</p>` : '';
   const successMessage = params.successMessage ? `<p style="color:#0a7a33;">${escapeHtml(params.successMessage)}</p>` : '';
   const token = params.token ? `<pre style="white-space:pre-wrap;word-break:break-word;background:#f5f5f5;padding:12px;border-radius:8px;">${escapeHtml(params.token)}</pre>` : '';
@@ -135,8 +152,8 @@ const renderLoginHtml = (params: {
   ${token}
   <form method="POST" action="/auth/login-web">
     <input type="hidden" name="returnTo" value="${returnTo}" />
-    <label>Email</label>
-    <input type="email" name="email" value="${email}" required />
+    <label>Email or Username</label>
+    <input type="text" name="identifier" value="${identifier}" required />
     <label>Password</label>
     <input type="password" name="password" minlength="5" required />
     <button type="submit">Log In</button>
@@ -147,10 +164,10 @@ const renderLoginHtml = (params: {
 </html>`;
 };
 
-const authenticateUser = async (email: string, password: string) => {
-  const user = await User.findByEmail(email);
+const authenticateUser = async (identifier: string, password: string) => {
+  const user = await User.findByIdentifier(identifier);
   if (!user) {
-    const error: ErrorWithStatusCode = new Error('A user with this email could not be found.');
+    const error: ErrorWithStatusCode = new Error('A user with this email or username could not be found.');
     error.statusCode = 401;
     throw error;
   }
@@ -201,7 +218,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       throw error;
     }
 
-    const email = req.body.email;
+    const email = normalizeEmail(req.body.email);
     const username = req.body.username;
     const password = req.body.password;
     createUser(email, username, password)
@@ -214,8 +231,9 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       })
       .catch(err => {
         console.log(err);
-        res.status(500).json({
-          message: 'Creating the user failed.'
+        const statusCode = err?.statusCode ?? 500;
+        res.status(statusCode).json({
+          message: statusCode === 409 ? 'email address already exists!' : 'Creating the user failed.'
         });
       });
   } catch (error: any) {
@@ -230,7 +248,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
 export const signupFromWeb = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const errors = validationResult(req);
-    const email = req.body.email;
+    const email = normalizeEmail(req.body.email);
     const username = req.body.username;
     const password = req.body.password;
 
@@ -252,10 +270,11 @@ export const signupFromWeb = async (req: Request, res: Response, next: NextFunct
       })
       .catch(err => {
         console.log(err);
-        res.status(500).send(renderSignupHtml({
+        const statusCode = err?.statusCode ?? 500;
+        res.status(statusCode).send(renderSignupHtml({
           email,
           username,
-          errorMessage: 'Creating the user failed.'
+          errorMessage: statusCode === 409 ? 'Email address already exists.' : 'Creating the user failed.'
         }));
       });
   } catch (error: any) {
@@ -268,9 +287,9 @@ export const signupFromWeb = async (req: Request, res: Response, next: NextFunct
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const email: string = String(req.body.email ?? '').trim().toLowerCase();
+    const identifier: string = normalizeIdentifier(req.body.identifier ?? req.body.email ?? req.body.username);
     const password: string = req.body.password;
-    const authResult = await authenticateUser(email, password);
+    const authResult = await authenticateUser(identifier, password);
 
     // return 200 status code for successful login
     res.status(200).json({
@@ -287,28 +306,28 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 };
 
 export const loginFromWeb = async (req: Request, res: Response) => {
-  const email = String(req.body.email ?? '').trim().toLowerCase();
+  const identifier = normalizeIdentifier(req.body.identifier ?? req.body.email ?? req.body.username);
   const password = String(req.body.password ?? '');
   const returnTo = String(req.body.returnTo ?? '/');
 
-  if (!email || !password) {
+  if (!identifier || !password) {
     res.status(422).send(renderLoginHtml({
-      email,
+      identifier,
       returnTo,
-      errorMessage: 'Email and password are required.'
+      errorMessage: 'Identifier and password are required.'
     }));
     return;
   }
 
   try {
-    const authResult = await authenticateUser(email, password);
+    const authResult = await authenticateUser(identifier, password);
     setSessionCookie(res, authResult.token);
     res.redirect(returnTo || '/');
   } catch (error: any) {
     const message = error?.message || 'Login failed.';
     const statusCode = error?.statusCode ?? 401;
     res.status(statusCode).send(renderLoginHtml({
-      email,
+      identifier,
       returnTo,
       errorMessage: message
     }));
