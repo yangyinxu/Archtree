@@ -189,6 +189,44 @@ export class Carousel {
         };
     }
 
+    static async moveItemsBetweenCarousels(sourceCarouselId: string, targetCarouselId: string, fromIndexes: number[], updatedBy: string) {
+        const source: any = await this.findById(sourceCarouselId);
+        const target: any = await this.findById(targetCarouselId);
+
+        if (!source || !target || sourceCarouselId === targetCarouselId) {
+            return null;
+        }
+
+        const sourceItems = (Array.isArray(source.items) ? [...source.items] : [])
+            .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0));
+        const targetItems = (Array.isArray(target.items) ? [...target.items] : [])
+            .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0));
+        const selectedIndexes = [...new Set(fromIndexes)].sort((a, b) => a - b);
+        if (selectedIndexes.length === 0 || selectedIndexes.some((index) => index < 0 || index >= sourceItems.length)) {
+            return null;
+        }
+
+        const selectedIndexSet = new Set(selectedIndexes);
+        const movedItems = selectedIndexes.map((index) => sourceItems[index]);
+        const remainingSourceItems = sourceItems.filter((_, index) => !selectedIndexSet.has(index));
+        const nextSourceItems = normalizeOrder(remainingSourceItems);
+        const nextTargetItems = normalizeOrder([...targetItems, ...movedItems]);
+
+        await this.updateById(sourceCarouselId, {
+            items: nextSourceItems,
+            updatedBy
+        });
+        await this.updateById(targetCarouselId, {
+            items: nextTargetItems,
+            updatedBy
+        });
+
+        return {
+            sourceItems: nextSourceItems,
+            targetItems: nextTargetItems
+        };
+    }
+
     static deleteById(carouselId: string) {
         const db = getDb();
         const carouselObjectId = ObjectId.createFromHexString(carouselId);

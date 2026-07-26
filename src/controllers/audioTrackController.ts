@@ -1,26 +1,64 @@
 import { Request, Response, NextFunction } from 'express';
+import { Readable } from 'node:stream';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
 import { getS3 } from '../app';
+import {
+    DeleteObjectCommand,
+    GetObjectCommand,
+    HeadObjectCommand,
+    PutObjectCommand
+} from '@aws-sdk/client-s3';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { ObjectId } from 'mongodb';
+
+const parseJsonField = (value: unknown) => {
+    if (typeof value !== 'string') return value;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return value;
+    }
+};
+
+const parseStringArray = (value: unknown) => {
+    const parsed = parseJsonField(value);
+    if (Array.isArray(parsed)) return parsed.map(String) as [string];
+    if (typeof parsed === 'string') {
+        return parsed.split(',').map((item) => item.trim()).filter(Boolean) as [string];
+    }
+    return [] as unknown as [string];
+};
 
 // Create a new audio track via the model and save it to the db
-export const postAudioTrack = (req: Request, res: Response, next: NextFunction) => {
+export const postAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const title: string = req.body.title;
-    const artistIds: [string] = req.body.artistIds;
-    const genres: [string] = req.body.genres;
-    const albumId: string = req.body.albumId;
-    const releaseDate: SimpleDate = SimpleDate.fromJson(req.body.releaseDate);
-    const duration: string = req.body.duration;
-    const format: AudioFormat = AudioFormat.fromJson(req.body.format);
-    const coverArtUrl: string = req.body.coverArtUrl;
+    const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
+    if (!uploadFile) {
+        return res.status(400).json({ message: 'An audio file is required. Use multipart form field: audioFile.' });
+    }
 
-    // Create a new audio track
+    const title: string = req.body.title;
+    const artistIds = parseStringArray(req.body.artistIds);
+    const genres = parseStringArray(req.body.genres);
+    const albumId: string = req.body.albumId;
+    const releaseDateValue = parseJsonField(req.body.releaseDate);
+    const releaseDate = releaseDateValue && typeof releaseDateValue === 'object'
+        ? SimpleDate.fromJson(releaseDateValue)
+        : new SimpleDate();
+    const duration: string = req.body.duration;
+    const formatValue = parseJsonField(req.body.format);
+    const format = formatValue && typeof formatValue === 'object'
+        ? AudioFormat.fromJson(formatValue)
+        : new AudioFormat(uploadFile.mimetype.replace(/^audio\//i, '').toUpperCase() || 'AUDIO');
+    const coverArtUrl: string = req.body.coverArtUrl;
+    const audioTrackObjectId = new ObjectId();
+    const audioTrackId = audioTrackObjectId.toHexString();
+
     const track = new AudioTrack(
         title,
         artistIds,
@@ -30,26 +68,39 @@ export const postAudioTrack = (req: Request, res: Response, next: NextFunction) 
         duration,
         format,
         coverArtUrl,
-        authReq.auth.userId
+        authReq.auth.userId,
+        uploadFile.originalname,
+        uploadFile.mimetype || 'audio/mpeg',
+        audioTrackObjectId
     );
 
-    // Save the audio track to the db
-    // TODO: Add the audioTrackId to the album and artist
-    // TODO: Remove the audioTrackId from the album and artist if the audio track is deleted
-
-    track.save()
-        .then((result: any) => {
-            console.log(result);
-            res.status(201).json({
-                message: `Audio Track ${title} Added Successfully`,
-                audioTrack: result
+    try {
+        await getS3().send(new PutObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: audioTrackId,
+            Body: uploadFile.buffer,
+            ContentType: uploadFile.mimetype || 'audio/mpeg'
+        }));
+        try {
+            await track.save();
+        } catch (databaseError) {
+            await getS3().send(new DeleteObjectCommand({
+                Bucket: process.env.S3_BUCKET_NAME!,
+                Key: audioTrackId
+            })).catch((cleanupError) => {
+                console.log('Unable to clean up S3 file after track creation failed:', cleanupError);
             });
-        })
-        .catch((err: any) => {
-            console.log(err);
-            res.status(500).json({ message: 'Failed to create audio track.' });
-        });
+            throw databaseError;
+        }
 
+        return res.status(201).json({
+            message: `Audio Track ${title} Added Successfully`,
+            audioTrackId
+        });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({ message: 'Failed to create and upload audio track.' });
+    }
 };
 
 export const updateAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
@@ -83,21 +134,21 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
 };
 
 // Get an audio track via the model and return it
-export const getAudioTrackById = (req: Request, res: Response, next: NextFunction) => {
+export const getAudioTrackById = async (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
 
     // Fetch the audio track from AWS S3
-    getS3().getObject({
-        Bucket: process.env.S3_BUCKET_NAME!,
-        Key: audioTrackId
-    }, (err: any, data: any) => {
-        if (err) {
-            console.log(err);
-            res.status(500).send('Error fetching audio track from AWS S3');
-        } else {
-            res.status(200).send(data.Body);
-        }
-    });
+    try {
+        const data = await getS3().send(new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: audioTrackId
+        }));
+        const body = await data.Body?.transformToByteArray();
+        res.status(200).send(Buffer.from(body ?? []));
+    } catch (error) {
+        console.log(error);
+        res.status(500).send('Error fetching audio track from AWS S3');
+    }
 
     // Fetch the audio track from the db
     /*
@@ -114,7 +165,7 @@ export const getAudioTrackById = (req: Request, res: Response, next: NextFunctio
 };
 
 // Stream an audio track by id from AWS S3 with support for HTTP Range requests
-export const streamAudioTrack = (req: Request, res: Response, next: NextFunction) => {
+export const streamAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
     const s3 = getS3();
     const params = {
@@ -124,11 +175,11 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
 
     // Check for Range header
     const range = req.headers.range;
-    s3.headObject(params, (err: any, metadata: any) => {
-        if (err || !metadata.ContentLength) {
-            console.error('Error getting metadata:', err);
-            console.error('Error details:', err);
-            res.status(500).json({ message: 'Error streaming audio track', error: err });
+    try {
+        const metadata = await s3.send(new HeadObjectCommand(params));
+        if (!metadata.ContentLength) {
+            console.error('Error getting metadata: missing ContentLength');
+            res.status(500).json({ message: 'Error streaming audio track' });
             return;
         }
 
@@ -160,7 +211,11 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
         res.setHeader('Content-Length', end - start + 1);
         res.setHeader('Content-Disposition', `inline; filename="${audioTrackId}"`);
 
-        const stream = s3.getObject({ ...params, Range: `bytes=${start}-${end}` }).createReadStream();
+        const object = await s3.send(new GetObjectCommand({ ...params, Range: `bytes=${start}-${end}` }));
+        const stream = object.Body as unknown as Readable | undefined;
+        if (!stream || typeof stream.pipe !== 'function') {
+            throw new Error('S3 object body is not a readable stream.');
+        }
         stream.on('error', (error: any) => {
             console.error('Error streaming audio track:', error);
             if (!res.headersSent) {
@@ -171,7 +226,14 @@ export const streamAudioTrack = (req: Request, res: Response, next: NextFunction
             }
         });
         stream.pipe(res);
-    });
+    } catch (error) {
+        console.error('Error streaming audio track:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ message: 'Error streaming audio track', error });
+        } else {
+            res.destroy();
+        }
+    }
 };
 
 // Get all audio tracks via the model and return them
@@ -211,10 +273,10 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
 
         let s3CleanupWarning: string | undefined;
         try {
-            await getS3().deleteObject({
+            await getS3().send(new DeleteObjectCommand({
                 Bucket: process.env.S3_BUCKET_NAME!,
                 Key: audioTrackId
-            }).promise();
+            }));
         } catch (s3Error) {
             console.log('S3 cleanup failed for audioTrackId:', audioTrackId, s3Error);
             s3CleanupWarning = 'Track metadata was deleted, but deleting the S3 file failed.';
@@ -260,12 +322,12 @@ export const uploadAudioTrackFile = async (req: Request, res: Response, next: Ne
             return res.status(400).json({ message: 'Missing audio file. Use multipart form field: audioFile.' });
         }
 
-        await getS3().upload({
+        await getS3().send(new PutObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: audioTrackId,
             Body: uploadFile.buffer,
             ContentType: uploadFile.mimetype || 'audio/mpeg'
-        }).promise();
+        }));
 
         return res.status(200).json({
             message: 'Audio file uploaded successfully.',

@@ -91,37 +91,42 @@ const renderSignupHtml = (params: {
 }) => {
   const email = escapeHtml(params.email ?? '');
   const username = escapeHtml(params.username ?? '');
-  const errorMessage = params.errorMessage ? `<p style="color:#b00020;">${escapeHtml(params.errorMessage)}</p>` : '';
-  const successMessage = params.successMessage ? `<p style="color:#0a7a33;">${escapeHtml(params.successMessage)}</p>` : '';
+  const errorMessage = params.errorMessage ? `<div class="alert alert--error" role="alert">${escapeHtml(params.errorMessage)}</div>` : '';
+  const successMessage = params.successMessage ? `<div class="alert" role="status">${escapeHtml(params.successMessage)}</div>` : '';
 
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Archtree Sign Up</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }
-    form { display: grid; gap: 12px; }
-    input { padding: 10px; font-size: 16px; }
-    button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
-  </style>
+  <link rel="stylesheet" href="/assets/archtree.css" />
 </head>
 <body>
-  <h1>Create Archtree Account</h1>
-  ${errorMessage}
-  ${successMessage}
-  <form method="POST" action="/auth/signup-web">
-    <label>Email</label>
-    <input type="email" name="email" value="${email}" required />
-    <label>Username</label>
-    <input type="text" name="username" value="${username}" required />
-    <label>Password</label>
-    <input type="password" name="password" minlength="5" required />
-    <button type="submit">Sign Up</button>
-  </form>
-  <p>API endpoint is also available at <code>PUT /auth/signup</code>.</p>
-  <p><a href="/auth/login-web">Already have an account? Log in</a></p>
+  <main class="page-shell page-shell--narrow auth-card">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <span>Archtree</span>
+    </a>
+    <section class="card card--raised">
+      <p class="eyebrow">New workspace</p>
+      <h1>Create your account</h1>
+      <p class="muted">Start organizing your music catalog and publishing structure.</p>
+      ${errorMessage}
+      ${successMessage}
+      <form method="POST" action="/auth/signup-web">
+        <label for="signup-email">Email</label>
+        <input id="signup-email" type="email" name="email" value="${email}" autocomplete="email" required />
+        <label for="signup-username">Username</label>
+        <input id="signup-username" type="text" name="username" value="${username}" autocomplete="username" required />
+        <label for="signup-password">Password</label>
+        <input id="signup-password" type="password" name="password" minlength="5" autocomplete="new-password" required />
+        <span class="muted">Use at least 5 characters.</span>
+        <button type="submit">Create account</button>
+      </form>
+    </section>
+    <p class="auth-footer">Already have an account? <a href="/auth/login-web">Log in</a></p>
+  </main>
 </body>
 </html>`;
 };
@@ -135,41 +140,45 @@ const renderLoginHtml = (params: {
   userId?: string;
 }) => {
   const identifier = escapeHtml(params.identifier ?? '');
-  const errorMessage = params.errorMessage ? `<p style="color:#b00020;">${escapeHtml(params.errorMessage)}</p>` : '';
-  const successMessage = params.successMessage ? `<p style="color:#0a7a33;">${escapeHtml(params.successMessage)}</p>` : '';
-  const token = params.token ? `<pre style="white-space:pre-wrap;word-break:break-word;background:#f5f5f5;padding:12px;border-radius:8px;">${escapeHtml(params.token)}</pre>` : '';
+  const errorMessage = params.errorMessage ? `<div class="alert alert--error" role="alert">${escapeHtml(params.errorMessage)}</div>` : '';
+  const successMessage = params.successMessage ? `<div class="alert" role="status">${escapeHtml(params.successMessage)}</div>` : '';
+  const token = params.token ? `<pre class="card" style="white-space:pre-wrap;word-break:break-word;">${escapeHtml(params.token)}</pre>` : '';
   const userId = params.userId ? `<p><strong>User ID:</strong> ${escapeHtml(params.userId)}</p>` : '';
   const returnTo = escapeHtml(params.returnTo ?? '/');
 
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Archtree Login</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }
-    form { display: grid; gap: 12px; }
-    input { padding: 10px; font-size: 16px; }
-    button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
-  </style>
+  <link rel="stylesheet" href="/assets/archtree.css" />
 </head>
 <body>
-  <h1>Archtree Login</h1>
-  ${errorMessage}
-  ${successMessage}
-  ${userId}
-  ${token}
-  <form method="POST" action="/auth/login-web">
-    <input type="hidden" name="returnTo" value="${returnTo}" />
-    <label>Email or Username</label>
-    <input type="text" name="identifier" value="${identifier}" required />
-    <label>Password</label>
-    <input type="password" name="password" minlength="5" required />
-    <button type="submit">Log In</button>
-  </form>
-  <p>API endpoint is also available at <code>POST /auth/login</code>.</p>
-  <p><a href="/auth/signup-web">Need an account? Sign up</a></p>
+  <main class="page-shell page-shell--narrow auth-card">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">A</span>
+      <span>Archtree</span>
+    </a>
+    <section class="card card--raised">
+      <p class="eyebrow">Welcome back</p>
+      <h1>Log in to Archtree</h1>
+      <p class="muted">Continue managing your catalog and listening experience.</p>
+      ${errorMessage}
+      ${successMessage}
+      ${userId}
+      ${token}
+      <form method="POST" action="/auth/login-web">
+        <input type="hidden" name="returnTo" value="${returnTo}" />
+        <label for="login-identifier">Email or username</label>
+        <input id="login-identifier" type="text" name="identifier" value="${identifier}" autocomplete="username" required />
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" name="password" minlength="5" autocomplete="current-password" required />
+        <button type="submit">Log in</button>
+      </form>
+    </section>
+    <p class="auth-footer">Need an account? <a href="/auth/signup-web">Create one</a></p>
+  </main>
 </body>
 </html>`;
 };

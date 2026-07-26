@@ -7,7 +7,9 @@ import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import { getS3 } from '../app';
+import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3';
 import { parseBuffer } from 'music-metadata';
+import { ObjectId } from 'mongodb';
 
 const escapeHtml = (value: string) => {
     return value
@@ -69,7 +71,6 @@ const uniqueStrings = (values: string[]) => {
 const titleFromFileName = (fileName: string) => {
     return fileName
         .replace(/\.[^.]+$/, '')
-        .replace(/[_-]+/g, ' ')
         .trim();
 };
 
@@ -137,10 +138,10 @@ const getS3StorageSummary = async (): Promise<S3StorageSummary> => {
     let objectCount = 0;
     let totalBytes = 0;
     do {
-        const page: any = await getS3().listObjectsV2({
+        const page = await getS3().send(new ListObjectsV2Command({
             Bucket: bucket,
             ContinuationToken: continuationToken
-        }).promise();
+        }));
         const objects = Array.isArray(page.Contents) ? page.Contents : [];
         objectCount += objects.length;
         totalBytes += objects.reduce((sum: number, object: any) => sum + Number(object.Size ?? 0), 0);
@@ -238,7 +239,7 @@ const renderManagePage = (params: {
     prefillAudioTrack?: any | null;
 }) => {
     const messageBlock = params.message
-        ? `<p style="padding:10px;background:#eef9ff;border:1px solid #b3e5fc;border-radius:8px;">${escapeHtml(params.message)}</p>`
+        ? `<div class="alert" role="status">${escapeHtml(params.message)}</div>`
         : '';
 
     const searchQuery = escapeHtml(params.searchQuery ?? '');
@@ -291,43 +292,63 @@ const renderManagePage = (params: {
     const prefillAudioTrack = params.prefillAudioTrack ?? null;
 
     return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Archtree Content Manager</title>
+  <link rel="stylesheet" href="/assets/archtree.css" />
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 960px; margin: 32px auto; padding: 0 16px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
     .content-hierarchy { display: grid; gap: 16px; }
-    .hierarchy-item { border-bottom: 1px solid #eee; padding-bottom: 12px; }
+    .hierarchy-item { border-bottom: 1px solid var(--line); padding-bottom: 14px; }
     .hierarchy-item:last-child { border-bottom: 0; padding-bottom: 0; }
     .hierarchy-item > strong { display: block; }
     .linked-content { margin: 6px 0 0 18px; padding-left: 18px; }
-    .empty-linked-content { color: #666; font-size: 14px; margin: 6px 0 0; }
-    form { display: grid; gap: 8px; }
-    input, select { padding: 8px; font-size: 14px; }
-    button { padding: 8px 12px; cursor: pointer; }
+    .track-selection { align-items: center; display: flex; gap: 8px; margin: 6px 0 0 18px; padding-left: 18px; }
+    .track-selection input { margin: 0; }
+    .batch-track-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+    .empty-linked-content { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
     .drag-list { display: grid; gap: 6px; margin: 10px 0; padding: 0; list-style: none; }
-    .drag-item { background: #f8f8f8; border: 1px solid #ddd; border-radius: 6px; cursor: grab; padding: 9px; }
+    .drag-item { background: var(--surface-strong); border: 1px solid var(--line); border-radius: 8px; cursor: grab; padding: 10px; }
     .drag-item.dragging { opacity: .45; }
-    .drag-item.drag-over { border-color: #2276d2; }
-    .drag-help { color: #666; font-size: 13px; margin: 6px 0; }
-    .storage-summary { align-items: baseline; background: #f5f8fc; border: 1px solid #d6e3f5; border-radius: 10px; display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0; padding: 12px 14px; }
-    .storage-summary small { color: #596579; flex-basis: 100%; }
-    h2, h3 { margin-bottom: 8px; }
-    code { background: #f3f3f3; padding: 2px 5px; border-radius: 4px; }
+    .drag-item.drag-over { border-color: var(--brand); }
+    .drag-help { color: var(--muted); font-size: 13px; margin: 6px 0; }
+    .move-item-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+    .move-item-choice { align-items: center; display: flex; gap: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); padding: 9px 10px; }
+    .move-item-choice input { flex: 0 0 auto; margin: 0; }
+    .manager-nav { display: flex; gap: 8px; margin: 18px 0 24px; overflow-x: auto; padding-bottom: 4px; }
+    .manager-nav a { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); padding: 7px 12px; font-size: 13px; font-weight: 700; text-decoration: none; }
+    .card h3:not(:first-child) { margin-top: 24px; }
+    hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
   </style>
 </head>
 <body>
-  <h1>Content Manager</h1>
-  <p>Signed in as <strong>${escapeHtml(params.userEmail)}</strong></p>
-  <p><a href="/">Home</a> | <form style="display:inline;" method="POST" action="/auth/logout-web"><button type="submit">Log out</button></form></p>
+  <main class="page-shell">
+  <header class="site-header">
+    <div>
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
+      <p class="eyebrow" style="margin-top:18px;">Catalog workspace</p>
+      <h1 style="margin-bottom:8px;">Content Manager</h1>
+      <p class="muted">Signed in as <strong>${escapeHtml(params.userEmail)}</strong></p>
+    </div>
+    <div class="header-actions">
+      <a class="button" href="/content/manage/audio-tracks">My Audio Tracks</a>
+      <a class="button button--secondary" href="/">Home</a>
+      <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+    </div>
+  </header>
   ${messageBlock}
   ${s3StorageBlock}
+  <nav class="manager-nav" aria-label="Content Manager sections">
+    <a href="#search">Search</a>
+    <a href="#my-content">My Content</a>
+    <a href="#composition">Composition</a>
+    <a href="#create">Create</a>
+    <a href="#quick-linking">Quick Linking</a>
+    <a href="#update-delete">Update / Delete</a>
+  </nav>
 
-  <div class="card">
+  <div class="card" id="search">
     <h2>Unified Search</h2>
     <form method="GET" action="/content/manage/search">
       <input type="text" name="q" value="${searchQuery}" placeholder="Search artist, album, track" required />
@@ -338,7 +359,7 @@ const renderManagePage = (params: {
     ${renderSectionList('Audio Tracks', audioTracks, (item) => `${escapeHtml(item.title ?? '')} (<code>${escapeHtml(String(item._id ?? ''))}</code>)`)}
   </div>
 
-  <h2>My Content</h2>
+  <div class="section-heading" id="my-content"><div><p class="eyebrow">Library</p><h2>My Content</h2></div></div>
   <div class="card">
     <h3>My Artists</h3>
     <div class="content-hierarchy">
@@ -369,17 +390,14 @@ const renderManagePage = (params: {
               const track = tracksById.get(trackId);
               if (!track) return renderMissingReference(trackId);
 
-              return renderReferencedItem(track, String(track.title ?? ''), 'audioTrack');
+              return `<label class="track-selection"><input type="checkbox" name="audioTrackIds" value="${escapeHtml(trackId)}" aria-label="Select ${escapeHtml(String(track.title ?? 'audio track'))}" />${renderReferencedItem(track, String(track.title ?? ''), 'audioTrack')}</label>`;
           });
+          const selectableTrackCount = linkedTrackIds.filter((trackId) => tracksById.has(trackId)).length;
 
-          return `<div class="hierarchy-item"><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked track${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}</div>`;
+          return `<form class="hierarchy-item" data-batch-track-delete method="POST" action="/content/manage/album/delete-audio-tracks"><input type="hidden" name="albumId" value="${escapeHtml(albumId)}" /><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked track${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}${selectableTrackCount > 0 ? '<div class="batch-track-actions"><button class="select-all-tracks button--secondary" type="button">Select all</button><button class="batch-delete-button" data-danger type="submit" disabled>Delete selected tracks</button></div>' : ''}</form>`;
       }).join('') : '<p class="empty-linked-content">No albums yet.</p>'}
     </div>
 
-    ${renderSectionList('My Audio Tracks', ownedAudioTracks, (item) => {
-            const id = escapeHtml(String(item._id ?? ''));
-            return `${escapeHtml(item.title ?? '')} (<code>${id}</code>) - <a href="/content/manage?uploadAudioTrackId=${id}">Use for upload</a>`;
-        })}
         ${renderSectionList('My Pages', ownedPages, (item) => {
                 const slug = escapeHtml(String(item.slug ?? ''));
                 const title = escapeHtml(String(item.title ?? ''));
@@ -408,7 +426,7 @@ const renderManagePage = (params: {
         </div>
   </div>
 
-    <h2>Composition</h2>
+    <div class="section-heading" id="composition"><div><p class="eyebrow">Presentation</p><h2>Composition</h2></div></div>
     <div class="grid">
         <div class="card">
             <h3>Save Page (Home/Library)</h3>
@@ -471,19 +489,19 @@ const renderManagePage = (params: {
         </div>
 
         <div class="card">
-            <h3>Move Item Between Carousels</h3>
-            <form method="POST" action="/content/manage/composition/carousel/move-item">
-                <select name="sourceCarouselId" required><option value="" disabled selected>Source carousel</option>${carouselOptions}</select>
-                <input name="fromIndex" placeholder="Source index" required />
-                <select name="targetCarouselId" required><option value="" disabled selected>Target carousel</option>${carouselOptions}</select>
-                <input name="toIndex" placeholder="Target index" required />
-                <button type="submit">Move Item</button>
+            <h3>Move Items Between Carousels</h3>
+            <form class="move-carousel-items" method="POST" action="/content/manage/composition/carousel/move-item">
+                <select class="move-source-carousel" name="sourceCarouselId" required><option value="" disabled selected>Select source carousel</option>${carouselOptions}</select>
+                <p class="drag-help">Select the items to move. They will keep their order and be added to the end of the destination carousel.</p>
+                <ul class="move-item-list" aria-live="polite"><li class="empty-linked-content">Choose a source carousel to see its items.</li></ul>
+                <select class="move-target-carousel" name="targetCarouselId" required><option value="" disabled selected>Select destination carousel</option>${carouselOptions}</select>
+                <button class="move-selected-items" type="submit" disabled>Move Selected Items</button>
             </form>
 
             <h3>Delete Carousel</h3>
             <form method="POST" action="/content/manage/composition/carousel/delete">
                 <input name="carouselId" placeholder="Carousel ID" required />
-                <button type="submit">Delete Carousel</button>
+                <button data-danger type="submit">Delete Carousel</button>
             </form>
             <p>Deleting a carousel will automatically detach it from all pages.</p>
         </div>
@@ -564,9 +582,62 @@ const renderManagePage = (params: {
           target.classList.remove('drag-over');
         });
       });
+
+      document.querySelectorAll('.move-carousel-items').forEach((form) => {
+        const sourceSelector = form.querySelector('.move-source-carousel');
+        const targetSelector = form.querySelector('.move-target-carousel');
+        const itemList = form.querySelector('.move-item-list');
+        const submitButton = form.querySelector('.move-selected-items');
+
+        const updateButton = () => {
+          submitButton.disabled = !sourceSelector.value
+            || !targetSelector.value
+            || sourceSelector.value === targetSelector.value
+            || itemList.querySelectorAll('input[name="fromIndexes"]:checked').length === 0;
+        };
+
+        const renderMoveChoices = () => {
+          itemList.replaceChildren();
+          [...targetSelector.options].forEach((option) => {
+            option.disabled = Boolean(option.value) && option.value === sourceSelector.value;
+          });
+          if (targetSelector.value === sourceSelector.value) targetSelector.value = '';
+
+          const source = compositionData.carousels.find((carousel) => carousel.id === sourceSelector.value);
+          const items = source ? [...source.items].sort((a, b) => a.order - b.order) : [];
+          if (items.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'empty-linked-content';
+            empty.textContent = source ? 'This carousel has no items.' : 'Choose a source carousel to see its items.';
+            itemList.append(empty);
+            updateButton();
+            return;
+          }
+
+          items.forEach((item, index) => {
+            const listItem = document.createElement('li');
+            const label = document.createElement('label');
+            label.className = 'move-item-choice';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.name = 'fromIndexes';
+            checkbox.value = String(index);
+            const text = document.createElement('span');
+            text.textContent = labelForCarouselItem(item);
+            label.append(checkbox, text);
+            listItem.append(label);
+            itemList.append(listItem);
+          });
+          updateButton();
+        };
+
+        sourceSelector.addEventListener('change', renderMoveChoices);
+        targetSelector.addEventListener('change', updateButton);
+        itemList.addEventListener('change', updateButton);
+      });
     </script>
 
-  <h2>Create</h2>
+  <div class="section-heading" id="create"><div><p class="eyebrow">New records</p><h2>Create</h2></div></div>
   <div class="grid">
     <div class="card">
       <h3>Create Artist</h3>
@@ -593,8 +664,8 @@ const renderManagePage = (params: {
     </div>
 
     <div class="card">
-      <h3>Create Audio Track</h3>
-      <form method="POST" action="/content/manage/audioTrack/create">
+      <h3>Create and Upload Audio Track</h3>
+      <form method="POST" action="/content/manage/audioTrack/create" enctype="multipart/form-data">
         <input name="title" placeholder="Title" required />
         <input name="artistIds" placeholder="Artist IDs (comma separated)" />
         <input name="genres" placeholder="Genres (comma separated)" />
@@ -604,12 +675,13 @@ const renderManagePage = (params: {
         <input name="formatType" placeholder="Format type (e.g. MP3)" />
         <input name="formatBitrate" placeholder="Bitrate (e.g. 320)" />
         <input name="coverArtUrl" placeholder="Cover Art URL" />
-        <button type="submit">Create Audio Track</button>
+        <input type="file" name="audioFile" accept="audio/*" required />
+        <button type="submit">Create and Upload Audio Track</button>
       </form>
     </div>
   </div>
 
-    <h2>Quick Linking</h2>
+    <div class="section-heading" id="quick-linking"><div><p class="eyebrow">Relationships</p><h2>Quick Linking</h2></div></div>
     <div class="grid">
         <div class="card">
             <h3>Link Track to Album</h3>
@@ -642,7 +714,7 @@ const renderManagePage = (params: {
         </div>
     </div>
 
-    <h2 id="update-delete">Update / Delete</h2>
+    <div class="section-heading" id="update-delete"><div><p class="eyebrow">Maintenance</p><h2>Update / Delete</h2></div></div>
   <div class="grid">
         <div class="card" id="artist-update-card">
       <h3>Artist</h3>
@@ -662,7 +734,7 @@ const renderManagePage = (params: {
       </form>
       <form method="POST" action="/content/manage/artist/delete">
                 <input name="artistId" value="${prefillArtistId}" placeholder="Artist ID" required />
-        <button type="submit">Delete Artist</button>
+        <button data-danger type="submit">Delete Artist</button>
       </form>
     </div>
 
@@ -683,7 +755,7 @@ const renderManagePage = (params: {
       </form>
       <form method="POST" action="/content/manage/album/delete">
                 <input name="albumId" value="${prefillAlbumId}" placeholder="Album ID" required />
-        <button type="submit">Delete Album</button>
+        <button data-danger type="submit">Delete Album</button>
       </form>
     </div>
 
@@ -709,7 +781,7 @@ const renderManagePage = (params: {
       </form>
       <form method="POST" action="/content/manage/audioTrack/delete">
                 <input name="audioTrackId" value="${prefillAudioTrackId}" placeholder="Audio Track ID" required />
-        <button type="submit">Delete Audio Track</button>
+        <button data-danger type="submit">Delete Audio Track</button>
       </form>
             <hr />
             <h3>Bulk Upload Audio Files</h3>
@@ -789,6 +861,73 @@ const renderManagePage = (params: {
             </form>
     </div>
   </div>
+  <script>
+    (() => {
+      const labels = {
+        slug: 'Page',
+        carouselId: 'Carousel',
+        sourceCarouselId: 'Source carousel',
+        targetCarouselId: 'Target carousel',
+        contentType: 'Content type',
+        albumId: 'Album',
+        birthDate: 'Birth date',
+        releaseDate: 'Release date',
+        audioFiles: 'Audio files',
+        audioFile: 'Audio file'
+      };
+
+      document.querySelectorAll('form input, form select, form textarea').forEach((field, index) => {
+        if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button') return;
+
+        const labelText = field.dataset.label || field.getAttribute('placeholder') || labels[field.name];
+        if (!labelText) return;
+
+        const id = field.id || 'content-field-' + index;
+        field.id = id;
+        const label = document.createElement('label');
+        label.className = 'field-label';
+        label.htmlFor = id;
+        label.textContent = labelText;
+        field.before(label);
+      });
+
+      document.querySelectorAll('[data-batch-track-delete]').forEach((form) => {
+        const button = form.querySelector('.batch-delete-button');
+        const selectAllButton = form.querySelector('.select-all-tracks');
+        const trackCheckboxes = [...form.querySelectorAll('input[name="audioTrackIds"]')];
+        const selectedTracks = () => form.querySelectorAll('input[name="audioTrackIds"]:checked');
+        const updateBatchControls = () => {
+          button.disabled = selectedTracks().length === 0;
+          selectAllButton.textContent = selectedTracks().length === trackCheckboxes.length ? 'Clear selection' : 'Select all';
+        };
+        form.addEventListener('change', updateBatchControls);
+        selectAllButton.addEventListener('click', () => {
+          const selectAll = selectedTracks().length !== trackCheckboxes.length;
+          trackCheckboxes.forEach((checkbox) => {
+            checkbox.checked = selectAll;
+          });
+          updateBatchControls();
+        });
+        form.addEventListener('submit', (event) => {
+          const count = selectedTracks().length;
+          if (count === 0 || !window.confirm('Delete ' + count + ' selected audio track' + (count === 1 ? '' : 's') + '? This also removes their uploaded files.')) {
+            event.preventDefault();
+          }
+        });
+      });
+
+      document.querySelectorAll('button[data-danger]').forEach((button) => {
+        const form = button.closest('form');
+        if (!form || form.matches('[data-batch-track-delete]')) return;
+        form.addEventListener('submit', (event) => {
+          if (!window.confirm('Delete this item? This action cannot be undone.')) {
+            event.preventDefault();
+          }
+        });
+      });
+    })();
+  </script>
+  </main>
 </body>
 </html>`;
 };
@@ -799,6 +938,105 @@ const getOwnerId = (doc: any) => {
 
 const redirectWithMessage = (res: Response, message: string) => {
     res.redirect(`/content/manage?message=${encodeURIComponent(message)}`);
+};
+
+const renderAudioTracksPage = (userEmail: string, tracks: any[]) => {
+    const trackItems = tracks.length > 0
+        ? tracks.map((track) => {
+            const id = String(track._id ?? '');
+            const editUrl = `/content/manage?prefillType=audioTrack&prefillId=${encodeURIComponent(id)}#audio-track-update-card`;
+            const albumId = String(track.albumId ?? '').trim();
+            const originalFileName = String(track.originalFileName ?? '').trim();
+            const title = String(track.title ?? 'Untitled Track');
+            return `<li data-track-item data-search="${escapeHtml(`${title} ${id} ${albumId} ${originalFileName}`.toLowerCase())}">
+              <div class="track-title-row"><strong>${escapeHtml(title)}</strong>${albumId ? '<span class="pill">In album</span>' : '<span class="pill pill--muted">Unassigned</span>'}</div>
+              <div class="item-meta">
+                <span>Track ID: <code>${escapeHtml(id)}</code></span>
+                <span>${albumId ? `Album ID: <code>${escapeHtml(albumId)}</code>` : 'No album assigned'}</span>
+                ${originalFileName ? `<span>File: ${escapeHtml(originalFileName)}</span>` : ''}
+              </div>
+              <div><a class="button button--secondary" href="${editUrl}">Edit track</a></div>
+            </li>`;
+        }).join('')
+        : '<li class="empty-state">No audio tracks yet. Create one from the Content Manager.</li>';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Audio Tracks - Archtree</title>
+  <link rel="stylesheet" href="/assets/archtree.css" />
+  <style>
+    .track-toolbar { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 18px; }
+    .track-title-row { align-items: center; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+    .pill--muted { color: #58635e; background: #e8ebe7; }
+    [data-track-item] { display: grid; gap: 10px; }
+    @media (max-width: 600px) { .track-toolbar { align-items: stretch; grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="page-shell">
+    <header class="site-header">
+      <div>
+        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
+        <p class="eyebrow" style="margin-top:18px;">Audio library</p>
+        <h1 style="margin-bottom:8px;">My Audio Tracks</h1>
+        <p class="muted">Signed in as <strong>${escapeHtml(userEmail)}</strong> · ${tracks.length} track${tracks.length === 1 ? '' : 's'}</p>
+      </div>
+      <div class="header-actions">
+        <a class="button" href="/content/manage#create">Create and upload</a>
+        <a class="button button--secondary" href="/content/manage">Content Manager</a>
+        <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+      </div>
+    </header>
+    <section class="card card--raised">
+      <div class="track-toolbar">
+        <div>
+          <label for="track-filter">Filter tracks</label>
+          <input id="track-filter" type="search" placeholder="Search title, ID, album, or filename" />
+        </div>
+        <span class="muted" id="track-filter-count">${tracks.length} shown</span>
+      </div>
+      <ul class="item-list" id="track-list">${trackItems}</ul>
+      <div class="empty-state" id="track-filter-empty" hidden>No tracks match this search.</div>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const filter = document.getElementById('track-filter');
+      const items = [...document.querySelectorAll('[data-track-item]')];
+      const count = document.getElementById('track-filter-count');
+      const empty = document.getElementById('track-filter-empty');
+      filter.addEventListener('input', () => {
+        const query = filter.value.trim().toLowerCase();
+        let visible = 0;
+        items.forEach((item) => {
+          const matches = !query || item.dataset.search.includes(query);
+          item.hidden = !matches;
+          if (matches) visible += 1;
+        });
+        count.textContent = visible + ' shown';
+        empty.hidden = visible !== 0 || items.length === 0;
+      });
+    })();
+  </script>
+</body>
+</html>`;
+};
+
+export const renderAudioTracksPageForWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage%2Faudio-tracks');
+        }
+
+        const tracks = await AudioTrack.fetchByCreator(authReq.auth.userId);
+        return res.status(200).send(renderAudioTracksPage(authReq.auth.email, tracks));
+    } catch (error) {
+        return next(error);
+    }
 };
 
 export const renderManagePageForWeb = async (req: Request, res: Response, next: NextFunction) => {
@@ -1098,28 +1336,69 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
+        const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
+        if (!uploadFile) {
+            return redirectWithMessage(res, 'An audio file is required to create an audio track.');
+        }
+
+        const albumId = String(req.body.albumId ?? '').trim();
+        let album: any | null = null;
+        if (albumId) {
+            album = await Album.findById(albumId);
+            if (!album || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
+                return redirectWithMessage(res, 'Selected album was not found or cannot be modified.');
+            }
+        }
+
         const formatType = String(req.body.formatType ?? 'MP3');
         const bitrateRaw = String(req.body.formatBitrate ?? '').trim();
         const bitrate = bitrateRaw ? Number(bitrateRaw) : undefined;
+        const audioTrackObjectId = new ObjectId();
+        const audioTrackId = audioTrackObjectId.toHexString();
 
         const track = new AudioTrack(
             String(req.body.title ?? ''),
             parseCsv(String(req.body.artistIds ?? '')),
             parseCsv(String(req.body.genres ?? '')),
-            String(req.body.albumId ?? ''),
+            albumId,
             parseDateInput(String(req.body.releaseDate ?? '')),
             String(req.body.duration ?? ''),
             new AudioFormat(formatType, Number.isNaN(bitrate as number) ? undefined : bitrate),
             String(req.body.coverArtUrl ?? ''),
-            authReq.auth.userId
+            authReq.auth.userId,
+            uploadFile.originalname,
+            uploadFile.mimetype || 'audio/mpeg',
+            audioTrackObjectId
         );
 
-        const createResult: any = await track.save();
-        const newTrackId = String(createResult?.insertedId ?? '');
-        const message = encodeURIComponent('Audio track created successfully. You can upload the file now.');
-        const uploadQuery = newTrackId ? `&uploadAudioTrackId=${encodeURIComponent(newTrackId)}` : '';
+        await getS3().send(new PutObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: audioTrackId,
+            Body: uploadFile.buffer,
+            ContentType: uploadFile.mimetype || 'audio/mpeg'
+        }));
 
-        return res.redirect(`/content/manage?message=${message}${uploadQuery}`);
+        try {
+            await track.save();
+        } catch (databaseError) {
+            await getS3().send(new DeleteObjectCommand({
+                Bucket: process.env.S3_BUCKET_NAME!,
+                Key: audioTrackId
+            })).catch((cleanupError) => {
+                console.log('Unable to clean up S3 file after track creation failed:', cleanupError);
+            });
+            throw databaseError;
+        }
+
+        if (album) {
+            const albumTrackIds = uniqueStrings([
+                ...(Array.isArray(album.audioTrackIds) ? album.audioTrackIds.map(String) : []),
+                audioTrackId
+            ]);
+            await Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] });
+        }
+
+        return redirectWithMessage(res, 'Audio track and file created successfully.');
     } catch (error) {
         return next(error);
     }
@@ -1186,15 +1465,71 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
         await AudioTrack.deleteById(audioTrackId);
 
         try {
-            await getS3().deleteObject({
+            await getS3().send(new DeleteObjectCommand({
                 Bucket: process.env.S3_BUCKET_NAME!,
                 Key: audioTrackId
-            }).promise();
+            }));
             return redirectWithMessage(res, 'Audio track deleted successfully.');
         } catch (s3Error) {
             console.log('S3 cleanup failed for audioTrackId:', audioTrackId, s3Error);
             return redirectWithMessage(res, 'Audio track deleted, but S3 file cleanup failed.');
         }
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        }
+
+        const albumId = String(req.body.albumId ?? '').trim();
+        const selectedTrackIds = uniqueStrings(
+            Array.isArray(req.body.audioTrackIds)
+                ? req.body.audioTrackIds.map(String)
+                : req.body.audioTrackIds ? [String(req.body.audioTrackIds)] : []
+        );
+        if (!albumId || selectedTrackIds.length === 0) {
+            return redirectWithMessage(res, 'Select at least one audio track to delete.');
+        }
+
+        const album = await Album.findById(albumId);
+        if (!album || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
+            return redirectWithMessage(res, 'Album not found or cannot be modified.');
+        }
+
+        const tracks = await Promise.all(selectedTrackIds.map((trackId) => AudioTrack.findById(trackId)));
+        const associatedTrackIds = new Set(uniqueStrings([
+            ...(Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds.map(String) : []),
+            ...tracks.filter(Boolean).filter((track: any) => String(track.albumId ?? '') === albumId).map(contentId)
+        ]));
+        if (tracks.some((track) => !track) || selectedTrackIds.some((trackId) => !associatedTrackIds.has(trackId))) {
+            return redirectWithMessage(res, 'One or more selected tracks do not belong to this album.');
+        }
+        if (tracks.some((track) => !ensureOwnerOrAdmin(authReq, getOwnerId(track)))) {
+            return redirectWithMessage(res, 'Forbidden: only creator or admin can delete every selected track.');
+        }
+
+        await Promise.all(selectedTrackIds.map((trackId) => AudioTrack.deleteById(trackId)));
+        const remainingTrackIds = uniqueStrings(
+            (Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []).map(String)
+        ).filter((trackId) => !selectedTrackIds.includes(trackId));
+        await Album.updateById(albumId, { audioTrackIds: remainingTrackIds as [string] });
+
+        const s3Results = await Promise.allSettled(selectedTrackIds.map((trackId) => getS3().send(new DeleteObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: trackId
+        }))));
+        const failedS3Deletes = s3Results.filter((result) => result.status === 'rejected').length;
+        if (failedS3Deletes > 0) {
+            console.log(`S3 cleanup failed for ${failedS3Deletes} deleted audio track(s).`, s3Results);
+            return redirectWithMessage(res, `${selectedTrackIds.length} audio track(s) deleted, but ${failedS3Deletes} uploaded file(s) could not be removed.`);
+        }
+
+        return redirectWithMessage(res, `${selectedTrackIds.length} audio track(s) deleted successfully.`);
     } catch (error) {
         return next(error);
     }
@@ -1222,12 +1557,12 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Missing audio file.');
         }
 
-        await getS3().upload({
+        await getS3().send(new PutObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: audioTrackId,
             Body: uploadFile.buffer,
             ContentType: uploadFile.mimetype || 'audio/mpeg'
-        }).promise();
+        }));
 
         await AudioTrack.updateById(audioTrackId, {
             originalFileName: uploadFile.originalname,
@@ -1289,6 +1624,8 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
             const embeddedGenres = Array.isArray(metadata?.common?.genre) ? metadata.common.genre.map(String) : [];
             const releaseYear = Number(metadata?.common?.year);
             const bitrate = Number(metadata?.format?.bitrate);
+            const audioTrackObjectId = new ObjectId();
+            const audioTrackId = audioTrackObjectId.toHexString();
             const track = new AudioTrack(
                 String(metadata?.common?.title ?? titleFromFileName(uploadFile.originalname) ?? 'Untitled Track'),
                 [] as unknown as [string],
@@ -1303,25 +1640,28 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                 '',
                 authReq.auth.userId,
                 uploadFile.originalname,
-                uploadFile.mimetype || 'audio/mpeg'
+                uploadFile.mimetype || 'audio/mpeg',
+                audioTrackObjectId
             );
 
-            let audioTrackId = '';
             try {
-                const createResult: any = await track.save();
-                audioTrackId = String(createResult.insertedId);
-                await getS3().upload({
+                await getS3().send(new PutObjectCommand({
                     Bucket: process.env.S3_BUCKET_NAME!,
                     Key: audioTrackId,
                     Body: uploadFile.buffer,
                     ContentType: uploadFile.mimetype || 'audio/mpeg'
-                }).promise();
+                }));
+                await track.save();
                 uploadedTrackIds.push(audioTrackId);
             } catch (uploadError) {
                 console.log(`Unable to upload ${uploadFile.originalname}:`, uploadError);
-                if (audioTrackId) {
-                    await AudioTrack.deleteById(audioTrackId);
-                }
+                await Promise.allSettled([
+                    AudioTrack.deleteById(audioTrackId),
+                    getS3().send(new DeleteObjectCommand({
+                        Bucket: process.env.S3_BUCKET_NAME!,
+                        Key: audioTrackId
+                    }))
+                ]);
                 failures.push(uploadFile.originalname);
             }
         }

@@ -13,11 +13,14 @@ import authRoutes from './routes/authRoutes';
 import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import videoRoutes from './routes/videoRoutes';
-import AWS from 'aws-sdk';
+import { S3Client } from '@aws-sdk/client-s3';
+import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddleware';
 
 const app: Application = express();
 
 console.log(`Service environment: ${process.env.NODE_ENV}`);
+
+app.use('/assets', express.static(path.join(__dirname, 'public')));
 
 // use body parser to parse request body in JSON format
 app.use(bodyParser.json());
@@ -59,9 +62,48 @@ app.use('/init-video', function (req, res) {
 // forward to /video router
 app.use('/video', videoRoutes);
 
+const escapeHtml = (value: string) => {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
 // home page
-app.get('/', (req, res, next) => {
-  res.sendFile(path.join(__dirname + '/index.html'));
+app.get('/', attachOptionalAuth, async (req, res, next) => {
+  try {
+    const auth = (req as AuthenticatedRequest).auth;
+    const template = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
+    const headerActions = auth
+      ? `<div class="header-actions">
+          <span class="muted">${escapeHtml(auth.email)}</span>
+          <a class="button" href="/content/manage">Content Manager</a>
+          <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+        </div>`
+      : `<div class="header-actions">
+          <a class="button button--secondary" href="/auth/login-web">Log in</a>
+          <a class="button" href="/auth/signup-web">Create account</a>
+        </div>`;
+    const heroActions = auth
+      ? `<div class="action-row">
+          <a class="button" href="/content/manage">Open Content Manager</a>
+          <a class="button button--secondary" href="/content/manage/audio-tracks">Browse my audio tracks</a>
+        </div>`
+      : `<div class="action-row">
+          <a class="button" href="/auth/signup-web">Create account</a>
+          <a class="button button--secondary" href="/auth/login-web">Log in</a>
+        </div>`;
+
+    return res.status(200).send(
+      template
+        .replace('{{HEADER_ACTIONS}}', headerActions)
+        .replace('{{HERO_ACTIONS}}', heroActions)
+    );
+  } catch (error) {
+    return next(error);
+  }
 });
 
 // health endpoint for load balancers and service monitoring
@@ -145,14 +187,11 @@ export const getDb = (): mongoDb.Db | null => {
 // the app should connect to the database as soon as it starts
 exports.mongoConnect = connectToDatabase();
 
-// Configure AWS SDK
-AWS.config.update({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+// AWS SDK v3 uses the standard credential provider chain by default, which
+// includes AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY when they are set.
+const s3 = new S3Client({
   region: process.env.AWS_REGION
 });
-
-const s3 = new AWS.S3();
 
 export const getS3 = () => {
   return s3;
