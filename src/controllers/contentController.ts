@@ -308,6 +308,7 @@ const renderManagePage = (params: {
     .linked-content { margin: 6px 0 0 18px; padding-left: 18px; }
     .empty-linked-content { color: #666; font-size: 14px; margin: 6px 0 0; }
     form { display: grid; gap: 8px; }
+    .field-label { color: #374151; font-size: 13px; font-weight: 600; margin-bottom: -4px; }
     input, select { padding: 8px; font-size: 14px; }
     button { padding: 8px 12px; cursor: pointer; }
     .drag-list { display: grid; gap: 6px; margin: 10px 0; padding: 0; list-style: none; }
@@ -790,6 +791,37 @@ const renderManagePage = (params: {
             </form>
     </div>
   </div>
+  <script>
+    (() => {
+      const labels = {
+        slug: 'Page',
+        carouselId: 'Carousel',
+        sourceCarouselId: 'Source carousel',
+        targetCarouselId: 'Target carousel',
+        contentType: 'Content type',
+        albumId: 'Album',
+        birthDate: 'Birth date',
+        releaseDate: 'Release date',
+        audioFiles: 'Audio files',
+        audioFile: 'Audio file'
+      };
+
+      document.querySelectorAll('form input, form select, form textarea').forEach((field, index) => {
+        if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button') return;
+
+        const labelText = field.dataset.label || field.getAttribute('placeholder') || labels[field.name];
+        if (!labelText) return;
+
+        const id = field.id || 'content-field-' + index;
+        field.id = id;
+        const label = document.createElement('label');
+        label.className = 'field-label';
+        label.htmlFor = id;
+        label.textContent = labelText;
+        field.before(label);
+      });
+    })();
+  </script>
 </body>
 </html>`;
 };
