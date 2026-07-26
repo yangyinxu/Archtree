@@ -11,6 +11,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import { ObjectId } from 'mongodb';
+import { normalizeUtf8Text } from '../utils/textEncoding';
 
 const parseJsonField = (value: unknown) => {
     if (typeof value !== 'string') return value;
@@ -58,9 +59,10 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     const coverArtUrl: string = req.body.coverArtUrl;
     const audioTrackObjectId = new ObjectId();
     const audioTrackId = audioTrackObjectId.toHexString();
+    const originalFileName = normalizeUtf8Text(uploadFile.originalname);
 
     const track = new AudioTrack(
-        title,
+        normalizeUtf8Text(title),
         artistIds,
         genres,
         albumId,
@@ -69,7 +71,7 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
         format,
         coverArtUrl,
         authReq.auth.userId,
-        uploadFile.originalname,
+        originalFileName,
         uploadFile.mimetype || 'audio/mpeg',
         audioTrackObjectId
     );
@@ -328,6 +330,10 @@ export const uploadAudioTrackFile = async (req: Request, res: Response, next: Ne
             Body: uploadFile.buffer,
             ContentType: uploadFile.mimetype || 'audio/mpeg'
         }));
+        await AudioTrack.updateById(audioTrackId, {
+            originalFileName: normalizeUtf8Text(uploadFile.originalname),
+            contentType: uploadFile.mimetype || 'audio/mpeg'
+        });
 
         return res.status(200).json({
             message: 'Audio file uploaded successfully.',

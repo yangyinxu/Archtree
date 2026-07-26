@@ -1,8 +1,15 @@
 import { getDb } from '../app';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from './simpleDate';
+import { normalizeUtf8Text } from '../utils/textEncoding';
 
 const collectionId = 'audioTracks';
+const normalizeAudioTrackText = (track: any) => {
+    if (!track) return track;
+    if (typeof track.title === 'string') track.title = normalizeUtf8Text(track.title);
+    if (typeof track.originalFileName === 'string') track.originalFileName = normalizeUtf8Text(track.originalFileName);
+    return track;
+};
 
 export class AudioTrack {
     _id?: ObjectId;
@@ -67,7 +74,8 @@ export class AudioTrack {
         return db!
             .collection(collectionId)
             .find({ _id: audioTrackObjectId })
-            .next();
+            .next()
+            .then(normalizeAudioTrackText);
     }
 
     // fetch all audio tracks from the database
@@ -80,7 +88,7 @@ export class AudioTrack {
             .find()
             .toArray()
             .then((audioTracks: any) => {
-                return audioTracks;
+                return audioTracks.map(normalizeAudioTrackText);
             })
             .catch((error: any) => {
                 console.log(error);
@@ -122,7 +130,8 @@ export class AudioTrack {
             .collection(collectionId)
             .find({ title: { $regex: query, $options: 'i' } })
             .limit(limit)
-            .toArray();
+            .toArray()
+            .then((audioTracks) => audioTracks.map(normalizeAudioTrackText));
     }
 
     static fetchByCreator(createdBy: string, limit: number = 50) {
@@ -132,7 +141,8 @@ export class AudioTrack {
             .collection(collectionId)
             .find({ createdBy })
             .limit(limit)
-            .toArray();
+            .toArray()
+            .then((audioTracks) => audioTracks.map(normalizeAudioTrackText));
     }
 }
 
