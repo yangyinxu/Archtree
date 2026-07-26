@@ -30,6 +30,7 @@ Required variables:
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region
 - `S3_BUCKET_NAME`: target S3 bucket for audio uploads
+- `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
 
 Security:
@@ -74,9 +75,11 @@ Web content management:
 - `GET /content/manage/search`
 - Create/update/delete forms for artists, albums, and audio tracks
 - Audio file upload form for a selected track
+- S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 
 Session behavior:
-- Web login sets an HttpOnly `session_token` cookie.
+- Browser and API login tokens last 30 days by default. Set `SESSION_DAYS` to a whole number from 1 to 90 to override it. `WEB_SESSION_DAYS` remains supported as a backwards-compatible fallback.
+- Web login sets an HttpOnly `session_token` cookie with the same lifetime.
 - Protected web pages redirect to login if unauthenticated.
 
 ## Audio Upload and Delete Lifecycle
@@ -100,5 +103,5 @@ Delete:
 - Buildspec path errors (`buildspect.yml` not found): check AWS buildspec override settings in CodeBuild/CodePipeline and set path to `buildspec.yml`.
 - S3 upload/delete errors: verify IAM permissions and required S3 environment variables.
 - `413 Request Entity Too Large`: increase upload limits in both places:
-   - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`)
-   - App multer limit via `MAX_AUDIO_UPLOAD_MB`
+  - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`, currently 1 GB total per request)
+  - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 200 MB)
