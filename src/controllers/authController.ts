@@ -12,11 +12,21 @@ interface ErrorWithStatusCode extends Error {
   data?: any;
 }
 
-const oneHourMs = 60 * 60 * 1000;
+const oneDayMs = 24 * 60 * 60 * 1000;
+
+const getSessionDurationMs = () => {
+  const configuredDays = Number(process.env.SESSION_DAYS ?? process.env.WEB_SESSION_DAYS ?? 30);
+  const safeDays = Number.isFinite(configuredDays)
+    ? Math.max(1, Math.min(90, Math.floor(configuredDays)))
+    : 30;
+
+  return safeDays * oneDayMs;
+};
 
 const setSessionCookie = (res: Response, token: string) => {
-  const expiresAt = new Date(Date.now() + oneHourMs).toUTCString();
-  res.setHeader('Set-Cookie', `session_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt}`);
+  const maxAgeSeconds = Math.floor(getSessionDurationMs() / 1000);
+  const expiresAt = new Date(Date.now() + getSessionDurationMs()).toUTCString();
+  res.setHeader('Set-Cookie', `session_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}; Expires=${expiresAt}`);
 };
 
 const clearSessionCookie = (res: Response) => {
@@ -187,7 +197,7 @@ const authenticateUser = async (identifier: string, password: string) => {
     },
     getJwtSecret(),
     {
-      expiresIn: '1h'
+      expiresIn: Math.floor(getSessionDurationMs() / 1000)
     }
   );
 

@@ -76,7 +76,8 @@ Web content management:
 - Audio file upload form for a selected track
 
 Session behavior:
-- Web login sets an HttpOnly `session_token` cookie.
+- Browser and API login tokens last 30 days by default. Set `SESSION_DAYS` to a whole number from 1 to 90 to override it. `WEB_SESSION_DAYS` remains supported as a backwards-compatible fallback.
+- Web login sets an HttpOnly `session_token` cookie with the same lifetime.
 - Protected web pages redirect to login if unauthenticated.
 
 ## Audio Upload and Delete Lifecycle
