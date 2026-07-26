@@ -10,24 +10,55 @@ import {
     PutObjectCommand
 } from '@aws-sdk/client-s3';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { ObjectId } from 'mongodb';
+
+const parseJsonField = (value: unknown) => {
+    if (typeof value !== 'string') return value;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return value;
+    }
+};
+
+const parseStringArray = (value: unknown) => {
+    const parsed = parseJsonField(value);
+    if (Array.isArray(parsed)) return parsed.map(String) as [string];
+    if (typeof parsed === 'string') {
+        return parsed.split(',').map((item) => item.trim()).filter(Boolean) as [string];
+    }
+    return [] as unknown as [string];
+};
 
 // Create a new audio track via the model and save it to the db
-export const postAudioTrack = (req: Request, res: Response, next: NextFunction) => {
+export const postAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const title: string = req.body.title;
-    const artistIds: [string] = req.body.artistIds;
-    const genres: [string] = req.body.genres;
-    const albumId: string = req.body.albumId;
-    const releaseDate: SimpleDate = SimpleDate.fromJson(req.body.releaseDate);
-    const duration: string = req.body.duration;
-    const format: AudioFormat = AudioFormat.fromJson(req.body.format);
-    const coverArtUrl: string = req.body.coverArtUrl;
+    const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
+    if (!uploadFile) {
+        return res.status(400).json({ message: 'An audio file is required. Use multipart form field: audioFile.' });
+    }
 
-    // Create a new audio track
+    const title: string = req.body.title;
+    const artistIds = parseStringArray(req.body.artistIds);
+    const genres = parseStringArray(req.body.genres);
+    const albumId: string = req.body.albumId;
+    const releaseDateValue = parseJsonField(req.body.releaseDate);
+    const releaseDate = releaseDateValue && typeof releaseDateValue === 'object'
+        ? SimpleDate.fromJson(releaseDateValue)
+        : new SimpleDate();
+    const duration: string = req.body.duration;
+    const formatValue = parseJsonField(req.body.format);
+    const format = formatValue && typeof formatValue === 'object'
+        ? AudioFormat.fromJson(formatValue)
+        : new AudioFormat(uploadFile.mimetype.replace(/^audio\//i, '').toUpperCase() || 'AUDIO');
+    const coverArtUrl: string = req.body.coverArtUrl;
+    const audioTrackObjectId = new ObjectId();
+    const audioTrackId = audioTrackObjectId.toHexString();
+
     const track = new AudioTrack(
         title,
         artistIds,
@@ -37,26 +68,39 @@ export const postAudioTrack = (req: Request, res: Response, next: NextFunction) 
         duration,
         format,
         coverArtUrl,
-        authReq.auth.userId
+        authReq.auth.userId,
+        uploadFile.originalname,
+        uploadFile.mimetype || 'audio/mpeg',
+        audioTrackObjectId
     );
 
-    // Save the audio track to the db
-    // TODO: Add the audioTrackId to the album and artist
-    // TODO: Remove the audioTrackId from the album and artist if the audio track is deleted
-
-    track.save()
-        .then((result: any) => {
-            console.log(result);
-            res.status(201).json({
-                message: `Audio Track ${title} Added Successfully`,
-                audioTrack: result
+    try {
+        await getS3().send(new PutObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: audioTrackId,
+            Body: uploadFile.buffer,
+            ContentType: uploadFile.mimetype || 'audio/mpeg'
+        }));
+        try {
+            await track.save();
+        } catch (databaseError) {
+            await getS3().send(new DeleteObjectCommand({
+                Bucket: process.env.S3_BUCKET_NAME!,
+                Key: audioTrackId
+            })).catch((cleanupError) => {
+                console.log('Unable to clean up S3 file after track creation failed:', cleanupError);
             });
-        })
-        .catch((err: any) => {
-            console.log(err);
-            res.status(500).json({ message: 'Failed to create audio track.' });
-        });
+            throw databaseError;
+        }
 
+        return res.status(201).json({
+            message: `Audio Track ${title} Added Successfully`,
+            audioTrackId
+        });
+    } catch (error) {
+        console.log(error);
+        return res.status(500).json({ message: 'Failed to create and upload audio track.' });
+    }
 };
 
 export const updateAudioTrack = async (req: Request, res: Response, next: NextFunction) => {

@@ -72,9 +72,11 @@ Web auth endpoints:
 Web content management:
 
 - `GET /content/manage`
+- `GET /content/manage/audio-tracks`
 - `GET /content/manage/search`
 - Create/update/delete forms for artists, albums, and audio tracks
-- Audio file upload form for a selected track
+- Single and bulk audio-track creation require audio files and upload them to S3 before saving track records
+- Existing tracks support replacing their uploaded audio file
 - S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 
 Session behavior:
@@ -86,9 +88,11 @@ Session behavior:
 
 Upload:
 
+- API creation: `POST /content/audioTrack` as multipart form data with required `audioFile`
 - API: `POST /content/audioTrack/:audioTrackId/upload`
 - Form field for file: `audioFile`
 - Authorization required; owner/admin enforced
+- New track records are saved only after their S3 upload succeeds; failed database inserts trigger S3 cleanup
 
 Delete:
 

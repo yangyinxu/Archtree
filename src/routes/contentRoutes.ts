@@ -18,7 +18,7 @@ const upload = multer({
 
 // ----------------------------
 // Post data of an audio track
-router.post('/audioTrack', requireAuth, audioTrackController.postAudioTrack);
+router.post('/audioTrack', requireAuth, upload.single('audioFile'), audioTrackController.postAudioTrack);
 
 // Update an audio track by id
 router.put('/audioTrack/:audioTrackId', requireAuth, audioTrackController.updateAudioTrack);
@@ -46,6 +46,7 @@ router.get('/audioTracks', audioTrackController.getAudioTracks);
 router.get('/search', contentController.searchContent);
 
 router.get('/manage', requireAuthForWeb, contentController.renderManagePageForWeb);
+router.get('/manage/audio-tracks', requireAuthForWeb, contentController.renderAudioTracksPageForWeb);
 router.get('/manage/search', requireAuthForWeb, contentController.searchContentWeb);
 
 router.post('/manage/artist/create', requireAuthForWeb, contentController.createArtistWeb);
@@ -56,7 +57,7 @@ router.post('/manage/album/create', requireAuthForWeb, contentController.createA
 router.post('/manage/album/update', requireAuthForWeb, contentController.updateAlbumWeb);
 router.post('/manage/album/delete', requireAuthForWeb, contentController.deleteAlbumWeb);
 
-router.post('/manage/audioTrack/create', requireAuthForWeb, contentController.createAudioTrackWeb);
+router.post('/manage/audioTrack/create', requireAuthForWeb, upload.single('audioFile'), contentController.createAudioTrackWeb);
 router.post('/manage/audioTrack/update', requireAuthForWeb, contentController.updateAudioTrackWeb);
 router.post('/manage/audioTrack/delete', requireAuthForWeb, contentController.deleteAudioTrackWeb);
 router.post('/manage/album/delete-audio-tracks', requireAuthForWeb, contentController.deleteAlbumAudioTracksWeb);

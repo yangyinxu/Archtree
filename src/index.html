@@ -1,26 +1,51 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-	<title>Archtree API</title>
-	<style>
-        body {
-            margin: 40px auto;
-            max-width: 650px;
-        }
-    </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Archtree</title>
+    <link rel="stylesheet" href="/assets/archtree.css" />
 </head>
 <body>
-	<h1>Archtree API v0.0.3</h1>
-	<p>Thanks for visiting the home page.</p>
-    <p><a href="/auth/signup-web">Create account (web signup)</a></p>
-    <p><a href="/auth/login-web">Log in (web test)</a></p>
-    <!--
-        <video id="videoPlayer" width="650" controls muted="muted" autoplay>
-            <source src="/video" type="video/mp4" />
-        </video>
-    -->
-        <ul>
-            <li><a href="/content/manage">Manage contents (web)</a></li>
-        </ul>
+    <main class="page-shell">
+        <header class="site-header">
+            <a class="brand" href="/">
+                <span class="brand-mark" aria-hidden="true">A</span>
+                <span>Archtree</span>
+            </a>
+            {{HEADER_ACTIONS}}
+        </header>
+
+        <section class="hero">
+            <p class="eyebrow">Music catalog workspace</p>
+            <h1>Shape your catalog.<br />Keep every release connected.</h1>
+            <p class="lede">Archtree brings artists, albums, audio tracks, pages, and carousels into one focused publishing workspace.</p>
+            {{HERO_ACTIONS}}
+        </section>
+
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Workspace</p>
+                <h2>Everything has a place</h2>
+            </div>
+        </div>
+        <section class="grid" aria-label="Archtree capabilities">
+            <article class="card">
+                <span class="pill">Catalog</span>
+                <h3>Connected music metadata</h3>
+                <p class="muted">Organize artists, albums, tracks, artwork, credits, and release details.</p>
+            </article>
+            <article class="card">
+                <span class="pill">Audio</span>
+                <h3>File-backed tracks</h3>
+                <p class="muted">Create tracks through S3-backed uploads and keep original filenames available.</p>
+            </article>
+            <article class="card">
+                <span class="pill">Publishing</span>
+                <h3>Composable pages</h3>
+                <p class="muted">Build home and library experiences with reusable, reorderable carousels.</p>
+            </article>
+        </section>
+    </main>
 </body>
 </html>

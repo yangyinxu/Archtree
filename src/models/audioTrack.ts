@@ -5,6 +5,7 @@ import { SimpleDate } from './simpleDate';
 const collectionId = 'audioTracks';
 
 export class AudioTrack {
+    _id?: ObjectId;
     title: string;
     artistIds: [string];
     genres: [string];
@@ -28,8 +29,10 @@ export class AudioTrack {
         coverArtUrl: string,
         createdBy: string,
         originalFileName?: string,
-        contentType?: string
+        contentType?: string,
+        id?: ObjectId
     ) {
+        if (id) this._id = id;
         this.title = title;
         this.artistIds = artistIds;
         this.genres = genres;
