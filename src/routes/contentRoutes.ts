@@ -59,6 +59,7 @@ router.post('/manage/album/delete', requireAuthForWeb, contentController.deleteA
 router.post('/manage/audioTrack/create', requireAuthForWeb, contentController.createAudioTrackWeb);
 router.post('/manage/audioTrack/update', requireAuthForWeb, contentController.updateAudioTrackWeb);
 router.post('/manage/audioTrack/delete', requireAuthForWeb, contentController.deleteAudioTrackWeb);
+router.post('/manage/album/delete-audio-tracks', requireAuthForWeb, contentController.deleteAlbumAudioTracksWeb);
 router.post('/manage/audioTrack/upload', requireAuthForWeb, upload.single('audioFile'), contentController.uploadAudioTrackWeb);
 router.post('/manage/audioTrack/bulk-upload', requireAuthForWeb, upload.array('audioFiles', 20), contentController.bulkUploadAudioTracksWeb);
 router.post('/manage/link/track-album', requireAuthForWeb, contentController.linkTrackToAlbumWeb);

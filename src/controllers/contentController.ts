@@ -70,7 +70,6 @@ const uniqueStrings = (values: string[]) => {
 const titleFromFileName = (fileName: string) => {
     return fileName
         .replace(/\.[^.]+$/, '')
-        .replace(/[_-]+/g, ' ')
         .trim();
 };
 
@@ -306,6 +305,9 @@ const renderManagePage = (params: {
     .hierarchy-item:last-child { border-bottom: 0; padding-bottom: 0; }
     .hierarchy-item > strong { display: block; }
     .linked-content { margin: 6px 0 0 18px; padding-left: 18px; }
+    .track-selection { align-items: center; display: flex; gap: 8px; margin: 6px 0 0 18px; padding-left: 18px; }
+    .track-selection input { margin: 0; }
+    .batch-track-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
     .empty-linked-content { color: #666; font-size: 14px; margin: 6px 0 0; }
     form { display: grid; gap: 8px; }
     .field-label { color: #374151; font-size: 13px; font-weight: 600; margin-bottom: -4px; }
@@ -371,10 +373,11 @@ const renderManagePage = (params: {
               const track = tracksById.get(trackId);
               if (!track) return renderMissingReference(trackId);
 
-              return renderReferencedItem(track, String(track.title ?? ''), 'audioTrack');
+              return `<label class="track-selection"><input type="checkbox" name="audioTrackIds" value="${escapeHtml(trackId)}" aria-label="Select ${escapeHtml(String(track.title ?? 'audio track'))}" />${renderReferencedItem(track, String(track.title ?? ''), 'audioTrack')}</label>`;
           });
+          const selectableTrackCount = linkedTrackIds.filter((trackId) => tracksById.has(trackId)).length;
 
-          return `<div class="hierarchy-item"><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked track${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}</div>`;
+          return `<form class="hierarchy-item" data-batch-track-delete method="POST" action="/content/manage/album/delete-audio-tracks"><input type="hidden" name="albumId" value="${escapeHtml(albumId)}" /><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked track${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}${selectableTrackCount > 0 ? '<div class="batch-track-actions"><button class="select-all-tracks" type="button">Select all</button><button class="batch-delete-button" type="submit" disabled>Delete selected tracks</button></div>' : ''}</form>`;
       }).join('') : '<p class="empty-linked-content">No albums yet.</p>'}
     </div>
 
@@ -820,6 +823,31 @@ const renderManagePage = (params: {
         label.textContent = labelText;
         field.before(label);
       });
+
+      document.querySelectorAll('[data-batch-track-delete]').forEach((form) => {
+        const button = form.querySelector('.batch-delete-button');
+        const selectAllButton = form.querySelector('.select-all-tracks');
+        const trackCheckboxes = [...form.querySelectorAll('input[name="audioTrackIds"]')];
+        const selectedTracks = () => form.querySelectorAll('input[name="audioTrackIds"]:checked');
+        const updateBatchControls = () => {
+          button.disabled = selectedTracks().length === 0;
+          selectAllButton.textContent = selectedTracks().length === trackCheckboxes.length ? 'Clear selection' : 'Select all';
+        };
+        form.addEventListener('change', updateBatchControls);
+        selectAllButton.addEventListener('click', () => {
+          const selectAll = selectedTracks().length !== trackCheckboxes.length;
+          trackCheckboxes.forEach((checkbox) => {
+            checkbox.checked = selectAll;
+          });
+          updateBatchControls();
+        });
+        form.addEventListener('submit', (event) => {
+          const count = selectedTracks().length;
+          if (count === 0 || !window.confirm('Delete ' + count + ' selected audio track' + (count === 1 ? '' : 's') + '? This also removes their uploaded files.')) {
+            event.preventDefault();
+          }
+        });
+      });
     })();
   </script>
 </body>
@@ -1228,6 +1256,62 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
             console.log('S3 cleanup failed for audioTrackId:', audioTrackId, s3Error);
             return redirectWithMessage(res, 'Audio track deleted, but S3 file cleanup failed.');
         }
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        }
+
+        const albumId = String(req.body.albumId ?? '').trim();
+        const selectedTrackIds = uniqueStrings(
+            Array.isArray(req.body.audioTrackIds)
+                ? req.body.audioTrackIds.map(String)
+                : req.body.audioTrackIds ? [String(req.body.audioTrackIds)] : []
+        );
+        if (!albumId || selectedTrackIds.length === 0) {
+            return redirectWithMessage(res, 'Select at least one audio track to delete.');
+        }
+
+        const album = await Album.findById(albumId);
+        if (!album || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
+            return redirectWithMessage(res, 'Album not found or cannot be modified.');
+        }
+
+        const tracks = await Promise.all(selectedTrackIds.map((trackId) => AudioTrack.findById(trackId)));
+        const associatedTrackIds = new Set(uniqueStrings([
+            ...(Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds.map(String) : []),
+            ...tracks.filter(Boolean).filter((track: any) => String(track.albumId ?? '') === albumId).map(contentId)
+        ]));
+        if (tracks.some((track) => !track) || selectedTrackIds.some((trackId) => !associatedTrackIds.has(trackId))) {
+            return redirectWithMessage(res, 'One or more selected tracks do not belong to this album.');
+        }
+        if (tracks.some((track) => !ensureOwnerOrAdmin(authReq, getOwnerId(track)))) {
+            return redirectWithMessage(res, 'Forbidden: only creator or admin can delete every selected track.');
+        }
+
+        await Promise.all(selectedTrackIds.map((trackId) => AudioTrack.deleteById(trackId)));
+        const remainingTrackIds = uniqueStrings(
+            (Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []).map(String)
+        ).filter((trackId) => !selectedTrackIds.includes(trackId));
+        await Album.updateById(albumId, { audioTrackIds: remainingTrackIds as [string] });
+
+        const s3Results = await Promise.allSettled(selectedTrackIds.map((trackId) => getS3().send(new DeleteObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: trackId
+        }))));
+        const failedS3Deletes = s3Results.filter((result) => result.status === 'rejected').length;
+        if (failedS3Deletes > 0) {
+            console.log(`S3 cleanup failed for ${failedS3Deletes} deleted audio track(s).`, s3Results);
+            return redirectWithMessage(res, `${selectedTrackIds.length} audio track(s) deleted, but ${failedS3Deletes} uploaded file(s) could not be removed.`);
+        }
+
+        return redirectWithMessage(res, `${selectedTrackIds.length} audio track(s) deleted successfully.`);
     } catch (error) {
         return next(error);
     }
