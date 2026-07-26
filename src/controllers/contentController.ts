@@ -454,9 +454,8 @@ const renderManagePage = (params: {
             <h3>Add Item to Carousel</h3>
             <form method="POST" action="/content/manage/composition/carousel/add-item">
                 <select name="carouselId" required><option value="" disabled selected>Select carousel</option>${carouselOptions}</select>
-                <input name="contentType" placeholder="post | album | audioTrack" required />
+                <select name="contentType" required><option value="" disabled selected>Select content type</option><option value="post">Post</option><option value="album">Album</option><option value="audioTrack">Audio Track</option></select>
                 <input name="contentId" placeholder="Content ID" required />
-                <input name="position" placeholder="Position (optional, 0-based)" />
                 <button type="submit">Add Carousel Item</button>
             </form>
 
