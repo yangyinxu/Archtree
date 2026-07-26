@@ -7,6 +7,7 @@ import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import { getS3 } from '../app';
+import { parseBuffer } from 'music-metadata';
 
 const escapeHtml = (value: string) => {
     return value
@@ -63,6 +64,48 @@ const toDateInputValue = (value: any) => {
 
 const uniqueStrings = (values: string[]) => {
     return [...new Set(values.filter(Boolean))];
+};
+
+const titleFromFileName = (fileName: string) => {
+    return fileName
+        .replace(/\.[^.]+$/, '')
+        .replace(/[_-]+/g, ' ')
+        .trim();
+};
+
+const formatDuration = (durationInSeconds: unknown) => {
+    const totalSeconds = Math.round(Number(durationInSeconds));
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
+        return '';
+    }
+
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const minutePart = String(minutes).padStart(2, '0');
+    const secondPart = String(seconds).padStart(2, '0');
+
+    return hours > 0 ? `${hours}:${minutePart}:${secondPart}` : `${minutePart}:${secondPart}`;
+};
+
+const inferAudioFormat = (fileName: string, mimeType: string, container?: string) => {
+    const normalizedContainer = String(container ?? '').trim().toUpperCase();
+    const knownContainers: Record<string, string> = {
+        MPEG: 'MP3',
+        'MPEG-4': 'M4A',
+        WAVE: 'WAV',
+        OGG: 'OGG'
+    };
+    if (normalizedContainer) {
+        return knownContainers[normalizedContainer] ?? normalizedContainer;
+    }
+
+    const extension = fileName.split('.').pop()?.trim().toUpperCase();
+    if (extension) {
+        return extension === 'MPEG' ? 'MP3' : extension;
+    }
+
+    return mimeType.replace(/^audio\//i, '').toUpperCase() || 'AUDIO';
 };
 
 const renderSectionList = (title: string, items: any[], formatter: (item: any) => string) => {
@@ -136,6 +179,10 @@ const renderManagePage = (params: {
     const carouselOptions = ownedCarousels.map((carousel) => {
         const id = contentId(carousel);
         return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}</option>`;
+    }).join('');
+    const albumOptions = ownedAlbums.map((album) => {
+        const id = contentId(album);
+        return `<option value="${escapeHtml(id)}">${escapeHtml(String(album.title ?? 'Untitled album'))}</option>`;
     }).join('');
     const compositionData = JSON.stringify({
         pages: ownedPages.map((page) => ({
@@ -577,6 +624,14 @@ const renderManagePage = (params: {
                 <input name="audioTrackId" value="${prefillAudioTrackId}" placeholder="Audio Track ID" required />
         <button type="submit">Delete Audio Track</button>
       </form>
+            <hr />
+            <h3>Bulk Upload Audio Files</h3>
+            <p>Select up to 20 files. A track is created for each file using its embedded metadata when available.</p>
+            <form method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data">
+                <select name="albumId"><option value="">No album</option>${albumOptions}</select>
+                <input type="file" name="audioFiles" accept="audio/*" multiple required />
+                <button type="submit">Create and Upload Audio Files</button>
+            </form>
             <hr />
             <h3>Upload Audio File</h3>
             <form method="POST" action="/content/manage/audioTrack/upload" enctype="multipart/form-data">
@@ -1020,7 +1075,113 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
             ContentType: uploadFile.mimetype || 'audio/mpeg'
         }).promise();
 
+        await AudioTrack.updateById(audioTrackId, {
+            originalFileName: uploadFile.originalname,
+            contentType: uploadFile.mimetype || 'audio/mpeg'
+        });
+
         return redirectWithMessage(res, 'Audio file uploaded successfully.');
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        }
+
+        const uploadFiles = (req as Request & { files?: Express.Multer.File[] }).files ?? [];
+        if (uploadFiles.length === 0) {
+            return redirectWithMessage(res, 'Select at least one audio file to upload.');
+        }
+
+        const albumId = String(req.body.albumId ?? '').trim();
+        let album: any | null = null;
+        if (albumId) {
+            album = await Album.findById(albumId);
+            if (!album || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
+                return redirectWithMessage(res, 'Selected album was not found or cannot be modified.');
+            }
+        }
+
+        const uploadedTrackIds: string[] = [];
+        const failures: string[] = [];
+
+        for (const uploadFile of uploadFiles) {
+            const isAudioFile = uploadFile.mimetype.startsWith('audio/')
+                || uploadFile.mimetype === 'video/mp4'
+                || uploadFile.mimetype === 'application/ogg';
+            if (!isAudioFile) {
+                failures.push(uploadFile.originalname);
+                continue;
+            }
+
+            let metadata: any = null;
+            try {
+                metadata = await parseBuffer(Uint8Array.from(uploadFile.buffer), {
+                    mimeType: uploadFile.mimetype || undefined,
+                    size: uploadFile.size
+                }, {
+                    duration: true,
+                    skipCovers: true
+                });
+            } catch (metadataError) {
+                console.log(`Unable to read audio metadata for ${uploadFile.originalname}:`, metadataError);
+            }
+
+            const embeddedGenres = Array.isArray(metadata?.common?.genre) ? metadata.common.genre.map(String) : [];
+            const releaseYear = Number(metadata?.common?.year);
+            const bitrate = Number(metadata?.format?.bitrate);
+            const track = new AudioTrack(
+                String(metadata?.common?.title ?? titleFromFileName(uploadFile.originalname) ?? 'Untitled Track'),
+                [] as unknown as [string],
+                embeddedGenres as unknown as [string],
+                albumId,
+                Number.isFinite(releaseYear) && releaseYear > 0 ? new SimpleDate(releaseYear, 1, 1) : new SimpleDate(),
+                formatDuration(metadata?.format?.duration),
+                new AudioFormat(
+                    inferAudioFormat(uploadFile.originalname, uploadFile.mimetype, metadata?.format?.container),
+                    Number.isFinite(bitrate) && bitrate > 0 ? Math.round(bitrate / 1000) : undefined
+                ),
+                '',
+                authReq.auth.userId,
+                uploadFile.originalname,
+                uploadFile.mimetype || 'audio/mpeg'
+            );
+
+            let audioTrackId = '';
+            try {
+                const createResult: any = await track.save();
+                audioTrackId = String(createResult.insertedId);
+                await getS3().upload({
+                    Bucket: process.env.S3_BUCKET_NAME!,
+                    Key: audioTrackId,
+                    Body: uploadFile.buffer,
+                    ContentType: uploadFile.mimetype || 'audio/mpeg'
+                }).promise();
+                uploadedTrackIds.push(audioTrackId);
+            } catch (uploadError) {
+                console.log(`Unable to upload ${uploadFile.originalname}:`, uploadError);
+                if (audioTrackId) {
+                    await AudioTrack.deleteById(audioTrackId);
+                }
+                failures.push(uploadFile.originalname);
+            }
+        }
+
+        if (album && uploadedTrackIds.length > 0) {
+            const albumTrackIds = uniqueStrings([
+                ...(Array.isArray(album.audioTrackIds) ? album.audioTrackIds.map(String) : []),
+                ...uploadedTrackIds
+            ]);
+            await Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] });
+        }
+
+        const message = `${uploadedTrackIds.length} audio track${uploadedTrackIds.length === 1 ? '' : 's'} created and uploaded.${failures.length > 0 ? ` ${failures.length} file${failures.length === 1 ? '' : 's'} failed.` : ''}`;
+        return redirectWithMessage(res, message);
     } catch (error) {
         return next(error);
     }
