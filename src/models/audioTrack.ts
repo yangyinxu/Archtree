@@ -14,6 +14,8 @@ export class AudioTrack {
     format: AudioFormat;
     coverArtUrl: string;
     createdBy: string;
+    originalFileName?: string;
+    contentType?: string;
 
     constructor(
         title: string,
@@ -24,7 +26,9 @@ export class AudioTrack {
         duration: string,
         format: AudioFormat,
         coverArtUrl: string,
-        createdBy: string
+        createdBy: string,
+        originalFileName?: string,
+        contentType?: string
     ) {
         this.title = title;
         this.artistIds = artistIds;
@@ -35,6 +39,8 @@ export class AudioTrack {
         this.format = format;
         this.coverArtUrl = coverArtUrl;
         this.createdBy = createdBy;
+        this.originalFileName = originalFileName;
+        this.contentType = contentType;
     }
 
     // save an audio track to the mongodb database
