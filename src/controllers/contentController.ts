@@ -129,6 +129,28 @@ const renderManagePage = (params: {
     const ownedAudioTracks = params.ownedAudioTracks ?? [];
     const ownedPages = params.ownedPages ?? [];
     const ownedCarousels = params.ownedCarousels ?? [];
+    const pageOptions = ownedPages.map((page) => {
+        const slug = String(page.slug ?? '');
+        return `<option value="${escapeHtml(slug)}">${escapeHtml(String(page.title ?? slug))} (${escapeHtml(slug)})</option>`;
+    }).join('');
+    const carouselOptions = ownedCarousels.map((carousel) => {
+        const id = contentId(carousel);
+        return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}</option>`;
+    }).join('');
+    const compositionData = JSON.stringify({
+        pages: ownedPages.map((page) => ({
+            slug: String(page.slug ?? ''),
+            title: String(page.title ?? page.slug ?? ''),
+            items: Array.isArray(page.items) ? page.items.map((item: any) => ({ carouselId: String(item.carouselId ?? ''), order: Number(item.order ?? 0) })) : []
+        })),
+        carousels: ownedCarousels.map((carousel) => ({
+            id: contentId(carousel),
+            name: String(carousel.name ?? 'Untitled carousel'),
+            items: Array.isArray(carousel.items) ? carousel.items.map((item: any) => ({ contentId: String(item.contentId ?? ''), contentType: String(item.contentType ?? 'Content'), order: Number(item.order ?? 0) })) : []
+        })),
+        albums: ownedAlbums.map((album) => ({ id: contentId(album), title: String(album.title ?? '') })),
+        audioTracks: ownedAudioTracks.map((track) => ({ id: contentId(track), title: String(track.title ?? '') }))
+    }).replace(/</g, '\\u003c');
     const prefillArtistId = escapeHtml(params.prefillArtistId ?? '');
     const prefillAlbumId = escapeHtml(params.prefillAlbumId ?? '');
     const prefillAudioTrackId = escapeHtml(params.prefillAudioTrackId ?? '');
@@ -153,8 +175,13 @@ const renderManagePage = (params: {
     .linked-content { margin: 6px 0 0 18px; padding-left: 18px; }
     .empty-linked-content { color: #666; font-size: 14px; margin: 6px 0 0; }
     form { display: grid; gap: 8px; }
-    input { padding: 8px; font-size: 14px; }
+    input, select { padding: 8px; font-size: 14px; }
     button { padding: 8px 12px; cursor: pointer; }
+    .drag-list { display: grid; gap: 6px; margin: 10px 0; padding: 0; list-style: none; }
+    .drag-item { background: #f8f8f8; border: 1px solid #ddd; border-radius: 6px; cursor: grab; padding: 9px; }
+    .drag-item.dragging { opacity: .45; }
+    .drag-item.drag-over { border-color: #2276d2; }
+    .drag-help { color: #666; font-size: 13px; margin: 6px 0; }
     h2, h3 { margin-bottom: 8px; }
     code { background: #f3f3f3; padding: 2px 5px; border-radius: 4px; }
   </style>
@@ -258,24 +285,26 @@ const renderManagePage = (params: {
 
             <h3>Attach Carousel to Page</h3>
             <form method="POST" action="/content/manage/composition/page/attach-carousel">
-                <input name="slug" placeholder="Slug: home or library" required />
-                <input name="carouselId" placeholder="Carousel ID" required />
+                <select name="slug" required><option value="" disabled selected>Select page</option>${pageOptions}</select>
+                <select name="carouselId" required><option value="" disabled selected>Select carousel</option>${carouselOptions}</select>
                 <input name="position" placeholder="Position (optional, 0-based)" />
                 <button type="submit">Attach Carousel</button>
             </form>
 
             <h3>Reorder Page Item</h3>
-            <form method="POST" action="/content/manage/composition/page/reorder-item">
-                <input name="slug" placeholder="Slug: home or library" required />
-                <input name="fromIndex" placeholder="From index" required />
-                <input name="toIndex" placeholder="To index" required />
-                <button type="submit">Reorder Page Item</button>
+            <form class="drag-reorder" data-kind="page" method="POST" action="/content/manage/composition/page/reorder-item">
+                <select class="reorder-selector" name="slug" required><option value="" disabled selected>Select page</option>${pageOptions}</select>
+                <p class="drag-help">Drag a carousel to its new position, then save.</p>
+                <ul class="drag-list" aria-label="Page item order"></ul>
+                <input class="from-index" type="hidden" name="fromIndex" />
+                <input class="to-index" type="hidden" name="toIndex" />
+                <button class="save-reorder" type="submit" disabled>Save New Order</button>
             </form>
 
             <h3>Detach Carousel from Page</h3>
             <form method="POST" action="/content/manage/composition/page/detach-carousel">
-                <input name="slug" placeholder="Slug: home or library" required />
-                <input name="carouselId" placeholder="Carousel ID" required />
+                <select name="slug" required><option value="" disabled selected>Select page</option>${pageOptions}</select>
+                <select name="carouselId" required><option value="" disabled selected>Select carousel</option>${carouselOptions}</select>
                 <button type="submit">Detach Carousel</button>
             </form>
         </div>
@@ -289,7 +318,7 @@ const renderManagePage = (params: {
 
             <h3>Add Item to Carousel</h3>
             <form method="POST" action="/content/manage/composition/carousel/add-item">
-                <input name="carouselId" placeholder="Carousel ID" required />
+                <select name="carouselId" required><option value="" disabled selected>Select carousel</option>${carouselOptions}</select>
                 <input name="contentType" placeholder="post | album | audioTrack" required />
                 <input name="contentId" placeholder="Content ID" required />
                 <input name="position" placeholder="Position (optional, 0-based)" />
@@ -297,20 +326,22 @@ const renderManagePage = (params: {
             </form>
 
             <h3>Reorder Carousel Item</h3>
-            <form method="POST" action="/content/manage/composition/carousel/reorder-item">
-                <input name="carouselId" placeholder="Carousel ID" required />
-                <input name="fromIndex" placeholder="From index" required />
-                <input name="toIndex" placeholder="To index" required />
-                <button type="submit">Reorder Carousel Item</button>
+            <form class="drag-reorder" data-kind="carousel" method="POST" action="/content/manage/composition/carousel/reorder-item">
+                <select class="reorder-selector" name="carouselId" required><option value="" disabled selected>Select carousel</option>${carouselOptions}</select>
+                <p class="drag-help">Drag an item to its new position, then save.</p>
+                <ul class="drag-list" aria-label="Carousel item order"></ul>
+                <input class="from-index" type="hidden" name="fromIndex" />
+                <input class="to-index" type="hidden" name="toIndex" />
+                <button class="save-reorder" type="submit" disabled>Save New Order</button>
             </form>
         </div>
 
         <div class="card">
             <h3>Move Item Between Carousels</h3>
             <form method="POST" action="/content/manage/composition/carousel/move-item">
-                <input name="sourceCarouselId" placeholder="Source carousel ID" required />
+                <select name="sourceCarouselId" required><option value="" disabled selected>Source carousel</option>${carouselOptions}</select>
                 <input name="fromIndex" placeholder="Source index" required />
-                <input name="targetCarouselId" placeholder="Target carousel ID" required />
+                <select name="targetCarouselId" required><option value="" disabled selected>Target carousel</option>${carouselOptions}</select>
                 <input name="toIndex" placeholder="Target index" required />
                 <button type="submit">Move Item</button>
             </form>
@@ -323,6 +354,83 @@ const renderManagePage = (params: {
             <p>Deleting a carousel will automatically detach it from all pages.</p>
         </div>
     </div>
+
+    <script>
+      const compositionData = ${compositionData};
+      const carouselNames = new Map(compositionData.carousels.map((carousel) => [carousel.id, carousel.name]));
+      const albumTitles = new Map(compositionData.albums.map((album) => [album.id, album.title]));
+      const trackTitles = new Map(compositionData.audioTracks.map((track) => [track.id, track.title]));
+
+      const labelForCarouselItem = (item) => {
+        if (item.contentType === 'album') return 'Album: ' + (albumTitles.get(item.contentId) || item.contentId);
+        if (item.contentType === 'audioTrack') return 'Track: ' + (trackTitles.get(item.contentId) || item.contentId);
+        return item.contentType + ': ' + item.contentId;
+      };
+
+      document.querySelectorAll('.drag-reorder').forEach((form) => {
+        const kind = form.dataset.kind;
+        const selector = form.querySelector('.reorder-selector');
+        const list = form.querySelector('.drag-list');
+        const fromInput = form.querySelector('.from-index');
+        const toInput = form.querySelector('.to-index');
+        const saveButton = form.querySelector('.save-reorder');
+        let draggedItem = null;
+
+        const renderItems = () => {
+          list.replaceChildren();
+          fromInput.value = '';
+          toInput.value = '';
+          saveButton.disabled = true;
+          if (!selector.value) return;
+
+          const source = kind === 'page'
+            ? compositionData.pages.find((page) => page.slug === selector.value)
+            : compositionData.carousels.find((carousel) => carousel.id === selector.value);
+          const items = source ? [...source.items].sort((a, b) => a.order - b.order) : [];
+          items.forEach((item, index) => {
+            const element = document.createElement('li');
+            element.className = 'drag-item';
+            element.draggable = true;
+            element.dataset.originalIndex = String(index);
+            element.textContent = kind === 'page'
+              ? (carouselNames.get(item.carouselId) || item.carouselId)
+              : labelForCarouselItem(item);
+            list.append(element);
+          });
+        };
+
+        selector.addEventListener('change', renderItems);
+        list.addEventListener('dragstart', (event) => {
+          draggedItem = event.target.closest('.drag-item');
+          if (draggedItem) draggedItem.classList.add('dragging');
+        });
+        list.addEventListener('dragend', () => {
+          if (draggedItem) draggedItem.classList.remove('dragging');
+          draggedItem = null;
+          list.querySelectorAll('.drag-over').forEach((item) => item.classList.remove('drag-over'));
+        });
+        list.addEventListener('dragover', (event) => {
+          event.preventDefault();
+          const target = event.target.closest('.drag-item');
+          if (target && target !== draggedItem) target.classList.add('drag-over');
+        });
+        list.addEventListener('dragleave', (event) => {
+          const target = event.target.closest('.drag-item');
+          if (target) target.classList.remove('drag-over');
+        });
+        list.addEventListener('drop', (event) => {
+          event.preventDefault();
+          const target = event.target.closest('.drag-item');
+          if (!draggedItem || !target || target === draggedItem) return;
+          const targetBounds = target.getBoundingClientRect();
+          list.insertBefore(draggedItem, event.clientY > targetBounds.top + targetBounds.height / 2 ? target.nextSibling : target);
+          fromInput.value = draggedItem.dataset.originalIndex || '';
+          toInput.value = String([...list.children].indexOf(draggedItem));
+          saveButton.disabled = fromInput.value === toInput.value;
+          target.classList.remove('drag-over');
+        });
+      });
+    </script>
 
   <h2>Create</h2>
   <div class="grid">
