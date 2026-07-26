@@ -5,6 +5,7 @@ import * as audioTrackController from '../controllers/audioTrackController';
 import * as albumController from '../controllers/albumController';
 import * as artistController from '../controllers/artistController';
 import * as contentController from '../controllers/contentController';
+import * as pageController from '../controllers/pageController';
 import { requireAuth } from '../middleware/authMiddleware';
 import { requireAuthForWeb } from '../middleware/authMiddleware';
 
@@ -58,6 +59,35 @@ router.post('/manage/audioTrack/create', requireAuthForWeb, contentController.cr
 router.post('/manage/audioTrack/update', requireAuthForWeb, contentController.updateAudioTrackWeb);
 router.post('/manage/audioTrack/delete', requireAuthForWeb, contentController.deleteAudioTrackWeb);
 router.post('/manage/audioTrack/upload', requireAuthForWeb, upload.single('audioFile'), contentController.uploadAudioTrackWeb);
+router.post('/manage/link/track-album', requireAuthForWeb, contentController.linkTrackToAlbumWeb);
+router.post('/manage/link/album-artist', requireAuthForWeb, contentController.linkAlbumToArtistWeb);
+router.post('/manage/link/track-artist', requireAuthForWeb, contentController.linkTrackToArtistWeb);
+
+router.post('/manage/composition/page/save', requireAuthForWeb, pageController.createOrUpdatePageWeb);
+router.post('/manage/composition/page/attach-carousel', requireAuthForWeb, pageController.attachCarouselToPageWeb);
+router.post('/manage/composition/page/reorder-item', requireAuthForWeb, pageController.reorderPageItemsWeb);
+router.post('/manage/composition/page/detach-carousel', requireAuthForWeb, pageController.detachCarouselFromPageWeb);
+
+router.post('/manage/composition/carousel/create', requireAuthForWeb, pageController.createCarouselWeb);
+router.post('/manage/composition/carousel/add-item', requireAuthForWeb, pageController.addCarouselItemWeb);
+router.post('/manage/composition/carousel/reorder-item', requireAuthForWeb, pageController.reorderCarouselItemsWeb);
+router.post('/manage/composition/carousel/move-item', requireAuthForWeb, pageController.moveCarouselItemBetweenCarouselsWeb);
+router.post('/manage/composition/carousel/delete', requireAuthForWeb, pageController.deleteCarouselWeb);
+
+router.get('/pages', pageController.listPages);
+router.get('/pages/:slug', pageController.getPageBySlug);
+router.get('/pages/:slug/expanded', pageController.getExpandedPageBySlug);
+router.post('/pages', requireAuth, pageController.upsertPage);
+router.post('/pages/:slug/items/carousel', requireAuth, pageController.attachCarouselToPage);
+router.delete('/pages/:slug/items/carousel/:carouselId', requireAuth, pageController.removeCarouselFromPage);
+router.post('/pages/:slug/items/reorder', requireAuth, pageController.reorderPageItems);
+
+router.get('/carousels', requireAuth, pageController.listCarouselsByUser);
+router.post('/carousels', requireAuth, pageController.createCarousel);
+router.post('/carousels/:carouselId/items', requireAuth, pageController.addCarouselItem);
+router.post('/carousels/:carouselId/items/reorder', requireAuth, pageController.reorderCarouselItems);
+router.post('/carousels/:sourceCarouselId/items/move', requireAuth, pageController.moveCarouselItemBetweenCarousels);
+router.delete('/carousels/:carouselId', requireAuth, pageController.deleteCarousel);
 
 // ----------------------------
 // Post data of an album

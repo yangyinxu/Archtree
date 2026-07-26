@@ -100,6 +100,17 @@ export async function connectToDatabase() {
       _db = client.db(process.env.DB_NAME || 'archtreeDb');
       console.log(`Successfully connected to MongoDB: ${_db.databaseName}`);
 
+      // Initialize indexes for page composition hierarchy.
+      _db.collection('pages').createIndex({ slug: 1 }, { unique: true }).catch((error) => {
+        console.log('Failed to ensure pages.slug index:', error);
+      });
+      _db.collection('pages').createIndex({ createdBy: 1, updatedAt: -1 }).catch((error) => {
+        console.log('Failed to ensure pages owner index:', error);
+      });
+      _db.collection('carousels').createIndex({ createdBy: 1, updatedAt: -1 }).catch((error) => {
+        console.log('Failed to ensure carousels owner index:', error);
+      });
+
       app.listen(port, () => {
         console.log('Starting service on port ' + port + '...');
       });
