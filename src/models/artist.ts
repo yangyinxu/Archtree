@@ -2,6 +2,13 @@ import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from '../models/simpleDate';
 
+const withoutLegacyTrackIds = (artist: any) => {
+    if (artist) {
+        delete artist.audioTrackIds;
+    }
+    return artist;
+};
+
 // define the Artist class
 export class Artist {
     name: string;
@@ -9,7 +16,6 @@ export class Artist {
     bio: string;
     coverArtUrl: string;
     albumIds: [string];
-    audioTrackIds: [string];
     createdBy: string;
 
     constructor(
@@ -18,7 +24,6 @@ export class Artist {
         bio: string,
         coverArtUrl: string,
         albumIds: [string], 
-        audioTrackIds: [string],
         createdBy: string
     ) {
         this.name = name;
@@ -26,7 +31,6 @@ export class Artist {
         this.bio = bio;
         this.coverArtUrl = coverArtUrl;
         this.albumIds = albumIds;
-        this.audioTrackIds = audioTrackIds;
         this.createdBy = createdBy;
     }
 
@@ -51,7 +55,8 @@ export class Artist {
         return db!
             .collection('artists')
             .find({ _id: artistObjectId })
-            .next();
+            .next()
+            .then(withoutLegacyTrackIds);
     }
 
     // fetch all artists from the database
@@ -64,7 +69,7 @@ export class Artist {
             .find()
             .toArray()
             .then((artists: any) => {
-                return artists;
+                return artists.map(withoutLegacyTrackIds);
             });
     }
 
@@ -75,7 +80,8 @@ export class Artist {
             .collection('artists')
             .find({ name: { $regex: query, $options: 'i' } })
             .limit(limit)
-            .toArray();
+            .toArray()
+            .then((artists) => artists.map(withoutLegacyTrackIds));
     }
 
     static fetchByCreator(createdBy: string, limit: number = 50) {
@@ -85,7 +91,8 @@ export class Artist {
             .collection('artists')
             .find({ createdBy })
             .limit(limit)
-            .toArray();
+            .toArray()
+            .then((artists) => artists.map(withoutLegacyTrackIds));
     }
 
     static updateById(artistId: string, update: Record<string, unknown>) {

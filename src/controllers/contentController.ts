@@ -25,6 +25,7 @@ import {
     deleteAudioObjectAndTrack,
     uploadAudioObject
 } from '../services/audioStorageService';
+import { validateOwnedContentReferences } from '../services/contentReferenceService';
 
 const parseCsv = (value: string) => {
     return value
@@ -465,7 +466,6 @@ const renderManagePage = (params: {
         <input name="bio" placeholder="Bio" />
         <input name="coverArtUrl" placeholder="Cover Art URL" />
         <input name="albumIds" placeholder="Album IDs (comma separated)" />
-        <input name="audioTrackIds" placeholder="Audio Track IDs (comma separated)" />
         <button type="submit">Create Artist</button>
       </form>
     </div>
@@ -485,9 +485,9 @@ const renderManagePage = (params: {
       <h3>Create and Upload Audio Track</h3>
       <form method="POST" action="/content/manage/audioTrack/create" enctype="multipart/form-data">
         <input name="title" placeholder="Title" required />
-        <input name="artistIds" placeholder="Artist IDs (comma separated)" />
+        <select name="artistId" required><option value="" disabled selected>Select artist</option>${artistOptions}</select>
         <input name="genres" placeholder="Genres (comma separated)" />
-        <input name="albumId" placeholder="Album ID" />
+        <select name="albumId"><option value="">No album</option>${albumOptions}</select>
         <input name="releaseDate" type="date" />
         <input name="duration" placeholder="Duration (e.g. 03:30)" />
         <input name="formatType" placeholder="Format type (e.g. MP3)" />
@@ -528,7 +528,7 @@ const renderManagePage = (params: {
                 <input name="artistId" placeholder="Artist ID" required />
                 <button type="submit">Link Track and Artist</button>
             </form>
-            <p>Adds artistId into track.artistIds and trackId into artist.audioTrackIds if missing.</p>
+            <p>Adds artistId to track.artistIds. Tracks are the source of truth for artist relationships.</p>
         </div>
     </div>
 
@@ -547,7 +547,6 @@ const renderManagePage = (params: {
                 <input name="bio" value="${escapeHtml(String(prefillArtist?.bio ?? ''))}" placeholder="New Bio (optional)" />
                 <input name="coverArtUrl" value="${escapeHtml(String(prefillArtist?.coverArtUrl ?? ''))}" placeholder="New Cover URL (optional)" />
                 <input name="albumIds" value="${escapeHtml(toCsvInput(prefillArtist?.albumIds))}" placeholder="Album IDs (comma separated)" />
-                <input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillArtist?.audioTrackIds))}" placeholder="Audio Track IDs (comma separated)" />
         <button type="submit">Update Artist</button>
       </form>
       <form method="POST" action="/content/manage/artist/delete">
@@ -605,6 +604,7 @@ const renderManagePage = (params: {
             <h3>Bulk Upload Audio Files</h3>
             <p>Select up to 20 files. A track is created for each file using its embedded metadata when available.</p>
             <form id="bulk-audio-upload-form" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data">
+                <select name="artistId" required><option value="" disabled selected>Select artist</option>${artistOptions}</select>
                 <select name="albumId"><option value="">No album</option>${albumOptions}</select>
                 <input type="file" name="audioFiles" accept="audio/*" multiple required />
                 <button type="submit">Create and Upload Audio Files</button>
@@ -634,6 +634,13 @@ const getOwnerId = (doc: any) => {
 
 const redirectWithMessage = (res: Response, message: string) => {
     res.redirect(`/content/manage?message=${encodeURIComponent(message)}`);
+};
+
+const respondToUploadError = (req: Request, res: Response, message: string, status: number = 400) => {
+    if (req.get('X-Requested-With') === 'XMLHttpRequest') {
+        return res.status(status).json({ message });
+    }
+    return redirectWithMessage(res, message);
 };
 
 export const renderAudioTracksPageForWeb = async (req: Request, res: Response, next: NextFunction) => {
@@ -794,13 +801,18 @@ export const createArtistWeb = async (req: Request, res: Response, next: NextFun
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
+        const albumIds = parseCsv(String(req.body.albumIds ?? ''));
+        const albumValidation = await validateOwnedContentReferences(authReq, 'album', albumIds);
+        if (!albumValidation.valid) {
+            return redirectWithMessage(res, albumValidation.message!);
+        }
+
         const artist = new Artist(
             String(req.body.name ?? ''),
             parseDateInput(String(req.body.birthDate ?? '')),
             String(req.body.bio ?? ''),
             String(req.body.coverArtUrl ?? ''),
-            parseCsv(String(req.body.albumIds ?? '')),
-            parseCsv(String(req.body.audioTrackIds ?? '')),
+            albumValidation.ids as [string],
             authReq.auth.userId
         );
 
@@ -818,7 +830,9 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const artistId = String(req.body.artistId ?? '');
+        const artistId = String(req.body.artistId ?? '').trim();
+        const artistValidation = await validateOwnedContentReferences(authReq, 'artist', [artistId]);
+        if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
         const artist = await Artist.findById(artistId);
         if (!artist) {
             return redirectWithMessage(res, 'Artist not found.');
@@ -832,9 +846,15 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
         if (req.body.name) updatePayload.name = String(req.body.name);
         if (req.body.bio) updatePayload.bio = String(req.body.bio);
         if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
-        if (req.body.albumIds) updatePayload.albumIds = parseCsv(String(req.body.albumIds));
-        if (req.body.audioTrackIds) updatePayload.audioTrackIds = parseCsv(String(req.body.audioTrackIds));
-
+        if (req.body.albumIds) {
+            const validation = await validateOwnedContentReferences(
+                authReq,
+                'album',
+                parseCsv(String(req.body.albumIds))
+            );
+            if (!validation.valid) return redirectWithMessage(res, validation.message!);
+            updatePayload.albumIds = validation.ids;
+        }
         await Artist.updateById(artistId, updatePayload);
         return redirectWithMessage(res, 'Artist updated successfully.');
     } catch (error) {
@@ -849,7 +869,9 @@ export const deleteArtistWeb = async (req: Request, res: Response, next: NextFun
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const artistId = String(req.body.artistId ?? '');
+        const artistId = String(req.body.artistId ?? '').trim();
+        const artistValidation = await validateOwnedContentReferences(authReq, 'artist', [artistId]);
+        if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
         const artist = await Artist.findById(artistId);
         if (!artist) {
             return redirectWithMessage(res, 'Artist not found.');
@@ -873,10 +895,16 @@ export const createAlbumWeb = async (req: Request, res: Response, next: NextFunc
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
+        const audioTrackIds = parseCsv(String(req.body.audioTrackIds ?? ''));
+        const trackValidation = await validateOwnedContentReferences(authReq, 'audioTrack', audioTrackIds);
+        if (!trackValidation.valid) {
+            return redirectWithMessage(res, trackValidation.message!);
+        }
+
         const album = new Album(
             String(req.body.title ?? ''),
             String(req.body.coverArtUrl ?? ''),
-            parseCsv(String(req.body.audioTrackIds ?? '')),
+            trackValidation.ids as [string],
             parseDateInput(String(req.body.releaseDate ?? '')),
             authReq.auth.userId
         );
@@ -895,7 +923,9 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const albumId = String(req.body.albumId ?? '');
+        const albumId = String(req.body.albumId ?? '').trim();
+        const albumValidation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+        if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
         const album = await Album.findById(albumId);
         if (!album) {
             return redirectWithMessage(res, 'Album not found.');
@@ -908,7 +938,15 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
         const updatePayload: Record<string, unknown> = {};
         if (req.body.title) updatePayload.title = String(req.body.title);
         if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
-        if (req.body.audioTrackIds) updatePayload.audioTrackIds = parseCsv(String(req.body.audioTrackIds));
+        if (req.body.audioTrackIds) {
+            const validation = await validateOwnedContentReferences(
+                authReq,
+                'audioTrack',
+                parseCsv(String(req.body.audioTrackIds))
+            );
+            if (!validation.valid) return redirectWithMessage(res, validation.message!);
+            updatePayload.audioTrackIds = validation.ids;
+        }
         if (req.body.releaseDate) updatePayload.releaseDate = parseDateInput(String(req.body.releaseDate));
 
         await Album.updateById(albumId, updatePayload);
@@ -925,7 +963,9 @@ export const deleteAlbumWeb = async (req: Request, res: Response, next: NextFunc
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const albumId = String(req.body.albumId ?? '');
+        const albumId = String(req.body.albumId ?? '').trim();
+        const albumValidation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+        if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
         const album = await Album.findById(albumId);
         if (!album) {
             return redirectWithMessage(res, 'Album not found.');
@@ -954,13 +994,23 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'An audio file is required to create an audio track.');
         }
 
+        const artistId = String(req.body.artistId ?? '').trim();
+        const artistValidation = await validateOwnedContentReferences(authReq, 'artist', [artistId]);
+        if (!artistId || !artistValidation.valid) {
+            return redirectWithMessage(
+                res,
+                artistValidation.message ?? 'Select an artist you are allowed to modify.'
+            );
+        }
+
         const albumId = String(req.body.albumId ?? '').trim();
         let album: any | null = null;
         if (albumId) {
-            album = await Album.findById(albumId);
-            if (!album || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
-                return redirectWithMessage(res, 'Selected album was not found or cannot be modified.');
+            const albumValidation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+            if (!albumValidation.valid) {
+                return redirectWithMessage(res, albumValidation.message!);
             }
+            album = await Album.findById(albumId);
         }
 
         const formatType = String(req.body.formatType ?? 'MP3');
@@ -972,7 +1022,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
 
         const track = new AudioTrack(
             normalizeUtf8Text(String(req.body.title ?? '')),
-            parseCsv(String(req.body.artistIds ?? '')),
+            [artistId],
             parseCsv(String(req.body.genres ?? '')),
             albumId,
             parseDateInput(String(req.body.releaseDate ?? '')),
@@ -1009,7 +1059,9 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const audioTrackId = String(req.body.audioTrackId ?? '');
+        const audioTrackId = String(req.body.audioTrackId ?? '').trim();
+        const trackValidation = await validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]);
+        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
@@ -1022,9 +1074,25 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
         const updatePayload: Record<string, unknown> = {};
         if (req.body.title) updatePayload.title = String(req.body.title);
         if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
-        if (req.body.artistIds) updatePayload.artistIds = parseCsv(String(req.body.artistIds));
+        if (req.body.artistIds) {
+            const validation = await validateOwnedContentReferences(
+                authReq,
+                'artist',
+                parseCsv(String(req.body.artistIds))
+            );
+            if (!validation.valid) return redirectWithMessage(res, validation.message!);
+            updatePayload.artistIds = validation.ids;
+        }
         if (req.body.genres) updatePayload.genres = parseCsv(String(req.body.genres));
-        if (req.body.albumId) updatePayload.albumId = String(req.body.albumId);
+        if (req.body.albumId) {
+            const validation = await validateOwnedContentReferences(
+                authReq,
+                'album',
+                [String(req.body.albumId)]
+            );
+            if (!validation.valid) return redirectWithMessage(res, validation.message!);
+            updatePayload.albumId = validation.ids[0];
+        }
         if (req.body.releaseDate) updatePayload.releaseDate = parseDateInput(String(req.body.releaseDate));
         if (req.body.duration) updatePayload.duration = String(req.body.duration);
         if (req.body.formatType) {
@@ -1050,7 +1118,9 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const audioTrackId = String(req.body.audioTrackId ?? '');
+        const audioTrackId = String(req.body.audioTrackId ?? '').trim();
+        const trackValidation = await validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]);
+        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
@@ -1088,6 +1158,13 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
         if (!albumId || selectedTrackIds.length === 0) {
             return redirectWithMessage(res, 'Select at least one audio track to delete.');
         }
+
+        const [albumValidation, trackValidation] = await Promise.all([
+            validateOwnedContentReferences(authReq, 'album', [albumId]),
+            validateOwnedContentReferences(authReq, 'audioTrack', selectedTrackIds)
+        ]);
+        if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
+        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
 
         const album = await Album.findById(albumId);
         if (!album || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
@@ -1140,7 +1217,9 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const audioTrackId = String(req.body.audioTrackId ?? '');
+        const audioTrackId = String(req.body.audioTrackId ?? '').trim();
+        const trackValidation = await validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]);
+        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
@@ -1172,16 +1251,27 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
 
         const uploadFiles = (req as Request & { files?: Express.Multer.File[] }).files ?? [];
         if (uploadFiles.length === 0) {
-            return redirectWithMessage(res, 'Select at least one audio file to upload.');
+            return respondToUploadError(req, res, 'Select at least one audio file to upload.');
+        }
+
+        const artistId = String(req.body.artistId ?? '').trim();
+        const artistValidation = await validateOwnedContentReferences(authReq, 'artist', [artistId]);
+        if (!artistId || !artistValidation.valid) {
+            return respondToUploadError(
+                req,
+                res,
+                artistValidation.message ?? 'Select an artist you are allowed to modify.'
+            );
         }
 
         const albumId = String(req.body.albumId ?? '').trim();
         let album: any | null = null;
         if (albumId) {
-            album = await Album.findById(albumId);
-            if (!album || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
-                return redirectWithMessage(res, 'Selected album was not found or cannot be modified.');
+            const albumValidation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+            if (!albumValidation.valid) {
+                return respondToUploadError(req, res, albumValidation.message!);
             }
+            album = await Album.findById(albumId);
         }
 
         const uploadedTrackIds: string[] = [];
@@ -1218,7 +1308,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
             const metadataTitle = normalizeUtf8Text(String(metadata?.common?.title ?? ''));
             const track = new AudioTrack(
                 metadataTitle || titleFromFileName(originalFileName) || 'Untitled Track',
-                [] as unknown as [string],
+                [artistId],
                 embeddedGenres as unknown as [string],
                 albumId,
                 Number.isFinite(releaseYear) && releaseYear > 0 ? new SimpleDate(releaseYear, 1, 1) : new SimpleDate(),
@@ -1251,7 +1341,6 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
             ]);
             await Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] });
         }
-
         const message = `${uploadedTrackIds.length} audio track${uploadedTrackIds.length === 1 ? '' : 's'} created and uploaded.${failures.length > 0 ? ` ${failures.length} file${failures.length === 1 ? '' : 's'} failed.` : ''}`;
         if (req.get('X-Requested-With') === 'XMLHttpRequest') {
             return res.status(uploadedTrackIds.length > 0 ? 200 : 422).json({
@@ -1275,6 +1364,13 @@ export const linkTrackToAlbumWeb = async (req: Request, res: Response, next: Nex
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
         const albumId = String(req.body.albumId ?? '').trim();
+        const [trackValidation, albumValidation] = await Promise.all([
+            validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]),
+            validateOwnedContentReferences(authReq, 'album', [albumId])
+        ]);
+        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
+        if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
+
         const track = await AudioTrack.findById(audioTrackId);
         const album = await Album.findById(albumId);
 
@@ -1308,6 +1404,13 @@ export const linkAlbumToArtistWeb = async (req: Request, res: Response, next: Ne
 
         const albumId = String(req.body.albumId ?? '').trim();
         const artistId = String(req.body.artistId ?? '').trim();
+        const [albumValidation, artistValidation] = await Promise.all([
+            validateOwnedContentReferences(authReq, 'album', [albumId]),
+            validateOwnedContentReferences(authReq, 'artist', [artistId])
+        ]);
+        if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
+        if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
+
         const album = await Album.findById(albumId);
         const artist = await Artist.findById(artistId);
 
@@ -1337,6 +1440,13 @@ export const linkTrackToArtistWeb = async (req: Request, res: Response, next: Ne
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
         const artistId = String(req.body.artistId ?? '').trim();
+        const [trackValidation, artistValidation] = await Promise.all([
+            validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]),
+            validateOwnedContentReferences(authReq, 'artist', [artistId])
+        ]);
+        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
+        if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
+
         const track = await AudioTrack.findById(audioTrackId);
         const artist = await Artist.findById(artistId);
 
@@ -1349,12 +1459,7 @@ export const linkTrackToArtistWeb = async (req: Request, res: Response, next: Ne
         }
 
         const trackArtistIds = uniqueStrings([...(Array.isArray((track as any).artistIds) ? (track as any).artistIds : []), artistId]);
-        const artistTrackIds = uniqueStrings([...(Array.isArray((artist as any).audioTrackIds) ? (artist as any).audioTrackIds : []), audioTrackId]);
-
-        await Promise.all([
-            AudioTrack.updateById(audioTrackId, { artistIds: trackArtistIds as [string] }),
-            Artist.updateById(artistId, { audioTrackIds: artistTrackIds as [string] })
-        ]);
+        await AudioTrack.updateById(audioTrackId, { artistIds: trackArtistIds as [string] });
 
         return redirectWithMessage(res, 'Track linked to artist successfully.');
     } catch (error) {

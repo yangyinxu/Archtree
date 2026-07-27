@@ -228,11 +228,12 @@
       progressLabel.textContent = message;
     };
 
-    const uploadFile = (file, albumId, fileIndex, fileCount, onProgress) => {
+    const uploadFile = (file, artistId, albumId, fileIndex, fileCount, onProgress) => {
       return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
         const formData = new FormData();
         formData.append('audioFiles', file);
+        formData.append('artistId', artistId);
         if (albumId) formData.append('albumId', albumId);
 
         request.open('POST', bulkUploadForm.action);
@@ -270,13 +271,19 @@
 
       button.disabled = true;
       showStatus('Starting upload…', 0);
+      const artistId = bulkUploadForm.querySelector('select[name="artistId"]').value;
       const albumId = bulkUploadForm.querySelector('select[name="albumId"]').value;
+      if (!artistId) {
+        showStatus('Select an artist before uploading.', 0);
+        button.disabled = false;
+        return;
+      }
       const failures = [];
       const succeeded = [];
 
       for (let index = 0; index < files.length; index += 1) {
         try {
-          await uploadFile(files[index], albumId, index, files.length, (fileProgress) => {
+          await uploadFile(files[index], artistId, albumId, index, files.length, (fileProgress) => {
             const percentage = Math.round(((index + fileProgress) / files.length) * 100);
             showStatus(`Uploading ${index + 1} of ${files.length}… ${percentage}%`, percentage);
           });

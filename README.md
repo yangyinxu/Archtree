@@ -76,6 +76,9 @@ Web content management:
 - `GET /content/manage/search`
 - Create/update/delete forms for artists, albums, and audio tracks
 - Single and bulk audio-track creation record filenames and a pending upload state before sending files to S3
+- Every newly uploaded track requires at least one owned artist. `audioTrack.artistIds` is the canonical artist-to-track relationship.
+- Artist responses no longer expose the legacy `audioTrackIds` field. Clients should find an artist's tracks by querying audio tracks whose `artistIds` contains the artist ID.
+- Content Manager reference fields validate IDs against the expected owned content type before saving.
 - Existing tracks support replacing their uploaded audio file
 - S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 

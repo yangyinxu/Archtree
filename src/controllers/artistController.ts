@@ -16,7 +16,6 @@ export const postArtist = (req: Request, res: Response, next: NextFunction) => {
     const bio: string = req.body.bio;
     const coverArtUrl: string = req.body.coverArtUrl;
     const albumIds: [string] = req.body.albumIds;
-    const audioTrackIds: [string] = req.body.audioTrackIds;
 
     // Create a new artist
     const artist = new Artist(
@@ -25,7 +24,6 @@ export const postArtist = (req: Request, res: Response, next: NextFunction) => {
         bio,
         coverArtUrl,
         albumIds,
-        audioTrackIds,
         authReq.auth.userId
     );
 
@@ -66,7 +64,6 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     if (req.body.bio !== undefined) updatePayload.bio = req.body.bio;
     if (req.body.coverArtUrl !== undefined) updatePayload.coverArtUrl = req.body.coverArtUrl;
     if (req.body.albumIds !== undefined) updatePayload.albumIds = req.body.albumIds;
-    if (req.body.audioTrackIds !== undefined) updatePayload.audioTrackIds = req.body.audioTrackIds;
     if (req.body.birthDate !== undefined) updatePayload.birthDate = SimpleDate.fromJson(req.body.birthDate);
 
     await Artist.updateById(artistId, updatePayload);
