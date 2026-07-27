@@ -38,12 +38,11 @@ Required variables:
 - `S3_CONNECTION_TIMEOUT_MS`: maximum S3 connection setup time (defaults to 5000)
 - `S3_REQUEST_TIMEOUT_MS`: maximum S3 socket inactivity time (defaults to 60000)
 - `S3_SUMMARY_WAIT_TIMEOUT_MS`: maximum content-manager wait for an S3 summary refresh (defaults to 2000)
-- `MAX_AUDIO_STREAM_CHUNK_MB`: largest audio byte range returned per request (defaults to 4)
 - `MAX_AUDIO_BATCH_UPLOAD_MB`: maximum aggregate multipart request size for bulk audio uploads (defaults to 1024)
 - `MAX_AUDIO_BATCH_FILES`: maximum files accepted in one bulk upload (defaults to 5)
 - `MAX_VIDEO_STREAM_CHUNK_MB`: largest video byte range returned per request (defaults to 4)
 - `MAX_MEDIA_REQUESTS_PER_IP`: concurrent public media requests allowed per client IP (defaults to 8)
-- `MAX_MEDIA_REQUESTS_GLOBAL`: concurrent public media requests allowed per server process (defaults to 200)
+- `MAX_MEDIA_REQUESTS_GLOBAL`: concurrent public media requests allowed per server process (defaults to 40)
 - `MAX_RECONCILIATION_OBJECTS`: safety ceiling for storage reconciliation reports (defaults to 50000)
 - `MAX_STORAGE_SUMMARY_OBJECTS`: safety ceiling for synchronous S3 storage summaries (defaults to 1000000)
 - `TRUST_PROXY_HOPS`: trusted reverse-proxy hop count; Elastic Beanstalk with ALB and Nginx typically uses 2

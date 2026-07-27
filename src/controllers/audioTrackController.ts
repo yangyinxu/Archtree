@@ -25,13 +25,6 @@ import {
 } from '../services/mediaDeliveryService';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
 
-const configuredAudioChunkMb = Number(process.env.MAX_AUDIO_STREAM_CHUNK_MB ?? 4);
-const maxAudioChunkBytes = (
-    Number.isFinite(configuredAudioChunkMb) && configuredAudioChunkMb > 0
-        ? configuredAudioChunkMb
-        : 4
-) * 1024 * 1024;
-
 const s3ErrorStatus = (error: any) => {
     const status = Number(error?.$metadata?.httpStatusCode ?? 0);
     return status === 403 ? 403 : status === 404 ? 404 : 502;
@@ -287,7 +280,10 @@ export const streamAudioTrack = async (req: Request, res: Response, next: NextFu
         let end = fileSize - 1;
 
         if (range) {
-            const parsedRange = parseSingleByteRange(range, fileSize, maxAudioChunkBytes);
+            // AVPlayer commonly sends open-ended or suffix ranges. Return the exact
+            // satisfiable range it requested; truncating it to an arbitrary chunk
+            // changes HTTP range semantics and can make the player reject the asset.
+            const parsedRange = parseSingleByteRange(range, fileSize, fileSize);
             if (!parsedRange) {
                 res.setHeader('Content-Range', `bytes */${fileSize}`);
                 return res.status(416).end();
@@ -305,6 +301,7 @@ export const streamAudioTrack = async (req: Request, res: Response, next: NextFu
         res.setHeader('Content-Length', end - start + 1);
         res.setHeader('Content-Disposition', `inline; filename="${audioTrackId}"`);
         res.setHeader('X-Accel-Buffering', 'no');
+        res.setHeader('Cache-Control', 'no-transform');
         if (metadata.ETag) res.setHeader('ETag', metadata.ETag);
 
         const object = await s3.send(
