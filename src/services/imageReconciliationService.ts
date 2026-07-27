@@ -8,10 +8,15 @@ type ListedImageObject = {
     size: number;
     lastModified?: Date;
 };
+const configuredReconciliationLimit = Number(process.env.MAX_RECONCILIATION_OBJECTS ?? 50_000);
+const reconciliationLimit = Number.isFinite(configuredReconciliationLimit) && configuredReconciliationLimit > 0
+    ? Math.floor(configuredReconciliationLimit)
+    : 50_000;
 
 const listImageObjects = async (bucket: string) => {
     const objects: ListedImageObject[] = [];
     let continuationToken: string | undefined;
+    const seenContinuationTokens = new Set<string>();
 
     do {
         const page = await getS3().send(new ListObjectsV2Command({
@@ -26,8 +31,16 @@ const listImageObjects = async (bucket: string) => {
                 size: Number(object.Size ?? 0),
                 lastModified: object.LastModified
             });
+            if (objects.length > reconciliationLimit) {
+                throw new Error(`Image reconciliation exceeds the ${reconciliationLimit} object safety limit.`);
+            }
         }
-        continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+        const nextToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+        if (nextToken && seenContinuationTokens.has(nextToken)) {
+            throw new Error('S3 returned a repeated continuation token while auditing image storage.');
+        }
+        if (nextToken) seenContinuationTokens.add(nextToken);
+        continuationToken = nextToken;
     } while (continuationToken);
 
     return objects;
@@ -45,16 +58,20 @@ export const reconcileImageStorage = async () => {
     }
 
     const [assets, s3Objects] = await Promise.all([
-        db.collection('imageAssets').find().toArray(),
+        db.collection('imageAssets').find().limit(reconciliationLimit + 1).toArray(),
         listImageObjects(bucket)
     ]);
+    if (assets.length > reconciliationLimit) {
+        throw new Error(`Image reconciliation exceeds the ${reconciliationLimit} database-record safety limit.`);
+    }
     const assetsByKey = new Map(assets.map((asset) => [String(asset.s3Key), asset]));
     const s3Keys = new Set(s3Objects.map((object) => object.key));
 
-    const orphanedObjects = await Promise.all(
-        s3Objects
-            .filter((object) => !assetsByKey.has(object.key))
-            .map(async (object) => {
+    const orphanCandidates = s3Objects.filter((object) => !assetsByKey.has(object.key));
+    const orphanedObjects: any[] = [];
+    for (let index = 0; index < orphanCandidates.length; index += 10) {
+        orphanedObjects.push(...await Promise.all(
+            orphanCandidates.slice(index, index + 10).map(async (object) => {
                 try {
                     const head = await getS3().send(new HeadObjectCommand({
                         Bucket: bucket,
@@ -74,7 +91,8 @@ export const reconcileImageStorage = async () => {
                     };
                 }
             })
-    );
+        ));
+    }
 
     const missingObjects = assets
         .filter((asset) => !s3Keys.has(String(asset.s3Key)))

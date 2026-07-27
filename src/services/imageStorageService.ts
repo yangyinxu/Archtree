@@ -4,6 +4,7 @@ import {
     PutObjectCommand
 } from '@aws-sdk/client-s3';
 import { ObjectId } from 'mongodb';
+import { createReadStream, promises as fs } from 'node:fs';
 import { getS3 } from '../infrastructure/s3';
 import { ImageAsset, ImageOwnerType } from '../models/imageAsset';
 import { maxImageUploadMb } from '../middleware/imageUpload';
@@ -22,17 +23,31 @@ const errorMessage = (error: unknown) => {
     return (error instanceof Error ? error.message : String(error)).substring(0, 500);
 };
 
-export const validateCoverArtFile = (uploadFile: Express.Multer.File) => {
+const readImageSignature = async (uploadFile: Express.Multer.File) => {
+    if (uploadFile.buffer) return uploadFile.buffer.subarray(0, 12);
+    if (!uploadFile.path) return Buffer.alloc(0);
+    const handle = await fs.open(uploadFile.path, 'r');
+    try {
+        const signature = new Uint8Array(12);
+        const { bytesRead } = await handle.read(signature, 0, signature.length, 0);
+        return Buffer.from(signature.subarray(0, bytesRead));
+    } finally {
+        await handle.close();
+    }
+};
+
+export const validateCoverArtFile = async (uploadFile: Express.Multer.File) => {
     const maxBytes = maxImageUploadMb * 1024 * 1024;
-    if (uploadFile.size > maxBytes || uploadFile.buffer.length > maxBytes) {
+    if (uploadFile.size > maxBytes || (uploadFile.buffer?.length ?? 0) > maxBytes) {
         throw Object.assign(
             new Error(`Cover art is too large. The maximum size is ${maxImageUploadMb} MB.`),
             { statusCode: 413 }
         );
     }
 
+    const signature = await readImageSignature(uploadFile);
     const matchesSignature = allowedImageTypes.get(uploadFile.mimetype);
-    if (!matchesSignature || !matchesSignature(uploadFile.buffer)) {
+    if (!matchesSignature || !matchesSignature(signature)) {
         throw Object.assign(
             new Error('Cover art must be a valid JPG, PNG, or WebP image.'),
             { statusCode: 400 }
@@ -46,7 +61,7 @@ export const uploadCoverArt = async (
     uploadFile: Express.Multer.File,
     createdBy: string
 ) => {
-    validateCoverArtFile(uploadFile);
+    await validateCoverArtFile(uploadFile);
 
     const imageObjectId = new ObjectId();
     const imageId = imageObjectId.toHexString();
@@ -67,10 +82,12 @@ export const uploadCoverArt = async (
     });
 
     try {
+        const body = uploadFile.path ? createReadStream(uploadFile.path) : uploadFile.buffer;
         await getS3().send(new PutObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: s3Key,
-            Body: uploadFile.buffer,
+            Body: body,
+            ContentLength: uploadFile.size,
             ContentType: uploadFile.mimetype,
             CacheControl: 'public, max-age=31536000, immutable',
             Metadata: {
@@ -130,15 +147,26 @@ export const deleteCoverArt = async (imageId: string | undefined | null) => {
     }
 };
 
-export const getCoverArtObject = async (imageId: string) => {
+export const getCoverArtObject = async (
+    imageId: string,
+    options: { ifNoneMatch?: string; abortSignal?: AbortSignal } = {}
+) => {
     const asset = await ImageAsset.findById(imageId);
     if (!asset || asset.uploadStatus !== 'ready') {
         return null;
     }
 
-    const object = await getS3().send(new GetObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME!,
-        Key: String(asset.s3Key)
-    }));
-    return { asset, object };
+    try {
+        const object = await getS3().send(new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: String(asset.s3Key),
+            IfNoneMatch: options.ifNoneMatch
+        }), { abortSignal: options.abortSignal });
+        return { asset, object, notModified: false as const };
+    } catch (error: any) {
+        if (error?.$metadata?.httpStatusCode === 304) {
+            return { asset, notModified: true as const };
+        }
+        throw error;
+    }
 };

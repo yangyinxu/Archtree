@@ -4,6 +4,7 @@ import { RequestHandler } from 'express';
 
 import User from '../models/user';
 import { signup, login, renderSignupPage, signupFromWeb, renderLoginPage, loginFromWeb, logoutFromWeb } from '../controllers/authController';
+import { asyncHandler, authRateLimit } from '../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
 
@@ -22,22 +23,22 @@ const signupValidation: RequestHandler[] = [
                 });
         })
         .normalizeEmail(),
-    body('password').trim().isLength({ min: 5 }),
-    body('username').trim().not().isEmpty()
+    body('password').trim().isLength({ min: 5, max: 256 }),
+    body('username').trim().isLength({ min: 1, max: 64 })
 ];
 
-router.put('/signup', signupValidation, signup);
+router.put('/signup', authRateLimit, signupValidation, asyncHandler(signup));
 
 router.get('/signup-web', renderSignupPage);
 
-router.post('/signup-web', signupValidation, signupFromWeb);
+router.post('/signup-web', authRateLimit, signupValidation, asyncHandler(signupFromWeb));
 
 router.get('/login-web', renderLoginPage);
 
-router.post('/login-web', loginFromWeb);
+router.post('/login-web', authRateLimit, asyncHandler(loginFromWeb));
 
 router.post('/logout-web', logoutFromWeb);
 
-router.post('/login', login);
+router.post('/login', authRateLimit, asyncHandler(login));
 
 export default router;

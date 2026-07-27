@@ -6,7 +6,7 @@ import { SimpleDate } from '../models/simpleDate';
 import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
-import { parseBuffer } from 'music-metadata';
+import { parseBuffer, parseFile } from 'music-metadata';
 import { ObjectId } from 'mongodb';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { escapeHtml } from '../views/html';
@@ -28,6 +28,8 @@ import {
 import { validateOwnedContentReferences } from '../services/contentReferenceService';
 import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
+import { boundedSearchQuery } from '../utils/search';
+import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
 
 const parseCsv = (value: string) => {
     return value
@@ -761,7 +763,7 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const rawQuery = String(req.query.q ?? '').trim();
+        const rawQuery = boundedSearchQuery(req.query.q);
         const selectedUploadTrackId = String(req.query.uploadAudioTrackId ?? '');
         const parsedLimit = Number(req.query.limit ?? 10);
         const limit = Number.isNaN(parsedLimit) ? 10 : Math.max(1, Math.min(parsedLimit, 50));
@@ -822,7 +824,7 @@ export const createArtistWeb = async (req: Request, res: Response, next: NextFun
         );
 
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
-        if (coverArtFile) validateCoverArtFile(coverArtFile);
+        if (coverArtFile) await validateCoverArtFile(coverArtFile);
         const result = await artist.save();
         const artistId = result.insertedId.toHexString();
         try {
@@ -964,7 +966,7 @@ export const createAlbumWeb = async (req: Request, res: Response, next: NextFunc
         );
 
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
-        if (coverArtFile) validateCoverArtFile(coverArtFile);
+        if (coverArtFile) await validateCoverArtFile(coverArtFile);
         const result = await album.save();
         const albumId = result.insertedId.toHexString();
         try {
@@ -1139,7 +1141,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         );
 
         await track.save();
-        await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId);
+        await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId, getRequestAbortSignal(req));
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) {
             const coverArt = await uploadCoverArt(
@@ -1302,6 +1304,10 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
         if (!albumId || selectedTrackIds.length === 0) {
             return redirectWithMessage(res, 'Select at least one audio track to delete.');
         }
+        const maximumBatchDeletes = 100;
+        if (selectedTrackIds.length > maximumBatchDeletes) {
+            return redirectWithMessage(res, `Delete no more than ${maximumBatchDeletes} audio tracks at once.`);
+        }
 
         const [albumValidation, trackValidation] = await Promise.all([
             validateOwnedContentReferences(authReq, 'album', [albumId]),
@@ -1378,7 +1384,7 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Missing audio file.');
         }
 
-        await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId);
+        await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId, getRequestAbortSignal(req));
 
         return redirectWithMessage(res, 'Audio file uploaded successfully.');
     } catch (error) {
@@ -1433,13 +1439,18 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
 
             let metadata: any = null;
             try {
-                metadata = await parseBuffer(Uint8Array.from(uploadFile.buffer), {
-                    mimeType: uploadFile.mimetype || undefined,
-                    size: uploadFile.size
-                }, {
-                    duration: true,
-                    skipCovers: true
-                });
+                metadata = uploadFile.path
+                    ? await parseFile(uploadFile.path, {
+                        duration: true,
+                        skipCovers: true
+                    })
+                    : await parseBuffer(Uint8Array.from(uploadFile.buffer), {
+                        mimeType: uploadFile.mimetype || undefined,
+                        size: uploadFile.size
+                    }, {
+                        duration: true,
+                        skipCovers: true
+                    });
             } catch (metadataError) {
                 console.log(`Unable to read audio metadata for ${originalFileName}:`, metadataError);
             }
@@ -1470,7 +1481,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
 
             try {
                 await track.save();
-                await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId);
+                await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId, getRequestAbortSignal(req));
                 uploadedTrackIds.push(audioTrackId);
             } catch (uploadError) {
                 console.log(`Unable to upload ${originalFileName}:`, uploadError);
@@ -1613,7 +1624,7 @@ export const linkTrackToArtistWeb = async (req: Request, res: Response, next: Ne
 
 export const searchContent = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const rawQuery = String(req.query.q ?? '').trim();
+        const rawQuery = boundedSearchQuery(req.query.q);
         if (!rawQuery) {
             return res.status(400).json({ message: 'Missing required query parameter: q' });
         }

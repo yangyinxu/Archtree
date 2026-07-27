@@ -184,6 +184,11 @@ const renderLoginHtml = (params: {
 };
 
 const authenticateUser = async (identifier: string, password: string) => {
+  if (!identifier || identifier.length > 254 || typeof password !== 'string' || password.length > 256) {
+    const error: ErrorWithStatusCode = new Error('Invalid credentials.');
+    error.statusCode = 422;
+    throw error;
+  }
   const user = await User.findByIdentifier(identifier);
   if (!user) {
     const error: ErrorWithStatusCode = new Error('A user with this email or username could not be found.');

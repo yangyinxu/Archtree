@@ -3,23 +3,37 @@ import * as mongoDb from 'mongodb';
 
 let database: mongoDb.Db | null = null;
 
-const ensureIndexes = (db: mongoDb.Db) => {
-  const indexes = [
-    db.collection('pages').createIndex({ slug: 1 }, { unique: true }),
-    db.collection('users').createIndex({ email: 1 }, { unique: true }),
-    db.collection('pages').createIndex({ createdBy: 1, updatedAt: -1 }),
-    db.collection('carousels').createIndex({ createdBy: 1, updatedAt: -1 }),
-    db.collection('audioTracks').createIndex({ artistIds: 1 }),
-    db.collection('audioTracks').createIndex({ uploadStatus: 1, uploadUpdatedAt: -1 })
+const positiveInteger = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
+
+const ensureIndexes = async (db: mongoDb.Db) => {
+  const indexes: Array<{
+    collection: string;
+    keys: mongoDb.IndexSpecification;
+    options?: mongoDb.CreateIndexesOptions;
+  }> = [
+    { collection: 'pages', keys: { slug: 1 }, options: { unique: true } },
+    { collection: 'users', keys: { email: 1 }, options: { unique: true } },
+    { collection: 'users', keys: { username: 1 } },
+    { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
+    { collection: 'carousels', keys: { createdBy: 1, updatedAt: -1 } },
+    { collection: 'artists', keys: { createdBy: 1 } },
+    { collection: 'albums', keys: { createdBy: 1 } },
+    { collection: 'audioTracks', keys: { createdBy: 1 } },
+    { collection: 'audioTracks', keys: { artistIds: 1 } },
+    { collection: 'audioTracks', keys: { uploadStatus: 1, uploadUpdatedAt: -1 } },
+    { collection: 'posts', keys: { createdAt: -1 } }
   ];
 
-  Promise.allSettled(indexes).then((results) => {
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        console.log(`Failed to ensure database index ${index + 1}:`, result.reason);
-      }
-    });
-  });
+  for (const [index, definition] of indexes.entries()) {
+    try {
+      await db.collection(definition.collection).createIndex(definition.keys, definition.options ?? {});
+    } catch (error) {
+      console.log(`Failed to ensure database index ${index + 1}:`, error);
+    }
+  }
 };
 
 export const connectToDatabase = async (): Promise<mongoDb.Db> => {
@@ -30,12 +44,18 @@ export const connectToDatabase = async (): Promise<mongoDb.Db> => {
     throw new Error('DB_NAME is required. Refusing to start with an implicit database name.');
   }
 
-  const client = new mongoDb.MongoClient(process.env.DB_CONN_STRING!);
+  const client = new mongoDb.MongoClient(process.env.DB_CONN_STRING!, {
+    connectTimeoutMS: positiveInteger(process.env.DB_CONNECT_TIMEOUT_MS, 10_000),
+    serverSelectionTimeoutMS: positiveInteger(process.env.DB_SERVER_SELECTION_TIMEOUT_MS, 10_000),
+    socketTimeoutMS: positiveInteger(process.env.DB_SOCKET_TIMEOUT_MS, 120_000),
+    waitQueueTimeoutMS: positiveInteger(process.env.DB_WAIT_QUEUE_TIMEOUT_MS, 10_000),
+    maxPoolSize: positiveInteger(process.env.DB_MAX_POOL_SIZE, 100)
+  });
   await client.connect();
 
   database = client.db(databaseName);
   console.log(`Successfully connected to MongoDB: ${database.databaseName}`);
-  ensureIndexes(database);
+  void ensureIndexes(database);
 
   return database;
 };

@@ -3,22 +3,29 @@ import * as albumController from '../../controllers/albumController';
 import * as artistController from '../../controllers/artistController';
 import * as contentController from '../../controllers/contentController';
 import { requireAuth } from '../../middleware/authMiddleware';
-import { imageUpload } from '../../middleware/imageUpload';
+import { imageUpload, maxImageUploadMb } from '../../middleware/imageUpload';
+import { requireUploadSize } from '../../middleware/audioUpload';
+import {
+    asyncHandler,
+    publicReadRateLimit,
+    uploadConcurrencyLimit,
+    uploadRateLimit
+} from '../../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
 
-router.get('/search', contentController.searchContent);
+router.get('/search', publicReadRateLimit, asyncHandler(contentController.searchContent));
 
-router.post('/album', requireAuth, imageUpload.single('coverArtFile'), albumController.postAlbum);
-router.put('/album/:albumId', requireAuth, imageUpload.single('coverArtFile'), albumController.updateAlbum);
-router.delete('/album/:albumId', requireAuth, albumController.deleteAlbum);
-router.get('/album/:albumId', albumController.getAlbumById);
-router.get('/albums', albumController.getAlbums);
+router.post('/album', requireAuth, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), asyncHandler(albumController.postAlbum));
+router.put('/album/:albumId', requireAuth, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), asyncHandler(albumController.updateAlbum));
+router.delete('/album/:albumId', requireAuth, asyncHandler(albumController.deleteAlbum));
+router.get('/album/:albumId', publicReadRateLimit, asyncHandler(albumController.getAlbumById));
+router.get('/albums', publicReadRateLimit, asyncHandler(albumController.getAlbums));
 
-router.post('/artist', requireAuth, imageUpload.single('coverArtFile'), artistController.postArtist);
-router.put('/artist/:artistId', requireAuth, imageUpload.single('coverArtFile'), artistController.updateArtist);
-router.delete('/artist/:artistId', requireAuth, artistController.deleteArtist);
-router.get('/artist/:artistId', artistController.getArtistById);
-router.get('/artists', artistController.getArtists);
+router.post('/artist', requireAuth, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), asyncHandler(artistController.postArtist));
+router.put('/artist/:artistId', requireAuth, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), asyncHandler(artistController.updateArtist));
+router.delete('/artist/:artistId', requireAuth, asyncHandler(artistController.deleteArtist));
+router.get('/artist/:artistId', publicReadRateLimit, asyncHandler(artistController.getArtistById));
+router.get('/artists', publicReadRateLimit, asyncHandler(artistController.getArtists));
 
 export default router;

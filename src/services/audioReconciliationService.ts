@@ -7,6 +7,10 @@ type ListedS3Object = {
     size: number;
     lastModified?: Date;
 };
+const configuredReconciliationLimit = Number(process.env.MAX_RECONCILIATION_OBJECTS ?? 50_000);
+const reconciliationLimit = Number.isFinite(configuredReconciliationLimit) && configuredReconciliationLimit > 0
+    ? Math.floor(configuredReconciliationLimit)
+    : 50_000;
 
 const decodeMetadataValue = (value?: string) => {
     if (!value) return '';
@@ -20,6 +24,7 @@ const decodeMetadataValue = (value?: string) => {
 const listS3Objects = async (bucket: string): Promise<ListedS3Object[]> => {
     const objects: ListedS3Object[] = [];
     let continuationToken: string | undefined;
+    const seenContinuationTokens = new Set<string>();
 
     do {
         const page = await getS3().send(new ListObjectsV2Command({
@@ -33,8 +38,16 @@ const listS3Objects = async (bucket: string): Promise<ListedS3Object[]> => {
                 size: Number(object.Size ?? 0),
                 lastModified: object.LastModified
             });
+            if (objects.length > reconciliationLimit) {
+                throw new Error(`Audio reconciliation exceeds the ${reconciliationLimit} object safety limit.`);
+            }
         }
-        continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+        const nextToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+        if (nextToken && seenContinuationTokens.has(nextToken)) {
+            throw new Error('S3 returned a repeated continuation token while auditing audio storage.');
+        }
+        if (nextToken) seenContinuationTokens.add(nextToken);
+        continuationToken = nextToken;
     } while (continuationToken);
 
     return objects;
@@ -100,9 +113,12 @@ export const reconcileAudioStorage = async () => {
                 uploadUpdatedAt: 1,
                 uploadError: 1
             }
-        }).toArray(),
+        }).limit(reconciliationLimit + 1).toArray(),
         listS3Objects(bucket)
     ]);
+    if (tracks.length > reconciliationLimit) {
+        throw new Error(`Audio reconciliation exceeds the ${reconciliationLimit} database-record safety limit.`);
+    }
     const s3Objects = allS3Objects.filter((object) => !object.key.startsWith('images/'));
 
     const tracksByKey = new Map(tracks.map((track) => [

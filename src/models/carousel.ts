@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 
 const collectionId = 'carousels';
+const maximumManualCarouselItems = 500;
 const toObjectId = (value: string) => {
     try {
         return ObjectId.createFromHexString(value);
@@ -130,6 +131,7 @@ export class Carousel {
                 items: normalizeOrder(
                     (Array.isArray(carousel?.items) ? [...carousel.items] : [])
                         .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0))
+                        .slice(0, maximumManualCarouselItems)
                 )
             };
         }
@@ -149,6 +151,15 @@ export class Carousel {
             return { ...carousel, mode, items: [] };
         }
 
+        const itemLimit = Math.max(1, Math.min(Number(config.limit ?? 20), 100));
+        const sort: Record<string, 1 | -1> = config.sort === 'titleAsc'
+            ? { title: 1 as const, _id: 1 as const }
+            : {
+                'releaseDate.year': -1 as const,
+                'releaseDate.month': -1 as const,
+                'releaseDate.day': -1 as const,
+                title: 1 as const
+            };
         let content: any[] = [];
         if (config.contentType === 'album') {
             const albumObjectIds = [...new Set<string>(
@@ -157,28 +168,24 @@ export class Carousel {
                     .filter((id: string) => Boolean(toObjectId(id)))
             )].map((id) => toObjectId(id)).filter((id): id is ObjectId => id !== null);
             content = albumObjectIds.length > 0
-                ? await db!.collection('albums').find({ _id: { $in: albumObjectIds } }).toArray()
+                ? await db!.collection('albums')
+                    .find({ _id: { $in: albumObjectIds } })
+                    .sort(sort)
+                    .limit(itemLimit)
+                    .maxTimeMS(3_000)
+                    .toArray()
                 : [];
         } else {
             content = await db!
                 .collection('audioTracks')
                 .find({ artistIds: config.artistId })
+                .sort(sort)
+                .limit(itemLimit)
+                .maxTimeMS(3_000)
                 .toArray();
         }
 
-        const releaseDateValue = (item: any) => {
-            const date = item?.releaseDate ?? {};
-            return (Number(date.year ?? 0) * 10000) + (Number(date.month ?? 0) * 100) + Number(date.day ?? 0);
-        };
-        const sorted = [...content].sort((left, right) => {
-            if (config.sort === 'titleAsc') {
-                return String(left.title ?? left.name ?? '').localeCompare(String(right.title ?? right.name ?? ''));
-            }
-            return releaseDateValue(right) - releaseDateValue(left)
-                || String(left.title ?? '').localeCompare(String(right.title ?? ''));
-        });
-        const itemLimit = Math.max(1, Math.min(Number(config.limit ?? 20), 100));
-        const items = sorted.slice(0, itemLimit).map((item, order) => ({
+        const items = content.map((item, order) => ({
             contentType: config.contentType,
             contentId: String(item._id),
             order
@@ -187,8 +194,14 @@ export class Carousel {
         return { ...carousel, mode, items };
     }
 
-    static resolveCarousels(carousels: any[]) {
-        return Promise.all(carousels.map((carousel) => this.resolveCarousel(carousel)));
+    static async resolveCarousels(carousels: any[]) {
+        const resolved: any[] = [];
+        for (let index = 0; index < carousels.length; index += 10) {
+            resolved.push(...await Promise.all(
+                carousels.slice(index, index + 10).map((carousel) => this.resolveCarousel(carousel))
+            ));
+        }
+        return resolved;
     }
 
     static updateById(carouselId: string, update: Record<string, unknown>) {
@@ -215,6 +228,9 @@ export class Carousel {
         }
 
         const nextItems = Array.isArray(existing.items) ? [...existing.items] : [];
+        if (nextItems.length >= maximumManualCarouselItems) {
+            return null;
+        }
         const insertAt = typeof position === 'number'
             ? Math.max(0, Math.min(position, nextItems.length))
             : nextItems.length;
@@ -265,6 +281,9 @@ export class Carousel {
 
         const sourceItems = Array.isArray(source.items) ? [...source.items] : [];
         const targetItems = Array.isArray(target.items) ? [...target.items] : [];
+        if (targetItems.length >= maximumManualCarouselItems) {
+            return null;
+        }
 
         if (fromIndex < 0 || fromIndex >= sourceItems.length) {
             return null;
@@ -305,6 +324,9 @@ export class Carousel {
             .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0));
         const selectedIndexes = [...new Set(fromIndexes)].sort((a, b) => a - b);
         if (selectedIndexes.length === 0 || selectedIndexes.some((index) => index < 0 || index >= sourceItems.length)) {
+            return null;
+        }
+        if (targetItems.length + selectedIndexes.length > maximumManualCarouselItems) {
             return null;
         }
 

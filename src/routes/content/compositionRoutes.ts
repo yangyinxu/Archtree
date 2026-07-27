@@ -1,12 +1,13 @@
 import express, { Router } from 'express';
 import * as pageController from '../../controllers/pageController';
 import { requireAuth } from '../../middleware/authMiddleware';
+import { asyncHandler, publicReadRateLimit } from '../../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
 
-router.get('/pages', pageController.listPages);
-router.get('/pages/:slug', pageController.getPageBySlug);
-router.get('/pages/:slug/expanded', pageController.getExpandedPageBySlug);
+router.get('/pages', publicReadRateLimit, asyncHandler(pageController.listPages));
+router.get('/pages/:slug', publicReadRateLimit, asyncHandler(pageController.getPageBySlug));
+router.get('/pages/:slug/expanded', publicReadRateLimit, asyncHandler(pageController.getExpandedPageBySlug));
 router.post('/pages', requireAuth, pageController.upsertPage);
 router.post('/pages/:slug/items/carousel', requireAuth, pageController.attachCarouselToPage);
 router.delete('/pages/:slug/items/carousel/:carouselId', requireAuth, pageController.removeCarouselFromPage);

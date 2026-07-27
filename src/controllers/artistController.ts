@@ -32,7 +32,7 @@ export const postArtist = async (req: Request, res: Response, next: NextFunction
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
 
     try {
-        if (coverArtFile) validateCoverArtFile(coverArtFile);
+        if (coverArtFile) await validateCoverArtFile(coverArtFile);
         const result = await artist.save();
         const artistId = result.insertedId.toHexString();
         try {
@@ -127,30 +127,23 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
 };
 
 // get an artist via the model and return it
-export const getArtistById = (req: Request, res: Response, next: NextFunction) => {
-    const artistId: string = req.params.artistId;
-
-    // Fetch the artist from the db
-    Artist.findById(artistId)
-        .then((artist: any) => {
-            res.status(200).json({
-                artist
-            });
-        })
-        .catch((error: any) => {
-            console.log(error);
-        });
+export const getArtistById = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const artist = await Artist.findById(req.params.artistId);
+        return res.status(artist ? 200 : 404).json({ artist });
+    } catch (error) {
+        return next(error);
+    }
 };
 
 // get all artists via the model and return them
-export const getArtists = (req: Request, res: Response, next: NextFunction) => {
-    Artist.fetchAll()
-        .then((artists: any) => {
-            res.status(200).json({
-                artists
-            });
-        })
-        .catch((error: any) => {
-            console.log(error);
-        });
+export const getArtists = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
+        const offset = Math.max(0, Number(req.query.offset) || 0);
+        const artists = await Artist.fetchAll(limit, offset);
+        return res.status(200).json({ artists, limit, offset });
+    } catch (error) {
+        return next(error);
+    }
 };

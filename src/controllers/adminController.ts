@@ -5,56 +5,43 @@ import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { renderAudioStorageAuditPage } from '../views/admin/audioStorageAuditView';
 import { reconcileImageStorage } from '../services/imageReconciliationService';
 
-const Product = require('../models/product');
-
 // {{baseUrl}}/admin/product
 export const getAddProduct = async (req: Request, res: Response, next: NextFunction) => {
-    // retrieve all products from database
-    const db = getDb();
-
-    if (db === undefined) {
-        console.log('Invalid Database');
-        return;
+    try {
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
+        const offset = Math.max(0, Number(req.query.offset) || 0);
+        const products = await getDb()!
+            .collection('products')
+            .find()
+            .skip(offset)
+            .limit(limit)
+            .toArray();
+        return res.status(200).json({ products, limit, offset });
+    } catch (error) {
+        return next(error);
     }
-
-    db!.collection('products')
-        .find()
-        .toArray()
-        .then((products: any) => {
-            console.log(products);
-            res.status(200).json({ products: products });
-        })
-        .catch((error: any) => {
-            console.log(error);
-            res.status(500).json({ message: 'An error occurred.' });
-        });
 };
 
 // {{baseUrl}}/admin/product
-export const postAddProduct = (req: Request, res: Response, next: () => void) => {
-    const title: string = req.body.title;
-    const imageUrl: string = req.body.imageUrl;
-    const price: number = req.body.price;
-    const description: string = req.body?.description;
-
-    const product = new Product(
-        title,
-        price,
-        description,
-        imageUrl);
-
-    product
-        .save()
-        .then((result: any) => {
-            console.log(result);
-            res.status(201).json({
-                message: `Product ${title} Added Successfully`,
-                product: result
-            });
-        })
-        .catch((err: any) => {
-            console.log(err);
+export const postAddProduct = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const product = {
+            title: String(req.body.title ?? '').trim(),
+            imageUrl: String(req.body.imageUrl ?? '').trim(),
+            price: Number(req.body.price),
+            description: String(req.body.description ?? '').trim()
+        };
+        if (!product.title || !product.imageUrl || !Number.isFinite(product.price)) {
+            return res.status(400).json({ message: 'Valid title, imageUrl, and price are required.' });
+        }
+        const result = await getDb()!.collection('products').insertOne(product);
+        return res.status(201).json({
+            message: `Product ${product.title} Added Successfully`,
+            productId: result.insertedId
         });
+    } catch (error) {
+        return next(error);
+    }
 };
 
 export const getAudioStorageReconciliation = async (req: Request, res: Response, next: NextFunction) => {
