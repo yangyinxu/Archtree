@@ -14,6 +14,7 @@ import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddl
 import { connectToDatabase } from './infrastructure/database';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
+import { maxImageUploadMb } from './middleware/imageUpload';
 
 const app: Application = express();
 
@@ -106,7 +107,9 @@ app.use((error: any, req: Request, res: Response, next: NextFunction) => {
   const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
   const status: number = isFileTooLarge ? 413 : error.statusCode || 500;
   const message: string = isFileTooLarge
-    ? `Audio file is too large. The maximum size per file is ${maxAudioUploadMb} MB.`
+    ? error?.field === 'coverArtFile'
+      ? `Cover art is too large. The maximum size is ${maxImageUploadMb} MB.`
+      : `Audio file is too large. The maximum size per file is ${maxAudioUploadMb} MB.`
     : error.message;
   const data: any = error.data;
 

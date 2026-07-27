@@ -2,6 +2,7 @@ import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getS3 } from '../infrastructure/s3';
 import { AudioTrack } from '../models/audioTrack';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import { deleteCoverArt } from './imageStorageService';
 
 const errorMessage = (error: unknown) => {
     if (error instanceof Error) {
@@ -66,6 +67,11 @@ export const uploadAudioObject = async (
 };
 
 export const deleteAudioObjectAndTrack = async (audioTrackId: string) => {
+    const track = await AudioTrack.findById(audioTrackId);
+    if (!track) {
+        throw new Error(`Audio track ${audioTrackId} no longer exists.`);
+    }
+
     const deletingUpdate = await AudioTrack.updateById(audioTrackId, {
         uploadStatus: 'deleting',
         uploadUpdatedAt: new Date(),
@@ -80,6 +86,7 @@ export const deleteAudioObjectAndTrack = async (audioTrackId: string) => {
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: audioTrackId
         }));
+        await deleteCoverArt(track.coverArtId);
     } catch (error) {
         await AudioTrack.updateById(audioTrackId, {
             uploadStatus: 'deleteFailed',

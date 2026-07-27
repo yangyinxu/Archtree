@@ -331,7 +331,8 @@
     birthDate: 'Birth date',
     releaseDate: 'Release date',
     audioFiles: 'Audio files',
-    audioFile: 'Audio file'
+    audioFile: 'Audio file',
+    coverArtFile: 'Cover art (JPG, PNG, or WebP)'
   };
 
   document.querySelectorAll('form input, form select, form textarea').forEach((field, index) => {

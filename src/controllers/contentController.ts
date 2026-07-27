@@ -26,6 +26,8 @@ import {
     uploadAudioObject
 } from '../services/audioStorageService';
 import { validateOwnedContentReferences } from '../services/contentReferenceService';
+import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
+import { getUploadedFile } from '../middleware/imageUpload';
 
 const parseCsv = (value: string) => {
     return value
@@ -242,7 +244,7 @@ const renderManagePage = (params: {
     </div>
     <div class="header-actions">
       <a class="button" href="/content/manage/audio-tracks">My Audio Tracks</a>
-      ${params.isAdmin ? '<a class="button button--secondary" href="/admin/audio-storage/reconciliation">Audit Audio Storage</a>' : ''}
+      ${params.isAdmin ? '<a class="button button--secondary" href="/admin/audio-storage/reconciliation">Audit Audio Storage</a><a class="button button--secondary" href="/admin/image-storage/reconciliation">Audit Image Storage</a>' : ''}
       <a class="button button--secondary" href="/">Home</a>
       <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
     </div>
@@ -460,11 +462,11 @@ const renderManagePage = (params: {
   <div class="grid">
     <div class="card">
       <h3>Create Artist</h3>
-      <form method="POST" action="/content/manage/artist/create">
+      <form method="POST" action="/content/manage/artist/create" enctype="multipart/form-data">
         <input name="name" placeholder="Name" required />
         <input name="birthDate" type="date" />
         <input name="bio" placeholder="Bio" />
-        <input name="coverArtUrl" placeholder="Cover Art URL" />
+        <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
         <input name="albumIds" placeholder="Album IDs (comma separated)" />
         <button type="submit">Create Artist</button>
       </form>
@@ -472,9 +474,9 @@ const renderManagePage = (params: {
 
     <div class="card">
       <h3>Create Album</h3>
-      <form method="POST" action="/content/manage/album/create">
+      <form method="POST" action="/content/manage/album/create" enctype="multipart/form-data">
         <input name="title" placeholder="Title" required />
-        <input name="coverArtUrl" placeholder="Cover Art URL" />
+        <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
         <input name="audioTrackIds" placeholder="Audio Track IDs (comma separated)" />
         <input name="releaseDate" type="date" />
         <button type="submit">Create Album</button>
@@ -492,7 +494,7 @@ const renderManagePage = (params: {
         <input name="duration" placeholder="Duration (e.g. 03:30)" />
         <input name="formatType" placeholder="Format type (e.g. MP3)" />
         <input name="formatBitrate" placeholder="Bitrate (e.g. 320)" />
-        <input name="coverArtUrl" placeholder="Cover Art URL" />
+        <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
         <input type="file" name="audioFile" accept="audio/*" required />
         <button type="submit">Create and Upload Audio Track</button>
       </form>
@@ -541,11 +543,12 @@ const renderManagePage = (params: {
                 <input name="prefillId" value="${prefillArtistId}" placeholder="Artist ID" required />
                 <button type="submit">Load Current</button>
             </form>
-      <form method="POST" action="/content/manage/artist/update">
+      <form method="POST" action="/content/manage/artist/update" enctype="multipart/form-data">
                 <input name="artistId" value="${prefillArtistId}" placeholder="Artist ID" required />
                 <input name="name" value="${escapeHtml(String(prefillArtist?.name ?? ''))}" placeholder="New Name (optional)" />
                 <input name="bio" value="${escapeHtml(String(prefillArtist?.bio ?? ''))}" placeholder="New Bio (optional)" />
-                <input name="coverArtUrl" value="${escapeHtml(String(prefillArtist?.coverArtUrl ?? ''))}" placeholder="New Cover URL (optional)" />
+                <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
+                <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
                 <input name="albumIds" value="${escapeHtml(toCsvInput(prefillArtist?.albumIds))}" placeholder="Album IDs (comma separated)" />
         <button type="submit">Update Artist</button>
       </form>
@@ -562,10 +565,11 @@ const renderManagePage = (params: {
                 <input name="prefillId" value="${prefillAlbumId}" placeholder="Album ID" required />
                 <button type="submit">Load Current</button>
             </form>
-      <form method="POST" action="/content/manage/album/update">
+      <form method="POST" action="/content/manage/album/update" enctype="multipart/form-data">
                 <input name="albumId" value="${prefillAlbumId}" placeholder="Album ID" required />
                 <input name="title" value="${escapeHtml(String(prefillAlbum?.title ?? ''))}" placeholder="New Title (optional)" />
-                <input name="coverArtUrl" value="${escapeHtml(String(prefillAlbum?.coverArtUrl ?? ''))}" placeholder="New Cover URL (optional)" />
+                <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
+                <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
                 <input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Audio Track IDs (comma separated)" />
                 <input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAlbum?.releaseDate))}" type="date" />
         <button type="submit">Update Album</button>
@@ -583,10 +587,11 @@ const renderManagePage = (params: {
                 <input name="prefillId" value="${prefillAudioTrackId}" placeholder="Audio Track ID" required />
                 <button type="submit">Load Current</button>
             </form>
-      <form method="POST" action="/content/manage/audioTrack/update">
+      <form method="POST" action="/content/manage/audioTrack/update" enctype="multipart/form-data">
                 <input name="audioTrackId" value="${prefillAudioTrackId}" placeholder="Audio Track ID" required />
                 <input name="title" value="${escapeHtml(String(prefillAudioTrack?.title ?? ''))}" placeholder="New Title (optional)" />
-                <input name="coverArtUrl" value="${escapeHtml(String(prefillAudioTrack?.coverArtUrl ?? ''))}" placeholder="New Cover URL (optional)" />
+                <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
+                <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
                 <input name="artistIds" value="${escapeHtml(toCsvInput(prefillAudioTrack?.artistIds))}" placeholder="Artist IDs (comma separated)" />
                 <input name="genres" value="${escapeHtml(toCsvInput(prefillAudioTrack?.genres))}" placeholder="Genres (comma separated)" />
                 <input name="albumId" value="${escapeHtml(String(prefillAudioTrack?.albumId ?? ''))}" placeholder="Album ID" />
@@ -816,7 +821,27 @@ export const createArtistWeb = async (req: Request, res: Response, next: NextFun
             authReq.auth.userId
         );
 
-        await artist.save();
+        const coverArtFile = getUploadedFile(req, 'coverArtFile');
+        if (coverArtFile) validateCoverArtFile(coverArtFile);
+        const result = await artist.save();
+        const artistId = result.insertedId.toHexString();
+        try {
+            if (coverArtFile) {
+                const coverArt = await uploadCoverArt(
+                    'artist',
+                    artistId,
+                    coverArtFile,
+                    authReq.auth.userId
+                );
+                await Artist.updateById(artistId, {
+                    coverArtId: coverArt.imageId,
+                    coverArtUrl: coverArt.coverArtUrl
+                });
+            }
+        } catch (error) {
+            await Artist.deleteById(artistId).catch(() => undefined);
+            throw error;
+        }
         return redirectWithMessage(res, 'Artist created successfully.');
     } catch (error) {
         return next(error);
@@ -843,9 +868,10 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
         }
 
         const updatePayload: Record<string, unknown> = {};
+        const coverArtFile = getUploadedFile(req, 'coverArtFile');
+        let replacementCoverArtId: string | undefined;
         if (req.body.name) updatePayload.name = String(req.body.name);
         if (req.body.bio) updatePayload.bio = String(req.body.bio);
-        if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
         if (req.body.albumIds) {
             const validation = await validateOwnedContentReferences(
                 authReq,
@@ -855,8 +881,35 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
             if (!validation.valid) return redirectWithMessage(res, validation.message!);
             updatePayload.albumIds = validation.ids;
         }
+        if (coverArtFile) {
+            const coverArt = await uploadCoverArt(
+                'artist',
+                artistId,
+                coverArtFile,
+                authReq.auth.userId
+            );
+            replacementCoverArtId = coverArt.imageId;
+            updatePayload.coverArtId = coverArt.imageId;
+            updatePayload.coverArtUrl = coverArt.coverArtUrl;
+        } else if (req.body.removeCoverArt === 'true') {
+            await deleteCoverArt(artist.coverArtId);
+            updatePayload.coverArtId = null;
+            updatePayload.coverArtUrl = '';
+        }
         await Artist.updateById(artistId, updatePayload);
-        return redirectWithMessage(res, 'Artist updated successfully.');
+        let cleanupPending = false;
+        if (replacementCoverArtId && artist.coverArtId && artist.coverArtId !== replacementCoverArtId) {
+            await deleteCoverArt(artist.coverArtId).catch((error) => {
+                cleanupPending = true;
+                console.log(`Unable to delete replaced artist cover art ${artist.coverArtId}:`, error);
+            });
+        }
+        return redirectWithMessage(
+            res,
+            cleanupPending
+                ? 'Artist updated successfully. Previous cover-art cleanup will need to be retried.'
+                : 'Artist updated successfully.'
+        );
     } catch (error) {
         return next(error);
     }
@@ -881,6 +934,7 @@ export const deleteArtistWeb = async (req: Request, res: Response, next: NextFun
             return redirectWithMessage(res, 'Forbidden: only creator or admin can delete this artist.');
         }
 
+        await deleteCoverArt(artist.coverArtId);
         await Artist.deleteById(artistId);
         return redirectWithMessage(res, 'Artist deleted successfully.');
     } catch (error) {
@@ -909,7 +963,27 @@ export const createAlbumWeb = async (req: Request, res: Response, next: NextFunc
             authReq.auth.userId
         );
 
-        await album.save();
+        const coverArtFile = getUploadedFile(req, 'coverArtFile');
+        if (coverArtFile) validateCoverArtFile(coverArtFile);
+        const result = await album.save();
+        const albumId = result.insertedId.toHexString();
+        try {
+            if (coverArtFile) {
+                const coverArt = await uploadCoverArt(
+                    'album',
+                    albumId,
+                    coverArtFile,
+                    authReq.auth.userId
+                );
+                await Album.updateById(albumId, {
+                    coverArtId: coverArt.imageId,
+                    coverArtUrl: coverArt.coverArtUrl
+                });
+            }
+        } catch (error) {
+            await Album.deleteById(albumId).catch(() => undefined);
+            throw error;
+        }
         return redirectWithMessage(res, 'Album created successfully.');
     } catch (error) {
         return next(error);
@@ -936,8 +1010,9 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
         }
 
         const updatePayload: Record<string, unknown> = {};
+        const coverArtFile = getUploadedFile(req, 'coverArtFile');
+        let replacementCoverArtId: string | undefined;
         if (req.body.title) updatePayload.title = String(req.body.title);
-        if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
         if (req.body.audioTrackIds) {
             const validation = await validateOwnedContentReferences(
                 authReq,
@@ -948,9 +1023,36 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
             updatePayload.audioTrackIds = validation.ids;
         }
         if (req.body.releaseDate) updatePayload.releaseDate = parseDateInput(String(req.body.releaseDate));
+        if (coverArtFile) {
+            const coverArt = await uploadCoverArt(
+                'album',
+                albumId,
+                coverArtFile,
+                authReq.auth.userId
+            );
+            replacementCoverArtId = coverArt.imageId;
+            updatePayload.coverArtId = coverArt.imageId;
+            updatePayload.coverArtUrl = coverArt.coverArtUrl;
+        } else if (req.body.removeCoverArt === 'true') {
+            await deleteCoverArt(album.coverArtId);
+            updatePayload.coverArtId = null;
+            updatePayload.coverArtUrl = '';
+        }
 
         await Album.updateById(albumId, updatePayload);
-        return redirectWithMessage(res, 'Album updated successfully.');
+        let cleanupPending = false;
+        if (replacementCoverArtId && album.coverArtId && album.coverArtId !== replacementCoverArtId) {
+            await deleteCoverArt(album.coverArtId).catch((error) => {
+                cleanupPending = true;
+                console.log(`Unable to delete replaced album cover art ${album.coverArtId}:`, error);
+            });
+        }
+        return redirectWithMessage(
+            res,
+            cleanupPending
+                ? 'Album updated successfully. Previous cover-art cleanup will need to be retried.'
+                : 'Album updated successfully.'
+        );
     } catch (error) {
         return next(error);
     }
@@ -975,6 +1077,7 @@ export const deleteAlbumWeb = async (req: Request, res: Response, next: NextFunc
             return redirectWithMessage(res, 'Forbidden: only creator or admin can delete this album.');
         }
 
+        await deleteCoverArt(album.coverArtId);
         await Album.deleteById(albumId);
         return redirectWithMessage(res, 'Album deleted successfully.');
     } catch (error) {
@@ -989,7 +1092,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
 
-        const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
+        const uploadFile = getUploadedFile(req, 'audioFile');
         if (!uploadFile) {
             return redirectWithMessage(res, 'An audio file is required to create an audio track.');
         }
@@ -1037,6 +1140,19 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
 
         await track.save();
         await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId);
+        const coverArtFile = getUploadedFile(req, 'coverArtFile');
+        if (coverArtFile) {
+            const coverArt = await uploadCoverArt(
+                'audioTrack',
+                audioTrackId,
+                coverArtFile,
+                authReq.auth.userId
+            );
+            await AudioTrack.updateById(audioTrackId, {
+                coverArtId: coverArt.imageId,
+                coverArtUrl: coverArt.coverArtUrl
+            });
+        }
 
         if (album) {
             const albumTrackIds = uniqueStrings([
@@ -1072,8 +1188,9 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
         }
 
         const updatePayload: Record<string, unknown> = {};
+        const coverArtFile = getUploadedFile(req, 'coverArtFile');
+        let replacementCoverArtId: string | undefined;
         if (req.body.title) updatePayload.title = String(req.body.title);
-        if (req.body.coverArtUrl) updatePayload.coverArtUrl = String(req.body.coverArtUrl);
         if (req.body.artistIds) {
             const validation = await validateOwnedContentReferences(
                 authReq,
@@ -1103,9 +1220,36 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
                 Number.isNaN(bitrate as number) ? undefined : bitrate
             );
         }
+        if (coverArtFile) {
+            const coverArt = await uploadCoverArt(
+                'audioTrack',
+                audioTrackId,
+                coverArtFile,
+                authReq.auth.userId
+            );
+            replacementCoverArtId = coverArt.imageId;
+            updatePayload.coverArtId = coverArt.imageId;
+            updatePayload.coverArtUrl = coverArt.coverArtUrl;
+        } else if (req.body.removeCoverArt === 'true') {
+            await deleteCoverArt(track.coverArtId);
+            updatePayload.coverArtId = null;
+            updatePayload.coverArtUrl = '';
+        }
 
         await AudioTrack.updateById(audioTrackId, updatePayload);
-        return redirectWithMessage(res, 'Audio track updated successfully.');
+        let cleanupPending = false;
+        if (replacementCoverArtId && track.coverArtId && track.coverArtId !== replacementCoverArtId) {
+            await deleteCoverArt(track.coverArtId).catch((error) => {
+                cleanupPending = true;
+                console.log(`Unable to delete replaced audio-track cover art ${track.coverArtId}:`, error);
+            });
+        }
+        return redirectWithMessage(
+            res,
+            cleanupPending
+                ? 'Audio track updated successfully. Previous cover-art cleanup will need to be retried.'
+                : 'Audio track updated successfully.'
+        );
     } catch (error) {
         return next(error);
     }

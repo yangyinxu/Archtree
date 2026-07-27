@@ -89,7 +89,7 @@ export const reconcileAudioStorage = async () => {
         throw new Error('S3_BUCKET_NAME is not configured.');
     }
 
-    const [tracks, s3Objects] = await Promise.all([
+    const [tracks, allS3Objects] = await Promise.all([
         db.collection('audioTracks').find({}, {
             projection: {
                 title: 1,
@@ -103,6 +103,7 @@ export const reconcileAudioStorage = async () => {
         }).toArray(),
         listS3Objects(bucket)
     ]);
+    const s3Objects = allS3Objects.filter((object) => !object.key.startsWith('images/'));
 
     const tracksByKey = new Map(tracks.map((track) => [
         String(track.s3Key ?? track._id),

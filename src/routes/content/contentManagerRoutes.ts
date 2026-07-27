@@ -3,6 +3,7 @@ import * as contentController from '../../controllers/contentController';
 import * as pageController from '../../controllers/pageController';
 import { requireAuthForWeb } from '../../middleware/authMiddleware';
 import { audioUpload } from '../../middleware/audioUpload';
+import { audioWithCoverArtUpload, imageUpload } from '../../middleware/imageUpload';
 
 const router: Router = express.Router();
 
@@ -10,17 +11,17 @@ router.get('/', requireAuthForWeb, contentController.renderManagePageForWeb);
 router.get('/audio-tracks', requireAuthForWeb, contentController.renderAudioTracksPageForWeb);
 router.get('/search', requireAuthForWeb, contentController.searchContentWeb);
 
-router.post('/artist/create', requireAuthForWeb, contentController.createArtistWeb);
-router.post('/artist/update', requireAuthForWeb, contentController.updateArtistWeb);
+router.post('/artist/create', requireAuthForWeb, imageUpload.single('coverArtFile'), contentController.createArtistWeb);
+router.post('/artist/update', requireAuthForWeb, imageUpload.single('coverArtFile'), contentController.updateArtistWeb);
 router.post('/artist/delete', requireAuthForWeb, contentController.deleteArtistWeb);
 
-router.post('/album/create', requireAuthForWeb, contentController.createAlbumWeb);
-router.post('/album/update', requireAuthForWeb, contentController.updateAlbumWeb);
+router.post('/album/create', requireAuthForWeb, imageUpload.single('coverArtFile'), contentController.createAlbumWeb);
+router.post('/album/update', requireAuthForWeb, imageUpload.single('coverArtFile'), contentController.updateAlbumWeb);
 router.post('/album/delete', requireAuthForWeb, contentController.deleteAlbumWeb);
 router.post('/album/delete-audio-tracks', requireAuthForWeb, contentController.deleteAlbumAudioTracksWeb);
 
-router.post('/audioTrack/create', requireAuthForWeb, audioUpload.single('audioFile'), contentController.createAudioTrackWeb);
-router.post('/audioTrack/update', requireAuthForWeb, contentController.updateAudioTrackWeb);
+router.post('/audioTrack/create', requireAuthForWeb, audioWithCoverArtUpload, contentController.createAudioTrackWeb);
+router.post('/audioTrack/update', requireAuthForWeb, imageUpload.single('coverArtFile'), contentController.updateAudioTrackWeb);
 router.post('/audioTrack/delete', requireAuthForWeb, contentController.deleteAudioTrackWeb);
 router.post('/audioTrack/upload', requireAuthForWeb, audioUpload.single('audioFile'), contentController.uploadAudioTrackWeb);
 router.post('/audioTrack/bulk-upload', requireAuthForWeb, audioUpload.array('audioFiles', 20), contentController.bulkUploadAudioTracksWeb);
