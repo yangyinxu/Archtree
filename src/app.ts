@@ -11,12 +11,18 @@ import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import videoRoutes from './routes/videoRoutes';
 import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddleware';
-import { connectToDatabase } from './infrastructure/database';
+import { connectToDatabase, getDb } from './infrastructure/database';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
 import { maxImageUploadMb } from './middleware/imageUpload';
+import { getMediaDeliveryMetrics } from './services/mediaDeliveryService';
 
 const app: Application = express();
+const defaultProxyHops = process.env.NODE_ENV === 'production' ? 2 : 1;
+const configuredProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? defaultProxyHops);
+app.set('trust proxy', Number.isFinite(configuredProxyHops) && configuredProxyHops >= 0
+  ? Math.floor(configuredProxyHops)
+  : defaultProxyHops);
 
 console.log(`Service environment: ${process.env.NODE_ENV}`);
 
@@ -98,18 +104,47 @@ app.get('/', attachOptionalAuth, async (req, res, next) => {
 });
 
 // health endpoint for load balancers and service monitoring
-app.get('/health', (req, res, next) => {
-  res.status(200).json({ status: 'ok' });
+app.get('/health', async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db) throw new Error('Database is unavailable.');
+    await db.command({ ping: 1 }, { maxTimeMS: 1_000 });
+    return res.status(200).json({
+      status: 'ok',
+      mediaDelivery: getMediaDeliveryMetrics(),
+      memory: {
+        rssBytes: process.memoryUsage().rss,
+        heapUsedBytes: process.memoryUsage().heapUsed
+      }
+    });
+  } catch {
+    return res.status(503).json({
+      status: 'unavailable',
+      mediaDelivery: getMediaDeliveryMetrics()
+    });
+  }
 });
 
 // catch unexpected requests
 app.use((error: any, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    return next(error);
+  }
+
   const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
-  const status: number = isFileTooLarge ? 413 : error.statusCode || 500;
+  const isTooManyFiles = error?.code === 'LIMIT_FILE_COUNT';
+  const isMulterInputError = typeof error?.code === 'string' && error.code.startsWith('LIMIT_');
+  const status: number = isFileTooLarge || isTooManyFiles
+    ? 413
+    : isMulterInputError ? 400 : error.statusCode || 500;
   const message: string = isFileTooLarge
     ? error?.field === 'coverArtFile'
       ? `Cover art is too large. The maximum size is ${maxImageUploadMb} MB.`
       : `Audio file is too large. The maximum size per file is ${maxAudioUploadMb} MB.`
+    : isTooManyFiles
+      ? 'Too many files were included in this upload.'
+      : isMulterInputError
+        ? 'Invalid multipart upload.'
     : error.message;
   const data: any = error.data;
 
@@ -123,12 +158,25 @@ app.use((error: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 const port: string | number = process.env.PORT || process.env.port || 8080;
+const positiveInteger = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
 
 // the app should connect to the database as soon as it starts
 connectToDatabase()
   .then(() => {
-    app.listen(port, () => {
+    const server = app.listen(port, () => {
       console.log('Starting service on port ' + port + '...');
+    });
+    server.headersTimeout = positiveInteger(process.env.SERVER_HEADERS_TIMEOUT_MS, 60_000);
+    server.requestTimeout = positiveInteger(process.env.SERVER_REQUEST_TIMEOUT_MS, 15 * 60_000);
+    server.keepAliveTimeout = positiveInteger(process.env.SERVER_KEEP_ALIVE_TIMEOUT_MS, 5_000);
+    server.timeout = positiveInteger(process.env.SERVER_INACTIVITY_TIMEOUT_MS, 120_000);
+    server.maxRequestsPerSocket = positiveInteger(process.env.SERVER_MAX_REQUESTS_PER_SOCKET, 1_000);
+    server.maxConnections = positiveInteger(process.env.SERVER_MAX_CONNECTIONS, 1_000);
+    server.on('clientError', (_error, socket) => {
+      if (!socket.destroyed) socket.destroy();
     });
   })
   .catch((error) => {

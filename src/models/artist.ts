@@ -2,6 +2,7 @@ import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from '../models/simpleDate';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
+import { escapeRegex } from '../utils/search';
 
 const withoutLegacyTrackIds = (artist: any) => {
     if (artist) {
@@ -62,13 +63,15 @@ export class Artist {
     }
 
     // fetch all artists from the database
-    static fetchAll() {
+    static fetchAll(limit: number = 50, offset: number = 0) {
         const db = getDb();
 
         // fetch all artists from the database
         return db!
             .collection('artists')
             .find()
+            .skip(offset)
+            .limit(limit)
             .toArray()
             .then((artists: any) => {
                 return artists.map(withoutLegacyTrackIds);
@@ -80,7 +83,8 @@ export class Artist {
 
         return db!
             .collection('artists')
-            .find({ name: { $regex: query, $options: 'i' } })
+            .find({ name: { $regex: escapeRegex(query), $options: 'i' } })
+            .maxTimeMS(3_000)
             .limit(limit)
             .toArray()
             .then((artists) => artists.map(withoutLegacyTrackIds));

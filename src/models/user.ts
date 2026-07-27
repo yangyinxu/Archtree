@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import Post from './post';
+import { escapeRegex } from '../utils/search';
 
 class User {
     constructor(
@@ -41,7 +42,8 @@ class User {
 
         return db!
             .collection('users')
-            .find({ email: { $regex: `^${normalized}$`, $options: 'i' } })
+            .find({ email: { $regex: `^${escapeRegex(normalized)}$`, $options: 'i' } })
+            .maxTimeMS(3_000)
             .next();
     }
 
@@ -51,7 +53,8 @@ class User {
 
         return db!
             .collection('users')
-            .find({ username: { $regex: `^${normalized}$`, $options: 'i' } })
+            .find({ username: { $regex: `^${escapeRegex(normalized)}$`, $options: 'i' } })
+            .maxTimeMS(3_000)
             .next();
     }
 

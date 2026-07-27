@@ -2,6 +2,7 @@ import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from '../models/simpleDate';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
+import { escapeRegex } from '../utils/search';
 
 export class Album {
     title: string;
@@ -45,13 +46,15 @@ export class Album {
     }
 
     // fetch all albums from the database
-    static fetchAll() {
+    static fetchAll(limit: number = 50, offset: number = 0) {
         const db = getDb();
 
         // fetch all albums from the database
         return db!
             .collection('albums')
             .find()
+            .skip(offset)
+            .limit(limit)
             .toArray()
             .then((albums: any) => {
                 return albums.map(withDerivedCoverArtUrl);
@@ -63,7 +66,8 @@ export class Album {
 
         return db!
             .collection('albums')
-            .find({ title: { $regex: query, $options: 'i' } })
+            .find({ title: { $regex: escapeRegex(query), $options: 'i' } })
+            .maxTimeMS(3_000)
             .limit(limit)
             .toArray()
             .then((albums) => albums.map(withDerivedCoverArtUrl));

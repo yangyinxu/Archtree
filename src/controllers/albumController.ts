@@ -29,7 +29,7 @@ export const postAlbum = async (req: Request, res: Response, next: NextFunction)
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
 
     try {
-        if (coverArtFile) validateCoverArtFile(coverArtFile);
+        if (coverArtFile) await validateCoverArtFile(coverArtFile);
         const result = await album.save();
         const albumId = result.insertedId.toHexString();
         try {
@@ -123,30 +123,23 @@ export const deleteAlbum = async (req: Request, res: Response, next: NextFunctio
 };
 
 // get an album via the model and return it
-export const getAlbumById = (req: Request, res: Response, next: NextFunction) => {
-    const albumId: string = req.params.albumId;
-
-    // Fetch the album from the db
-    Album.findById(albumId)
-        .then((album: any) => {
-            res.status(200).json({
-                album
-            });
-        })
-        .catch((error: any) => {
-            console.log(error);
-        });
+export const getAlbumById = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const album = await Album.findById(req.params.albumId);
+        return res.status(album ? 200 : 404).json({ album });
+    } catch (error) {
+        return next(error);
+    }
 };
 
 // get all albums via the model and return them
-export const getAlbums = (req: Request, res: Response, next: NextFunction) => {
-    Album.fetchAll()
-        .then((albums: any) => {
-            res.status(200).json({
-                albums
-            });
-        })
-        .catch((error: any) => {
-            console.log(error);
-        });
+export const getAlbums = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
+        const offset = Math.max(0, Number(req.query.offset) || 0);
+        const albums = await Album.fetchAll(limit, offset);
+        return res.status(200).json({ albums, limit, offset });
+    } catch (error) {
+        return next(error);
+    }
 };

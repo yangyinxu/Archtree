@@ -172,7 +172,9 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         }
 
         const orderedItems = Array.isArray(page.items)
-            ? [...page.items].sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0))
+            ? [...page.items]
+                .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0))
+                .slice(0, 100)
             : [];
 
         const carouselIds = orderedItems

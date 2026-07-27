@@ -1,6 +1,7 @@
 import { getDb } from '../infrastructure/database';
 
 const collectionId = 'pages';
+const maximumPageItems = 100;
 
 // v1 page surfaces are fixed to Home and Library.
 export type PageSlug = 'home' | 'library';
@@ -117,6 +118,9 @@ export class Page {
         }
 
         const nextItems = Array.isArray(page.items) ? [...page.items] : [];
+        if (nextItems.length >= maximumPageItems) {
+            return null;
+        }
         const insertAt = typeof position === 'number'
             ? Math.max(0, Math.min(position, nextItems.length))
             : nextItems.length;

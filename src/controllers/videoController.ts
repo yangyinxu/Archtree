@@ -1,111 +1,85 @@
-import { Request, Response, NextFunction } from 'express';
-import * as mongoDb from 'mongodb';
+import { NextFunction, Request, Response } from 'express';
+import { GridFSBucket, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
-import path from 'path';
+import {
+    createMediaAbortContext,
+    parseSingleByteRange,
+    pipeMediaStream
+} from '../services/mediaDeliveryService';
 
-const gridFsCollection: string = 'fs.files';
+const gridFsCollection = 'fs.files';
+const configuredVideoChunkMb = Number(process.env.MAX_VIDEO_STREAM_CHUNK_MB ?? 4);
+const maxVideoChunkBytes = (
+    Number.isFinite(configuredVideoChunkMb) && configuredVideoChunkMb > 0
+        ? configuredVideoChunkMb
+        : 4
+) * 1024 * 1024;
 
-export const getVideo = async (req: Request, res: Response, next: NextFunction) => {
-    // tell the server which part of the video to send back
-    const range = req.headers.range;
-    // if a range is not provided
-    if (!range) {
-        res.status(400).send('Requires Range header');
-        return;
+const streamVideo = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    videoId?: string
+) => {
+    const db = getDb();
+    if (!db) {
+        return res.status(503).json({ message: 'Database is unavailable.' });
     }
 
-    const db = getDb();
-    db?.collection(gridFsCollection).findOne({}, (err: any, video: any) => {
-        if (!video) {
-            res.status(404).send('No video uploaded!');
-            return;
-        }
-
-        const videoSize:number = video.length;
-        // replace all non-digits with empty string
-        const match = range?.match(/bytes=(\d+)-(\d+)/);
-        const start = match ? parseInt(match[2], 10) : 0;
-        // end is either the start + 1MB or the end of the video
-        const end = videoSize - 1;
-        const contentLength = end - start + 1;
-        
-        console.log("--------------------")
-        console.log("range: " + range)
-        console.log("videoSize: " + videoSize)
-        console.log("start: " + start)
-        console.log("end: " + end)
-        console.log("contentLength: " + contentLength)
-
-        const headers = {
-            "Content-Range": `bytes ${start}-${end}/${videoSize}`,
-            "Accept-Ranges": "bytes",
-            "Content-Length": contentLength,
-            "Content-Type": "video/mp4",
-        };
-
-        // HTTP Status 206 for Partial Content
-        res.writeHead(206, headers);
-
-        const bucket = new mongoDb.GridFSBucket(db);
-        const downloadStream = bucket.openDownloadStreamByName('bigbuck', {
-            start
-        });
-        // Stream the video chunk to the client
-        downloadStream.pipe(res);
-    });
-
-}
-
-export const getVideoById = async (req: Request, res: Response, next: NextFunction) => {
-    console.log("getVideoById: " + req.params.videoId)
-
-    // tell the server which part of the video to send back
-    const range = req.headers.range;
-    // if a range is not provided
-    if (!range) {
-        res.status(400).send('Requires Range header');
-        return;
+    if (videoId && !/^[0-9a-f]{24}$/i.test(videoId)) {
+        return res.status(400).json({ message: 'Invalid video ID.' });
     }
 
-    const db = getDb();
-    db?.collection(gridFsCollection).findOne({}, (err: any, video: any) => {
+    const context = createMediaAbortContext(req, res);
+    try {
+        const query = videoId ? { _id: new ObjectId(videoId) } : {};
+        const video = await db.collection(gridFsCollection).findOne(query, { maxTimeMS: 5_000 });
         if (!video) {
-            res.status(404).send('No video uploaded!');
-            return;
+            return res.status(404).json({ message: 'Video not found.' });
         }
 
-        const videoSize:number = video.length;
-        // replace all non-digits with empty string
-        const match = range?.match(/bytes=(\d+)-(\d+)/);
-        const start = match ? parseInt(match[2], 10) : 0;
-        // end is either the start + 1MB or the end of the video
-        //const end = Math.min(start + CHUNK_SIZE, videoSize - 1);
-        const end = videoSize - 1;
-        const contentLength = end - start + 1;
-        
-        console.log("--------------------")
-        console.log("range: " + range)
-        console.log("videoSize: " + videoSize)
-        console.log("start: " + start)
-        console.log("end: " + end)
-        console.log("contentLength: " + contentLength)
+        const videoSize = Number(video.length);
+        const rangeHeader = req.headers.range;
+        if (!rangeHeader) {
+            res.setHeader('Content-Range', `bytes */${videoSize}`);
+            return res.status(416).json({ message: 'A byte Range header is required.' });
+        }
 
-        const headers = {
-            "Content-Range": `bytes ${start}-${end}/${videoSize}`,
-            "Accept-Ranges": "bytes",
-            "Content-Length": contentLength,
-            "Content-Type": "video/mp4",
-        };
+        const range = parseSingleByteRange(rangeHeader, videoSize, maxVideoChunkBytes);
+        if (!range) {
+            res.setHeader('Content-Range', `bytes */${videoSize}`);
+            return res.status(416).end();
+        }
 
-        // HTTP Status 206 for Partial Content
-        res.writeHead(206, headers);
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${videoSize}`);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', range.end - range.start + 1);
+        res.setHeader('Content-Type', String(video.contentType || 'video/mp4'));
+        res.setHeader('X-Accel-Buffering', 'no');
 
-        const bucket = new mongoDb.GridFSBucket(db);
-        const downloadStream = bucket.openDownloadStreamByName('bigbuck', {
-            start
+        const bucket = new GridFSBucket(db);
+        const downloadStream = bucket.openDownloadStream(video._id, {
+            start: range.start,
+            end: range.end + 1
         });
-        // Stream the video chunk to the client
-        downloadStream.pipe(res);
-    });
+        await pipeMediaStream(req, res, downloadStream, context);
+        return;
+    } catch (error: any) {
+        if (context.aborted || error?.name === 'AbortError') return;
+        if (res.headersSent) {
+            return res.destroy(error instanceof Error ? error : undefined);
+        }
+        return next(error);
+    } finally {
+        context.cleanup();
+    }
+};
 
-}
+export const getVideo = (req: Request, res: Response, next: NextFunction) => {
+    return streamVideo(req, res, next);
+};
+
+export const getVideoById = (req: Request, res: Response, next: NextFunction) => {
+    return streamVideo(req, res, next, req.params.videoId);
+};

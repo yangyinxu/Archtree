@@ -1,6 +1,10 @@
 import { NextFunction, Request, Response } from 'express';
 import { Readable } from 'node:stream';
 import { getCoverArtObject } from '../services/imageStorageService';
+import {
+    createMediaAbortContext,
+    pipeMediaStream
+} from '../services/mediaDeliveryService';
 
 export const getImage = async (req: Request, res: Response, next: NextFunction) => {
     const imageId = String(req.params.imageId ?? '');
@@ -8,10 +12,21 @@ export const getImage = async (req: Request, res: Response, next: NextFunction) 
         return res.status(400).json({ message: 'Invalid image ID.' });
     }
 
+    const context = createMediaAbortContext(req, res);
     try {
-        const result = await getCoverArtObject(imageId);
+        const result = await getCoverArtObject(imageId, {
+            ifNoneMatch: req.headers['if-none-match'],
+            abortSignal: context.signal
+        });
         if (!result) {
             return res.status(404).json({ message: 'Image not found.' });
+        }
+        if (result.notModified) {
+            const requestedEtag = req.headers['if-none-match'];
+            if (requestedEtag) {
+                res.setHeader('ETag', requestedEtag);
+            }
+            return res.status(304).end();
         }
 
         const stream = result.object.Body as unknown as Readable | undefined;
@@ -22,24 +37,22 @@ export const getImage = async (req: Request, res: Response, next: NextFunction) 
         res.setHeader('Content-Type', String(result.asset.contentType));
         res.setHeader('Cache-Control', 'public, max-age=86400');
         res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('X-Accel-Buffering', 'no');
         if (result.object.ETag) {
             res.setHeader('ETag', result.object.ETag);
-            if (req.headers['if-none-match'] === result.object.ETag) {
-                return res.status(304).end();
-            }
         }
         if (result.object.ContentLength !== undefined) {
             res.setHeader('Content-Length', result.object.ContentLength);
         }
-        stream.on('error', (error) => {
-            if (!res.headersSent) {
-                next(error);
-            } else {
-                res.destroy(error);
-            }
-        });
-        return stream.pipe(res);
-    } catch (error) {
+        await pipeMediaStream(req, res, stream, context);
+        return;
+    } catch (error: any) {
+        if (context.aborted || error?.name === 'AbortError') return;
+        if (res.headersSent) {
+            return res.destroy(error instanceof Error ? error : undefined);
+        }
         return next(error);
+    } finally {
+        context.cleanup();
     }
 };

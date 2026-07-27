@@ -1,5 +1,5 @@
 import multer from 'multer';
-import { maxAudioUploadMb } from './audioUpload';
+import { audioDiskStorage, maxAudioUploadMb } from './audioUpload';
 
 const configuredMaxImageUploadMb = Number(process.env.MAX_IMAGE_UPLOAD_MB ?? 10);
 export const maxImageUploadMb = Number.isFinite(configuredMaxImageUploadMb) && configuredMaxImageUploadMb > 0
@@ -19,7 +19,7 @@ export const imageUpload = multer({
 // Multer only supports one per-file size limit. Audio creation accepts both an
 // audio file and cover art, so the image service enforces the smaller image limit.
 export const audioWithCoverArtUpload = multer({
-    storage,
+    storage: audioDiskStorage,
     limits: {
         fileSize: maxAudioUploadMb * 1024 * 1024,
         files: 2

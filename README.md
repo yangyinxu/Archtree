@@ -25,11 +25,28 @@ Required variables:
 
 - `DB_CONN_STRING`: MongoDB connection string
 - `DB_NAME`: MongoDB database name (required; no runtime fallback)
+- `DB_CONNECT_TIMEOUT_MS`: maximum MongoDB connection setup time (defaults to 10000)
+- `DB_SERVER_SELECTION_TIMEOUT_MS`: maximum MongoDB server selection time (defaults to 10000)
+- `DB_SOCKET_TIMEOUT_MS`: maximum MongoDB socket inactivity time (defaults to 120000)
+- `DB_WAIT_QUEUE_TIMEOUT_MS`: maximum wait for a pooled MongoDB connection (defaults to 10000)
+- `DB_MAX_POOL_SIZE`: maximum MongoDB connections per server process (defaults to 100)
 - `JWT_SECRET`: JWT signing secret
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 operations
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region
 - `S3_BUCKET_NAME`: target S3 bucket for audio uploads
+- `S3_CONNECTION_TIMEOUT_MS`: maximum S3 connection setup time (defaults to 5000)
+- `S3_REQUEST_TIMEOUT_MS`: maximum S3 socket inactivity time (defaults to 60000)
+- `S3_SUMMARY_WAIT_TIMEOUT_MS`: maximum content-manager wait for an S3 summary refresh (defaults to 2000)
+- `MAX_AUDIO_STREAM_CHUNK_MB`: largest audio byte range returned per request (defaults to 4)
+- `MAX_AUDIO_BATCH_UPLOAD_MB`: maximum aggregate multipart request size for bulk audio uploads (defaults to 1024)
+- `MAX_AUDIO_BATCH_FILES`: maximum files accepted in one bulk upload (defaults to 5)
+- `MAX_VIDEO_STREAM_CHUNK_MB`: largest video byte range returned per request (defaults to 4)
+- `MAX_MEDIA_REQUESTS_PER_IP`: concurrent public media requests allowed per client IP (defaults to 8)
+- `MAX_MEDIA_REQUESTS_GLOBAL`: concurrent public media requests allowed per server process (defaults to 200)
+- `MAX_RECONCILIATION_OBJECTS`: safety ceiling for storage reconciliation reports (defaults to 50000)
+- `MAX_STORAGE_SUMMARY_OBJECTS`: safety ceiling for synchronous S3 storage summaries (defaults to 1000000)
+- `TRUST_PROXY_HOPS`: trusted reverse-proxy hop count; Elastic Beanstalk with ALB and Nginx typically uses 2
 - `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
 
@@ -106,6 +123,10 @@ Upload:
 - API creation: `POST /content/audioTrack` as multipart form data with required `audioFile`
 - API: `POST /content/audioTrack/:audioTrackId/upload`
 - Form field for file: `audioFile`
+- Large audio uploads are spooled to bounded temporary files and streamed to S3; they are not retained in the Node.js heap.
+- Upload requests require `Content-Length`, are concurrency/rate limited, and temporary files are removed on completion or disconnect.
+- Playback: `GET /content/audioTrack/stream/:audioTrackId` supports bounded single-range responses and cancels the upstream S3 request when the client disconnects.
+- Legacy audio download routes redirect to the streaming endpoint and no longer buffer whole objects in server memory.
 - Authorization required; owner/admin enforced
 - New tracks are saved with `uploadStatus: pending` before S3 upload, then marked `ready` or `failed`.
 - S3 objects include track ID, owner ID, and encoded original filename metadata.

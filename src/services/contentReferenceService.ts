@@ -23,6 +23,13 @@ export const validateOwnedContentReferences = async (
 ): Promise<ContentReferenceValidation> => {
     const config = referenceConfig[type];
     const ids = [...new Set(values.map((value) => String(value).trim().toLowerCase()).filter(Boolean))];
+    if (ids.length > 100) {
+        return {
+            valid: false,
+            ids: [],
+            message: `No more than 100 ${config.label.toLowerCase()} references may be processed at once.`
+        };
+    }
     if (ids.length === 0) {
         if (values.length > 0) {
             return {

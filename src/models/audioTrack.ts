@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { SimpleDate } from './simpleDate';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
+import { escapeRegex } from '../utils/search';
 
 const collectionId = 'audioTracks';
 export type AudioUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
@@ -91,19 +92,18 @@ export class AudioTrack {
     }
 
     // fetch all audio tracks from the database
-    static fetchAll() {
+    static fetchAll(limit: number = 50, offset: number = 0) {
         const db = getDb();
 
         // fetch all audio tracks from the database
         return db!
             .collection(collectionId)
             .find()
+            .skip(offset)
+            .limit(limit)
             .toArray()
             .then((audioTracks: any) => {
                 return audioTracks.map(normalizeAudioTrackText);
-            })
-            .catch((error: any) => {
-                console.log(error);
             });
     }
 
@@ -134,7 +134,8 @@ export class AudioTrack {
 
         return db!
             .collection(collectionId)
-            .find({ title: { $regex: query, $options: 'i' } })
+            .find({ title: { $regex: escapeRegex(query), $options: 'i' } })
+            .maxTimeMS(3_000)
             .limit(limit)
             .toArray()
             .then((audioTracks) => audioTracks.map(normalizeAudioTrackText));

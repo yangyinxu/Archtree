@@ -4,6 +4,8 @@ import { RequestHandler } from 'express';
 
 // import all the functions from the feedController
 import * as feedController from '../controllers/feedController';
+import { requireAuth } from '../middleware/authMiddleware';
+import { asyncHandler, publicReadRateLimit } from '../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
 
@@ -18,15 +20,15 @@ const createPostValidation: RequestHandler[] = [
 ];
 
 // Get a single post
-router.get('/post', feedController.getPost);
+router.get('/post', publicReadRateLimit, asyncHandler(feedController.getPost));
 
 // Get all posts
-router.get('/posts', feedController.getPosts);
+router.get('/posts', publicReadRateLimit, asyncHandler(feedController.getPosts));
 
 // Create a post
-router.post('/post', createPostValidation, feedController.createPost);
+router.post('/post', requireAuth, createPostValidation, asyncHandler(feedController.createPost));
 
 // Delete a post
-router.delete('/post', feedController.deletePost);
+router.delete('/post', requireAuth, asyncHandler(feedController.deletePost));
 
 export default router;

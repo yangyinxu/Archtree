@@ -1,4 +1,5 @@
 import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { createReadStream } from 'node:fs';
 import { getS3 } from '../infrastructure/s3';
 import { AudioTrack } from '../models/audioTrack';
 import { normalizeUtf8Text } from '../utils/textEncoding';
@@ -18,7 +19,8 @@ const encodeMetadataValue = (value: string) => {
 export const uploadAudioObject = async (
     audioTrackId: string,
     uploadFile: Express.Multer.File,
-    ownerId: string
+    ownerId: string,
+    abortSignal?: AbortSignal
 ) => {
     const originalFileName = normalizeUtf8Text(uploadFile.originalname);
     const contentType = uploadFile.mimetype || 'audio/mpeg';
@@ -37,17 +39,19 @@ export const uploadAudioObject = async (
     }
 
     try {
+        const body = uploadFile.path ? createReadStream(uploadFile.path) : uploadFile.buffer;
         await getS3().send(new PutObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: audioTrackId,
-            Body: uploadFile.buffer,
+            Body: body,
+            ContentLength: uploadFile.size,
             ContentType: contentType,
             Metadata: {
                 trackid: audioTrackId,
                 ownerid: ownerId,
                 originalfilename: encodeMetadataValue(originalFileName)
             }
-        }));
+        }), { abortSignal });
 
         await AudioTrack.updateById(audioTrackId, {
             uploadStatus: 'ready',
