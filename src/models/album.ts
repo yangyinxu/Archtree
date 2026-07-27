@@ -1,10 +1,12 @@
 import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from '../models/simpleDate';
+import { withDerivedCoverArtUrl } from '../utils/coverArt';
 
 export class Album {
     title: string;
     coverArtUrl: string;
+    coverArtId?: string;
     audioTrackIds: [string];
     releaseDate: SimpleDate;
     createdBy: string;
@@ -38,7 +40,8 @@ export class Album {
         return db!
             .collection('albums')
             .find({ _id: albumObjectId })
-            .next();
+            .next()
+            .then(withDerivedCoverArtUrl);
     }
 
     // fetch all albums from the database
@@ -51,7 +54,7 @@ export class Album {
             .find()
             .toArray()
             .then((albums: any) => {
-                return albums;
+                return albums.map(withDerivedCoverArtUrl);
             });
     }
 
@@ -62,7 +65,8 @@ export class Album {
             .collection('albums')
             .find({ title: { $regex: query, $options: 'i' } })
             .limit(limit)
-            .toArray();
+            .toArray()
+            .then((albums) => albums.map(withDerivedCoverArtUrl));
     }
 
     static fetchByCreator(createdBy: string, limit: number = 50) {
@@ -72,7 +76,8 @@ export class Album {
             .collection('albums')
             .find({ createdBy })
             .limit(limit)
-            .toArray();
+            .toArray()
+            .then((albums) => albums.map(withDerivedCoverArtUrl));
     }
 
     static updateById(albumId: string, update: Record<string, unknown>) {

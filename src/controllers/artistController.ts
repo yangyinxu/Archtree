@@ -2,9 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { Artist } from '../models/artist';
 import { SimpleDate } from '../models/simpleDate';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
+import { getUploadedFile } from '../middleware/imageUpload';
 
 // Create a new artist via the model and save it to the db
-export const postArtist = (req: Request, res: Response, next: NextFunction) => {
+export const postArtist = async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
@@ -27,20 +29,33 @@ export const postArtist = (req: Request, res: Response, next: NextFunction) => {
         authReq.auth.userId
     );
 
-    // Save the artist to the db
-    artist.save()
-        .then((result: any) => {
-            console.log(result);
-            res.status(201).json({
-                message: `Artist ${name} Added Successfully`,
-                artist: result
-            });
-        })
-        .catch((err: any) => {
-            console.log(err);
-            res.status(500).json({ message: 'Failed to create artist.' });
-        });
+    const coverArtFile = getUploadedFile(req, 'coverArtFile');
 
+    try {
+        if (coverArtFile) validateCoverArtFile(coverArtFile);
+        const result = await artist.save();
+        const artistId = result.insertedId.toHexString();
+        try {
+            if (coverArtFile) {
+                const coverArt = await uploadCoverArt('artist', artistId, coverArtFile, authReq.auth.userId);
+                await Artist.updateById(artistId, {
+                    coverArtId: coverArt.imageId,
+                    coverArtUrl: coverArt.coverArtUrl
+                });
+            }
+        } catch (error) {
+            await Artist.deleteById(artistId).catch(() => undefined);
+            throw error;
+        }
+        const createdArtist = await Artist.findById(artistId);
+        return res.status(201).json({
+            message: `Artist ${name} Added Successfully`,
+            artist: createdArtist
+        });
+    } catch (error) {
+        console.log(error);
+        return next(error);
+    }
 };
 
 export const updateArtist = async (req: Request, res: Response, next: NextFunction) => {
@@ -60,14 +75,34 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     }
 
     const updatePayload: Record<string, unknown> = {};
+    const coverArtFile = getUploadedFile(req, 'coverArtFile');
+    let replacementCoverArtId: string | undefined;
     if (req.body.name !== undefined) updatePayload.name = req.body.name;
     if (req.body.bio !== undefined) updatePayload.bio = req.body.bio;
     if (req.body.coverArtUrl !== undefined) updatePayload.coverArtUrl = req.body.coverArtUrl;
     if (req.body.albumIds !== undefined) updatePayload.albumIds = req.body.albumIds;
     if (req.body.birthDate !== undefined) updatePayload.birthDate = SimpleDate.fromJson(req.body.birthDate);
 
+    if (coverArtFile) {
+        const coverArt = await uploadCoverArt('artist', artistId, coverArtFile, authReq.auth.userId);
+        replacementCoverArtId = coverArt.imageId;
+        updatePayload.coverArtId = coverArt.imageId;
+        updatePayload.coverArtUrl = coverArt.coverArtUrl;
+    } else if (String(req.body.removeCoverArt ?? '').toLowerCase() === 'true') {
+        await deleteCoverArt(artist.coverArtId);
+        updatePayload.coverArtId = null;
+        updatePayload.coverArtUrl = '';
+    }
+
     await Artist.updateById(artistId, updatePayload);
-    return res.status(200).json({ message: 'Artist updated successfully.' });
+    let cleanupPending = false;
+    if (replacementCoverArtId && artist.coverArtId && artist.coverArtId !== replacementCoverArtId) {
+        await deleteCoverArt(artist.coverArtId).catch((error) => {
+            cleanupPending = true;
+            console.log(`Unable to delete replaced artist cover art ${artist.coverArtId}:`, error);
+        });
+    }
+    return res.status(200).json({ message: 'Artist updated successfully.', cleanupPending });
 };
 
 export const deleteArtist = async (req: Request, res: Response, next: NextFunction) => {
@@ -86,6 +121,7 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
         return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
     }
 
+    await deleteCoverArt(artist.coverArtId);
     await Artist.deleteById(artistId);
     return res.status(200).json({ message: 'Artist deleted successfully.' });
 };

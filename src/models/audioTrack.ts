@@ -2,6 +2,7 @@ import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from './simpleDate';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import { withDerivedCoverArtUrl } from '../utils/coverArt';
 
 const collectionId = 'audioTracks';
 export type AudioUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
@@ -10,7 +11,7 @@ const normalizeAudioTrackText = (track: any) => {
     if (!track) return track;
     if (typeof track.title === 'string') track.title = normalizeUtf8Text(track.title);
     if (typeof track.originalFileName === 'string') track.originalFileName = normalizeUtf8Text(track.originalFileName);
-    return track;
+    return withDerivedCoverArtUrl(track);
 };
 
 export class AudioTrack {
@@ -23,6 +24,7 @@ export class AudioTrack {
     duration: string;
     format: AudioFormat;
     coverArtUrl: string;
+    coverArtId?: string;
     createdBy: string;
     originalFileName?: string;
     contentType?: string;

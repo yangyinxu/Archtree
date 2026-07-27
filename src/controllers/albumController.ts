@@ -2,9 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { Album } from '../models/album';
 import { SimpleDate } from '../models/simpleDate';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
+import { getUploadedFile } from '../middleware/imageUpload';
 
 // Create a new album via the model and save it to the db
-export const postAlbum = (req: Request, res: Response, next: NextFunction) => {
+export const postAlbum = async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
@@ -24,20 +26,33 @@ export const postAlbum = (req: Request, res: Response, next: NextFunction) => {
         authReq.auth.userId
     );
 
-    // Save the album to the db
-    album.save()
-        .then((result: any) => {
-            console.log(result);
-            res.status(201).json({
-                message: `Album ${title} Added Successfully`,
-                album: result
-            });
-        })
-        .catch((err: any) => {
-            console.log(err);
-            res.status(500).json({ message: 'Failed to create album.' });
-        });
+    const coverArtFile = getUploadedFile(req, 'coverArtFile');
 
+    try {
+        if (coverArtFile) validateCoverArtFile(coverArtFile);
+        const result = await album.save();
+        const albumId = result.insertedId.toHexString();
+        try {
+            if (coverArtFile) {
+                const coverArt = await uploadCoverArt('album', albumId, coverArtFile, authReq.auth.userId);
+                await Album.updateById(albumId, {
+                    coverArtId: coverArt.imageId,
+                    coverArtUrl: coverArt.coverArtUrl
+                });
+            }
+        } catch (error) {
+            await Album.deleteById(albumId).catch(() => undefined);
+            throw error;
+        }
+        const createdAlbum = await Album.findById(albumId);
+        return res.status(201).json({
+            message: `Album ${title} Added Successfully`,
+            album: createdAlbum
+        });
+    } catch (error) {
+        console.log(error);
+        return next(error);
+    }
 };
 
 export const updateAlbum = async (req: Request, res: Response, next: NextFunction) => {
@@ -57,13 +72,33 @@ export const updateAlbum = async (req: Request, res: Response, next: NextFunctio
     }
 
     const updatePayload: Record<string, unknown> = {};
+    const coverArtFile = getUploadedFile(req, 'coverArtFile');
+    let replacementCoverArtId: string | undefined;
     if (req.body.title !== undefined) updatePayload.title = req.body.title;
     if (req.body.coverArtUrl !== undefined) updatePayload.coverArtUrl = req.body.coverArtUrl;
     if (req.body.audioTrackIds !== undefined) updatePayload.audioTrackIds = req.body.audioTrackIds;
     if (req.body.releaseDate !== undefined) updatePayload.releaseDate = SimpleDate.fromJson(req.body.releaseDate);
 
+    if (coverArtFile) {
+        const coverArt = await uploadCoverArt('album', albumId, coverArtFile, authReq.auth.userId);
+        replacementCoverArtId = coverArt.imageId;
+        updatePayload.coverArtId = coverArt.imageId;
+        updatePayload.coverArtUrl = coverArt.coverArtUrl;
+    } else if (String(req.body.removeCoverArt ?? '').toLowerCase() === 'true') {
+        await deleteCoverArt(album.coverArtId);
+        updatePayload.coverArtId = null;
+        updatePayload.coverArtUrl = '';
+    }
+
     await Album.updateById(albumId, updatePayload);
-    return res.status(200).json({ message: 'Album updated successfully.' });
+    let cleanupPending = false;
+    if (replacementCoverArtId && album.coverArtId && album.coverArtId !== replacementCoverArtId) {
+        await deleteCoverArt(album.coverArtId).catch((error) => {
+            cleanupPending = true;
+            console.log(`Unable to delete replaced album cover art ${album.coverArtId}:`, error);
+        });
+    }
+    return res.status(200).json({ message: 'Album updated successfully.', cleanupPending });
 };
 
 export const deleteAlbum = async (req: Request, res: Response, next: NextFunction) => {
@@ -82,6 +117,7 @@ export const deleteAlbum = async (req: Request, res: Response, next: NextFunctio
         return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
     }
 
+    await deleteCoverArt(album.coverArtId);
     await Album.deleteById(albumId);
     return res.status(200).json({ message: 'Album deleted successfully.' });
 };

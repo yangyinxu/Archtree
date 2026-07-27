@@ -16,6 +16,8 @@ import {
     uploadAudioObject
 } from '../services/audioStorageService';
 import { validateOwnedContentReferences } from '../services/contentReferenceService';
+import { deleteCoverArt, uploadCoverArt } from '../services/imageStorageService';
+import { getUploadedFile } from '../middleware/imageUpload';
 
 const parseJsonField = (value: unknown) => {
     if (typeof value !== 'string') return value;
@@ -42,7 +44,7 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
         return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
+    const uploadFile = getUploadedFile(req, 'audioFile');
     if (!uploadFile) {
         return res.status(400).json({ message: 'An audio file is required. Use multipart form field: audioFile.' });
     }
@@ -100,6 +102,19 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     try {
         await track.save();
         await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId);
+        const coverArtFile = getUploadedFile(req, 'coverArtFile');
+        if (coverArtFile) {
+            const coverArt = await uploadCoverArt(
+                'audioTrack',
+                audioTrackId,
+                coverArtFile,
+                authReq.auth.userId
+            );
+            await AudioTrack.updateById(audioTrackId, {
+                coverArtId: coverArt.imageId,
+                coverArtUrl: coverArt.coverArtUrl
+            });
+        }
 
         return res.status(201).json({
             message: `Audio Track ${title} Added Successfully`,
@@ -132,6 +147,8 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     }
 
     const updatePayload: Record<string, unknown> = {};
+    const coverArtFile = getUploadedFile(req, 'coverArtFile');
+    let replacementCoverArtId: string | undefined;
     if (req.body.title !== undefined) updatePayload.title = req.body.title;
     if (req.body.artistIds !== undefined) {
         const artistIds = parseStringArray(req.body.artistIds);
@@ -162,8 +179,31 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     if (req.body.releaseDate !== undefined) updatePayload.releaseDate = SimpleDate.fromJson(req.body.releaseDate);
     if (req.body.format !== undefined) updatePayload.format = AudioFormat.fromJson(req.body.format);
 
+    if (coverArtFile) {
+        const coverArt = await uploadCoverArt(
+            'audioTrack',
+            audioTrackId,
+            coverArtFile,
+            authReq.auth.userId
+        );
+        replacementCoverArtId = coverArt.imageId;
+        updatePayload.coverArtId = coverArt.imageId;
+        updatePayload.coverArtUrl = coverArt.coverArtUrl;
+    } else if (String(req.body.removeCoverArt ?? '').toLowerCase() === 'true') {
+        await deleteCoverArt(audioTrack.coverArtId);
+        updatePayload.coverArtId = null;
+        updatePayload.coverArtUrl = '';
+    }
+
     await AudioTrack.updateById(audioTrackId, updatePayload);
-    return res.status(200).json({ message: 'Audio track updated successfully.' });
+    let cleanupPending = false;
+    if (replacementCoverArtId && audioTrack.coverArtId && audioTrack.coverArtId !== replacementCoverArtId) {
+        await deleteCoverArt(audioTrack.coverArtId).catch((error) => {
+            cleanupPending = true;
+            console.log(`Unable to delete replaced audio-track cover art ${audioTrack.coverArtId}:`, error);
+        });
+    }
+    return res.status(200).json({ message: 'Audio track updated successfully.', cleanupPending });
 };
 
 // Get an audio track via the model and return it

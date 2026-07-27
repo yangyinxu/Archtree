@@ -1,12 +1,13 @@
 import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from '../models/simpleDate';
+import { withDerivedCoverArtUrl } from '../utils/coverArt';
 
 const withoutLegacyTrackIds = (artist: any) => {
     if (artist) {
         delete artist.audioTrackIds;
     }
-    return artist;
+    return withDerivedCoverArtUrl(artist);
 };
 
 // define the Artist class
@@ -15,6 +16,7 @@ export class Artist {
     birthDate: SimpleDate;
     bio: string;
     coverArtUrl: string;
+    coverArtId?: string;
     albumIds: [string];
     createdBy: string;
 

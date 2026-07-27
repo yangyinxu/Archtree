@@ -79,6 +79,9 @@ Web content management:
 - Every newly uploaded track requires at least one owned artist. `audioTrack.artistIds` is the canonical artist-to-track relationship.
 - Artist responses no longer expose the legacy `audioTrackIds` field. Clients should find an artist's tracks by querying audio tracks whose `artistIds` contains the artist ID.
 - Content Manager reference fields validate IDs against the expected owned content type before saving.
+- Artist, album, and audio-track create/update forms accept optional JPG, PNG, or WebP cover art through the `coverArtFile` multipart field.
+- Cover art is stored in the private S3 bucket and referenced by `coverArtId`. API responses derive `coverArtUrl` as `/content/images/:imageId`.
+- Replacing cover art attaches the new image before deleting the old object. Deleting an artist, album, or audio track deletes its tracked cover-art object before removing its database record.
 - Existing tracks support replacing their uploaded audio file
 - S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 
@@ -122,6 +125,8 @@ Reconciliation:
 - Compares every `audioTracks` record against the objects in `S3_BUCKET_NAME`.
 - Reports orphaned S3 objects, database tracks with missing objects, and pending/failed lifecycle records.
 - The report is read-only; it never deletes S3 objects automatically.
+- Admin-only image report: `GET /admin/image-storage/reconciliation`
+- The image report audits the `images/` namespace against `imageAssets`, including orphaned, detached, missing, pending, and failed image records.
 
 ## Troubleshooting
 
@@ -131,4 +136,5 @@ Reconciliation:
 - `413 Request Entity Too Large`: increase upload limits in both places:
   - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`, currently 1 GB total per request)
   - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 512 MB)
+  - Cover-art limit via `MAX_IMAGE_UPLOAD_MB` (defaults to 10 MB)
   - Content Manager bulk uploads send files sequentially, keeping each request below the proxy limit and avoiding buffering the entire selection in memory at once.

@@ -3,6 +3,7 @@ import { getDb } from '../infrastructure/database';
 import { reconcileAudioStorage } from '../services/audioReconciliationService';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { renderAudioStorageAuditPage } from '../views/admin/audioStorageAuditView';
+import { reconcileImageStorage } from '../services/imageReconciliationService';
 
 const Product = require('../models/product');
 
@@ -67,6 +68,16 @@ export const getAudioStorageReconciliation = async (req: Request, res: Response,
             const auth = (req as AuthenticatedRequest).auth;
             return res.status(200).send(renderAudioStorageAuditPage(report, auth?.email ?? 'Administrator'));
         }
+        return res.status(200).json(report);
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const getImageStorageReconciliation = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const report = await reconcileImageStorage();
+        res.setHeader('Cache-Control', 'no-store');
         return res.status(200).json(report);
     } catch (error) {
         return next(error);
