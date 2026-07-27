@@ -7,13 +7,13 @@ import {
 } from '../services/mediaDeliveryService';
 
 const configuredPerIpLimit = Number(process.env.MAX_MEDIA_REQUESTS_PER_IP ?? 8);
-const configuredGlobalLimit = Number(process.env.MAX_MEDIA_REQUESTS_GLOBAL ?? 200);
+const configuredGlobalLimit = Number(process.env.MAX_MEDIA_REQUESTS_GLOBAL ?? 40);
 const perIpLimit = Number.isFinite(configuredPerIpLimit) && configuredPerIpLimit > 0
     ? Math.floor(configuredPerIpLimit)
     : 8;
 const globalLimit = Number.isFinite(configuredGlobalLimit) && configuredGlobalLimit > 0
     ? Math.floor(configuredGlobalLimit)
-    : 200;
+    : 40;
 const activeRequestsByIp = new Map<string, number>();
 
 export const limitMediaConcurrency = (req: Request, res: Response, next: NextFunction) => {
