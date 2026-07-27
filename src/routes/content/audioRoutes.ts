@@ -12,6 +12,7 @@ router.get('/audioTrack/:audioTrackId', audioTrackController.getAudioTrackById);
 router.post('/audioTrack/:audioTrackId/upload', requireAuth, audioUpload.single('audioFile'), audioTrackController.uploadAudioTrackFile);
 router.delete('/audioTrack/:audioTrackId', requireAuth, audioTrackController.deleteAudioTrack);
 router.get('/audioTrack/aws/:audioTrackId', audioTrackController.getAudioFile);
+router.head('/audioTrack/stream/:audioTrackId', audioTrackController.headAudioTrackStream);
 router.get('/audioTrack/stream/:audioTrackId', audioTrackController.streamAudioTrack);
 router.get('/audioTracks', audioTrackController.getAudioTracks);
 

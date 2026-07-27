@@ -238,6 +238,31 @@ export const getAudioTrackById = async (req: Request, res: Response, next: NextF
 };
 
 // Stream an audio track by id from AWS S3 with support for HTTP Range requests
+export const headAudioTrackStream = async (req: Request, res: Response, next: NextFunction) => {
+    const audioTrackId = req.params.audioTrackId;
+    try {
+        const metadata = await getS3().send(new HeadObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!,
+            Key: audioTrackId
+        }));
+        if (metadata.ContentLength === undefined) {
+            return res.status(404).end();
+        }
+
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Type', metadata.ContentType || 'audio/mpeg');
+        res.setHeader('Content-Length', metadata.ContentLength);
+        if (metadata.ETag) res.setHeader('ETag', metadata.ETag);
+        return res.status(200).end();
+    } catch (error: any) {
+        const statusCode = error?.$metadata?.httpStatusCode === 404 ? 404 : 500;
+        if (statusCode === 500) {
+            console.error('Error checking audio track:', error);
+        }
+        return res.status(statusCode).end();
+    }
+};
+
 export const streamAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
     const s3 = getS3();
@@ -280,7 +305,7 @@ export const streamAudioTrack = async (req: Request, res: Response, next: NextFu
         }
 
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Content-Type', metadata.ContentType || 'audio/mpeg');
         res.setHeader('Content-Length', end - start + 1);
         res.setHeader('Content-Disposition', `inline; filename="${audioTrackId}"`);
 
