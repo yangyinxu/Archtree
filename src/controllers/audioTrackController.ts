@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { Readable } from 'node:stream';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
+import { Artist } from '../models/artist';
 import { SimpleDate } from '../models/simpleDate';
 import { getS3 } from '../infrastructure/s3';
 import {
@@ -14,6 +15,7 @@ import {
     deleteAudioObjectAndTrack,
     uploadAudioObject
 } from '../services/audioStorageService';
+import { validateOwnedContentReferences } from '../services/contentReferenceService';
 
 const parseJsonField = (value: unknown) => {
     if (typeof value !== 'string') return value;
@@ -47,6 +49,23 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
 
     const title: string = req.body.title;
     const artistIds = parseStringArray(req.body.artistIds);
+    if (!artistIds[0]) {
+        return res.status(400).json({ message: 'At least one artistId is required.' });
+    }
+
+    let artists: any[];
+    try {
+        artists = await Promise.all(artistIds.map((artistId) => Artist.findById(artistId)));
+    } catch {
+        return res.status(400).json({ message: 'One or more artistIds are invalid.' });
+    }
+    if (artists.some((artist) => !artist)) {
+        return res.status(404).json({ message: 'One or more artists were not found.' });
+    }
+    if (artists.some((artist) => !ensureOwnerOrAdmin(authReq, String(artist.createdBy ?? '')))) {
+        return res.status(403).json({ message: 'One or more artists cannot be modified by this user.' });
+    }
+
     const genres = parseStringArray(req.body.genres);
     const albumId: string = req.body.albumId;
     const releaseDateValue = parseJsonField(req.body.releaseDate);
@@ -114,9 +133,30 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
 
     const updatePayload: Record<string, unknown> = {};
     if (req.body.title !== undefined) updatePayload.title = req.body.title;
-    if (req.body.artistIds !== undefined) updatePayload.artistIds = req.body.artistIds;
+    if (req.body.artistIds !== undefined) {
+        const artistIds = parseStringArray(req.body.artistIds);
+        if (!artistIds[0]) {
+            return res.status(400).json({ message: 'At least one artistId is required.' });
+        }
+        const validation = await validateOwnedContentReferences(authReq, 'artist', artistIds);
+        if (!validation.valid) {
+            return res.status(400).json({ message: validation.message });
+        }
+        updatePayload.artistIds = validation.ids;
+    }
     if (req.body.genres !== undefined) updatePayload.genres = req.body.genres;
-    if (req.body.albumId !== undefined) updatePayload.albumId = req.body.albumId;
+    if (req.body.albumId !== undefined) {
+        const albumId = String(req.body.albumId ?? '').trim();
+        if (albumId) {
+            const validation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+            if (!validation.valid) {
+                return res.status(400).json({ message: validation.message });
+            }
+            updatePayload.albumId = validation.ids[0];
+        } else {
+            updatePayload.albumId = '';
+        }
+    }
     if (req.body.duration !== undefined) updatePayload.duration = req.body.duration;
     if (req.body.coverArtUrl !== undefined) updatePayload.coverArtUrl = req.body.coverArtUrl;
     if (req.body.releaseDate !== undefined) updatePayload.releaseDate = SimpleDate.fromJson(req.body.releaseDate);
