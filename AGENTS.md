@@ -22,3 +22,11 @@
 - Do not remove the only database evidence of an S3 object while storage
   cleanup is incomplete, and do not leave successful uploads without a
   traceable lifecycle record.
+
+## Code Documentation
+
+- Add concise comments to classes, types, and functions that explain their
+  responsibility, contract, or non-obvious behavior.
+- Prefer comments that explain why a behavior exists or identify an important
+  constraint. Do not restate syntax that is already clear from the code.
+- Update or remove comments whenever the documented behavior changes.
