@@ -2,6 +2,9 @@
 
 Archtree is an Express + TypeScript backend for authentication, content management, and media upload/streaming.
 
+Product behavior shared by the backend and iOS client is documented in
+[`docs/business-rules.md`](docs/business-rules.md).
+
 ## Tech Stack
 
 - Node.js 24
