@@ -5,6 +5,12 @@ Archtree is an Express + TypeScript backend for authentication, content manageme
 Product behavior shared by the backend and iOS client is documented in
 [`docs/business-rules.md`](docs/business-rules.md).
 
+## Code Documentation
+
+Classes, types, and functions should have concise comments describing their
+responsibility or non-obvious constraints. Comments should explain intent
+rather than repeat the code and must stay synchronized with behavior.
+
 ## Tech Stack
 
 - Node.js 24
@@ -129,6 +135,16 @@ Personalized Library:
 - Included audio tracks expose `displayCoverArtUrl`, resolving track-specific
   cover art first and linked album cover art second. Linked albums used for
   this resolution are also included without transferring image ownership.
+- Album cards read `Album.title`, while audio-track cards read
+  `AudioTrack.title`; correct album text does not verify the encoding of a
+  legacy track title.
+- Audio-track titles and original filenames are normalized when read, created,
+  or updated. Expanded Home and Library responses must apply the same
+  normalization even though they resolve included tracks directly from the
+  database.
+- The iOS Library endpoint can target a local backend based on its login
+  endpoint setting, while Home uses the configured deployed base URL. Keep
+  local and deployed backend versions compatible when comparing their output.
 
 Session behavior:
 - Browser and API login tokens last 30 days by default. Set `SESSION_DAYS` to a whole number from 1 to 90 to override it. `WEB_SESSION_DAYS` remains supported as a backwards-compatible fallback.

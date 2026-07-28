@@ -48,13 +48,33 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   styled consistently with the existing Play Video button.
 - Tapping the album Play button starts the album queue and adds only the album
   to Recently Played.
-- Starting on a different song, using Next or Previous, and automatic queue
-  advancement inside that album queue do not add audio tracks to Recently
-  Played and do not add the album again.
+- Explicitly tapping an individual song in an album's track list adds that
+  audio track, but not the album, to Recently Played.
+- Using Next or Previous and automatic queue advancement inside an album queue
+  do not add audio tracks to Recently Played and do not add the album again.
 - Playing an audio track outside an album queue adds that audio track to
   Recently Played.
 - The album Play action consumes one entry in the shared 20-entry Recently
   Played history.
+
+## Background and System Playback
+
+- Active audio continues when the player screen is dismissed, the app enters
+  the background, or the device locks, until playback is paused, stopped, or
+  the queue ends.
+- The in-app player, lock screen, Control Center, Bluetooth accessories, and
+  other system media controls share one playback state and queue.
+- System controls support play, pause, seeking, ten-second skips, and available
+  previous/next queue navigation.
+- Previous, Next, and automatic queue advancement from system controls follow
+  the same Recently Played rules as their in-app equivalents and do not create
+  additional activity entries.
+- When the app returns from the background with a current Now Playing item, it
+  presents the live audio player regardless of which tab was previously open.
+  This route reuses the existing playback queue and position without restarting
+  the track.
+- Audio interruptions and output-route changes pause playback safely; playback
+  resumes after an interruption only when iOS indicates that it should.
 
 ## Audio-Track Artwork
 

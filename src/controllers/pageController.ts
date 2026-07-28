@@ -12,6 +12,7 @@ import {
 } from '../models/carousel';
 import { Page, PageSlug } from '../models/page';
 import { Artist } from '../models/artist';
+import { normalizeAudioTrackText } from '../models/audioTrack';
 import { withDerivedCoverArtUrl, withDisplayCoverArtUrl } from '../utils/coverArt';
 
 // v1 only allows composition pages for Home and Library.
@@ -266,7 +267,10 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             included: {
                 albums: includedAlbums.map(withDerivedCoverArtUrl),
                 audioTracks: audioTracks.map((track: any) =>
-                    withDisplayCoverArtUrl(track, albumsById.get(String(track.albumId ?? '')))
+                    withDisplayCoverArtUrl(
+                        normalizeAudioTrackText(track),
+                        albumsById.get(String(track.albumId ?? ''))
+                    )
                 )
             }
         });

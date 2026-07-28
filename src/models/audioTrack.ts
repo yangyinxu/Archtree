@@ -8,7 +8,7 @@ import { escapeRegex } from '../utils/search';
 const collectionId = 'audioTracks';
 export type AudioUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
 
-const normalizeAudioTrackText = (track: any) => {
+export const normalizeAudioTrackText = (track: any) => {
     if (!track) return track;
     if (typeof track.title === 'string') track.title = normalizeUtf8Text(track.title);
     if (typeof track.originalFileName === 'string') track.originalFileName = normalizeUtf8Text(track.originalFileName);
@@ -49,7 +49,7 @@ export class AudioTrack {
         id?: ObjectId
     ) {
         if (id) this._id = id;
-        this.title = title;
+        this.title = normalizeUtf8Text(title);
         this.artistIds = artistIds;
         this.genres = genres;
         this.albumId = albumId;
@@ -58,7 +58,7 @@ export class AudioTrack {
         this.format = format;
         this.coverArtUrl = coverArtUrl;
         this.createdBy = createdBy;
-        this.originalFileName = originalFileName;
+        this.originalFileName = originalFileName ? normalizeUtf8Text(originalFileName) : originalFileName;
         this.contentType = contentType;
         this.s3Key = id?.toHexString();
         this.uploadStatus = 'pending';
@@ -123,10 +123,17 @@ export class AudioTrack {
     static updateById(audioTrackId: string, update: Record<string, unknown>) {
         const db = getDb();
         const audioTrackObjectId = ObjectId.createFromHexString(audioTrackId);
+        const normalizedUpdate = { ...update };
+        if (typeof normalizedUpdate.title === 'string') {
+            normalizedUpdate.title = normalizeUtf8Text(normalizedUpdate.title);
+        }
+        if (typeof normalizedUpdate.originalFileName === 'string') {
+            normalizedUpdate.originalFileName = normalizeUtf8Text(normalizedUpdate.originalFileName);
+        }
 
         return db!
             .collection(collectionId)
-            .updateOne({ _id: audioTrackObjectId }, { $set: update });
+            .updateOne({ _id: audioTrackObjectId }, { $set: normalizedUpdate });
     }
 
     static searchByTitle(query: string, limit: number = 10) {
