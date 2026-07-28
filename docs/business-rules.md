@@ -56,6 +56,16 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - The album Play action consumes one entry in the shared 20-entry Recently
   Played history.
 
+## Audio-Track Artwork
+
+- An audio track uses its own cover art when one is explicitly assigned.
+- Otherwise, a linked audio track inherits its album's cover art for display
+  without copying album asset ownership into the audio-track record.
+- A track with neither track-specific nor album artwork uses the client
+  placeholder.
+- Artist artwork is not used as an implicit track fallback because a track can
+  reference multiple artists.
+
 ## Authentication and Resolution
 
 - Saved content and recent activity belong to the authenticated viewer.

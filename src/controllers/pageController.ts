@@ -12,7 +12,7 @@ import {
 } from '../models/carousel';
 import { Page, PageSlug } from '../models/page';
 import { Artist } from '../models/artist';
-import { withDerivedCoverArtUrl } from '../utils/coverArt';
+import { withDerivedCoverArtUrl, withDisplayCoverArtUrl } from '../utils/coverArt';
 
 // v1 only allows composition pages for Home and Library.
 const allowedSlugs: PageSlug[] = ['home', 'library'];
@@ -245,6 +245,18 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
                 }).maxTimeMS(3_000).toArray()
                 : []
         ]);
+        const linkedAlbumIds = [...new Set<string>(audioTracks
+            .map((track: any) => String(track.albumId ?? ''))
+            .filter(validateObjectId))];
+        const fetchedAlbumIds = new Set(albums.map((album: any) => String(album._id)));
+        const missingLinkedAlbumIds = linkedAlbumIds.filter((id) => !fetchedAlbumIds.has(id));
+        const linkedAlbums = missingLinkedAlbumIds.length > 0
+            ? await db.collection('albums').find({
+                _id: { $in: missingLinkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) }
+            }).maxTimeMS(3_000).toArray()
+            : [];
+        const includedAlbums = [...albums, ...linkedAlbums];
+        const albumsById = new Map(includedAlbums.map((album: any) => [String(album._id), album]));
 
         return res.status(200).json({
             page: {
@@ -252,8 +264,10 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
                 items: expandedItems
             },
             included: {
-                albums: albums.map(withDerivedCoverArtUrl),
-                audioTracks: audioTracks.map(withDerivedCoverArtUrl)
+                albums: includedAlbums.map(withDerivedCoverArtUrl),
+                audioTracks: audioTracks.map((track: any) =>
+                    withDisplayCoverArtUrl(track, albumsById.get(String(track.albumId ?? '')))
+                )
             }
         });
     } catch (error) {
