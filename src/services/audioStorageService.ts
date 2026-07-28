@@ -2,6 +2,7 @@ import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createReadStream } from 'node:fs';
 import { getS3 } from '../infrastructure/s3';
 import { AudioTrack } from '../models/audioTrack';
+import { cleanupDeletedContentReferences } from './contentReferenceService';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { deleteCoverArt } from './imageStorageService';
 
@@ -102,5 +103,6 @@ export const deleteAudioObjectAndTrack = async (audioTrackId: string) => {
         throw error;
     }
 
+    await cleanupDeletedContentReferences('audioTrack', audioTrackId);
     await AudioTrack.deleteById(audioTrackId);
 };

@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
+import { UserLibrary } from '../models/userLibrary';
 
 export type ContentReferenceType = 'artist' | 'album' | 'audioTrack';
 
@@ -84,4 +85,39 @@ export const validateOwnedContentReferences = async (
     }
 
     return { valid: true, ids };
+};
+
+export const cleanupDeletedContentReferences = async (
+    type: 'album' | 'audioTrack',
+    contentId: string
+) => {
+    const db = getDb()!;
+    const contentType = type;
+    const operations: Promise<unknown>[] = [
+        UserLibrary.cleanupContent(contentType, contentId),
+        db.collection('carousels').updateMany(
+            { mode: 'manual', items: { $elemMatch: { contentType, contentId } } },
+            { $pull: { items: { contentType, contentId } }, $set: { updatedAt: new Date() } } as any
+        )
+    ];
+    if (type === 'album') {
+        operations.push(
+            db.collection('artists').updateMany(
+                { albumIds: contentId },
+                { $pull: { albumIds: contentId } } as any
+            ),
+            db.collection('audioTracks').updateMany(
+                { albumId: contentId },
+                { $unset: { albumId: '' } }
+            )
+        );
+    } else {
+        operations.push(
+            db.collection('albums').updateMany(
+                { audioTrackIds: contentId },
+                { $pull: { audioTrackIds: contentId } } as any
+            )
+        );
+    }
+    await Promise.all(operations);
 };

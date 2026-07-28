@@ -4,6 +4,7 @@ import { SimpleDate } from '../models/simpleDate';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
+import { cleanupDeletedContentReferences } from '../services/contentReferenceService';
 
 // Create a new album via the model and save it to the db
 export const postAlbum = async (req: Request, res: Response, next: NextFunction) => {
@@ -118,6 +119,7 @@ export const deleteAlbum = async (req: Request, res: Response, next: NextFunctio
     }
 
     await deleteCoverArt(album.coverArtId);
+    await cleanupDeletedContentReferences('album', albumId);
     await Album.deleteById(albumId);
     return res.status(200).json({ message: 'Album deleted successfully.' });
 };

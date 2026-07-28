@@ -4,6 +4,7 @@ import { reconcileAudioStorage } from '../services/audioReconciliationService';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { renderAudioStorageAuditPage } from '../views/admin/audioStorageAuditView';
 import { reconcileImageStorage } from '../services/imageReconciliationService';
+import { reconcileContentReferences } from '../services/contentReferenceReconciliationService';
 
 // {{baseUrl}}/admin/product
 export const getAddProduct = async (req: Request, res: Response, next: NextFunction) => {
@@ -64,6 +65,16 @@ export const getAudioStorageReconciliation = async (req: Request, res: Response,
 export const getImageStorageReconciliation = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const report = await reconcileImageStorage();
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).json(report);
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const getContentReferenceReconciliation = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const report = await reconcileContentReferences();
         res.setHeader('Cache-Control', 'no-store');
         return res.status(200).json(report);
     } catch (error) {

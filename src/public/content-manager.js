@@ -57,14 +57,22 @@
 
   document.querySelectorAll('.carousel-mode').forEach((selector) => {
     const form = selector.closest('form');
-    const config = form.querySelector('.artist-carousel-config');
-    const configFields = [...config.querySelectorAll('select, input')];
+    const artistConfig = form.querySelector('.artist-carousel-config');
+    const personalizedConfig = form.querySelector('.personalized-carousel-config');
+    const artistFields = [...artistConfig.querySelectorAll('select, input')];
+    const personalizedFields = [...personalizedConfig.querySelectorAll('select, input')];
     const updateMode = () => {
       const isArtist = selector.value === 'artist';
-      config.hidden = !isArtist;
-      configFields.forEach((field) => {
+      const isPersonalized = selector.value === 'personalized';
+      artistConfig.hidden = !isArtist;
+      personalizedConfig.hidden = !isPersonalized;
+      artistFields.forEach((field) => {
         field.disabled = !isArtist;
         field.required = isArtist;
+      });
+      personalizedFields.forEach((field) => {
+        field.disabled = !isPersonalized;
+        field.required = isPersonalized;
       });
     };
     selector.addEventListener('change', updateMode);
@@ -81,6 +89,17 @@
       form.querySelector('select[name="artistContentType"]').value = carousel.artistConfig.contentType;
       form.querySelector('select[name="artistSort"]').value = carousel.artistConfig.sort;
       form.querySelector('input[name="artistLimit"]').value = String(carousel.artistConfig.limit);
+    });
+  });
+
+  document.querySelectorAll('.update-personalized-carousel').forEach((form) => {
+    const selector = form.querySelector('.personalized-carousel-selector');
+    selector.addEventListener('change', () => {
+      const carousel = compositionData.carousels.find((item) => item.id === selector.value);
+      if (!carousel || !carousel.personalizedConfig) return;
+      form.querySelector('input[name="name"]').value = carousel.name;
+      form.querySelector('select[name="personalizedSource"]').value = carousel.personalizedConfig.source;
+      form.querySelector('input[name="personalizedLimit"]').value = String(carousel.personalizedConfig.limit);
     });
   });
 

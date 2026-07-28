@@ -7,10 +7,12 @@ import {
     ArtistCarouselConfig,
     Carousel,
     CarouselContentType,
-    CarouselMode
+    CarouselMode,
+    PersonalizedCarouselConfig
 } from '../models/carousel';
 import { Page, PageSlug } from '../models/page';
 import { Artist } from '../models/artist';
+import { withDerivedCoverArtUrl } from '../utils/coverArt';
 
 // v1 only allows composition pages for Home and Library.
 const allowedSlugs: PageSlug[] = ['home', 'library'];
@@ -59,9 +61,29 @@ const validateObjectId = (value: string) => {
     }
 };
 
-const parseCarouselDefinition = (body: any): { mode: CarouselMode; artistConfig?: ArtistCarouselConfig } | null => {
-    const mode: CarouselMode = body?.mode === 'artist' ? 'artist' : 'manual';
+const parseCarouselDefinition = (body: any): {
+    mode: CarouselMode;
+    artistConfig?: ArtistCarouselConfig;
+    personalizedConfig?: PersonalizedCarouselConfig;
+} | null => {
+    const mode: CarouselMode = body?.mode === 'artist'
+        ? 'artist'
+        : body?.mode === 'personalized' ? 'personalized' : 'manual';
     if (mode === 'manual') return { mode };
+    if (mode === 'personalized') {
+        const source = String(body?.personalizedSource ?? '').trim();
+        const requestedLimit = Number(body?.personalizedLimit ?? 20);
+        if ((source !== 'recentlySaved' && source !== 'recentlyPlayed') || !Number.isFinite(requestedLimit)) {
+            return null;
+        }
+        return {
+            mode,
+            personalizedConfig: {
+                source,
+                limit: Math.max(1, Math.min(Math.floor(requestedLimit), 20))
+            }
+        };
+    }
 
     const artistId = String(body?.artistId ?? '').trim();
     const contentType = String(body?.artistContentType ?? '').trim();
@@ -182,7 +204,8 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             .filter(Boolean);
 
         // Expand carousel references into full carousel payloads for client rendering.
-        const carousels: any[] = await Carousel.fetchByIds(carouselIds);
+        const viewerUserId = (req as AuthenticatedRequest).auth?.userId;
+        const carousels: any[] = await Carousel.fetchByIds(carouselIds, viewerUserId);
         const carouselMap = new Map<string, any>();
         for (const carousel of carousels) {
             carouselMap.set(String(carousel._id), {
@@ -198,10 +221,39 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             carousel: carouselMap.get(String(item.carouselId ?? '')) ?? null
         }));
 
+        const resolvedRefs = expandedItems.flatMap((item: any) =>
+            Array.isArray(item.carousel?.items) ? item.carousel.items : []
+        );
+        const albumIds = [...new Set<string>(resolvedRefs
+            .filter((item: any) => item.contentType === 'album')
+            .map((item: any) => String(item.contentId))
+            .filter(validateObjectId))];
+        const audioTrackIds = [...new Set<string>(resolvedRefs
+            .filter((item: any) => item.contentType === 'audioTrack')
+            .map((item: any) => String(item.contentId))
+            .filter(validateObjectId))];
+        const db = getDb()!;
+        const [albums, audioTracks] = await Promise.all([
+            albumIds.length > 0
+                ? db.collection('albums').find({
+                    _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) }
+                }).maxTimeMS(3_000).toArray()
+                : [],
+            audioTrackIds.length > 0
+                ? db.collection('audioTracks').find({
+                    _id: { $in: audioTrackIds.map((id) => ObjectId.createFromHexString(id)) }
+                }).maxTimeMS(3_000).toArray()
+                : []
+        ]);
+
         return res.status(200).json({
             page: {
                 ...page,
                 items: expandedItems
+            },
+            included: {
+                albums: albums.map(withDerivedCoverArtUrl),
+                audioTracks: audioTracks.map(withDerivedCoverArtUrl)
             }
         });
     } catch (error) {
@@ -246,11 +298,12 @@ export const createCarousel = async (req: Request, res: Response, next: NextFunc
             authReq.auth.userId,
             authReq.auth.userId,
             definition.mode,
-            definition.artistConfig
+            definition.artistConfig,
+            definition.personalizedConfig
         );
         const result: any = await carousel.save();
         const saved = await Carousel.findById(String(result.insertedId));
-        const resolved = saved ? await Carousel.resolveCarousel(saved) : null;
+        const resolved = saved ? await Carousel.resolveCarousel(saved, authReq.auth.userId) : null;
 
         return res.status(201).json({
             message: 'Carousel created successfully.',
@@ -305,6 +358,39 @@ export const updateArtistCarousel = async (req: Request, res: Response, next: Ne
     }
 };
 
+export const updatePersonalizedCarousel = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        const carouselId = String(req.params.carouselId ?? '').trim();
+        const name = String(req.body.name ?? '').trim();
+        const definition = parseCarouselDefinition({ ...req.body, mode: 'personalized' });
+        if (!authReq.auth || !validateObjectId(carouselId) || !name || !definition?.personalizedConfig) {
+            return res.status(authReq.auth ? 400 : 401).json({ message: 'Valid personalized carousel configuration is required.' });
+        }
+        const carousel: any = await Carousel.findById(carouselId);
+        if (!carousel || carousel.mode !== 'personalized') {
+            return res.status(404).json({ message: 'Personalized carousel not found.' });
+        }
+        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
+            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this carousel.' });
+        }
+        await Carousel.updateById(carouselId, {
+            name,
+            mode: 'personalized',
+            personalizedConfig: definition.personalizedConfig,
+            items: [],
+            updatedBy: authReq.auth.userId
+        });
+        const saved = await Carousel.findById(carouselId);
+        return res.status(200).json({
+            message: 'Personalized carousel updated successfully.',
+            carousel: saved ? await Carousel.resolveCarousel(saved, authReq.auth.userId) : null
+        });
+    } catch (error) {
+        return next(error);
+    }
+};
+
 export const renameManualCarousel = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authReq = req as AuthenticatedRequest;
@@ -319,7 +405,7 @@ export const renameManualCarousel = async (req: Request, res: Response, next: Ne
         }
 
         const carousel: any = await Carousel.findById(carouselId);
-        if (!carousel || carousel.mode === 'artist') {
+        if (!carousel || carousel.mode !== 'manual') {
             return res.status(404).json({ message: 'Manual carousel not found.' });
         }
         if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
@@ -489,7 +575,7 @@ export const addCarouselItem = async (req: Request, res: Response, next: NextFun
         if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
             return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this carousel.' });
         }
-        if (carousel.mode === 'artist') {
+        if (carousel.mode !== 'manual') {
             return res.status(400).json({ message: 'Artist carousels are populated automatically and cannot accept manual items.' });
         }
 
@@ -541,7 +627,7 @@ export const reorderCarouselItems = async (req: Request, res: Response, next: Ne
         if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
             return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this carousel.' });
         }
-        if (carousel.mode === 'artist') {
+        if (carousel.mode !== 'manual') {
             return res.status(400).json({ message: 'Artist carousels are populated automatically and cannot be reordered.' });
         }
 
@@ -585,7 +671,7 @@ export const moveCarouselItemBetweenCarousels = async (req: Request, res: Respon
         if (!ensureOwnerOrAdmin(authReq, getOwnerId(source)) || !ensureOwnerOrAdmin(authReq, getOwnerId(target))) {
             return res.status(403).json({ message: 'Forbidden: only creator or admin can modify these carousels.' });
         }
-        if (source.mode === 'artist' || target.mode === 'artist') {
+        if (source.mode !== 'manual' || target.mode !== 'manual') {
             return res.status(400).json({ message: 'Items cannot be moved into or out of an artist carousel.' });
         }
 
@@ -693,13 +779,16 @@ export const createCarouselWeb = async (req: Request, res: Response, next: NextF
             authReq.auth.userId,
             authReq.auth.userId,
             definition.mode,
-            definition.artistConfig
+            definition.artistConfig,
+            definition.personalizedConfig
         );
         await carousel.save();
 
         return redirectWithMessage(res, definition.mode === 'artist'
             ? 'Artist carousel created successfully.'
-            : 'Carousel created successfully.');
+            : definition.mode === 'personalized'
+                ? 'Personalized carousel created successfully.'
+                : 'Carousel created successfully.');
     } catch (error) {
         return next(error);
     }
@@ -745,6 +834,36 @@ export const updateArtistCarouselWeb = async (req: Request, res: Response, next:
     }
 };
 
+export const updatePersonalizedCarouselWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        const carouselId = String(req.body.carouselId ?? '').trim();
+        const name = String(req.body.name ?? '').trim();
+        const definition = parseCarouselDefinition({ ...req.body, mode: 'personalized' });
+        if (!validateObjectId(carouselId) || !name || !definition?.personalizedConfig) {
+            return redirectWithMessage(res, 'Valid personalized carousel configuration is required.');
+        }
+        const carousel: any = await Carousel.findById(carouselId);
+        if (!carousel || carousel.mode !== 'personalized') {
+            return redirectWithMessage(res, 'Personalized carousel not found.');
+        }
+        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
+            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this carousel.');
+        }
+        await Carousel.updateById(carouselId, {
+            name,
+            mode: 'personalized',
+            personalizedConfig: definition.personalizedConfig,
+            items: [],
+            updatedBy: authReq.auth.userId
+        });
+        return redirectWithMessage(res, 'Personalized carousel updated successfully.');
+    } catch (error) {
+        return next(error);
+    }
+};
+
 export const renameManualCarouselWeb = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authReq = req as AuthenticatedRequest;
@@ -759,7 +878,7 @@ export const renameManualCarouselWeb = async (req: Request, res: Response, next:
         }
 
         const carousel: any = await Carousel.findById(carouselId);
-        if (!carousel || carousel.mode === 'artist') {
+        if (!carousel || carousel.mode !== 'manual') {
             return redirectWithMessage(res, 'Manual carousel not found.');
         }
         if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
@@ -903,7 +1022,7 @@ export const addCarouselItemWeb = async (req: Request, res: Response, next: Next
         if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
             return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this carousel.');
         }
-        if (carousel.mode === 'artist') {
+        if (carousel.mode !== 'manual') {
             return redirectWithMessage(res, 'Artist carousels are populated automatically and cannot accept manual items.');
         }
 
@@ -947,7 +1066,7 @@ export const reorderCarouselItemsWeb = async (req: Request, res: Response, next:
         if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
             return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this carousel.');
         }
-        if (carousel.mode === 'artist') {
+        if (carousel.mode !== 'manual') {
             return redirectWithMessage(res, 'Artist carousels are populated automatically and cannot be reordered.');
         }
 
@@ -991,7 +1110,7 @@ export const moveCarouselItemBetweenCarouselsWeb = async (req: Request, res: Res
         if (!ensureOwnerOrAdmin(authReq, getOwnerId(source)) || !ensureOwnerOrAdmin(authReq, getOwnerId(target))) {
             return redirectWithMessage(res, 'Forbidden: only creator or admin can modify these carousels.');
         }
-        if (source.mode === 'artist' || target.mode === 'artist') {
+        if (source.mode !== 'manual' || target.mode !== 'manual') {
             return redirectWithMessage(res, 'Items cannot be moved into or out of an artist carousel.');
         }
 

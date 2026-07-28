@@ -3,6 +3,7 @@ import express, { Router } from 'express';
 import {
     getAddProduct,
     getAudioStorageReconciliation,
+    getContentReferenceReconciliation,
     getImageStorageReconciliation,
     postAddProduct
 } from '../controllers/adminController';
@@ -19,5 +20,6 @@ router.get('/product', requireAuth, requireAdmin, publicReadRateLimit, asyncHand
 router.post('/product', requireAuth, requireAdmin, asyncHandler(postAddProduct));
 router.get('/audio-storage/reconciliation', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(getAudioStorageReconciliation));
 router.get('/image-storage/reconciliation', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(getImageStorageReconciliation));
+router.get('/content-references/reconciliation', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(getContentReferenceReconciliation));
 
 export default router;

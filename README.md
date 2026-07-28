@@ -2,6 +2,9 @@
 
 Archtree is an Express + TypeScript backend for authentication, content management, and media upload/streaming.
 
+Product behavior shared by the backend and iOS client is documented in
+[`docs/business-rules.md`](docs/business-rules.md).
+
 ## Tech Stack
 
 - Node.js 24
@@ -110,6 +113,20 @@ Artist carousels:
 - Dynamic results support newest-release or title sorting and a configurable limit from 1 to 100.
 - Artist carousel items cannot be manually added, reordered, or moved between carousels.
 
+Personalized Library:
+
+- Authenticated users can save and unsave albums or audio tracks through
+  `/content/me/saves/:contentType/:contentId`.
+- `POST /content/me/saves/status` resolves saved state for up to 100 visible
+  items, and `POST /content/me/recently-played` records explicit playback
+  actions.
+- Personalized carousels mix albums and audio tracks from either Recently Saved
+  or Recently Played and resolve for the viewer requesting an expanded page.
+- Each recent history is capped at 20 mixed-content entries; the full saved
+  relationship is retained separately.
+- Expanded page responses include the resolved album and audio-track documents
+  in an additive `included` payload.
+
 Session behavior:
 - Browser and API login tokens last 30 days by default. Set `SESSION_DAYS` to a whole number from 1 to 90 to override it. `WEB_SESSION_DAYS` remains supported as a backwards-compatible fallback.
 - Web login sets an HttpOnly `session_token` cookie with the same lifetime.
@@ -147,6 +164,10 @@ Reconciliation:
 - The report is read-only; it never deletes S3 objects automatically.
 - Admin-only image report: `GET /admin/image-storage/reconciliation`
 - The image report audits the `images/` namespace against `imageAssets`, including orphaned, detached, missing, pending, and failed image records.
+- Admin-only content-reference report: `GET /admin/content-references/reconciliation`
+- The content-reference report detects dangling saved/activity references,
+  manual carousel items, artist-album links, album-track links, and track-album
+  links without mutating data.
 
 ## Troubleshooting
 

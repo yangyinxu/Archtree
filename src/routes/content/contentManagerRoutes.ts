@@ -49,6 +49,7 @@ router.post('/composition/page/detach-carousel', requireAuthForWeb, pageControll
 
 router.post('/composition/carousel/create', requireAuthForWeb, pageController.createCarouselWeb);
 router.post('/composition/carousel/update-artist', requireAuthForWeb, pageController.updateArtistCarouselWeb);
+router.post('/composition/carousel/update-personalized', requireAuthForWeb, pageController.updatePersonalizedCarouselWeb);
 router.post('/composition/carousel/rename-manual', requireAuthForWeb, pageController.renameManualCarouselWeb);
 router.post('/composition/carousel/add-item', requireAuthForWeb, pageController.addCarouselItemWeb);
 router.post('/composition/carousel/reorder-item', requireAuthForWeb, pageController.reorderCarouselItemsWeb);

@@ -25,7 +25,7 @@ import {
     deleteAudioObjectAndTrack,
     uploadAudioObject
 } from '../services/audioStorageService';
-import { validateOwnedContentReferences } from '../services/contentReferenceService';
+import { cleanupDeletedContentReferences, validateOwnedContentReferences } from '../services/contentReferenceService';
 import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import { boundedSearchQuery } from '../utils/search';
@@ -158,11 +158,13 @@ const renderManagePage = (params: {
     }).join('');
     const carouselOptions = ownedCarousels.map((carousel) => {
         const id = contentId(carousel);
-        const dynamicLabel = carousel.mode === 'artist' ? ' · Dynamic' : '';
+        const dynamicLabel = carousel.mode === 'artist'
+            ? ' · Artist'
+            : carousel.mode === 'personalized' ? ' · Personalized' : '';
         return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}${dynamicLabel}</option>`;
     }).join('');
     const manualCarouselOptions = ownedCarousels
-        .filter((carousel) => carousel.mode !== 'artist')
+        .filter((carousel) => carousel.mode === 'manual' || !carousel.mode)
         .map((carousel) => {
             const id = contentId(carousel);
             return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}</option>`;
@@ -172,6 +174,12 @@ const renderManagePage = (params: {
         .map((carousel) => {
             const id = contentId(carousel);
             return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled artist carousel'))}</option>`;
+        }).join('');
+    const personalizedCarouselOptions = ownedCarousels
+        .filter((carousel) => carousel.mode === 'personalized')
+        .map((carousel) => {
+            const id = contentId(carousel);
+            return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled personalized carousel'))}</option>`;
         }).join('');
     const artistOptions = ownedArtists.map((artist) => {
         const id = contentId(artist);
@@ -190,8 +198,9 @@ const renderManagePage = (params: {
         carousels: ownedCarousels.map((carousel) => ({
             id: contentId(carousel),
             name: String(carousel.name ?? 'Untitled carousel'),
-            mode: carousel.mode === 'artist' ? 'artist' : 'manual',
+            mode: carousel.mode === 'artist' ? 'artist' : carousel.mode === 'personalized' ? 'personalized' : 'manual',
             artistConfig: carousel.artistConfig ?? null,
+            personalizedConfig: carousel.personalizedConfig ?? null,
             items: Array.isArray(carousel.items) ? carousel.items.map((item: any) => ({ contentId: String(item.contentId ?? ''), contentType: String(item.contentType ?? 'Content'), order: Number(item.order ?? 0) })) : []
         })),
         albums: ownedAlbums.map((album) => ({ id: contentId(album), title: String(album.title ?? '') })),
@@ -327,6 +336,7 @@ const renderManagePage = (params: {
           ${ownedCarousels.length > 0 ? ownedCarousels.map((carousel) => {
               const items = Array.isArray(carousel.items) ? [...carousel.items].sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0)) : [];
               const isArtistCarousel = carousel.mode === 'artist';
+              const isPersonalizedCarousel = carousel.mode === 'personalized';
               const artistName = isArtistCarousel
                   ? String(ownedArtists.find((artist) => contentId(artist) === String(carousel.artistConfig?.artistId ?? ''))?.name ?? 'Unavailable artist')
                   : '';
@@ -345,6 +355,8 @@ const renderManagePage = (params: {
 
               const dynamicSummary = isArtistCarousel
                   ? `<span class="pill">Dynamic</span> <span>${escapeHtml(artistName)} · ${carousel.artistConfig?.contentType === 'album' ? 'Albums' : 'Audio tracks'}</span>`
+                  : isPersonalizedCarousel
+                      ? `<span class="pill">Personalized</span> <span>${carousel.personalizedConfig?.source === 'recentlyPlayed' ? 'Recently Played' : 'Recently Saved'} · Mixed content</span>`
                   : '<span class="pill pill--muted">Manual</span>';
               return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><div class="item-meta">${dynamicSummary}<span>${items.length} item${items.length === 1 ? '' : 's'}</span></div>${renderNestedList(carouselItems)}</div>`;
           }).join('') : '<p class="empty-linked-content">No carousels yet.</p>'}
@@ -391,13 +403,18 @@ const renderManagePage = (params: {
             <h3>Create Carousel</h3>
             <form method="POST" action="/content/manage/composition/carousel/create">
                 <input name="name" placeholder="Carousel name" required />
-                <select class="carousel-mode" name="mode" required><option value="manual">Manual carousel</option><option value="artist">Artist carousel</option></select>
+                <select class="carousel-mode" name="mode" required><option value="manual">Manual carousel</option><option value="artist">Artist carousel</option><option value="personalized">Personalized carousel</option></select>
                 <div class="artist-carousel-config stack" hidden>
                     <select name="artistId"><option value="" disabled selected>Select artist</option>${artistOptions}</select>
                     <select name="artistContentType"><option value="album">Albums</option><option value="audioTrack">Audio tracks</option></select>
                     <select name="artistSort"><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select>
                     <input name="artistLimit" type="number" min="1" max="100" value="20" />
                     <p class="drag-help">Items are generated automatically from the selected artist and cannot be manually reordered.</p>
+                </div>
+                <div class="personalized-carousel-config stack" hidden>
+                    <select name="personalizedSource"><option value="recentlySaved">Recently Saved</option><option value="recentlyPlayed">Recently Played</option></select>
+                    <input name="personalizedLimit" type="number" min="1" max="20" value="20" />
+                    <p class="drag-help">Albums and audio tracks are mixed automatically for the signed-in viewer.</p>
                 </div>
                 <button type="submit">Create Carousel</button>
             </form>
@@ -411,6 +428,15 @@ const renderManagePage = (params: {
                 <select name="artistSort" required><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select>
                 <input name="artistLimit" type="number" min="1" max="100" value="20" required />
                 <button type="submit">Update Artist Carousel</button>
+            </form>
+
+            <h3>Update Personalized Carousel</h3>
+            <form class="update-personalized-carousel" method="POST" action="/content/manage/composition/carousel/update-personalized">
+                <select class="personalized-carousel-selector" name="carouselId" required><option value="" disabled selected>Select personalized carousel</option>${personalizedCarouselOptions}</select>
+                <input name="name" placeholder="Carousel name" required />
+                <select name="personalizedSource" required><option value="recentlySaved">Recently Saved</option><option value="recentlyPlayed">Recently Played</option></select>
+                <input name="personalizedLimit" type="number" min="1" max="20" value="20" required />
+                <button type="submit">Update Personalized Carousel</button>
             </form>
 
             <h3>Rename Manual Carousel</h3>
@@ -1080,6 +1106,7 @@ export const deleteAlbumWeb = async (req: Request, res: Response, next: NextFunc
         }
 
         await deleteCoverArt(album.coverArtId);
+        await cleanupDeletedContentReferences('album', albumId);
         await Album.deleteById(albumId);
         return redirectWithMessage(res, 'Album deleted successfully.');
     } catch (error) {
