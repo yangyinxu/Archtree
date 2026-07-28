@@ -69,10 +69,12 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Previous, Next, and automatic queue advancement from system controls follow
   the same Recently Played rules as their in-app equivalents and do not create
   additional activity entries.
+- Each new playback queue records its navigation origin. Home and Library are
+  the current origins; future pages that launch playback follow the same
+  contract without adding source-specific playback logic.
 - When the app returns from the background with a current Now Playing item, it
-  presents the live audio player regardless of which tab was previously open.
-  This route reuses the existing playback queue and position without restarting
-  the track.
+  selects that originating tab and navigates to its real audio-player route
+  without restarting the queue or changing playback position.
 - Audio interruptions and output-route changes pause playback safely; playback
   resumes after an interruption only when iOS indicates that it should.
 
