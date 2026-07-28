@@ -86,6 +86,8 @@ Security:
 - Production authentication routes reject requests unless trusted proxy headers
   identify an HTTPS connection. Configure an HTTPS load-balancer listener and
   certificate before deploying the Phase 0 authentication contract.
+- Deferred production infrastructure work is tracked in
+  [`docs/deployment-todos.md`](docs/deployment-todos.md).
 
 ## Local Run
 
