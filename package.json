@@ -4,6 +4,7 @@
   "description": "",
   "main": "src/app.ts",
   "scripts": {
+    "build": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "NODE_ENV=production tsx src/app.ts",
     "dev": "NODE_ENV=develop tsx src/app.ts"
