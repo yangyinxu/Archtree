@@ -126,6 +126,9 @@ Personalized Library:
   relationship is retained separately.
 - Expanded page responses include the resolved album and audio-track documents
   in an additive `included` payload.
+- Included audio tracks expose `displayCoverArtUrl`, resolving track-specific
+  cover art first and linked album cover art second. Linked albums used for
+  this resolution are also included without transferring image ownership.
 
 Session behavior:
 - Browser and API login tokens last 30 days by default. Set `SESSION_DAYS` to a whole number from 1 to 90 to override it. `WEB_SESSION_DAYS` remains supported as a backwards-compatible fallback.
