@@ -40,6 +40,11 @@ Required variables:
 - `DB_WAIT_QUEUE_TIMEOUT_MS`: maximum wait for a pooled MongoDB connection (defaults to 10000)
 - `DB_MAX_POOL_SIZE`: maximum MongoDB connections per server process (defaults to 100)
 - `JWT_SECRET`: JWT signing secret
+- `ACCESS_TOKEN_MINUTES`: short-lived access-token lifetime from 1 to 60 minutes (defaults to 15)
+- `REFRESH_SESSION_DAYS`: rotating refresh-session lifetime from 1 to 90 days (defaults to `SESSION_DAYS`, then 30)
+- `ALLOW_LEGACY_AUTH_TOKENS`: temporary `true` opt-in for accepting and issuing
+  old non-revocable app tokens during a coordinated client rollout (defaults to
+  `false`; remove after migration)
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 operations
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region
@@ -61,6 +66,9 @@ Required variables:
 Security:
 - Do not commit real credentials.
 - Store production secrets in AWS Secrets Manager or SSM Parameter Store.
+- Production authentication routes reject requests unless trusted proxy headers
+  identify an HTTPS connection. Configure an HTTPS load-balancer listener and
+  certificate before deploying the Phase 0 authentication contract.
 
 ## Local Run
 
@@ -93,6 +101,14 @@ Web auth endpoints:
 - `GET /auth/login-web`
 - `POST /auth/login-web`
 - `POST /auth/logout-web`
+
+App session endpoints:
+
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/logout-all`
+- `GET /auth/me`
 
 Web content management:
 
@@ -142,13 +158,20 @@ Personalized Library:
   or updated. Expanded Home and Library responses must apply the same
   normalization even though they resolve included tracks directly from the
   database.
-- The iOS Library endpoint can target a local backend based on its login
-  endpoint setting, while Home uses the configured deployed base URL. Keep
-  local and deployed backend versions compatible when comparing their output.
+- The iOS client accepts an `ARCHTREE_AUTH_BASE_URL` Info.plist value for
+  authenticated traffic. Release builds require HTTPS; DEBUG builds additionally
+  permit HTTP only for `localhost` and `127.0.0.1`.
 
 Session behavior:
-- Browser and API login tokens last 30 days by default. Set `SESSION_DAYS` to a whole number from 1 to 90 to override it. `WEB_SESSION_DAYS` remains supported as a backwards-compatible fallback.
-- Web login sets an HttpOnly `session_token` cookie with the same lifetime.
+- API login returns a short-lived access token and a rotating opaque refresh
+  token. Only a SHA-256 hash of the refresh token is stored in `authSessions`.
+- Access tokens default to 15 minutes. Refresh sessions have an absolute
+  lifetime of 30 days by default.
+- Refresh rotation is atomic, so a refresh token can succeed only once.
+- Protected requests verify that the access token's backing session is still
+  active, allowing logout and logout-all to revoke access immediately.
+- Web login stores the access and refresh credentials in separate HttpOnly
+  cookies and rotates them transparently when the access cookie expires.
 - Protected web pages redirect to login if unauthenticated.
 
 ## Audio Upload and Delete Lifecycle

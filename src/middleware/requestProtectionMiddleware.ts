@@ -1,4 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express';
+import crypto from 'crypto';
 
 type WindowEntry = {
     count: number;
@@ -41,6 +42,46 @@ export const rateLimit = (
         }
         return next();
     };
+};
+
+/** Limits credential attempts across IPs without retaining the raw identifier. */
+const accountRateLimit = (
+    scope: string,
+    maximumRequests: number,
+    windowMs: number
+): RequestHandler => {
+    return (req, res, next) => {
+        const identifier = String(req.body?.identifier ?? req.body?.email ?? req.body?.username ?? '')
+            .trim()
+            .toLowerCase();
+        if (!identifier) {
+            return next();
+        }
+
+        const digest = crypto.createHash('sha256').update(identifier, 'utf8').digest('hex');
+        const now = Date.now();
+        const key = `${scope}:${digest}`;
+        const current = windows.get(key);
+        const entry = !current || current.resetsAt <= now
+            ? { count: 0, resetsAt: now + windowMs }
+            : current;
+        entry.count += 1;
+        windows.set(key, entry);
+
+        if (entry.count > maximumRequests) {
+            res.setHeader('Retry-After', Math.max(1, Math.ceil((entry.resetsAt - now) / 1000)));
+            return res.status(429).json({ message: 'Too many requests. Please try again later.' });
+        }
+        return next();
+    };
+};
+
+/** Rejects production credentials sent without TLS after trusted-proxy resolution. */
+export const requireSecureAuthTransport: RequestHandler = (req, res, next) => {
+    if (process.env.NODE_ENV === 'production' && !req.secure) {
+        return res.status(426).json({ message: 'Secure authentication transport is required.' });
+    }
+    return next();
 };
 
 const activeByScopeAndClient = new Map<string, number>();
@@ -90,6 +131,8 @@ export const asyncHandler = (
 };
 
 export const authRateLimit = rateLimit('auth', 20, 15 * 60_000);
+export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
+export const authConcurrencyLimit = limitConcurrency('auth-password', 2, 20);
 export const publicReadRateLimit = rateLimit('public-read', 120, 60_000);
 export const uploadRateLimit = rateLimit('upload', 20, 60 * 60_000);
 export const uploadConcurrencyLimit = limitConcurrency('upload', 1, 4);

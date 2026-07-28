@@ -1,8 +1,21 @@
 import { Request, Response, NextFunction } from 'express';
 import { validationResult } from 'express-validator';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import User from '../models/user';
+import AuthSession from '../models/authSession';
+import {
+  createSession,
+  createLegacyMigrationToken,
+  refreshSession,
+  revokeRefreshSession,
+  SessionUser
+} from '../services/authSessionService';
+import {
+  clearBrowserSessionCookies,
+  getCookieValue,
+  setBrowserSessionCookies
+} from '../services/authCookieService';
+import { recordSecurityEvent } from '../services/securityAuditService';
 
 /**
  * Interface for Error object with statusCode property
@@ -11,37 +24,6 @@ interface ErrorWithStatusCode extends Error {
   statusCode?: number;
   data?: any;
 }
-
-const oneDayMs = 24 * 60 * 60 * 1000;
-
-const getSessionDurationMs = () => {
-  const configuredDays = Number(process.env.SESSION_DAYS ?? process.env.WEB_SESSION_DAYS ?? 30);
-  const safeDays = Number.isFinite(configuredDays)
-    ? Math.max(1, Math.min(90, Math.floor(configuredDays)))
-    : 30;
-
-  return safeDays * oneDayMs;
-};
-
-const setSessionCookie = (res: Response, token: string) => {
-  const maxAgeSeconds = Math.floor(getSessionDurationMs() / 1000);
-  const expiresAt = new Date(Date.now() + getSessionDurationMs()).toUTCString();
-  res.setHeader('Set-Cookie', `session_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}; Expires=${expiresAt}`);
-};
-
-const clearSessionCookie = (res: Response) => {
-  res.setHeader('Set-Cookie', 'session_token=; Path=/; HttpOnly; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
-};
-
-const getJwtSecret = () => {
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    const error: ErrorWithStatusCode = new Error('JWT secret is not configured.');
-    error.statusCode = 500;
-    throw error;
-  }
-  return jwtSecret;
-};
 
 const normalizeEmail = (email: string) => {
   return String(email ?? '').trim().toLowerCase();
@@ -120,8 +102,8 @@ const renderSignupHtml = (params: {
         <label for="signup-username">Username</label>
         <input id="signup-username" type="text" name="username" value="${username}" autocomplete="username" required />
         <label for="signup-password">Password</label>
-        <input id="signup-password" type="password" name="password" minlength="5" autocomplete="new-password" required />
-        <span class="muted">Use at least 5 characters.</span>
+        <input id="signup-password" type="password" name="password" minlength="12" autocomplete="new-password" required />
+        <span class="muted">Use at least 12 characters.</span>
         <button type="submit">Create account</button>
       </form>
     </section>
@@ -173,7 +155,7 @@ const renderLoginHtml = (params: {
         <label for="login-identifier">Email or username</label>
         <input id="login-identifier" type="text" name="identifier" value="${identifier}" autocomplete="username" required />
         <label for="login-password">Password</label>
-        <input id="login-password" type="password" name="password" minlength="5" autocomplete="current-password" required />
+        <input id="login-password" type="password" name="password" autocomplete="current-password" required />
         <button type="submit">Log in</button>
       </form>
     </section>
@@ -183,42 +165,37 @@ const renderLoginHtml = (params: {
 </html>`;
 };
 
-const authenticateUser = async (identifier: string, password: string) => {
+// A fixed-cost comparison prevents missing accounts from returning materially faster.
+const dummyPasswordHash = bcrypt.hashSync('archtree-invalid-password', 12);
+
+/** Validates credentials without revealing whether the identifier exists. */
+const authenticateUser = async (identifier: string, password: string, req?: Request) => {
   if (!identifier || identifier.length > 254 || typeof password !== 'string' || password.length > 256) {
     const error: ErrorWithStatusCode = new Error('Invalid credentials.');
-    error.statusCode = 422;
+    error.statusCode = 401;
     throw error;
   }
   const user = await User.findByIdentifier(identifier);
   if (!user) {
-    const error: ErrorWithStatusCode = new Error('A user with this email or username could not be found.');
+    await bcrypt.compare(password, dummyPasswordHash);
+    const error: ErrorWithStatusCode = new Error('Invalid credentials.');
     error.statusCode = 401;
     throw error;
   }
 
   const isEqual = await bcrypt.compare(password, user.password);
   if (!isEqual) {
-    const error: ErrorWithStatusCode = new Error('Wrong password!');
+    const error: ErrorWithStatusCode = new Error('Invalid credentials.');
     error.statusCode = 401;
     throw error;
   }
 
-  const token = jwt.sign(
-    {
-      email: user.email,
-      userId: user._id.toString(),
-      role: user.role ?? 'user'
-    },
-    getJwtSecret(),
-    {
-      expiresIn: Math.floor(getSessionDurationMs() / 1000)
-    }
-  );
-
   return {
     userId: user._id.toString(),
-    token,
-    role: user.role ?? 'user'
+    email: user.email,
+    role: user.role ?? 'user',
+    legacyToken: createLegacyMigrationToken(user as unknown as SessionUser),
+    ...(await createSession(user as unknown as SessionUser, req))
   };
 };
 
@@ -313,12 +290,21 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   try {
     const identifier: string = normalizeIdentifier(req.body.identifier ?? req.body.email ?? req.body.username);
     const password: string = req.body.password;
-    const authResult = await authenticateUser(identifier, password);
-
-    // return 200 status code for successful login
-    res.status(200).json({
-      token: authResult.token,
+    const authResult = await authenticateUser(identifier, password, req);
+    recordSecurityEvent('login_succeeded', {
       userId: authResult.userId,
+      sessionId: authResult.sessionId
+    });
+
+    res.status(200).json({
+      // Old clients read `token`; opt-in migration mode can preserve their session lifetime.
+      token: authResult.legacyToken ?? authResult.accessToken,
+      accessToken: authResult.accessToken,
+      refreshToken: authResult.refreshToken,
+      accessTokenExpiresIn: authResult.accessTokenExpiresIn,
+      refreshTokenExpiresAt: authResult.refreshTokenExpiresAt,
+      userId: authResult.userId,
+      email: authResult.email,
       role: authResult.role
     });
   } catch (error: any) {
@@ -344,8 +330,12 @@ export const loginFromWeb = async (req: Request, res: Response) => {
   }
 
   try {
-    const authResult = await authenticateUser(identifier, password);
-    setSessionCookie(res, authResult.token);
+    const authResult = await authenticateUser(identifier, password, req);
+    recordSecurityEvent('browser_login_succeeded', {
+      userId: authResult.userId,
+      sessionId: authResult.sessionId
+    });
+    setBrowserSessionCookies(res, authResult);
     res.redirect(returnTo || '/');
   } catch (error: any) {
     const message = error?.message || 'Login failed.';
@@ -358,7 +348,48 @@ export const loginFromWeb = async (req: Request, res: Response) => {
   }
 };
 
-export const logoutFromWeb = (req: Request, res: Response) => {
-  clearSessionCookie(res);
+/** Rotates an opaque refresh token and returns a new access/refresh pair. */
+export const refresh = async (req: Request, res: Response) => {
+  const refreshToken = String(req.body.refreshToken ?? '');
+  const tokens = await refreshSession(refreshToken);
+  if (!tokens) {
+    recordSecurityEvent('refresh_rejected');
+    return res.status(401).json({ message: 'Authentication failed.' });
+  }
+
+  recordSecurityEvent('refresh_succeeded', { sessionId: tokens.sessionId });
+  return res.status(200).json(tokens);
+};
+
+/** Revokes one refresh session and always clears the client-side session. */
+export const logout = async (req: Request, res: Response) => {
+  await revokeRefreshSession(String(req.body.refreshToken ?? ''));
+  recordSecurityEvent('logout_completed');
+  return res.status(204).send();
+};
+
+/** Revokes every active session for the authenticated account. */
+export const logoutAll = async (req: Request, res: Response) => {
+  const userId = (req as Request & { auth?: { userId: string } }).auth?.userId;
+  if (userId) {
+    await AuthSession.revokeAll(userId);
+    recordSecurityEvent('logout_all_completed', { userId });
+  }
+  return res.status(204).send();
+};
+
+/** Returns the authoritative identity for the current access token. */
+export const me = async (req: Request, res: Response) => {
+  const auth = (req as Request & { auth?: { userId: string; email: string; role: string } }).auth!;
+  return res.status(200).json(auth);
+};
+
+export const logoutFromWeb = async (req: Request, res: Response) => {
+  const refreshToken = getCookieValue(req, 'refresh_token');
+  if (refreshToken) {
+    await revokeRefreshSession(refreshToken);
+  }
+  recordSecurityEvent('browser_logout_completed');
+  clearBrowserSessionCookies(res);
   res.redirect('/');
 };
