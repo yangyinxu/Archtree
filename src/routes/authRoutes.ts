@@ -24,6 +24,13 @@ import {
     requireSecureAuthTransport
 } from '../middleware/requestProtectionMiddleware';
 import { requireAuth } from '../middleware/authMiddleware';
+import {
+    forgotPassword,
+    register,
+    resendVerification,
+    resetPassword,
+    verifyEmail
+} from '../controllers/emailAuthController';
 
 const router: Router = express.Router();
 
@@ -49,6 +56,20 @@ const signupValidation: RequestHandler[] = [
 router.use(requireSecureAuthTransport);
 
 router.put('/signup', authRateLimit, authAccountRateLimit, authConcurrencyLimit, signupValidation, asyncHandler(signup));
+router.post(
+    '/signup',
+    authRateLimit,
+    authAccountRateLimit,
+    authConcurrencyLimit,
+    body('email').trim().isEmail().normalizeEmail(),
+    body('password').isLength({ min: 12, max: 256 }),
+    body('displayName').optional().trim().isLength({ max: 80 }),
+    asyncHandler(register)
+);
+router.post('/email/verify', authRateLimit, authAccountRateLimit, body('email').isEmail(), body('code').isLength({ min: 6, max: 6 }).isNumeric(), asyncHandler(verifyEmail));
+router.post('/email/resend-verification', authRateLimit, authAccountRateLimit, body('email').isEmail(), asyncHandler(resendVerification));
+router.post('/password/forgot', authRateLimit, authAccountRateLimit, body('email').isEmail(), asyncHandler(forgotPassword));
+router.post('/password/reset', authRateLimit, authAccountRateLimit, authConcurrencyLimit, body('email').isEmail(), body('code').isLength({ min: 6, max: 6 }).isNumeric(), body('password').isLength({ min: 12, max: 256 }), asyncHandler(resetPassword));
 
 router.get('/signup-web', renderSignupPage);
 

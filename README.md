@@ -40,6 +40,9 @@ Required variables:
 - `DB_WAIT_QUEUE_TIMEOUT_MS`: maximum wait for a pooled MongoDB connection (defaults to 10000)
 - `DB_MAX_POOL_SIZE`: maximum MongoDB connections per server process (defaults to 100)
 - `JWT_SECRET`: JWT signing secret
+- `AUTH_CODE_PEPPER`: optional separate HMAC secret for verification and reset
+  codes (defaults to `JWT_SECRET`)
+- `AUTH_EMAIL_FROM`: AWS SES verified sender used for verification and reset mail
 - `ACCESS_TOKEN_MINUTES`: short-lived access-token lifetime from 1 to 60 minutes (defaults to 15)
 - `ACCESS_TOKEN_SECONDS`: development-only access-token lifetime from 1 to 300 seconds
   for fast refresh-rotation testing (ignored in production)
@@ -124,6 +127,11 @@ Web auth endpoints:
 App session endpoints:
 
 - `POST /auth/login`
+- `POST /auth/signup`
+- `POST /auth/email/verify`
+- `POST /auth/email/resend-verification`
+- `POST /auth/password/forgot`
+- `POST /auth/password/reset`
 - `POST /auth/refresh`
 - `POST /auth/logout`
 - `POST /auth/logout-all`

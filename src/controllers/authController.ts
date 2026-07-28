@@ -189,6 +189,11 @@ const authenticateUser = async (identifier: string, password: string, req?: Requ
     error.statusCode = 401;
     throw error;
   }
+  if (user.emailVerified === false) {
+    const error: ErrorWithStatusCode = new Error('Verify your email before signing in.');
+    error.statusCode = 403;
+    throw error;
+  }
 
   return {
     userId: user._id.toString(),
@@ -381,7 +386,13 @@ export const logoutAll = async (req: Request, res: Response) => {
 /** Returns the authoritative identity for the current access token. */
 export const me = async (req: Request, res: Response) => {
   const auth = (req as Request & { auth?: { userId: string; email: string; role: string } }).auth!;
-  return res.status(200).json(auth);
+  const user = await User.findById(auth.userId);
+  return res.status(200).json({
+    ...auth,
+    displayName: user?.displayName ?? user?.username ?? '',
+    emailVerified: user?.emailVerified !== false,
+    authenticationMethods: ['password']
+  });
 };
 
 export const logoutFromWeb = async (req: Request, res: Response) => {

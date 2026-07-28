@@ -90,6 +90,11 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 
 ## Authentication and Resolution
 
+- New email registrations require a single-use verification code; existing
+  accounts without an `emailVerified` migration field remain treated as verified.
+- Password-recovery and verification request responses do not reveal whether an
+  email address belongs to an account.
+- Completing a password reset revokes every active session for that account.
 - Saved content and recent activity belong to the authenticated viewer.
 - The same personalized carousel definition resolves differently for each user.
 - A signed-out viewer receives no personalized carousel items.

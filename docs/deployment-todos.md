@@ -33,6 +33,10 @@ Required before production authentication is enabled:
       `https://` domain.
 - [ ] Deploy Archtree and verify login, refresh rotation, `/auth/me`, logout,
       and logout-all over HTTPS.
+- [ ] Verify the SES sender/domain, grant the runtime only `ses:SendEmail`, and
+      configure `AUTH_EMAIL_FROM` plus an `AUTH_CODE_PEPPER`.
+- [ ] Configure the iOS Associated Domains entitlement after the production
+      authentication domain exists.
 - [ ] If legacy-token compatibility is temporarily enabled for rollout, remove
       `ALLOW_LEGACY_AUTH_TOKENS=true` after the migration window.
 
