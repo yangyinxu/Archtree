@@ -16,6 +16,7 @@ import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
 import { maxImageUploadMb } from './middleware/imageUpload';
 import { getMediaDeliveryMetrics } from './services/mediaDeliveryService';
+import { accessTokenDurationSeconds } from './services/authSessionService';
 
 const app: Application = express();
 const defaultProxyHops = process.env.NODE_ENV === 'production' ? 2 : 1;
@@ -25,6 +26,7 @@ app.set('trust proxy', Number.isFinite(configuredProxyHops) && configuredProxyHo
   : defaultProxyHops);
 
 console.log(`Service environment: ${process.env.NODE_ENV}`);
+console.log(`Authentication access-token lifetime: ${accessTokenDurationSeconds()} seconds`);
 
 app.use('/assets', express.static(path.join(__dirname, 'public')));
 

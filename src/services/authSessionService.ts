@@ -37,8 +37,13 @@ const boundedDuration = (value: string | undefined, fallback: number, maximum: n
         : fallback;
 };
 
-export const accessTokenDurationSeconds = () =>
-    boundedDuration(process.env.ACCESS_TOKEN_MINUTES, 15, 60) * minutesToSeconds;
+/** Uses a seconds-scale lifetime in development so refresh rotation can be tested quickly. */
+export const accessTokenDurationSeconds = () => {
+    if (process.env.NODE_ENV !== 'production' && process.env.ACCESS_TOKEN_SECONDS) {
+        return boundedDuration(process.env.ACCESS_TOKEN_SECONDS, 15, 300);
+    }
+    return boundedDuration(process.env.ACCESS_TOKEN_MINUTES, 15, 60) * minutesToSeconds;
+};
 
 export const refreshSessionDurationMilliseconds = () =>
     boundedDuration(

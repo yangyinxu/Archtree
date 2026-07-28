@@ -41,6 +41,8 @@ Required variables:
 - `DB_MAX_POOL_SIZE`: maximum MongoDB connections per server process (defaults to 100)
 - `JWT_SECRET`: JWT signing secret
 - `ACCESS_TOKEN_MINUTES`: short-lived access-token lifetime from 1 to 60 minutes (defaults to 15)
+- `ACCESS_TOKEN_SECONDS`: development-only access-token lifetime from 1 to 300 seconds
+  for fast refresh-rotation testing (ignored in production)
 - `REFRESH_SESSION_DAYS`: rotating refresh-session lifetime from 1 to 90 days (defaults to `SESSION_DAYS`, then 30)
 - `ALLOW_LEGACY_AUTH_TOKENS`: temporary `true` opt-in for accepting and issuing
   old non-revocable app tokens during a coordinated client rollout (defaults to
@@ -62,6 +64,21 @@ Required variables:
 - `TRUST_PROXY_HOPS`: trusted reverse-proxy hop count; Elastic Beanstalk with ALB and Nginx typically uses 2
 - `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
+
+### Verify refresh-token rotation locally
+
+Stop any existing Archtree process, then start the development server with its
+dedicated five-second access-token lifetime:
+
+```bash
+npm run dev:auth-rotation
+```
+
+Sign in again after restarting the server, wait at least five seconds, then refresh
+an authenticated screen in the iOS app. The Xcode console reports the expired
+access token, successful refresh-token rotation, and successful retry without
+printing either token. The server console emits a `refresh_succeeded` security
+event only after the stored refresh-token hash has been atomically replaced.
 
 Security:
 - Do not commit real credentials.

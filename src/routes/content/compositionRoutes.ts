@@ -7,6 +7,7 @@ const router: Router = express.Router();
 
 router.get('/pages', publicReadRateLimit, asyncHandler(pageController.listPages));
 router.get('/pages/:slug', publicReadRateLimit, asyncHandler(pageController.getPageBySlug));
+router.get('/pages/:slug(library)/expanded', publicReadRateLimit, requireAuth, asyncHandler(pageController.getExpandedPageBySlug));
 router.get('/pages/:slug/expanded', publicReadRateLimit, attachOptionalAuth, asyncHandler(pageController.getExpandedPageBySlug));
 router.post('/pages', requireAuth, pageController.upsertPage);
 router.post('/pages/:slug/items/carousel', requireAuth, pageController.attachCarouselToPage);

@@ -93,6 +93,9 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Saved content and recent activity belong to the authenticated viewer.
 - The same personalized carousel definition resolves differently for each user.
 - A signed-out viewer receives no personalized carousel items.
+- The expanded Library page requires valid authentication and returns `401`
+  for missing or expired credentials so clients can refresh their sessions.
+- Expanded public pages such as Home may use optional authentication.
 - Backend requests validate that referenced albums and audio tracks exist and
   match the declared content type.
 - Deleted content is removed from saved and recent-activity references and is
