@@ -90,9 +90,48 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 
 ## Authentication and Resolution
 
+- New email registrations require a single-use verification code; existing
+  accounts without an `emailVerified` migration field remain treated as verified.
+- Apple and Google identities are keyed by each provider's stable subject ID,
+  not by an email address that can change.
+- A verified provider email matching an existing account does not silently link
+  the accounts. Linking a new provider requires a valid session for the target
+  account.
+- Federated credentials must be signature-, issuer-, audience-, expiry-, and
+  nonce-verified by Archtree before a session or account is created.
+- Passkeys can be enrolled only from an authenticated account. Passkey sign-in
+  uses discoverable credentials, one-time server challenges, required user
+  verification, and server-maintained signature counters.
+- Authentication funnel telemetry contains only a bounded stage, method,
+  outcome, and timestamp; it does not contain account identifiers, email,
+  credentials, tokens, or network addresses.
+- Authentication entry points display only methods the connected deployment
+  reports as fully configured. Password sign-in remains available as the
+  compatibility fallback when optional capabilities cannot be resolved.
+- Password-recovery and verification request responses do not reveal whether an
+  email address belongs to an account.
+- Completing a password reset revokes every active session for that account.
+- Listeners can view and revoke active sessions, sign out everywhere, and
+  delete their account in-app.
+- Active-session UI uses familiar device and browser descriptions and never
+  presents raw User-Agent or networking-version strings as device names.
+- Authenticated listeners can set or change a password. Changing credentials
+  preserves the current session and revokes every other active session.
+- Apple or Google can be unlinked only when another password, provider, or
+  passkey method remains available for account recovery.
+- Listeners can clear Recently Played activity without removing saved albums
+  or audio tracks.
+- Listener deletion removes saved content, recent activity, authentication
+  actions, provider identities, and sessions before removing the user.
+- Creator deletion fails without changing the account while creator-owned
+  content remains. Owned content must first be transferred or deleted through
+  its normal database/S3 lifecycle.
 - Saved content and recent activity belong to the authenticated viewer.
 - The same personalized carousel definition resolves differently for each user.
 - A signed-out viewer receives no personalized carousel items.
+- The expanded Library page requires valid authentication and returns `401`
+  for missing or expired credentials so clients can refresh their sessions.
+- Expanded public pages such as Home may use optional authentication.
 - Backend requests validate that referenced albums and audio tracks exist and
   match the declared content type.
 - Deleted content is removed from saved and recent-activity references and is

@@ -23,6 +23,16 @@ rather than repeat the code and must stay synchronized with behavior.
 
 - `npm run dev`: start development server
 - `npm start`: start production-mode server
+- `npm test`: run isolated unit and security-policy tests
+- `npm run test:integration`: run transactional authentication lifecycle tests
+  against a disposable single-node MongoDB replica set
+
+The integration suite requires a trusted `mongod` executable on `PATH`. On
+macOS, approve or install that binary according to the machine's security
+policy before running the suite; the tests never weaken Gatekeeper themselves.
+Each run owns a uniquely prefixed temporary database directory, verifies its
+removal during teardown, and conservatively removes abandoned test directories
+whose recorded owner process is no longer running.
 
 Notes:
 - The previous `prod` alias was removed to keep scripts minimal.
@@ -40,7 +50,12 @@ Required variables:
 - `DB_WAIT_QUEUE_TIMEOUT_MS`: maximum wait for a pooled MongoDB connection (defaults to 10000)
 - `DB_MAX_POOL_SIZE`: maximum MongoDB connections per server process (defaults to 100)
 - `JWT_SECRET`: JWT signing secret
+- `AUTH_CODE_PEPPER`: optional separate HMAC secret for verification and reset
+  codes (defaults to `JWT_SECRET`)
+- `AUTH_EMAIL_FROM`: AWS SES verified sender used for verification and reset mail
 - `ACCESS_TOKEN_MINUTES`: short-lived access-token lifetime from 1 to 60 minutes (defaults to 15)
+- `ACCESS_TOKEN_SECONDS`: development-only access-token lifetime from 1 to 300 seconds
+  for fast refresh-rotation testing (ignored in production)
 - `REFRESH_SESSION_DAYS`: rotating refresh-session lifetime from 1 to 90 days (defaults to `SESSION_DAYS`, then 30)
 - `ALLOW_LEGACY_AUTH_TOKENS`: temporary `true` opt-in for accepting and issuing
   old non-revocable app tokens during a coordinated client rollout (defaults to
@@ -63,12 +78,29 @@ Required variables:
 - `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
 
+### Verify refresh-token rotation locally
+
+Stop any existing Archtree process, then start the development server with its
+dedicated five-second access-token lifetime:
+
+```bash
+npm run dev:auth-rotation
+```
+
+Sign in again after restarting the server, wait at least five seconds, then refresh
+an authenticated screen in the iOS app. The Xcode console reports the expired
+access token, successful refresh-token rotation, and successful retry without
+printing either token. The server console emits a `refresh_succeeded` security
+event only after the stored refresh-token hash has been atomically replaced.
+
 Security:
 - Do not commit real credentials.
 - Store production secrets in AWS Secrets Manager or SSM Parameter Store.
 - Production authentication routes reject requests unless trusted proxy headers
   identify an HTTPS connection. Configure an HTTPS load-balancer listener and
   certificate before deploying the Phase 0 authentication contract.
+- Deferred production infrastructure work is tracked in
+  [`docs/deployment-todos.md`](docs/deployment-todos.md).
 
 ## Local Run
 
@@ -83,7 +115,7 @@ Security:
 This repo includes `buildspec.yml` with CI-oriented behavior:
 
 - `install`: `npm ci`
-- `build`: `npm run build --if-present`
+- `build`: `npm test`, then `npm run build --if-present`
 - `post_build`: removes `node_modules` before artifact packaging
 
 Artifact packaging intentionally excludes `node_modules` so Elastic Beanstalk performs a clean dependency install on each instance.
@@ -104,11 +136,23 @@ Web auth endpoints:
 
 App session endpoints:
 
+- `GET /auth/capabilities`
 - `POST /auth/login`
+- `POST /auth/signup`
+- `POST /auth/email/verify`
+- `POST /auth/email/resend-verification`
+- `POST /auth/password/forgot`
+- `POST /auth/password/reset`
+- `POST /auth/password/change`
 - `POST /auth/refresh`
 - `POST /auth/logout`
 - `POST /auth/logout-all`
 - `GET /auth/me`
+- `GET /auth/sessions`
+- `DELETE /auth/sessions/:id`
+- `DELETE /auth/identities/:provider`
+- `DELETE /auth/activity/listening-history`
+- `DELETE /auth/account`
 
 Web content management:
 

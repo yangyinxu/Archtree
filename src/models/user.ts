@@ -9,13 +9,17 @@ class User {
         public password: string,
         public username: string,
         public posts: Post[],
-        public role: string = 'user'
+        public role: string = 'user',
+        public displayName: string = '',
+        public emailVerified: boolean = true
     ) {
         this.email = email;
         this.password = password;
         this.username = username;
         this.posts = posts;
         this.role = role;
+        this.displayName = displayName;
+        this.emailVerified = emailVerified;
     }
 
     save() {
@@ -28,6 +32,9 @@ class User {
     }
 
     static findById(userId: string) {
+        if (!ObjectId.isValid(userId)) {
+            return null;
+        }
         const db = getDb();
 
         return db!
@@ -79,6 +86,30 @@ class User {
         }
 
         return this.findByEmail(normalized);
+    }
+
+    static markEmailVerified(userId: string) {
+        const db = getDb();
+        return db!.collection('users').updateOne(
+            { _id: new ObjectId(userId) },
+            { $set: { emailVerified: true, emailVerifiedAt: new Date() } }
+        );
+    }
+
+    static updatePassword(userId: string, password: string) {
+        const db = getDb();
+        return db!.collection('users').updateOne(
+            { _id: new ObjectId(userId) },
+            { $set: { password, passwordUpdatedAt: new Date() } }
+        );
+    }
+
+    /** Removes a newly staged account when its identity link cannot be persisted. */
+    static deleteById(userId: string) {
+        if (!ObjectId.isValid(userId)) {
+            return null;
+        }
+        return getDb()!.collection('users').deleteOne({ _id: new ObjectId(userId) });
     }
 }
 

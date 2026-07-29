@@ -21,6 +21,7 @@ export interface AuthContext {
     userId: string;
     email: string;
     role: string;
+    sessionId?: string;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -67,6 +68,7 @@ const attachAuthContext = async (req: Request, replacementToken?: string) => {
         userId: decodedToken.userId,
         email: user.email,
         role: user.role ?? 'user'
+        ,...(decodedToken.sessionId ? { sessionId: decodedToken.sessionId } : {})
     };
 
     return (req as AuthenticatedRequest).auth;
@@ -130,6 +132,18 @@ export const attachOptionalAuth = async (req: Request, res: Response, next: Next
         // Intentionally ignore optional auth parsing errors.
     }
 
+    return next();
+};
+
+/** Rejects a supplied invalid bearer token while allowing truly signed-out provider login. */
+export const requireAuthWhenPresented = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    if (req.get('Authorization')) {
+        return requireAuth(req, res, next);
+    }
     return next();
 };
 

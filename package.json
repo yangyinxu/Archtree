@@ -5,19 +5,25 @@
   "main": "src/app.ts",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsx --test test/**/*.test.ts",
+    "test:integration": "tsx --test --test-concurrency=1 test/**/*.integration.ts",
     "start": "NODE_ENV=production tsx src/app.ts",
-    "dev": "NODE_ENV=develop tsx src/app.ts"
+    "dev": "NODE_ENV=develop tsx src/app.ts",
+    "dev:auth-rotation": "NODE_ENV=develop ACCESS_TOKEN_SECONDS=5 tsx src/app.ts"
   },
   "author": "Yangyin Xu",
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1095.0",
+    "@aws-sdk/client-sesv2": "^3.1097.0",
+    "@simplewebauthn/server": "^13.3.2",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.0",
     "dotenv": "^16.0.3",
     "express": "^4.19.2",
     "express-validator": "^6.14.0",
+    "google-auth-library": "^10.9.1",
+    "jose": "^6.2.4",
     "jsonwebtoken": "^8.5.1",
     "mongodb": "^4.16.0",
     "multer": "^2.2.0",

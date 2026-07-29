@@ -37,8 +37,13 @@ const boundedDuration = (value: string | undefined, fallback: number, maximum: n
         : fallback;
 };
 
-export const accessTokenDurationSeconds = () =>
-    boundedDuration(process.env.ACCESS_TOKEN_MINUTES, 15, 60) * minutesToSeconds;
+/** Uses a seconds-scale lifetime in development so refresh rotation can be tested quickly. */
+export const accessTokenDurationSeconds = () => {
+    if (process.env.NODE_ENV !== 'production' && process.env.ACCESS_TOKEN_SECONDS) {
+        return boundedDuration(process.env.ACCESS_TOKEN_SECONDS, 15, 300);
+    }
+    return boundedDuration(process.env.ACCESS_TOKEN_MINUTES, 15, 60) * minutesToSeconds;
+};
 
 export const refreshSessionDurationMilliseconds = () =>
     boundedDuration(
@@ -102,6 +107,18 @@ export const createLegacyMigrationToken = (user: SessionUser) => {
 const userAgentFrom = (req?: Request) =>
     String(req?.get('User-Agent') ?? '').trim().slice(0, 256) || undefined;
 
+/** Accepts only the app's bounded platform category, never a user-provided device name. */
+const deviceFrom = (req?: Request) => {
+    const type = String(req?.get('X-Finitude-Device-Type') ?? '').toLowerCase();
+    if (type === 'phone') {
+        return { deviceName: 'iPhone', deviceType: 'phone' as const };
+    }
+    if (type === 'tablet') {
+        return { deviceName: 'iPad', deviceType: 'tablet' as const };
+    }
+    return undefined;
+};
+
 /** Creates the initial access/refresh pair for a newly authenticated user. */
 export const createSession = async (user: SessionUser, req?: Request): Promise<SessionTokens> => {
     const refreshToken = newRefreshToken();
@@ -110,7 +127,8 @@ export const createSession = async (user: SessionUser, req?: Request): Promise<S
         user._id.toString(),
         hashRefreshToken(refreshToken),
         refreshTokenExpiresAt,
-        userAgentFrom(req)
+        userAgentFrom(req),
+        deviceFrom(req)
     );
 
     return {

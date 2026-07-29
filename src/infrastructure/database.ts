@@ -2,6 +2,7 @@ import * as dotenv from 'dotenv';
 import * as mongoDb from 'mongodb';
 
 let database: mongoDb.Db | null = null;
+let databaseClient: mongoDb.MongoClient | null = null;
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -20,6 +21,15 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'authSessions', keys: { refreshTokenHash: 1 }, options: { unique: true } },
     { collection: 'authSessions', keys: { userId: 1, revokedAt: 1, expiresAt: -1 } },
     { collection: 'authSessions', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'authActionTokens', keys: { codeHash: 1 } },
+    { collection: 'authActionTokens', keys: { userId: 1, purpose: 1, consumedAt: 1 } },
+    { collection: 'authActionTokens', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'authIdentities', keys: { provider: 1, providerSubject: 1 }, options: { unique: true } },
+    { collection: 'authIdentities', keys: { userId: 1, provider: 1 }, options: { unique: true } },
+    { collection: 'passkeys', keys: { credentialId: 1 }, options: { unique: true } },
+    { collection: 'passkeys', keys: { userId: 1, createdAt: -1 } },
+    { collection: 'passkeyChallenges', keys: { flowId: 1 }, options: { unique: true } },
+    { collection: 'passkeyChallenges', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'userSaves', keys: { userId: 1, contentType: 1, contentId: 1 }, options: { unique: true } },
     { collection: 'userSaves', keys: { userId: 1, savedAt: -1 } },
     { collection: 'userActivity', keys: { userId: 1 }, options: { unique: true } },
@@ -59,9 +69,10 @@ export const connectToDatabase = async (): Promise<mongoDb.Db> => {
   });
   await client.connect();
 
+  databaseClient = client;
   database = client.db(databaseName);
   console.log(`Successfully connected to MongoDB: ${database.databaseName}`);
-  void ensureIndexes(database);
+  await ensureIndexes(database);
 
   return database;
 };
@@ -73,4 +84,20 @@ export const getDb = (): mongoDb.Db | null => {
   }
 
   return database;
+};
+
+/** Exposes the connected client for bounded multi-collection transactions. */
+export const getDatabaseClient = (): mongoDb.MongoClient => {
+  if (!databaseClient) {
+    throw new Error('Database client is not connected.');
+  }
+  return databaseClient;
+};
+
+/** Closes and clears the cached connection so isolated test databases cannot leak state. */
+export const disconnectFromDatabase = async () => {
+  const client = databaseClient;
+  database = null;
+  databaseClient = null;
+  await client?.close();
 };
