@@ -5,7 +5,7 @@
   "main": "src/app.ts",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsx --test test/**/*.test.ts",
     "start": "NODE_ENV=production tsx src/app.ts",
     "dev": "NODE_ENV=develop tsx src/app.ts",
     "dev:auth-rotation": "NODE_ENV=develop ACCESS_TOKEN_SECONDS=5 tsx src/app.ts"

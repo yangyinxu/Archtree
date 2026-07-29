@@ -117,6 +117,27 @@ class AuthSession {
         );
     }
 
+    /** Revokes every other device while preserving the session that changed credentials. */
+    static async revokeAllExcept(userId: string, sessionId: string) {
+        if (!ObjectId.isValid(sessionId)) {
+            return null;
+        }
+        const now = new Date();
+        return getDb()!.collection<AuthSessionDocument>('authSessions').updateMany(
+            {
+                userId,
+                _id: { $ne: new ObjectId(sessionId) },
+                revokedAt: { $exists: false }
+            },
+            {
+                $set: {
+                    revokedAt: now,
+                    updatedAt: now
+                }
+            }
+        );
+    }
+
     /** Lists active sessions without ever exposing refresh-token hashes. */
     static listActive(userId: string) {
         return getDb()!.collection<AuthSessionDocument>('authSessions')

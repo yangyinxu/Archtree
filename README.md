@@ -126,16 +126,23 @@ Web auth endpoints:
 
 App session endpoints:
 
+- `GET /auth/capabilities`
 - `POST /auth/login`
 - `POST /auth/signup`
 - `POST /auth/email/verify`
 - `POST /auth/email/resend-verification`
 - `POST /auth/password/forgot`
 - `POST /auth/password/reset`
+- `POST /auth/password/change`
 - `POST /auth/refresh`
 - `POST /auth/logout`
 - `POST /auth/logout-all`
 - `GET /auth/me`
+- `GET /auth/sessions`
+- `DELETE /auth/sessions/:id`
+- `DELETE /auth/identities/:provider`
+- `DELETE /auth/activity/listening-history`
+- `DELETE /auth/account`
 
 Web content management:
 

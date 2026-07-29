@@ -50,6 +50,14 @@ class AuthIdentity {
     static deleteForUser(userId: string) {
         return getDb()!.collection<AuthIdentityDocument>('authIdentities').deleteMany({ userId });
     }
+
+    /** Removes one linked provider only after account recovery safeguards are checked. */
+    static deleteForUserAndProvider(userId: string, provider: AuthProvider) {
+        return getDb()!.collection<AuthIdentityDocument>('authIdentities').deleteOne({
+            userId,
+            provider
+        });
+    }
 }
 
 export default AuthIdentity;

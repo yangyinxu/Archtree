@@ -105,11 +105,20 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Authentication funnel telemetry contains only a bounded stage, method,
   outcome, and timestamp; it does not contain account identifiers, email,
   credentials, tokens, or network addresses.
+- Authentication entry points display only methods the connected deployment
+  reports as fully configured. Password sign-in remains available as the
+  compatibility fallback when optional capabilities cannot be resolved.
 - Password-recovery and verification request responses do not reveal whether an
   email address belongs to an account.
 - Completing a password reset revokes every active session for that account.
 - Listeners can view and revoke active sessions, sign out everywhere, and
   delete their account in-app.
+- Authenticated listeners can set or change a password. Changing credentials
+  preserves the current session and revokes every other active session.
+- Apple or Google can be unlinked only when another password, provider, or
+  passkey method remains available for account recovery.
+- Listeners can clear Recently Played activity without removing saved albums
+  or audio tracks.
 - Listener deletion removes saved content, recent activity, authentication
   actions, provider identities, and sessions before removing the user.
 - Creator deletion fails without changing the account while creator-owned
