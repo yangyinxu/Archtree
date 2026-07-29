@@ -113,6 +113,8 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Completing a password reset revokes every active session for that account.
 - Listeners can view and revoke active sessions, sign out everywhere, and
   delete their account in-app.
+- Active-session UI uses familiar device and browser descriptions and never
+  presents raw User-Agent or networking-version strings as device names.
 - Authenticated listeners can set or change a password. Changing credentials
   preserves the current session and revokes every other active session.
 - Apple or Google can be unlinked only when another password, provider, or

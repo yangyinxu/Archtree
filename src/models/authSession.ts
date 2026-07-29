@@ -10,11 +10,19 @@ export interface AuthSessionDocument {
     expiresAt: Date;
     revokedAt?: Date;
     userAgent?: string;
+    deviceName?: string;
+    deviceType?: 'phone' | 'tablet';
 }
 
 /** Persists revocable refresh sessions without storing usable refresh tokens. */
 class AuthSession {
-    static async create(userId: string, refreshTokenHash: string, expiresAt: Date, userAgent?: string) {
+    static async create(
+        userId: string,
+        refreshTokenHash: string,
+        expiresAt: Date,
+        userAgent?: string,
+        device?: { deviceName: string; deviceType: 'phone' | 'tablet' }
+    ) {
         const db = getDb();
         const now = new Date();
         const result = await db!.collection<AuthSessionDocument>('authSessions').insertOne({
@@ -24,7 +32,8 @@ class AuthSession {
             createdAt: now,
             updatedAt: now,
             expiresAt,
-            ...(userAgent ? { userAgent } : {})
+            ...(userAgent ? { userAgent } : {}),
+            ...(device ?? {})
         });
 
         return result.insertedId.toString();

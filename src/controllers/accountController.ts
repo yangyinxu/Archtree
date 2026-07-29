@@ -9,6 +9,7 @@ import { Passkey } from '../models/passkey';
 import User from '../models/user';
 import { recordSecurityEvent } from '../services/securityAuditService';
 import { evaluatePassword } from '../services/passwordPolicyService';
+import { describeSessionDevice } from '../services/deviceSessionService';
 
 const creatorCollections = ['artists', 'albums', 'audioTracks', 'carousels', 'pages', 'imageAssets'];
 
@@ -17,14 +18,23 @@ export const listSessions = async (req: Request, res: Response) => {
     const auth = (req as AuthenticatedRequest).auth!;
     const sessions = await AuthSession.listActive(auth.userId);
     return res.status(200).json({
-        sessions: sessions.map(session => ({
-            id: session._id.toString(),
-            createdAt: session.createdAt,
-            lastUsedAt: session.updatedAt,
-            expiresAt: session.expiresAt,
-            userAgent: session.userAgent ?? 'Unknown device',
-            isCurrent: session._id.toString() === auth.sessionId
-        }))
+        sessions: sessions.map(session => {
+            const device = session.deviceName && session.deviceType
+                ? {
+                    deviceName: session.deviceName,
+                    deviceType: session.deviceType
+                }
+                : describeSessionDevice(session.userAgent);
+            return {
+                id: session._id.toString(),
+                createdAt: session.createdAt,
+                lastUsedAt: session.updatedAt,
+                expiresAt: session.expiresAt,
+                userAgent: session.userAgent ?? '',
+                ...device,
+                isCurrent: session._id.toString() === auth.sessionId
+            };
+        })
     });
 };
 

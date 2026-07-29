@@ -19,6 +19,9 @@ Current state:
 
 Required before production authentication is enabled:
 
+- [ ] Enroll the project in a paid Apple Developer team. The active iOS target
+      intentionally omits Sign in with Apple and Associated Domains
+      entitlements until this is available.
 - [ ] Choose a production API domain owned by the project.
 - [ ] Issue and validate an AWS ACM certificate in the load balancer's region.
 - [ ] Configure an HTTPS listener on port 443 and attach the certificate.

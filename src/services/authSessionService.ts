@@ -107,6 +107,18 @@ export const createLegacyMigrationToken = (user: SessionUser) => {
 const userAgentFrom = (req?: Request) =>
     String(req?.get('User-Agent') ?? '').trim().slice(0, 256) || undefined;
 
+/** Accepts only the app's bounded platform category, never a user-provided device name. */
+const deviceFrom = (req?: Request) => {
+    const type = String(req?.get('X-Finitude-Device-Type') ?? '').toLowerCase();
+    if (type === 'phone') {
+        return { deviceName: 'iPhone', deviceType: 'phone' as const };
+    }
+    if (type === 'tablet') {
+        return { deviceName: 'iPad', deviceType: 'tablet' as const };
+    }
+    return undefined;
+};
+
 /** Creates the initial access/refresh pair for a newly authenticated user. */
 export const createSession = async (user: SessionUser, req?: Request): Promise<SessionTokens> => {
     const refreshToken = newRefreshToken();
@@ -115,7 +127,8 @@ export const createSession = async (user: SessionUser, req?: Request): Promise<S
         user._id.toString(),
         hashRefreshToken(refreshToken),
         refreshTokenExpiresAt,
-        userAgentFrom(req)
+        userAgentFrom(req),
+        deviceFrom(req)
     );
 
     return {
