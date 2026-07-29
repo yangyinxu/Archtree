@@ -37,6 +37,18 @@ Required before production authentication is enabled:
       configure `AUTH_EMAIL_FROM` plus an `AUTH_CODE_PEPPER`.
 - [ ] Configure the iOS Associated Domains entitlement after the production
       authentication domain exists.
+- [ ] Enable Sign in with Apple for `com.yxu.Finitude-iOS`, refresh its
+      provisioning profile, and set `APPLE_CLIENT_IDS` to every accepted app or
+      service client identifier.
+- [ ] Create Google iOS and server OAuth clients. Set the iOS
+      `GOOGLE_CLIENT_ID`, `GOOGLE_REVERSED_CLIENT_ID`, and
+      `GOOGLE_SERVER_CLIENT_ID` build settings, and set Archtree
+      `GOOGLE_CLIENT_IDS` to the accepted server client identifiers.
+- [ ] Verify first-time Apple registration, Apple private relay, repeat login,
+      Google registration, repeat login, provider revocation, and nonce
+      rejection on a signed device build.
+- [ ] Verify an existing email cannot be silently linked while signed out and
+      can be linked only from an authenticated account-management flow.
 - [ ] If legacy-token compatibility is temporarily enabled for rollout, remove
       `ALLOW_LEGACY_AUTH_TOKENS=true` after the migration window.
 

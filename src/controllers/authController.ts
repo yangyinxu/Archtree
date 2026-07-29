@@ -16,6 +16,7 @@ import {
   setBrowserSessionCookies
 } from '../services/authCookieService';
 import { recordSecurityEvent } from '../services/securityAuditService';
+import AuthIdentity from '../models/authIdentity';
 
 /**
  * Interface for Error object with statusCode property
@@ -387,11 +388,16 @@ export const logoutAll = async (req: Request, res: Response) => {
 export const me = async (req: Request, res: Response) => {
   const auth = (req as Request & { auth?: { userId: string; email: string; role: string } }).auth!;
   const user = await User.findById(auth.userId);
+  const identities = await AuthIdentity.listForUser(auth.userId);
+  const authenticationMethods = [
+    ...(user?.password ? ['password'] : []),
+    ...identities.map(identity => identity.provider)
+  ];
   return res.status(200).json({
     ...auth,
     displayName: user?.displayName ?? user?.username ?? '',
     emailVerified: user?.emailVerified !== false,
-    authenticationMethods: ['password']
+    authenticationMethods
   });
 };
 

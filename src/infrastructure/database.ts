@@ -2,6 +2,7 @@ import * as dotenv from 'dotenv';
 import * as mongoDb from 'mongodb';
 
 let database: mongoDb.Db | null = null;
+let databaseClient: mongoDb.MongoClient | null = null;
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -23,6 +24,8 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'authActionTokens', keys: { codeHash: 1 } },
     { collection: 'authActionTokens', keys: { userId: 1, purpose: 1, consumedAt: 1 } },
     { collection: 'authActionTokens', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'authIdentities', keys: { provider: 1, providerSubject: 1 }, options: { unique: true } },
+    { collection: 'authIdentities', keys: { userId: 1, provider: 1 }, options: { unique: true } },
     { collection: 'userSaves', keys: { userId: 1, contentType: 1, contentId: 1 }, options: { unique: true } },
     { collection: 'userSaves', keys: { userId: 1, savedAt: -1 } },
     { collection: 'userActivity', keys: { userId: 1 }, options: { unique: true } },
@@ -62,6 +65,7 @@ export const connectToDatabase = async (): Promise<mongoDb.Db> => {
   });
   await client.connect();
 
+  databaseClient = client;
   database = client.db(databaseName);
   console.log(`Successfully connected to MongoDB: ${database.databaseName}`);
   void ensureIndexes(database);
@@ -76,4 +80,12 @@ export const getDb = (): mongoDb.Db | null => {
   }
 
   return database;
+};
+
+/** Exposes the connected client for bounded multi-collection transactions. */
+export const getDatabaseClient = (): mongoDb.MongoClient => {
+  if (!databaseClient) {
+    throw new Error('Database client is not connected.');
+  }
+  return databaseClient;
 };

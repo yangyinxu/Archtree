@@ -108,6 +108,14 @@ export class UserLibrary {
         ]);
     }
 
+    /** Removes listener-owned saves and activity during account deletion. */
+    static async deleteForUser(userId: string) {
+        await Promise.all([
+            getDb()!.collection(savesCollection).deleteMany({ userId }),
+            getDb()!.collection(activityCollection).deleteMany({ userId })
+        ]);
+    }
+
     private static async recordActivity(userId: string, source: ActivitySource, entries: ActivityEntry[]) {
         const keys = entries.map((entry) => `${entry.contentType}:${entry.contentId}`);
         await getDb()!.collection(activityCollection).updateOne(

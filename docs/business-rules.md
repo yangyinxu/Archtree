@@ -92,9 +92,23 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 
 - New email registrations require a single-use verification code; existing
   accounts without an `emailVerified` migration field remain treated as verified.
+- Apple and Google identities are keyed by each provider's stable subject ID,
+  not by an email address that can change.
+- A verified provider email matching an existing account does not silently link
+  the accounts. Linking a new provider requires a valid session for the target
+  account.
+- Federated credentials must be signature-, issuer-, audience-, expiry-, and
+  nonce-verified by Archtree before a session or account is created.
 - Password-recovery and verification request responses do not reveal whether an
   email address belongs to an account.
 - Completing a password reset revokes every active session for that account.
+- Listeners can view and revoke active sessions, sign out everywhere, and
+  delete their account in-app.
+- Listener deletion removes saved content, recent activity, authentication
+  actions, provider identities, and sessions before removing the user.
+- Creator deletion fails without changing the account while creator-owned
+  content remains. Owned content must first be transferred or deleted through
+  its normal database/S3 lifecycle.
 - Saved content and recent activity belong to the authenticated viewer.
 - The same personalized carousel definition resolves differently for each user.
 - A signed-out viewer receives no personalized carousel items.

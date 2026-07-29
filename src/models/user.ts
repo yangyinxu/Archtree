@@ -103,6 +103,14 @@ class User {
             { $set: { password, passwordUpdatedAt: new Date() } }
         );
     }
+
+    /** Removes a newly staged account when its identity link cannot be persisted. */
+    static deleteById(userId: string) {
+        if (!ObjectId.isValid(userId)) {
+            return null;
+        }
+        return getDb()!.collection('users').deleteOne({ _id: new ObjectId(userId) });
+    }
 }
 
 export default User;

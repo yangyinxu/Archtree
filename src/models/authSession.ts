@@ -116,6 +116,27 @@ class AuthSession {
             }
         );
     }
+
+    /** Lists active sessions without ever exposing refresh-token hashes. */
+    static listActive(userId: string) {
+        return getDb()!.collection<AuthSessionDocument>('authSessions')
+            .find({
+                userId,
+                revokedAt: { $exists: false },
+                expiresAt: { $gt: new Date() }
+            })
+            .project({
+                refreshTokenHash: 0
+            })
+            .sort({ updatedAt: -1 })
+            .limit(50)
+            .toArray();
+    }
+
+    /** Removes revoked session metadata after final account deletion. */
+    static deleteForUser(userId: string) {
+        return getDb()!.collection<AuthSessionDocument>('authSessions').deleteMany({ userId });
+    }
 }
 
 export default AuthSession;

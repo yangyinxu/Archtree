@@ -23,7 +23,7 @@ import {
     authRateLimit,
     requireSecureAuthTransport
 } from '../middleware/requestProtectionMiddleware';
-import { requireAuth } from '../middleware/authMiddleware';
+import { requireAuth, requireAuthWhenPresented } from '../middleware/authMiddleware';
 import {
     forgotPassword,
     register,
@@ -31,6 +31,15 @@ import {
     resetPassword,
     verifyEmail
 } from '../controllers/emailAuthController';
+import {
+    authenticateWithApple,
+    authenticateWithGoogle
+} from '../controllers/federatedAuthController';
+import {
+    deleteAccount,
+    listSessions,
+    revokeSession
+} from '../controllers/accountController';
 
 const router: Router = express.Router();
 
@@ -70,6 +79,8 @@ router.post('/email/verify', authRateLimit, authAccountRateLimit, body('email').
 router.post('/email/resend-verification', authRateLimit, authAccountRateLimit, body('email').isEmail(), asyncHandler(resendVerification));
 router.post('/password/forgot', authRateLimit, authAccountRateLimit, body('email').isEmail(), asyncHandler(forgotPassword));
 router.post('/password/reset', authRateLimit, authAccountRateLimit, authConcurrencyLimit, body('email').isEmail(), body('code').isLength({ min: 6, max: 6 }).isNumeric(), body('password').isLength({ min: 12, max: 256 }), asyncHandler(resetPassword));
+router.post('/apple', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithApple));
+router.post('/google', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithGoogle));
 
 router.get('/signup-web', renderSignupPage);
 
@@ -90,5 +101,8 @@ router.post('/logout', authRateLimit, asyncHandler(logout));
 router.post('/logout-all', requireAuth, asyncHandler(logoutAll));
 
 router.get('/me', requireAuth, asyncHandler(me));
+router.get('/sessions', requireAuth, asyncHandler(listSessions));
+router.delete('/sessions/:id', requireAuth, asyncHandler(revokeSession));
+router.delete('/account', requireAuth, asyncHandler(deleteAccount));
 
 export default router;
