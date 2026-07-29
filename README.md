@@ -23,6 +23,16 @@ rather than repeat the code and must stay synchronized with behavior.
 
 - `npm run dev`: start development server
 - `npm start`: start production-mode server
+- `npm test`: run isolated unit and security-policy tests
+- `npm run test:integration`: run transactional authentication lifecycle tests
+  against a disposable single-node MongoDB replica set
+
+The integration suite requires a trusted `mongod` executable on `PATH`. On
+macOS, approve or install that binary according to the machine's security
+policy before running the suite; the tests never weaken Gatekeeper themselves.
+Each run owns a uniquely prefixed temporary database directory, verifies its
+removal during teardown, and conservatively removes abandoned test directories
+whose recorded owner process is no longer running.
 
 Notes:
 - The previous `prod` alias was removed to keep scripts minimal.
@@ -105,7 +115,7 @@ Security:
 This repo includes `buildspec.yml` with CI-oriented behavior:
 
 - `install`: `npm ci`
-- `build`: `npm run build --if-present`
+- `build`: `npm test`, then `npm run build --if-present`
 - `post_build`: removes `node_modules` before artifact packaging
 
 Artifact packaging intentionally excludes `node_modules` so Elastic Beanstalk performs a clean dependency install on each instance.

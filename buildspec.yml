@@ -8,6 +8,7 @@ phases:
       - npm ci
   build:
     commands:
+      - npm test
       - npm run build --if-present
   post_build:
     commands:

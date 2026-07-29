@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc --noEmit",
     "test": "tsx --test test/**/*.test.ts",
+    "test:integration": "tsx --test --test-concurrency=1 test/**/*.integration.ts",
     "start": "NODE_ENV=production tsx src/app.ts",
     "dev": "NODE_ENV=develop tsx src/app.ts",
     "dev:auth-rotation": "NODE_ENV=develop ACCESS_TOKEN_SECONDS=5 tsx src/app.ts"

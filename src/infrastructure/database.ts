@@ -72,7 +72,7 @@ export const connectToDatabase = async (): Promise<mongoDb.Db> => {
   databaseClient = client;
   database = client.db(databaseName);
   console.log(`Successfully connected to MongoDB: ${database.databaseName}`);
-  void ensureIndexes(database);
+  await ensureIndexes(database);
 
   return database;
 };
@@ -92,4 +92,12 @@ export const getDatabaseClient = (): mongoDb.MongoClient => {
     throw new Error('Database client is not connected.');
   }
   return databaseClient;
+};
+
+/** Closes and clears the cached connection so isolated test databases cannot leak state. */
+export const disconnectFromDatabase = async () => {
+  const client = databaseClient;
+  database = null;
+  databaseClient = null;
+  await client?.close();
 };
