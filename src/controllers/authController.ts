@@ -15,8 +15,9 @@ import {
   getCookieValue,
   setBrowserSessionCookies
 } from '../services/authCookieService';
-import { recordSecurityEvent } from '../services/securityAuditService';
+import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import AuthIdentity from '../models/authIdentity';
+import { Passkey } from '../models/passkey';
 
 /**
  * Interface for Error object with statusCode property
@@ -301,6 +302,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       userId: authResult.userId,
       sessionId: authResult.sessionId
     });
+    recordAuthFunnelEvent('login', 'password', 'succeeded');
 
     res.status(200).json({
       // Old clients read `token`; opt-in migration mode can preserve their session lifetime.
@@ -314,6 +316,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       role: authResult.role
     });
   } catch (error: any) {
+    recordAuthFunnelEvent('login', 'password', 'rejected');
     if (!error.statusCode) {
       error.statusCode = 500;
     }
@@ -389,9 +392,11 @@ export const me = async (req: Request, res: Response) => {
   const auth = (req as Request & { auth?: { userId: string; email: string; role: string } }).auth!;
   const user = await User.findById(auth.userId);
   const identities = await AuthIdentity.listForUser(auth.userId);
+  const passkeys = await Passkey.listForUser(auth.userId);
   const authenticationMethods = [
     ...(user?.password ? ['password'] : []),
-    ...identities.map(identity => identity.provider)
+    ...identities.map(identity => identity.provider),
+    ...(passkeys.length > 0 ? ['passkey'] : [])
   ];
   return res.status(200).json({
     ...auth,

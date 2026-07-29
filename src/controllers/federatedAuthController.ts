@@ -9,7 +9,7 @@ import {
     verifyAppleIdentity,
     verifyGoogleIdentity
 } from '../services/federatedIdentityService';
-import { recordSecurityEvent } from '../services/securityAuditService';
+import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 
 const conflict = () => {
     const error = new Error(
@@ -96,6 +96,7 @@ const completeFederatedAuthentication = async (
         userId: user._id.toString(),
         sessionId: tokens.sessionId
     });
+    recordAuthFunnelEvent('login', identity.provider, 'succeeded');
     return res.status(200).json({
         ...tokens,
         userId: user._id.toString(),

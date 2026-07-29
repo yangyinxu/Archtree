@@ -51,6 +51,8 @@ export const deleteAccount = async (req: Request, res: Response) => {
             await db.collection('userActivity').deleteMany({ userId: auth.userId }, options);
             await db.collection('authActionTokens').deleteMany({ userId: auth.userId }, options);
             await db.collection('authIdentities').deleteMany({ userId: auth.userId }, options);
+            await db.collection('passkeys').deleteMany({ userId: auth.userId }, options);
+            await db.collection('passkeyChallenges').deleteMany({ userId: auth.userId }, options);
             await db.collection('authSessions').deleteMany({ userId: auth.userId }, options);
             await db.collection('users').deleteOne(
                 { _id: new ObjectId(auth.userId) },

@@ -40,6 +40,12 @@ import {
     listSessions,
     revokeSession
 } from '../controllers/accountController';
+import {
+    authenticationOptions,
+    registrationOptions,
+    verifyAuthentication,
+    verifyRegistration
+} from '../controllers/passkeyAuthController';
 
 const router: Router = express.Router();
 
@@ -104,5 +110,9 @@ router.get('/me', requireAuth, asyncHandler(me));
 router.get('/sessions', requireAuth, asyncHandler(listSessions));
 router.delete('/sessions/:id', requireAuth, asyncHandler(revokeSession));
 router.delete('/account', requireAuth, asyncHandler(deleteAccount));
+router.post('/passkeys/register/options', requireAuth, asyncHandler(registrationOptions));
+router.post('/passkeys/register/verify', requireAuth, asyncHandler(verifyRegistration));
+router.post('/passkeys/authenticate/options', authRateLimit, asyncHandler(authenticationOptions));
+router.post('/passkeys/authenticate/verify', authRateLimit, asyncHandler(verifyAuthentication));
 
 export default router;

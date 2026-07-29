@@ -99,6 +99,12 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   account.
 - Federated credentials must be signature-, issuer-, audience-, expiry-, and
   nonce-verified by Archtree before a session or account is created.
+- Passkeys can be enrolled only from an authenticated account. Passkey sign-in
+  uses discoverable credentials, one-time server challenges, required user
+  verification, and server-maintained signature counters.
+- Authentication funnel telemetry contains only a bounded stage, method,
+  outcome, and timestamp; it does not contain account identifiers, email,
+  credentials, tokens, or network addresses.
 - Password-recovery and verification request responses do not reveal whether an
   email address belongs to an account.
 - Completing a password reset revokes every active session for that account.

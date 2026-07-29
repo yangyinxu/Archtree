@@ -5,7 +5,7 @@ import AuthActionToken, { AuthActionPurpose } from '../models/authActionToken';
 import AuthSession from '../models/authSession';
 import User from '../models/user';
 import { requireAuthEmailConfiguration, sendAuthCode } from '../services/authEmailService';
-import { recordSecurityEvent } from '../services/securityAuditService';
+import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 
 const normalizeEmail = (value: unknown) => String(value ?? '').trim().toLowerCase();
 const acceptedMessage = { message: 'If the account can use this action, an email has been sent.' };
@@ -39,6 +39,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
             const result = await new User(email, passwordHash, '', [], 'user', displayName, false).save();
             user = await User.findById(result.insertedId.toString());
             recordSecurityEvent('email_registration_created', { userId: result.insertedId.toString() });
+            recordAuthFunnelEvent('registration', 'email', 'succeeded');
         }
 
         if (user && user.emailVerified !== true) {
@@ -60,6 +61,7 @@ export const verifyEmail = async (req: Request, res: Response) => {
     }
     await User.markEmailVerified(user._id.toString());
     recordSecurityEvent('email_verified', { userId: user._id.toString() });
+    recordAuthFunnelEvent('verification', 'email', 'succeeded');
     return res.status(204).send();
 };
 
@@ -102,5 +104,6 @@ export const resetPassword = async (req: Request, res: Response) => {
     await User.updatePassword(user._id.toString(), await bcrypt.hash(String(req.body.password), 12));
     await AuthSession.revokeAll(user._id.toString());
     recordSecurityEvent('password_reset_completed', { userId: user._id.toString() });
+    recordAuthFunnelEvent('recovery', 'password', 'succeeded');
     return res.status(204).send();
 };

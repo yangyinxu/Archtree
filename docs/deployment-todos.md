@@ -49,6 +49,14 @@ Required before production authentication is enabled:
       rejection on a signed device build.
 - [ ] Verify an existing email cannot be silently linked while signed out and
       can be linked only from an authenticated account-management flow.
+- [ ] Set `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGIN`, and `WEBAUTHN_RP_NAME` for the
+      final HTTPS authentication domain.
+- [ ] Add `webcredentials:<WEBAUTHN_RP_ID>` to the signed iOS Associated Domains
+      entitlement and publish a valid `/.well-known/apple-app-site-association`
+      file containing the app identifier.
+- [ ] Verify passkey enrollment, discoverable sign-in, cancellation, replay
+      rejection, counter updates, synced-device use, and lost-passkey recovery
+      on signed physical devices.
 - [ ] If legacy-token compatibility is temporarily enabled for rollout, remove
       `ALLOW_LEGACY_AUTH_TOKENS=true` after the migration window.
 
