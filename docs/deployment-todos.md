@@ -5,21 +5,23 @@ be completed solely through application code.
 
 ## Production HTTPS for Authentication
 
-Status: Repository configuration prepared for single-instance TLS; deployment
-and production verification remain deferred.
+Status: Single-instance TLS is deployed and password login is verified on a
+physical device. Refresh, profile, and session-revocation lifecycle checks
+remain pending.
 
 Current state:
 
-- Route 53 points the production domain at the healthy single-instance Elastic
-  Beanstalk environment, but DNS may still be propagating.
-- Repository hooks now provision renewable Let's Encrypt TLS directly in Nginx
-  after DNS validation succeeds.
-- The iOS Release configuration still identifies the HTTP endpoint, and the
-  authentication client refuses to send credentials or tokens to it.
-- Production Archtree authentication rejects requests that are not identified
-  as HTTPS after trusted-proxy resolution.
+- Route 53 resolves the production domain to the healthy single-instance
+  Elastic Beanstalk environment.
+- Nginx serves a trusted, renewable Let's Encrypt certificate and redirects
+  public HTTP traffic to HTTPS.
+- Physical-device Debug and Release iOS builds use
+  `https://api.example.com`;
+  simulator Debug builds retain the localhost override.
+- Archtree trusts the single deployed Nginx proxy hop, and public HTTP cannot
+  bypass the HTTPS redirect with a forged forwarded-protocol header.
 
-Required before production authentication is enabled:
+Remaining rollout and capability gates:
 
 - [ ] Enroll the project in a paid Apple Developer team. The active iOS target
       intentionally omits Sign in with Apple and Associated Domains
@@ -29,19 +31,20 @@ Required before production authentication is enabled:
       directly on the single Elastic Beanstalk instance.
 - [x] Add instance security-group ingress for port 443.
 - [x] Point production DNS to the Elastic Beanstalk environment.
-- [ ] Set `HTTPS_DOMAIN`, `ACME_EMAIL`, and `TRUST_PROXY_HOPS=1` in Elastic
+- [x] Set `HTTPS_DOMAIN`, `ACME_EMAIL`, and `TRUST_PROXY_HOPS=1` in Elastic
       Beanstalk, then deploy after DNS resolves to the instance.
-- [ ] Confirm Let's Encrypt issuance and the HTTP-to-HTTPS redirect.
-- [ ] Verify `TRUST_PROXY_HOPS` against the deployed proxy chain.
-- [ ] Change the iOS Release `ARCHTREE_AUTH_BASE_URL` to the production
+- [x] Confirm Let's Encrypt issuance and the HTTP-to-HTTPS redirect.
+- [x] Verify `TRUST_PROXY_HOPS` against the deployed proxy chain.
+- [x] Change the iOS Release `ARCHTREE_AUTH_BASE_URL` to the production
       `https://` domain.
-- [ ] Deploy Archtree and verify login, refresh rotation, `/auth/me`, logout,
-      and logout-all over HTTPS.
+- [x] Verify password login over HTTPS from a signed physical-device build.
+- [ ] Verify refresh rotation, `/auth/me`, logout, and logout-all over HTTPS
+      from a signed physical-device build.
 - [ ] Verify the SES sender/domain, grant the runtime only `ses:SendEmail`, and
       configure `AUTH_EMAIL_FROM` plus an `AUTH_CODE_PEPPER`.
 - [ ] Configure the iOS Associated Domains entitlement after the production
       authentication domain exists.
-- [ ] Enable Sign in with Apple for `com.yxu.Finitude-iOS`, refresh its
+- [ ] Enable Sign in with Apple for `com.example.finitude`, refresh its
       provisioning profile, and set `APPLE_CLIENT_IDS` to every accepted app or
       service client identifier.
 - [ ] Create Google iOS and server OAuth clients. Set the iOS
@@ -64,14 +67,16 @@ Required before production authentication is enabled:
 - [ ] If legacy-token compatibility is temporarily enabled for rollout, remove
       `ALLOW_LEGACY_AUTH_TOKENS=true` after the migration window.
 
-Safety constraints while deferred:
+Safety constraints while rollout work remains:
 
 - Do not weaken the iOS secure-authentication URL check or ATS policy.
 - Do not remove Archtree's production secure-transport middleware.
-- Do not ship production authentication against the current HTTP endpoint.
+- Do not regress production authentication to a remote HTTP endpoint.
 
 Completion evidence:
 
 - HTTPS responds successfully with a trusted certificate.
 - HTTP authentication is rejected or redirected without processing credentials.
-- A Release iOS build completes the full authentication lifecycle over HTTPS.
+- A signed physical-device build completes password login over HTTPS.
+- Refresh, profile, and session-revocation operations complete over HTTPS
+  before the full authentication lifecycle is considered verified.
