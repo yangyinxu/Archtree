@@ -74,7 +74,12 @@ Required variables:
 - `MAX_MEDIA_REQUESTS_GLOBAL`: concurrent public media requests allowed per server process (defaults to 40)
 - `MAX_RECONCILIATION_OBJECTS`: safety ceiling for storage reconciliation reports (defaults to 50000)
 - `MAX_STORAGE_SUMMARY_OBJECTS`: safety ceiling for synchronous S3 storage summaries (defaults to 1000000)
-- `TRUST_PROXY_HOPS`: trusted reverse-proxy hop count; Elastic Beanstalk with ALB and Nginx typically uses 2
+- `TRUST_PROXY_HOPS`: trusted reverse-proxy hop count; the single-instance
+  Elastic Beanstalk Nginx configuration uses 1
+- `HTTPS_DOMAIN`: production API hostname used for the single-instance Elastic
+  Beanstalk certificate and Nginx virtual host
+- `ACME_EMAIL`: operational email address used for Let's Encrypt registration
+  and expiry notices
 - `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
 
@@ -97,8 +102,9 @@ Security:
 - Do not commit real credentials.
 - Store production secrets in AWS Secrets Manager or SSM Parameter Store.
 - Production authentication routes reject requests unless trusted proxy headers
-  identify an HTTPS connection. Configure an HTTPS load-balancer listener and
-  certificate before deploying the Phase 0 authentication contract.
+  identify an HTTPS connection. The single-instance Elastic Beanstalk setup in
+  `.platform/hooks` obtains and renews a Let's Encrypt certificate, terminates
+  TLS in Nginx, and redirects the configured domain from HTTP to HTTPS.
 - Deferred production infrastructure work is tracked in
   [`docs/deployment-todos.md`](docs/deployment-todos.md).
 
@@ -119,6 +125,24 @@ This repo includes `buildspec.yml` with CI-oriented behavior:
 - `post_build`: removes `node_modules` before artifact packaging
 
 Artifact packaging intentionally excludes `node_modules` so Elastic Beanstalk performs a clean dependency install on each instance.
+
+### Single-instance Elastic Beanstalk HTTPS
+
+This repository supports direct TLS termination on a single-instance Amazon
+Linux 2023 Elastic Beanstalk environment without a load balancer:
+
+1. Point the Route 53 record at the environment and allow it to propagate.
+2. Set `HTTPS_DOMAIN`, `ACME_EMAIL`, and `TRUST_PROXY_HOPS=1` in the environment.
+3. Deploy with ports 80 and 443 allowed. The included `.ebextensions` resource
+   admits port 443 on the instance security group.
+
+The first successful post-deployment run obtains a public Let's Encrypt
+certificate through the HTTP-01 challenge, enables port 443, and redirects
+requests for `HTTPS_DOMAIN` to HTTPS. If DNS is not ready, deployment remains
+healthy over HTTP and a later deployment retries issuance. A systemd timer
+checks renewal twice daily. Certificate files remain on the instance, so
+replacing the single instance requires issuance again; Let's Encrypt rate
+limits should be considered before repeated environment rebuilds.
 
 Important:
 - Build phase should not run `npm start`.

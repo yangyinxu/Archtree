@@ -5,13 +5,15 @@ be completed solely through application code.
 
 ## Production HTTPS for Authentication
 
-Status: Deferred. Blocks production activation of Phase 0 authentication, but
-does not block continued local development or later feature implementation.
+Status: Repository configuration prepared for single-instance TLS; deployment
+and production verification remain deferred.
 
 Current state:
 
-- The Elastic Beanstalk endpoint responds over HTTP.
-- Port 443 does not currently provide HTTPS.
+- Route 53 points the production domain at the healthy single-instance Elastic
+  Beanstalk environment, but DNS may still be propagating.
+- Repository hooks now provision renewable Let's Encrypt TLS directly in Nginx
+  after DNS validation succeeds.
 - The iOS Release configuration still identifies the HTTP endpoint, and the
   authentication client refuses to send credentials or tokens to it.
 - Production Archtree authentication rejects requests that are not identified
@@ -22,15 +24,14 @@ Required before production authentication is enabled:
 - [ ] Enroll the project in a paid Apple Developer team. The active iOS target
       intentionally omits Sign in with Apple and Associated Domains
       entitlements until this is available.
-- [ ] Choose a production API domain owned by the project.
-- [ ] Issue and validate an AWS ACM certificate in the load balancer's region.
-- [ ] Configure an HTTPS listener on port 443 and attach the certificate.
-- [ ] Forward HTTPS traffic from the load balancer to Archtree's internal HTTP
-      port.
-- [ ] Allow port 443 through the applicable load-balancer security group.
-- [ ] Point production DNS to the Elastic Beanstalk environment or load
-      balancer.
-- [ ] Redirect public port 80 traffic to HTTPS where appropriate.
+- [x] Choose a production API domain owned by the project.
+- [x] Add repository configuration for public certificate issuance and renewal
+      directly on the single Elastic Beanstalk instance.
+- [x] Add instance security-group ingress for port 443.
+- [x] Point production DNS to the Elastic Beanstalk environment.
+- [ ] Set `HTTPS_DOMAIN`, `ACME_EMAIL`, and `TRUST_PROXY_HOPS=1` in Elastic
+      Beanstalk, then deploy after DNS resolves to the instance.
+- [ ] Confirm Let's Encrypt issuance and the HTTP-to-HTTPS redirect.
 - [ ] Verify `TRUST_PROXY_HOPS` against the deployed proxy chain.
 - [ ] Change the iOS Release `ARCHTREE_AUTH_BASE_URL` to the production
       `https://` domain.
