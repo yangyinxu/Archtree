@@ -73,8 +73,35 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   the current origins; future pages that launch playback follow the same
   contract without adding source-specific playback logic.
 - When the app returns from the background with a current Now Playing item, it
-  selects that originating tab and navigates to its real audio-player route
+  selects that originating tab and presents the existing audio-player surface
   without restarting the queue or changing playback position.
+- While a queue has a current item, the iOS app displays a compact Now Playing
+  bar above the tab bar. Tapping or swiping upward expands the existing player;
+  dismissing it returns to the compact bar without stopping playback.
+- Starting playback from Home, Library, or album details keeps the current page
+  visible and reveals the compact Now Playing bar; it does not push a separate
+  full-screen player route.
+- The compact and expanded presentations are two views of one shared player
+  surface and one queue; playback controls must not create a second player or
+  queue state.
+- During an interactive compact-to-expanded transition, the expanded player's
+  backdrop, header, and playback controls move as one rigid surface, with no
+  element reflowing or settling independently after the gesture ends.
+- The expanded player's fixed header uses native Liquid Glass controls on
+  supported iOS versions.
+- On the compact bar, a vertical upward gesture is reserved for expansion. A
+  horizontal gesture is reserved for previous/next queue navigation and must
+  never expand the player, including when the gesture contains minor movement
+  on the other axis.
+- Horizontal queue navigation follows the finger during the gesture and settles
+  to the available adjacent item on release. At a queue boundary, the bar
+  returns to its original position without changing the current item.
+- Horizontal swipes on the compact Now Playing bar move to the next or previous
+  available queue item. They follow the same queue-boundary and Recently
+  Played rules as the in-app Previous and Next controls.
+- The compact and expanded players use iOS's system audio route picker for
+  available Bluetooth and AirPlay outputs. Finitude does not implement custom
+  device discovery or remote playback handoff to another Finitude device.
 - Audio interruptions and output-route changes pause playback safely; playback
   resumes after an interruption only when iOS indicates that it should.
 

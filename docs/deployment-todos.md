@@ -38,8 +38,8 @@ Remaining rollout and capability gates:
 - [x] Change the iOS Release `ARCHTREE_AUTH_BASE_URL` to the production
       `https://` domain.
 - [x] Verify password login over HTTPS from a signed physical-device build.
-- [ ] Verify refresh rotation, `/auth/me`, logout, and logout-all over HTTPS
-      from a signed physical-device build.
+- [ ] Verify refresh rotation, logout, and logout-all over HTTPS from a signed
+      physical-device build. `/auth/me` has been verified.
 - [ ] Verify the SES sender/domain, grant the runtime only `ses:SendEmail`, and
       configure `AUTH_EMAIL_FROM` plus an `AUTH_CODE_PEPPER`.
 - [ ] Configure the iOS Associated Domains entitlement after the production
