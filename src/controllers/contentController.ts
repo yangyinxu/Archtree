@@ -5,6 +5,7 @@ import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { SimpleDate } from '../models/simpleDate';
 import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
+import { ContentCollection } from '../models/contentCollection';
 import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
 import { parseBuffer, parseFile } from 'music-metadata';
 import { ObjectId } from 'mongodb';
@@ -30,6 +31,7 @@ import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../service
 import { getUploadedFile } from '../middleware/imageUpload';
 import { boundedSearchQuery } from '../utils/search';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
+import { renderPageItemsHierarchy } from '../views/contentManager/pageItemsView';
 
 const parseCsv = (value: string) => {
     return value
@@ -123,6 +125,7 @@ const renderManagePage = (params: {
     ownedAudioTracks?: any[];
     ownedPages?: any[];
     ownedCarousels?: any[];
+    ownedContentCollections?: any[];
     s3StorageSummary?: S3StorageSummary | null;
     s3StorageSummaryError?: string;
     prefillArtistId?: string;
@@ -147,6 +150,7 @@ const renderManagePage = (params: {
     const ownedAudioTracks = params.ownedAudioTracks ?? [];
     const ownedPages = params.ownedPages ?? [];
     const ownedCarousels = params.ownedCarousels ?? [];
+    const ownedContentCollections = params.ownedContentCollections ?? [];
     const s3StorageSummary = params.s3StorageSummary ?? null;
     const s3StorageSummaryError = params.s3StorageSummaryError ?? '';
     const s3StorageBlock = s3StorageSummary
@@ -193,7 +197,12 @@ const renderManagePage = (params: {
         pages: ownedPages.map((page) => ({
             slug: String(page.slug ?? ''),
             title: String(page.title ?? page.slug ?? ''),
-            items: Array.isArray(page.items) ? page.items.map((item: any) => ({ carouselId: String(item.carouselId ?? ''), order: Number(item.order ?? 0) })) : []
+            items: Array.isArray(page.items) ? page.items.map((item: any) => ({
+                itemType: String(item.itemType ?? (item.carouselId ? 'carousel' : 'unknown')),
+                carouselId: String(item.carouselId ?? ''),
+                collectionId: String(item.collectionId ?? ''),
+                order: Number(item.order ?? 0)
+            })) : []
         })),
         carousels: ownedCarousels.map((carousel) => ({
             id: contentId(carousel),
@@ -202,6 +211,13 @@ const renderManagePage = (params: {
             artistConfig: carousel.artistConfig ?? null,
             personalizedConfig: carousel.personalizedConfig ?? null,
             items: Array.isArray(carousel.items) ? carousel.items.map((item: any) => ({ contentId: String(item.contentId ?? ''), contentType: String(item.contentType ?? 'Content'), order: Number(item.order ?? 0) })) : []
+        })),
+        contentCollections: ownedContentCollections.map((collection) => ({
+            id: contentId(collection),
+            name: String(collection.name ?? 'Untitled collection'),
+            presentation: String(collection.presentation ?? ''),
+            mode: String(collection.mode ?? 'manual'),
+            dynamicSource: collection.dynamicSource ? String(collection.dynamicSource) : null
         })),
         albums: ownedAlbums.map((album) => ({ id: contentId(album), title: String(album.title ?? '') })),
         audioTracks: ownedAudioTracks.map((track) => ({ id: contentId(track), title: String(track.title ?? '') }))
@@ -226,6 +242,9 @@ const renderManagePage = (params: {
     .hierarchy-item:last-child { border-bottom: 0; padding-bottom: 0; }
     .hierarchy-item > strong { display: block; }
     .linked-content { margin: 6px 0 0 18px; padding-left: 18px; }
+    .page-item-list { display: grid; gap: 8px; margin-top: 10px; }
+    .page-item-list > li { padding-left: 4px; }
+    .page-item-list .item-meta { display: inline-flex; margin-left: 6px; }
     .track-selection { align-items: center; display: flex; gap: 8px; margin: 6px 0 0 18px; padding-left: 18px; }
     .track-selection input { margin: 0; }
     .batch-track-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
@@ -325,12 +344,7 @@ const renderManagePage = (params: {
       }).join('') : '<p class="empty-linked-content">No albums yet.</p>'}
     </div>
 
-        ${renderSectionList('My Pages', ownedPages, (item) => {
-                const slug = escapeHtml(String(item.slug ?? ''));
-                const title = escapeHtml(String(item.title ?? ''));
-                const itemCount = Number(Array.isArray(item.items) ? item.items.length : 0);
-                return `${title} [${slug}] - ${itemCount} page items`;
-        })}
+        ${renderPageItemsHierarchy(ownedPages, ownedCarousels, ownedContentCollections)}
         <h3>My Carousels</h3>
         <div class="content-hierarchy">
           ${ownedCarousels.length > 0 ? ownedCarousels.map((carousel) => {
@@ -698,12 +712,13 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
         }
 
         const ownedByUser = authReq.auth.userId;
-        const [ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels, s3StorageSummaryResult] = await Promise.all([
+        const [ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels, ownedContentCollections, s3StorageSummaryResult] = await Promise.all([
             Artist.fetchByCreator(ownedByUser),
             Album.fetchByCreator(ownedByUser),
             AudioTrack.fetchByCreator(ownedByUser),
             Page.fetchByCreator(ownedByUser),
             Carousel.fetchByCreator(ownedByUser),
+            ContentCollection.fetchByCreator(ownedByUser),
             loadS3StorageSummary()
         ]);
 
@@ -768,6 +783,7 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
             ownedAudioTracks,
             ownedPages,
             ownedCarousels,
+            ownedContentCollections,
             s3StorageSummary: s3StorageSummaryResult.summary,
             s3StorageSummaryError: s3StorageSummaryResult.errorCode,
             prefillArtistId,
@@ -794,7 +810,7 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
         const parsedLimit = Number(req.query.limit ?? 10);
         const limit = Number.isNaN(parsedLimit) ? 10 : Math.max(1, Math.min(parsedLimit, 50));
 
-        const [artists, albums, audioTracks, ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels, s3StorageSummaryResult] = await Promise.all([
+        const [artists, albums, audioTracks, ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels, ownedContentCollections, s3StorageSummaryResult] = await Promise.all([
             rawQuery ? Artist.searchByName(rawQuery, limit) : Promise.resolve([]),
             rawQuery ? Album.searchByTitle(rawQuery, limit) : Promise.resolve([]),
             rawQuery ? AudioTrack.searchByTitle(rawQuery, limit) : Promise.resolve([]),
@@ -803,6 +819,7 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
             AudioTrack.fetchByCreator(authReq.auth.userId),
             Page.fetchByCreator(authReq.auth.userId),
             Carousel.fetchByCreator(authReq.auth.userId),
+            ContentCollection.fetchByCreator(authReq.auth.userId),
             loadS3StorageSummary()
         ]);
 
@@ -819,6 +836,7 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
             ownedAudioTracks,
             ownedPages,
             ownedCarousels,
+            ownedContentCollections,
             s3StorageSummary: s3StorageSummaryResult.summary,
             s3StorageSummaryError: s3StorageSummaryResult.errorCode
         }));

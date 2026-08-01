@@ -110,6 +110,102 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Audio interruptions and output-route changes pause playback safely; playback
   resumes after an interruption only when iOS indicates that it should.
 
+## Offline Downloads
+
+- Starting or resuming a download requires an authenticated session. Signed-out
+  listeners may browse and play available online streams, but Download prompts
+  for sign-in and does not start a transfer until authentication succeeds.
+- Completed downloads, cached metadata, and incomplete transfer state belong to
+  the device rather than an account. They remain visible and manageable after
+  logout or account switching, and completed valid downloads remain playable
+  offline without a session.
+- Playback always prefers a valid completed device-local audio asset for the
+  requested soundtrack ID. The iOS app must not request the remote stream when
+  that local file is available; it uses the server stream only when no valid
+  completed local asset exists.
+- The iOS Library composes device-local Downloaded content even when the
+  authenticated server Library is unavailable or returns `401`. Signed-out
+  state suppresses protected server sections, not device-local downloads.
+- A download manifest must retain the canonical content ID. An album manifest
+  must retain its album ID and the canonical ID of each component soundtrack.
+  Missing or invalid required IDs make the affected entry corrupted and
+  non-playable because it cannot be reconciled safely.
+- Missing non-identity metadata does not make valid downloaded audio
+  unplayable. The app renders every available field, uses clear fallback text
+  for missing titles or durations, and shows a warning when metadata is
+  incomplete.
+- Packshot artwork is non-critical. A soundtrack uses its own cached artwork,
+  inherited album artwork, or the packaged placeholder in that order; missing
+  downloaded artwork never blocks playback.
+- Selecting a corrupted entry explains that its required identity is missing
+  and offers Delete download. The app deletes it only after the listener
+  confirms the destructive action. An entry that retains a valid content ID
+  may offer authenticated Retry to repair its file or metadata.
+- In-progress soundtrack and album downloads remain recoverable and visible.
+  Each affected item in a Carousel, Grid, or List displays its download
+  progress on its packshot image. Incomplete items are not presented as
+  completed downloads.
+- Logout durably pauses active transfers by ending authenticated network tasks
+  while preserving validated partial files, validators, and resume state.
+  Late callbacks cannot mark a paused entry complete after logout. Resuming
+  creates a newly authenticated request and never reuses persisted credentials.
+  Opaque system resume data containing the previous request is not persisted;
+  resumption uses app-owned partial bytes and validator metadata.
+- Downloaded content provides a filter control with Songs, Albums, Artists,
+  and Playlists options. Albums use a Grid page item and Songs use a List page
+  item. Artists and Playlists are visible as unavailable future options and
+  have no content implementation yet.
+- Settings includes a Downloads entry that opens the device-wide download
+  management page. Signed-out and signed-in listeners can cancel paused
+  downloads, delete individual downloads, and clear every download from the
+  device. Future management may add filters and bulk deletion by album or
+  artist.
+- Completed downloads are local content and are not uploaded to Archtree or
+  treated as Saved Library content. Removing a local download does not unsave
+  its soundtrack or album, and unsaving content does not remove its download.
+- A local audio asset may be owned by multiple device-local download entries.
+  Removing one entry must not delete an asset still owned by another entry.
+
+## Page Items
+
+- Page items use a discriminated contract with three supported presentation
+  types: Carousel, Grid, and List.
+- Grid and List definitions each have one source mode: manual or dynamic.
+  Manual definitions contain explicitly curated content references; dynamic
+  definitions resolve items from a declared source and cannot be manually
+  edited, reordered, or mixed with manual references.
+- Content Manager creators can add, remove, and reorder albums in a manual Grid.
+  The initial manual Grid contract is album-only.
+- Content Manager shows every page's configured Carousel, Grid, and List items
+  in persisted order, including each item's resolved name, source mode, and ID.
+  Missing or unsupported references remain visible as warnings rather than
+  disappearing from the page summary.
+- Manual Lists can contain explicitly curated supported content references and
+  preserve their configured order. Dynamic Lists resolve their ordering from
+  their source definition.
+- Device-local Downloaded Albums is a dynamic Grid whose source contains only
+  downloaded album entries. Device-local Downloaded Songs is a separate dynamic
+  List whose source contains only independently downloaded soundtrack entries.
+- Dynamic Grid and List definitions expose only source configuration, filters,
+  sort, and page size in Content Manager; their resolved items are read-only.
+- A Grid always presents its source as a grid. A List always presents its source
+  as a vertical list. One page-item type does not change into another layout in
+  response to filtering.
+- A List is a single-column, vertically scrolling collection. Each row has a
+  leading square packshot, a primary title, and a secondary metadata line that
+  identifies the content type and available creator or artist attribution.
+- List metadata omits unavailable components without leaving stray separators.
+  Missing titles use explicit fallback text, while accessibility exposes the
+  complete available title even when visible text is truncated.
+- The full List row is the primary action target. A soundtrack row starts the
+  shared player and an album row opens album details; auxiliary controls must
+  not create an overlapping primary tap target.
+- A List exposes its active sort above the rows and defaults device-local
+  Downloaded content to newest download first. Changing sort resets pagination
+  and applies a deterministic tie-breaker.
+- Download progress and warning state overlay the row’s packshot without
+  changing row alignment or displacing title and metadata text.
+
 ## Audio-Track Artwork
 
 - An audio track uses its own cover art when one is explicitly assigned.

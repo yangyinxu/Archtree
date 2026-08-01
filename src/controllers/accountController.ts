@@ -11,7 +11,15 @@ import { recordSecurityEvent } from '../services/securityAuditService';
 import { evaluatePassword } from '../services/passwordPolicyService';
 import { describeSessionDevice } from '../services/deviceSessionService';
 
-const creatorCollections = ['artists', 'albums', 'audioTracks', 'carousels', 'pages', 'imageAssets'];
+const creatorCollections = [
+    'artists',
+    'albums',
+    'audioTracks',
+    'carousels',
+    'contentCollections',
+    'pages',
+    'imageAssets'
+];
 
 /** Lists revocable devices while marking the access token's own session. */
 export const listSessions = async (req: Request, res: Response) => {

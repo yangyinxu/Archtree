@@ -11,6 +11,7 @@ import {
     PersonalizedCarouselConfig
 } from '../models/carousel';
 import { Page, PageSlug } from '../models/page';
+import { ContentCollection } from '../models/contentCollection';
 import { Artist } from '../models/artist';
 import { normalizeAudioTrackText } from '../models/audioTrack';
 import { withDerivedCoverArtUrl, withDisplayCoverArtUrl } from '../utils/coverArt';
@@ -201,12 +202,20 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             : [];
 
         const carouselIds = orderedItems
+            .filter((item: any) => item.itemType === 'carousel')
             .map((item: any) => String(item.carouselId ?? ''))
+            .filter(Boolean);
+        const collectionIds = orderedItems
+            .filter((item: any) => item.itemType === 'grid' || item.itemType === 'list')
+            .map((item: any) => String(item.collectionId ?? ''))
             .filter(Boolean);
 
         // Expand carousel references into full carousel payloads for client rendering.
         const viewerUserId = (req as AuthenticatedRequest).auth?.userId;
-        const carousels: any[] = await Carousel.fetchByIds(carouselIds, viewerUserId);
+        const [carousels, contentCollections]: any[][] = await Promise.all([
+            Carousel.fetchByIds(carouselIds, viewerUserId),
+            ContentCollection.fetchByIds(collectionIds)
+        ]);
         const carouselMap = new Map<string, any>();
         for (const carousel of carousels) {
             carouselMap.set(String(carousel._id), {
@@ -217,13 +226,35 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             });
         }
 
-        const expandedItems = orderedItems.map((item: any) => ({
-            ...item,
-            carousel: carouselMap.get(String(item.carouselId ?? '')) ?? null
-        }));
+        const collectionMap = new Map<string, any>();
+        for (const collection of contentCollections) {
+            collectionMap.set(String(collection._id), {
+                ...collection,
+                // Dynamic downloaded sources resolve from device-owned state in the client.
+                items: collection.mode === 'manual' && Array.isArray(collection.items)
+                    ? [...collection.items].sort((a: any, b: any) =>
+                        Number(a.order ?? 0) - Number(b.order ?? 0)
+                    )
+                    : []
+            });
+        }
+
+        const expandedItems = orderedItems.map((item: any) => item.itemType === 'carousel'
+            ? {
+                ...item,
+                carousel: carouselMap.get(String(item.carouselId ?? '')) ?? null
+            }
+            : {
+                ...item,
+                contentCollection: collectionMap.get(String(item.collectionId ?? '')) ?? null
+            });
 
         const resolvedRefs = expandedItems.flatMap((item: any) =>
-            Array.isArray(item.carousel?.items) ? item.carousel.items : []
+            Array.isArray(item.carousel?.items)
+                ? item.carousel.items
+                : Array.isArray(item.contentCollection?.items)
+                    ? item.contentCollection.items
+                    : []
         );
         const albumIds = [...new Set<string>(resolvedRefs
             .filter((item: any) => item.contentType === 'album')

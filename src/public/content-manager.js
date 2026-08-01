@@ -2,8 +2,11 @@
   const compositionDataElement = document.getElementById('composition-data');
   const compositionData = compositionDataElement
     ? JSON.parse(compositionDataElement.textContent || '')
-    : { pages: [], carousels: [], albums: [], audioTracks: [] };
+    : { pages: [], carousels: [], contentCollections: [], albums: [], audioTracks: [] };
   const carouselNames = new Map(compositionData.carousels.map((carousel) => [carousel.id, carousel.name]));
+  const collectionNames = new Map(
+    (compositionData.contentCollections || []).map((collection) => [collection.id, collection.name])
+  );
   const albumTitles = new Map(compositionData.albums.map((album) => [album.id, album.title]));
   const trackTitles = new Map(compositionData.audioTracks.map((track) => [track.id, track.title]));
   const uploadResultsKey = 'archtree.bulkUploadResults';
@@ -117,6 +120,14 @@
     return item.contentType + ': ' + item.contentId;
   };
 
+  const labelForPageItem = (item) => {
+    if (item.itemType === 'grid' || item.itemType === 'list') {
+      const type = item.itemType === 'grid' ? 'Grid' : 'List';
+      return `${type}: ${collectionNames.get(item.collectionId) || item.collectionId || 'Unavailable reference'}`;
+    }
+    return `Carousel: ${carouselNames.get(item.carouselId) || item.carouselId || 'Unavailable reference'}`;
+  };
+
   document.querySelectorAll('.drag-reorder').forEach((form) => {
     const kind = form.dataset.kind;
     const selector = form.querySelector('.reorder-selector');
@@ -143,7 +154,7 @@
         element.draggable = true;
         element.dataset.originalIndex = String(index);
         element.textContent = kind === 'page'
-          ? (carouselNames.get(item.carouselId) || item.carouselId)
+          ? labelForPageItem(item)
           : labelForCarouselItem(item);
         list.append(element);
       });

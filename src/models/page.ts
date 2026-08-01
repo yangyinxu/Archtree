@@ -6,11 +6,19 @@ const maximumPageItems = 100;
 // v1 page surfaces are fixed to Home and Library.
 export type PageSlug = 'home' | 'library';
 
-export interface PageItemRef {
+export interface CarouselPageItemRef {
     itemType: 'carousel';
     carouselId: string;
     order: number;
 }
+
+export interface CollectionPageItemRef {
+    itemType: 'grid' | 'list';
+    collectionId: string;
+    order: number;
+}
+
+export type PageItemRef = CarouselPageItemRef | CollectionPageItemRef;
 
 // Normalize order to a stable 0..N sequence after mutations.
 const normalizeOrder = (items: PageItemRef[]) => {
@@ -150,6 +158,33 @@ export class Page {
         return normalizedItems;
     }
 
+    static async addCollectionItem(
+        slug: PageSlug,
+        itemType: 'grid' | 'list',
+        collectionRefId: string,
+        updatedBy: string,
+        position?: number
+    ) {
+        const page: any = await this.findBySlug(slug);
+        if (!page) return null;
+        const nextItems = Array.isArray(page.items) ? [...page.items] : [];
+        if (nextItems.length >= maximumPageItems) return null;
+        const insertAt = typeof position === 'number'
+            ? Math.max(0, Math.min(position, nextItems.length))
+            : nextItems.length;
+        nextItems.splice(insertAt, 0, {
+            itemType,
+            collectionId: collectionRefId,
+            order: insertAt
+        });
+        const items = normalizeOrder(nextItems);
+        await getDb()!.collection(collectionId).updateOne(
+            { slug },
+            { $set: { items, updatedBy, updatedAt: new Date() } }
+        );
+        return items;
+    }
+
     static async removeCarouselItem(slug: PageSlug, carouselId: string, updatedBy: string) {
         const page: any = await this.findBySlug(slug);
         if (!page) {
@@ -157,7 +192,9 @@ export class Page {
         }
 
         const nextItems = Array.isArray(page.items)
-            ? page.items.filter((item: PageItemRef) => item.carouselId !== carouselId)
+            ? page.items.filter((item: PageItemRef) =>
+                item.itemType !== 'carousel' || item.carouselId !== carouselId
+            )
             : [];
 
         const normalizedItems = normalizeOrder(nextItems);
@@ -177,6 +214,22 @@ export class Page {
             );
 
         return normalizedItems;
+    }
+
+    static async removeCollectionItem(slug: PageSlug, collectionRefId: string, updatedBy: string) {
+        const page: any = await this.findBySlug(slug);
+        if (!page) return null;
+        const nextItems = Array.isArray(page.items)
+            ? page.items.filter((item: PageItemRef) =>
+                item.itemType === 'carousel' || item.collectionId !== collectionRefId
+            )
+            : [];
+        const items = normalizeOrder(nextItems);
+        await getDb()!.collection(collectionId).updateOne(
+            { slug },
+            { $set: { items, updatedBy, updatedAt: new Date() } }
+        );
+        return items;
     }
 
     static async reorderItem(slug: PageSlug, fromIndex: number, toIndex: number, updatedBy: string) {
@@ -229,5 +282,15 @@ export class Page {
                     }
                 }
             );
+    }
+
+    static detachCollectionFromAllPages(collectionRefId: string, updatedBy: string) {
+        return getDb()!.collection(collectionId).updateMany(
+            { 'items.collectionId': collectionRefId },
+            {
+                $pull: { items: { collectionId: collectionRefId } } as any,
+                $set: { updatedBy, updatedAt: new Date() }
+            }
+        );
     }
 }

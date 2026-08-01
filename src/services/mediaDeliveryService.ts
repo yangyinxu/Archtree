@@ -7,6 +7,32 @@ export type ByteRange = {
     end: number;
 };
 
+/** Honors resumable byte ranges only when the supplied entity validator matches. */
+export const shouldHonorRange = (
+    ifRangeHeader: string | undefined,
+    currentEtag: string | undefined
+) => {
+    if (!ifRangeHeader) return true;
+    if (!currentEtag || ifRangeHeader.startsWith('W/')) return false;
+    return ifRangeHeader.trim() === currentEtag.trim();
+};
+
+/** Builds a safe attachment header without allowing filenames to inject headers or paths. */
+export const attachmentContentDisposition = (
+    requestedFilename: string | undefined,
+    fallbackId: string
+) => {
+    const normalized = String(requestedFilename ?? '')
+        .replace(/[\r\n\\/\0"]/g, '_')
+        .trim()
+        .slice(0, 180);
+    const filename = normalized || `${fallbackId}.mp3`;
+    const asciiFilename = filename
+        .replace(/[^\x20-\x7E]/g, '_')
+        .replace(/["\\]/g, '_');
+    return `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+};
+
 type MediaMetrics = {
     activeRequests: number;
     peakActiveRequests: number;
