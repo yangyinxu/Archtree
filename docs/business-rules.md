@@ -87,6 +87,11 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - During an interactive compact-to-expanded transition, the expanded player's
   backdrop, header, and playback controls move as one rigid surface, with no
   element reflowing or settling independently after the gesture ends.
+- During an upward drag from the compact bar, the expanded player's top edge
+  stays aligned with the drag finger's vertical axis; it must not lag behind
+  or accelerate ahead of the finger. The player remains collapsed until the
+  drag begins, then follows the finger directly through the interactive
+  transition.
 - The expanded player's fixed header uses native Liquid Glass controls on
   supported iOS versions.
 - On the compact bar, a vertical upward gesture is reserved for expansion. A
