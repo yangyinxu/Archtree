@@ -35,6 +35,7 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'userActivity', keys: { userId: 1 }, options: { unique: true } },
     { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'carousels', keys: { createdBy: 1, updatedAt: -1 } },
+    { collection: 'contentCollections', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'artists', keys: { createdBy: 1 } },
     { collection: 'albums', keys: { createdBy: 1 } },
     { collection: 'audioTracks', keys: { createdBy: 1 } },

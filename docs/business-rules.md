@@ -73,10 +73,138 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   the current origins; future pages that launch playback follow the same
   contract without adding source-specific playback logic.
 - When the app returns from the background with a current Now Playing item, it
-  selects that originating tab and navigates to its real audio-player route
+  selects that originating tab and presents the existing audio-player surface
   without restarting the queue or changing playback position.
+- While a queue has a current item, the iOS app displays a compact Now Playing
+  bar above the tab bar. Tapping or swiping upward expands the existing player;
+  dismissing it returns to the compact bar without stopping playback.
+- Starting playback from Home, Library, or album details keeps the current page
+  visible and reveals the compact Now Playing bar; it does not push a separate
+  full-screen player route.
+- The compact and expanded presentations are two views of one shared player
+  surface and one queue; playback controls must not create a second player or
+  queue state.
+- During an interactive compact-to-expanded transition, the expanded player's
+  backdrop, header, and playback controls move as one rigid surface, with no
+  element reflowing or settling independently after the gesture ends.
+- During an upward drag from the compact bar, the expanded player's top edge
+  stays aligned with the drag finger's vertical axis; it must not lag behind
+  or accelerate ahead of the finger. The player remains collapsed until the
+  drag begins, then follows the finger directly through the interactive
+  transition.
+- The expanded player's fixed header uses native Liquid Glass controls on
+  supported iOS versions.
+- On the compact bar, a vertical upward gesture is reserved for expansion. A
+  horizontal gesture is reserved for previous/next queue navigation and must
+  never expand the player, including when the gesture contains minor movement
+  on the other axis.
+- Horizontal queue navigation follows the finger during the gesture and settles
+  to the available adjacent item on release. At a queue boundary, the bar
+  returns to its original position without changing the current item.
+- Horizontal swipes on the compact Now Playing bar move to the next or previous
+  available queue item. They follow the same queue-boundary and Recently
+  Played rules as the in-app Previous and Next controls.
+- The compact and expanded players use iOS's system audio route picker for
+  available Bluetooth and AirPlay outputs. Finitude does not implement custom
+  device discovery or remote playback handoff to another Finitude device.
 - Audio interruptions and output-route changes pause playback safely; playback
   resumes after an interruption only when iOS indicates that it should.
+
+## Offline Downloads
+
+- Starting or resuming a download requires an authenticated session. Signed-out
+  listeners may browse and play available online streams, but Download prompts
+  for sign-in and does not start a transfer until authentication succeeds.
+- Completed downloads, cached metadata, and incomplete transfer state belong to
+  the device rather than an account. They remain visible and manageable after
+  logout or account switching, and completed valid downloads remain playable
+  offline without a session.
+- Playback always prefers a valid completed device-local audio asset for the
+  requested soundtrack ID. The iOS app must not request the remote stream when
+  that local file is available; it uses the server stream only when no valid
+  completed local asset exists.
+- The iOS Library composes device-local Downloaded content even when the
+  authenticated server Library is unavailable or returns `401`. Signed-out
+  state suppresses protected server sections, not device-local downloads.
+- A download manifest must retain the canonical content ID. An album manifest
+  must retain its album ID and the canonical ID of each component soundtrack.
+  Missing or invalid required IDs make the affected entry corrupted and
+  non-playable because it cannot be reconciled safely.
+- Missing non-identity metadata does not make valid downloaded audio
+  unplayable. The app renders every available field, uses clear fallback text
+  for missing titles or durations, and shows a warning when metadata is
+  incomplete.
+- Packshot artwork is non-critical. A soundtrack uses its own cached artwork,
+  inherited album artwork, or the packaged placeholder in that order; missing
+  downloaded artwork never blocks playback.
+- Selecting a corrupted entry explains that its required identity is missing
+  and offers Delete download. The app deletes it only after the listener
+  confirms the destructive action. An entry that retains a valid content ID
+  may offer authenticated Retry to repair its file or metadata.
+- In-progress soundtrack and album downloads remain recoverable and visible.
+  Each affected item in a Carousel, Grid, or List displays its download
+  progress on its packshot image. Incomplete items are not presented as
+  completed downloads.
+- Logout durably pauses active transfers by ending authenticated network tasks
+  while preserving validated partial files, validators, and resume state.
+  Late callbacks cannot mark a paused entry complete after logout. Resuming
+  creates a newly authenticated request and never reuses persisted credentials.
+  Opaque system resume data containing the previous request is not persisted;
+  resumption uses app-owned partial bytes and validator metadata.
+- Downloaded content provides a filter control with Songs, Albums, Artists,
+  and Playlists options. Albums use a Grid page item and Songs use a List page
+  item. Artists and Playlists are visible as unavailable future options and
+  have no content implementation yet.
+- Settings includes a Downloads entry that opens the device-wide download
+  management page. Signed-out and signed-in listeners can cancel paused
+  downloads, delete individual downloads, and clear every download from the
+  device. Future management may add filters and bulk deletion by album or
+  artist.
+- Completed downloads are local content and are not uploaded to Archtree or
+  treated as Saved Library content. Removing a local download does not unsave
+  its soundtrack or album, and unsaving content does not remove its download.
+- A local audio asset may be owned by multiple device-local download entries.
+  Removing one entry must not delete an asset still owned by another entry.
+
+## Page Items
+
+- Page items use a discriminated contract with three supported presentation
+  types: Carousel, Grid, and List.
+- Grid and List definitions each have one source mode: manual or dynamic.
+  Manual definitions contain explicitly curated content references; dynamic
+  definitions resolve items from a declared source and cannot be manually
+  edited, reordered, or mixed with manual references.
+- Content Manager creators can add, remove, and reorder albums in a manual Grid.
+  The initial manual Grid contract is album-only.
+- Content Manager shows every page's configured Carousel, Grid, and List items
+  in persisted order, including each item's resolved name, source mode, and ID.
+  Missing or unsupported references remain visible as warnings rather than
+  disappearing from the page summary.
+- Manual Lists can contain explicitly curated supported content references and
+  preserve their configured order. Dynamic Lists resolve their ordering from
+  their source definition.
+- Device-local Downloaded Albums is a dynamic Grid whose source contains only
+  downloaded album entries. Device-local Downloaded Songs is a separate dynamic
+  List whose source contains only independently downloaded soundtrack entries.
+- Dynamic Grid and List definitions expose only source configuration, filters,
+  sort, and page size in Content Manager; their resolved items are read-only.
+- A Grid always presents its source as a grid. A List always presents its source
+  as a vertical list. One page-item type does not change into another layout in
+  response to filtering.
+- A List is a single-column, vertically scrolling collection. Each row has a
+  leading square packshot, a primary title, and a secondary metadata line that
+  identifies the content type and available creator or artist attribution.
+- List metadata omits unavailable components without leaving stray separators.
+  Missing titles use explicit fallback text, while accessibility exposes the
+  complete available title even when visible text is truncated.
+- The full List row is the primary action target. A soundtrack row starts the
+  shared player and an album row opens album details; auxiliary controls must
+  not create an overlapping primary tap target.
+- A List exposes its active sort above the rows and defaults device-local
+  Downloaded content to newest download first. Changing sort resets pagination
+  and applies a deterministic tie-breaker.
+- Download progress and warning state overlay the row’s packshot without
+  changing row alignment or displacing title and metadata text.
 
 ## Audio-Track Artwork
 
@@ -87,6 +215,62 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   placeholder.
 - Artist artwork is not used as an implicit track fallback because a track can
   reference multiple artists.
+
+## Profile Identity and Avatars
+
+- Signed-out account entry points display a neutral person placeholder and the
+  Log in label. Content artwork is never used as a user-avatar fallback.
+- A signed-in listener without an avatar displays deterministic initials from
+  the authoritative display name, then email, with a neutral placeholder when
+  neither value is available.
+- A profile avatar is optional, belongs only to its authenticated account, and
+  is not reused as artist, album, or soundtrack artwork.
+- Avatar image bytes are private account data. Only the authenticated owner can
+  read, replace, or delete them. Making avatars public requires a separate
+  product decision and does not happen implicitly through a storage URL.
+- Missing, malformed, offline, or failed avatar loading falls back to initials
+  or the neutral placeholder without hiding or disabling the account entry.
+- After selecting a photo, the listener can reposition and scale it in an
+  in-app square crop editor and preview the final circular avatar before any
+  upload begins. Upload requires explicit confirmation of that preview.
+- Cancelling photo selection, cropping, or preview leaves the current avatar
+  unchanged and creates no network request or server-side asset. The original
+  photo is never modified.
+- While a confirmed crop uploads, the last server-confirmed avatar remains
+  visible. A failed upload preserves that avatar, discards the failed crop, and
+  shows an error; the listener starts again through Change Photo rather
+  than a separate retry action. The replacement appears only after Archtree
+  confirms it.
+- Archtree is the source of truth for avatar identity and revision. Stale
+  profile or image responses from a previous account or revision must not
+  replace current session state.
+- Avatar upload, replacement, and deletion are idempotent and revision-checked.
+  Concurrent stale mutations cannot overwrite or delete the winning avatar.
+- Replacing an avatar attaches a validated replacement before deleting the old
+  asset. A cleanup failure remains explicitly recoverable and must not be
+  reported as completed cleanup.
+- An account with an avatar requires the listener to explicitly remove that
+  avatar before account deletion. Confirmed avatar deletion clears the profile
+  reference and removes its owned S3 asset through the documented database/S3
+  lifecycle; partial failure remains retryable and accurately reported.
+- Account-scoped avatar metadata and cached bytes are cleared on logout,
+  account deletion, or account change so one listener's avatar is never shown
+  to another listener on the device.
+- Uploaded avatars are fully decoded and normalized by Archtree. The service
+  enforces bounded file and pixel sizes, removes metadata such as EXIF location,
+  and controls the stored output encoding.
+
+## Search
+
+- Search is available to signed-out and signed-in listeners through the public content search experience.
+- The Search tab appears between Home and Library.
+- Before a query is entered, Search displays its default state and the current account's recent search history.
+- Search history is stored only on the device, is isolated per authenticated account, and is deleted when that account signs out.
+- Search history is limited to 10 entries. Repeating a query moves it to the newest position instead of creating a duplicate.
+- Once a query is submitted, Search displays grouped Artist, Album, and Soundtrack results and does not display a Recent Content section.
+- Artist results open Artist details, Album results open Album details, and Soundtrack results use the shared playback queue.
+- When the server search endpoint is unavailable, valid device-local downloaded Albums and Soundtracks may be shown as fallback results. Local fallback results are visibly marked as downloaded content.
+- Voice search is not part of the initial Search release and requires a separate product decision.
 
 ## Authentication and Resolution
 

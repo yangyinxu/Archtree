@@ -19,15 +19,60 @@ import { validateOwnedContentReferences } from '../services/contentReferenceServ
 import { deleteCoverArt, uploadCoverArt } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import {
+    attachmentContentDisposition,
     createMediaAbortContext,
     parseSingleByteRange,
-    pipeMediaStream
+    pipeMediaStream,
+    shouldHonorRange
 } from '../services/mediaDeliveryService';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
 
 const s3ErrorStatus = (error: any) => {
     const status = Number(error?.$metadata?.httpStatusCode ?? 0);
     return status === 403 ? 403 : status === 404 ? 404 : 502;
+};
+
+/** Resolves only database-confirmed ready assets for authenticated downloads. */
+const resolveReadyDownloadAsset = async (
+    audioTrackId: string,
+    abortSignal: AbortSignal
+) => {
+    if (!ObjectId.isValid(audioTrackId)) return { status: 'notFound' as const };
+    const track: any = await AudioTrack.findById(audioTrackId);
+    if (!track) return { status: 'notFound' as const };
+    if (track.uploadStatus !== 'ready') return { status: 'notReady' as const };
+
+    const s3Key = String(track.s3Key ?? '').trim();
+    if (!s3Key) return { status: 'notReady' as const };
+    const params = {
+        Bucket: process.env.S3_BUCKET_NAME!,
+        Key: s3Key
+    };
+    const metadata = await getS3().send(
+        new HeadObjectCommand(params),
+        { abortSignal }
+    );
+    if (!metadata.ContentLength) return { status: 'notReady' as const };
+
+    return { status: 'ready' as const, track, params, metadata };
+};
+
+const setDownloadHeaders = (
+    res: Response,
+    asset: Extract<Awaited<ReturnType<typeof resolveReadyDownloadAsset>>, { status: 'ready' }>,
+    contentLength: number
+) => {
+    const { track, metadata } = asset;
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Type', metadata.ContentType || track.contentType || 'audio/mpeg');
+    res.setHeader('Content-Length', contentLength);
+    res.setHeader(
+        'Content-Disposition',
+        attachmentContentDisposition(track.originalFileName, String(track._id))
+    );
+    res.setHeader('Cache-Control', 'private, no-store, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (metadata.ETag) res.setHeader('ETag', metadata.ETag);
 };
 
 const parseJsonField = (value: unknown) => {
@@ -324,6 +369,112 @@ export const streamAudioTrack = async (req: Request, res: Response, next: NextFu
         } else {
             res.destroy(error instanceof Error ? error : undefined);
         }
+    } finally {
+        context.cleanup();
+    }
+};
+
+export const headAudioTrackDownload = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    const context = createMediaAbortContext(req, res);
+    try {
+        const asset = await resolveReadyDownloadAsset(
+            req.params.audioTrackId,
+            context.signal
+        );
+        if (asset.status === 'notFound') return res.status(404).end();
+        if (asset.status === 'notReady') return res.status(409).end();
+
+        setDownloadHeaders(res, asset, asset.metadata.ContentLength!);
+        return res.status(200).end();
+    } catch (error: any) {
+        if (context.aborted || error?.name === 'AbortError') return;
+        const statusCode = s3ErrorStatus(error);
+        if (statusCode >= 500) {
+            console.error('Error checking downloadable audio track:', error);
+        }
+        return res.status(statusCode).end();
+    } finally {
+        context.cleanup();
+    }
+};
+
+/** Downloads one ready audio asset with validator-aware resumable ranges. */
+export const downloadAudioTrack = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    const context = createMediaAbortContext(req, res);
+    try {
+        const asset = await resolveReadyDownloadAsset(
+            req.params.audioTrackId,
+            context.signal
+        );
+        if (asset.status === 'notFound') {
+            return res.status(404).json({ message: 'Audio track not found.' });
+        }
+        if (asset.status === 'notReady') {
+            return res.status(409).json({ message: 'Audio track is not ready for download.' });
+        }
+
+        const fileSize = asset.metadata.ContentLength!;
+        const requestedRange = req.headers.range;
+        const ifRange = typeof req.headers['if-range'] === 'string'
+            ? req.headers['if-range']
+            : undefined;
+        const effectiveRange = requestedRange && shouldHonorRange(
+            ifRange,
+            asset.metadata.ETag
+        ) ? requestedRange : undefined;
+        let start = 0;
+        let end = fileSize - 1;
+
+        if (effectiveRange) {
+            const parsedRange = parseSingleByteRange(
+                effectiveRange,
+                fileSize,
+                fileSize
+            );
+            if (!parsedRange) {
+                res.setHeader('Accept-Ranges', 'bytes');
+                res.setHeader('Content-Range', `bytes */${fileSize}`);
+                if (asset.metadata.ETag) res.setHeader('ETag', asset.metadata.ETag);
+                return res.status(416).end();
+            }
+            start = parsedRange.start;
+            end = parsedRange.end;
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+        } else {
+            res.status(200);
+        }
+
+        setDownloadHeaders(res, asset, end - start + 1);
+        const object = await getS3().send(
+            new GetObjectCommand({
+                ...asset.params,
+                Range: effectiveRange ? `bytes=${start}-${end}` : undefined
+            }),
+            { abortSignal: context.signal }
+        );
+        const stream = object.Body as unknown as Readable | undefined;
+        if (!stream || typeof stream.pipe !== 'function') {
+            throw new Error('S3 object body is not a readable stream.');
+        }
+        await pipeMediaStream(req, res, stream, context);
+    } catch (error: any) {
+        if (context.aborted || error?.name === 'AbortError') return;
+        console.error('Error downloading audio track:', error);
+        if (!res.headersSent) {
+            return res.status(s3ErrorStatus(error)).json({
+                message: 'Unable to download audio track.'
+            });
+        }
+        res.destroy(error instanceof Error ? error : undefined);
     } finally {
         context.cleanup();
     }

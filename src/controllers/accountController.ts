@@ -11,7 +11,15 @@ import { recordSecurityEvent } from '../services/securityAuditService';
 import { evaluatePassword } from '../services/passwordPolicyService';
 import { describeSessionDevice } from '../services/deviceSessionService';
 
-const creatorCollections = ['artists', 'albums', 'audioTracks', 'carousels', 'pages', 'imageAssets'];
+const creatorCollections = [
+    'artists',
+    'albums',
+    'audioTracks',
+    'carousels',
+    'contentCollections',
+    'pages',
+    'imageAssets'
+];
 
 /** Lists revocable devices while marking the access token's own session. */
 export const listSessions = async (req: Request, res: Response) => {
@@ -128,11 +136,22 @@ export const deleteAccount = async (req: Request, res: Response) => {
     const auth = (req as AuthenticatedRequest).auth!;
     const db = getDb()!;
     for (const collection of creatorCollections) {
-        if (await db.collection(collection).findOne({ createdBy: auth.userId }, { projection: { _id: 1 } })) {
+        const ownershipQuery = collection === 'imageAssets'
+            ? { createdBy: auth.userId, ownerType: { $ne: 'user' } }
+            : { createdBy: auth.userId };
+        if (await db.collection(collection).findOne(ownershipQuery, { projection: { _id: 1 } })) {
             return res.status(409).json({
                 message: 'Creator-owned content must be transferred or deleted before this account can be removed.'
             });
         }
+    }
+
+    const user = await User.findById(auth.userId);
+    if (user?.avatarAssetId) {
+        return res.status(409).json({
+            message: 'The profile avatar must finish deleting before the account can be removed.',
+            requiresAvatarDeletion: true
+        });
     }
 
     const databaseSession = getDatabaseClient().startSession();
@@ -145,6 +164,7 @@ export const deleteAccount = async (req: Request, res: Response) => {
             await db.collection('authIdentities').deleteMany({ userId: auth.userId }, options);
             await db.collection('passkeys').deleteMany({ userId: auth.userId }, options);
             await db.collection('passkeyChallenges').deleteMany({ userId: auth.userId }, options);
+            await db.collection('avatarMutations').deleteMany({ userId: auth.userId }, options);
             await db.collection('authSessions').deleteMany({ userId: auth.userId }, options);
             await db.collection('users').deleteOne(
                 { _id: new ObjectId(auth.userId) },

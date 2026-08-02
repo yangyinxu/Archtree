@@ -401,6 +401,13 @@ export const me = async (req: Request, res: Response) => {
   return res.status(200).json({
     ...auth,
     displayName: user?.displayName ?? user?.username ?? '',
+    avatarRevision: Number(user?.avatarRevision ?? 0),
+    avatar: user?.avatarAssetId
+      ? {
+          assetId: String(user.avatarAssetId),
+          revision: Number(user.avatarRevision ?? 0)
+        }
+      : null,
     emailVerified: user?.emailVerified !== false,
     authenticationMethods
   });

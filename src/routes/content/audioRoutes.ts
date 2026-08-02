@@ -19,6 +19,8 @@ router.get('/audioTrack/:audioTrackId', limitMediaConcurrency, audioTrackControl
 router.post('/audioTrack/:audioTrackId/upload', requireAuth, uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + 1), audioUpload.single('audioFile'), audioTrackController.uploadAudioTrackFile);
 router.delete('/audioTrack/:audioTrackId', requireAuth, audioTrackController.deleteAudioTrack);
 router.get('/audioTrack/aws/:audioTrackId', limitMediaConcurrency, audioTrackController.getAudioFile);
+router.head('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrency, audioTrackController.headAudioTrackDownload);
+router.get('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrency, audioTrackController.downloadAudioTrack);
 router.head('/audioTrack/stream/:audioTrackId', limitMediaConcurrency, audioTrackController.headAudioTrackStream);
 router.get('/audioTrack/stream/:audioTrackId', limitMediaConcurrency, audioTrackController.streamAudioTrack);
 router.get('/audioTracks', publicReadRateLimit, asyncHandler(audioTrackController.getAudioTracks));
