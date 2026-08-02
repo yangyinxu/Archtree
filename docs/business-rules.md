@@ -260,6 +260,18 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   enforces bounded file and pixel sizes, removes metadata such as EXIF location,
   and controls the stored output encoding.
 
+## Search
+
+- Search is available to signed-out and signed-in listeners through the public content search experience.
+- The Search tab appears between Home and Library.
+- Before a query is entered, Search displays its default state and the current account's recent search history.
+- Search history is stored only on the device, is isolated per authenticated account, and is deleted when that account signs out.
+- Search history is limited to 10 entries. Repeating a query moves it to the newest position instead of creating a duplicate.
+- Once a query is submitted, Search displays grouped Artist, Album, and Soundtrack results and does not display a Recent Content section.
+- Artist results open Artist details, Album results open Album details, and Soundtrack results use the shared playback queue.
+- When the server search endpoint is unavailable, valid device-local downloaded Albums and Soundtracks may be shown as fallback results. Local fallback results are visibly marked as downloaded content.
+- Voice search is not part of the initial Search release and requires a separate product decision.
+
 ## Authentication and Resolution
 
 - New email registrations require a single-use verification code; existing
