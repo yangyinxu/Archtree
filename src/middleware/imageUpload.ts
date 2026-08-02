@@ -5,6 +5,7 @@ const configuredMaxImageUploadMb = Number(process.env.MAX_IMAGE_UPLOAD_MB ?? 10)
 export const maxImageUploadMb = Number.isFinite(configuredMaxImageUploadMb) && configuredMaxImageUploadMb > 0
     ? configuredMaxImageUploadMb
     : 10;
+export const maxAvatarUploadMb = 5;
 
 const storage = multer.memoryStorage();
 
@@ -12,6 +13,14 @@ export const imageUpload = multer({
     storage,
     limits: {
         fileSize: maxImageUploadMb * 1024 * 1024,
+        files: 1
+    }
+});
+
+export const avatarUpload = multer({
+    storage,
+    limits: {
+        fileSize: maxAvatarUploadMb * 1024 * 1024,
         files: 1
     }
 });

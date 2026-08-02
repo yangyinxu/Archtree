@@ -206,6 +206,11 @@ test('listener deletion removes every account-owned record transactionally', asy
         getDb()!.collection('passkeyChallenges').insertOne({
             userId: userIdString,
             flowId: 'deletion-flow'
+        }),
+        getDb()!.collection('avatarMutations').insertOne({
+            _id: 'deletion-avatar-mutation',
+            userId: userIdString,
+            status: 'completed'
         })
     ]);
     const sessionId = await AuthSession.create(
@@ -225,6 +230,7 @@ test('listener deletion removes every account-owned record transactionally', asy
         'authIdentities',
         'passkeys',
         'passkeyChallenges',
+        'avatarMutations',
         'authSessions'
     ]) {
         assert.equal(
@@ -234,6 +240,37 @@ test('listener deletion removes every account-owned record transactionally', asy
         );
     }
     assert.equal(await getDb()!.collection('users').findOne({ _id: userId }), null);
+});
+
+test('account deletion preserves the account until its avatar is explicitly removed', async () => {
+    const userId = new ObjectId();
+    const userIdString = userId.toString();
+    await getDb()!.collection('users').insertOne({
+        _id: userId,
+        email: 'delete-avatar-first@example.com',
+        password: 'hash',
+        username: '',
+        posts: [],
+        role: 'user',
+        avatarAssetId: new ObjectId().toString(),
+        avatarRevision: 1
+    });
+    const sessionId = await AuthSession.create(
+        userIdString,
+        'avatar-deletion-session',
+        new Date(Date.now() + 60_000)
+    );
+    const capture = captureResponse();
+
+    await deleteAccount(authenticatedRequest(userIdString, sessionId), capture.response);
+
+    assert.equal(capture.statusCode, 409);
+    assert.deepEqual(capture.body, {
+        message: 'The profile avatar must finish deleting before the account can be removed.',
+        requiresAvatarDeletion: true
+    });
+    assert.ok(await getDb()!.collection('users').findOne({ _id: userId }));
+    assert.ok(await AuthSession.findActiveById(sessionId));
 });
 
 test('creator deletion fails without mutating account data while owned content remains', async () => {

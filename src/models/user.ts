@@ -104,6 +104,37 @@ class User {
         );
     }
 
+    /** Atomically attaches an avatar only when the caller still owns the expected revision. */
+    static replaceAvatar(userId: string, expectedRevision: number, avatarAssetId: string) {
+        const revisionFilter = expectedRevision === 0
+            ? { $or: [{ avatarRevision: 0 }, { avatarRevision: { $exists: false } }] }
+            : { avatarRevision: expectedRevision };
+        return getDb()!.collection('users').findOneAndUpdate(
+            { _id: new ObjectId(userId), ...revisionFilter },
+            {
+                $set: { avatarAssetId, avatarUpdatedAt: new Date() },
+                $inc: { avatarRevision: 1 }
+            },
+            { returnDocument: 'before' }
+        );
+    }
+
+    /** Clears the expected avatar reference after its owned storage object is removed. */
+    static clearAvatar(userId: string, expectedRevision: number, avatarAssetId: string) {
+        return getDb()!.collection('users').findOneAndUpdate(
+            {
+                _id: new ObjectId(userId),
+                avatarAssetId,
+                avatarRevision: expectedRevision
+            },
+            {
+                $set: { avatarAssetId: null, avatarUpdatedAt: new Date() },
+                $inc: { avatarRevision: 1 }
+            },
+            { returnDocument: 'before' }
+        );
+    }
+
     /** Removes a newly staged account when its identity link cannot be persisted. */
     static deleteById(userId: string) {
         if (!ObjectId.isValid(userId)) {

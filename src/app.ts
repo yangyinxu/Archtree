@@ -14,7 +14,7 @@ import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddl
 import { connectToDatabase, getDb } from './infrastructure/database';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
-import { maxImageUploadMb } from './middleware/imageUpload';
+import { maxAvatarUploadMb, maxImageUploadMb } from './middleware/imageUpload';
 import { getMediaDeliveryMetrics } from './services/mediaDeliveryService';
 import { accessTokenDurationSeconds } from './services/authSessionService';
 
@@ -42,7 +42,11 @@ app.use((req, res, next) => {
   // allow the following HTTP methods
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST, PUT, PATCH, DELETE');
   // allow clients to send requests with the following types of headers
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match'
+  );
+  res.setHeader('Access-Control-Expose-Headers', 'ETag');
   next();
 });
 
@@ -140,7 +144,9 @@ app.use((error: any, req: Request, res: Response, next: NextFunction) => {
     ? 413
     : isMulterInputError ? 400 : error.statusCode || 500;
   const message: string = isFileTooLarge
-    ? error?.field === 'coverArtFile'
+    ? error?.field === 'avatar'
+      ? `Avatar is too large. The maximum size is ${maxAvatarUploadMb} MB.`
+      : error?.field === 'coverArtFile'
       ? `Cover art is too large. The maximum size is ${maxImageUploadMb} MB.`
       : `Audio file is too large. The maximum size per file is ${maxAudioUploadMb} MB.`
     : isTooManyFiles

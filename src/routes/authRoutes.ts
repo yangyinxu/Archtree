@@ -51,6 +51,13 @@ import {
 } from '../controllers/passkeyAuthController';
 import { getAuthenticationCapabilities } from '../services/authCapabilitiesService';
 import { requireAcceptablePassword } from '../services/passwordPolicyService';
+import { deleteAvatar, getAvatar, putAvatar } from '../controllers/avatarController';
+import { avatarUpload } from '../middleware/imageUpload';
+import {
+    uploadConcurrencyLimit,
+    uploadRateLimit
+} from '../middleware/requestProtectionMiddleware';
+import { limitMediaConcurrency } from '../middleware/mediaDeliveryMiddleware';
 
 const router: Router = express.Router();
 
@@ -115,6 +122,22 @@ router.post('/logout', authRateLimit, asyncHandler(logout));
 router.post('/logout-all', requireAuth, asyncHandler(logoutAll));
 
 router.get('/me', requireAuth, asyncHandler(me));
+router.get('/avatar', requireAuth, limitMediaConcurrency, asyncHandler(getAvatar));
+router.put(
+    '/avatar',
+    requireAuth,
+    uploadRateLimit,
+    uploadConcurrencyLimit,
+    avatarUpload.single('avatar'),
+    asyncHandler(putAvatar)
+);
+router.delete(
+    '/avatar',
+    requireAuth,
+    uploadRateLimit,
+    uploadConcurrencyLimit,
+    asyncHandler(deleteAvatar)
+);
 router.get('/sessions', requireAuth, asyncHandler(listSessions));
 router.delete('/sessions/:id', requireAuth, asyncHandler(revokeSession));
 router.post(

@@ -216,6 +216,50 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Artist artwork is not used as an implicit track fallback because a track can
   reference multiple artists.
 
+## Profile Identity and Avatars
+
+- Signed-out account entry points display a neutral person placeholder and the
+  Log in label. Content artwork is never used as a user-avatar fallback.
+- A signed-in listener without an avatar displays deterministic initials from
+  the authoritative display name, then email, with a neutral placeholder when
+  neither value is available.
+- A profile avatar is optional, belongs only to its authenticated account, and
+  is not reused as artist, album, or soundtrack artwork.
+- Avatar image bytes are private account data. Only the authenticated owner can
+  read, replace, or delete them. Making avatars public requires a separate
+  product decision and does not happen implicitly through a storage URL.
+- Missing, malformed, offline, or failed avatar loading falls back to initials
+  or the neutral placeholder without hiding or disabling the account entry.
+- After selecting a photo, the listener can reposition and scale it in an
+  in-app square crop editor and preview the final circular avatar before any
+  upload begins. Upload requires explicit confirmation of that preview.
+- Cancelling photo selection, cropping, or preview leaves the current avatar
+  unchanged and creates no network request or server-side asset. The original
+  photo is never modified.
+- While a confirmed crop uploads, the last server-confirmed avatar remains
+  visible. A failed upload preserves that avatar, discards the failed crop, and
+  shows an error; the listener starts again through Change Photo rather
+  than a separate retry action. The replacement appears only after Archtree
+  confirms it.
+- Archtree is the source of truth for avatar identity and revision. Stale
+  profile or image responses from a previous account or revision must not
+  replace current session state.
+- Avatar upload, replacement, and deletion are idempotent and revision-checked.
+  Concurrent stale mutations cannot overwrite or delete the winning avatar.
+- Replacing an avatar attaches a validated replacement before deleting the old
+  asset. A cleanup failure remains explicitly recoverable and must not be
+  reported as completed cleanup.
+- An account with an avatar requires the listener to explicitly remove that
+  avatar before account deletion. Confirmed avatar deletion clears the profile
+  reference and removes its owned S3 asset through the documented database/S3
+  lifecycle; partial failure remains retryable and accurately reported.
+- Account-scoped avatar metadata and cached bytes are cleared on logout,
+  account deletion, or account change so one listener's avatar is never shown
+  to another listener on the device.
+- Uploaded avatars are fully decoded and normalized by Archtree. The service
+  enforces bounded file and pixel sizes, removes metadata such as EXIF location,
+  and controls the stored output encoding.
+
 ## Authentication and Resolution
 
 - New email registrations require a single-use verification code; existing

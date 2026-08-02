@@ -3,7 +3,7 @@ import { getDb } from '../infrastructure/database';
 
 const collectionId = 'imageAssets';
 
-export type ImageOwnerType = 'artist' | 'album' | 'audioTrack';
+export type ImageOwnerType = 'artist' | 'album' | 'audioTrack' | 'user';
 export type ImageUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
 
 export interface ImageAssetRecord {

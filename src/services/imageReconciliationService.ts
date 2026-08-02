@@ -58,7 +58,11 @@ export const reconcileImageStorage = async () => {
     }
 
     const [assets, s3Objects] = await Promise.all([
-        db.collection('imageAssets').find().limit(reconciliationLimit + 1).toArray(),
+        // Avatar objects use a separate private prefix and must not enter this
+        // cover-art cleanup report until they have a dedicated report-only audit.
+        db.collection('imageAssets').find({ ownerType: { $ne: 'user' } })
+            .limit(reconciliationLimit + 1)
+            .toArray(),
         listImageObjects(bucket)
     ]);
     if (assets.length > reconciliationLimit) {
