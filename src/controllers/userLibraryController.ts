@@ -1,6 +1,12 @@
 import { NextFunction, Request, Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
-import { isLibraryContentType, normalizeLibraryContentId, UserLibrary } from '../models/userLibrary';
+import {
+    isLibraryContentType,
+    LibraryContentType,
+    LibrarySort,
+    normalizeLibraryContentId,
+    UserLibrary
+} from '../models/userLibrary';
 
 const parseTarget = (req: Request) => {
     const contentType = String(req.params.contentType ?? '').trim();
@@ -47,6 +53,36 @@ export const getSaveStatuses = async (req: Request, res: Response, next: NextFun
             return res.status(400).json({ message: 'Every item must have a valid content type and ID.' });
         }
         return res.status(200).json({ items: await UserLibrary.statuses(auth.userId, items as any) });
+    } catch (error) {
+        return next(error);
+    }
+};
+
+export const listLibrary = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const auth = (req as AuthenticatedRequest).auth!;
+        const requestedTypes = String(req.query.types ?? '')
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean);
+        if (requestedTypes.some((value) => !isLibraryContentType(value))) {
+            return res.status(400).json({ message: 'Library types must be album or audioTrack.' });
+        }
+        const requestedSort = String(req.query.sort ?? 'recentActivity');
+        const allowedSorts: LibrarySort[] = ['recentActivity', 'recentlySaved', 'recentlyPlayed'];
+        if (!allowedSorts.includes(requestedSort as LibrarySort)) {
+            return res.status(400).json({ message: 'Library sort is invalid.' });
+        }
+        const requestedLimit = Number(req.query.limit ?? 50);
+        if (!Number.isFinite(requestedLimit) || requestedLimit < 1) {
+            return res.status(400).json({ message: 'Library limit must be a positive number.' });
+        }
+        return res.status(200).json(await UserLibrary.list(auth.userId, {
+            contentTypes: requestedTypes as LibraryContentType[],
+            sort: requestedSort as LibrarySort,
+            limit: requestedLimit,
+            cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined
+        }));
     } catch (error) {
         return next(error);
     }

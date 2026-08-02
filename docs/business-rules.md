@@ -10,8 +10,22 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Saved-content state is not limited to 20 items. The 20-item limits apply only
   to the recent-activity lists described below.
 - Unsaving content removes it from Recently Saved immediately.
-- The iOS Library tab renders the carousels configured on the Library page.
-- If no Library carousels are configured, the app shows an empty state.
+- The iOS Library tab renders one dynamic, vertically scrolling list rather
+  than creator-configured page items.
+- The Library list contains the union of every saved album and soundtrack and
+  every device-local album and soundtrack download. Matching saved and
+  downloaded representations are one row, keyed by canonical content type and
+  ID.
+- Albums and Songs are additive content-type filters. Downloads is an
+  availability filter that can be combined with either content type. With no
+  filters selected, the complete supported Library is visible.
+- The Library supports Recent Activity, Recently Saved, and Recently Played
+  sorting. Recent Activity uses the newest saved, played, or downloaded event.
+  Items without the selected sort event follow items that have one, using a
+  deterministic fallback order.
+- Completed downloaded content displays a download checkmark in its Library
+  row. In-progress, paused, failed, and corrupted content displays its actual
+  state rather than the completed checkmark.
 - The Save control remains visible while signed out and uses disabled styling.
   Tapping it shows a sign-in-required error alert; it does not open login
   automatically.
@@ -133,7 +147,8 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Missing non-identity metadata does not make valid downloaded audio
   unplayable. The app renders every available field, uses clear fallback text
   for missing titles or durations, and shows a warning when metadata is
-  incomplete.
+  incomplete. Manage Downloads treats incomplete metadata as a clearable
+  download issue while preserving the separate playable/unplayable distinction.
 - Packshot artwork is non-critical. A soundtrack uses its own cached artwork,
   inherited album artwork, or the packaged placeholder in that order; missing
   downloaded artwork never blocks playback.
@@ -145,6 +160,11 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   Each affected item in a Carousel, Grid, or List displays its download
   progress on its packshot image. Incomplete items are not presented as
   completed downloads.
+- Built-in device-download collections that include multiple transfer states
+  use the headings Downloads — Albums and Downloads — Songs. Configured page
+  items retain their creator-defined names. Individual entries show their
+  actual state, such as Download Complete, Downloading, Download Paused, or
+  Download Failed; incomplete items are never labeled as completed.
 - Logout durably pauses active transfers by ending authenticated network tasks
   while preserving validated partial files, validators, and resume state.
   Late callbacks cannot mark a paused entry complete after logout. Resuming
@@ -183,14 +203,15 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Manual Lists can contain explicitly curated supported content references and
   preserve their configured order. Dynamic Lists resolve their ordering from
   their source definition.
-- Device-local Downloaded Albums is a dynamic Grid whose source contains only
-  downloaded album entries. Device-local Downloaded Songs is a separate dynamic
-  List whose source contains only independently downloaded soundtrack entries.
+- Legacy configured Downloaded Albums and Downloaded Songs page items remain
+  readable for backward compatibility, but the iOS Library no longer renders
+  configured page items. It composes device-local downloads into its unified
+  dynamic list.
 - Dynamic Grid and List definitions expose only source configuration, filters,
   sort, and page size in Content Manager; their resolved items are read-only.
-- A Grid always presents its source as a grid. A List always presents its source
-  as a vertical list. One page-item type does not change into another layout in
-  response to filtering.
+- Outside the unified iOS Library, a Grid always presents its source as a grid.
+  A List always presents its source as a vertical list. One page-item type does
+  not change into another layout in response to filtering.
 - A List is a single-column, vertically scrolling collection. Each row has a
   leading square packshot, a primary title, and a secondary metadata line that
   identifies the content type and available creator or artist attribution.

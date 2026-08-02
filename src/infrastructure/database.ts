@@ -32,6 +32,8 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'passkeyChallenges', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'userSaves', keys: { userId: 1, contentType: 1, contentId: 1 }, options: { unique: true } },
     { collection: 'userSaves', keys: { userId: 1, savedAt: -1 } },
+    { collection: 'userSaves', keys: { userId: 1, lastPlayedAt: -1, _id: -1 } },
+    { collection: 'userSaves', keys: { userId: 1, lastActivityAt: -1, _id: -1 } },
     { collection: 'userActivity', keys: { userId: 1 }, options: { unique: true } },
     { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'carousels', keys: { createdBy: 1, updatedAt: -1 } },
