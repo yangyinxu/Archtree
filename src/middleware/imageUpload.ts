@@ -2,8 +2,9 @@ import multer from 'multer';
 import { audioDiskStorage, maxAudioUploadMb } from './audioUpload';
 
 const configuredMaxImageUploadMb = Number(process.env.MAX_IMAGE_UPLOAD_MB ?? 10);
+export const absoluteMaxImageUploadMb = 25;
 export const maxImageUploadMb = Number.isFinite(configuredMaxImageUploadMb) && configuredMaxImageUploadMb > 0
-    ? configuredMaxImageUploadMb
+    ? Math.min(configuredMaxImageUploadMb, absoluteMaxImageUploadMb)
     : 10;
 export const maxAvatarUploadMb = 5;
 

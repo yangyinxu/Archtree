@@ -14,7 +14,7 @@ const album = {
   contentType: 'album',
   id: '64b000000000000000000001',
   title: 'Night Geometry',
-  artworkUrl: '',
+  artworkUrl: '/content/images/0123456789abcdef01234567',
   artistNames: ['Finite Ensemble'],
   releaseDate: { year: 2026 }
 } as const;
@@ -73,6 +73,13 @@ test('Album Play and explicit soundtrack selection share the ordered Album queue
   renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
 
   expect(await screen.findByRole('heading', { name: 'Night Geometry' })).toBeInTheDocument();
+  const heroArtwork = screen.getByRole('img', { name: 'Night Geometry cover' });
+  expect(heroArtwork).toHaveAttribute('loading', 'eager');
+  expect(heroArtwork).toHaveAttribute('fetchpriority', 'high');
+  expect(heroArtwork).toHaveAttribute(
+    'sizes',
+    '(max-width: 520px) 12rem, (max-width: 720px) 10rem, 20rem'
+  );
   await user.click(screen.getByRole('button', { name: 'Play' }));
   expect(launch).toHaveBeenLastCalledWith([
     expect.objectContaining({ id: track.id, streamUrl: track.streamUrl })

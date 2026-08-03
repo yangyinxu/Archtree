@@ -5,12 +5,20 @@ import compositionRoutes from './content/compositionRoutes';
 import contentManagerRoutes from './content/contentManagerRoutes';
 import userLibraryRoutes from './content/userLibraryRoutes';
 import * as imageController from '../controllers/imageController';
-import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
+import {
+    limitMediaConcurrencyFor,
+    observeMediaDeliveryFor
+} from '../middleware/mediaDeliveryMiddleware';
 
 const router: Router = express.Router();
 
 router.use('/manage', contentManagerRoutes);
 router.use(userLibraryRoutes);
+router.get(
+    '/images/:imageId/v1/:width.webp',
+    observeMediaDeliveryFor('artwork'),
+    imageController.getImageVariant
+);
 router.get('/images/:imageId', limitMediaConcurrencyFor('artwork'), imageController.getImage);
 router.use(audioRoutes);
 router.use(catalogRoutes);

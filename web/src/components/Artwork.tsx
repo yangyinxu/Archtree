@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Disc3, Music2, UserRound, type LucideIcon } from 'lucide-react';
 
 import type { ContentSummary } from '../api/contentSchemas';
+import { responsiveArtworkSrcSet } from '../artwork/artworkUrls';
 import styles from './Artwork.module.css';
 
 export type ArtworkKind = ContentSummary['contentType'];
@@ -18,6 +19,8 @@ export interface ArtworkProps {
   kind: ArtworkKind;
   className?: string;
   loading?: 'eager' | 'lazy';
+  sizes?: string;
+  fetchPriority?: 'high' | 'low' | 'auto';
 }
 
 /** Preserves artwork geometry and replaces missing or failed images predictably. */
@@ -26,16 +29,24 @@ export const Artwork = ({
   alt,
   kind,
   className = '',
-  loading = 'lazy'
+  loading = 'lazy',
+  sizes,
+  fetchPriority
 }: ArtworkProps) => {
   const normalizedSource = src?.trim() ?? '';
+  const srcSet = responsiveArtworkSrcSet(normalizedSource);
   const [failedSource, setFailedSource] = useState<string | null>(null);
+  const [retryOriginalSource, setRetryOriginalSource] = useState<string | null>(null);
   const hasImage = normalizedSource.length > 0 && failedSource !== normalizedSource;
+  const retryingOriginal = retryOriginalSource === normalizedSource;
   const FallbackIcon = fallbackIcons[kind];
 
   useEffect(() => {
     if (failedSource && failedSource !== normalizedSource) setFailedSource(null);
-  }, [failedSource, normalizedSource]);
+    if (retryOriginalSource && retryOriginalSource !== normalizedSource) {
+      setRetryOriginalSource(null);
+    }
+  }, [failedSource, normalizedSource, retryOriginalSource]);
 
   return (
     <span
@@ -45,11 +56,21 @@ export const Artwork = ({
     >
       {hasImage ? (
         <img
+          key={retryingOriginal ? 'original' : 'responsive'}
           alt={alt}
           decoding="async"
+          fetchPriority={fetchPriority}
           loading={loading}
-          onError={() => setFailedSource(normalizedSource)}
+          onError={() => {
+            if (srcSet && !retryingOriginal) {
+              setRetryOriginalSource(normalizedSource);
+              return;
+            }
+            setFailedSource(normalizedSource);
+          }}
+          sizes={srcSet && !retryingOriginal ? sizes : undefined}
           src={normalizedSource}
+          srcSet={srcSet && !retryingOriginal ? srcSet : undefined}
         />
       ) : (
         <FallbackIcon aria-hidden="true" focusable="false" strokeWidth={1.5} />

@@ -366,12 +366,20 @@ test('shares transport state and metadata with progressive Media Session control
     mediaMetadataFactory: metadataFactory
   });
 
-  await store.launchAlbumQueue(tracks, 0, { autoplay: false });
+  const managedArtwork = '/content/images/0123456789abcdef01234567';
+  await store.launchAlbumQueue([
+    { ...tracks[0], artworkUrl: managedArtwork },
+    tracks[1]
+  ], 0, { autoplay: false });
   expect(mediaSession.metadata).toEqual({
     normalized: {
       title: 'Still Water',
       artist: 'Aster Vale',
-      artwork: [{ src: '/art/still-water.jpg' }]
+      artwork: [96, 192, 320, 480, 640, 960, 1280].map((width) => ({
+        src: `${managedArtwork}/v1/${width}.webp`,
+        sizes: `${width}x${width}`,
+        type: 'image/webp'
+      }))
     }
   });
   expect(mediaSession.playbackState).toBe('paused');

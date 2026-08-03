@@ -29,7 +29,7 @@ export const ContentListRow = ({ item, onPlay, trailing }: ContentListRowProps) 
   const metadata = metadataFor(item).filter((value) => value !== null && value !== '').join(' · ');
   const body = (
     <>
-      <Artwork alt="" className={styles.artwork} kind={item.contentType} src={item.artworkUrl} />
+      <Artwork alt="" className={styles.artwork} kind={item.contentType} sizes="3.15rem" src={item.artworkUrl} />
       <span className={styles.copy}>
         <span className={styles.title} title={title}>{title}</span>
         <span className={styles.metadata}>{metadata}</span>

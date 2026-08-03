@@ -17,6 +17,7 @@
     "test:e2e:chromium": "npm run test:e2e:chromium --workspace @archtree/finitude-web",
     "test:integration": "tsx --test --test-concurrency=1 test/**/*.integration.ts",
     "test:media-load": "node scripts/media-range-load.mjs",
+    "stage:eb-artifact": "node scripts/stage-eb-artifact.mjs",
     "start": "NODE_ENV=production tsx src/app.ts",
     "dev": "NODE_ENV=develop tsx src/app.ts",
     "dev:web": "npm run dev --workspace @archtree/finitude-web",

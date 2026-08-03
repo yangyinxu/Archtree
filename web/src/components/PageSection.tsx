@@ -15,6 +15,9 @@ export interface PageSectionProps {
 export const PageSection = ({ id, title, presentation, items, onPlay }: PageSectionProps) => {
   const headingId = `listener-section-${id}`;
   const carouselHelpId = `${headingId}-help`;
+  const cardArtworkSizes = presentation === 'carousel'
+    ? '(max-width: 480px) calc(72vw - 1.3rem - 2px), calc(clamp(10.5rem, 18vw, 14rem) - 1.3rem - 2px)'
+    : '(max-width: 340px) calc(100vw - 3.3rem - 2px), (max-width: 480px) calc((100vw - 2.75rem) / 2 - 1.3rem - 2px), (max-width: 1023px) calc(10.5rem - 1.3rem - 2px), calc(14rem - 1.3rem - 2px)';
 
   return (
     <section className={styles.section} aria-labelledby={headingId}>
@@ -39,7 +42,7 @@ export const PageSection = ({ id, title, presentation, items, onPlay }: PageSect
               ? items.map((item) => <ContentListRow item={item} key={`${item.contentType}:${item.id}`} onPlay={onPlay} />)
               : items.map((item) => (
                 <li className={styles.cardItem} key={`${item.contentType}:${item.id}`}>
-                  <ContentCard item={item} onPlay={onPlay} />
+                  <ContentCard artworkSizes={cardArtworkSizes} item={item} onPlay={onPlay} />
                 </li>
               ))}
           </ul>

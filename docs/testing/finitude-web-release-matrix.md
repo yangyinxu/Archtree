@@ -10,11 +10,14 @@ The Playwright suite runs the production `web/dist` bundle through Archtree's
 Express application and uses deterministic browser-only API and audio fixtures.
 It covers bundled Chromium, Firefox, and WebKit engines, critical/serious axe
 findings, keyboard skip navigation, reduced motion, direct route refreshes, and
-320 px, 768 px, and 1440 px reflow checks.
+320 px, 768 px, and 1440 px reflow checks. It also verifies that wheel input
+over the desktop player cannot move the application shell while the main content
+remains independently scrollable.
 
-Latest local automated evidence (2026-08-03): 36/36 Playwright projects passed
-against the production bundle; server tests passed 72/72 and Web unit/component
-tests passed 91/91; Mongo-backed integration tests passed 24/24. CI repeats the
+Latest local automated evidence (2026-08-03): 39/39 Playwright projects passed
+against the production bundle; server tests passed 112/112 and Web unit/component
+tests passed 103/103; Mongo-backed integration tests passed 24/24. The largest
+initial route is 140.9 KiB gzip against the 150 KiB budget. CI repeats the
 browser gate through `.github/workflows/finitude-web-release.yml`.
 
 Passing these projects does not prove support for a branded browser release.
@@ -25,7 +28,9 @@ media-store suite is a separate release gate.
 ## Media Range load evidence
 
 `npm run test:media-load` provides a bounded workload for ready audio tracks,
-public artwork, overlapping seek cancellation, and media-health recovery. It
+fixed-width public WebP artwork, overlapping seek cancellation, and
+media-health recovery. Artwork checks cycle through every supported width and
+verify content type, length, ETag, and mandatory cache revalidation. The command
 defaults to loopback, rejects remote targets without both explicit opt-in and
 an exact hostname allowlist, caps the run at 32 clients and 1,000 requests, and
 prints only aggregate results. Record the approved target class, runner count,
@@ -36,6 +41,22 @@ The checked-in harness is not itself staging evidence. Before release, run it
 against the production-equivalent S3 path from approved multiple source hosts
 and verify that playback-reserved slots, Range contracts, error rates, and
 two-second active-request recovery remain within the documented thresholds.
+
+## Deployment artifact evidence
+
+`npm run stage:eb-artifact` copies only the reviewed Elastic Beanstalk runtime
+allowlist, validates the Vite manifest and hashed assets, rejects environment,
+dependency, report, and symbolic-link pollution, verifies platform-hook
+permissions, and writes bounded source/build identity to `RELEASE.json`. The CI
+release gate retains a commit-named archive for 30 days after all automated
+gates pass.
+
+Follow
+[`../deployment/finitude-web-rollout-runbook.md`](../deployment/finitude-web-rollout-runbook.md)
+to promote the exact same archive, retain the immediately previous successful
+archive, execute smoke/observation gates, and roll back without rebuilding. The
+artifact contract has local automated evidence; the staging rollout and
+rollback rehearsal remain pending external evidence.
 
 ## Manual browser matrix
 

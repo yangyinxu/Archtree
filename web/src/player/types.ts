@@ -1,3 +1,5 @@
+import type { MediaSessionArtworkSource } from '../artwork/artworkUrls';
+
 /** Canonical metadata retained for every item in the one shared playback queue. */
 export interface PlayerQueueItem {
   id: string;
@@ -111,7 +113,7 @@ export interface CreatePlayerStoreOptions {
   mediaMetadataFactory?: (metadata: {
     title: string;
     artist: string;
-    artwork: Array<{ src: string }>;
+    artwork: MediaSessionArtworkSource[];
   }) => unknown;
   initialVolume?: number;
   initiallyMuted?: boolean;

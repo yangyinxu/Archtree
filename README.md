@@ -37,6 +37,8 @@ rather than repeat the code and must stay synchronized with behavior.
   against a disposable single-node MongoDB replica set
 - `npm run test:media-load`: run the bounded audio Range, seek/abort, artwork,
   and health-recovery workload against an explicitly authorized environment
+- `npm run stage:eb-artifact`: validate and stage the exact allowlisted Elastic
+  Beanstalk runtime tree in `elastic-beanstalk-artifact`
 
 The integration suite requires a trusted `mongod` executable on `PATH`. On
 macOS, approve or install that binary according to the machine's security
@@ -83,6 +85,8 @@ Required variables:
 - `S3_SUMMARY_WAIT_TIMEOUT_MS`: maximum content-manager wait for an S3 summary refresh (defaults to 2000)
 - `MAX_AUDIO_BATCH_UPLOAD_MB`: maximum aggregate multipart request size for bulk audio uploads (defaults to 1024)
 - `MAX_AUDIO_BATCH_FILES`: maximum files accepted in one bulk upload (defaults to 5)
+- `MAX_IMAGE_UPLOAD_MB`: maximum cover-art upload size in MiB (defaults to 10
+  and is hard-capped at 25 so public derivative work remains byte-bounded)
 - `MAX_VIDEO_STREAM_CHUNK_MB`: largest video byte range returned per request (defaults to 4)
 - `MAX_MEDIA_REQUESTS_PER_IP`: concurrent public media requests allowed per client IP (defaults to 8)
 - `MAX_MEDIA_REQUESTS_GLOBAL`: concurrent public media requests allowed per server process (defaults to 40)
@@ -175,7 +179,12 @@ Finitude Web is streaming-only and exposes no Download action, Download filter,
 offline state, or browser-local media lifecycle; native-client downloads remain
 a separate product capability.
 Public artwork resolution similarly permits only ready Artist, Album, and
-Soundtrack image assets; account avatars remain private behind `/auth/avatar`.
+Soundtrack image assets that their current owner still references; account
+avatars remain private behind `/auth/avatar`. Finitude Web derives responsive
+96, 192, 320, 480, 640, 960, and 1280 px square WebP responses from
+`/content/images/:imageId/v1/:width.webp`. They are versioned, revalidated,
+CPU-concurrency bounded responses and never create extra S3 objects; the
+original image route remains the fallback and native-client contract.
 The Archtree landing page links both signed-out and signed-in visitors to
 `/listen` while preserving its existing creator and authentication actions.
 
@@ -194,7 +203,9 @@ capacity.
 The media load command targets `http://127.0.0.1:8081` by default and requires
 one or more database-confirmed ready audio-track ObjectIds. It checks `HEAD`,
 full and partial responses, open-ended and suffix ranges, invalid ranges,
-overlapping seek cancellation, concurrent artwork, and `/health` recovery.
+overlapping seek cancellation, concurrent fixed-width WebP artwork (including
+its type, validator, size, and revalidation contract), and `/health`
+recovery.
 The command enforces maximums of 32 simulated clients and 1,000 total requests
 and emits only one aggregate JSON result; it does not print URLs, content IDs,
 ETags, or Range values.
@@ -209,7 +220,7 @@ ALLOW_REMOTE_MEDIA_LOAD=1 \
 MEDIA_LOAD_TRACK_IDS=<ready-audio-track-object-id> \
 MEDIA_LOAD_ARTWORK_IDS=<public-artwork-object-id> \
 MEDIA_LOAD_CLIENTS=12 \
-MEDIA_LOAD_ARTWORK_CONCURRENCY=16 \
+MEDIA_LOAD_ARTWORK_CONCURRENCY=4 \
 npm run test:media-load
 ```
 
@@ -223,9 +234,15 @@ This repo includes `buildspec.yml` with CI-oriented behavior:
 
 - `install`: `npm ci`
 - `build`: `npm test`, then `npm run build --if-present`
-- `post_build`: removes `node_modules` before artifact packaging
+- `post_build`: stages and validates the explicit Elastic Beanstalk runtime
+  allowlist before packaging
 
-Artifact packaging intentionally excludes `node_modules` so Elastic Beanstalk performs a clean dependency install on each instance.
+Artifact packaging includes only the root package/lock/TypeScript files,
+server source, Web runtime package plus built distribution, `.platform`, and
+`.ebextensions`. It rejects nested dependencies, environment files, test
+reports, symbolic links, missing or unhashed Vite assets, and non-executable
+platform hooks. `RELEASE.json` records the source commit and build identity;
+Elastic Beanstalk performs a clean dependency install on each instance.
 
 The separate `.github/workflows/finitude-web-release.yml` gate follows the
 Playwright CI installation flow and runs unit/component tests, both production
@@ -234,6 +251,14 @@ builds, and all three browser/axe projects on pull requests and pushes to
 HTML report are retained as workflow artifacts. The Mongo-backed integration
 suite remains a distinct gate on runners that provide a trusted `mongod`
 binary.
+
+After the browser gate, CI retains a commit-named Elastic Beanstalk ZIP for 30
+days so staging and production can promote the same tested bytes and the
+previous successful version remains directly deployable. Follow
+[`docs/deployment/finitude-web-rollout-runbook.md`](docs/deployment/finitude-web-rollout-runbook.md)
+for the smoke, observation, evidence, and rollback contract. A retained bundle
+and runbook do not replace the required production-equivalent rollout and
+rollback rehearsal.
 
 ### Single-instance Elastic Beanstalk HTTPS
 
@@ -425,5 +450,5 @@ Reconciliation:
 - `413 Request Entity Too Large`: increase upload limits in both places:
   - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`, currently 1 GB total per request)
   - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 512 MB)
-  - Cover-art limit via `MAX_IMAGE_UPLOAD_MB` (defaults to 10 MB)
+  - Cover-art limit via `MAX_IMAGE_UPLOAD_MB` (defaults to 10 MB; maximum 25 MB)
   - Content Manager bulk uploads send files sequentially, keeping each request below the proxy limit and avoiding buffering the entire selection in memory at once.

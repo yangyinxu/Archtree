@@ -34,7 +34,15 @@ export const ArtistPage = () => {
   return (
     <div className={styles.page}>
       <header className={styles.hero}>
-        <Artwork alt={`${artist.name} portrait`} className={styles.artistArtwork} kind="artist" loading="eager" src={artist.artworkUrl} />
+        <Artwork
+          alt={`${artist.name} portrait`}
+          className={styles.artistArtwork}
+          fetchPriority="high"
+          kind="artist"
+          loading="eager"
+          sizes="(max-width: 520px) 12rem, (max-width: 720px) 10rem, 20rem"
+          src={artist.artworkUrl}
+        />
         <div className={styles.heroCopy}>
           <p className={styles.eyebrow}>Artist</p>
           <h1>{artist.name || 'Unknown artist'}</h1>

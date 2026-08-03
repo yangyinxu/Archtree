@@ -31,8 +31,8 @@
 
 .signedOut,
 .button[aria-disabled='true'] {
-  color: var(--color-text-subtle);
-  opacity: 0.7;
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
 }
 
 .signedOut {

@@ -8,6 +8,15 @@ const MAX_TOTAL_REQUESTS = 1_000;
 const RANGE_SAMPLE_BYTES = 64 * 1024;
 const HEALTH_RECOVERY_TIMEOUT_MS = 2_000;
 const HEALTH_RECOVERY_INTERVAL_MS = 200;
+export const ARTWORK_VARIANT_WIDTHS = Object.freeze([
+    96,
+    192,
+    320,
+    480,
+    640,
+    960,
+    1280
+]);
 
 export const HELP = `Finitude media Range load check
 
@@ -23,7 +32,7 @@ Optional:
   MEDIA_LOAD_ARTWORK_IDS        Comma-separated public artwork ObjectIds.
   MEDIA_LOAD_CLIENTS            Concurrent listeners, default 4, maximum 32.
   MEDIA_LOAD_SEEK_CYCLES        Open-ended seek requests per listener, default 4.
-  MEDIA_LOAD_ARTWORK_CONCURRENCY  Artwork workers and minimum request count, default 8, maximum 32.
+  MEDIA_LOAD_ARTWORK_CONCURRENCY  Artwork workers, default 4, maximum 32.
   MEDIA_LOAD_REQUEST_TIMEOUT_MS Per-request timeout, default 10000, maximum 30000.
   MEDIA_LOAD_SEEK_DELAY_MS      Delay between seek replacements, default 75.
   MEDIA_LOAD_HEALTH_POLLS       Concurrent health samples, default 40, maximum 100.
@@ -58,11 +67,21 @@ export const parseBoundedInteger = (value, fallback, minimum, maximum, errorCode
 /** Repeats supplied artwork IDs just enough to exercise the configured worker pool. */
 export const buildArtworkWorkload = (artworkIds, concurrency) => {
     if (artworkIds.length === 0) return [];
-    const requestCount = Math.max(artworkIds.length, concurrency);
+    const requestCount = Math.max(
+        artworkIds.length,
+        concurrency,
+        ARTWORK_VARIANT_WIDTHS.length
+    );
     return Array.from(
         { length: requestCount },
         (_, index) => artworkIds[index % artworkIds.length]
     );
+};
+
+/** Selects a checked-in display width without exposing content identifiers in output. */
+export const buildArtworkVariantPath = (artworkId, requestIndex) => {
+    const width = ARTWORK_VARIANT_WIDTHS[requestIndex % ARTWORK_VARIANT_WIDTHS.length];
+    return `/content/images/${encodeURIComponent(artworkId)}/v1/${width}.webp`;
 };
 
 const normalizeHostname = (hostname) => String(hostname ?? '')
@@ -149,7 +168,7 @@ export const loadConfiguration = (env = process.env) => {
     );
     const artworkConcurrency = parseBoundedInteger(
         env.MEDIA_LOAD_ARTWORK_CONCURRENCY,
-        8,
+        4,
         1,
         MAX_CLIENTS,
         'MEDIA_LOAD_ARTWORK_CONCURRENCY_INVALID'
@@ -283,6 +302,29 @@ export const validateInvalidRangeContract = (status, headers, fileSize) => {
     return contentRange?.type === 'unsatisfied' && contentRange.size === fileSize
         ? []
         : ['RANGE_INVALID_CONTENT_RANGE'];
+};
+
+/** Verifies that display artwork is versioned WebP with mandatory revalidation. */
+export const validateArtworkContract = (status, headers) => {
+    if (status === 429) {
+        return [
+            'ARTWORK_THROTTLED',
+            ...(headers.get('retry-after') ? [] : ['ARTWORK_RETRY_AFTER'])
+        ];
+    }
+    if (status !== 200) return ['ARTWORK_STATUS'];
+
+    const errors = [];
+    if (!String(headers.get('etag') ?? '').trim()) errors.push('ARTWORK_ETAG');
+    if (!safeContentLength(headers)) errors.push('ARTWORK_CONTENT_LENGTH');
+    if (String(headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
+        !== 'image/webp') {
+        errors.push('ARTWORK_CONTENT_TYPE');
+    }
+    const cacheControl = String(headers.get('cache-control') ?? '').toLowerCase();
+    if (!cacheControl.includes('public')) errors.push('ARTWORK_CACHE_PUBLIC');
+    if (!cacheControl.includes('no-cache')) errors.push('ARTWORK_CACHE_REVALIDATION');
+    return errors;
 };
 
 export const buildSeekStarts = (fileSize, count) => {
@@ -609,24 +651,18 @@ const runListener = async (runtime, trackId, metadata) => {
     await invalidRange(runtime, trackId, metadata);
 };
 
-const loadArtwork = async (runtime, artworkId) => {
+const loadArtwork = async (runtime, artworkId, requestIndex) => {
     const request = await startRequest(
         runtime,
         'artwork',
-        `/content/images/${encodeURIComponent(artworkId)}`
+        buildArtworkVariantPath(artworkId, requestIndex)
     );
     if (!request) return;
-    const errors = [];
-    if (request.response.status === 429) {
-        if (!request.response.headers.get('retry-after')) errors.push('ARTWORK_RETRY_AFTER');
-    } else if (request.response.status !== 200) {
-        errors.push('ARTWORK_STATUS');
-    } else {
-        if (!request.response.headers.get('etag')) errors.push('ARTWORK_ETAG');
-        const contentLength = safeContentLength(request.response.headers);
-        if (!contentLength) errors.push('ARTWORK_CONTENT_LENGTH');
-    }
-    applyValidation(runtime.stats, 'artwork', errors);
+    applyValidation(
+        runtime.stats,
+        'artwork',
+        validateArtworkContract(request.response.status, request.response.headers)
+    );
     await completeResponse(runtime, request);
 };
 
@@ -777,7 +813,7 @@ export const runMediaRangeLoad = async (env = process.env, fetchImpl = globalThi
         runBounded(
             config.artworkWorkload,
             config.artworkConcurrency,
-            (artworkId) => loadArtwork(runtime, artworkId)
+            (artworkId, requestIndex) => loadArtwork(runtime, artworkId, requestIndex)
         )
     ]);
     await monitor.stop();
@@ -801,6 +837,8 @@ export const runMediaRangeLoad = async (env = process.env, fetchImpl = globalThi
         && stats.requests.networkErrors === 0
         && stats.playback.status429 === 0
         && stats.playback.status5xx === 0
+        && stats.artwork.status429 === 0
+        && stats.artwork.status5xx === 0
         && stats.health.non200 === 0
         && stats.health.playbackRejectedDelta === 0
         && stats.health.playbackServerErrorDelta === 0
@@ -841,5 +879,7 @@ export const runCli = async (argv = process.argv.slice(2), env = process.env) =>
 const isMain = process.argv[1]
     && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
-    process.exitCode = await runCli();
+    runCli().then((exitCode) => {
+        process.exitCode = exitCode;
+    });
 }

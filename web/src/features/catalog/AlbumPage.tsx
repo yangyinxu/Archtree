@@ -65,7 +65,15 @@ export const AlbumPage = () => {
   return (
     <div className={styles.page}>
       <header className={styles.hero}>
-        <Artwork alt={`${album.title} cover`} className={styles.heroArtwork} kind="album" loading="eager" src={album.artworkUrl} />
+        <Artwork
+          alt={`${album.title} cover`}
+          className={styles.heroArtwork}
+          fetchPriority="high"
+          kind="album"
+          loading="eager"
+          sizes="(max-width: 520px) 12rem, (max-width: 720px) 10rem, 20rem"
+          src={album.artworkUrl}
+        />
         <div className={styles.heroCopy}>
           <p className={styles.eyebrow}>Album</p>
           <h1>{album.title || 'Untitled album'}</h1>

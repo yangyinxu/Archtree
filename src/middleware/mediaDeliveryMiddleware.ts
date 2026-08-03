@@ -180,5 +180,28 @@ export const limitMediaConcurrencyFor = (resourceClass: MediaResourceClass) => (
     defaultMediaAdmissionController.middleware(resourceClass)
 );
 
+/** Records independently bounded work without placing it in the playback admission pool. */
+export const observeMediaDeliveryFor = (
+    resourceClass: MediaResourceClass,
+    metrics: MediaDeliveryMetricsRegistry = defaultMediaDeliveryMetrics
+): RequestHandler => (req, res, next) => {
+    metrics.markRequestAccepted(resourceClass);
+    res.locals.mediaDelivery = { resourceClass, metrics };
+
+    let released = false;
+    const release = (closedBeforeFinish: boolean) => {
+        if (released) return;
+        released = true;
+        res.off('finish', onFinish);
+        res.off('close', onClose);
+        metrics.markRequestFinished(resourceClass, responseOutcome(res, closedBeforeFinish));
+    };
+    const onFinish = () => release(false);
+    const onClose = () => release(!res.writableEnded);
+    res.once('finish', onFinish);
+    res.once('close', onClose);
+    return next();
+};
+
 // Compatibility default for any older playback route that imports this handler directly.
 export const limitMediaConcurrency = limitMediaConcurrencyFor('playback');

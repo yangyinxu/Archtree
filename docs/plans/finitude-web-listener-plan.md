@@ -736,21 +736,30 @@ Exit criteria:
 - Monitoring distinguishes page/API failures from audio delivery failures.
 - Rollout and rollback have both been rehearsed.
 
-Implementation evidence recorded on 2026-08-02:
+Implementation evidence updated on 2026-08-03:
 
 - Complete in the repository: strict anonymous Web Vitals and error telemetry,
   private-avatar public-route denial, playback-reserved media admission and
   per-resource health metrics, production-bundle Playwright coverage across
   Chromium/Firefox/WebKit, axe critical/serious gates, responsive and Reduce
-  Motion checks, CI automation, and a remote-opt-in bounded Range/seek/artwork
-  load harness with aggregate-only output.
-- Passing locally: server 72/72, Web unit/component 91/91, Mongo integration
-  24/24, browser/axe 36/36, server/Web production builds, and the 150 KiB
-  initial-route JavaScript budget.
+  Motion checks, fixed-bottom player scroll regression coverage, CI automation,
+  and a remote-opt-in bounded Range/seek/artwork load harness with aggregate-only
+  output. Responsive artwork now uses seven
+  fixed versioned WebP sizes, attached-owner public validation, ETag
+  revalidation, and a separate CPU concurrency limit without creating
+  derivative S3 objects. CI also validates a strict runtime allowlist, records its source
+  identity, and retains a commit-named rollback bundle; the rollout runbook
+  requires the same tested bytes for staging and production.
+- Passing locally: server 112/112, Web unit/component 103/103, Mongo integration
+  24/24, browser/axe 39/39, server/Web production builds, and the 150 KiB
+  initial-route JavaScript budget (largest route 140.9 KiB gzip). The validated
+  Elastic Beanstalk staging artifact also contains the hashed listener assets
+  and deep-link runtime contract.
 - Still requires production-equivalent evidence: branded-browser and assistive
   technology matrix, measured p75 Web Vitals, realistic multi-source S3 Range
-  load/seek execution with the checked-in harness, artwork variant sizing, and
-  rollout/rollback rehearsal.
+  load/seek/artwork execution with the checked-in harness, and an actual
+  rollout/rollback rehearsal using the retained artifacts. A checked-in runbook
+  and locally validated bundle are the contract, not the rehearsal evidence.
 - Beta acceptance and navigation update recorded on 2026-08-03 by user
   direction: the existing Archtree landing page now links signed-out and
   signed-in visitors to `/listen` without replacing its creator, account, or

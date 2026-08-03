@@ -6,7 +6,10 @@
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100dvh;
+  inset: 0;
   overflow: hidden;
+  position: fixed;
+  width: 100%;
 }
 
 .skipLink {

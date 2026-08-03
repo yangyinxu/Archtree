@@ -220,7 +220,13 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
   const compactIdentity = (
     <>
       {current ? (
-        <Artwork alt="" className={styles.artwork} kind="audioTrack" src={current.artworkUrl} />
+        <Artwork
+          alt=""
+          className={styles.artwork}
+          kind="audioTrack"
+          sizes="(max-width: 767px) 2.55rem, 3.4rem"
+          src={current.artworkUrl}
+        />
       ) : (
         <span className={styles.artworkFallback} aria-hidden="true">F</span>
       )}
@@ -398,6 +404,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
               className={styles.expandedArtwork}
               kind="audioTrack"
               loading="eager"
+              sizes="(max-width: 767px) and (orientation: landscape) and (max-height: 500px) min(32vh, 14rem), min(72vw, 22rem)"
               src={current.artworkUrl}
             />
 

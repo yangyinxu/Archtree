@@ -41,6 +41,25 @@ jobs:
       - name: Run production-bundle browser and accessibility tests
         run: npm run test:e2e
 
+      - name: Stage the Elastic Beanstalk deployment artifact
+        run: npm run stage:eb-artifact
+
+      - name: Create the versioned Elastic Beanstalk rollback bundle
+        env:
+          EB_BUNDLE_NAME: archtree-eb-${{ github.sha }}.zip
+        run: |
+          cd elastic-beanstalk-artifact
+          zip -q -r "../${EB_BUNDLE_NAME}" \
+            .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json src tsconfig.json web
+
+      - name: Retain the versioned Elastic Beanstalk rollback bundle
+        uses: actions/upload-artifact@v5
+        with:
+          name: archtree-eb-${{ github.sha }}
+          path: archtree-eb-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Retain browser evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v5

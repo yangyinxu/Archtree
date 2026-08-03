@@ -30,15 +30,23 @@ const contentMetadata = (item: ContentSummary) => {
 export interface ContentCardProps {
   item: ContentSummary;
   onPlay?: (audioTrack: AudioTrackSummary) => void;
+  artworkSizes?: string;
 }
 
+// Subtract the action's inline padding and border from each outer grid-card width.
+export const defaultContentCardArtworkSizes = '(max-width: 400px) calc(100vw - 3.3rem - 2px), (max-width: 480px) calc((100vw - 2.75rem) / 2 - 1.3rem - 2px), (max-width: 1023px) calc(10.5rem - 1.3rem - 2px), calc(14rem - 1.3rem - 2px)';
+
 /** Presents one content summary with a single, non-overlapping primary action. */
-export const ContentCard = ({ item, onPlay }: ContentCardProps) => {
+export const ContentCard = ({
+  item,
+  onPlay,
+  artworkSizes = defaultContentCardArtworkSizes
+}: ContentCardProps) => {
   const title = contentTitle(item);
   const metadata = contentMetadata(item);
   const body = (
     <>
-      <Artwork alt="" kind={item.contentType} src={item.artworkUrl} />
+      <Artwork alt="" kind={item.contentType} sizes={artworkSizes} src={item.artworkUrl} />
       <span className={styles.copy}>
         <span className={styles.title} title={title}>{title}</span>
         <span className={styles.metadata}>{metadata}</span>

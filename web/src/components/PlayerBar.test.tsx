@@ -50,7 +50,7 @@ const tracks: PlayerQueueItem[] = [
   {
     id: 'track-1',
     title: 'Still Water',
-    artworkUrl: '/art/still-water.jpg',
+    artworkUrl: '/content/images/0123456789abcdef01234567',
     artistNames: ['Aster Vale'],
     streamUrl: '/audio/still-water.mp3'
   },
@@ -101,10 +101,18 @@ test('opens and closes the mobile expanded surface without creating another play
   const { audioFactory, store } = await playerFixture();
   render(<PlayerBar store={store} />);
 
+  const compactArtwork = screen
+    .getByRole('button', { name: 'Open Now Playing: Still Water' })
+    .querySelector('img');
+  expect(compactArtwork).toHaveAttribute('sizes', '(max-width: 767px) 2.55rem, 3.4rem');
   await user.click(screen.getByRole('button', { name: 'Open Now Playing: Still Water' }));
   const expanded = screen.getByRole('dialog', { name: 'Still Water' });
 
-  expect(within(expanded).getByRole('img', { name: 'Still Water cover' })).toBeInTheDocument();
+  expect(within(expanded).getByRole('img', { name: 'Still Water cover' }))
+    .toHaveAttribute(
+      'sizes',
+      '(max-width: 767px) and (orientation: landscape) and (max-height: 500px) min(32vh, 14rem), min(72vw, 22rem)'
+    );
   expect(within(expanded).getByRole('button', { name: 'Skip backward 10 seconds' })).toBeEnabled();
   expect(within(expanded).getByRole('button', { name: 'Skip forward 10 seconds' })).toBeEnabled();
   expect(within(expanded).getByRole('slider', { name: 'Volume' })).toHaveValue('1');

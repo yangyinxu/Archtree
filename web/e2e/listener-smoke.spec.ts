@@ -55,6 +55,69 @@ test('keeps the Album route and persistent player while navigating', async ({ pa
   await expect(player.getByText('First Light', { exact: true })).toBeVisible();
 });
 
+test('keeps the desktop player anchored when the wheel originates over it', async ({ page }) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto('/listen');
+
+  // Force a root scroll range without making the deterministic catalog fixture
+  // repetitive; the application shell must reject that accidental scroll path.
+  await page.evaluate(() => {
+    const overflowProbe = document.createElement('div');
+    overflowProbe.setAttribute('aria-hidden', 'true');
+    overflowProbe.style.height = '75rem';
+    document.body.append(overflowProbe);
+  });
+  const player = page.getByRole('region', { name: 'Now playing' });
+  await expect(player).toBeVisible();
+  const readLayout = () => player.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: rect.bottom,
+      top: rect.top,
+      viewportHeight: window.innerHeight,
+      windowScrollY: window.scrollY
+    };
+  });
+  const before = await readLayout();
+  await player.getByText('Nothing playing', { exact: true }).hover();
+  const wheelSettled = page.evaluate(() => new Promise<void>((resolve) => {
+    window.addEventListener('wheel', () => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }, { once: true });
+  }));
+  await page.mouse.wheel(0, 1_200);
+  await wheelSettled;
+
+  const after = await readLayout();
+  expect(after.windowScrollY).toBe(0);
+  expect(Math.abs(after.bottom - after.viewportHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(1);
+
+  const main = page.getByRole('main');
+  await main.evaluate((element) => {
+    const overflowProbe = document.createElement('div');
+    overflowProbe.setAttribute('aria-hidden', 'true');
+    overflowProbe.style.height = '75rem';
+    element.append(overflowProbe);
+  });
+  const mainBox = await main.boundingBox();
+  expect(mainBox).not.toBeNull();
+  await page.mouse.move(mainBox!.x + 4, mainBox!.y + 4);
+  const mainWheelSettled = page.evaluate(() => new Promise<void>((resolve) => {
+    window.addEventListener('wheel', () => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }, { once: true });
+  }));
+  await page.mouse.wheel(0, 600);
+  await mainWheelSettled;
+
+  const mainScrollTop = await main.evaluate((element) => element.scrollTop);
+  const afterMainScroll = await readLayout();
+  expect(mainScrollTop).toBeGreaterThan(0);
+  expect(afterMainScroll.windowScrollY).toBe(0);
+  expect(Math.abs(afterMainScroll.bottom - afterMainScroll.viewportHeight)).toBeLessThanOrEqual(1);
+});
+
 test('keeps signed-out Save in place without sending a mutation', async ({ api, page }) => {
   await page.goto(albumPath);
   const albumSave = page.getByRole('main')

@@ -5,7 +5,8 @@ import type { NextFunction, Request, Response } from 'express';
 
 import {
     createMediaAdmissionController,
-    MediaAdmissionController
+    MediaAdmissionController,
+    observeMediaDeliveryFor
 } from '../src/middleware/mediaDeliveryMiddleware';
 import {
     createMediaDeliveryMetricsRegistry,
@@ -210,4 +211,25 @@ test('an aborted response releases its slot and records an anonymous terminal ou
     const replacement = requestMedia(controller, 'artwork', ip);
     assert.equal(replacement.admitted, true);
     replacement.response.finish();
+});
+
+test('independently scheduled artwork remains observable without consuming playback admission', () => {
+    const metrics = createMediaDeliveryMetricsRegistry();
+    const responses = Array.from({ length: 10 }, (_, index) => {
+        const response = new TestResponse();
+        let observed = false;
+        observeMediaDeliveryFor('artwork', metrics)(
+            requestFor(`198.51.100.${index + 1}`),
+            response as unknown as Response,
+            (() => { observed = true; }) as NextFunction
+        );
+        assert.equal(observed, true);
+        assert.equal(response.statusCode, 200);
+        return response;
+    });
+
+    assert.equal(metrics.snapshot().byResource.artwork.activeRequests, 10);
+    for (const response of responses) response.finish();
+    assert.equal(metrics.snapshot().byResource.artwork.activeRequests, 0);
+    assert.equal(metrics.snapshot().byResource.artwork.responseOutcomes.success, 10);
 });

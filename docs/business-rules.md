@@ -94,6 +94,9 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - The Web listener owns one long-lived audio element, queue, and playback
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player.
+- The compact Web player remains anchored to the viewport bottom. Scrolling
+  page content, including a wheel gesture that begins over the player, must not
+  move the player or the surrounding application shell.
 - The Archtree landing page presents a visible Finitude Web entry to signed-out
   and signed-in visitors. Public browsing does not require authentication, and
   the entry does not replace creator-management or account actions.
@@ -296,6 +299,16 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 
 ## Audio-Track Artwork
 
+- Public catalog artwork is readable only while its lifecycle record is ready
+  and its Artist, Album, or Soundtrack owner still references that exact image.
+  Private avatars, incomplete assets, and detached replacement assets are not
+  public even when an image ID is known.
+- Finitude Web may request fixed, versioned display-size variants derived from
+  the canonical cover-art object. These variants are transient responses, do
+  not create additional S3 objects or ownership records, and never replace the
+  canonical asset used by native clients and reconciliation.
+- Public catalog artwork responses require origin revalidation before cached
+  bytes are reused, so detaching an image prevents subsequent public reads.
 - An audio track uses its own cover art when one is explicitly assigned.
 - Otherwise, a linked audio track inherits its album's cover art for display
   without copying album asset ownership into the audio-track record.

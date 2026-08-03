@@ -12,6 +12,10 @@ import type {
 } from './types';
 import { enqueueListenerTelemetry } from '../telemetry/client';
 import { classifyListenerRoute } from '../telemetry/routeClassifier';
+import {
+  mediaSessionArtworkSources,
+  type MediaSessionArtworkSource
+} from '../artwork/artworkUrls';
 
 const DEFAULT_SKIP_SECONDS = 10;
 
@@ -96,7 +100,7 @@ const resolveMediaSession = (): PlayerMediaSession | null => {
 const defaultMetadataFactory = (metadata: {
   title: string;
   artist: string;
-  artwork: Array<{ src: string }>;
+  artwork: MediaSessionArtworkSource[];
 }): unknown => {
   if (typeof MediaMetadata === 'undefined') return metadata;
   return new MediaMetadata(metadata);
@@ -164,9 +168,7 @@ export const createPlayerStore = (
           ? metadataFactory({
               title: snapshot.currentItem.title,
               artist: snapshot.currentItem.artistNames.join(', '),
-              artwork: snapshot.currentItem.artworkUrl
-                ? [{ src: snapshot.currentItem.artworkUrl }]
-                : []
+              artwork: mediaSessionArtworkSources(snapshot.currentItem.artworkUrl)
             })
           : null;
       } catch {
