@@ -62,14 +62,14 @@ export class Artist {
             .then(withoutLegacyTrackIds);
     }
 
-    // fetch all artists from the database
+    /** Returns a stable global Artist page for public reads and admin inventory. */
     static fetchAll(limit: number = 50, offset: number = 0) {
         const db = getDb();
 
-        // fetch all artists from the database
         return db!
             .collection('artists')
             .find()
+            .sort({ _id: 1 })
             .skip(offset)
             .limit(limit)
             .toArray()

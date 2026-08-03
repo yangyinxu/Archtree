@@ -83,13 +83,15 @@ export class Page {
             .toArray();
     }
 
-    static fetchAll(limit: number = 50) {
+    /** Returns a stable global Page inventory slice without applying provenance filters. */
+    static fetchAll(limit: number = 50, offset: number = 0) {
         const db = getDb();
 
         return db!
             .collection(collectionId)
             .find()
-            .sort({ updatedAt: -1 })
+            .sort({ updatedAt: -1, _id: 1 })
+            .skip(offset)
             .limit(limit)
             .toArray();
     }

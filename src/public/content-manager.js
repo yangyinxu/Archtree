@@ -207,9 +207,11 @@
 
     const renderMoveChoices = () => {
       itemList.replaceChildren();
-      [...targetSelector.options].forEach((option) => {
-        option.disabled = Boolean(option.value) && option.value === sourceSelector.value;
-      });
+      if (targetSelector.options) {
+        [...targetSelector.options].forEach((option) => {
+          option.disabled = Boolean(option.value) && option.value === sourceSelector.value;
+        });
+      }
       if (targetSelector.value === sourceSelector.value) targetSelector.value = '';
 
       const source = compositionData.carousels.find((carousel) => carousel.id === sourceSelector.value);

@@ -4,6 +4,10 @@ import { ActivitySource, UserLibrary } from './userLibrary';
 
 const collectionId = 'carousels';
 const maximumManualCarouselItems = 500;
+const readyAudioFilter = {
+    uploadStatus: 'ready',
+    s3Key: { $type: 'string', $regex: /\S/ }
+};
 const toObjectId = (value: string) => {
     try {
         return ObjectId.createFromHexString(value);
@@ -114,6 +118,20 @@ export class Carousel {
             .then((carousels) => this.resolveCarousels(carousels, createdBy));
     }
 
+    /** Returns a stable global Carousel inventory slice for administrator workflows. */
+    static fetchAll(limit: number = 100, offset: number = 0, viewerUserId?: string) {
+        const db = getDb();
+
+        return db!
+            .collection(collectionId)
+            .find()
+            .sort({ updatedAt: -1, _id: 1 })
+            .skip(offset)
+            .limit(limit)
+            .toArray()
+            .then((carousels) => this.resolveCarousels(carousels, viewerUserId));
+    }
+
     static fetchByIds(carouselIds: string[], viewerUserId?: string) {
         const db = getDb();
         const objectIds = carouselIds
@@ -152,7 +170,8 @@ export class Carousel {
             if (!viewerUserId || !config || (config.source !== 'recentlySaved' && config.source !== 'recentlyPlayed')) {
                 return { ...carousel, mode, items: [] };
             }
-            const entries = await UserLibrary.recent(viewerUserId, config.source, config.limit);
+            const itemLimit = Math.max(1, Math.min(Number(config.limit ?? 20) || 20, 20));
+            const entries = await UserLibrary.recent(viewerUserId, config.source, 20);
             const db = getDb()!;
             const albumIds = entries
                 .filter((entry) => entry.contentType === 'album')
@@ -168,7 +187,10 @@ export class Carousel {
                         .project({ _id: 1 }).maxTimeMS(3_000).toArray()
                     : [],
                 audioTrackIds.length > 0
-                    ? db.collection('audioTracks').find({ _id: { $in: audioTrackIds } })
+                    ? db.collection('audioTracks').find({
+                        ...readyAudioFilter,
+                        _id: { $in: audioTrackIds }
+                    })
                         .project({ _id: 1 }).maxTimeMS(3_000).toArray()
                     : []
             ]);
@@ -178,6 +200,7 @@ export class Carousel {
             ]);
             const validItems: CarouselItemRef[] = entries
                 .filter((entry) => validKeys.has(`${entry.contentType}:${entry.contentId}`))
+                .slice(0, itemLimit)
                 .map((entry, order) => ({
                     contentType: entry.contentType,
                     contentId: entry.contentId,
@@ -208,7 +231,8 @@ export class Carousel {
                 'releaseDate.year': -1 as const,
                 'releaseDate.month': -1 as const,
                 'releaseDate.day': -1 as const,
-                title: 1 as const
+                title: 1 as const,
+                _id: 1 as const
             };
         let content: any[] = [];
         if (config.contentType === 'album') {
@@ -228,7 +252,10 @@ export class Carousel {
         } else {
             content = await db!
                 .collection('audioTracks')
-                .find({ artistIds: config.artistId })
+                .find({
+                    ...readyAudioFilter,
+                    artistIds: { $in: [config.artistId, artistObjectId] }
+                })
                 .sort(sort)
                 .limit(itemLimit)
                 .maxTimeMS(3_000)

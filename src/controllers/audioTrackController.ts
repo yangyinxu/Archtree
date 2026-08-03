@@ -8,14 +8,14 @@ import {
     GetObjectCommand,
     HeadObjectCommand
 } from '@aws-sdk/client-s3';
-import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { ObjectId } from 'mongodb';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import {
     deleteAudioObjectAndTrack,
     uploadAudioObject
 } from '../services/audioStorageService';
-import { validateOwnedContentReferences } from '../services/contentReferenceService';
+import { validateContentReferences } from '../services/contentReferenceService';
 import { deleteCoverArt, uploadCoverArt } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import {
@@ -26,6 +26,8 @@ import {
     shouldHonorRange
 } from '../services/mediaDeliveryService';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
+import { listPublicAudioTracks } from '../services/publicCatalogService';
+import { boundedLimit, boundedOffset } from '../utils/pagination';
 
 const s3ErrorStatus = (error: any) => {
     const status = Number(error?.$metadata?.httpStatusCode ?? 0);
@@ -99,6 +101,9 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
 
     const uploadFile = getUploadedFile(req, 'audioFile');
     if (!uploadFile) {
@@ -120,10 +125,6 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     if (artists.some((artist) => !artist)) {
         return res.status(404).json({ message: 'One or more artists were not found.' });
     }
-    if (artists.some((artist) => !ensureOwnerOrAdmin(authReq, String(artist.createdBy ?? '')))) {
-        return res.status(403).json({ message: 'One or more artists cannot be modified by this user.' });
-    }
-
     const genres = parseStringArray(req.body.genres);
     const albumId: string = req.body.albumId;
     const releaseDateValue = parseJsonField(req.body.releaseDate);
@@ -191,15 +192,14 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
 
     const audioTrackId: string = req.params.audioTrackId;
     const audioTrack = await AudioTrack.findById(audioTrackId);
     if (!audioTrack) {
         return res.status(404).json({ message: 'Audio track not found.' });
-    }
-
-    if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
-        return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -211,7 +211,7 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
         if (!artistIds[0]) {
             return res.status(400).json({ message: 'At least one artistId is required.' });
         }
-        const validation = await validateOwnedContentReferences(authReq, 'artist', artistIds);
+        const validation = await validateContentReferences('artist', artistIds);
         if (!validation.valid) {
             return res.status(400).json({ message: validation.message });
         }
@@ -221,7 +221,7 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     if (req.body.albumId !== undefined) {
         const albumId = String(req.body.albumId ?? '').trim();
         if (albumId) {
-            const validation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+            const validation = await validateContentReferences('album', [albumId]);
             if (!validation.valid) {
                 return res.status(400).json({ message: validation.message });
             }
@@ -469,9 +469,9 @@ export const downloadAudioTrack = async (
 // Get all audio tracks via the model and return them
 export const getAudioTracks = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
-        const offset = Math.max(0, Number(req.query.offset) || 0);
-        const audioTracks = await AudioTrack.fetchAll(limit, offset);
+        const limit = boundedLimit(req.query.limit, 50, 100);
+        const offset = boundedOffset(req.query.offset);
+        const audioTracks = await listPublicAudioTracks(limit, offset);
         return res.status(200).json({ audioTracks, limit, offset });
     } catch (error) {
         return next(error);
@@ -485,16 +485,15 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const audioTrackId: string = req.params.audioTrackId;
         const audioTrack = await AudioTrack.findById(audioTrackId);
 
         if (!audioTrack) {
             return res.status(404).json({ message: 'Audio track not found.' });
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
-            return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
         }
 
         try {
@@ -530,16 +529,15 @@ export const uploadAudioTrackFile = async (req: Request, res: Response, next: Ne
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const audioTrackId: string = req.params.audioTrackId;
         const audioTrack = await AudioTrack.findById(audioTrackId);
 
         if (!audioTrack) {
             return res.status(404).json({ message: 'Audio track not found.' });
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
-            return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
         }
 
         const uploadFile = (req as Request & { file?: Express.Multer.File }).file;

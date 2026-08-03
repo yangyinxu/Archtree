@@ -1,6 +1,5 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
-import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { UserLibrary } from '../models/userLibrary';
 
 export type ContentReferenceType = 'artist' | 'album' | 'audioTrack';
@@ -17,8 +16,8 @@ export type ContentReferenceValidation = {
     message?: string;
 };
 
-export const validateOwnedContentReferences = async (
-    req: AuthenticatedRequest,
+/** Validates administrator-selected shared references without treating provenance as permission. */
+export const validateContentReferences = async (
     type: ContentReferenceType,
     values: string[]
 ): Promise<ContentReferenceValidation> => {
@@ -59,7 +58,7 @@ export const validateOwnedContentReferences = async (
     const documents = await db.collection(config.collection).find({
         _id: { $in: ids.map((id) => ObjectId.createFromHexString(id)) }
     }, {
-        projection: { createdBy: 1 }
+        projection: { _id: 1 }
     }).toArray();
     const documentsById = new Map(documents.map((document) => [String(document._id), document]));
 
@@ -69,18 +68,6 @@ export const validateOwnedContentReferences = async (
             valid: false,
             ids,
             message: `${config.label} ID "${missingId}" does not refer to an existing ${config.label.toLowerCase()}.`
-        };
-    }
-
-    const inaccessibleId = ids.find((id) => {
-        const document = documentsById.get(id);
-        return req.auth?.role !== 'admin' && String(document?.createdBy ?? '') !== req.auth?.userId;
-    });
-    if (inaccessibleId) {
-        return {
-            valid: false,
-            ids,
-            message: `${config.label} ID "${inaccessibleId}" belongs to content you cannot modify.`
         };
     }
 

@@ -91,14 +91,14 @@ export class AudioTrack {
             .then(normalizeAudioTrackText);
     }
 
-    // fetch all audio tracks from the database
+    /** Returns a stable global Soundtrack page, including admin-visible lifecycle states. */
     static fetchAll(limit: number = 50, offset: number = 0) {
         const db = getDb();
 
-        // fetch all audio tracks from the database
         return db!
             .collection(collectionId)
             .find()
+            .sort({ _id: 1 })
             .skip(offset)
             .limit(limit)
             .toArray()

@@ -45,14 +45,14 @@ export class Album {
             .then(withDerivedCoverArtUrl);
     }
 
-    // fetch all albums from the database
+    /** Returns a stable global Album page for public reads and admin inventory. */
     static fetchAll(limit: number = 50, offset: number = 0) {
         const db = getDb();
 
-        // fetch all albums from the database
         return db!
             .collection('albums')
             .find()
+            .sort({ _id: 1 })
             .skip(offset)
             .limit(limit)
             .toArray()

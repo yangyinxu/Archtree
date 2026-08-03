@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 
 import { getDb } from '../infrastructure/database';
-import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import {
     CollectionContentType,
     CollectionDynamicSource,
@@ -11,6 +11,7 @@ import {
     ContentCollection
 } from '../models/contentCollection';
 import { Page, PageSlug } from '../models/page';
+import { boundedLimit, boundedOffset } from '../utils/pagination';
 
 export type ContentCollectionDefinition = {
     presentation: CollectionPresentation;
@@ -20,7 +21,6 @@ export type ContentCollectionDefinition = {
 };
 
 const isObjectId = (value: string) => ObjectId.isValid(value);
-const ownerId = (document: any) => String(document?.createdBy ?? '');
 const pageSlug = (value: unknown): PageSlug | null => {
     const normalized = String(value ?? '').trim().toLowerCase();
     return normalized === 'home' || normalized === 'library' ? normalized : null;
@@ -67,6 +67,9 @@ export const createContentCollection = async (req: Request, res: Response, next:
         const name = String(req.body.name ?? '').trim();
         const definition = parseContentCollectionDefinition(req.body);
         if (!authReq.auth) return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
         if (!name || !definition) {
             return res.status(400).json({ message: 'A valid Grid/List definition is required.' });
         }
@@ -94,8 +97,15 @@ export const listContentCollections = async (req: Request, res: Response, next: 
     try {
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
+        const limit = boundedLimit(req.query.limit, 50, 100);
+        const offset = boundedOffset(req.query.offset);
         return res.status(200).json({
-            contentCollections: await ContentCollection.fetchByCreator(authReq.auth.userId)
+            contentCollections: await ContentCollection.fetchAll(limit, offset),
+            limit,
+            offset
         });
     } catch (error) {
         return next(error);
@@ -108,6 +118,9 @@ export const attachContentCollectionToPage = async (req: Request, res: Response,
         const slug = pageSlug(req.params.slug);
         const collectionId = String(req.body.collectionId ?? '').trim();
         if (!authReq.auth) return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
         if (!slug || !isObjectId(collectionId)) {
             return res.status(400).json({ message: 'Invalid page slug or collectionId.' });
         }
@@ -116,10 +129,6 @@ export const attachContentCollectionToPage = async (req: Request, res: Response,
             ContentCollection.findById(collectionId)
         ]);
         if (!page || !collection) return res.status(404).json({ message: 'Page or Grid/List not found.' });
-        if (!ensureOwnerOrAdmin(authReq, ownerId(page))
-            || !ensureOwnerOrAdmin(authReq, ownerId(collection))) {
-            return res.status(403).json({ message: 'Forbidden: creator or admin only.' });
-        }
         const items = await Page.addCollectionItem(
             slug,
             collection.presentation,
@@ -139,14 +148,14 @@ export const removeContentCollectionFromPage = async (req: Request, res: Respons
         const slug = pageSlug(req.params.slug);
         const collectionId = String(req.params.collectionId ?? '').trim();
         if (!authReq.auth) return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
         if (!slug || !isObjectId(collectionId)) {
             return res.status(400).json({ message: 'Invalid page slug or collectionId.' });
         }
         const page: any = await Page.findBySlug(slug);
         if (!page) return res.status(404).json({ message: 'Page not found.' });
-        if (!ensureOwnerOrAdmin(authReq, ownerId(page))) {
-            return res.status(403).json({ message: 'Forbidden: creator or admin only.' });
-        }
         return res.status(200).json({
             message: 'Grid/List detached from page.',
             items: await Page.removeCollectionItem(slug, collectionId, authReq.auth.userId)
@@ -162,14 +171,14 @@ export const addContentCollectionItem = async (req: Request, res: Response, next
         const collectionId = String(req.params.collectionId ?? '').trim();
         const contentId = String(req.body.contentId ?? '').trim();
         if (!authReq.auth) return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
         if (!isObjectId(collectionId) || !isObjectId(contentId)) {
             return res.status(400).json({ message: 'Valid collectionId and contentId are required.' });
         }
         const collection: any = await ContentCollection.findById(collectionId);
         if (!collection) return res.status(404).json({ message: 'Grid/List not found.' });
-        if (!ensureOwnerOrAdmin(authReq, ownerId(collection))) {
-            return res.status(403).json({ message: 'Forbidden: creator or admin only.' });
-        }
         if (collection.mode !== 'manual') {
             return res.status(400).json({ message: 'Dynamic Grid/List items cannot be changed manually.' });
         }
@@ -196,14 +205,14 @@ export const reorderContentCollectionItems = async (req: Request, res: Response,
         const fromIndex = index(req.body.fromIndex);
         const toIndex = index(req.body.toIndex);
         if (!authReq.auth) return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
         if (!isObjectId(collectionId) || fromIndex === null || toIndex === null) {
             return res.status(400).json({ message: 'Valid collectionId and indexes are required.' });
         }
         const collection: any = await ContentCollection.findById(collectionId);
         if (!collection) return res.status(404).json({ message: 'Grid/List not found.' });
-        if (!ensureOwnerOrAdmin(authReq, ownerId(collection))) {
-            return res.status(403).json({ message: 'Forbidden: creator or admin only.' });
-        }
         if (collection.mode !== 'manual') {
             return res.status(400).json({ message: 'Dynamic Grid/List items cannot be reordered.' });
         }
@@ -222,12 +231,12 @@ export const deleteContentCollection = async (req: Request, res: Response, next:
         const authReq = req as AuthenticatedRequest;
         const collectionId = String(req.params.collectionId ?? '').trim();
         if (!authReq.auth) return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
         if (!isObjectId(collectionId)) return res.status(400).json({ message: 'Invalid collectionId.' });
         const collection: any = await ContentCollection.findById(collectionId);
         if (!collection) return res.status(404).json({ message: 'Grid/List not found.' });
-        if (!ensureOwnerOrAdmin(authReq, ownerId(collection))) {
-            return res.status(403).json({ message: 'Forbidden: creator or admin only.' });
-        }
         await Page.detachCollectionFromAllPages(collectionId, authReq.auth.userId);
         await ContentCollection.deleteById(collectionId);
         return res.status(200).json({ message: 'Grid/List deleted successfully.' });

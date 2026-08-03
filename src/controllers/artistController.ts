@@ -1,15 +1,20 @@
 import { Request, Response, NextFunction } from 'express';
 import { Artist } from '../models/artist';
 import { SimpleDate } from '../models/simpleDate';
-import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
+import { getPublicArtist, listPublicArtists } from '../services/publicCatalogService';
+import { boundedLimit, boundedOffset } from '../utils/pagination';
 
 // Create a new artist via the model and save it to the db
 export const postArtist = async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
+    }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
     }
 
     const name: string = req.body.name;
@@ -63,15 +68,14 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
 
     const artistId = req.params.artistId;
     const artist = await Artist.findById(artistId);
     if (!artist) {
         return res.status(404).json({ message: 'Artist not found.' });
-    }
-
-    if (!ensureOwnerOrAdmin(authReq, artist.createdBy ?? '')) {
-        return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -110,15 +114,14 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
 
     const artistId = req.params.artistId;
     const artist = await Artist.findById(artistId);
     if (!artist) {
         return res.status(404).json({ message: 'Artist not found.' });
-    }
-
-    if (!ensureOwnerOrAdmin(authReq, artist.createdBy ?? '')) {
-        return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
     }
 
     await deleteCoverArt(artist.coverArtId);
@@ -129,7 +132,7 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
 // get an artist via the model and return it
 export const getArtistById = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const artist = await Artist.findById(req.params.artistId);
+        const artist = await getPublicArtist(req.params.artistId);
         return res.status(artist ? 200 : 404).json({ artist });
     } catch (error) {
         return next(error);
@@ -139,9 +142,9 @@ export const getArtistById = async (req: Request, res: Response, next: NextFunct
 // get all artists via the model and return them
 export const getArtists = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
-        const offset = Math.max(0, Number(req.query.offset) || 0);
-        const artists = await Artist.fetchAll(limit, offset);
+        const limit = boundedLimit(req.query.limit, 50, 100);
+        const offset = boundedOffset(req.query.offset);
+        const artists = await listPublicArtists(limit, offset);
         return res.status(200).json({ artists, limit, offset });
     } catch (error) {
         return next(error);

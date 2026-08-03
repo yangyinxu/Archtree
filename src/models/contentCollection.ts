@@ -83,6 +83,16 @@ export class ContentCollection {
             .toArray();
     }
 
+    /** Returns a stable global Grid/List inventory slice for administrator workflows. */
+    static fetchAll(limit: number = 100, offset: number = 0) {
+        return getDb()!.collection(collectionId)
+            .find()
+            .sort({ updatedAt: -1, _id: 1 })
+            .skip(offset)
+            .limit(limit)
+            .toArray();
+    }
+
     static fetchByIds(ids: string[]) {
         const objectIds = ids.filter(Boolean).map((id) => ObjectId.createFromHexString(id));
         if (objectIds.length === 0) return Promise.resolve([]);

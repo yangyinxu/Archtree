@@ -1,16 +1,21 @@
 import { Request, Response, NextFunction } from 'express';
 import { Album } from '../models/album';
 import { SimpleDate } from '../models/simpleDate';
-import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import { cleanupDeletedContentReferences } from '../services/contentReferenceService';
+import { getPublicAlbum, listPublicAlbums } from '../services/publicCatalogService';
+import { boundedLimit, boundedOffset } from '../utils/pagination';
 
 // Create a new album via the model and save it to the db
 export const postAlbum = async (req: Request, res: Response, next: NextFunction) => {
     const authReq = req as AuthenticatedRequest;
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
+    }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
     }
 
     const title: string = req.body.title;
@@ -61,15 +66,14 @@ export const updateAlbum = async (req: Request, res: Response, next: NextFunctio
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
 
     const albumId = req.params.albumId;
     const album = await Album.findById(albumId);
     if (!album) {
         return res.status(404).json({ message: 'Album not found.' });
-    }
-
-    if (!ensureOwnerOrAdmin(authReq, album.createdBy ?? '')) {
-        return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -107,15 +111,14 @@ export const deleteAlbum = async (req: Request, res: Response, next: NextFunctio
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
 
     const albumId = req.params.albumId;
     const album = await Album.findById(albumId);
     if (!album) {
         return res.status(404).json({ message: 'Album not found.' });
-    }
-
-    if (!ensureOwnerOrAdmin(authReq, album.createdBy ?? '')) {
-        return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
     }
 
     await deleteCoverArt(album.coverArtId);
@@ -127,7 +130,7 @@ export const deleteAlbum = async (req: Request, res: Response, next: NextFunctio
 // get an album via the model and return it
 export const getAlbumById = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const album = await Album.findById(req.params.albumId);
+        const album = await getPublicAlbum(req.params.albumId);
         return res.status(album ? 200 : 404).json({ album });
     } catch (error) {
         return next(error);
@@ -137,9 +140,9 @@ export const getAlbumById = async (req: Request, res: Response, next: NextFuncti
 // get all albums via the model and return them
 export const getAlbums = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
-        const offset = Math.max(0, Number(req.query.offset) || 0);
-        const albums = await Album.fetchAll(limit, offset);
+        const limit = boundedLimit(req.query.limit, 50, 100);
+        const offset = boundedOffset(req.query.offset);
+        const albums = await listPublicAlbums(limit, offset);
         return res.status(200).json({ albums, limit, offset });
     } catch (error) {
         return next(error);

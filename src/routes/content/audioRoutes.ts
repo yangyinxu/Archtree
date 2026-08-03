@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import * as audioTrackController from '../../controllers/audioTrackController';
-import { requireAuth } from '../../middleware/authMiddleware';
+import { requireAdmin, requireAuth } from '../../middleware/authMiddleware';
 import {
     audioUpload,
     cleanupTemporaryUploads,
@@ -13,11 +13,11 @@ import { asyncHandler, attachRequestAbortSignal, publicReadRateLimit, uploadConc
 
 const router: Router = express.Router();
 
-router.post('/audioTrack', requireAuth, uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + maxImageUploadMb + 2), audioWithCoverArtUpload, audioTrackController.postAudioTrack);
-router.put('/audioTrack/:audioTrackId', requireAuth, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), audioTrackController.updateAudioTrack);
+router.post('/audioTrack', requireAuth, requireAdmin, uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + maxImageUploadMb + 2), audioWithCoverArtUpload, audioTrackController.postAudioTrack);
+router.put('/audioTrack/:audioTrackId', requireAuth, requireAdmin, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), audioTrackController.updateAudioTrack);
 router.get('/audioTrack/:audioTrackId', limitMediaConcurrencyFor('playback'), audioTrackController.getAudioTrackById);
-router.post('/audioTrack/:audioTrackId/upload', requireAuth, uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + 1), audioUpload.single('audioFile'), audioTrackController.uploadAudioTrackFile);
-router.delete('/audioTrack/:audioTrackId', requireAuth, audioTrackController.deleteAudioTrack);
+router.post('/audioTrack/:audioTrackId/upload', requireAuth, requireAdmin, uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + 1), audioUpload.single('audioFile'), audioTrackController.uploadAudioTrackFile);
+router.delete('/audioTrack/:audioTrackId', requireAuth, requireAdmin, audioTrackController.deleteAudioTrack);
 router.get('/audioTrack/aws/:audioTrackId', limitMediaConcurrencyFor('playback'), audioTrackController.getAudioFile);
 router.head('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrencyFor('download'), audioTrackController.headAudioTrackDownload);
 router.get('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrencyFor('download'), audioTrackController.downloadAudioTrack);
