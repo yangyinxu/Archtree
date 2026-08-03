@@ -11,7 +11,7 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   to the recent-activity lists described below.
 - Unsaving content removes it from Recently Saved immediately.
 - The iOS Library tab renders one dynamic, vertically scrolling list rather
-  than creator-configured page items.
+  than administrator-configured page items.
 - The Library list contains the union of every saved album and soundtrack and
   every device-local album and soundtrack download. Matching saved and
   downloaded representations are one row, keyed by canonical content type and
@@ -29,6 +29,50 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - The Save control remains visible while signed out and uses disabled styling.
   Tapping it shows a sign-in-required error alert; it does not open login
   automatically.
+
+## User Playlists
+
+- Authenticated listeners can create, edit, and delete their own Playlists.
+  Archtree provides the shared server-backed Playlist contract used by Web and
+  future iOS clients.
+- Desktop Web displays a New Playlist control and the signed-in listener's
+  Playlist list in the left sidebar below primary navigation. The reference
+  layout informs hierarchy without copying another product's branding or exact
+  components.
+- Server-backed Playlists do not add Web downloads or implement iOS Downloaded
+  Playlists. Web remains streaming-only, and native offline Playlist behavior
+  requires a separate future contract.
+
+## Catalog Visibility and Administration
+
+- Finitude authorization has two product classes: `admin` and ordinary `user`.
+  Any account whose persisted role is missing, unknown, or not exactly `admin`
+  is treated as a user. `createdBy` records content provenance and does not
+  grant a creator role or mutation permission.
+- Public registration and federated account creation produce ordinary users.
+  Administrator promotion is a controlled operational database action; there
+  is no public role-promotion endpoint.
+- Signed-out visitors, users, and admins can browse every database-confirmed
+  ready or published Artist, Album, Soundtrack, configured public page item,
+  Feed Post, stream, and public catalog artwork. Public visibility does not
+  depend on the viewer role or the record's `createdBy` value.
+- Pending, failed, deleting, orphaned, or otherwise non-ready lifecycle data is
+  not public. Private account data, including avatars, saves, activity,
+  sessions, and account metadata, is not part of the public catalog.
+- A public Feed Post may retain its opaque author `userId` as content
+  attribution for existing clients. That reference does not make the author's
+  profile, avatar, email, account metadata, or other private state public.
+- Only admins can create, update, delete, upload, link, reorder, or otherwise
+  mutate shared Artists, Albums, Soundtracks, Feed Posts, assets, content
+  relationships, Pages, Carousels, Grids, and Lists.
+- Only admins can see or access Content Manager. Hiding its navigation is not
+  an authorization boundary; direct page, form, API, and upload requests must
+  enforce the same administrator role before processing a mutation.
+- Admins manage the global shared catalog regardless of `createdBy`, while
+  retaining that field for provenance and lifecycle auditing.
+- Ordinary users continue to manage their own saves, Library state, Recently
+  Played activity, profile/avatar, account, device-local downloads, and
+  Playlists. These owner-scoped actions do not mutate the shared catalog.
 
 ## Personalized Carousels
 
@@ -84,9 +128,9 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 
 ## Web Listener
 
-- The Web listener renders creator-configured Carousel, Grid, and List Home
-  sections in persisted order. A client limitation on another platform does
-  not change the configured presentation type.
+- The Web listener renders administrator-configured Carousel, Grid, and List
+  Home sections in persisted order. A client limitation on another platform
+  does not change the configured presentation type.
 - The Web Library is the complete server-backed union of saved Albums and
   Soundtracks. Web is streaming-only: it provides no Download action, Download
   filter, offline state, or browser-local Finitude media lifecycle. An ordinary
@@ -99,7 +143,7 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   move the player or the surrounding application shell.
 - The Archtree landing page presents a visible Finitude Web entry to signed-out
   and signed-in visitors. Public browsing does not require authentication, and
-  the entry does not replace creator-management or account actions.
+  the entry does not replace content-management or account actions.
 - Web logout clears account-scoped server-state caches and that account's local
   search history, but it does not stop an already-playing public stream.
 - Browser Media Session controls are a progressive enhancement over the same
@@ -232,7 +276,7 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   completed downloads.
 - Built-in device-download collections that include multiple transfer states
   use the headings Downloads — Albums and Downloads — Songs. Configured page
-  items retain their creator-defined names. Individual entries show their
+  items retain their configured names. Individual entries show their
   actual state, such as Download Complete, Downloading, Download Paused, or
   Download Failed; incomplete items are never labeled as completed.
 - Logout durably pauses active transfers by ending authenticated network tasks
@@ -264,8 +308,8 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   Manual definitions contain explicitly curated content references; dynamic
   definitions resolve items from a declared source and cannot be manually
   edited, reordered, or mixed with manual references.
-- Content Manager creators can add, remove, and reorder albums in a manual Grid.
-  The initial manual Grid contract is album-only.
+- Content Manager administrators can add, remove, and reorder albums in a
+  manual Grid. The initial manual Grid contract is album-only.
 - Content Manager shows every page's configured Carousel, Grid, and List items
   in persisted order, including each item's resolved name, source mode, and ID.
   Missing or unsupported references remain visible as warnings rather than
@@ -409,11 +453,13 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   passkey method remains available for account recovery.
 - Listeners can clear Recently Played activity without removing saved albums
   or audio tracks.
-- Listener deletion removes saved content, recent activity, authentication
-  actions, provider identities, and sessions before removing the user.
-- Creator deletion fails without changing the account while creator-owned
-  content remains. Owned content must first be transferred or deleted through
-  its normal database/S3 lifecycle.
+- Listener deletion removes saved content, recent activity, Playlists,
+  authentication actions, provider identities, and sessions before removing
+  the user.
+- Account deletion fails without changing the account while shared catalog
+  records still retain that account's `createdBy` provenance. An administrator
+  must first reassign that provenance or delete the affected shared records
+  through their normal database/S3 lifecycle.
 - Saved content and recent activity belong to the authenticated viewer.
 - The same personalized carousel definition resolves differently for each user.
 - A signed-out viewer receives no personalized carousel items.
@@ -442,7 +488,7 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   database metadata. If S3 deletion fails, retain the database record with a
   failed-deletion state so the operation can be retried or reconciled.
 - Database references to deleted content, including album, artist, carousel,
-  saved-content, and recent-activity references, must be cleaned up
+  Playlist, saved-content, and recent-activity references, must be cleaned up
   idempotently.
 - Shared assets or references must not be deleted merely because one referencing
   record is removed.

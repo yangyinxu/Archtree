@@ -11,7 +11,7 @@ import { recordSecurityEvent } from '../services/securityAuditService';
 import { evaluatePassword } from '../services/passwordPolicyService';
 import { describeSessionDevice } from '../services/deviceSessionService';
 
-const creatorCollections = [
+const catalogProvenanceCollections = [
     'artists',
     'albums',
     'audioTracks',
@@ -131,17 +131,17 @@ export const unlinkProvider = async (req: Request, res: Response) => {
     return res.status(204).send();
 };
 
-/** Deletes listener data atomically enough to retry, while creator accounts fail closed. */
+/** Deletes personal data while preserving shared-catalog provenance references. */
 export const deleteAccount = async (req: Request, res: Response) => {
     const auth = (req as AuthenticatedRequest).auth!;
     const db = getDb()!;
-    for (const collection of creatorCollections) {
-        const ownershipQuery = collection === 'imageAssets'
+    for (const collection of catalogProvenanceCollections) {
+        const provenanceQuery = collection === 'imageAssets'
             ? { createdBy: auth.userId, ownerType: { $ne: 'user' } }
             : { createdBy: auth.userId };
-        if (await db.collection(collection).findOne(ownershipQuery, { projection: { _id: 1 } })) {
+        if (await db.collection(collection).findOne(provenanceQuery, { projection: { _id: 1 } })) {
             return res.status(409).json({
-                message: 'Creator-owned content must be transferred or deleted before this account can be removed.'
+                message: 'Shared catalog records still reference this account as provenance. An administrator must reassign that provenance or delete those records before the account can be removed.'
             });
         }
     }

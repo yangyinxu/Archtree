@@ -273,7 +273,7 @@ test('account deletion preserves the account until its avatar is explicitly remo
     assert.ok(await AuthSession.findActiveById(sessionId));
 });
 
-test('creator deletion fails without mutating account data while owned content remains', async () => {
+test('account deletion preserves the account while shared catalog provenance remains', async () => {
     const userId = new ObjectId();
     const userIdString = userId.toString();
     await getDb()!.collection('users').insertOne({
@@ -299,6 +299,10 @@ test('creator deletion fails without mutating account data while owned content r
     await deleteAccount(authenticatedRequest(userIdString, sessionId), capture.response);
 
     assert.equal(capture.statusCode, 409);
+    assert.equal(
+        capture.body?.message,
+        'Shared catalog records still reference this account as provenance. An administrator must reassign that provenance or delete those records before the account can be removed.'
+    );
     assert.ok(await getDb()!.collection('users').findOne({ _id: userId }));
     assert.ok(await AuthSession.findActiveById(sessionId));
     assert.ok(await getDb()!.collection('albums').findOne({ createdBy: userIdString }));

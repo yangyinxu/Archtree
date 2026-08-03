@@ -175,6 +175,16 @@ The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, and authenticated Library
 responses without exposing storage lifecycle fields. Public audio streaming is
 limited to database-confirmed `ready` tracks and preserves HTTP Range seeking.
+Legacy native-client reads under `/content` and `/feed` also remain available
+without authentication. Their Artist, Album, Soundtrack, Page, Carousel,
+Grid/List, and Feed Post responses use explicit public projections rather than
+raw MongoDB documents. Soundtrack list, search, Album relationship, personalized
+section, and expanded-page queries filter for `uploadStatus: ready` plus a
+non-blank `s3Key` before applying item limits or pagination. Public responses do
+not expose `createdBy`, `updatedBy`, `coverArtId`, object keys, upload errors,
+original filenames, or lifecycle timestamps. Feed Posts retain only their
+existing opaque author reference; it cannot be used to read private account or
+avatar data.
 Finitude Web is streaming-only and exposes no Download action, Download filter,
 offline state, or browser-local media lifecycle; native-client downloads remain
 a separate product capability.
@@ -186,7 +196,8 @@ avatars remain private behind `/auth/avatar`. Finitude Web derives responsive
 CPU-concurrency bounded responses and never create extra S3 objects; the
 original image route remains the fallback and native-client contract.
 The Archtree landing page links both signed-out and signed-in visitors to
-`/listen` while preserving its existing creator and authentication actions.
+`/listen` while preserving its existing content-management and authentication
+actions. Content-management actions are rendered only for administrators.
 
 `POST /api/listener/v1/telemetry` accepts only same-origin JSON envelopes of
 one to ten bounded anonymous events. It has an independent 16 KiB body limit,
@@ -335,16 +346,50 @@ App session endpoints:
 - `DELETE /auth/activity/listening-history`
 - `DELETE /auth/account`
 
+Account roles:
+
+- Public registration and federated sign-in create ordinary `user` accounts.
+- Only the exact database role `admin` grants shared-content management access;
+  missing, legacy, or unknown role values are treated as `user`.
+- There is no public role-promotion endpoint. An operator may promote or demote
+  one verified account by updating that account's `users.role` field directly
+  to `admin` or `user`, using an exact `_id` match and verifying that exactly
+  one record matched.
+- Authorization reloads the current database role for each request, so a role
+  change applies without trusting a stale role claim from an access token.
+- `createdBy` remains internal provenance. It does not grant an owner/creator
+  role and never lets an ordinary user mutate shared content.
+
+Shared-content authorization:
+
+- Artist, Album, Soundtrack, audio upload, Page, Carousel, Grid/List,
+  relationship, and Feed Post mutations require authentication and the exact
+  database-backed `admin` role.
+- Authentication and admin authorization run before JSON/form parsing for
+  shared mutations and before multipart decoding, temporary-file creation,
+  upload throttling, or controller work.
+- Public Catalog, Search, Home, Feed, artwork, and ready stream reads do not
+  require authentication and do not filter by `createdBy` or viewer role.
+- Personal `/content/me/*`, account, avatar, session, activity, Save, Library,
+  download, and future own-Playlist operations remain owner-scoped rather than
+  administrator-only.
+
 Web content management:
 
+- Every Content Manager page, search, form, upload, and backing shared-content
+  mutation is administrator-only. Anonymous browser requests are sent to login;
+  an authenticated non-admin receives `403`.
 - `GET /content/manage`
 - `GET /content/manage/audio-tracks`
 - `GET /content/manage/search`
+- Administrator inventory is global rather than `createdBy`-scoped. Artist,
+  Album, Soundtrack, Page, Carousel, and Grid/List sections use stable bounded
+  pagination; internal provenance remains available for audit.
 - Create/update/delete forms for artists, albums, and audio tracks
 - Single and bulk audio-track creation record filenames and a pending upload state before sending files to S3
-- Every newly uploaded track requires at least one owned artist. `audioTrack.artistIds` is the canonical artist-to-track relationship.
+- Every newly uploaded track requires at least one existing artist. `audioTrack.artistIds` is the canonical artist-to-track relationship.
 - Artist responses no longer expose the legacy `audioTrackIds` field. Clients should find an artist's tracks by querying audio tracks whose `artistIds` contains the artist ID.
-- Content Manager reference fields validate IDs against the expected owned content type before saving.
+- Content Manager reference fields validate IDs against the expected shared content type before saving.
 - Artist, album, and audio-track create/update forms accept optional JPG, PNG, or WebP cover art through the `coverArtFile` multipart field.
 - Cover art is stored in the private S3 bucket and referenced by `coverArtId`. API responses derive `coverArtUrl` as `/content/images/:imageId`.
 - Replacing cover art attaches the new image before deleting the old object. Deleting an artist, album, or audio track deletes its tracked cover-art object before removing its database record.
@@ -355,7 +400,7 @@ Artist carousels:
 
 - Manual carousels keep an explicitly managed item list.
 - Manual carousels can be renamed without changing their items.
-- Artist carousels dynamically resolve either albums or audio tracks for one owned artist.
+- Artist carousels dynamically resolve either albums or audio tracks for one existing artist.
 - Album carousels use the artist's `albumIds`; audio-track carousels query `AudioTrack.artistIds`.
 - Dynamic results support newest-release or title sorting and a configurable limit from 1 to 100.
 - Artist carousel items cannot be manually added, reordered, or moved between carousels.
@@ -371,8 +416,10 @@ Personalized Library:
   or Recently Played and resolve for the viewer requesting an expanded page.
 - Each recent history is capped at 20 mixed-content entries; the full saved
   relationship is retained separately.
-- Expanded page responses include the resolved album and audio-track documents
-  in an additive `included` payload.
+- Expanded page responses include allowlisted resolved Album, Soundtrack, and
+  Feed Post documents in an additive `included` payload. Referenced Posts are
+  hydrated independently of the default Feed page, so older configured items
+  remain discoverable.
 - Included audio tracks expose `displayCoverArtUrl`, resolving track-specific
   cover art first and linked album cover art second. Linked albums used for
   this resolution are also included without transferring image ownership.
@@ -403,7 +450,8 @@ Session behavior:
 - Listener avatar writes and destructive account actions also bind to the
   account projected in the page. A stale tab receives a conflict instead of
   mutating whichever account most recently replaced the browser cookies.
-- Protected web pages redirect to login if unauthenticated.
+- Protected web pages redirect to login if unauthenticated. Content Manager
+  additionally requires the current database role to be `admin`.
 
 ## Audio Upload and Delete Lifecycle
 
@@ -416,7 +464,7 @@ Upload:
 - Upload requests require `Content-Length`, are concurrency/rate limited, and temporary files are removed on completion or disconnect.
 - Playback: `GET /content/audioTrack/stream/:audioTrackId` supports bounded single-range responses and cancels the upstream S3 request when the client disconnects.
 - Legacy audio download routes redirect to the streaming endpoint and no longer buffer whole objects in server memory.
-- Authorization required; owner/admin enforced
+- Authorization required; admin enforced before multipart parsing or upload work
 - New tracks are saved with `uploadStatus: pending` before S3 upload, then marked `ready` or `failed`.
 - S3 objects include track ID, owner ID, and encoded original filename metadata.
 - Failed or interrupted uploads remain identifiable in MongoDB and can be retried against the same track.
