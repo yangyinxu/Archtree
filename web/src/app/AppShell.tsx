@@ -71,7 +71,12 @@ const AccountEntry = () => {
 
   return (
     <Link className={styles.account} to={user ? '/account' : '/login'} aria-label={label}>
-      <Avatar displayName={user?.displayName} email={user?.email} />
+      <Avatar
+        avatar={user?.avatar}
+        displayName={user?.displayName}
+        email={user?.email}
+        viewerId={user?.id}
+      />
       <span>{label}</span>
     </Link>
   );

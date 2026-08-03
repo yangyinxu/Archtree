@@ -170,6 +170,17 @@ export const refreshSession = async (refreshToken: string): Promise<SessionToken
     };
 };
 
+/** Identifies an active opaque refresh credential without consuming its one-time rotation. */
+export const refreshSessionIdentity = async (refreshToken: string) => {
+    if (!refreshToken || refreshToken.length > 512) {
+        return null;
+    }
+    const session = await AuthSession.findActiveByRefreshTokenHash(hashRefreshToken(refreshToken));
+    return session
+        ? { userId: session.userId, sessionId: session._id.toString() }
+        : null;
+};
+
 /** Revokes the session identified by an opaque refresh token. */
 export const revokeRefreshSession = async (refreshToken: string) => {
     if (!refreshToken || refreshToken.length > 512) {

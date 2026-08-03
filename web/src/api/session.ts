@@ -38,8 +38,9 @@ export const loginBrowserSession = (input: LoginInput) => {
 };
 
 /** Revokes the rotating session and clears both browser cookies server-side. */
-export const logoutBrowserSession = () => apiRequestNoContent('/auth/browser/logout', {
+export const logoutBrowserSession = (viewerId?: string) => apiRequestNoContent('/auth/browser/logout', {
   method: 'POST',
   body: '{}',
+  headers: viewerId ? { 'X-Finitude-Account-Viewer': viewerId } : undefined,
   retryAuthentication: false
 });

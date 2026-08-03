@@ -19,6 +19,7 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'users', keys: { email: 1 }, options: { unique: true } },
     { collection: 'users', keys: { username: 1 } },
     { collection: 'authSessions', keys: { refreshTokenHash: 1 }, options: { unique: true } },
+    { collection: 'authSessions', keys: { previousRefreshTokenHash: 1 }, options: { sparse: true } },
     { collection: 'authSessions', keys: { userId: 1, revokedAt: 1, expiresAt: -1 } },
     { collection: 'authSessions', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'authActionTokens', keys: { codeHash: 1 } },

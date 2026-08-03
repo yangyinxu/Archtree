@@ -7,9 +7,10 @@ import {
   browserSessionQueryKey,
   logoutBrowserSession
 } from '../../api/session';
-import { Avatar } from '../../components/Avatar';
 import { Icon } from '../../components/Icon';
 import { clearSearchHistory } from '../search/searchHistory';
+import { AccountLifecyclePanel } from './AccountLifecyclePanel';
+import { AvatarSettings } from './avatar';
 import styles from '../../styles/Pages.module.css';
 
 /** Converts safe method identifiers into familiar account labels. */
@@ -27,7 +28,7 @@ export const AccountPage = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const logout = useMutation({
-    mutationFn: logoutBrowserSession,
+    mutationFn: () => logoutBrowserSession(session.data?.user.id),
     onSuccess: () => {
       clearSearchHistory(session.data?.user.id);
       queryClient.clear();
@@ -59,9 +60,9 @@ export const AccountPage = () => {
             <div className={styles.actions}><Link className={styles.primaryLink} to="/login">Log in</Link></div>
           </div>
         ) : (
-          <div>
+          <div className={styles.accountContent}>
+            <AvatarSettings user={session.data.user} />
             <div className={styles.identityRow}>
-              <Avatar displayName={session.data.user.displayName} email={session.data.user.email} />
               <div>
                 <p className={styles.identityTitle}>{session.data.user.displayName || 'Finitude listener'}</p>
                 <p className={styles.identityMeta}>{session.data.user.email}</p>
@@ -111,6 +112,8 @@ export const AccountPage = () => {
           </div>
         )}
       </section>
+
+      {session.data && <AccountLifecyclePanel viewerId={session.data.user.id} />}
     </div>
   );
 };

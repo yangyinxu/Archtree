@@ -2,16 +2,19 @@
 
 ## Status
 
-In progress as of 2026-08-02. The first three implementation slices now provide
+In progress as of 2026-08-02. The first four implementation slices now provide
 the `/listen` workspace and responsive shell, browser-only HttpOnly cookie
 sessions, safe versioned listener DTOs for Home, Search, Album, Artist, Track,
 and Library, ready-only public streaming, real configured discovery content,
 grouped search, detail pages, one persistent browser player, Save/Library UI,
 per-account search history, registration/verification/recovery, signed-in
 device and password management, an expanded mobile player, accessible keyboard
-controls, Express deep-link integration, and server/Web tests. Avatar and
-destructive account management, browser E2E/accessibility automation,
-performance/security rollout checks, and release work remain in later slices.
+controls, private revision-bound avatar loading and crop/preview management,
+listening-history clearing, sign out everywhere, account deletion, strict
+listener CSP/security headers, route-level code splitting, a 150 KiB initial
+route JavaScript budget, Express deep-link integration, and server/Web tests.
+Browser E2E/accessibility automation, observability, load/cross-browser checks,
+and rollout work remain in later slices.
 
 This document is implementation guidance, not the canonical product contract.
 Before implementing a Web-specific behavior, promote the agreed rule to
@@ -734,11 +737,11 @@ navigation make the listener Web app the primary public destination.
 
 This phase is intentionally not scheduled into the first release.
 
-Account-completeness work may include avatar crop/preview/revision behavior,
-provider linking/unlinking, passkey enrollment, active-session revocation,
-change password, sign out everywhere, clear listening history, and account
-deletion. Each flow must preserve the existing partial-failure and private-
-avatar rules.
+Avatar crop/preview/revision behavior, active-session revocation, change
+password, sign out everywhere, clear listening history, and account deletion
+are now implemented on Web. Remaining account-completeness work may include
+provider linking/unlinking and passkey enrollment. Each future flow must
+preserve the existing partial-failure and private-avatar rules.
 
 Before building offline downloads, run a separate feasibility prototype for:
 

@@ -484,6 +484,11 @@
   margin-bottom: 1.5rem;
 }
 
+.accountContent {
+  max-width: 48rem;
+  width: 100%;
+}
+
 .identityTitle {
   color: var(--color-text);
   font-weight: 680;

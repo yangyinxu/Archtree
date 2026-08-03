@@ -14,6 +14,7 @@ import { getDb } from './infrastructure/database';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
 import { maxAvatarUploadMb, maxImageUploadMb } from './middleware/imageUpload';
+import { applySecurityHeaders } from './middleware/securityHeadersMiddleware';
 import { getMediaDeliveryMetrics } from './services/mediaDeliveryService';
 import { requireSameOriginCookieMutation } from './services/authCookieService';
 
@@ -109,12 +110,14 @@ const mountListenerApplication = (app: Application, listenerDistPath: string) =>
 /** Constructs the Express application without connecting to MongoDB or opening a socket. */
 export const createApp = (options: CreateAppOptions = {}): Application => {
   const app: Application = express();
+  app.disable('x-powered-by');
   const defaultProxyHops = 1;
   const configuredProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? defaultProxyHops);
   app.set('trust proxy', Number.isFinite(configuredProxyHops) && configuredProxyHops >= 0
     ? Math.floor(configuredProxyHops)
     : defaultProxyHops);
 
+  app.use(applySecurityHeaders);
   app.use('/assets', express.static(path.join(__dirname, 'public')));
 
   // Parse JSON APIs and browser form submissions before their routers.

@@ -46,28 +46,28 @@ const renderLoginFlow = () => {
   );
 };
 
-test('renders responsive navigation and exactly one persistent player surface', () => {
+test('renders responsive navigation and exactly one persistent player surface', async () => {
   const { container } = renderRoute('/');
 
-  expect(screen.getByRole('heading', { name: 'Leave room for the music.' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Leave room for the music.' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main-content');
   expect(container.querySelectorAll('nav[aria-label="Primary"]')).toHaveLength(2);
   expect(screen.getAllByRole('link', { name: 'Library' })).toHaveLength(1);
   expect(screen.getAllByRole('region', { name: 'Now playing' })).toHaveLength(1);
 });
 
-test('shows authentication-required Library instead of an empty success', () => {
+test('shows authentication-required Library instead of an empty success', async () => {
   renderRoute('/library');
 
-  expect(screen.getByRole('heading', { name: 'Log in to open your Library' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Log in to open your Library' })).toBeInTheDocument();
   expect(screen.getAllByRole('link', { name: 'Log in' }).some((link) => link.getAttribute('href') === '/login')).toBe(true);
 });
 
 test('announces an unknown nested address as not found', async () => {
   renderRoute('/library/unknown');
 
-  expect(document.title).toBe('Page not found · Finitude');
   expect(await screen.findByText('Page not found page')).toBeInTheDocument();
+  expect(document.title).toBe('Page not found · Finitude');
 });
 
 test('logs in through the browser session endpoint and returns Home', async () => {

@@ -110,6 +110,21 @@ event only after the stored refresh-token hash has been atomically replaced.
 Security:
 - Do not commit real credentials.
 - Store production secrets in AWS Secrets Manager or SSM Parameter Store.
+- Express applies one deployment-wide Content Security Policy before static
+  files and routers. Scripts, forms, API requests, and audio stay same-origin;
+  images additionally allow HTTPS cover art plus `blob:`/`data:` previews.
+  Listener HTML, assets, and APIs use strict same-origin styles. Inline-style
+  compatibility is limited to the existing server-rendered Content Manager,
+  legacy login result page, and HTML audio-storage audit. Framing, plugins,
+  base-tag rewriting, inline script attributes, camera, microphone, geolocation,
+  and other unused browser capabilities are blocked.
+- Listener HTML, static assets, API responses, and errors also receive
+  `Referrer-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, and
+  `Permissions-Policy` headers.
+- Production browser session cookies are host-only, `Secure`, `HttpOnly`, and
+  use `SameSite=Lax` for the short-lived access cookie and `SameSite=Strict`
+  for the rotating refresh cookie. Local development omits `Secure` so HTTP
+  loopback testing continues to work.
 - Production authentication routes reject requests unless trusted proxy headers
   identify an HTTPS connection. The single-instance Elastic Beanstalk setup in
   `.platform/hooks` obtains and renews a Let's Encrypt certificate, terminates
@@ -129,7 +144,9 @@ To develop the listener with hot reload, keep the server running and start a
 second process with `npm run dev:web`, then open
 `http://localhost:5173/listen/`. For a production-style local run, use
 `npm run build` first; Express then serves the generated `web/dist` bundle at
-`/listen` and supports listener deep links.
+`/listen` and supports listener deep links. The Web build measures every
+initial route's unique compressed JavaScript and fails if any route exceeds the
+reviewed 150 KiB gzip budget.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, and authenticated Library
@@ -212,6 +229,9 @@ App session endpoints:
 - `POST /auth/logout`
 - `POST /auth/logout-all`
 - `GET /auth/me`
+- `GET /auth/avatar`
+- `PUT /auth/avatar` with `If-Match` and `Idempotency-Key`
+- `DELETE /auth/avatar` with `If-Match` and `Idempotency-Key`
 - `GET /auth/sessions`
 - `DELETE /auth/sessions/:id`
 - `DELETE /auth/identities/:provider`
@@ -272,7 +292,8 @@ Personalized Library:
 
 Session behavior:
 - API login returns a short-lived access token and a rotating opaque refresh
-  token. Only a SHA-256 hash of the refresh token is stored in `authSessions`.
+  token. `authSessions` stores only SHA-256 hashes; the immediately previous
+  hash is retained as revocation-only evidence so logout wins a refresh race.
 - Access tokens default to 15 minutes. Refresh sessions have an absolute
   lifetime of 30 days by default.
 - Refresh rotation is atomic, so a refresh token can succeed only once.
@@ -280,6 +301,11 @@ Session behavior:
   active, allowing logout and logout-all to revoke access immediately.
 - Web login stores the access and refresh credentials in separate HttpOnly
   cookies and rotates them transparently when the access cookie expires.
+- Listener avatar reads bind private bytes to the requesting account and
+  authoritative revision; a stale account projection receives no image bytes.
+- Listener avatar writes and destructive account actions also bind to the
+  account projected in the page. A stale tab receives a conflict instead of
+  mutating whichever account most recently replaced the browser cookies.
 - Protected web pages redirect to login if unauthenticated.
 
 ## Audio Upload and Delete Lifecycle

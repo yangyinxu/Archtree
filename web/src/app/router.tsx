@@ -1,20 +1,40 @@
+import { lazy, Suspense, type ReactNode } from 'react';
 import { createBrowserRouter, type RouteObject } from 'react-router';
 
-import { AccountPage } from '../features/account/AccountPage';
-import { AccountSessionsPage } from '../features/account/AccountSessionsPage';
-import { ChangePasswordPage } from '../features/account/ChangePasswordPage';
-import { ForgotPasswordPage } from '../features/account/ForgotPasswordPage';
-import { LoginPage } from '../features/account/LoginPage';
-import { RegisterPage } from '../features/account/RegisterPage';
-import { ResetPasswordPage } from '../features/account/ResetPasswordPage';
-import { VerifyEmailPage } from '../features/account/VerifyEmailPage';
-import { AlbumPage } from '../features/catalog/AlbumPage';
-import { ArtistPage } from '../features/catalog/ArtistPage';
-import { HomePage } from '../features/home/HomePage';
-import { LibraryPage } from '../features/library/LibraryPage';
-import { SearchPage } from '../features/search/SearchPage';
 import { AppShell } from './AppShell';
 import { NotFoundPage, RouteErrorPage } from './RouteErrorPage';
+import styles from '../styles/Pages.module.css';
+
+const AccountPage = lazy(() => import('../features/account/AccountPage').then(({ AccountPage }) => ({ default: AccountPage })));
+const AccountSessionsPage = lazy(() => import('../features/account/AccountSessionsPage').then(({ AccountSessionsPage }) => ({ default: AccountSessionsPage })));
+const ChangePasswordPage = lazy(() => import('../features/account/ChangePasswordPage').then(({ ChangePasswordPage }) => ({ default: ChangePasswordPage })));
+const ForgotPasswordPage = lazy(() => import('../features/account/ForgotPasswordPage').then(({ ForgotPasswordPage }) => ({ default: ForgotPasswordPage })));
+const LoginPage = lazy(() => import('../features/account/LoginPage').then(({ LoginPage }) => ({ default: LoginPage })));
+const RegisterPage = lazy(() => import('../features/account/RegisterPage').then(({ RegisterPage }) => ({ default: RegisterPage })));
+const ResetPasswordPage = lazy(() => import('../features/account/ResetPasswordPage').then(({ ResetPasswordPage }) => ({ default: ResetPasswordPage })));
+const VerifyEmailPage = lazy(() => import('../features/account/VerifyEmailPage').then(({ VerifyEmailPage }) => ({ default: VerifyEmailPage })));
+const AlbumPage = lazy(() => import('../features/catalog/AlbumPage').then(({ AlbumPage }) => ({ default: AlbumPage })));
+const ArtistPage = lazy(() => import('../features/catalog/ArtistPage').then(({ ArtistPage }) => ({ default: ArtistPage })));
+const HomePage = lazy(() => import('../features/home/HomePage').then(({ HomePage }) => ({ default: HomePage })));
+const LibraryPage = lazy(() => import('../features/library/LibraryPage').then(({ LibraryPage }) => ({ default: LibraryPage })));
+const SearchPage = lazy(() => import('../features/search/SearchPage').then(({ SearchPage }) => ({ default: SearchPage })));
+
+/** Provides an announced route placeholder while a page-specific bundle loads. */
+const RouteLoadingPage = () => (
+  <div className={styles.page}>
+    <section className={styles.panel} role="status">
+      <div>
+        <p className={styles.eyebrow}>Finitude</p>
+        <p className={styles.panelTitle}>Opening your listening room…</p>
+      </div>
+    </section>
+  </div>
+);
+
+/** Keeps each page behind the same accessible suspense boundary. */
+const loadRoute = (page: ReactNode) => (
+  <Suspense fallback={<RouteLoadingPage />}>{page}</Suspense>
+);
 
 export const appRoutes: RouteObject[] = [
   {
@@ -22,19 +42,19 @@ export const appRoutes: RouteObject[] = [
     element: <AppShell />,
     errorElement: <RouteErrorPage />,
     children: [
-      { index: true, element: <HomePage />, errorElement: <RouteErrorPage /> },
-      { path: 'search', element: <SearchPage />, errorElement: <RouteErrorPage /> },
-      { path: 'library', element: <LibraryPage />, errorElement: <RouteErrorPage /> },
-      { path: 'albums/:albumId', element: <AlbumPage />, errorElement: <RouteErrorPage /> },
-      { path: 'artists/:artistId', element: <ArtistPage />, errorElement: <RouteErrorPage /> },
-      { path: 'login', element: <LoginPage />, errorElement: <RouteErrorPage /> },
-      { path: 'register', element: <RegisterPage />, errorElement: <RouteErrorPage /> },
-      { path: 'verify-email', element: <VerifyEmailPage />, errorElement: <RouteErrorPage /> },
-      { path: 'forgot-password', element: <ForgotPasswordPage />, errorElement: <RouteErrorPage /> },
-      { path: 'reset-password', element: <ResetPasswordPage />, errorElement: <RouteErrorPage /> },
-      { path: 'account/sessions', element: <AccountSessionsPage />, errorElement: <RouteErrorPage /> },
-      { path: 'account/password', element: <ChangePasswordPage />, errorElement: <RouteErrorPage /> },
-      { path: 'account', element: <AccountPage />, errorElement: <RouteErrorPage /> },
+      { index: true, element: loadRoute(<HomePage />), errorElement: <RouteErrorPage /> },
+      { path: 'search', element: loadRoute(<SearchPage />), errorElement: <RouteErrorPage /> },
+      { path: 'library', element: loadRoute(<LibraryPage />), errorElement: <RouteErrorPage /> },
+      { path: 'albums/:albumId', element: loadRoute(<AlbumPage />), errorElement: <RouteErrorPage /> },
+      { path: 'artists/:artistId', element: loadRoute(<ArtistPage />), errorElement: <RouteErrorPage /> },
+      { path: 'login', element: loadRoute(<LoginPage />), errorElement: <RouteErrorPage /> },
+      { path: 'register', element: loadRoute(<RegisterPage />), errorElement: <RouteErrorPage /> },
+      { path: 'verify-email', element: loadRoute(<VerifyEmailPage />), errorElement: <RouteErrorPage /> },
+      { path: 'forgot-password', element: loadRoute(<ForgotPasswordPage />), errorElement: <RouteErrorPage /> },
+      { path: 'reset-password', element: loadRoute(<ResetPasswordPage />), errorElement: <RouteErrorPage /> },
+      { path: 'account/sessions', element: loadRoute(<AccountSessionsPage />), errorElement: <RouteErrorPage /> },
+      { path: 'account/password', element: loadRoute(<ChangePasswordPage />), errorElement: <RouteErrorPage /> },
+      { path: 'account', element: loadRoute(<AccountPage />), errorElement: <RouteErrorPage /> },
       { path: '*', element: <NotFoundPage /> }
     ]
   }

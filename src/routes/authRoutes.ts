@@ -30,6 +30,7 @@ import {
 } from '../middleware/requestProtectionMiddleware';
 import {
     requireAuth,
+    requireCurrentAccountViewer,
     requireAuthWhenPresented,
     requireBrowserAuth
 } from '../middleware/authMiddleware';
@@ -241,7 +242,7 @@ router.post('/refresh', authRateLimit, asyncHandler(refresh));
 
 router.post('/logout', authRateLimit, asyncHandler(logout));
 
-router.post('/logout-all', requireAuth, asyncHandler(logoutAll));
+router.post('/logout-all', requireAuth, requireCurrentAccountViewer, asyncHandler(logoutAll));
 
 router.get('/me', requireAuth, asyncHandler(me));
 router.get('/avatar', requireAuth, limitMediaConcurrency, asyncHandler(getAvatar));
@@ -271,9 +272,14 @@ router.post(
     body('newPassword').custom(requireAcceptablePassword),
     asyncHandler(changePassword)
 );
-router.delete('/activity/listening-history', requireAuth, asyncHandler(clearListeningHistory));
+router.delete(
+    '/activity/listening-history',
+    requireAuth,
+    requireCurrentAccountViewer,
+    asyncHandler(clearListeningHistory)
+);
 router.delete('/identities/:provider', requireAuth, asyncHandler(unlinkProvider));
-router.delete('/account', requireAuth, asyncHandler(deleteAccount));
+router.delete('/account', requireAuth, requireCurrentAccountViewer, asyncHandler(deleteAccount));
 router.post('/passkeys/register/options', requireAuth, asyncHandler(registrationOptions));
 router.post('/passkeys/register/verify', requireAuth, asyncHandler(verifyRegistration));
 router.post('/passkeys/authenticate/options', authRateLimit, asyncHandler(authenticationOptions));

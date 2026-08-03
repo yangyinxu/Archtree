@@ -528,7 +528,9 @@
   }
 
   .miniProgress {
+    appearance: none;
     background: rgb(255 255 255 / 0.1);
+    border: 0;
     bottom: 0;
     display: block;
     height: 2px;
@@ -536,12 +538,19 @@
     overflow: hidden;
     position: absolute;
     right: 0.75rem;
+    width: auto;
   }
 
-  .miniProgress span {
+  .miniProgress::-webkit-progress-bar {
+    background: rgb(255 255 255 / 0.1);
+  }
+
+  .miniProgress::-webkit-progress-value {
     background: var(--color-accent);
-    display: block;
-    height: 100%;
+  }
+
+  .miniProgress::-moz-progress-bar {
+    background: var(--color-accent);
   }
 
   .expandedPlayer {
@@ -598,7 +607,7 @@
   }
 
   .expandedPlay,
-  .miniProgress span {
+  .miniProgress {
     forced-color-adjust: none;
   }
 }

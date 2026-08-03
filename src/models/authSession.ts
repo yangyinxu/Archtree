@@ -5,6 +5,7 @@ export interface AuthSessionDocument {
     _id: ObjectId;
     userId: string;
     refreshTokenHash: string;
+    previousRefreshTokenHash?: string;
     createdAt: Date;
     updatedAt: Date;
     expiresAt: Date;
@@ -50,6 +51,7 @@ class AuthSession {
             },
             {
                 $set: {
+                    previousRefreshTokenHash: refreshTokenHash,
                     refreshTokenHash: replacementHash,
                     updatedAt: new Date()
                 }
@@ -73,11 +75,27 @@ class AuthSession {
         });
     }
 
+    /** Resolves an opaque refresh credential without rotating or exposing its hash. */
+    static async findActiveByRefreshTokenHash(refreshTokenHash: string) {
+        const db = getDb();
+        return db!.collection<AuthSessionDocument>('authSessions').findOne({
+            $or: [
+                { refreshTokenHash },
+                { previousRefreshTokenHash: refreshTokenHash }
+            ],
+            revokedAt: { $exists: false },
+            expiresAt: { $gt: new Date() }
+        });
+    }
+
     static async revokeByRefreshTokenHash(refreshTokenHash: string) {
         const db = getDb();
         return db!.collection<AuthSessionDocument>('authSessions').updateOne(
             {
-                refreshTokenHash,
+                $or: [
+                    { refreshTokenHash },
+                    { previousRefreshTokenHash: refreshTokenHash }
+                ],
                 revokedAt: { $exists: false }
             },
             {
@@ -156,7 +174,8 @@ class AuthSession {
                 expiresAt: { $gt: new Date() }
             })
             .project({
-                refreshTokenHash: 0
+                refreshTokenHash: 0,
+                previousRefreshTokenHash: 0
             })
             .sort({ updatedAt: -1 })
             .limit(50)

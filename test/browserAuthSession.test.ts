@@ -84,6 +84,26 @@ test('logout headers expire both browser credentials', () => {
     }
 });
 
+test('production browser credentials are host-only Secure HttpOnly cookies', { concurrency: false }, () => {
+    const previousEnvironment = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+        const active = browserSessionCookieHeaders(tokenPair('access', 'refresh'));
+        const cleared = clearedBrowserSessionCookieHeaders();
+        for (const header of [...active, ...cleared]) {
+            assert.match(header, /; Path=\//);
+            assert.match(header, /; HttpOnly;/);
+            assert.match(header, /; Secure$/);
+            assert.doesNotMatch(header, /; Domain=/i, 'omitting Domain keeps the cookie host-only');
+        }
+        assert.match(active[0], /SameSite=Lax/);
+        assert.match(active[1], /SameSite=Strict/);
+    } finally {
+        if (previousEnvironment === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousEnvironment;
+    }
+});
+
 test('browser mutations reject cross-site and non-JSON requests', () => {
     const sameOrigin = {
         contentType: 'application/json; charset=utf-8',

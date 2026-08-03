@@ -43,10 +43,48 @@ const sendMutationResult = (res: Response, result: { statusCode: number; body?: 
     return res.status(result.statusCode).send();
 };
 
+/** Binds optional Web avatar reads to the session projection that requested them. */
+export const assertAvatarReadIdentity = (
+    req: Request,
+    authenticatedUserId: string,
+    user: Record<string, any> | null
+) => {
+    const requestedViewer = String(req.get('X-Finitude-Avatar-Viewer') ?? '').trim();
+    const requestedRevision = String(req.get('X-Finitude-Avatar-Revision') ?? '').trim();
+    if (requestedViewer && requestedViewer !== authenticatedUserId) {
+        throw Object.assign(new Error('The profile photo identity changed. Refresh the account.'), {
+            statusCode: 409
+        });
+    }
+    if (!requestedRevision) return;
+    const parsedRevision = Number(requestedRevision);
+    if (!Number.isSafeInteger(parsedRevision) || parsedRevision < 0) {
+        throw Object.assign(new Error('A valid avatar revision is required.'), { statusCode: 400 });
+    }
+    if (parsedRevision !== revisionOf(user)) {
+        throw Object.assign(new Error('The profile photo changed. Refresh the account.'), {
+            statusCode: 409
+        });
+    }
+};
+
+/** Prevents a stale Web page from mutating the account that replaced its cookie session. */
+export const assertAvatarMutationViewer = (req: Request, authenticatedUserId: string) => {
+    const requestedViewer = String(req.get('X-Finitude-Avatar-Viewer') ?? '').trim();
+    if (requestedViewer && requestedViewer !== authenticatedUserId) {
+        throw Object.assign(new Error('The active account changed. Refresh the account.'), {
+            statusCode: 409
+        });
+    }
+};
+
 /** Streams only the current avatar owned by the authenticated account. */
 export const getAvatar = async (req: Request, res: Response, next: NextFunction) => {
     const auth = (req as AuthenticatedRequest).auth!;
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     const user = await User.findById(auth.userId) as Record<string, any> | null;
+    assertAvatarReadIdentity(req, auth.userId, user);
     const imageId = String(user?.avatarAssetId ?? '');
     if (!imageId) return res.status(404).json({ message: 'Avatar not found.' });
 
@@ -69,8 +107,6 @@ export const getAvatar = async (req: Request, res: Response, next: NextFunction)
         res.setHeader('Content-Type', String(result.asset.contentType));
         // The app owns an account-scoped cache that it can erase on logout.
         // Shared URL caches must never retain authenticated avatar bytes.
-        res.setHeader('Cache-Control', 'private, no-store');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
         if (result.object.ETag) res.setHeader('ETag', result.object.ETag);
         if (result.object.ContentLength !== undefined) {
             res.setHeader('Content-Length', result.object.ContentLength);
@@ -91,6 +127,7 @@ export const putAvatar = async (req: Request, res: Response, next: NextFunction)
     const auth = (req as AuthenticatedRequest).auth!;
     let mutationId = '';
     try {
+        assertAvatarMutationViewer(req, auth.userId);
         const { idempotencyKey, expectedRevision } = mutationHeaders(req);
         const mutation = await beginAvatarMutation(auth.userId, idempotencyKey, 'replace', expectedRevision);
         mutationId = mutation.mutationId;
@@ -156,6 +193,7 @@ export const deleteAvatar = async (req: Request, res: Response, next: NextFuncti
     const auth = (req as AuthenticatedRequest).auth!;
     let mutationId = '';
     try {
+        assertAvatarMutationViewer(req, auth.userId);
         const { idempotencyKey, expectedRevision } = mutationHeaders(req);
         const mutation = await beginAvatarMutation(auth.userId, idempotencyKey, 'delete', expectedRevision);
         mutationId = mutation.mutationId;

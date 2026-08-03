@@ -37,14 +37,20 @@ const cookieValue = (jar: string, name: string) => jar
 
 const browserMutation = (
     pathname: string,
-    options: { body?: Record<string, unknown>; cookie?: string; origin?: string } = {}
+    options: {
+        body?: Record<string, unknown>;
+        cookie?: string;
+        origin?: string;
+        viewerId?: string;
+    } = {}
 ) => fetch(`${baseUrl}${pathname}`, {
     method: 'POST',
     headers: {
         'Content-Type': 'application/json',
         Origin: options.origin ?? baseUrl,
         'Sec-Fetch-Site': options.origin && options.origin !== baseUrl ? 'cross-site' : 'same-origin',
-        ...(options.cookie ? { Cookie: options.cookie } : {})
+        ...(options.cookie ? { Cookie: options.cookie } : {}),
+        ...(options.viewerId ? { 'X-Finitude-Account-Viewer': options.viewerId } : {})
     },
     body: JSON.stringify(options.body ?? {})
 });
@@ -142,6 +148,17 @@ test('browser login, one-time refresh, session read, and logout keep tokens out 
     assert.equal(session.status, 200);
     assert.equal((await session.json()).user.id, loginBody.user.id);
 
+    const staleViewerLogout = await browserMutation('/auth/browser/logout', {
+        cookie: loginJar,
+        viewerId: 'another-listener'
+    });
+    assert.equal(staleViewerLogout.status, 409);
+    assert.equal(setCookieHeaders(staleViewerLogout).length, 0);
+    const sessionAfterStaleViewer = await fetch(`${baseUrl}/auth/browser/session`, {
+        headers: { Cookie: loginJar }
+    });
+    assert.equal(sessionAfterStaleViewer.status, 200);
+
     const crossSiteCookieMutation = await browserMutation('/auth/logout-all', {
         cookie: loginJar,
         origin: 'https://attacker.example'
@@ -200,6 +217,62 @@ test('logout revokes the stable session even after its refresh token rotated', a
         headers: { Cookie: rotatedJar }
     });
     assert.equal(sessionAfterLogout.status, 401);
+});
+
+test('refresh-only logout remains bound to the account shown by the page', async () => {
+    const login = await browserMutation('/auth/browser/login', {
+        body: { identifier: 'listener@example.com', password: 'correct horse battery staple' }
+    });
+    assert.equal(login.status, 200);
+    const viewerId = (await login.json()).user.id;
+    const jar = cookieJar(setCookieHeaders(login));
+    const refreshOnlyJar = `refresh_token=${cookieValue(jar, 'refresh_token')}`;
+
+    const staleViewerLogout = await browserMutation('/auth/browser/logout', {
+        cookie: refreshOnlyJar,
+        viewerId: 'another-listener'
+    });
+    assert.equal(staleViewerLogout.status, 409);
+    assert.equal(setCookieHeaders(staleViewerLogout).length, 0);
+
+    const matchingLogout = await browserMutation('/auth/browser/logout', {
+        cookie: refreshOnlyJar,
+        viewerId
+    });
+    assert.equal(matchingLogout.status, 204);
+    assert.equal(setCookieHeaders(matchingLogout).length, 2);
+
+    const revokedRefresh = await browserMutation('/auth/browser/refresh', { cookie: refreshOnlyJar });
+    assert.equal(revokedRefresh.status, 401);
+});
+
+test('refresh-only logout revokes a session even when refresh rotates concurrently', async () => {
+    const login = await browserMutation('/auth/browser/login', {
+        body: { identifier: 'listener@example.com', password: 'correct horse battery staple' }
+    });
+    assert.equal(login.status, 200);
+    const viewerId = (await login.json()).user.id;
+    const jar = cookieJar(setCookieHeaders(login));
+    const refreshOnlyJar = `refresh_token=${cookieValue(jar, 'refresh_token')}`;
+
+    const [refresh, logout] = await Promise.all([
+        browserMutation('/auth/browser/refresh', { cookie: refreshOnlyJar }),
+        browserMutation('/auth/browser/logout', { cookie: refreshOnlyJar, viewerId })
+    ]);
+    assert.equal(logout.status, 204);
+    assert.ok([200, 401].includes(refresh.status));
+
+    if (refresh.status === 200) {
+        const rotatedJar = cookieJar(setCookieHeaders(refresh));
+        const refreshAfterLogout = await browserMutation('/auth/browser/refresh', {
+            cookie: rotatedJar
+        });
+        assert.equal(refreshAfterLogout.status, 401);
+        const sessionAfterLogout = await fetch(`${baseUrl}/auth/browser/session`, {
+            headers: { Cookie: rotatedJar }
+        });
+        assert.equal(sessionAfterLogout.status, 401);
+    }
 });
 
 test('signed-out refresh and logout probes cannot exhaust the login limiter', async () => {

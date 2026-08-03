@@ -498,7 +498,7 @@ const renderManagePage = (params: {
         </div>
     </div>
 
-    <script id="composition-data" type="application/json">${compositionData}</script>
+    <div id="composition-data" hidden>${escapeHtml(compositionData)}</div>
 
   <div class="section-heading" id="create"><div><p class="eyebrow">New records</p><h2>Create</h2></div></div>
   <div class="grid">

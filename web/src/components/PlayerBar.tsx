@@ -349,9 +349,12 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
         </div>
 
         {mobile && current && player.duration > 0 && (
-          <div className={styles.miniProgress} aria-hidden="true">
-            <span style={{ width: `${Math.min(100, (player.currentTime / player.duration) * 100)}%` }} />
-          </div>
+          <progress
+            aria-hidden="true"
+            className={styles.miniProgress}
+            max={player.duration}
+            value={Math.min(player.currentTime, player.duration)}
+          />
         )}
       </section>
 

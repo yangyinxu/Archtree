@@ -114,6 +114,25 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     }
 };
 
+/** Rejects stale Web account actions while leaving headerless native clients compatible. */
+export const requireCurrentAccountViewer = (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    const auth = (req as AuthenticatedRequest).auth;
+    if (!auth) {
+        return res.status(401).json({ message: 'Missing or invalid credentials.' });
+    }
+    const requestedViewer = String(req.get('X-Finitude-Account-Viewer') ?? '').trim();
+    if (requestedViewer && requestedViewer !== auth.userId) {
+        return res.status(409).json({
+            message: 'The active account changed. Refresh the account before trying again.'
+        });
+    }
+    return next();
+};
+
 /** Authenticates the listener SPA from its HttpOnly access cookie only. */
 export const requireBrowserAuth = async (req: Request, res: Response, next: NextFunction) => {
     setBrowserSessionPrivacyHeaders(res);

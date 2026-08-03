@@ -1,0 +1,180 @@
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  margin-top: 1.5rem;
+  overflow: hidden;
+  text-align: left;
+}
+
+.headingBlock {
+  padding: 1.25rem 1.35rem 1rem;
+}
+
+.eyebrow,
+.dialogEyebrow {
+  color: var(--color-accent-bright);
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.heading,
+.dialogTitle {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}
+
+.heading {
+  font-size: 1.25rem;
+  margin-top: 0.3rem;
+}
+
+.actionList {
+  border-top: 1px solid var(--color-border);
+}
+
+.actionRow {
+  align-items: center;
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 1rem 1.35rem;
+}
+
+.actionRow + .actionRow {
+  border-top: 1px solid var(--color-border);
+}
+
+.actionRow h3 {
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.actionRow p,
+.dialogCopy {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  margin-top: 0.25rem;
+  max-width: 38rem;
+}
+
+.dangerRow {
+  background: rgb(129 47 52 / 0.06);
+}
+
+.secondaryButton,
+.dangerButton,
+.cancelButton,
+.confirmButton {
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-height: 2.75rem;
+  padding: 0.65rem 1rem;
+}
+
+.secondaryButton,
+.cancelButton {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.dangerButton,
+.confirmButton {
+  background: rgb(145 51 57 / 0.24);
+  border: 1px solid rgb(255 170 168 / 0.38);
+  color: var(--color-danger);
+}
+
+.secondaryButton:disabled,
+.dangerButton:disabled,
+.cancelButton:disabled,
+.confirmButton:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.status,
+.error {
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  margin: 0 1.35rem 1rem;
+  padding: 0.7rem 0.8rem;
+}
+
+.status {
+  background: rgb(68 142 124 / 0.18);
+  border: 1px solid rgb(115 217 202 / 0.25);
+  color: var(--color-accent-bright);
+}
+
+.error {
+  background: rgb(129 47 52 / 0.2);
+  border: 1px solid rgb(255 170 168 / 0.26);
+  color: var(--color-danger);
+  margin: 1rem 0 0;
+}
+
+.backdrop {
+  align-items: center;
+  background: rgb(4 5 10 / 0.76);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: 120;
+}
+
+.dialog {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: 31rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
+  width: 100%;
+}
+
+.dialogTitle {
+  font-size: 1.35rem;
+  margin-top: 0.35rem;
+}
+
+.dialogCopy {
+  font-size: 0.86rem;
+  margin-top: 0.7rem;
+}
+
+.dialogActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .actionRow {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .secondaryButton,
+  .dangerButton {
+    width: 100%;
+  }
+
+  .dialogActions {
+    flex-direction: column-reverse;
+  }
+
+  .dialogActions button {
+    width: 100%;
+  }
+}

@@ -10,6 +10,7 @@ import {
   createLegacyMigrationToken,
   getJwtSecret,
   refreshSession,
+  refreshSessionIdentity,
   revokeRefreshSession,
   SessionUser
 } from '../services/authSessionService';
@@ -326,12 +327,19 @@ const browserAccessSessionIdentity = (req: Request) => {
   }
 };
 
-/** Revokes both stable and rotating credentials to make logout win refresh races. */
-const revokeBrowserRequestSession = async (req: Request) => {
-  const identity = browserAccessSessionIdentity(req);
+/** Revokes stable identities plus rotating credentials so logout wins refresh races. */
+const revokeBrowserRequestSession = async (
+  req: Request,
+  knownIdentities: Array<{ userId: string; sessionId: string }> = []
+) => {
+  const identities = [browserAccessSessionIdentity(req), ...knownIdentities]
+    .filter((identity): identity is { userId: string; sessionId: string } => Boolean(identity));
   const refreshToken = getCookieValue(req, 'refresh_token');
   const revocations: Promise<unknown>[] = [];
-  if (identity) {
+  const seenSessionIds = new Set<string>();
+  for (const identity of identities) {
+    if (seenSessionIds.has(identity.sessionId)) continue;
+    seenSessionIds.add(identity.sessionId);
     revocations.push(AuthSession.revokeById(identity.userId, identity.sessionId));
   }
   if (refreshToken) {
@@ -546,8 +554,28 @@ export const browserSession = async (req: Request, res: Response) => {
 /** Revokes the refresh session and clears both cookies without a redirect. */
 export const browserLogout = async (req: Request, res: Response) => {
   setBrowserSessionPrivacyHeaders(res);
+  const requestedViewer = String(req.get('X-Finitude-Account-Viewer') ?? '').trim();
+  const accessIdentity = browserAccessSessionIdentity(req);
+  let refreshIdentity: Awaited<ReturnType<typeof refreshSessionIdentity>>;
   try {
-    await revokeBrowserRequestSession(req);
+    refreshIdentity = await refreshSessionIdentity(getCookieValue(req, 'refresh_token'));
+  } catch {
+    // Account binding cannot safely guess through a database outage; fail closed
+    // rather than clearing a newer account's cookies from a stale page.
+    recordSecurityEvent('browser_json_logout_identity_unavailable');
+    return res.status(503).json({ message: 'Finitude could not safely confirm the active account.' });
+  }
+  const credentialIdentities = [accessIdentity, refreshIdentity].filter(
+    (identity): identity is NonNullable<typeof identity> => Boolean(identity)
+  );
+  if (requestedViewer && credentialIdentities.some(({ userId }) => userId !== requestedViewer)) {
+    recordSecurityEvent('browser_json_logout_viewer_mismatch');
+    return res.status(409).json({
+      message: 'The active account changed. Refresh the account before trying again.'
+    });
+  }
+  try {
+    await revokeBrowserRequestSession(req, credentialIdentities);
     recordSecurityEvent('browser_json_logout_completed');
   } catch {
     // Client-side logout must still complete if server-side revocation is temporarily unavailable.
