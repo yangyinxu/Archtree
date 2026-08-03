@@ -46,7 +46,10 @@ The first production release should let a listener:
   motion, browser zoom, and desktop or mobile layouts.
 
 Offline downloads, editable queues, playlists, lyrics, voice search, and
-cross-device playback handoff are not part of the first release.
+cross-device playback handoff were not part of the first release. User
+Playlists are now planned independently in
+`finitude-user-playlists-plan.md`; that new roadmap does not change this
+document's historical MVP boundary.
 
 ## Product and technical principles
 
@@ -174,7 +177,9 @@ The repository already provides most foundational data and media operations:
 
 ### Deferred from the MVP
 
-- Editable Up Next, Play Next, Add to Queue, drag-to-reorder, or playlists.
+- Editable Up Next, Play Next, Add to Queue, or live queue drag-to-reorder.
+- User Playlists, now tracked by `finitude-user-playlists-plan.md` as a
+  post-MVP, shared Web/iOS feature.
 - Lyrics, comments, social features, and voice search.
 - Video playback unless a separate product contract defines its relationship
   to Albums and Soundtracks.
