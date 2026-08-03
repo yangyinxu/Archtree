@@ -148,6 +148,28 @@ test('refuses to replace an unmarked dedicated artifact directory', async (t) =>
   assert.equal(await readFile(path.join(outputDirectory, 'sentinel.txt'), 'utf8'), 'preserve me\n');
 });
 
+test('stages a clean local Git worktree before creating its temporary output', async (t) => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  for (const args of [
+    ['init', '-q'],
+    ['config', 'user.name', 'Artifact Test'],
+    ['config', 'user.email', 'artifact-test@example.invalid'],
+    ['add', '.'],
+    ['commit', '-q', '--no-gpg-sign', '-m', 'fixture']
+  ]) {
+    execFileSync('git', args, { cwd: sourceRoot, stdio: 'ignore' });
+  }
+
+  const { release } = await stageElasticBeanstalkArtifact({
+    sourceRoot,
+    outputDirectory: path.join(sourceRoot, 'elastic-beanstalk-artifact'),
+    environment: {}
+  });
+  assert.match(release.commitSha, /^[0-9a-f]{40}$/);
+  assert.equal(release.buildId, 'local');
+});
+
 test('refuses to label a dirty local worktree as its current commit', async (t) => {
   const sourceRoot = await createSourceFixture();
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));

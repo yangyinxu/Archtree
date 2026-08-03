@@ -356,6 +356,8 @@ export const stageElasticBeanstalkArtifact = async ({
   const resolvedSourceRoot = path.resolve(sourceRoot);
   const resolvedOutputDirectory = path.resolve(resolvedSourceRoot, outputDirectory);
   await assertSafeOutputDirectory(resolvedSourceRoot, resolvedOutputDirectory);
+  // Resolve cleanliness before creating the otherwise-untracked temporary tree.
+  const metadata = releaseMetadata(resolvedSourceRoot, environment);
 
   const temporaryDirectory = `${resolvedOutputDirectory}.tmp-${process.pid}-${randomUUID()}`;
   await mkdir(path.dirname(resolvedOutputDirectory), { recursive: true });
@@ -370,7 +372,6 @@ export const stageElasticBeanstalkArtifact = async ({
       await cp(source, destination, { recursive: true, errorOnExist: true });
     }
 
-    const metadata = releaseMetadata(resolvedSourceRoot, environment);
     await writeFile(
       path.join(temporaryDirectory, artifactMarkerName),
       artifactMarkerContents,
