@@ -173,6 +173,8 @@ responses without exposing storage lifecycle fields. Public audio streaming is
 limited to database-confirmed `ready` tracks and preserves HTTP Range seeking.
 Public artwork resolution similarly permits only ready Artist, Album, and
 Soundtrack image assets; account avatars remain private behind `/auth/avatar`.
+The Archtree landing page links both signed-out and signed-in visitors to
+`/listen` while preserving its existing creator and authentication actions.
 
 `POST /api/listener/v1/telemetry` accepts only same-origin JSON envelopes of
 one to ten bounded anonymous events. It has an independent 16 KiB body limit,

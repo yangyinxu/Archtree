@@ -317,6 +317,18 @@ button:disabled {
   background: #eef1ed;
 }
 
+.button--listener {
+  color: #fff;
+  background: var(--ink);
+  box-shadow: 0 8px 18px rgba(23, 35, 31, 0.18);
+}
+
+.button--listener:hover {
+  color: #fff;
+  background: #0b1210;
+  box-shadow: 0 10px 22px rgba(23, 35, 31, 0.24);
+}
+
 .button--danger,
 button[data-danger] {
   background: var(--danger);
@@ -472,6 +484,18 @@ progress {
   width: 100%;
   height: 12px;
   accent-color: var(--brand);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .button {
+    transition: none;
+  }
+
+  button:hover,
+  .button:hover {
+    transform: none;
+  }
 }
 
 @media (max-width: 680px) {

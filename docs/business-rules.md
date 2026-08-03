@@ -94,6 +94,9 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - The Web listener owns one long-lived audio element, queue, and playback
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player.
+- The Archtree landing page presents a visible Finitude Web entry to signed-out
+  and signed-in visitors. Public browsing does not require authentication, and
+  the entry does not replace creator-management or account actions.
 - Web logout clears account-scoped server-state caches and that account's local
   search history, but it does not stop an already-playing public stream.
 - Browser Media Session controls are a progressive enhancement over the same

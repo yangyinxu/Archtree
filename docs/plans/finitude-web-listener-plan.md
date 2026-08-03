@@ -738,13 +738,17 @@ Implementation evidence recorded on 2026-08-02:
   Chromium/Firefox/WebKit, axe critical/serious gates, responsive and Reduce
   Motion checks, CI automation, and a remote-opt-in bounded Range/seek/artwork
   load harness with aggregate-only output.
-- Passing locally: server 71/71, Web unit/component 91/91, Mongo integration
-  24/24, browser/axe 33/33, server/Web production builds, and the 150 KiB
+- Passing locally: server 72/72, Web unit/component 91/91, Mongo integration
+  24/24, browser/axe 36/36, server/Web production builds, and the 150 KiB
   initial-route JavaScript budget.
 - Still requires production-equivalent evidence: branded-browser and assistive
   technology matrix, measured p75 Web Vitals, realistic multi-source S3 Range
   load/seek execution with the checked-in harness, artwork variant sizing, and
   rollout/rollback rehearsal.
+- Beta acceptance and navigation update recorded on 2026-08-03 by user
+  direction: the existing Archtree landing page now links signed-out and
+  signed-in visitors to `/listen` without replacing its creator, account, or
+  authentication actions.
 
 **Milestone C: general availability.** Only after this gate should product
 navigation make the listener Web app the primary public destination.

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createApp } from '../src/app';
+import { createApp, renderLandingActions } from '../src/app';
 
 const listen = async (listenerDistPath: string) => {
   const app = createApp({ listenerDistPath, environment: 'test' });
@@ -75,6 +75,24 @@ test('production defaults to the single trusted Nginx proxy hop', () => {
   }
 });
 
+test('landing actions expose Finitude without replacing account or creator actions', () => {
+  const signedOut = renderLandingActions();
+  assert.match(signedOut.headerActions, /href="\/listen">Open Finitude/);
+  assert.match(signedOut.heroActions, /href="\/listen">Open Finitude/);
+  assert.match(signedOut.headerActions, /href="\/auth\/login-web">Log in/);
+  assert.match(signedOut.heroActions, /href="\/auth\/signup-web">Create account/);
+
+  const signedIn = renderLandingActions({ email: 'listener+<beta>@example.com' });
+  assert.match(signedIn.headerActions, /href="\/listen">Open Finitude/);
+  assert.match(signedIn.heroActions, /href="\/listen">Open Finitude/);
+  assert.match(signedIn.headerActions, /listener\+&lt;beta&gt;@example\.com/);
+  assert.doesNotMatch(signedIn.headerActions, /<beta>/);
+  assert.match(signedIn.headerActions, /href="\/content\/manage">Content Manager/);
+  assert.match(signedIn.headerActions, /action="\/auth\/logout-web"/);
+  assert.match(signedIn.heroActions, /href="\/content\/manage">Open Content Manager/);
+  assert.match(signedIn.heroActions, /href="\/content\/manage\/audio-tracks">Browse my audio tracks/);
+});
+
 test('listener routes report a clear service error when the bundle is absent', async () => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-listener-missing-'));
   const { server, baseUrl } = await listen(path.join(temporaryRoot, 'missing-dist'));
@@ -105,6 +123,12 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.equal(serverRenderedStyles.status, 200);
     assertSecurityHeaders(serverRenderedStyles);
     assert.match(serverRenderedStyles.headers.get('content-type') ?? '', /text\/css/);
+
+    const landingPage = await fetch(`${baseUrl}/`);
+    assert.equal(landingPage.status, 200);
+    assertSecurityHeaders(landingPage);
+    const landingHtml = await landingPage.text();
+    assert.equal(landingHtml.match(/href="\/listen"/g)?.length, 2);
   } finally {
     await close(server);
     await rm(temporaryRoot, { recursive: true, force: true });

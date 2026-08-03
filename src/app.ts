@@ -9,7 +9,11 @@ import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import listenerRoutes from './routes/listenerRoutes';
 import videoRoutes from './routes/videoRoutes';
-import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddleware';
+import {
+  attachOptionalAuth,
+  type AuthContext,
+  type AuthenticatedRequest
+} from './middleware/authMiddleware';
 import { getHealth } from './controllers/healthController';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
@@ -113,6 +117,46 @@ const mountListenerApplication = (app: Application, listenerDistPath: string) =>
   });
 };
 
+export interface LandingActions {
+  headerActions: string;
+  heroActions: string;
+}
+
+/** Keeps the public listener entry visible without replacing creator or authentication actions. */
+export const renderLandingActions = (
+  auth?: Pick<AuthContext, 'email'>
+): LandingActions => {
+  const listenerButton = '<a class="button button--listener" href="/listen">Open Finitude</a>';
+  if (auth) {
+    return {
+      headerActions: `<div class="header-actions">
+        ${listenerButton}
+        <span class="muted">${escapeHtml(auth.email)}</span>
+        <a class="button" href="/content/manage">Content Manager</a>
+        <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+      </div>`,
+      heroActions: `<div class="action-row">
+        <a class="button" href="/content/manage">Open Content Manager</a>
+        ${listenerButton}
+        <a class="button button--secondary" href="/content/manage/audio-tracks">Browse my audio tracks</a>
+      </div>`
+    };
+  }
+
+  return {
+    headerActions: `<div class="header-actions">
+      ${listenerButton}
+      <a class="button button--secondary" href="/auth/login-web">Log in</a>
+      <a class="button" href="/auth/signup-web">Create account</a>
+    </div>`,
+    heroActions: `<div class="action-row">
+      ${listenerButton}
+      <a class="button" href="/auth/signup-web">Create account</a>
+      <a class="button button--secondary" href="/auth/login-web">Log in</a>
+    </div>`
+  };
+};
+
 /** Constructs the Express application without connecting to MongoDB or opening a socket. */
 export const createApp = (options: CreateAppOptions = {}): Application => {
   const app: Application = express();
@@ -168,25 +212,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     try {
       const auth = (req as AuthenticatedRequest).auth;
       const template = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
-      const headerActions = auth
-        ? `<div class="header-actions">
-          <span class="muted">${escapeHtml(auth.email)}</span>
-          <a class="button" href="/content/manage">Content Manager</a>
-          <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
-        </div>`
-        : `<div class="header-actions">
-          <a class="button button--secondary" href="/auth/login-web">Log in</a>
-          <a class="button" href="/auth/signup-web">Create account</a>
-        </div>`;
-      const heroActions = auth
-        ? `<div class="action-row">
-          <a class="button" href="/content/manage">Open Content Manager</a>
-          <a class="button button--secondary" href="/content/manage/audio-tracks">Browse my audio tracks</a>
-        </div>`
-        : `<div class="action-row">
-          <a class="button" href="/auth/signup-web">Create account</a>
-          <a class="button button--secondary" href="/auth/login-web">Log in</a>
-        </div>`;
+      const { headerActions, heroActions } = renderLandingActions(auth);
 
       return res.status(200).send(
         template

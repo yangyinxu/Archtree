@@ -3,6 +3,19 @@ import { expect, test } from './support/test';
 
 const albumPath = `/listen/albums/${catalogIds.album}`;
 
+test('opens the listener from the Archtree landing page without replacing account actions', async ({ page }) => {
+  const response = await page.goto('/');
+
+  expect(response?.status()).toBe(200);
+  await expect(page.getByRole('link', { name: 'Open Finitude' })).toHaveCount(2);
+  await expect(page.getByRole('link', { name: 'Log in' })).toHaveCount(2);
+  await expect(page.getByRole('link', { name: 'Create account' })).toHaveCount(2);
+
+  await page.getByRole('link', { name: 'Open Finitude' }).first().click();
+  await expect(page).toHaveURL(/\/listen$/);
+  await expect(page.getByRole('heading', { name: 'Leave room for the music.' })).toBeVisible();
+});
+
 test('serves a production bundle deep link and survives a document reload', async ({ page }) => {
   const response = await page.goto(albumPath);
 

@@ -12,8 +12,8 @@ It covers bundled Chromium, Firefox, and WebKit engines, critical/serious axe
 findings, keyboard skip navigation, reduced motion, direct route refreshes, and
 320 px, 768 px, and 1440 px reflow checks.
 
-Latest local automated evidence (2026-08-02): 33/33 Playwright projects passed
-against the production bundle; server tests passed 71/71 and Web unit/component
+Latest local automated evidence (2026-08-03): 36/36 Playwright projects passed
+against the production bundle; server tests passed 72/72 and Web unit/component
 tests passed 91/91; Mongo-backed integration tests passed 24/24. CI repeats the
 browser gate through `.github/workflows/finitude-web-release.yml`.
 
