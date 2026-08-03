@@ -24,6 +24,7 @@ import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/security
 import AuthIdentity from '../models/authIdentity';
 import { Passkey } from '../models/passkey';
 import { registerEmailAccount } from './emailAuthController';
+import { normalizeUserRole } from '../services/authRoleService';
 
 /**
  * Interface for Error object with statusCode property
@@ -36,7 +37,7 @@ interface ErrorWithStatusCode extends Error {
 export interface BrowserSessionUserSource {
   userId: string;
   email: string;
-  role?: string;
+  role?: unknown;
   displayName?: string;
   username?: string;
   avatarAssetId?: unknown;
@@ -54,7 +55,7 @@ export const browserSessionPayload = (source: BrowserSessionUserSource) => {
     user: {
       id: source.userId,
       email: source.email,
-      role: source.role ?? 'user',
+      role: normalizeUserRole(source.role),
       displayName: source.displayName ?? source.username ?? '',
       avatarRevision,
       avatar: source.avatarAssetId ? { revision: avatarRevision } : null,
@@ -70,7 +71,7 @@ const normalizeEmail = (email: string) => {
   return String(email ?? '').trim().toLowerCase();
 };
 
-const createUser = async (email: string, username: string, password: string, role: string = 'user') => {
+const createUser = async (email: string, username: string, password: string) => {
   const normalizedEmail = normalizeEmail(email);
 
   const existing = await User.findByEmail(normalizedEmail);
@@ -87,7 +88,7 @@ const createUser = async (email: string, username: string, password: string, rol
     hashedPassword,
     username,
     [],
-    role
+    'user'
   );
 
   return user.save();
@@ -263,7 +264,7 @@ const authenticateUser = async (identifier: string, password: string, req?: Requ
   return {
     userId: user._id.toString(),
     email: user.email,
-    role: user.role ?? 'user',
+    role: normalizeUserRole(user.role),
     displayName: user.displayName ?? user.username ?? '',
     username: user.username ?? '',
     avatarAssetId: user.avatarAssetId,
@@ -296,7 +297,7 @@ const loadBrowserSessionPayload = async (userId: string) => {
   return browserSessionPayload({
     userId: user._id.toString(),
     email: user.email,
-    role: user.role ?? 'user',
+    role: normalizeUserRole(user.role),
     displayName: user.displayName ?? user.username ?? '',
     username: user.username ?? '',
     avatarAssetId: user.avatarAssetId,

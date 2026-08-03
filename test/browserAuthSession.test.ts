@@ -7,6 +7,7 @@ import {
     clearedBrowserSessionCookieHeaders,
     cookieMutationRejection
 } from '../src/services/authCookieService';
+import { normalizeUserRole } from '../src/services/authRoleService';
 
 const tokenPair = (accessToken: string, refreshToken: string) => ({
     accessToken,
@@ -47,6 +48,23 @@ test('browser identity projection never includes tokens or a session identifier'
     assert.equal('accessToken' in payload.user, false);
     assert.equal('refreshToken' in payload.user, false);
     assert.equal('sessionId' in payload.user, false);
+});
+
+test('roles fail closed unless the persisted value is exactly admin', () => {
+    assert.equal(normalizeUserRole('admin'), 'admin');
+    for (const role of ['user', 'creator', 'ADMIN', ' admin ', '', undefined, null, 1]) {
+        assert.equal(normalizeUserRole(role), 'user');
+        assert.equal(browserSessionPayload({
+            userId: 'role-test',
+            email: 'role-test@example.com',
+            role
+        }).user.role, 'user');
+    }
+    assert.equal(browserSessionPayload({
+        userId: 'admin-test',
+        email: 'admin-test@example.com',
+        role: 'admin'
+    }).user.role, 'admin');
 });
 
 test('rotated credentials replace both HttpOnly cookie values', { concurrency: false }, () => {

@@ -14,6 +14,7 @@ import { Passkey, PasskeyChallenge } from '../models/passkey';
 import User from '../models/user';
 import { createSession } from '../services/authSessionService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
+import { normalizeUserRole } from '../services/authRoleService';
 
 const configuration = () => {
     const rpID = String(process.env.WEBAUTHN_RP_ID ?? '').trim();
@@ -143,6 +144,6 @@ export const verifyAuthentication = async (req: Request, res: Response) => {
         ...tokens,
         userId: user._id.toString(),
         email: user.email,
-        role: user.role ?? 'user'
+        role: normalizeUserRole(user.role)
     });
 };

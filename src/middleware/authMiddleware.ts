@@ -12,11 +12,12 @@ import {
     setBrowserSessionCookies,
     setBrowserSessionPrivacyHeaders
 } from '../services/authCookieService';
+import { normalizeUserRole, UserRole } from '../services/authRoleService';
 
 interface JwtPayload {
     userId: string;
     email: string;
-    role?: string;
+    role?: unknown;
     sessionId?: string;
     tokenType?: 'access';
 }
@@ -24,7 +25,7 @@ interface JwtPayload {
 export interface AuthContext {
     userId: string;
     email: string;
-    role: string;
+    role: UserRole;
     sessionId?: string;
 }
 
@@ -71,8 +72,8 @@ const attachAuthContext = async (req: Request, replacementToken?: string) => {
     (req as AuthenticatedRequest).auth = {
         userId: decodedToken.userId,
         email: user.email,
-        role: user.role ?? 'user'
-        ,...(decodedToken.sessionId ? { sessionId: decodedToken.sessionId } : {})
+        role: normalizeUserRole(user.role),
+        ...(decodedToken.sessionId ? { sessionId: decodedToken.sessionId } : {})
     };
 
     return (req as AuthenticatedRequest).auth;
@@ -102,6 +103,8 @@ const attachOrRefreshBrowserAuth = async (req: Request, res: Response) => {
 };
 
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+    // Reuse the database-backed context installed by an earlier pre-body guard.
+    if ((req as AuthenticatedRequest).auth) return next();
     try {
         const auth = await attachAuthContext(req);
         if (!auth) {
@@ -150,6 +153,8 @@ export const requireBrowserAuth = async (req: Request, res: Response, next: Next
 };
 
 export const requireAuthForWeb = async (req: Request, res: Response, next: NextFunction) => {
+    // Content Manager authenticates before the application body parser runs.
+    if ((req as AuthenticatedRequest).auth) return next();
     try {
         const auth = await attachOrRefreshBrowserAuth(req, res);
         if (!auth) {
@@ -162,6 +167,20 @@ export const requireAuthForWeb = async (req: Request, res: Response, next: NextF
         const returnTo = encodeURIComponent(req.originalUrl || '/content/manage');
         return res.redirect(`/auth/login-web?returnTo=${returnTo}`);
     }
+};
+
+/** Returns a non-HTML denial when an authenticated Web user is not an administrator. */
+export const requireAdminForWeb = (req: Request, res: Response, next: NextFunction) => {
+    setBrowserSessionPrivacyHeaders(res);
+    const auth = (req as AuthenticatedRequest).auth;
+    if (!auth) {
+        return res.status(401).type('text/plain').send('Missing or invalid credentials.');
+    }
+    if (normalizeUserRole(auth.role) !== 'admin') {
+        return res.status(403).type('text/plain').send('Administrator access is required.');
+    }
+
+    return next();
 };
 
 export const attachOptionalAuth = async (req: Request, res: Response, next: NextFunction) => {
@@ -214,7 +233,7 @@ export const requireAdmin = (req: Request, res: Response, next: NextFunction) =>
     if (!auth) {
         return res.status(401).json({ message: 'Missing or invalid credentials.' });
     }
-    if (auth.role !== 'admin') {
+    if (normalizeUserRole(auth.role) !== 'admin') {
         return res.status(403).json({ message: 'Administrator access is required.' });
     }
 

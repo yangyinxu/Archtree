@@ -3,17 +3,18 @@ import { Request } from 'express';
 import jwt from 'jsonwebtoken';
 import AuthSession from '../models/authSession';
 import User from '../models/user';
+import { normalizeUserRole, UserRole } from './authRoleService';
 
 export interface SessionUser {
     _id: { toString(): string };
     email: string;
-    role?: string;
+    role?: unknown;
 }
 
 export interface AccessTokenPayload {
     userId: string;
     email: string;
-    role: string;
+    role: UserRole;
     sessionId: string;
     tokenType: 'access';
 }
@@ -73,7 +74,7 @@ const newRefreshToken = () => crypto.randomBytes(48).toString('base64url');
 
 /** Signs a short-lived access token bound to a revocable server session. */
 const signAccessToken = (user: SessionUser, sessionId: string) => {
-    const role = user.role ?? 'user';
+    const role = normalizeUserRole(user.role);
     return jwt.sign(
         {
             userId: user._id.toString(),
@@ -97,7 +98,7 @@ export const createLegacyMigrationToken = (user: SessionUser) => {
         {
             userId: user._id.toString(),
             email: user.email,
-            role: user.role ?? 'user'
+            role: normalizeUserRole(user.role)
         },
         getJwtSecret(),
         { expiresIn: legacyDays * 24 * 60 * 60 }
