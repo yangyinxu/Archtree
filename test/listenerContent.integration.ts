@@ -8,6 +8,7 @@ import { ObjectId } from 'mongodb';
 
 import { createApp } from '../src/app';
 import { getDb } from '../src/infrastructure/database';
+import { Carousel } from '../src/models/carousel';
 import {
     MongoReplicaSetHarness,
     startMongoReplicaSet
@@ -17,17 +18,24 @@ let harness: MongoReplicaSetHarness | undefined;
 let server: Server | undefined;
 let baseUrl = '';
 let accessToken = '';
+let adminAccessToken = '';
 
 const ids = {
     user: new ObjectId(),
     session: new ObjectId(),
+    admin: new ObjectId(),
+    adminSession: new ObjectId(),
     artist: new ObjectId(),
     album: new ObjectId(),
     readyOne: new ObjectId(),
     readyTwo: new ObjectId(),
     pending: new ObjectId(),
+    blankKey: new ObjectId(),
+    unlistedReady: new ObjectId(),
     missing: new ObjectId(),
+    post: new ObjectId(),
     manualCarousel: new ObjectId(),
+    artistCarousel: new ObjectId(),
     personalizedCarousel: new ObjectId(),
     grid: new ObjectId()
 };
@@ -52,7 +60,16 @@ const allObjectKeys = (value: unknown, keys = new Set<string>()) => {
 
 const expectSafe = (payload: unknown) => {
     const keys = allObjectKeys(payload);
-    for (const forbidden of ['createdBy', 's3Key', 'uploadStatus', 'uploadError']) {
+    for (const forbidden of [
+        'createdBy',
+        'updatedBy',
+        'coverArtId',
+        's3Key',
+        'uploadStatus',
+        'uploadUpdatedAt',
+        'uploadError',
+        'originalFileName'
+    ]) {
         assert.equal(keys.has(forbidden), false, `response exposed ${forbidden}`);
     }
 };
@@ -72,10 +89,26 @@ before(async () => {
             posts: [],
             role: 'user'
         }),
+        db.collection('users').insertOne({
+            _id: ids.admin,
+            email: 'admin@example.com',
+            username: 'admin',
+            password: 'unused',
+            posts: [],
+            role: 'admin'
+        }),
         db.collection('authSessions').insertOne({
             _id: ids.session,
             userId,
             refreshTokenHash: 'integration-hash',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            expiresAt: new Date(Date.now() + 60_000)
+        }),
+        db.collection('authSessions').insertOne({
+            _id: ids.adminSession,
+            userId: ids.admin.toString(),
+            refreshTokenHash: 'admin-integration-hash',
             createdAt: new Date(),
             updatedAt: new Date(),
             expiresAt: new Date(Date.now() + 60_000)
@@ -94,6 +127,7 @@ before(async () => {
             coverArtUrl: '/album.jpg',
             audioTrackIds: [
                 ids.pending.toString(),
+                ids.blankKey.toString(),
                 ids.readyTwo.toString(),
                 ids.missing.toString(),
                 ids.readyOne.toString()
@@ -136,7 +170,49 @@ before(async () => {
                 s3Key: ids.pending.toString(),
                 uploadError: 'private failure detail',
                 createdBy: 'private-owner'
+            },
+            {
+                _id: ids.blankKey,
+                title: 'A Needle Whitespace Key',
+                artistIds: [artistId],
+                albumId,
+                coverArtUrl: '',
+                uploadStatus: 'ready',
+                s3Key: '   ',
+                createdBy: 'private-owner'
+            },
+            {
+                _id: ids.unlistedReady,
+                title: 'Other Ready Track',
+                artistIds: [],
+                albumId,
+                coverArtUrl: '',
+                uploadStatus: 'ready',
+                s3Key: 'private/unlisted-ready',
+                createdBy: 'private-owner'
             }
+        ]),
+        db.collection('posts').insertMany([
+            {
+                _id: ids.post,
+                title: 'Needle Post',
+                description: 'Public feed content',
+                mainImageUrl: '/post.jpg',
+                imageUrls: ['/post-detail.jpg'],
+                userId: ids.user,
+                createdAt: new Date('2026-08-03T12:00:00.000Z'),
+                moderationNotes: 'private note'
+            },
+            ...Array.from({ length: 50 }, (_, index) => ({
+                _id: new ObjectId(),
+                title: `Newer Feed Post ${index + 1}`,
+                description: 'A newer post that occupies the default Feed page.',
+                mainImageUrl: `/newer-post-${index + 1}.jpg`,
+                imageUrls: [],
+                userId: ids.admin,
+                createdAt: new Date(`2026-08-04T12:00:${String(index).padStart(2, '0')}.000Z`),
+                moderationNotes: 'must remain private'
+            }))
         ]),
         db.collection('carousels').insertMany([
             {
@@ -146,8 +222,21 @@ before(async () => {
                 items: [
                     { contentType: 'album', contentId: albumId, order: 0 },
                     { contentType: 'audioTrack', contentId: ids.pending.toString(), order: 1 },
-                    { contentType: 'audioTrack', contentId: ids.readyOne.toString(), order: 2 }
+                    { contentType: 'audioTrack', contentId: ids.readyOne.toString(), order: 2 },
+                    { contentType: 'post', contentId: ids.post.toString(), order: 3 }
                 ]
+            },
+            {
+                _id: ids.artistCarousel,
+                name: 'Artist Soundtracks',
+                mode: 'artist',
+                items: [],
+                artistConfig: {
+                    artistId,
+                    contentType: 'audioTrack',
+                    sort: 'titleAsc',
+                    limit: 1
+                }
             },
             {
                 _id: ids.personalizedCarousel,
@@ -210,6 +299,13 @@ before(async () => {
         email: 'listener@example.com',
         role: 'user',
         sessionId: ids.session.toString(),
+        tokenType: 'access'
+    }, process.env.JWT_SECRET!, { expiresIn: 60 });
+    adminAccessToken = jwt.sign({
+        userId: ids.admin.toString(),
+        email: 'admin@example.com',
+        role: 'admin',
+        sessionId: ids.adminSession.toString(),
         tokenType: 'access'
     }, process.env.JWT_SECRET!, { expiresIn: 60 });
 
@@ -327,4 +423,135 @@ test('listener Library requires authentication and retains non-ready items safel
     assert.equal(pending.audioTrack.streamUrl, null);
     assert.equal(response.headers.get('cache-control'), 'private, no-store');
     expectSafe(library);
+});
+
+test('legacy public catalog is role-independent, allowlisted, and ready-filtered', async () => {
+    const requestPayload = async (path: string, token?: string) => {
+        const response = await fetch(`${baseUrl}${path}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined
+        });
+        assert.equal(response.status, 200, path);
+        return response.json();
+    };
+    const publicPaths = [
+        '/content/artists?limit=100',
+        `/content/artist/${ids.artist}`,
+        '/content/albums?limit=100',
+        `/content/album/${ids.album}`,
+        '/content/audioTracks?limit=100',
+        '/content/search?q=Needle&limit=100',
+        '/content/pages',
+        '/content/pages/home',
+        '/feed/posts?limit=100',
+        `/feed/post?postId=${ids.post}`
+    ];
+    for (const path of publicPaths) {
+        const anonymous = await requestPayload(path);
+        const user = await requestPayload(path, accessToken);
+        const admin = await requestPayload(path, adminAccessToken);
+        assert.deepEqual(user, anonymous, `${path} varied for an ordinary user`);
+        assert.deepEqual(admin, anonymous, `${path} varied for an administrator`);
+        expectSafe(anonymous);
+    }
+
+    const albums: any = await requestPayload('/content/albums?limit=100');
+    assert.deepEqual(albums.albums[0].audioTrackIds, [
+        ids.readyTwo.toString(),
+        ids.readyOne.toString()
+    ]);
+    const tracks: any = await requestPayload('/content/audioTracks?limit=100');
+    assert.deepEqual(tracks.audioTracks.map((track: any) => track._id), [
+        ids.readyOne.toString(),
+        ids.readyTwo.toString(),
+        ids.unlistedReady.toString()
+    ]);
+    assert.equal(tracks.audioTracks.some((track: any) => track._id === ids.pending.toString()), false);
+    assert.deepEqual(Object.keys(tracks.audioTracks[0]).sort(), [
+        '_id',
+        'albumId',
+        'artistIds',
+        'coverArtUrl',
+        'displayCoverArtUrl',
+        'duration',
+        'format',
+        'genres',
+        'releaseDate',
+        'title'
+    ]);
+
+    const firstReadyPage: any = await requestPayload('/content/audioTracks?limit=1');
+    assert.equal(firstReadyPage.audioTracks[0]._id, ids.readyOne.toString());
+    const firstReadySearchPage: any = await requestPayload('/content/search?q=Needle&limit=1');
+    assert.equal(firstReadySearchPage.audioTracks[0]._id, ids.readyOne.toString());
+    const search: any = await requestPayload('/content/search?q=Needle&limit=100');
+    assert.deepEqual(search.audioTracks.map((track: any) => track._id), [
+        ids.readyOne.toString(),
+        ids.readyTwo.toString()
+    ]);
+});
+
+test('artist carousel filters non-ready Soundtracks before applying its limit', async () => {
+    const [artistCarousel]: any[] = await Carousel.fetchByIds([
+        ids.artistCarousel.toString()
+    ]);
+
+    assert.deepEqual(artistCarousel.items.map((item: any) => item.contentId), [
+        ids.readyOne.toString()
+    ]);
+});
+
+test('shared-content authorization runs before the application body parser', async () => {
+    const malformedJson = async (path: string, token?: string, redirect: RequestRedirect = 'follow') =>
+        fetch(`${baseUrl}${path}`, {
+            method: 'POST',
+            redirect,
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {})
+            },
+            body: '{'
+        });
+
+    for (const path of ['/content/album', '/feed/post']) {
+        assert.equal((await malformedJson(path)).status, 401);
+        assert.equal((await malformedJson(path, accessToken)).status, 403);
+        assert.equal((await malformedJson(path, adminAccessToken)).status, 400);
+    }
+    assert.equal((await malformedJson('/content/manage/artist/delete', undefined, 'manual')).status, 302);
+    assert.equal((await malformedJson('/content/manage/artist/delete', accessToken)).status, 403);
+    assert.equal((await malformedJson('/content/manage/artist/delete', adminAccessToken)).status, 400);
+});
+
+test('legacy expanded Home hydrates referenced posts outside the default Feed page safely', async () => {
+    const feedResponse = await fetch(`${baseUrl}/feed/posts`);
+    assert.equal(feedResponse.status, 200);
+    const feed: any = await feedResponse.json();
+    assert.equal(feed.posts.length, 50);
+    assert.equal(feed.posts.some((post: any) => post._id === ids.post.toString()), false);
+
+    const response = await fetch(`${baseUrl}/content/pages/home/expanded`);
+    assert.equal(response.status, 200);
+    const payload: any = await response.json();
+    expectSafe(payload);
+
+    const serialized = JSON.stringify(payload);
+    assert.equal(serialized.includes(ids.pending.toString()), false);
+    assert.deepEqual(payload.included.audioTracks.map((track: any) => track._id), [
+        ids.readyOne.toString(),
+        ids.readyTwo.toString()
+    ]);
+    assert.ok(Array.isArray(payload.included.albums));
+    assert.ok(Array.isArray(payload.included.audioTracks));
+    assert.deepEqual(payload.included.posts.map((post: any) => post._id), [ids.post.toString()]);
+    assert.deepEqual(Object.keys(payload.included.posts[0]).sort(), [
+        '_id',
+        'createdAt',
+        'description',
+        'imageUrls',
+        'mainImageUrl',
+        'title',
+        'userId'
+    ]);
+    assert.equal(JSON.stringify(payload.page).includes(ids.post.toString()), true);
+    assert.deepEqual(Object.keys(payload.page).sort(), ['items', 'slug', 'title']);
 });

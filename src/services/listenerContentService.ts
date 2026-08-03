@@ -103,7 +103,7 @@ const audioTrackProjection = {
 };
 const readyAudioFilter = {
     uploadStatus: 'ready',
-    s3Key: { $type: 'string', $ne: '' }
+    s3Key: { $type: 'string', $regex: /\S/ }
 };
 
 const isHexObjectId = (value: unknown): value is string =>
@@ -359,16 +359,42 @@ const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
         const source = carousel?.personalizedConfig?.source as ActivitySource | undefined;
         const requestedLimit = Number(carousel?.personalizedConfig?.limit ?? 20);
         if (!viewerUserId || (source !== 'recentlySaved' && source !== 'recentlyPlayed')) return [];
-        const entries = await UserLibrary.recent(
-            viewerUserId,
-            source,
-            Math.max(1, Math.min(Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 20, 20))
+        const limit = Math.max(
+            1,
+            Math.min(Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 20, 20)
         );
-        return entries.flatMap((entry, order): ListenerContentRef[] =>
-            isHexObjectId(entry.contentId)
-                ? [{ contentType: entry.contentType, contentId: entry.contentId, order }]
+        const entries = await UserLibrary.recent(viewerUserId, source, 20);
+        const albumIds = uniqueIds(entries
+            .filter((entry) => entry.contentType === 'album')
+            .map((entry) => entry.contentId));
+        const trackIds = uniqueIds(entries
+            .filter((entry) => entry.contentType === 'audioTrack')
+            .map((entry) => entry.contentId));
+        const db = getDb()!;
+        const [albums, tracks] = await Promise.all([
+            albumIds.length > 0
+                ? db.collection('albums').find({ _id: { $in: albumIds.map(toObjectId) } })
+                    .project({ _id: 1 }).maxTimeMS(queryTimeoutMs).toArray()
+                : [],
+            trackIds.length > 0
+                ? db.collection('audioTracks').find({
+                    ...readyAudioFilter,
+                    _id: { $in: trackIds.map(toObjectId) }
+                }).project({ _id: 1 }).maxTimeMS(queryTimeoutMs).toArray()
                 : []
-        );
+        ]);
+        const validKeys = new Set([
+            ...albums.map((item) => `album:${item._id}`),
+            ...tracks.map((item) => `audioTrack:${item._id}`)
+        ]);
+        return entries
+            .filter((entry) => validKeys.has(`${entry.contentType}:${entry.contentId}`))
+            .slice(0, limit)
+            .map((entry, order) => ({
+                contentType: entry.contentType,
+                contentId: entry.contentId,
+                order
+            }));
     }
 
     const config = carousel?.artistConfig;

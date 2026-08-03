@@ -216,18 +216,6 @@ export const requireAuthWhenPresented = async (
     return next();
 };
 
-export const ensureOwnerOrAdmin = (req: AuthenticatedRequest, ownerId: string) => {
-    if (!req.auth) {
-        return false;
-    }
-
-    if (req.auth.role === 'admin') {
-        return true;
-    }
-
-    return req.auth.userId === ownerId;
-};
-
 export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
     const auth = (req as AuthenticatedRequest).auth;
     if (!auth) {

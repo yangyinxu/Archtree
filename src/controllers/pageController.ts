@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 
 import { getDb } from '../infrastructure/database';
-import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import {
     ArtistCarouselConfig,
     Carousel,
@@ -13,8 +13,14 @@ import {
 import { Page, PageSlug } from '../models/page';
 import { ContentCollection } from '../models/contentCollection';
 import { Artist } from '../models/artist';
-import { normalizeAudioTrackText } from '../models/audioTrack';
-import { withDerivedCoverArtUrl, withDisplayCoverArtUrl } from '../utils/coverArt';
+import {
+    projectPublicAlbums,
+    projectPublicAudioTracks,
+    readyPublicAudioFilter,
+    toPublicFeedPost
+} from '../services/publicCatalogService';
+import { toPublicExpandedPage, toPublicPage } from '../services/publicPageService';
+import { boundedLimit, boundedOffset } from '../utils/pagination';
 
 // v1 only allows composition pages for Home and Library.
 const allowedSlugs: PageSlug[] = ['home', 'library'];
@@ -127,12 +133,15 @@ const doesContentExist = async (contentType: CarouselContentType, contentId: str
     return Boolean(doc);
 };
 
-const getOwnerId = (doc: any) => {
-    return String(doc?.createdBy ?? '');
-};
-
 const redirectWithMessage = (res: Response, message: string) => {
     res.redirect(`/content/manage?message=${encodeURIComponent(message)}`);
+};
+
+/** Keeps Web composition mutations admin-only if their route guard is bypassed. */
+const rejectNonAdminWebMutation = (req: AuthenticatedRequest, res: Response) => {
+    if (req.auth?.role === 'admin') return false;
+    res.status(403).type('text/plain').send('Administrator access is required.');
+    return true;
 };
 
 export const upsertPage = async (req: Request, res: Response, next: NextFunction) => {
@@ -141,16 +150,14 @@ export const upsertPage = async (req: Request, res: Response, next: NextFunction
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const slug = getPageSlug(String(req.body.slug ?? ''));
         const title = String(req.body.title ?? '').trim();
         if (!slug || !title) {
             return res.status(400).json({ message: 'Invalid slug or title. Allowed slugs: home, library.' });
-        }
-
-        const existingPage: any = await Page.findBySlug(slug);
-        if (existingPage && !ensureOwnerOrAdmin(authReq, getOwnerId(existingPage))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this page.' });
         }
 
         await Page.upsertBySlug(slug, title, authReq.auth.userId);
@@ -177,7 +184,7 @@ export const getPageBySlug = async (req: Request, res: Response, next: NextFunct
             return res.status(404).json({ message: 'Page not found.' });
         }
 
-        return res.status(200).json({ page });
+        return res.status(200).json({ page: toPublicPage(page) });
     } catch (error) {
         return next(error);
     }
@@ -204,11 +211,11 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         const carouselIds = orderedItems
             .filter((item: any) => item.itemType === 'carousel')
             .map((item: any) => String(item.carouselId ?? ''))
-            .filter(Boolean);
+            .filter(validateObjectId);
         const collectionIds = orderedItems
             .filter((item: any) => item.itemType === 'grid' || item.itemType === 'list')
             .map((item: any) => String(item.collectionId ?? ''))
-            .filter(Boolean);
+            .filter(validateObjectId);
 
         // Expand carousel references into full carousel payloads for client rendering.
         const viewerUserId = (req as AuthenticatedRequest).auth?.userId;
@@ -216,46 +223,16 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             Carousel.fetchByIds(carouselIds, viewerUserId),
             ContentCollection.fetchByIds(collectionIds)
         ]);
-        const carouselMap = new Map<string, any>();
-        for (const carousel of carousels) {
-            carouselMap.set(String(carousel._id), {
-                ...carousel,
-                items: Array.isArray(carousel.items)
-                    ? [...carousel.items].sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0))
+        const resolvedRefs = [
+            ...carousels.flatMap((carousel) =>
+                Array.isArray(carousel?.items) ? carousel.items : []
+            ),
+            ...contentCollections.flatMap((collection) =>
+                collection?.mode === 'manual' && Array.isArray(collection?.items)
+                    ? collection.items
                     : []
-            });
-        }
-
-        const collectionMap = new Map<string, any>();
-        for (const collection of contentCollections) {
-            collectionMap.set(String(collection._id), {
-                ...collection,
-                // Dynamic downloaded sources resolve from device-owned state in the client.
-                items: collection.mode === 'manual' && Array.isArray(collection.items)
-                    ? [...collection.items].sort((a: any, b: any) =>
-                        Number(a.order ?? 0) - Number(b.order ?? 0)
-                    )
-                    : []
-            });
-        }
-
-        const expandedItems = orderedItems.map((item: any) => item.itemType === 'carousel'
-            ? {
-                ...item,
-                carousel: carouselMap.get(String(item.carouselId ?? '')) ?? null
-            }
-            : {
-                ...item,
-                contentCollection: collectionMap.get(String(item.collectionId ?? '')) ?? null
-            });
-
-        const resolvedRefs = expandedItems.flatMap((item: any) =>
-            Array.isArray(item.carousel?.items)
-                ? item.carousel.items
-                : Array.isArray(item.contentCollection?.items)
-                    ? item.contentCollection.items
-                    : []
-        );
+            )
+        ];
         const albumIds = [...new Set<string>(resolvedRefs
             .filter((item: any) => item.contentType === 'album')
             .map((item: any) => String(item.contentId))
@@ -264,8 +241,12 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             .filter((item: any) => item.contentType === 'audioTrack')
             .map((item: any) => String(item.contentId))
             .filter(validateObjectId))];
+        const postIds = [...new Set<string>(resolvedRefs
+            .filter((item: any) => item.contentType === 'post')
+            .map((item: any) => String(item.contentId))
+            .filter(validateObjectId))];
         const db = getDb()!;
-        const [albums, audioTracks] = await Promise.all([
+        const [albums, audioTracks, posts] = await Promise.all([
             albumIds.length > 0
                 ? db.collection('albums').find({
                     _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) }
@@ -273,7 +254,21 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
                 : [],
             audioTrackIds.length > 0
                 ? db.collection('audioTracks').find({
+                    ...readyPublicAudioFilter,
                     _id: { $in: audioTrackIds.map((id) => ObjectId.createFromHexString(id)) }
+                }).maxTimeMS(3_000).toArray()
+                : [],
+            postIds.length > 0
+                ? db.collection('posts').find({
+                    _id: { $in: postIds.map((id) => ObjectId.createFromHexString(id)) }
+                }).project({
+                    _id: 1,
+                    title: 1,
+                    description: 1,
+                    mainImageUrl: 1,
+                    imageUrls: 1,
+                    userId: 1,
+                    createdAt: 1
                 }).maxTimeMS(3_000).toArray()
                 : []
         ]);
@@ -288,21 +283,27 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             }).maxTimeMS(3_000).toArray()
             : [];
         const includedAlbums = [...albums, ...linkedAlbums];
-        const albumsById = new Map(includedAlbums.map((album: any) => [String(album._id), album]));
+        const [publicAlbums, publicAudioTracks] = await Promise.all([
+            projectPublicAlbums(includedAlbums),
+            projectPublicAudioTracks(audioTracks)
+        ]);
+        const postsById = new Map(posts.map((post: any) => [String(post._id), post] as const));
+        const publicPosts = postIds.flatMap((postId) => {
+            const post = postsById.get(postId);
+            return post ? [toPublicFeedPost(post)] : [];
+        });
+        const publicPage = toPublicExpandedPage(page, carousels, contentCollections, {
+            albumIds: new Set(albums.map((album: any) => String(album._id))),
+            audioTrackIds: new Set(audioTracks.map((track: any) => String(track._id))),
+            postIds: new Set(postsById.keys())
+        });
 
         return res.status(200).json({
-            page: {
-                ...page,
-                items: expandedItems
-            },
+            page: publicPage,
             included: {
-                albums: includedAlbums.map(withDerivedCoverArtUrl),
-                audioTracks: audioTracks.map((track: any) =>
-                    withDisplayCoverArtUrl(
-                        normalizeAudioTrackText(track),
-                        albumsById.get(String(track.albumId ?? ''))
-                    )
-                )
+                albums: publicAlbums,
+                audioTracks: publicAudioTracks,
+                posts: publicPosts
             }
         });
     } catch (error) {
@@ -315,7 +316,7 @@ export const listPages = async (req: Request, res: Response, next: NextFunction)
         const pages = await Page.fetchAll();
         return res.status(200).json({
             allowedSlugs,
-            pages
+            pages: pages.map(toPublicPage)
         });
     } catch (error) {
         return next(error);
@@ -328,6 +329,9 @@ export const createCarousel = async (req: Request, res: Response, next: NextFunc
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const name = String(req.body.name ?? '').trim();
         const definition = parseCarouselDefinition(req.body);
@@ -336,8 +340,8 @@ export const createCarousel = async (req: Request, res: Response, next: NextFunc
         }
         if (definition.artistConfig) {
             const artist = await Artist.findById(definition.artistConfig.artistId);
-            if (!artist || !ensureOwnerOrAdmin(authReq, String(artist.createdBy ?? ''))) {
-                return res.status(404).json({ message: 'Configured artist was not found or cannot be used.' });
+            if (!artist) {
+                return res.status(404).json({ message: 'Configured artist was not found.' });
             }
         }
 
@@ -369,6 +373,9 @@ export const updateArtistCarousel = async (req: Request, res: Response, next: Ne
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const carouselId = String(req.params.carouselId ?? '').trim();
         const name = String(req.body.name ?? '').trim();
@@ -381,13 +388,9 @@ export const updateArtistCarousel = async (req: Request, res: Response, next: Ne
         if (!carousel || carousel.mode !== 'artist') {
             return res.status(404).json({ message: 'Artist carousel not found.' });
         }
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this carousel.' });
-        }
-
         const artist = await Artist.findById(definition.artistConfig.artistId);
-        if (!artist || !ensureOwnerOrAdmin(authReq, String(artist.createdBy ?? ''))) {
-            return res.status(404).json({ message: 'Configured artist was not found or cannot be used.' });
+        if (!artist) {
+            return res.status(404).json({ message: 'Configured artist was not found.' });
         }
 
         await Carousel.updateById(carouselId, {
@@ -410,18 +413,21 @@ export const updateArtistCarousel = async (req: Request, res: Response, next: Ne
 export const updatePersonalizedCarousel = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
         const carouselId = String(req.params.carouselId ?? '').trim();
         const name = String(req.body.name ?? '').trim();
         const definition = parseCarouselDefinition({ ...req.body, mode: 'personalized' });
-        if (!authReq.auth || !validateObjectId(carouselId) || !name || !definition?.personalizedConfig) {
-            return res.status(authReq.auth ? 400 : 401).json({ message: 'Valid personalized carousel configuration is required.' });
+        if (!validateObjectId(carouselId) || !name || !definition?.personalizedConfig) {
+            return res.status(400).json({ message: 'Valid personalized carousel configuration is required.' });
         }
         const carousel: any = await Carousel.findById(carouselId);
         if (!carousel || carousel.mode !== 'personalized') {
             return res.status(404).json({ message: 'Personalized carousel not found.' });
-        }
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this carousel.' });
         }
         await Carousel.updateById(carouselId, {
             name,
@@ -446,6 +452,9 @@ export const renameManualCarousel = async (req: Request, res: Response, next: Ne
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const carouselId = String(req.params.carouselId ?? '').trim();
         const name = String(req.body.name ?? '').trim();
@@ -457,10 +466,6 @@ export const renameManualCarousel = async (req: Request, res: Response, next: Ne
         if (!carousel || carousel.mode !== 'manual') {
             return res.status(404).json({ message: 'Manual carousel not found.' });
         }
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can rename this carousel.' });
-        }
-
         await Carousel.updateById(carouselId, {
             name,
             updatedBy: authReq.auth.userId
@@ -474,15 +479,21 @@ export const renameManualCarousel = async (req: Request, res: Response, next: Ne
     }
 };
 
-export const listCarouselsByUser = async (req: Request, res: Response, next: NextFunction) => {
+/** Lists the bounded global Carousel inventory for administrators. */
+export const listCarousels = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
-        const carousels = await Carousel.fetchByCreator(authReq.auth.userId);
-        return res.status(200).json({ carousels });
+        const limit = boundedLimit(req.query.limit, 50, 100);
+        const offset = boundedOffset(req.query.offset);
+        const carousels = await Carousel.fetchAll(limit, offset);
+        return res.status(200).json({ carousels, limit, offset });
     } catch (error) {
         return next(error);
     }
@@ -493,6 +504,9 @@ export const attachCarouselToPage = async (req: Request, res: Response, next: Ne
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
         }
 
         const slug = getPageSlug(String(req.params.slug ?? req.body.slug ?? ''));
@@ -506,17 +520,9 @@ export const attachCarouselToPage = async (req: Request, res: Response, next: Ne
             return res.status(404).json({ message: 'Page not found. Create it first.' });
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(page))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this page.' });
-        }
-
         const carousel: any = await Carousel.findById(carouselId);
         if (!carousel) {
             return res.status(404).json({ message: 'Carousel not found.' });
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can attach this carousel.' });
         }
 
         const position = parseOptionalPosition(req.body.position);
@@ -537,6 +543,9 @@ export const removeCarouselFromPage = async (req: Request, res: Response, next: 
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const slug = getPageSlug(String(req.params.slug ?? ''));
         const carouselId = String(req.params.carouselId ?? '').trim();
@@ -547,10 +556,6 @@ export const removeCarouselFromPage = async (req: Request, res: Response, next: 
         const page: any = await Page.findBySlug(slug);
         if (!page) {
             return res.status(404).json({ message: 'Page not found.' });
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(page))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this page.' });
         }
 
         const items = await Page.removeCarouselItem(slug, carouselId, authReq.auth.userId);
@@ -570,6 +575,9 @@ export const reorderPageItems = async (req: Request, res: Response, next: NextFu
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const slug = getPageSlug(String(req.params.slug ?? req.body.slug ?? ''));
         const fromIndex = parseRequiredIndex(req.body.fromIndex);
@@ -582,10 +590,6 @@ export const reorderPageItems = async (req: Request, res: Response, next: NextFu
         const page: any = await Page.findBySlug(slug);
         if (!page) {
             return res.status(404).json({ message: 'Page not found.' });
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(page))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this page.' });
         }
 
         const items = await Page.reorderItem(slug, fromIndex, toIndex, authReq.auth.userId);
@@ -608,6 +612,9 @@ export const addCarouselItem = async (req: Request, res: Response, next: NextFun
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const carouselId = String(req.params.carouselId ?? '').trim();
         const contentType = String(req.body.contentType ?? '').trim();
@@ -621,9 +628,6 @@ export const addCarouselItem = async (req: Request, res: Response, next: NextFun
             return res.status(404).json({ message: 'Carousel not found.' });
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this carousel.' });
-        }
         if (carousel.mode !== 'manual') {
             return res.status(400).json({ message: 'Artist carousels are populated automatically and cannot accept manual items.' });
         }
@@ -659,6 +663,9 @@ export const reorderCarouselItems = async (req: Request, res: Response, next: Ne
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const carouselId = String(req.params.carouselId ?? '').trim();
         const fromIndex = parseRequiredIndex(req.body.fromIndex);
@@ -673,9 +680,6 @@ export const reorderCarouselItems = async (req: Request, res: Response, next: Ne
             return res.status(404).json({ message: 'Carousel not found.' });
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify this carousel.' });
-        }
         if (carousel.mode !== 'manual') {
             return res.status(400).json({ message: 'Artist carousels are populated automatically and cannot be reordered.' });
         }
@@ -700,6 +704,9 @@ export const moveCarouselItemBetweenCarousels = async (req: Request, res: Respon
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const sourceCarouselId = String(req.params.sourceCarouselId ?? '').trim();
         const targetCarouselId = String(req.body.targetCarouselId ?? '').trim();
@@ -717,9 +724,6 @@ export const moveCarouselItemBetweenCarousels = async (req: Request, res: Respon
             return res.status(404).json({ message: 'Source or target carousel not found.' });
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(source)) || !ensureOwnerOrAdmin(authReq, getOwnerId(target))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can modify these carousels.' });
-        }
         if (source.mode !== 'manual' || target.mode !== 'manual') {
             return res.status(400).json({ message: 'Items cannot be moved into or out of an artist carousel.' });
         }
@@ -751,6 +755,9 @@ export const deleteCarousel = async (req: Request, res: Response, next: NextFunc
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Missing or invalid credentials.' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const carouselId = String(req.params.carouselId ?? '').trim();
         if (!validateObjectId(carouselId)) {
@@ -760,10 +767,6 @@ export const deleteCarousel = async (req: Request, res: Response, next: NextFunc
         const carousel: any = await Carousel.findById(carouselId);
         if (!carousel) {
             return res.status(404).json({ message: 'Carousel not found.' });
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return res.status(403).json({ message: 'Forbidden: only creator or admin can delete this carousel.' });
         }
 
         // Deletion policy: detach from all pages first, then delete the carousel.
@@ -784,16 +787,12 @@ export const createOrUpdatePageWeb = async (req: Request, res: Response, next: N
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const slug = getPageSlug(String(req.body.slug ?? ''));
         const title = String(req.body.title ?? '').trim();
         if (!slug || !title) {
             return redirectWithMessage(res, 'Invalid page slug or missing title. Allowed slugs: home, library.');
-        }
-
-        const existingPage: any = await Page.findBySlug(slug);
-        if (existingPage && !ensureOwnerOrAdmin(authReq, getOwnerId(existingPage))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this page.');
         }
 
         await Page.upsertBySlug(slug, title, authReq.auth.userId);
@@ -809,6 +808,7 @@ export const createCarouselWeb = async (req: Request, res: Response, next: NextF
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const name = String(req.body.name ?? '').trim();
         const definition = parseCarouselDefinition(req.body);
@@ -817,8 +817,8 @@ export const createCarouselWeb = async (req: Request, res: Response, next: NextF
         }
         if (definition.artistConfig) {
             const artist = await Artist.findById(definition.artistConfig.artistId);
-            if (!artist || !ensureOwnerOrAdmin(authReq, String(artist.createdBy ?? ''))) {
-                return redirectWithMessage(res, 'Configured artist was not found or cannot be used.');
+            if (!artist) {
+                return redirectWithMessage(res, 'Configured artist was not found.');
             }
         }
 
@@ -849,6 +849,7 @@ export const updateArtistCarouselWeb = async (req: Request, res: Response, next:
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const carouselId = String(req.body.carouselId ?? '').trim();
         const name = String(req.body.name ?? '').trim();
@@ -861,13 +862,9 @@ export const updateArtistCarouselWeb = async (req: Request, res: Response, next:
         if (!carousel || carousel.mode !== 'artist') {
             return redirectWithMessage(res, 'Artist carousel not found.');
         }
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this carousel.');
-        }
-
         const artist = await Artist.findById(definition.artistConfig.artistId);
-        if (!artist || !ensureOwnerOrAdmin(authReq, String(artist.createdBy ?? ''))) {
-            return redirectWithMessage(res, 'Configured artist was not found or cannot be used.');
+        if (!artist) {
+            return redirectWithMessage(res, 'Configured artist was not found.');
         }
 
         await Carousel.updateById(carouselId, {
@@ -887,6 +884,7 @@ export const updatePersonalizedCarouselWeb = async (req: Request, res: Response,
     try {
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        if (rejectNonAdminWebMutation(authReq, res)) return;
         const carouselId = String(req.body.carouselId ?? '').trim();
         const name = String(req.body.name ?? '').trim();
         const definition = parseCarouselDefinition({ ...req.body, mode: 'personalized' });
@@ -896,9 +894,6 @@ export const updatePersonalizedCarouselWeb = async (req: Request, res: Response,
         const carousel: any = await Carousel.findById(carouselId);
         if (!carousel || carousel.mode !== 'personalized') {
             return redirectWithMessage(res, 'Personalized carousel not found.');
-        }
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this carousel.');
         }
         await Carousel.updateById(carouselId, {
             name,
@@ -919,6 +914,7 @@ export const renameManualCarouselWeb = async (req: Request, res: Response, next:
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const carouselId = String(req.body.carouselId ?? '').trim();
         const name = String(req.body.name ?? '').trim();
@@ -930,10 +926,6 @@ export const renameManualCarouselWeb = async (req: Request, res: Response, next:
         if (!carousel || carousel.mode !== 'manual') {
             return redirectWithMessage(res, 'Manual carousel not found.');
         }
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can rename this carousel.');
-        }
-
         await Carousel.updateById(carouselId, {
             name,
             updatedBy: authReq.auth.userId
@@ -950,6 +942,7 @@ export const attachCarouselToPageWeb = async (req: Request, res: Response, next:
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const slug = getPageSlug(String(req.body.slug ?? ''));
         const carouselId = String(req.body.carouselId ?? '').trim();
@@ -962,17 +955,9 @@ export const attachCarouselToPageWeb = async (req: Request, res: Response, next:
             return redirectWithMessage(res, 'Page not found. Create it first.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(page))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this page.');
-        }
-
         const carousel: any = await Carousel.findById(carouselId);
         if (!carousel) {
             return redirectWithMessage(res, 'Carousel not found.');
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can attach this carousel.');
         }
 
         const position = parseOptionalPosition(req.body.position);
@@ -990,6 +975,7 @@ export const reorderPageItemsWeb = async (req: Request, res: Response, next: Nex
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const slug = getPageSlug(String(req.body.slug ?? ''));
         const fromIndex = parseRequiredIndex(req.body.fromIndex);
@@ -1001,10 +987,6 @@ export const reorderPageItemsWeb = async (req: Request, res: Response, next: Nex
         const page: any = await Page.findBySlug(slug);
         if (!page) {
             return redirectWithMessage(res, 'Page not found.');
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(page))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this page.');
         }
 
         const updated = await Page.reorderItem(slug, fromIndex, toIndex, authReq.auth.userId);
@@ -1024,6 +1006,7 @@ export const detachCarouselFromPageWeb = async (req: Request, res: Response, nex
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const slug = getPageSlug(String(req.body.slug ?? ''));
         const carouselId = String(req.body.carouselId ?? '').trim();
@@ -1034,10 +1017,6 @@ export const detachCarouselFromPageWeb = async (req: Request, res: Response, nex
         const page: any = await Page.findBySlug(slug);
         if (!page) {
             return redirectWithMessage(res, 'Page not found.');
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(page))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this page.');
         }
 
         await Page.removeCarouselItem(slug, carouselId, authReq.auth.userId);
@@ -1054,6 +1033,7 @@ export const addCarouselItemWeb = async (req: Request, res: Response, next: Next
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const carouselId = String(req.body.carouselId ?? '').trim();
         const contentType = String(req.body.contentType ?? '').trim();
@@ -1068,9 +1048,6 @@ export const addCarouselItemWeb = async (req: Request, res: Response, next: Next
             return redirectWithMessage(res, 'Carousel not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this carousel.');
-        }
         if (carousel.mode !== 'manual') {
             return redirectWithMessage(res, 'Artist carousels are populated automatically and cannot accept manual items.');
         }
@@ -1098,6 +1075,7 @@ export const reorderCarouselItemsWeb = async (req: Request, res: Response, next:
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const carouselId = String(req.body.carouselId ?? '').trim();
         const fromIndex = parseRequiredIndex(req.body.fromIndex);
@@ -1112,9 +1090,6 @@ export const reorderCarouselItemsWeb = async (req: Request, res: Response, next:
             return redirectWithMessage(res, 'Carousel not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this carousel.');
-        }
         if (carousel.mode !== 'manual') {
             return redirectWithMessage(res, 'Artist carousels are populated automatically and cannot be reordered.');
         }
@@ -1136,6 +1111,7 @@ export const moveCarouselItemBetweenCarouselsWeb = async (req: Request, res: Res
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const sourceCarouselId = String(req.body.sourceCarouselId ?? '').trim();
         const targetCarouselId = String(req.body.targetCarouselId ?? '').trim();
@@ -1156,9 +1132,6 @@ export const moveCarouselItemBetweenCarouselsWeb = async (req: Request, res: Res
             return redirectWithMessage(res, 'Source or target carousel not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(source)) || !ensureOwnerOrAdmin(authReq, getOwnerId(target))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify these carousels.');
-        }
         if (source.mode !== 'manual' || target.mode !== 'manual') {
             return redirectWithMessage(res, 'Items cannot be moved into or out of an artist carousel.');
         }
@@ -1180,6 +1153,7 @@ export const deleteCarouselWeb = async (req: Request, res: Response, next: NextF
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminWebMutation(authReq, res)) return;
 
         const carouselId = String(req.body.carouselId ?? '').trim();
         if (!validateObjectId(carouselId)) {
@@ -1189,10 +1163,6 @@ export const deleteCarouselWeb = async (req: Request, res: Response, next: NextF
         const carousel: any = await Carousel.findById(carouselId);
         if (!carousel) {
             return redirectWithMessage(res, 'Carousel not found.');
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(carousel))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can delete this carousel.');
         }
 
         await Page.detachCarouselFromAllPages(carouselId, authReq.auth.userId);
