@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { Server } from 'node:http';
 import { after, before, test } from 'node:test';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { ObjectId } from 'mongodb';
 
 import { createApp } from '../src/app';
@@ -287,4 +288,69 @@ test('signed-out refresh and logout probes cannot exhaust the login limiter', as
         body: { identifier: 'listener@example.com', password: 'correct horse battery staple' }
     });
     assert.equal(login.status, 200);
+});
+
+test('persisted roles override stale token claims and unknown values fail closed', async () => {
+    const userId = new ObjectId();
+    const email = 'role-authority@example.com';
+    const password = 'role authority integration password';
+    await getDb()!.collection('users').insertOne({
+        _id: userId,
+        email,
+        password: await bcrypt.hash(password, 4),
+        username: 'role-authority',
+        displayName: 'Role Authority',
+        posts: [],
+        role: 'creator',
+        emailVerified: true,
+        avatarRevision: 0
+    });
+
+    const legacyRoleLogin = await browserMutation('/auth/browser/login', {
+        body: { identifier: email, password }
+    });
+    assert.equal(legacyRoleLogin.status, 200);
+    assert.equal((await legacyRoleLogin.clone().json()).user.role, 'user');
+    const legacyRoleJar = cookieJar(setCookieHeaders(legacyRoleLogin));
+    const legacyRoleClaims = jwt.decode(cookieValue(legacyRoleJar, 'session_token')) as {
+        role?: string;
+    } | null;
+    assert.equal(legacyRoleClaims?.role, 'user');
+
+    const deniedAsLegacyRole = await fetch(`${baseUrl}/content/manage/audio-tracks`, {
+        headers: { Cookie: legacyRoleJar },
+        redirect: 'manual'
+    });
+    assert.equal(deniedAsLegacyRole.status, 403);
+
+    await getDb()!.collection('users').updateOne(
+        { _id: userId },
+        { $set: { role: 'admin' } }
+    );
+    const grantedWithStaleUserClaim = await fetch(`${baseUrl}/content/manage/audio-tracks`, {
+        headers: { Cookie: legacyRoleJar },
+        redirect: 'manual'
+    });
+    assert.equal(grantedWithStaleUserClaim.status, 200);
+
+    const adminLogin = await browserMutation('/auth/browser/login', {
+        body: { identifier: email, password }
+    });
+    assert.equal(adminLogin.status, 200);
+    assert.equal((await adminLogin.clone().json()).user.role, 'admin');
+    const adminJar = cookieJar(setCookieHeaders(adminLogin));
+    const adminClaims = jwt.decode(cookieValue(adminJar, 'session_token')) as {
+        role?: string;
+    } | null;
+    assert.equal(adminClaims?.role, 'admin');
+
+    await getDb()!.collection('users').updateOne(
+        { _id: userId },
+        { $set: { role: 'creator' } }
+    );
+    const deniedWithStaleAdminClaim = await fetch(`${baseUrl}/content/manage/audio-tracks`, {
+        headers: { Cookie: adminJar },
+        redirect: 'manual'
+    });
+    assert.equal(deniedWithStaleAdminClaim.status, 403);
 });

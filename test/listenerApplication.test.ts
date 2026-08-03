@@ -75,22 +75,33 @@ test('production defaults to the single trusted Nginx proxy hop', () => {
   }
 });
 
-test('landing actions expose Finitude without replacing account or creator actions', () => {
+test('landing actions expose Finitude while reserving Content Manager for admins', () => {
   const signedOut = renderLandingActions();
   assert.match(signedOut.headerActions, /href="\/listen">Open Finitude/);
   assert.match(signedOut.heroActions, /href="\/listen">Open Finitude/);
   assert.match(signedOut.headerActions, /href="\/auth\/login-web">Log in/);
   assert.match(signedOut.heroActions, /href="\/auth\/signup-web">Create account/);
 
-  const signedIn = renderLandingActions({ email: 'listener+<beta>@example.com' });
-  assert.match(signedIn.headerActions, /href="\/listen">Open Finitude/);
-  assert.match(signedIn.heroActions, /href="\/listen">Open Finitude/);
-  assert.match(signedIn.headerActions, /listener\+&lt;beta&gt;@example\.com/);
-  assert.doesNotMatch(signedIn.headerActions, /<beta>/);
-  assert.match(signedIn.headerActions, /href="\/content\/manage">Content Manager/);
-  assert.match(signedIn.headerActions, /action="\/auth\/logout-web"/);
-  assert.match(signedIn.heroActions, /href="\/content\/manage">Open Content Manager/);
-  assert.match(signedIn.heroActions, /href="\/content\/manage\/audio-tracks">Browse my audio tracks/);
+  const signedInUser = renderLandingActions({
+    email: 'listener+<beta>@example.com',
+    role: 'user'
+  });
+  assert.match(signedInUser.headerActions, /href="\/listen">Open Finitude/);
+  assert.match(signedInUser.heroActions, /href="\/listen">Open Finitude/);
+  assert.match(signedInUser.headerActions, /listener\+&lt;beta&gt;@example\.com/);
+  assert.doesNotMatch(signedInUser.headerActions, /<beta>/);
+  assert.doesNotMatch(signedInUser.headerActions, /content\/manage/);
+  assert.doesNotMatch(signedInUser.heroActions, /content\/manage/);
+  assert.match(signedInUser.headerActions, /action="\/auth\/logout-web"/);
+
+  const legacyRole = renderLandingActions({ email: 'legacy@example.com', role: 'creator' });
+  assert.doesNotMatch(legacyRole.headerActions, /content\/manage/);
+  assert.doesNotMatch(legacyRole.heroActions, /content\/manage/);
+
+  const admin = renderLandingActions({ email: 'admin@example.com', role: 'admin' });
+  assert.match(admin.headerActions, /href="\/content\/manage">Content Manager/);
+  assert.match(admin.heroActions, /href="\/content\/manage">Open Content Manager/);
+  assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks">Browse audio tracks/);
 });
 
 test('listener routes report a clear service error when the bundle is absent', async () => {
