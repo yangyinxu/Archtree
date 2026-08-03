@@ -160,8 +160,15 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   or accelerate ahead of the finger. The player remains collapsed until the
   drag begins, then follows the finger directly through the interactive
   transition.
-- The expanded player's fixed header uses native Liquid Glass controls on
-  supported iOS versions.
+- The expanded player's fixed header presents a centered pull indicator instead
+  of a downward-chevron button. Pulling down collapses the player, and assistive
+  technologies retain a semantic Collapse action.
+- The expanded player keeps its title to one line and automatically marquees
+  overflow unless Reduce Motion is enabled. Save and More actions sit beside
+  the metadata, and confirmed local-download deletion belongs in More.
+- Expanded playback uses a slim progress track without a persistent thumb and
+  standard filled previous/play-or-pause/next transport controls, with the
+  centered play-or-pause action visually dominant.
 - On the compact bar, a vertical upward gesture is reserved for expansion. A
   horizontal gesture is reserved for previous/next queue navigation and must
   never expand the player, including when the gesture contains minor movement
