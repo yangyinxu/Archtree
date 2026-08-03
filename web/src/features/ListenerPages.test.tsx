@@ -156,6 +156,8 @@ test('Library sends type filters to the server and retains the mixed saved list'
   });
 
   expect(await screen.findByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Downloads' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/offline/i)).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Albums' }));
   await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => String(path).includes('types=album'))).toBe(true));
   expect(await screen.findByRole('link', { name: 'Night Geometry, album' })).toBeInTheDocument();

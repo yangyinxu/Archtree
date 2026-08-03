@@ -71,9 +71,10 @@ cross-device playback handoff are not part of the first release.
 6. **Progressive enhancement for browser media integration.** Core playback
    uses `HTMLAudioElement`. Media Session metadata and system control handlers
    are enabled only when supported; their absence must not break playback.
-7. **No false parity.** The Web MVP does not show a Download action until a
-   complete browser-local lifecycle exists. A normal file download is not
-   labeled as a Finitude offline download.
+7. **Streaming-only Web.** The Web listener intentionally provides no Finitude
+   Download action, Download filter, offline state, or browser-local media
+   lifecycle. A normal browser file download is not labeled as Finitude
+   offline content.
 8. **Canonical rules win over client gaps.** The Web client supports the
    documented Carousel, Grid, and List page-item contract even though the
    current iOS Home implementation renders only Carousel items.
@@ -166,9 +167,13 @@ The repository already provides most foundational data and media operations:
 - Essential account identity display and a route into account management.
 - Accessibility, performance, security, observability, and production rollout.
 
+### Explicitly excluded from Web
+
+- Browser offline downloads, Download filtering, and device-local media
+  management. These remain native-client capabilities.
+
 ### Deferred from the MVP
 
-- Browser offline downloads and Download filtering.
 - Editable Up Next, Play Next, Add to Queue, drag-to-reorder, or playlists.
 - Lyrics, comments, social features, and voice search.
 - Video playback unless a separate product contract defines its relationship
@@ -398,8 +403,8 @@ Tasks:
 
 - Confirm `/listen` as the initial base path and decide whether `/` remains the
   workspace landing page after general release.
-- Confirm that browser offline downloads and all Download UI are absent from
-  the MVP.
+- Confirm that Web remains streaming-only and all Download and offline UI are
+  absent.
 - Confirm Web-specific playback expectations: playback persists across SPA
   routes and while the browser permits background audio, but the product does
   not promise iOS-equivalent locked/background execution.
@@ -416,9 +421,9 @@ Tasks:
   public or whether the product needs a draft/published lifecycle before the
   listener API launches.
 - Prepare the exact `docs/business-rules.md` additions for the Web Library's
-  server-only Saved view before offline support, browser-local search history,
-  persistent player behavior, and progressive Media Session support. Apply
-  each agreed addition in the same change as the implementation it governs.
+  server-only Saved view with no offline support, browser-local search history,
+  persistent player behavior, and progressive Media Session support. Apply each
+  agreed addition in the same change as the implementation it governs.
 - Freeze the route map and additive response contracts listed above.
 - Produce desktop, tablet, and mobile wireframes for the shell, Home, Album,
   Search, Library, and player states.
@@ -628,7 +633,8 @@ Tasks:
 - Keep signed-out history isolated from authenticated identities. Clear an
   authenticated account's local history on that account's logout.
 - Implement initial, typing, loading, no-result, error, retry, and result
-  states. Do not claim an offline fallback before Web downloads exist.
+  states. Do not claim an offline fallback because Web has no local-download
+  content source.
 
 Exit criteria:
 
@@ -753,7 +759,7 @@ Implementation evidence recorded on 2026-08-02:
 **Milestone C: general availability.** Only after this gate should product
 navigation make the listener Web app the primary public destination.
 
-### Phase 8 — Post-MVP account completeness and browser offline feasibility
+### Phase 8 — Post-MVP account completeness
 
 This phase is intentionally not scheduled into the first release.
 
@@ -763,21 +769,10 @@ are now implemented on Web. Remaining account-completeness work may include
 provider linking/unlinking and passkey enrollment. Each future flow must
 preserve the existing partial-failure and private-avatar rules.
 
-Before building offline downloads, run a separate feasibility prototype for:
-
-- OPFS/IndexedDB support and storage quotas in target browsers.
-- Persistent-storage permission and browser eviction behavior.
-- Service Worker limitations and interrupted-download recovery.
-- Authenticated `HEAD`, `Range`, `ETag`, and `If-Range` behavior.
-- Browser-profile/origin ownership, logout pausing, and signed-out playback.
-- Multi-tab download locking and player coordination.
-- Versioned manifests, corrupted states, shared local asset ownership, retry,
-  delete, and reconciliation.
-
-If implemented, browser downloads must follow the complete canonical lifecycle:
-completed local assets remain device/browser-owned, Save and Download remain
-independent, incomplete states remain visible, and one owner cannot delete an
-asset still owned by another entry.
+Browser offline playback and downloads are not part of Phase 8 or the Web
+roadmap. The Web listener remains streaming-only; the native-client download
+lifecycle remains governed separately by the canonical Offline Downloads
+rules.
 
 ## Test strategy
 

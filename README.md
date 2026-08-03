@@ -171,6 +171,9 @@ The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, and authenticated Library
 responses without exposing storage lifecycle fields. Public audio streaming is
 limited to database-confirmed `ready` tracks and preserves HTTP Range seeking.
+Finitude Web is streaming-only and exposes no Download action, Download filter,
+offline state, or browser-local media lifecycle; native-client downloads remain
+a separate product capability.
 Public artwork resolution similarly permits only ready Artist, Album, and
 Soundtrack image assets; account avatars remain private behind `/auth/avatar`.
 The Archtree landing page links both signed-out and signed-in visitors to

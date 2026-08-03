@@ -88,9 +88,9 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   sections in persisted order. A client limitation on another platform does
   not change the configured presentation type.
 - The Web Library is the complete server-backed union of saved Albums and
-  Soundtracks. Until browser-local offline downloads have their own complete
-  lifecycle, Web displays no Download action or Download filter and does not
-  represent ordinary file downloads as Finitude offline content.
+  Soundtracks. Web is streaming-only: it provides no Download action, Download
+  filter, offline state, or browser-local Finitude media lifecycle. An ordinary
+  browser file download is not represented as Finitude offline content.
 - The Web listener owns one long-lived audio element, queue, and playback
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player.
@@ -190,6 +190,9 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 
 ## Offline Downloads
 
+- This section applies only to native clients with device-local download
+  support. Finitude Web remains streaming-only and does not adopt these states,
+  controls, storage rules, or offline playback guarantees.
 - Starting or resuming a download requires an authenticated session. Signed-out
   listeners may browse and play available online streams, but Download prompts
   for sign-in and does not start a transfer until authentication succeeds.
@@ -354,7 +357,10 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Search history is limited to 10 entries. Repeating a query moves it to the newest position instead of creating a duplicate.
 - Once a query is submitted, Search displays grouped Artist, Album, and Soundtrack results and does not display a Recent Content section.
 - Artist results open Artist details, Album results open Album details, and Soundtrack results use the shared playback queue.
-- When the server search endpoint is unavailable, valid device-local downloaded Albums and Soundtracks may be shown as fallback results. Local fallback results are visibly marked as downloaded content.
+- On native clients with device-local download support, valid downloaded Albums
+  and Soundtracks may be shown when the server search endpoint is unavailable;
+  those results are visibly marked as downloaded content. Finitude Web has no
+  device-local downloaded-content fallback.
 - Voice search is not part of the initial Search release and requires a separate product decision.
 
 ## Authentication and Resolution
