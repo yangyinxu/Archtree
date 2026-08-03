@@ -244,7 +244,12 @@ test('clamps seeking, skip controls, volume, and mute state', async () => {
 test('exposes blocked autoplay as recoverable and succeeds on a later play', async () => {
   const audio = new FakeAudio();
   audio.failures.push(new DOMException('A gesture is required.', 'NotAllowedError'));
-  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  const onPlaybackError = vi.fn();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    onPlaybackError
+  });
 
   await store.launchStandalone(tracks[0]);
   expect(store.getSnapshot()).toMatchObject({
@@ -256,6 +261,10 @@ test('exposes blocked autoplay as recoverable and succeeds on a later play', asy
   await store.play();
   expect(store.getSnapshot()).toMatchObject({ status: 'playing', error: null });
   expect(audio.playCalls).toBe(2);
+  expect(onPlaybackError).toHaveBeenCalledWith({
+    stage: 'play_call',
+    code: 'autoplayBlocked'
+  });
 });
 
 test('ignores a stale play rejection after a newer source has launched', async () => {
@@ -276,7 +285,12 @@ test('ignores a stale play rejection after a newer source has launched', async (
 
 test('retains the queue through a network error so playback can retry', async () => {
   const audio = new FakeAudio();
-  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  const onPlaybackError = vi.fn();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    onPlaybackError
+  });
   await store.launchAlbumQueue(tracks, 1, { autoplay: false });
 
   audio.error = { code: 2 };
@@ -286,6 +300,7 @@ test('retains the queue through a network error so playback can retry', async ()
     status: 'error',
     error: { code: 'network', recoverable: true }
   });
+  expect(onPlaybackError).toHaveBeenCalledWith({ stage: 'media_element', code: 'network' });
 
   await store.play();
   expect(audio.loadCalls).toBe(2);
@@ -300,7 +315,8 @@ test('keeps source navigation recoverable when audio is unavailable', async () =
   const audioFactory = vi.fn((): PlayerAudio => {
     throw new Error('Audio is unavailable.');
   });
-  const store = createPlayerStore({ audioFactory, mediaSession: null });
+  const onPlaybackError = vi.fn();
+  const store = createPlayerStore({ audioFactory, mediaSession: null, onPlaybackError });
 
   await store.launchAlbumQueue(tracks, 0);
   expect(store.getSnapshot()).toMatchObject({
@@ -316,6 +332,28 @@ test('keeps source navigation recoverable when audio is unavailable', async () =
     error: { code: 'streamUnavailable', recoverable: true }
   });
   expect(audioFactory).toHaveBeenCalledTimes(1);
+  expect(onPlaybackError).toHaveBeenCalledTimes(1);
+  expect(onPlaybackError).toHaveBeenCalledWith({
+    stage: 'audio_create',
+    code: 'streamUnavailable'
+  });
+});
+
+test('classifies an empty stream URL as a source setup failure without content metadata', async () => {
+  const onPlaybackError = vi.fn();
+  const store = createPlayerStore({
+    audioFactory: () => new FakeAudio(),
+    mediaSession: null,
+    onPlaybackError
+  });
+
+  await store.launchStandalone({ ...tracks[0], streamUrl: '' });
+
+  expect(onPlaybackError).toHaveBeenCalledWith({
+    stage: 'source_set',
+    code: 'streamUnavailable'
+  });
+  expect(onPlaybackError.mock.calls.flat()).not.toContain('track-1');
 });
 
 test('shares transport state and metadata with progressive Media Session controls', async () => {

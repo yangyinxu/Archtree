@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
 import { apiErrorPayloadSchema, browserSessionSchema } from './schemas';
+import { enqueueListenerTelemetry } from '../telemetry/client';
+import {
+  classifyApiOperation,
+  classifyListenerRoute,
+  statusBucket
+} from '../telemetry/routeClassifier';
 
 export type ApiErrorKind = 'http' | 'network' | 'invalid-response';
 
@@ -33,6 +39,27 @@ interface BrowserLockManager {
     callback: () => Promise<Output>
   ): Promise<Output>;
 }
+
+const reportTerminalApiFailure = (
+  path: string,
+  method: string | undefined,
+  error: unknown,
+  attempt: 'initial' | 'after_refresh'
+) => {
+  if (error instanceof DOMException && error.name === 'AbortError') return;
+  const operation = classifyApiOperation(path, method);
+  if (!operation || !(error instanceof ApiError)) return;
+  enqueueListenerTelemetry({
+    category: 'api_error',
+    operation,
+    kind: error.kind === 'invalid-response' ? 'invalid_response' : error.kind,
+    statusBucket: error.kind === 'http' ? statusBucket(error.status) : 'none',
+    route: classifyListenerRoute(
+      typeof window === 'undefined' ? '/listen' : window.location.pathname
+    ),
+    attempt
+  });
+};
 
 const requestHeaders = (init?: RequestInit) => {
   const headers = new Headers(init?.headers);
@@ -172,12 +199,27 @@ export const apiRequest = async <Output>(
     return await requestOnce(path, schema, init);
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 401 || !retryAuthentication) {
+      reportTerminalApiFailure(path, init.method, error, 'initial');
       throw error;
     }
 
-    const refreshed = await refreshAfter(observedGeneration);
-    if (!refreshed) throw error;
-    return requestOnce(path, schema, init);
+    let refreshed: boolean;
+    try {
+      refreshed = await refreshAfter(observedGeneration);
+    } catch (refreshError) {
+      reportTerminalApiFailure(path, init.method, error, 'initial');
+      throw refreshError;
+    }
+    if (!refreshed) {
+      reportTerminalApiFailure(path, init.method, error, 'initial');
+      throw error;
+    }
+    try {
+      return await requestOnce(path, schema, init);
+    } catch (retryError) {
+      reportTerminalApiFailure(path, init.method, retryError, 'after_refresh');
+      throw retryError;
+    }
   }
 };
 
@@ -201,10 +243,25 @@ export const apiRequestNoContent = async (
     await run();
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 401 || !retryAuthentication) {
+      reportTerminalApiFailure(path, init.method, error, 'initial');
       throw error;
     }
-    const refreshed = await refreshAfter(observedGeneration);
-    if (!refreshed) throw error;
-    await run();
+    let refreshed: boolean;
+    try {
+      refreshed = await refreshAfter(observedGeneration);
+    } catch (refreshError) {
+      reportTerminalApiFailure(path, init.method, error, 'initial');
+      throw refreshError;
+    }
+    if (!refreshed) {
+      reportTerminalApiFailure(path, init.method, error, 'initial');
+      throw error;
+    }
+    try {
+      await run();
+    } catch (retryError) {
+      reportTerminalApiFailure(path, init.method, retryError, 'after_refresh');
+      throw retryError;
+    }
   }
 };

@@ -43,11 +43,13 @@ export const SaveButton = ({
 
   const signedOut = !viewerId;
   const label = saved ? 'Remove from Library' : 'Save to Library';
+  // A signed-out activation is available because its outcome is the explanatory alert.
+  const actionUnavailable = saved === null || mutation.isPending;
 
   return (
     <span className={`${styles.wrapper} ${compact ? styles.compact : ''}`}>
       <button
-        aria-disabled={signedOut || saved === null || mutation.isPending}
+        aria-disabled={actionUnavailable}
         aria-label={label}
         className={`${styles.button} ${signedOut ? styles.signedOut : ''}`}
         onClick={() => {

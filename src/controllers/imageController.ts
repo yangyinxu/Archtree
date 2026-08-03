@@ -19,6 +19,7 @@ export const getImage = async (req: Request, res: Response, next: NextFunction) 
             abortSignal: context.signal
         });
         if (!result) {
+            res.setHeader('Cache-Control', 'private, no-store');
             return res.status(404).json({ message: 'Image not found.' });
         }
         if (result.notModified) {

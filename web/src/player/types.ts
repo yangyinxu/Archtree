@@ -23,6 +23,18 @@ export interface PlayerErrorState {
   recoverable: true;
 }
 
+export type PlayerPlaybackErrorStage =
+  | 'audio_create'
+  | 'source_set'
+  | 'play_call'
+  | 'media_element';
+
+/** Anonymous playback failure dimension emitted without queue or content metadata. */
+export interface PlayerPlaybackErrorEvent {
+  stage: PlayerPlaybackErrorStage;
+  code: PlayerErrorCode;
+}
+
 /** Immutable snapshot consumed by React and non-React player surfaces. */
 export interface PlayerSnapshot {
   queue: readonly PlayerQueueItem[];
@@ -103,6 +115,7 @@ export interface CreatePlayerStoreOptions {
   }) => unknown;
   initialVolume?: number;
   initiallyMuted?: boolean;
+  onPlaybackError?: (event: PlayerPlaybackErrorEvent) => void;
 }
 
 /** Public commands intentionally contain no routing or activity-reporting dependency. */

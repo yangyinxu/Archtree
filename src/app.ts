@@ -10,13 +10,19 @@ import feedRoutes from './routes/feedRoutes';
 import listenerRoutes from './routes/listenerRoutes';
 import videoRoutes from './routes/videoRoutes';
 import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddleware';
-import { getDb } from './infrastructure/database';
+import { getHealth } from './controllers/healthController';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
 import { maxAvatarUploadMb, maxImageUploadMb } from './middleware/imageUpload';
 import { applySecurityHeaders } from './middleware/securityHeadersMiddleware';
-import { getMediaDeliveryMetrics } from './services/mediaDeliveryService';
-import { requireSameOriginCookieMutation } from './services/authCookieService';
+import {
+  requireStrictSameOriginBrowserMutation,
+  requireSameOriginCookieMutation
+} from './services/authCookieService';
+import {
+  listenerTelemetryConcurrencyLimit,
+  listenerTelemetryRateLimit
+} from './middleware/requestProtectionMiddleware';
 
 export interface CreateAppOptions {
   /** Overrides the production listener bundle location for isolated route tests. */
@@ -120,6 +126,16 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use(applySecurityHeaders);
   app.use('/assets', express.static(path.join(__dirname, 'public')));
 
+  // Protect and bound anonymous diagnostics before the general JSON parser can
+  // consume a larger request. The listener router owns the final controller.
+  app.post(
+    '/api/listener/v1/telemetry',
+    requireStrictSameOriginBrowserMutation,
+    listenerTelemetryRateLimit,
+    listenerTelemetryConcurrencyLimit,
+    bodyParser.json({ limit: '16kb', strict: true })
+  );
+
   // Parse JSON APIs and browser form submissions before their routers.
   app.use(bodyParser.json());
   app.use(bodyParser.urlencoded({ extended: false }));
@@ -182,26 +198,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     }
   });
 
-  app.get('/health', async (_req, res) => {
-    try {
-      const db = getDb();
-      if (!db) throw new Error('Database is unavailable.');
-      await db.command({ ping: 1 }, { maxTimeMS: 1_000 });
-      return res.status(200).json({
-        status: 'ok',
-        mediaDelivery: getMediaDeliveryMetrics(),
-        memory: {
-          rssBytes: process.memoryUsage().rss,
-          heapUsedBytes: process.memoryUsage().heapUsed
-        }
-      });
-    } catch {
-      return res.status(503).json({
-        status: 'unavailable',
-        mediaDelivery: getMediaDeliveryMetrics()
-      });
-    }
-  });
+  app.get('/health', getHealth);
 
   app.use((error: any, req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) {
@@ -211,9 +208,10 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
     const isTooManyFiles = error?.code === 'LIMIT_FILE_COUNT';
     const isMulterInputError = typeof error?.code === 'string' && error.code.startsWith('LIMIT_');
+    const isInvalidJson = error?.type === 'entity.parse.failed';
     const status: number = isFileTooLarge || isTooManyFiles
       ? 413
-      : isMulterInputError ? 400 : error.statusCode || 500;
+      : isMulterInputError || isInvalidJson ? 400 : error.statusCode || 500;
     const message: string = isFileTooLarge
       ? error?.field === 'avatar'
         ? `Avatar is too large. The maximum size is ${maxAvatarUploadMb} MB.`
@@ -224,12 +222,40 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
         ? 'Too many files were included in this upload.'
         : isMulterInputError
           ? 'Invalid multipart upload.'
-          : error.message;
+          : isInvalidJson
+            ? 'Invalid JSON request.'
+            : error.message;
     const data: any = error.data;
 
     if (status >= 500) {
-      console.log(`Caught unexpected request: ${req.originalUrl}`);
-      console.log(error);
+      const method = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+        .includes(req.method) ? req.method : 'OTHER';
+      const requestArea = req.path === '/api/listener/v1/telemetry'
+        ? 'listener_telemetry'
+        : req.path.startsWith('/api/listener/v1')
+          ? 'listener_api'
+          : req.path === '/listen' || req.path.startsWith('/listen/')
+            ? 'listener_page'
+            : req.path.startsWith('/auth')
+              ? 'auth'
+              : req.path.startsWith('/content')
+                ? 'content'
+                : req.path.startsWith('/feed')
+                  ? 'feed'
+                  : req.path.startsWith('/video')
+                    ? 'video'
+                    : req.path.startsWith('/admin')
+                      ? 'admin'
+                      : req.path === '/'
+                        ? 'root'
+                        : 'other';
+      console.error(JSON.stringify({
+        category: 'server_error',
+        requestArea,
+        method,
+        status: Number.isInteger(status) && status <= 599 ? status : 500,
+        occurredAt: new Date().toISOString()
+      }));
     }
 
     if (status >= 500) {
@@ -247,8 +273,11 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
 if (typeof require !== 'undefined' && require.main === module) {
   void import('./server')
     .then(({ startServer }) => startServer())
-    .catch((error) => {
-      console.log(`Error starting Archtree: ${error}`);
+    .catch(() => {
+      console.error(JSON.stringify({
+        category: 'server_start_failed',
+        occurredAt: new Date().toISOString()
+      }));
       process.exitCode = 1;
     });
 }

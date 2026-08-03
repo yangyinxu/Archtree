@@ -2,6 +2,10 @@ import { z } from 'zod';
 
 import { apiRequest } from './client';
 import { browserSessionSchema } from './schemas';
+import {
+  flushListenerTelemetry,
+  resetListenerTelemetryForTests
+} from '../telemetry/client';
 
 const sessionBody = {
   user: {
@@ -40,7 +44,7 @@ test('coalesces concurrent 401 responses into one cookie refresh', async () => {
   let sessionChecks = 0;
   let releaseRefresh!: () => void;
   const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const path = String(input);
     if (path === '/auth/browser/session') {
       sessionChecks += 1;
@@ -157,4 +161,36 @@ test('waits for another tab and reuses its newly rotated access cookie', async (
   expect(sessionChecks).toBe(2);
   expect(expiredAccessAttempts).toBe(2);
   expect(currentAccessAttempts).toBe(2);
+});
+
+test('reports a terminal listener API failure using only bounded classifications', async () => {
+  resetListenerTelemetryForTests();
+  window.history.replaceState({}, '', '/listen/albums/private-content-id');
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input) === '/api/listener/v1/telemetry') {
+      return new Response(null, { status: 204 });
+    }
+    return jsonResponse({ message: 'private upstream error text' }, 503);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  await expect(apiRequest(
+    '/api/listener/v1/home?query=private-search',
+    z.object({ ready: z.boolean() }).strict(),
+    { retryAuthentication: false }
+  )).rejects.toMatchObject({ status: 503 });
+  flushListenerTelemetry();
+
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  const telemetryInit = fetchMock.mock.calls[1][1] as RequestInit;
+  expect(JSON.parse(String(telemetryInit.body))).toEqual({ events: [{
+    category: 'api_error',
+    operation: 'listener_home',
+    kind: 'http',
+    statusBucket: '5xx',
+    route: 'album',
+    attempt: 'initial'
+  }] });
+  expect(String(telemetryInit.body)).not.toContain('private');
+  resetListenerTelemetryForTests();
 });

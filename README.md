@@ -30,8 +30,13 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm start`: start production-mode server
 - `npm run build`: type-check the server and build the listener bundle
 - `npm test`: run server and listener unit/component tests
+- `npm run test:e2e`: run the production listener bundle against Chromium,
+  Firefox, and WebKit with accessibility checks
+- `npm run test:e2e:chromium`: run the faster Chromium-only browser gate
 - `npm run test:integration`: run transactional authentication lifecycle tests
   against a disposable single-node MongoDB replica set
+- `npm run test:media-load`: run the bounded audio Range, seek/abort, artwork,
+  and health-recovery workload against an explicitly authorized environment
 
 The integration suite requires a trusted `mongod` executable on `PATH`. On
 macOS, approve or install that binary according to the machine's security
@@ -81,6 +86,12 @@ Required variables:
 - `MAX_VIDEO_STREAM_CHUNK_MB`: largest video byte range returned per request (defaults to 4)
 - `MAX_MEDIA_REQUESTS_PER_IP`: concurrent public media requests allowed per client IP (defaults to 8)
 - `MAX_MEDIA_REQUESTS_GLOBAL`: concurrent public media requests allowed per server process (defaults to 40)
+- `MEDIA_PLAYBACK_RESERVED_PER_IP`: slots within the per-client media limit
+  reserved from artwork, avatar, video, and download traffic for playback
+  (defaults to 25% of the configured limit, currently 2)
+- `MEDIA_PLAYBACK_RESERVED_GLOBAL`: slots within the process media limit
+  reserved from non-playback traffic (defaults to 40% of the configured limit,
+  currently 16)
 - `MAX_RECONCILIATION_OBJECTS`: safety ceiling for storage reconciliation reports (defaults to 50000)
 - `MAX_STORAGE_SUMMARY_OBJECTS`: safety ceiling for synchronous S3 storage summaries (defaults to 1000000)
 - `TRUST_PROXY_HOPS`: trusted reverse-proxy hop count; the single-instance
@@ -148,10 +159,58 @@ second process with `npm run dev:web`, then open
 initial route's unique compressed JavaScript and fails if any route exceeds the
 reviewed 150 KiB gzip budget.
 
+Install the version-matched browser runtimes once before running the local
+browser gate:
+
+```bash
+npx playwright install chromium firefox webkit
+npm run test:e2e
+```
+
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, and authenticated Library
 responses without exposing storage lifecycle fields. Public audio streaming is
 limited to database-confirmed `ready` tracks and preserves HTTP Range seeking.
+Public artwork resolution similarly permits only ready Artist, Album, and
+Soundtrack image assets; account avatars remain private behind `/auth/avatar`.
+
+`POST /api/listener/v1/telemetry` accepts only same-origin JSON envelopes of
+one to ten bounded anonymous events. It has an independent 16 KiB body limit,
+rate/concurrency protection, no cookie requirement, no retry contract, and no
+fields for identity, credentials, content/search text, URLs, or raw errors.
+`GET /health` is `no-store` and exposes process-local, identity-free media
+admission and stream outcomes split across playback, download, artwork,
+avatar, and video. The shared 40/8 process/client ceiling reserves 16/2 slots
+from non-playback traffic so artwork-heavy pages cannot consume all playback
+capacity.
+
+### Verify media Range behavior under bounded load
+
+The media load command targets `http://127.0.0.1:8081` by default and requires
+one or more database-confirmed ready audio-track ObjectIds. It checks `HEAD`,
+full and partial responses, open-ended and suffix ranges, invalid ranges,
+overlapping seek cancellation, concurrent artwork, and `/health` recovery.
+The command enforces maximums of 32 simulated clients and 1,000 total requests
+and emits only one aggregate JSON result; it does not print URLs, content IDs,
+ETags, or Range values.
+
+For a production-equivalent staging target, remote traffic requires both an
+explicit opt-in and an exact hostname allowlist:
+
+```bash
+MEDIA_LOAD_BASE_URL=https://staging.example.com \
+MEDIA_LOAD_ALLOWED_HOSTS=staging.example.com \
+ALLOW_REMOTE_MEDIA_LOAD=1 \
+MEDIA_LOAD_TRACK_IDS=<ready-audio-track-object-id> \
+MEDIA_LOAD_ARTWORK_IDS=<public-artwork-object-id> \
+MEDIA_LOAD_CLIENTS=12 \
+MEDIA_LOAD_ARTWORK_CONCURRENCY=16 \
+npm run test:media-load
+```
+
+Run this only in an environment approved for load testing. The harness models
+concurrent clients from one runner; release evidence still needs approved
+multi-source staging traffic against the real media store.
 
 ## AWS CodeBuild
 
@@ -162,6 +221,14 @@ This repo includes `buildspec.yml` with CI-oriented behavior:
 - `post_build`: removes `node_modules` before artifact packaging
 
 Artifact packaging intentionally excludes `node_modules` so Elastic Beanstalk performs a clean dependency install on each instance.
+
+The separate `.github/workflows/finitude-web-release.yml` gate follows the
+Playwright CI installation flow and runs unit/component tests, both production
+builds, and all three browser/axe projects on pull requests and pushes to
+`develop` or `main`. Browser traces, screenshots, videos, JUnit output, and the
+HTML report are retained as workflow artifacts. The Mongo-backed integration
+suite remains a distinct gate on runners that provide a trusted `mongod`
+binary.
 
 ### Single-instance Elastic Beanstalk HTTPS
 

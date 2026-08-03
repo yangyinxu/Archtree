@@ -5,6 +5,7 @@ import { RouterProvider } from 'react-router';
 
 import { queryClient } from './app/queryClient';
 import { router } from './app/router';
+import { startListenerTelemetryLifecycle } from './telemetry/client';
 import './styles/tokens.css';
 import './styles/global.css';
 
@@ -18,3 +19,9 @@ createRoot(root).render(
     </QueryClientProvider>
   </StrictMode>
 );
+
+startListenerTelemetryLifecycle();
+// Core Web Vitals stay in a separate chunk so monitoring cannot consume the listener's entry budget.
+void import('./telemetry/webVitals')
+  .then(({ startWebVitalsTelemetry }) => startWebVitalsTelemetry())
+  .catch(() => undefined);

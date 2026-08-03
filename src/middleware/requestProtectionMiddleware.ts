@@ -135,8 +135,12 @@ export const browserRefreshRateLimit = rateLimit('browser-refresh', 120, 15 * 60
 export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
 export const authConcurrencyLimit = limitConcurrency('auth-password', 2, 20);
 export const publicReadRateLimit = rateLimit('public-read', 120, 60_000);
+/** Bounds anonymous listener diagnostics before any request body is parsed. */
+export const listenerTelemetryRateLimit = rateLimit('listener-telemetry', 20, 60_000);
 export const uploadRateLimit = rateLimit('upload', 20, 60 * 60_000);
 export const uploadConcurrencyLimit = limitConcurrency('upload', 1, 4);
+/** Prevents telemetry uploads from occupying meaningful API capacity. */
+export const listenerTelemetryConcurrencyLimit = limitConcurrency('listener-telemetry', 2, 10);
 export const reconciliationConcurrencyLimit = limitConcurrency('reconciliation', 1, 1);
 
 const requestAbortControllers = new WeakMap<Request, AbortController>();

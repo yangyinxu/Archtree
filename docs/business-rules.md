@@ -115,6 +115,12 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - A native Apple, Google, or passkey configuration does not make that method
   visible on Web. Web advertises an optional sign-in method only after its
   complete browser-to-HttpOnly-session flow is configured.
+- Listener performance and failure telemetry contains only bounded route,
+  operation, status, Web Vital, and playback classifications. Its event payload
+  and sink never retain identity, credentials, content IDs or titles, search
+  terms, URLs or query strings, exception text or stacks, network addresses,
+  device fingerprints, or a persistent visitor ID. Authentication funnel
+  telemetry remains a separate bounded contract.
 
 ## Background and System Playback
 

@@ -133,6 +133,20 @@ export const browserMutationRejection = (metadata: BrowserMutationRequestMetadat
     return originMutationRejection(metadata, false);
 };
 
+/** Requires both JSON and explicit same-origin browser evidence. */
+export const sameOriginBrowserJsonMutationRejection = (
+    metadata: BrowserMutationRequestMetadata
+) => {
+    const contentType = String(metadata.contentType ?? '')
+        .split(';', 1)[0]
+        .trim()
+        .toLowerCase();
+    if (contentType !== 'application/json') {
+        return { status: 415, message: 'Browser request requires JSON.' };
+    }
+    return originMutationRejection(metadata, true);
+};
+
 /** Requires explicit browser same-origin evidence for a cookie-authenticated write. */
 export const cookieMutationRejection = (metadata: BrowserMutationRequestMetadata) =>
     originMutationRejection(metadata, true);
@@ -155,6 +169,30 @@ export const requireSameOriginBrowserMutation = (
         return res.status(400).json({ message: 'A valid request host is required.' });
     }
     const rejection = browserMutationRejection({
+        contentType: req.get('Content-Type'),
+        origin: req.get('Origin'),
+        requestOrigin: `${req.protocol}://${host}`,
+        secFetchSite: req.get('Sec-Fetch-Site'),
+        allowedOrigins: configuredBrowserOrigins()
+    });
+    if (rejection) {
+        return res.status(rejection.status).json({ message: rejection.message });
+    }
+    return next();
+};
+
+/** Protects anonymous browser JSON writes that must not accept originless clients. */
+export const requireStrictSameOriginBrowserMutation = (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    setBrowserSessionPrivacyHeaders(res);
+    const host = req.get('Host');
+    if (!host) {
+        return res.status(400).json({ message: 'A valid request host is required.' });
+    }
+    const rejection = sameOriginBrowserJsonMutationRejection({
         contentType: req.get('Content-Type'),
         origin: req.get('Origin'),
         requestOrigin: `${req.protocol}://${host}`,

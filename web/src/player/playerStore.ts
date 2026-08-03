@@ -5,10 +5,13 @@ import type {
   PlayerErrorState,
   PlayerMediaSession,
   PlayerMediaSessionAction,
+  PlayerPlaybackErrorStage,
   PlayerQueueItem,
   PlayerSnapshot,
   PlayerStore
 } from './types';
+import { enqueueListenerTelemetry } from '../telemetry/client';
+import { classifyListenerRoute } from '../telemetry/routeClassifier';
 
 const DEFAULT_SKIP_SECONDS = 10;
 
@@ -132,8 +135,20 @@ export const createPlayerStore = (
   let audioCreationAttempted = false;
   let sourceGeneration = 0;
   let playAttemptGeneration = 0;
+  let lastReportedPlaybackError = '';
   let lastMediaItem: PlayerQueueItem | null | undefined;
   let destroyed = false;
+
+  const reportPlaybackError = (stage: PlayerPlaybackErrorStage, code: PlayerErrorCode) => {
+    const signature = `${sourceGeneration}:${stage}:${code}`;
+    if (signature === lastReportedPlaybackError) return;
+    lastReportedPlaybackError = signature;
+    try {
+      options.onPlaybackError?.({ stage, code });
+    } catch {
+      // Monitoring is optional and must never change player state or retry behavior.
+    }
+  };
 
   const notify = () => {
     listeners.forEach((listener) => listener());
@@ -271,10 +286,12 @@ export const createPlayerStore = (
       error: () => {
         if (!snapshot.currentItem || destroyed) return;
         playAttemptGeneration += 1;
+        const code = classifyMediaError(target.error?.code);
+        reportPlaybackError('media_element', code);
         updateSnapshot({
           status: 'error',
           isBuffering: false,
-          error: playerError(classifyMediaError(target.error?.code))
+          error: playerError(code)
         });
       },
       ended: () => {
@@ -319,6 +336,7 @@ export const createPlayerStore = (
         boundAudioListeners.clear();
       }
       audio = null;
+      reportPlaybackError('audio_create', 'streamUnavailable');
       updateSnapshot({
         status: 'error',
         isBuffering: false,
@@ -347,6 +365,7 @@ export const createPlayerStore = (
         || attempt !== playAttemptGeneration
         || expectedSourceGeneration !== sourceGeneration) return;
       const code = classifyPlaybackFailure(failure);
+      reportPlaybackError('play_call', code);
       updateSnapshot({
         status: code === 'autoplayBlocked' ? 'paused' : 'error',
         isBuffering: false,
@@ -372,6 +391,7 @@ export const createPlayerStore = (
     });
 
     if (!item.streamUrl.trim()) {
+      reportPlaybackError('source_set', 'streamUnavailable');
       updateSnapshot({
         status: 'error',
         isBuffering: false,
@@ -399,6 +419,7 @@ export const createPlayerStore = (
       target.currentTime = 0;
       target.load();
     } catch {
+      reportPlaybackError('source_set', 'streamUnavailable');
       updateSnapshot({
         status: 'error',
         isBuffering: false,
@@ -509,6 +530,7 @@ export const createPlayerStore = (
         try {
           target.load();
         } catch {
+          reportPlaybackError('source_set', 'streamUnavailable');
           updateSnapshot({
             status: 'error',
             isBuffering: false,
@@ -653,4 +675,14 @@ export const createPlayerStore = (
 };
 
 /** Shared browser runtime; its audio element is created lazily on first launch. */
-export const playerStore = createPlayerStore();
+export const playerStore = createPlayerStore({
+  onPlaybackError: (event) => {
+    enqueueListenerTelemetry({
+      category: 'playback_error',
+      route: classifyListenerRoute(
+        typeof window === 'undefined' ? '/listen' : window.location.pathname
+      ),
+      ...event
+    });
+  }
+});

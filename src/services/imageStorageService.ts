@@ -23,6 +23,25 @@ const errorMessage = (error: unknown) => {
     return (error instanceof Error ? error.message : String(error)).substring(0, 500);
 };
 
+const publicCoverArtOwnerTypes = new Set<ImageOwnerType>([
+    'artist',
+    'album',
+    'audioTrack'
+]);
+
+type PublicCoverArtAsset = Record<string, unknown> & {
+    ownerType: Exclude<ImageOwnerType, 'user'>;
+    uploadStatus: 'ready';
+};
+
+/** Keeps account-owned avatar bytes out of the public cover-art resolver. */
+export const isPublicCoverArtAsset = (asset: unknown): asset is PublicCoverArtAsset => {
+    if (typeof asset !== 'object' || asset === null || Array.isArray(asset)) return false;
+    const candidate = asset as Record<string, unknown>;
+    return candidate.uploadStatus === 'ready'
+        && publicCoverArtOwnerTypes.has(candidate.ownerType as ImageOwnerType);
+};
+
 const readImageSignature = async (uploadFile: Express.Multer.File) => {
     if (uploadFile.buffer) return uploadFile.buffer.subarray(0, 12);
     if (!uploadFile.path) return Buffer.alloc(0);
@@ -149,19 +168,34 @@ export const deleteCoverArt = async (imageId: string | undefined | null) => {
 
 export const getCoverArtObject = async (
     imageId: string,
-    options: { ifNoneMatch?: string; abortSignal?: AbortSignal } = {}
+    options: { ifNoneMatch?: string; abortSignal?: AbortSignal } = {},
+    dependencies: {
+        findAsset?: (assetId: string) => Promise<unknown>;
+        getObject?: (input: {
+            s3Key: string;
+            ifNoneMatch?: string;
+            abortSignal?: AbortSignal;
+        }) => Promise<any>;
+    } = {}
 ) => {
-    const asset = await ImageAsset.findById(imageId);
-    if (!asset || asset.uploadStatus !== 'ready') {
+    const findAsset = dependencies.findAsset ?? ImageAsset.findById.bind(ImageAsset);
+    const asset = await findAsset(imageId);
+    if (!isPublicCoverArtAsset(asset)) {
         return null;
     }
 
     try {
-        const object = await getS3().send(new GetObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: String(asset.s3Key),
-            IfNoneMatch: options.ifNoneMatch
-        }), { abortSignal: options.abortSignal });
+        const object = await (dependencies.getObject
+            ? dependencies.getObject({
+                s3Key: String(asset.s3Key),
+                ifNoneMatch: options.ifNoneMatch,
+                abortSignal: options.abortSignal
+            })
+            : getS3().send(new GetObjectCommand({
+                Bucket: process.env.S3_BUCKET_NAME!,
+                Key: String(asset.s3Key),
+                IfNoneMatch: options.ifNoneMatch
+            }), { abortSignal: options.abortSignal }));
         return { asset, object, notModified: false as const };
     } catch (error: any) {
         if (error?.$metadata?.httpStatusCode === 304) {

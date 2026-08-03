@@ -1,6 +1,7 @@
 import express, { Router } from 'express';
 
 import * as listenerController from '../controllers/listenerController';
+import { ingestListenerTelemetry } from '../controllers/listenerTelemetryController';
 import {
     attachOptionalAccessAuth,
     requireAuth
@@ -12,6 +13,8 @@ import {
 
 const router: Router = express.Router();
 
+// Size, origin, rate, and concurrency guards run in app.ts before the shared JSON parser.
+router.post('/telemetry', ingestListenerTelemetry);
 router.get('/home', publicReadRateLimit, attachOptionalAccessAuth, asyncHandler(listenerController.home));
 router.get('/search', publicReadRateLimit, asyncHandler(listenerController.search));
 router.get('/albums/:id', publicReadRateLimit, asyncHandler(listenerController.album));

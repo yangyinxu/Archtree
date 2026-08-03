@@ -14,6 +14,8 @@ export type {
   PlayerMediaSession,
   PlayerMediaSessionAction,
   PlayerMediaSessionActionDetails,
+  PlayerPlaybackErrorEvent,
+  PlayerPlaybackErrorStage,
   PlayerQueueItem,
   PlayerSnapshot,
   PlayerStatus,

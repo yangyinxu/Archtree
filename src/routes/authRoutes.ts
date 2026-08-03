@@ -70,7 +70,7 @@ import {
     uploadConcurrencyLimit,
     uploadRateLimit
 } from '../middleware/requestProtectionMiddleware';
-import { limitMediaConcurrency } from '../middleware/mediaDeliveryMiddleware';
+import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
 import {
     requireBrowserRefreshCookie,
     requireSameOriginBrowserFormMutation,
@@ -245,7 +245,7 @@ router.post('/logout', authRateLimit, asyncHandler(logout));
 router.post('/logout-all', requireAuth, requireCurrentAccountViewer, asyncHandler(logoutAll));
 
 router.get('/me', requireAuth, asyncHandler(me));
-router.get('/avatar', requireAuth, limitMediaConcurrency, asyncHandler(getAvatar));
+router.get('/avatar', requireAuth, limitMediaConcurrencyFor('avatar'), asyncHandler(getAvatar));
 router.put(
     '/avatar',
     requireAuth,

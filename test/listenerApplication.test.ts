@@ -176,3 +176,224 @@ test('listener caches only manifested assets and reserves SPA fallbacks for rout
     await rm(temporaryRoot, { recursive: true, force: true });
   }
 });
+
+const telemetryEvent = {
+  category: 'web_vital',
+  route: 'home',
+  metric: 'LCP',
+  value: 1_250,
+  navigationType: 'navigate'
+};
+
+const telemetryHeaders = (baseUrl: string, client = '198.51.100.10') => ({
+  'Content-Type': 'application/json',
+  'Origin': baseUrl,
+  'X-Forwarded-For': client
+});
+
+test('listener telemetry accepts strict same-origin batches without requiring credentials', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-listener-telemetry-'));
+  const { server, baseUrl } = await listen(path.join(temporaryRoot, 'missing-dist'));
+  const originalInfo = console.info;
+  const records: string[] = [];
+  console.info = (value?: unknown) => { records.push(String(value)); };
+  try {
+    const anonymous = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: telemetryHeaders(baseUrl),
+      body: JSON.stringify({ events: [telemetryEvent] })
+    });
+    assert.equal(anonymous.status, 204);
+    assertSecurityHeaders(anonymous);
+    assert.equal(anonymous.headers.get('cache-control'), 'no-store');
+    assert.equal(anonymous.headers.get('pragma'), 'no-cache');
+    assert.equal(await anonymous.text(), '');
+
+    const withIrrelevantCookie = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: {
+        ...telemetryHeaders(baseUrl, '198.51.100.11'),
+        Cookie: 'session_token=not-a-valid-credential'
+      },
+      body: JSON.stringify({ events: [{
+        category: 'playback_error',
+        route: 'album',
+        stage: 'play_call',
+        code: 'network'
+      }] })
+    });
+    assert.equal(withIrrelevantCookie.status, 204);
+    assert.equal(records.length, 2);
+    for (const record of records) {
+      assert.doesNotMatch(record, /session_token|not-a-valid-credential|198\.51\.100/);
+      const parsed = JSON.parse(record);
+      assert.equal(parsed.schemaVersion, 1);
+      assert.equal(typeof parsed.occurredAt, 'string');
+    }
+  } finally {
+    console.info = originalInfo;
+    await close(server);
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('listener telemetry rejects cross-origin, non-JSON, unbounded, and oversized input', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-listener-telemetry-invalid-'));
+  const { server, baseUrl } = await listen(path.join(temporaryRoot, 'missing-dist'));
+  try {
+    const crossOrigin = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://attacker.example',
+        'X-Forwarded-For': '198.51.100.20'
+      },
+      body: JSON.stringify({ events: [telemetryEvent] })
+    });
+    assert.equal(crossOrigin.status, 403);
+    assert.equal(crossOrigin.headers.get('cache-control'), 'no-store');
+
+    const nonJson = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: {
+        Origin: baseUrl,
+        'Content-Type': 'text/plain',
+        'X-Forwarded-For': '198.51.100.21'
+      },
+      body: 'not-json'
+    });
+    assert.equal(nonJson.status, 415);
+
+    const originless = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '198.51.100.25'
+      },
+      body: JSON.stringify({ events: [telemetryEvent] })
+    });
+    assert.equal(originless.status, 403);
+
+    const malformed = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: telemetryHeaders(baseUrl, '198.51.100.26'),
+      body: '{"events":[private-secret]}'
+    });
+    assert.equal(malformed.status, 400);
+    assert.deepEqual(await malformed.json(), { message: 'Invalid JSON request.' });
+
+    const rawField = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: telemetryHeaders(baseUrl, '198.51.100.22'),
+      body: JSON.stringify({ events: [{
+        ...telemetryEvent,
+        url: '/listen/search?q=private'
+      }] })
+    });
+    assert.equal(rawField.status, 422);
+    assert.deepEqual(await rawField.json(), {
+      message: 'Invalid listener telemetry payload.'
+    });
+
+    const authenticationFunnel = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: telemetryHeaders(baseUrl, '198.51.100.23'),
+      body: JSON.stringify({ events: [{
+        category: 'authentication_funnel',
+        stage: 'login',
+        method: 'password',
+        outcome: 'rejected'
+      }] })
+    });
+    assert.equal(authenticationFunnel.status, 422);
+
+    const oversized = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers: telemetryHeaders(baseUrl, '198.51.100.24'),
+      body: JSON.stringify({ events: [{
+        ...telemetryEvent,
+        padding: 'x'.repeat(17 * 1024)
+      }] })
+    });
+    assert.equal(oversized.status, 413);
+    assert.equal(oversized.headers.get('cache-control'), 'no-store');
+  } finally {
+    await close(server);
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('listener telemetry limits every client to twenty batches per minute', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-listener-telemetry-rate-'));
+  const { server, baseUrl } = await listen(path.join(temporaryRoot, 'missing-dist'));
+  const headers = telemetryHeaders(baseUrl, '198.51.100.30');
+  try {
+    for (let request = 1; request <= 20; request += 1) {
+      const response = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ events: [] })
+      });
+      assert.equal(response.status, 422);
+      assert.equal(response.headers.get('ratelimit-limit'), '20');
+    }
+    const rejected = await fetch(`${baseUrl}/api/listener/v1/telemetry`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ events: [telemetryEvent] })
+    });
+    assert.equal(rejected.status, 429);
+    assert.equal(rejected.headers.get('retry-after') !== null, true);
+  } finally {
+    await close(server);
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('unexpected telemetry sink failures emit only bounded server error fields', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-listener-telemetry-error-'));
+  const { server, baseUrl } = await listen(path.join(temporaryRoot, 'missing-dist'));
+  const originalInfo = console.info;
+  const originalError = console.error;
+  const records: string[] = [];
+  console.info = () => {
+    throw new Error('listener@example.com /listen/search?q=private access-token');
+  };
+  console.error = (value?: unknown) => { records.push(String(value)); };
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/listener/v1/telemetry?query=private-content-id`,
+      {
+        method: 'POST',
+        headers: telemetryHeaders(baseUrl, '198.51.100.40'),
+        body: JSON.stringify({ events: [telemetryEvent] })
+      }
+    );
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      message: 'The service could not complete the request.'
+    });
+    assert.equal(records.length, 1);
+    const logged = records[0];
+    assert.doesNotMatch(logged, /listener@example|private|content-id|access-token|198\.51\.100/);
+    assert.deepEqual(
+      Object.keys(JSON.parse(logged)).sort(),
+      ['category', 'method', 'occurredAt', 'requestArea', 'status'].sort()
+    );
+    assert.deepEqual(
+      { ...JSON.parse(logged), occurredAt: '<bounded-server-time>' },
+      {
+        category: 'server_error',
+        requestArea: 'listener_telemetry',
+        method: 'POST',
+        status: 500,
+        occurredAt: '<bounded-server-time>'
+      }
+    );
+  } finally {
+    console.info = originalInfo;
+    console.error = originalError;
+    await close(server);
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});

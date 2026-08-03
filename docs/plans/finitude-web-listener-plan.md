@@ -730,6 +730,22 @@ Exit criteria:
 - Monitoring distinguishes page/API failures from audio delivery failures.
 - Rollout and rollback have both been rehearsed.
 
+Implementation evidence recorded on 2026-08-02:
+
+- Complete in the repository: strict anonymous Web Vitals and error telemetry,
+  private-avatar public-route denial, playback-reserved media admission and
+  per-resource health metrics, production-bundle Playwright coverage across
+  Chromium/Firefox/WebKit, axe critical/serious gates, responsive and Reduce
+  Motion checks, CI automation, and a remote-opt-in bounded Range/seek/artwork
+  load harness with aggregate-only output.
+- Passing locally: server 71/71, Web unit/component 91/91, Mongo integration
+  24/24, browser/axe 33/33, server/Web production builds, and the 150 KiB
+  initial-route JavaScript budget.
+- Still requires production-equivalent evidence: branded-browser and assistive
+  technology matrix, measured p75 Web Vitals, realistic multi-source S3 Range
+  load/seek execution with the checked-in harness, artwork variant sizing, and
+  rollout/rollback rehearsal.
+
 **Milestone C: general availability.** Only after this gate should product
 navigation make the listener Web app the primary public destination.
 
