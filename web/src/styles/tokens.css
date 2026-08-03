@@ -1,0 +1,44 @@
+:root {
+  color-scheme: dark;
+  --color-canvas: #0b0d14;
+  --color-player: #11131d;
+  --color-surface: #171a26;
+  --color-surface-raised: #202333;
+  --color-surface-hover: #252938;
+  --color-border: rgb(255 255 255 / 0.085);
+  --color-border-strong: rgb(255 255 255 / 0.16);
+  --color-text: #f5f4fa;
+  --color-text-muted: #bbb9c7;
+  --color-text-subtle: #858391;
+  --color-accent: #73d9ca;
+  --color-accent-bright: #a1eee2;
+  --color-accent-soft: rgb(98 214 198 / 0.13);
+  --color-violet: #7268bd;
+  --color-violet-soft: rgb(114 104 189 / 0.18);
+  --color-warm: #e4a67f;
+  --color-danger: #ffaaa8;
+  --color-focus: #9eeadd;
+  --color-focus-soft: rgb(115 217 202 / 0.2);
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Avenir Next", Inter, ui-sans-serif, sans-serif;
+  --radius-sm: 0.55rem;
+  --radius-md: 0.9rem;
+  --radius-lg: 1.4rem;
+  --shadow-sm: 0 8px 24px rgb(0 0 0 / 0.22);
+  --shadow-lg: 0 24px 60px rgb(0 0 0 / 0.3);
+  --motion-fast: 150ms;
+  --motion-medium: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0.75, 0.3, 1);
+  --sidebar-width: 15rem;
+  --topbar-height: 4.35rem;
+  --player-height: 5.1rem;
+  --mobile-player-height: 3.55rem;
+  --mobile-nav-height: 3.7rem;
+  --content-max: 96rem;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  :root {
+    --sidebar-width: 5.4rem;
+  }
+}

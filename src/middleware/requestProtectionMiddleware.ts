@@ -131,6 +131,7 @@ export const asyncHandler = (
 };
 
 export const authRateLimit = rateLimit('auth', 20, 15 * 60_000);
+export const browserRefreshRateLimit = rateLimit('browser-refresh', 120, 15 * 60_000);
 export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
 export const authConcurrencyLimit = limitConcurrency('auth-password', 2, 20);
 export const publicReadRateLimit = rateLimit('public-read', 120, 60_000);

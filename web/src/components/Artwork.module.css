@@ -1,0 +1,38 @@
+.artwork {
+  align-items: center;
+  aspect-ratio: 1;
+  background:
+    radial-gradient(circle at 25% 18%, rgb(115 217 202 / 0.22), transparent 34%),
+    linear-gradient(145deg, var(--color-surface-raised), var(--color-canvas));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-subtle);
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  overflow: hidden;
+  width: 100%;
+}
+
+.artist {
+  border-radius: 50%;
+}
+
+.artwork img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.artwork svg {
+  height: 30%;
+  min-height: 1.4rem;
+  min-width: 1.4rem;
+  width: 30%;
+}
+
+@media (forced-colors: active) {
+  .artwork {
+    border-color: CanvasText;
+  }
+}

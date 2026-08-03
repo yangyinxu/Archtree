@@ -1,11 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
 import { validationResult } from 'express-validator';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import User from '../models/user';
 import AuthSession from '../models/authSession';
 import {
+  AccessTokenPayload,
   createSession,
   createLegacyMigrationToken,
+  getJwtSecret,
   refreshSession,
   revokeRefreshSession,
   SessionUser
@@ -13,11 +16,13 @@ import {
 import {
   clearBrowserSessionCookies,
   getCookieValue,
-  setBrowserSessionCookies
+  setBrowserSessionCookies,
+  setBrowserSessionPrivacyHeaders
 } from '../services/authCookieService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import AuthIdentity from '../models/authIdentity';
 import { Passkey } from '../models/passkey';
+import { registerEmailAccount } from './emailAuthController';
 
 /**
  * Interface for Error object with statusCode property
@@ -26,6 +31,39 @@ interface ErrorWithStatusCode extends Error {
   statusCode?: number;
   data?: any;
 }
+
+export interface BrowserSessionUserSource {
+  userId: string;
+  email: string;
+  role?: string;
+  displayName?: string;
+  username?: string;
+  avatarAssetId?: unknown;
+  avatarRevision?: number;
+  emailVerified?: boolean;
+  authenticationMethods?: BrowserAuthenticationMethod[];
+}
+
+export type BrowserAuthenticationMethod = 'password' | 'apple' | 'google' | 'passkey';
+
+/** Projects account identity while deliberately omitting credentials and session identifiers. */
+export const browserSessionPayload = (source: BrowserSessionUserSource) => {
+  const avatarRevision = Number(source.avatarRevision ?? 0);
+  return {
+    user: {
+      id: source.userId,
+      email: source.email,
+      role: source.role ?? 'user',
+      displayName: source.displayName ?? source.username ?? '',
+      avatarRevision,
+      avatar: source.avatarAssetId ? { revision: avatarRevision } : null,
+      emailVerified: source.emailVerified !== false,
+      ...(source.authenticationMethods
+        ? { authenticationMethods: source.authenticationMethods }
+        : {})
+    }
+  };
+};
 
 const normalizeEmail = (email: string) => {
   return String(email ?? '').trim().toLowerCase();
@@ -56,6 +94,30 @@ const createUser = async (email: string, username: string, password: string, rol
 
 const normalizeIdentifier = (value: string) => {
   return String(value ?? '').trim();
+};
+
+/** Restricts legacy form redirects to known same-origin browser destinations. */
+export const safeWebReturnTo = (value: unknown) => {
+  const candidate = String(value ?? '').trim();
+  if (!candidate.startsWith('/') || candidate.startsWith('//')) return '/';
+  try {
+    const base = 'https://archtree.invalid';
+    const destination = new URL(candidate, base);
+    if (destination.origin !== base) return '/';
+    const contentManagerDestination = [
+      '/content/manage',
+      '/content/manage/audio-tracks',
+      '/content/manage/search'
+    ].includes(destination.pathname);
+    const listenerDestination = destination.pathname === '/listen'
+      || destination.pathname.startsWith('/listen/');
+    if (!contentManagerDestination && !listenerDestination && destination.pathname !== '/') {
+      return '/';
+    }
+    return `${destination.pathname}${destination.search}${destination.hash}`;
+  } catch {
+    return '/';
+  }
 };
 
 const escapeHtml = (value: string) => {
@@ -201,9 +263,83 @@ const authenticateUser = async (identifier: string, password: string, req?: Requ
     userId: user._id.toString(),
     email: user.email,
     role: user.role ?? 'user',
+    displayName: user.displayName ?? user.username ?? '',
+    username: user.username ?? '',
+    avatarAssetId: user.avatarAssetId,
+    avatarRevision: Number(user.avatarRevision ?? 0),
+    emailVerified: user.emailVerified !== false,
     legacyToken: createLegacyMigrationToken(user as unknown as SessionUser),
     ...(await createSession(user as unknown as SessionUser, req))
   };
+};
+
+/** Loads the authoritative safe listener identity after cookie authentication. */
+const loadBrowserSessionPayload = async (userId: string) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    const error: ErrorWithStatusCode = new Error('Authentication failed.');
+    error.statusCode = 401;
+    throw error;
+  }
+  const [identities, passkeys] = await Promise.all([
+    AuthIdentity.listForUser(userId),
+    Passkey.listForUser(userId)
+  ]);
+  const availableMethods = new Set<BrowserAuthenticationMethod>();
+  if (user.password) availableMethods.add('password');
+  identities.forEach(({ provider }) => availableMethods.add(provider));
+  if (passkeys.length > 0) availableMethods.add('passkey');
+  const authenticationMethods = (
+    ['password', 'apple', 'google', 'passkey'] as BrowserAuthenticationMethod[]
+  ).filter((method) => availableMethods.has(method));
+  return browserSessionPayload({
+    userId: user._id.toString(),
+    email: user.email,
+    role: user.role ?? 'user',
+    displayName: user.displayName ?? user.username ?? '',
+    username: user.username ?? '',
+    avatarAssetId: user.avatarAssetId,
+    avatarRevision: Number(user.avatarRevision ?? 0),
+    emailVerified: user.emailVerified !== false,
+    authenticationMethods
+  });
+};
+
+/** Recovers only a signed session identity so logout can revoke an expired access token. */
+const browserAccessSessionIdentity = (req: Request) => {
+  const accessToken = getCookieValue(req, 'session_token');
+  if (!accessToken) return null;
+  try {
+    const claims = jwt.verify(accessToken, getJwtSecret(), {
+      ignoreExpiration: true
+    }) as Partial<AccessTokenPayload>;
+    if (
+      claims.tokenType !== 'access'
+      || typeof claims.userId !== 'string'
+      || typeof claims.sessionId !== 'string'
+    ) {
+      return null;
+    }
+    return { userId: claims.userId, sessionId: claims.sessionId };
+  } catch {
+    return null;
+  }
+};
+
+/** Revokes both stable and rotating credentials to make logout win refresh races. */
+const revokeBrowserRequestSession = async (req: Request) => {
+  const identity = browserAccessSessionIdentity(req);
+  const refreshToken = getCookieValue(req, 'refresh_token');
+  const revocations: Promise<unknown>[] = [];
+  if (identity) {
+    revocations.push(AuthSession.revokeById(identity.userId, identity.sessionId));
+  }
+  if (refreshToken) {
+    revocations.push(revokeRefreshSession(refreshToken));
+  }
+  const results = await Promise.allSettled(revocations);
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
 };
 
 export const renderSignupPage = (req: Request, res: Response) => {
@@ -211,7 +347,7 @@ export const renderSignupPage = (req: Request, res: Response) => {
 };
 
 export const renderLoginPage = (req: Request, res: Response) => {
-  const returnTo = String(req.query.returnTo ?? '/');
+  const returnTo = safeWebReturnTo(req.query.returnTo);
   res.status(200).send(renderLoginHtml({ returnTo }));
 };
 
@@ -270,26 +406,17 @@ export const signupFromWeb = async (req: Request, res: Response, next: NextFunct
       return;
     }
 
-    createUser(email, username, password)
-      .then(() => {
-        res.status(201).send(renderSignupHtml({
-          successMessage: 'User created successfully. You can now log in from the app.'
-        }));
-      })
-      .catch(err => {
-        console.log(err);
-        const statusCode = err?.statusCode ?? 500;
-        res.status(statusCode).send(renderSignupHtml({
-          email,
-          username,
-          errorMessage: statusCode === 409 ? 'Email address already exists.' : 'Creating the user failed.'
-        }));
-      });
+    await registerEmailAccount(email, password, username, username);
+    res.status(202).send(renderSignupHtml({
+      successMessage: 'If the account can be created, a verification code has been sent. Verify the email before logging in.'
+    }));
   } catch (error: any) {
-    if (!error.statusCode) {
-      error.statusCode = 500;
-    }
-    next(error);
+    console.log(error);
+    res.status(error?.statusCode ?? 500).send(renderSignupHtml({
+      email: normalizeEmail(req.body.email),
+      username: String(req.body.username ?? ''),
+      errorMessage: 'Creating the account failed.'
+    }));
   }
 };
 
@@ -327,7 +454,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 export const loginFromWeb = async (req: Request, res: Response) => {
   const identifier = normalizeIdentifier(req.body.identifier ?? req.body.email ?? req.body.username);
   const password = String(req.body.password ?? '');
-  const returnTo = String(req.body.returnTo ?? '/');
+  const returnTo = safeWebReturnTo(req.body.returnTo);
 
   if (!identifier || !password) {
     res.status(422).send(renderLoginHtml({
@@ -355,6 +482,80 @@ export const loginFromWeb = async (req: Request, res: Response) => {
       errorMessage: message
     }));
   }
+};
+
+/** Establishes an HttpOnly listener session without exposing either credential. */
+export const browserLogin = async (req: Request, res: Response, next: NextFunction) => {
+  setBrowserSessionPrivacyHeaders(res);
+  const identifier = normalizeIdentifier(req.body.identifier ?? req.body.email ?? req.body.username);
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  if (!identifier || !password) {
+    recordAuthFunnelEvent('login', 'password', 'rejected');
+    return res.status(422).json({ message: 'Identifier and password are required.' });
+  }
+
+  try {
+    const authResult = await authenticateUser(identifier, password, req);
+    const payload = await loadBrowserSessionPayload(authResult.userId);
+    setBrowserSessionCookies(res, authResult);
+    recordSecurityEvent('browser_json_login_succeeded', {
+      userId: authResult.userId,
+      sessionId: authResult.sessionId
+    });
+    recordAuthFunnelEvent('login', 'password', 'succeeded');
+    return res.status(200).json(payload);
+  } catch (error: any) {
+    recordSecurityEvent('browser_json_login_rejected');
+    recordAuthFunnelEvent('login', 'password', 'rejected');
+    if (!error.statusCode) {
+      error.statusCode = 500;
+    }
+    return next(error);
+  }
+};
+
+/** Rotates the refresh cookie once and returns only safe account metadata. */
+export const browserRefresh = async (req: Request, res: Response) => {
+  setBrowserSessionPrivacyHeaders(res);
+  const refreshToken = getCookieValue(req, 'refresh_token');
+  const tokens = await refreshSession(refreshToken);
+  if (!tokens) {
+    recordSecurityEvent('browser_json_refresh_rejected');
+    return res.status(401).json({ message: 'Authentication failed.' });
+  }
+
+  // Commit the rotated pair before the profile read so a transient read failure does
+  // not strand the browser with the refresh token that was just consumed.
+  setBrowserSessionCookies(res, tokens);
+  const claims = jwt.verify(tokens.accessToken, getJwtSecret()) as AccessTokenPayload;
+  const payload = await loadBrowserSessionPayload(claims.userId);
+  recordSecurityEvent('browser_json_refresh_succeeded', { sessionId: tokens.sessionId });
+  return res.status(200).json(payload);
+};
+
+/** Returns the current cookie-authenticated listener identity. */
+export const browserSession = async (req: Request, res: Response) => {
+  setBrowserSessionPrivacyHeaders(res);
+  const auth = (req as Request & { auth?: { userId: string } }).auth;
+  if (!auth) {
+    return res.status(401).json({ message: 'Missing or invalid browser session.' });
+  }
+  return res.status(200).json(await loadBrowserSessionPayload(auth.userId));
+};
+
+/** Revokes the refresh session and clears both cookies without a redirect. */
+export const browserLogout = async (req: Request, res: Response) => {
+  setBrowserSessionPrivacyHeaders(res);
+  try {
+    await revokeBrowserRequestSession(req);
+    recordSecurityEvent('browser_json_logout_completed');
+  } catch {
+    // Client-side logout must still complete if server-side revocation is temporarily unavailable.
+    recordSecurityEvent('browser_json_logout_revocation_failed');
+  } finally {
+    clearBrowserSessionCookies(res);
+  }
+  return res.status(204).send();
 };
 
 /** Rotates an opaque refresh token and returns a new access/refresh pair. */
@@ -414,11 +615,13 @@ export const me = async (req: Request, res: Response) => {
 };
 
 export const logoutFromWeb = async (req: Request, res: Response) => {
-  const refreshToken = getCookieValue(req, 'refresh_token');
-  if (refreshToken) {
-    await revokeRefreshSession(refreshToken);
+  try {
+    await revokeBrowserRequestSession(req);
+    recordSecurityEvent('browser_logout_completed');
+  } catch {
+    recordSecurityEvent('browser_logout_revocation_failed');
+  } finally {
+    clearBrowserSessionCookies(res);
   }
-  recordSecurityEvent('browser_logout_completed');
-  clearBrowserSessionCookies(res);
   res.redirect('/');
 };

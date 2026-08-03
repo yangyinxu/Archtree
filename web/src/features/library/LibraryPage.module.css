@@ -1,0 +1,170 @@
+.page {
+  margin: 0 auto;
+  max-width: var(--content-max);
+  padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 4vw, 3.5rem) 4rem;
+  width: 100%;
+}
+
+.eyebrow {
+  color: var(--color-accent-bright);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  margin-bottom: 0.7rem;
+  text-transform: uppercase;
+}
+
+.title {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: clamp(2.1rem, 5vw, 4.3rem);
+  letter-spacing: -0.05em;
+  line-height: 0.98;
+}
+
+.lede {
+  color: var(--color-text-muted);
+  margin-top: 0.85rem;
+}
+
+.heading {
+  align-items: end;
+  display: flex;
+  gap: 2rem;
+  justify-content: space-between;
+}
+
+.sortControl {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sortControl span {
+  color: var(--color-text-subtle);
+  font-size: 0.72rem;
+  font-weight: 680;
+  text-transform: uppercase;
+}
+
+.sortControl select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  min-height: 2.75rem;
+  padding: 0 2.3rem 0 0.8rem;
+}
+
+.filters {
+  display: flex;
+  gap: 0.55rem;
+  margin: 2rem 0 1.2rem;
+}
+
+.filters button {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+}
+
+.filters button[aria-pressed='true'] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #09110f;
+  font-weight: 700;
+}
+
+.list {
+  background: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  list-style: none;
+  margin: 0;
+  overflow: visible;
+  padding: 0.35rem;
+}
+
+.state {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-muted);
+  display: grid;
+  gap: 0.8rem;
+  justify-items: start;
+  margin-top: 2rem;
+  min-height: 16rem;
+  padding: clamp(1.4rem, 5vw, 3rem);
+  place-content: center;
+}
+
+.state h1,
+.state h2 {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+}
+
+.state button,
+.loginLink,
+.loadMore button {
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  color: #09110f;
+  display: inline-flex;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.6rem 1.05rem;
+  text-decoration: none;
+}
+
+.stateIcon {
+  color: var(--color-accent-bright);
+}
+
+.loadMore {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
+.loadMore button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.paginationError {
+  color: var(--color-danger);
+  font-size: 0.8rem;
+  margin-top: 0.8rem;
+  text-align: center;
+}
+
+.rowActions {
+  align-items: center;
+  display: flex;
+  gap: 0.55rem;
+}
+
+.unavailable {
+  color: var(--color-text-subtle);
+  font-size: 0.72rem;
+}
+
+@media (max-width: 640px) {
+  .heading {
+    align-items: start;
+    flex-direction: column;
+    gap: 1.2rem;
+  }
+
+  .sortControl,
+  .sortControl select {
+    width: 100%;
+  }
+}

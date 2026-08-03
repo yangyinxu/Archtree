@@ -7,7 +7,11 @@ import {
     getJwtSecret,
     refreshSession
 } from '../services/authSessionService';
-import { getCookieValue, setBrowserSessionCookies } from '../services/authCookieService';
+import {
+    getCookieValue,
+    setBrowserSessionCookies,
+    setBrowserSessionPrivacyHeaders
+} from '../services/authCookieService';
 
 interface JwtPayload {
     userId: string;
@@ -110,6 +114,22 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     }
 };
 
+/** Authenticates the listener SPA from its HttpOnly access cookie only. */
+export const requireBrowserAuth = async (req: Request, res: Response, next: NextFunction) => {
+    setBrowserSessionPrivacyHeaders(res);
+    try {
+        const accessCookie = getCookieValue(req, 'session_token');
+        const auth = await attachAuthContext(req, accessCookie);
+        if (!auth) {
+            return res.status(401).json({ message: 'Missing or invalid browser session.' });
+        }
+
+        return next();
+    } catch {
+        return res.status(401).json({ message: 'Authentication failed.' });
+    }
+};
+
 export const requireAuthForWeb = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const auth = await attachOrRefreshBrowserAuth(req, res);
@@ -130,6 +150,17 @@ export const attachOptionalAuth = async (req: Request, res: Response, next: Next
         await attachOrRefreshBrowserAuth(req, res);
     } catch (error) {
         // Intentionally ignore optional auth parsing errors.
+    }
+
+    return next();
+};
+
+/** Adds an optional viewer without rotating cookies during a public GET. */
+export const attachOptionalAccessAuth = async (req: Request, _res: Response, next: NextFunction) => {
+    try {
+        await attachAuthContext(req);
+    } catch {
+        // Expired or malformed credentials degrade to the public response.
     }
 
     return next();

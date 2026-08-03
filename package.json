@@ -3,12 +3,20 @@
   "version": "1.0.0",
   "description": "",
   "main": "src/app.ts",
+  "workspaces": [
+    "web"
+  ],
   "scripts": {
-    "build": "tsc --noEmit",
-    "test": "tsx --test test/**/*.test.ts",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc --noEmit",
+    "build:web": "npm run build --workspace @archtree/finitude-web",
+    "test": "npm run test:server && npm run test:web",
+    "test:server": "tsx --test test/**/*.test.ts",
+    "test:web": "npm run test --workspace @archtree/finitude-web",
     "test:integration": "tsx --test --test-concurrency=1 test/**/*.integration.ts",
     "start": "NODE_ENV=production tsx src/app.ts",
     "dev": "NODE_ENV=develop tsx src/app.ts",
+    "dev:web": "npm run dev --workspace @archtree/finitude-web",
     "dev:auth-rotation": "NODE_ENV=develop ACCESS_TOKEN_SECONDS=5 tsx src/app.ts"
   },
   "author": "Yangyin Xu",

@@ -1,0 +1,70 @@
+import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Bookmark, BookmarkCheck } from 'lucide-react';
+
+import {
+  saveContent,
+  unsaveContent
+} from '../api/listener';
+import type { LibraryTarget } from '../api/contentSchemas';
+import styles from './SaveButton.module.css';
+
+export interface SaveButtonProps {
+  target: LibraryTarget;
+  viewerId?: string | null;
+  saved: boolean | null;
+  onSavedChange?: (saved: boolean) => void;
+  compact?: boolean;
+}
+
+/** Confirms server mutations before changing Save state and preserves the signed-out prompt. */
+export const SaveButton = ({
+  target,
+  viewerId,
+  saved,
+  onSavedChange,
+  compact = false
+}: SaveButtonProps) => {
+  const queryClient = useQueryClient();
+  const [message, setMessage] = useState('');
+  const mutation = useMutation({
+    mutationFn: () => saved ? unsaveContent(target) : saveContent(target),
+    onSuccess: (result) => {
+      setMessage(result.saved ? 'Saved to your Library.' : 'Removed from your Library.');
+      onSavedChange?.(result.saved);
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['listener', 'home'] }),
+        queryClient.invalidateQueries({ queryKey: ['listener', 'library'] }),
+        queryClient.invalidateQueries({ queryKey: ['listener', 'save-statuses'] })
+      ]);
+    },
+    onError: () => setMessage('Finitude could not update your Library. Try again.')
+  });
+
+  const signedOut = !viewerId;
+  const label = saved ? 'Remove from Library' : 'Save to Library';
+
+  return (
+    <span className={`${styles.wrapper} ${compact ? styles.compact : ''}`}>
+      <button
+        aria-disabled={signedOut || saved === null || mutation.isPending}
+        aria-label={label}
+        className={`${styles.button} ${signedOut ? styles.signedOut : ''}`}
+        onClick={() => {
+          if (signedOut) {
+            setMessage('Log in to save albums and soundtracks.');
+            return;
+          }
+          if (saved === null || mutation.isPending) return;
+          setMessage('');
+          mutation.mutate();
+        }}
+        type="button"
+      >
+        {saved ? <BookmarkCheck aria-hidden="true" /> : <Bookmark aria-hidden="true" />}
+        {!compact && <span>{mutation.isPending ? 'Updating…' : label}</span>}
+      </button>
+      {message && <span className={styles.message} role={mutation.isError || signedOut ? 'alert' : 'status'}>{message}</span>}
+    </span>
+  );
+};

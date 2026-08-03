@@ -1,6 +1,8 @@
-# Archtree Backend
+# Archtree
 
-Archtree is an Express + TypeScript backend for authentication, content management, and media upload/streaming.
+Archtree is an Express + TypeScript service for authentication, content
+management, and media upload/streaming. It also hosts the React-based Finitude
+Web listener under `/listen`.
 
 Product behavior shared by the backend and iOS client is documented in
 [`docs/business-rules.md`](docs/business-rules.md).
@@ -16,14 +18,18 @@ rather than repeat the code and must stay synchronized with behavior.
 - Node.js 24
 - Express
 - TypeScript (runtime via tsx)
+- React + Vite
 - MongoDB
 - AWS S3 (audio object storage)
 
 ## Scripts
 
 - `npm run dev`: start development server
+- `npm run dev:web`: start the listener Vite server at `/listen/`; run the
+  Express development server separately so API requests can be proxied
 - `npm start`: start production-mode server
-- `npm test`: run isolated unit and security-policy tests
+- `npm run build`: type-check the server and build the listener bundle
+- `npm test`: run server and listener unit/component tests
 - `npm run test:integration`: run transactional authentication lifecycle tests
   against a disposable single-node MongoDB replica set
 
@@ -60,6 +66,9 @@ Required variables:
 - `ALLOW_LEGACY_AUTH_TOKENS`: temporary `true` opt-in for accepting and issuing
   old non-revocable app tokens during a coordinated client rollout (defaults to
   `false`; remove after migration)
+- `BROWSER_ALLOWED_ORIGINS`: optional comma-separated additional exact origins
+  for cookie-authenticated browser mutations; same-origin requests are always
+  accepted
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 operations
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region
@@ -116,6 +125,17 @@ Security:
 3. Start server:
    - `npm run dev`
 
+To develop the listener with hot reload, keep the server running and start a
+second process with `npm run dev:web`, then open
+`http://localhost:5173/listen/`. For a production-style local run, use
+`npm run build` first; Express then serves the generated `web/dist` bundle at
+`/listen` and supports listener deep links.
+
+The listener reads browser-safe content from `/api/listener/v1`. The versioned
+namespace provides Home, Search, Album, Artist, Track, and authenticated Library
+responses without exposing storage lifecycle fields. Public audio streaming is
+limited to database-confirmed `ready` tracks and preserves HTTP Range seeking.
+
 ## AWS CodeBuild
 
 This repo includes `buildspec.yml` with CI-oriented behavior:
@@ -157,6 +177,26 @@ Web auth endpoints:
 - `GET /auth/login-web`
 - `POST /auth/login-web`
 - `POST /auth/logout-web`
+
+Listener browser-session endpoints (HttpOnly cookies; credentials are never
+returned to JavaScript):
+
+- `GET /auth/browser/capabilities`
+- `POST /auth/browser/register`
+- `POST /auth/browser/email/verify`
+- `POST /auth/browser/email/resend-verification`
+- `POST /auth/browser/password/forgot`
+- `POST /auth/browser/password/reset`
+- `POST /auth/browser/login`
+- `POST /auth/browser/refresh`
+- `GET /auth/browser/session`
+- `POST /auth/browser/logout`
+
+Browser authentication mutations require same-origin JSON. Registration,
+verification resend, and recovery-request responses are deliberately generic
+so account existence is not disclosed. Browser capability discovery reports
+only end-to-end browser methods; native Apple, Google, or passkey configuration
+does not expose a nonfunctional listener button.
 
 App session endpoints:
 

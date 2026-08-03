@@ -14,16 +14,25 @@ import {
     signupFromWeb,
     renderLoginPage,
     loginFromWeb,
-    logoutFromWeb
+    logoutFromWeb,
+    browserLogin,
+    browserLogout,
+    browserRefresh,
+    browserSession
 } from '../controllers/authController';
 import {
     asyncHandler,
     authAccountRateLimit,
     authConcurrencyLimit,
     authRateLimit,
+    browserRefreshRateLimit,
     requireSecureAuthTransport
 } from '../middleware/requestProtectionMiddleware';
-import { requireAuth, requireAuthWhenPresented } from '../middleware/authMiddleware';
+import {
+    requireAuth,
+    requireAuthWhenPresented,
+    requireBrowserAuth
+} from '../middleware/authMiddleware';
 import {
     forgotPassword,
     register,
@@ -49,7 +58,10 @@ import {
     verifyAuthentication,
     verifyRegistration
 } from '../controllers/passkeyAuthController';
-import { getAuthenticationCapabilities } from '../services/authCapabilitiesService';
+import {
+    getAuthenticationCapabilities,
+    getBrowserAuthenticationCapabilities
+} from '../services/authCapabilitiesService';
 import { requireAcceptablePassword } from '../services/passwordPolicyService';
 import { deleteAvatar, getAvatar, putAvatar } from '../controllers/avatarController';
 import { avatarUpload } from '../middleware/imageUpload';
@@ -58,6 +70,12 @@ import {
     uploadRateLimit
 } from '../middleware/requestProtectionMiddleware';
 import { limitMediaConcurrency } from '../middleware/mediaDeliveryMiddleware';
+import {
+    requireBrowserRefreshCookie,
+    requireSameOriginBrowserFormMutation,
+    requireSameOriginBrowserMutation,
+    setBrowserSessionPrivacyHeaders
+} from '../services/authCookieService';
 
 const router: Router = express.Router();
 
@@ -80,6 +98,42 @@ const signupValidation: RequestHandler[] = [
     body('username').trim().isLength({ min: 1, max: 64 })
 ];
 
+const signupWebValidation: RequestHandler[] = [
+    body('email')
+        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
+        .isEmail()
+        .withMessage('Please enter a valid email.')
+        .normalizeEmail(),
+    body('password').custom(requireAcceptablePassword),
+    body('username').trim().isLength({ min: 1, max: 64 })
+];
+
+const emailRegistrationValidation: RequestHandler[] = [
+    body('email')
+        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
+        .isEmail()
+        .normalizeEmail(),
+    body('password').custom(requireAcceptablePassword),
+    body('displayName').optional().trim().isLength({ max: 80 })
+];
+
+const emailOnlyValidation: RequestHandler[] = [
+    body('email')
+        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
+        .isEmail()
+        .normalizeEmail()
+];
+
+const emailCodeValidation: RequestHandler[] = [
+    ...emailOnlyValidation,
+    body('code').trim().isLength({ min: 6, max: 6 }).isNumeric()
+];
+
+const passwordResetValidation: RequestHandler[] = [
+    ...emailCodeValidation,
+    body('password').custom(requireAcceptablePassword)
+];
+
 router.use(requireSecureAuthTransport);
 router.get('/capabilities', (_req, res) => {
     res.status(200).json(getAuthenticationCapabilities());
@@ -91,27 +145,95 @@ router.post(
     authRateLimit,
     authAccountRateLimit,
     authConcurrencyLimit,
-    body('email').trim().isEmail().normalizeEmail(),
-    body('password').custom(requireAcceptablePassword),
-    body('displayName').optional().trim().isLength({ max: 80 }),
+    ...emailRegistrationValidation,
     asyncHandler(register)
 );
-router.post('/email/verify', authRateLimit, authAccountRateLimit, body('email').isEmail(), body('code').isLength({ min: 6, max: 6 }).isNumeric(), asyncHandler(verifyEmail));
-router.post('/email/resend-verification', authRateLimit, authAccountRateLimit, body('email').isEmail(), asyncHandler(resendVerification));
-router.post('/password/forgot', authRateLimit, authAccountRateLimit, body('email').isEmail(), asyncHandler(forgotPassword));
-router.post('/password/reset', authRateLimit, authAccountRateLimit, authConcurrencyLimit, body('email').isEmail(), body('code').isLength({ min: 6, max: 6 }).isNumeric(), body('password').custom(requireAcceptablePassword), asyncHandler(resetPassword));
+router.post('/email/verify', authRateLimit, authAccountRateLimit, ...emailCodeValidation, asyncHandler(verifyEmail));
+router.post('/email/resend-verification', authRateLimit, authAccountRateLimit, ...emailOnlyValidation, asyncHandler(resendVerification));
+router.post('/password/forgot', authRateLimit, authAccountRateLimit, ...emailOnlyValidation, asyncHandler(forgotPassword));
+router.post('/password/reset', authRateLimit, authAccountRateLimit, authConcurrencyLimit, ...passwordResetValidation, asyncHandler(resetPassword));
 router.post('/apple', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithApple));
 router.post('/google', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithGoogle));
 
 router.get('/signup-web', renderSignupPage);
 
-router.post('/signup-web', authRateLimit, authAccountRateLimit, authConcurrencyLimit, signupValidation, asyncHandler(signupFromWeb));
+router.post('/signup-web', requireSameOriginBrowserFormMutation, authRateLimit, authAccountRateLimit, authConcurrencyLimit, signupWebValidation, asyncHandler(signupFromWeb));
 
 router.get('/login-web', renderLoginPage);
 
-router.post('/login-web', authRateLimit, authAccountRateLimit, authConcurrencyLimit, asyncHandler(loginFromWeb));
+router.post('/login-web', requireSameOriginBrowserFormMutation, authRateLimit, authAccountRateLimit, authConcurrencyLimit, asyncHandler(loginFromWeb));
 
-router.post('/logout-web', asyncHandler(logoutFromWeb));
+router.post('/logout-web', requireSameOriginBrowserFormMutation, asyncHandler(logoutFromWeb));
+
+router.get('/browser/capabilities', (_req, res) => {
+    setBrowserSessionPrivacyHeaders(res);
+    res.status(200).json(getBrowserAuthenticationCapabilities());
+});
+
+router.post(
+    '/browser/register',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    authAccountRateLimit,
+    authConcurrencyLimit,
+    ...emailRegistrationValidation,
+    asyncHandler(register)
+);
+router.post(
+    '/browser/email/verify',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    authAccountRateLimit,
+    ...emailCodeValidation,
+    asyncHandler(verifyEmail)
+);
+router.post(
+    '/browser/email/resend-verification',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    authAccountRateLimit,
+    ...emailOnlyValidation,
+    asyncHandler(resendVerification)
+);
+router.post(
+    '/browser/password/forgot',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    authAccountRateLimit,
+    ...emailOnlyValidation,
+    asyncHandler(forgotPassword)
+);
+router.post(
+    '/browser/password/reset',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    authAccountRateLimit,
+    authConcurrencyLimit,
+    ...passwordResetValidation,
+    asyncHandler(resetPassword)
+);
+
+router.post(
+    '/browser/login',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    authAccountRateLimit,
+    authConcurrencyLimit,
+    asyncHandler(browserLogin)
+);
+router.post(
+    '/browser/refresh',
+    requireSameOriginBrowserMutation,
+    requireBrowserRefreshCookie,
+    browserRefreshRateLimit,
+    asyncHandler(browserRefresh)
+);
+router.get('/browser/session', requireBrowserAuth, asyncHandler(browserSession));
+router.post(
+    '/browser/logout',
+    requireSameOriginBrowserMutation,
+    asyncHandler(browserLogout)
+);
 
 router.post('/login', authRateLimit, authAccountRateLimit, authConcurrencyLimit, asyncHandler(login));
 

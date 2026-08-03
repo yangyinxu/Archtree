@@ -1,0 +1,80 @@
+.section {
+  min-width: 0;
+}
+
+.title {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 2.5vw, 1.9rem);
+  letter-spacing: -0.03em;
+  margin: 0 0 1rem;
+}
+
+.carousel,
+.grid,
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.carousel {
+  display: grid;
+  gap: clamp(0.75rem, 1.7vw, 1.15rem);
+  grid-auto-columns: clamp(10.5rem, 18vw, 14rem);
+  grid-auto-flow: column;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 0.2rem 0.15rem 0.85rem;
+  scroll-snap-type: inline proximity;
+  scrollbar-width: thin;
+}
+
+.carousel .cardItem {
+  scroll-snap-align: start;
+}
+
+.grid {
+  display: grid;
+  gap: clamp(0.75rem, 1.7vw, 1.15rem);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10.5rem), 1fr));
+}
+
+.list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cardItem {
+  list-style: none;
+  min-width: 0;
+}
+
+.empty {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  margin: 0;
+  padding: 1rem;
+}
+
+.visuallyHidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+@media (max-width: 480px) {
+  .carousel {
+    grid-auto-columns: minmax(10.5rem, 72vw);
+  }
+
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.75rem), 1fr));
+  }
+}

@@ -60,6 +60,14 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 
 - An album detail page has one prominent Play button above its audio-track list,
   styled consistently with the existing Play Video button.
+- A populated `Album.audioTrackIds` list is the canonical album soundtrack
+  order. Missing and non-ready references do not become playable queue items,
+  and reverse-linked tracks are not silently appended. Legacy albums with no
+  declared soundtrack IDs may fall back to ready tracks whose `albumId`
+  references that album, using a deterministic order.
+- Album artist attribution is derived from the ordered component soundtracks'
+  explicit artist relationships. When those soundtracks provide no artist,
+  Artists that explicitly reference the Album provide the display fallback.
 - Tapping the album Play button starts the album queue and adds only the album
   to Recently Played.
 - Explicitly tapping an individual song in an album's track list adds that
@@ -70,6 +78,43 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   Recently Played.
 - The album Play action consumes one entry in the shared 20-entry Recently
   Played history.
+- Public soundtrack metadata and streaming expose only database-confirmed
+  ready audio. Stream `HEAD` and `GET` resolve the stored object key from that
+  database record; an orphaned or non-ready storage object is not public audio.
+
+## Web Listener
+
+- The Web listener renders creator-configured Carousel, Grid, and List Home
+  sections in persisted order. A client limitation on another platform does
+  not change the configured presentation type.
+- The Web Library is the complete server-backed union of saved Albums and
+  Soundtracks. Until browser-local offline downloads have their own complete
+  lifecycle, Web displays no Download action or Download filter and does not
+  represent ordinary file downloads as Finitude offline content.
+- The Web listener owns one long-lived audio element, queue, and playback
+  state. Starting playback keeps the current route visible, and navigation
+  inside the listener does not replace or restart that player.
+- Web logout clears account-scoped server-state caches and that account's local
+  search history, but it does not stop an already-playing public stream.
+- Browser Media Session controls are a progressive enhancement over the same
+  in-page player state. Browser or operating-system restrictions may pause or
+  stop background playback, so Web does not promise iOS-equivalent locked or
+  background execution.
+- On mobile Web, activating or swiping upward on the compact player opens an
+  expanded presentation of that same player and queue. Closing it returns to
+  the compact presentation without changing route or playback; horizontal
+  compact-player swipes move only to an available adjacent queue item.
+- Web playback shortcuts are inactive while focus is in an editable control.
+  Unmodified single-character shortcuts are not used; the accessible player
+  help lists the available non-character keys and every action remains
+  available through visible controls.
+- Public Web registration, verification, resend, and password-recovery writes
+  use same-origin JSON contracts and never return session credentials. Generic
+  registration, resend, and recovery responses do not reveal account
+  existence.
+- A native Apple, Google, or passkey configuration does not make that method
+  visible on Web. Web advertises an optional sign-in method only after its
+  complete browser-to-HttpOnly-session flow is configured.
 
 ## Background and System Playback
 

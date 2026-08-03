@@ -1,0 +1,69 @@
+.card {
+  height: 100%;
+  min-width: 0;
+}
+
+.action {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  height: 100%;
+  min-width: 0;
+  padding: 0.65rem;
+  text-align: left;
+  text-decoration: none;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+  width: 100%;
+}
+
+button.action {
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-strong);
+  transform: translateY(-2px);
+}
+
+.copy {
+  display: block;
+  min-width: 0;
+  padding: 0.8rem 0.3rem 0.25rem;
+}
+
+.title,
+.metadata {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title {
+  font-size: 0.92rem;
+  font-weight: 680;
+}
+
+.metadata {
+  color: var(--color-text-subtle);
+  font-size: 0.76rem;
+  margin-top: 0.23rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action {
+    transition: none;
+  }
+
+  .action:hover {
+    transform: none;
+  }
+}

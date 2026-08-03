@@ -1,193 +1,251 @@
-import express, { Application, Request, Response, NextFunction } from 'express';
+import express, { Application, NextFunction, Request, Response } from 'express';
 import bodyParser from 'body-parser';
-
-import path from 'path';
-
 import fs from 'fs';
+import path from 'path';
 
 import adminRoutes from './routes/adminRoutes';
 import authRoutes from './routes/authRoutes';
 import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
+import listenerRoutes from './routes/listenerRoutes';
 import videoRoutes from './routes/videoRoutes';
 import { attachOptionalAuth, AuthenticatedRequest } from './middleware/authMiddleware';
-import { connectToDatabase, getDb } from './infrastructure/database';
+import { getDb } from './infrastructure/database';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
 import { maxAvatarUploadMb, maxImageUploadMb } from './middleware/imageUpload';
 import { getMediaDeliveryMetrics } from './services/mediaDeliveryService';
-import { accessTokenDurationSeconds } from './services/authSessionService';
+import { requireSameOriginCookieMutation } from './services/authCookieService';
 
-const app: Application = express();
-const defaultProxyHops = process.env.NODE_ENV === 'production' ? 2 : 1;
-const configuredProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? defaultProxyHops);
-app.set('trust proxy', Number.isFinite(configuredProxyHops) && configuredProxyHops >= 0
-  ? Math.floor(configuredProxyHops)
-  : defaultProxyHops);
+export interface CreateAppOptions {
+  /** Overrides the production listener bundle location for isolated route tests. */
+  listenerDistPath?: string;
+  /** Retains explicit runtime context for existing isolated application callers. */
+  environment?: string;
+}
 
-console.log(`Service environment: ${process.env.NODE_ENV}`);
-console.log(`Authentication access-token lifetime: ${accessTokenDurationSeconds()} seconds`);
-
-app.use('/assets', express.static(path.join(__dirname, 'public')));
-
-// use body parser to parse request body in JSON format
-app.use(bodyParser.json());
-// parse browser form submissions
-app.use(bodyParser.urlencoded({ extended: false }));
-
-// add response headers to avoid CORS error
-app.use((req, res, next) => {
-  // allow any domain to access the server via wild card
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  // allow the following HTTP methods
-  res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST, PUT, PATCH, DELETE');
-  // allow clients to send requests with the following types of headers
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match'
-  );
-  res.setHeader('Access-Control-Expose-Headers', 'ETag');
-  next();
-});
-
-app.use('/admin', adminRoutes);
-
-// forward to /auth router
-app.use('/auth', authRoutes);
-
-app.use('/content', contentRoutes);
-
-// forward to /feed router
-app.use('/feed', feedRoutes);
-
-// uploads the bigbuck.mp4 video to MongoDB in chunks
-/*
-app.use('/init-video', function (req, res) {
-  const bucket: mongoDb.GridFSBucket = new mongoDb.GridFSBucket(_db);
-  const videoUploadStream: mongoDb.GridFSBucketWriteStream = bucket.openUploadStream('bigbuck');
-  const videoReadstream: fs.ReadStream = fs.createReadStream(path.join(__dirname + '/bigbuck.mp4'));
-  videoReadstream.pipe(videoUploadStream);
-  res.status(200).send('Video uploaded successfully!');
-});
-*/
-
-// forward to /video router
-app.use('/video', videoRoutes);
-
-// home page
-app.get('/', attachOptionalAuth, async (req, res, next) => {
+/** Resolves only files emitted in Vite's manifest for immutable caching. */
+const readListenerManifestAssets = (listenerDistPath: string) => {
+  const manifestPath = path.join(listenerDistPath, '.vite', 'manifest.json');
+  const assets = new Set<string>();
   try {
-    const auth = (req as AuthenticatedRequest).auth;
-    const template = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
-    const headerActions = auth
-      ? `<div class="header-actions">
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    for (const value of Object.values(manifest)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const chunk = value as { file?: unknown; css?: unknown; assets?: unknown };
+      const filenames = [
+        ...(typeof chunk.file === 'string' ? [chunk.file] : []),
+        ...(Array.isArray(chunk.css) ? chunk.css : []),
+        ...(Array.isArray(chunk.assets) ? chunk.assets : [])
+      ];
+      for (const filename of filenames) {
+        if (typeof filename !== 'string') continue;
+        const resolved = path.resolve(listenerDistPath, filename.replace(/^\/+/, ''));
+        const relative = path.relative(listenerDistPath, resolved);
+        if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+          assets.add(resolved);
+        }
+      }
+    }
+  } catch {
+    // A missing or malformed manifest safely disables long-lived caching.
+  }
+  return assets;
+};
+
+/** Distinguishes missing bundle resources from extensionless listener routes. */
+const isListenerAssetRequest = (req: Request) => {
+  const listenerPath = req.path.replace(/^\/listen\/?/, '');
+  return listenerPath === 'assets'
+    || listenerPath.startsWith('assets/')
+    || path.posix.extname(listenerPath) !== '';
+};
+
+/** Mounts the built listener SPA without allowing its fallback to capture backend routes. */
+const mountListenerApplication = (app: Application, listenerDistPath: string) => {
+  const indexPath = path.join(listenerDistPath, 'index.html');
+  if (!fs.existsSync(indexPath)) {
+    app.use('/listen', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).json({
+        message: 'The Finitude Web listener bundle is unavailable. Build web/dist before starting the listener.'
+      });
+    });
+    return;
+  }
+
+  const immutableAssets = readListenerManifestAssets(listenerDistPath);
+
+  app.use('/listen', express.static(listenerDistPath, {
+    index: false,
+    redirect: false,
+    setHeaders: (res, filePath) => {
+      if (path.resolve(filePath) === path.resolve(indexPath)) {
+        res.setHeader('Cache-Control', 'no-cache');
+        return;
+      }
+      if (immutableAssets.has(path.resolve(filePath))) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    }
+  }));
+
+  const sendListenerIndex = (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(indexPath, (error) => {
+      if (error) next(error);
+    });
+  };
+  app.get('/listen', sendListenerIndex);
+  app.get('/listen/*', (req, res, next) => {
+    if (isListenerAssetRequest(req)) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(404).json({ message: 'The requested listener asset was not found.' });
+    }
+    return sendListenerIndex(req, res, next);
+  });
+};
+
+/** Constructs the Express application without connecting to MongoDB or opening a socket. */
+export const createApp = (options: CreateAppOptions = {}): Application => {
+  const app: Application = express();
+  const defaultProxyHops = 1;
+  const configuredProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? defaultProxyHops);
+  app.set('trust proxy', Number.isFinite(configuredProxyHops) && configuredProxyHops >= 0
+    ? Math.floor(configuredProxyHops)
+    : defaultProxyHops);
+
+  app.use('/assets', express.static(path.join(__dirname, 'public')));
+
+  // Parse JSON APIs and browser form submissions before their routers.
+  app.use(bodyParser.json());
+  app.use(bodyParser.urlencoded({ extended: false }));
+
+  app.use((_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST, PUT, PATCH, DELETE');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match'
+    );
+    res.setHeader('Access-Control-Expose-Headers', 'ETag');
+    next();
+  });
+
+  app.use(requireSameOriginCookieMutation);
+
+  app.use('/admin', adminRoutes);
+  app.use('/auth', authRoutes);
+  app.use('/content', contentRoutes);
+  app.use('/feed', feedRoutes);
+  app.use('/video', videoRoutes);
+  app.use('/api/listener/v1', listenerRoutes);
+
+  const listenerDistPath = options.listenerDistPath
+    ?? path.resolve(__dirname, '..', 'web', 'dist');
+  mountListenerApplication(app, listenerDistPath);
+
+  app.get('/', attachOptionalAuth, async (req, res, next) => {
+    try {
+      const auth = (req as AuthenticatedRequest).auth;
+      const template = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
+      const headerActions = auth
+        ? `<div class="header-actions">
           <span class="muted">${escapeHtml(auth.email)}</span>
           <a class="button" href="/content/manage">Content Manager</a>
           <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
         </div>`
-      : `<div class="header-actions">
+        : `<div class="header-actions">
           <a class="button button--secondary" href="/auth/login-web">Log in</a>
           <a class="button" href="/auth/signup-web">Create account</a>
         </div>`;
-    const heroActions = auth
-      ? `<div class="action-row">
+      const heroActions = auth
+        ? `<div class="action-row">
           <a class="button" href="/content/manage">Open Content Manager</a>
           <a class="button button--secondary" href="/content/manage/audio-tracks">Browse my audio tracks</a>
         </div>`
-      : `<div class="action-row">
+        : `<div class="action-row">
           <a class="button" href="/auth/signup-web">Create account</a>
           <a class="button button--secondary" href="/auth/login-web">Log in</a>
         </div>`;
 
-    return res.status(200).send(
-      template
-        .replace('{{HEADER_ACTIONS}}', headerActions)
-        .replace('{{HERO_ACTIONS}}', heroActions)
-    );
-  } catch (error) {
-    return next(error);
-  }
-});
+      return res.status(200).send(
+        template
+          .replace('{{HEADER_ACTIONS}}', headerActions)
+          .replace('{{HERO_ACTIONS}}', heroActions)
+      );
+    } catch (error) {
+      return next(error);
+    }
+  });
 
-// health endpoint for load balancers and service monitoring
-app.get('/health', async (req, res) => {
-  try {
-    const db = getDb();
-    if (!db) throw new Error('Database is unavailable.');
-    await db.command({ ping: 1 }, { maxTimeMS: 1_000 });
-    return res.status(200).json({
-      status: 'ok',
-      mediaDelivery: getMediaDeliveryMetrics(),
-      memory: {
-        rssBytes: process.memoryUsage().rss,
-        heapUsedBytes: process.memoryUsage().heapUsed
-      }
-    });
-  } catch {
-    return res.status(503).json({
-      status: 'unavailable',
-      mediaDelivery: getMediaDeliveryMetrics()
-    });
-  }
-});
+  app.get('/health', async (_req, res) => {
+    try {
+      const db = getDb();
+      if (!db) throw new Error('Database is unavailable.');
+      await db.command({ ping: 1 }, { maxTimeMS: 1_000 });
+      return res.status(200).json({
+        status: 'ok',
+        mediaDelivery: getMediaDeliveryMetrics(),
+        memory: {
+          rssBytes: process.memoryUsage().rss,
+          heapUsedBytes: process.memoryUsage().heapUsed
+        }
+      });
+    } catch {
+      return res.status(503).json({
+        status: 'unavailable',
+        mediaDelivery: getMediaDeliveryMetrics()
+      });
+    }
+  });
 
-// catch unexpected requests
-app.use((error: any, req: Request, res: Response, next: NextFunction) => {
-  if (res.headersSent) {
-    return next(error);
-  }
+  app.use((error: any, req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) {
+      return next(error);
+    }
 
-  const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
-  const isTooManyFiles = error?.code === 'LIMIT_FILE_COUNT';
-  const isMulterInputError = typeof error?.code === 'string' && error.code.startsWith('LIMIT_');
-  const status: number = isFileTooLarge || isTooManyFiles
-    ? 413
-    : isMulterInputError ? 400 : error.statusCode || 500;
-  const message: string = isFileTooLarge
-    ? error?.field === 'avatar'
-      ? `Avatar is too large. The maximum size is ${maxAvatarUploadMb} MB.`
-      : error?.field === 'coverArtFile'
-      ? `Cover art is too large. The maximum size is ${maxImageUploadMb} MB.`
-      : `Audio file is too large. The maximum size per file is ${maxAudioUploadMb} MB.`
-    : isTooManyFiles
-      ? 'Too many files were included in this upload.'
-      : isMulterInputError
-        ? 'Invalid multipart upload.'
-    : error.message;
-  const data: any = error.data;
+    const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
+    const isTooManyFiles = error?.code === 'LIMIT_FILE_COUNT';
+    const isMulterInputError = typeof error?.code === 'string' && error.code.startsWith('LIMIT_');
+    const status: number = isFileTooLarge || isTooManyFiles
+      ? 413
+      : isMulterInputError ? 400 : error.statusCode || 500;
+    const message: string = isFileTooLarge
+      ? error?.field === 'avatar'
+        ? `Avatar is too large. The maximum size is ${maxAvatarUploadMb} MB.`
+        : error?.field === 'coverArtFile'
+          ? `Cover art is too large. The maximum size is ${maxImageUploadMb} MB.`
+          : `Audio file is too large. The maximum size per file is ${maxAudioUploadMb} MB.`
+      : isTooManyFiles
+        ? 'Too many files were included in this upload.'
+        : isMulterInputError
+          ? 'Invalid multipart upload.'
+          : error.message;
+    const data: any = error.data;
 
-  // Only log server-side failures as unexpected errors.
-  if (status >= 500) {
-    console.log(`Caught unexpected request: ${req.originalUrl}`);
-    console.log(error);
-  }
+    if (status >= 500) {
+      console.log(`Caught unexpected request: ${req.originalUrl}`);
+      console.log(error);
+    }
 
-  res.status(status).json({ message: message, data: data });
-});
+    if (status >= 500) {
+      return res.status(status).json({
+        message: 'The service could not complete the request.'
+      });
+    }
+    return res.status(status).json({ message, data });
+  });
 
-const port: string | number = process.env.PORT || process.env.port || 8080;
-const positiveInteger = (value: string | undefined, fallback: number) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+  return app;
 };
 
-// the app should connect to the database as soon as it starts
-connectToDatabase()
-  .then(() => {
-    const server = app.listen(port, () => {
-      console.log('Starting service on port ' + port + '...');
+// Keep `tsx src/app.ts` as the runtime entry while imports remain side-effect free.
+if (typeof require !== 'undefined' && require.main === module) {
+  void import('./server')
+    .then(({ startServer }) => startServer())
+    .catch((error) => {
+      console.log(`Error starting Archtree: ${error}`);
+      process.exitCode = 1;
     });
-    server.headersTimeout = positiveInteger(process.env.SERVER_HEADERS_TIMEOUT_MS, 60_000);
-    server.requestTimeout = positiveInteger(process.env.SERVER_REQUEST_TIMEOUT_MS, 15 * 60_000);
-    server.keepAliveTimeout = positiveInteger(process.env.SERVER_KEEP_ALIVE_TIMEOUT_MS, 5_000);
-    server.timeout = positiveInteger(process.env.SERVER_INACTIVITY_TIMEOUT_MS, 120_000);
-    server.maxRequestsPerSocket = positiveInteger(process.env.SERVER_MAX_REQUESTS_PER_SOCKET, 1_000);
-    server.maxConnections = positiveInteger(process.env.SERVER_MAX_CONNECTIONS, 1_000);
-    server.on('clientError', (_error, socket) => {
-      if (!socket.destroyed) socket.destroy();
-    });
-  })
-  .catch((error) => {
-    console.log(`Error connecting to MongoDB: ${error}`);
-    throw error;
-  });
+}

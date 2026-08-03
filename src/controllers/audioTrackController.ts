@@ -32,8 +32,8 @@ const s3ErrorStatus = (error: any) => {
     return status === 403 ? 403 : status === 404 ? 404 : 502;
 };
 
-/** Resolves only database-confirmed ready assets for authenticated downloads. */
-const resolveReadyDownloadAsset = async (
+/** Resolves the stored object only after its database lifecycle is playable. */
+const resolveReadyAudioAsset = async (
     audioTrackId: string,
     abortSignal: AbortSignal
 ) => {
@@ -59,7 +59,7 @@ const resolveReadyDownloadAsset = async (
 
 const setDownloadHeaders = (
     res: Response,
-    asset: Extract<Awaited<ReturnType<typeof resolveReadyDownloadAsset>>, { status: 'ready' }>,
+    asset: Extract<Awaited<ReturnType<typeof resolveReadyAudioAsset>>, { status: 'ready' }>,
     contentLength: number
 ) => {
     const { track, metadata } = asset;
@@ -273,21 +273,17 @@ export const getAudioTrackById = async (req: Request, res: Response, next: NextF
 
 // Stream an audio track by id from AWS S3 with support for HTTP Range requests
 export const headAudioTrackStream = async (req: Request, res: Response, next: NextFunction) => {
-    const audioTrackId = req.params.audioTrackId;
     const context = createMediaAbortContext(req, res);
     try {
-        const metadata = await getS3().send(new HeadObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: audioTrackId
-        }), { abortSignal: context.signal });
-        if (metadata.ContentLength === undefined) {
-            return res.status(404).end();
-        }
+        const asset = await resolveReadyAudioAsset(req.params.audioTrackId, context.signal);
+        // Public streaming deliberately does not reveal a non-ready lifecycle state.
+        if (asset.status !== 'ready') return res.status(404).end();
 
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Type', metadata.ContentType || 'audio/mpeg');
-        res.setHeader('Content-Length', metadata.ContentLength);
-        if (metadata.ETag) res.setHeader('ETag', metadata.ETag);
+        res.setHeader('Content-Type', asset.metadata.ContentType || asset.track.contentType || 'audio/mpeg');
+        res.setHeader('Content-Length', asset.metadata.ContentLength!);
+        res.setHeader('Cache-Control', 'no-transform');
+        if (asset.metadata.ETag) res.setHeader('ETag', asset.metadata.ETag);
         return res.status(200).end();
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
@@ -303,24 +299,14 @@ export const headAudioTrackStream = async (req: Request, res: Response, next: Ne
 
 export const streamAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
-    const s3 = getS3();
-    const params = {
-        Bucket: process.env.S3_BUCKET_NAME!,
-        Key: audioTrackId
-    };
-
     const range = req.headers.range;
     const context = createMediaAbortContext(req, res);
     try {
-        const metadata = await s3.send(
-            new HeadObjectCommand(params),
-            { abortSignal: context.signal }
-        );
-        if (!metadata.ContentLength) {
-            return res.status(404).end();
-        }
+        const asset = await resolveReadyAudioAsset(audioTrackId, context.signal);
+        // Missing and non-ready tracks share the same public response.
+        if (asset.status !== 'ready') return res.status(404).end();
 
-        const fileSize = metadata.ContentLength;
+        const fileSize = asset.metadata.ContentLength!;
         let start = 0;
         let end = fileSize - 1;
 
@@ -342,16 +328,16 @@ export const streamAudioTrack = async (req: Request, res: Response, next: NextFu
         }
 
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Type', metadata.ContentType || 'audio/mpeg');
+        res.setHeader('Content-Type', asset.metadata.ContentType || asset.track.contentType || 'audio/mpeg');
         res.setHeader('Content-Length', end - start + 1);
         res.setHeader('Content-Disposition', `inline; filename="${audioTrackId}"`);
         res.setHeader('X-Accel-Buffering', 'no');
         res.setHeader('Cache-Control', 'no-transform');
-        if (metadata.ETag) res.setHeader('ETag', metadata.ETag);
+        if (asset.metadata.ETag) res.setHeader('ETag', asset.metadata.ETag);
 
-        const object = await s3.send(
+        const object = await getS3().send(
             new GetObjectCommand({
-                ...params,
+                ...asset.params,
                 Range: range ? `bytes=${start}-${end}` : undefined
             }),
             { abortSignal: context.signal }
@@ -381,7 +367,7 @@ export const headAudioTrackDownload = async (
 ) => {
     const context = createMediaAbortContext(req, res);
     try {
-        const asset = await resolveReadyDownloadAsset(
+        const asset = await resolveReadyAudioAsset(
             req.params.audioTrackId,
             context.signal
         );
@@ -410,7 +396,7 @@ export const downloadAudioTrack = async (
 ) => {
     const context = createMediaAbortContext(req, res);
     try {
-        const asset = await resolveReadyDownloadAsset(
+        const asset = await resolveReadyAudioAsset(
             req.params.audioTrackId,
             context.signal
         );
