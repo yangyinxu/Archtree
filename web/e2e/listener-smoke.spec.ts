@@ -58,6 +58,7 @@ test('keeps the Album route and persistent player while navigating', async ({ pa
 test('keeps the desktop player anchored when the wheel originates over it', async ({ page }) => {
   await page.setViewportSize({ width: 1_440, height: 900 });
   await page.goto('/listen');
+  await expect(page.getByRole('heading', { level: 2, name: 'Featured albums' })).toBeVisible();
 
   // Force a root scroll range without making the deterministic catalog fixture
   // repetitive; the application shell must reject that accidental scroll path.
