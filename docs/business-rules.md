@@ -86,9 +86,12 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Each new playback queue records its navigation origin. Home and Library are
   the current origins; future pages that launch playback follow the same
   contract without adding source-specific playback logic.
-- When the app returns from the background with a current Now Playing item, it
-  selects that originating tab and presents the existing audio-player surface
-  without restarting the queue or changing playback position.
+- Ordinary foregrounding preserves the selected tab and the audio player's
+  prior expanded or collapsed presentation. It does not expand a collapsed
+  player merely because the queue has a current Now Playing item.
+- Generic app activation is not a player-navigation intent. The client does not
+  infer a Dynamic Island or lock screen media selection from activation; any
+  documented routed intent must be handled explicitly.
 - While a queue has a current item, the iOS app displays a compact Now Playing
   bar above the tab bar. Tapping or swiping upward expands the existing player;
   dismissing it returns to the compact bar without stopping playback.
