@@ -102,18 +102,23 @@ test('keeps the desktop player anchored when the wheel originates over it', asyn
   });
   const mainBox = await main.boundingBox();
   expect(mainBox).not.toBeNull();
-  await page.mouse.move(mainBox!.x + 4, mainBox!.y + 4);
-  const mainWheelSettled = page.evaluate(() => new Promise<void>((resolve) => {
-    window.addEventListener('wheel', () => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-    }, { once: true });
-  }));
+  const mainWheelPoint = {
+    x: mainBox!.x + (mainBox!.width / 2),
+    y: mainBox!.y + Math.min(64, mainBox!.height / 2)
+  };
+  await page.mouse.move(mainWheelPoint.x, mainWheelPoint.y);
+  const wheelTargetsMain = await main.evaluate((element, point) => {
+    const target = document.elementFromPoint(point.x, point.y);
+    return target instanceof Element && target.closest('main') === element;
+  }, mainWheelPoint);
+  expect(wheelTargetsMain).toBe(true);
   await page.mouse.wheel(0, 600);
-  await mainWheelSettled;
+  await expect.poll(
+    () => main.evaluate((element) => element.scrollTop),
+    { message: 'wheel over main should scroll the main container' }
+  ).toBeGreaterThan(0);
 
-  const mainScrollTop = await main.evaluate((element) => element.scrollTop);
   const afterMainScroll = await readLayout();
-  expect(mainScrollTop).toBeGreaterThan(0);
   expect(afterMainScroll.windowScrollY).toBe(0);
   expect(Math.abs(afterMainScroll.bottom - afterMainScroll.viewportHeight)).toBeLessThanOrEqual(1);
 });
