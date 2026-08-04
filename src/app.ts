@@ -162,7 +162,6 @@ export const renderLandingActions = (
       : '';
     return {
       headerActions: `<div class="header-actions">
-        ${listenerButton}
         <span class="muted">${escapeHtml(auth.email)}</span>
         ${contentManagerHeaderAction}
         <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
@@ -176,7 +175,6 @@ export const renderLandingActions = (
 
   return {
     headerActions: `<div class="header-actions">
-      ${listenerButton}
       <a class="button button--secondary" href="/auth/login-web">Log in</a>
       <a class="button" href="/auth/signup-web">Create account</a>
     </div>`,

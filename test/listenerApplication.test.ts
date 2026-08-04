@@ -77,7 +77,7 @@ test('production defaults to the single trusted Nginx proxy hop', () => {
 
 test('landing actions expose Finitude while reserving Content Manager for admins', () => {
   const signedOut = renderLandingActions();
-  assert.match(signedOut.headerActions, /href="\/listen">Open Finitude/);
+  assert.doesNotMatch(signedOut.headerActions, /href="\/listen">Open Finitude/);
   assert.match(signedOut.heroActions, /href="\/listen">Open Finitude/);
   assert.match(signedOut.headerActions, /href="\/auth\/login-web">Log in/);
   assert.match(signedOut.heroActions, /href="\/auth\/signup-web">Create account/);
@@ -86,7 +86,7 @@ test('landing actions expose Finitude while reserving Content Manager for admins
     email: 'listener+<beta>@example.com',
     role: 'user'
   });
-  assert.match(signedInUser.headerActions, /href="\/listen">Open Finitude/);
+  assert.doesNotMatch(signedInUser.headerActions, /href="\/listen">Open Finitude/);
   assert.match(signedInUser.heroActions, /href="\/listen">Open Finitude/);
   assert.match(signedInUser.headerActions, /listener\+&lt;beta&gt;@example\.com/);
   assert.doesNotMatch(signedInUser.headerActions, /<beta>/);
@@ -139,7 +139,7 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.equal(landingPage.status, 200);
     assertSecurityHeaders(landingPage);
     const landingHtml = await landingPage.text();
-    assert.equal(landingHtml.match(/href="\/listen"/g)?.length, 2);
+    assert.equal(landingHtml.match(/href="\/listen"/g)?.length, 1);
   } finally {
     await close(server);
     await rm(temporaryRoot, { recursive: true, force: true });
