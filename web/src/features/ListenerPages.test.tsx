@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
@@ -8,7 +8,9 @@ import { browserSessionQueryKey } from '../api/session';
 import { playerStore } from '../player';
 import { AlbumPage } from './catalog/AlbumPage';
 import { LibraryPage } from './library/LibraryPage';
+import { SearchQueryProvider } from './search/SearchQueryProvider';
 import { SearchPage } from './search/SearchPage';
+import { readSearchHistory, rememberSearchQuery } from './search/searchHistory';
 
 const album = {
   contentType: 'album',
@@ -39,9 +41,27 @@ const artist = {
   artworkUrl: ''
 } as const;
 
+const listenerSession = {
+  user: {
+    id: 'listener-1',
+    email: 'listener@example.com',
+    role: 'user',
+    displayName: 'Listener',
+    avatarRevision: 0,
+    avatar: null,
+    emailVerified: true
+  }
+};
+
+const unresolvedSession = Symbol('unresolved browser session');
+
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: { 'Content-Type': 'application/json' }
+});
+
+const waitForSearchDebounce = () => act(async () => {
+  await new Promise((resolve) => window.setTimeout(resolve, 350));
 });
 
 const renderRoute = (
@@ -51,11 +71,16 @@ const renderRoute = (
   session: unknown = null
 ) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.setQueryData(browserSessionQueryKey, session);
+  if (session !== unresolvedSession) queryClient.setQueryData(browserSessionQueryKey, session);
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
-        <Routes><Route element={element} path={routePath} /></Routes>
+        <Routes>
+          <Route
+            element={<SearchQueryProvider>{element}</SearchQueryProvider>}
+            path={routePath}
+          />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -98,7 +123,7 @@ test('Search renders grouped public results and keeps content actions canonical'
     albums: [album],
     audioTracks: [track]
   })));
-  renderRoute('/search?q=Night', '/search', <SearchPage />);
+  renderRoute('/search/?q=Night', '/search', <SearchPage />);
 
   expect(await screen.findByRole('heading', { name: 'Artists' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Albums' })).toBeInTheDocument();
@@ -108,6 +133,213 @@ test('Search renders grouped public results and keeps content actions canonical'
     `/artists/${artist.id}`
   );
   expect(screen.getByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
+  expect(readSearchHistory(null)).toEqual([]);
+});
+
+test('Search retry refreshes results without adding or reordering history', async () => {
+  const user = userEvent.setup();
+  rememberSearchQuery(null, 'Prior');
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ message: 'Unavailable' }, 503))
+    .mockResolvedValueOnce(jsonResponse({
+      query: 'Night',
+      artists: [],
+      albums: [],
+      audioTracks: []
+    }));
+  vi.stubGlobal('fetch', fetchMock);
+  renderRoute('/search?q=Night', '/search', <SearchPage />);
+
+  await user.click(await screen.findByRole('button', { name: 'Try again' }));
+
+  expect(await screen.findByText('No artists, albums, or soundtracks matched this search.'))
+    .toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(readSearchHistory(null)).toEqual(['Prior']);
+});
+
+test('Search debounces edited queries without remembering them until explicit submission', async () => {
+  const user = userEvent.setup();
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    query: 'Nigh',
+    artists: [],
+    albums: [],
+    audioTracks: []
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  renderRoute('/search', '/search', <SearchPage />);
+
+  const input = screen.getByRole('searchbox', {
+    name: 'Search artists, albums, and soundtracks'
+  });
+  expect(input).toHaveAttribute('enterkeyhint', 'search');
+  expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
+  await user.type(input, 'Night');
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(readSearchHistory(null)).toEqual([]);
+  await waitForSearchDebounce();
+
+  expect(await screen.findByRole('heading', { name: 'Results for “Night”' })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock).toHaveBeenLastCalledWith(
+    '/api/listener/v1/search?q=Night',
+    expect.objectContaining({ signal: expect.any(AbortSignal) })
+  );
+  expect(readSearchHistory(null)).toEqual([]);
+
+  await user.type(input, '{Backspace}');
+  await waitForSearchDebounce();
+
+  expect(await screen.findByRole('heading', { name: 'Results for “Nigh”' })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(readSearchHistory(null)).toEqual([]);
+
+  fireEvent.keyDown(input, { key: 'Enter', keyCode: 229, isComposing: true });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(readSearchHistory(null)).toEqual([]);
+
+  await user.keyboard('{Enter}');
+
+  await waitFor(() => expect(readSearchHistory(null)).toEqual(['Nigh']));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock).toHaveBeenLastCalledWith(
+    '/api/listener/v1/search?q=Nigh',
+    expect.objectContaining({ signal: expect.any(AbortSignal) })
+  );
+});
+
+test('Search cancels an in-flight draft request when a newer draft is previewed', async () => {
+  const user = userEvent.setup();
+  let firstSignal: AbortSignal | undefined;
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('q=Night')) {
+      firstSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        firstSignal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      });
+    }
+    return Promise.resolve(jsonResponse({
+      query: 'Dawn',
+      artists: [],
+      albums: [],
+      audioTracks: []
+    }));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  renderRoute('/search', '/search', <SearchPage />);
+
+  const input = screen.getByRole('searchbox', {
+    name: 'Search artists, albums, and soundtracks'
+  });
+  await user.type(input, 'Night');
+  await waitForSearchDebounce();
+  expect(firstSignal).toBeDefined();
+
+  await user.clear(input);
+  await user.type(input, 'Dawn');
+  await waitForSearchDebounce();
+
+  expect(await screen.findByRole('heading', { name: 'Results for “Dawn”' })).toBeInTheDocument();
+  expect(firstSignal?.aborted).toBe(true);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(readSearchHistory(null)).toEqual([]);
+});
+
+test('Search waits for IME composition to finish before previewing or recording', async () => {
+  const user = userEvent.setup();
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    query: '夜',
+    artists: [],
+    albums: [],
+    audioTracks: []
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  renderRoute('/search', '/search', <SearchPage />);
+
+  const input = screen.getByRole('searchbox', {
+    name: 'Search artists, albums, and soundtracks'
+  });
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: '夜' } });
+  await waitForSearchDebounce();
+
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(readSearchHistory(null)).toEqual([]);
+
+  fireEvent.keyDown(input, { key: 'Enter', keyCode: 229, isComposing: true });
+  fireEvent.compositionEnd(input, { data: '夜' });
+
+  expect(await screen.findByRole('heading', { name: 'Results for “夜”' }, {
+    timeout: 1_000
+  })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(readSearchHistory(null)).toEqual([]);
+
+  await user.click(input);
+  await user.keyboard('{Enter}');
+
+  await waitFor(() => expect(readSearchHistory(null)).toEqual(['夜']));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test('Search defers history until the pending account identity resolves', async () => {
+  const user = userEvent.setup();
+  let finishSession!: (response: Response) => void;
+  const sessionRequest = new Promise<Response>((resolve) => { finishSession = resolve; });
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    if (String(input) === '/auth/browser/session') return sessionRequest;
+    return Promise.resolve(jsonResponse({
+      query: 'Private search',
+      artists: [],
+      albums: [],
+      audioTracks: []
+    }));
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const view = renderRoute('/search', '/search', <SearchPage />, unresolvedSession);
+
+  const input = screen.getByRole('searchbox', {
+    name: 'Search artists, albums, and soundtracks'
+  });
+  await user.type(input, 'Private search');
+  await user.keyboard('{Enter}');
+
+  expect(await screen.findByRole('heading', {
+    name: 'Results for “Private search”'
+  })).toBeInTheDocument();
+  expect(readSearchHistory(null)).toEqual([]);
+  expect(readSearchHistory('listener-1')).toEqual([]);
+
+  view.unmount();
+  finishSession(jsonResponse(listenerSession));
+
+  await waitFor(() => expect(readSearchHistory('listener-1')).toEqual(['Private search']));
+  expect(readSearchHistory(null)).toEqual([]);
+});
+
+test('clearing an edited Search draft returns to the default state without a new request', async () => {
+  const user = userEvent.setup();
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    query: 'Night',
+    artists: [],
+    albums: [],
+    audioTracks: []
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  renderRoute('/search?q=Night', '/search', <SearchPage />);
+
+  expect(await screen.findByRole('heading', { name: 'Results for “Night”' })).toBeInTheDocument();
+  await user.clear(screen.getByRole('searchbox', {
+    name: 'Search artists, albums, and soundtracks'
+  }));
+
+  expect(await screen.findByRole('heading', { name: 'Try a listening mood' }, {
+    timeout: 1_000
+  })).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(readSearchHistory(null)).toEqual([]);
 });
 
 test('Library sends type filters to the server and retains the mixed saved list', async () => {
@@ -150,17 +382,7 @@ test('Library sends type filters to the server and retains the mixed saved list'
     return jsonResponse({ items, nextCursor: null });
   });
   vi.stubGlobal('fetch', fetchMock);
-  renderRoute('/library', '/library', <LibraryPage />, {
-    user: {
-      id: 'listener-1',
-      email: 'listener@example.com',
-      role: 'user',
-      displayName: 'Listener',
-      avatarRevision: 0,
-      avatar: null,
-      emailVerified: true
-    }
-  });
+  renderRoute('/library', '/library', <LibraryPage />, listenerSession);
 
   expect(await screen.findByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Downloads' })).not.toBeInTheDocument();

@@ -430,7 +430,18 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Before a query is entered, Search displays its default state and the current account's recent search history.
 - Search history is stored only on the device, is isolated per authenticated account, and is deleted when that account signs out.
 - Search history is limited to 10 entries. Repeating a query moves it to the newest position instead of creating a duplicate.
-- Once a query is submitted, Search displays grouped Artist, Album, and Soundtrack results and does not display a Recent Content section.
+- Typing or deleting characters updates results for the normalized non-empty
+  draft after a short cancellable debounce. Clearing the draft returns Search
+  to its default state. Draft-driven searches, direct links, browser history
+  navigation, and retries do not add or reorder search history.
+- A non-empty query is added to or reordered in search history only when the
+  listener explicitly submits it with the platform's supported Search action,
+  or selects a suggested or historical query. Finitude Web uses the search
+  input's Enter or mobile-keyboard Search action and does not display a
+  separate Search button in the page search bar.
+- Once a non-empty query is executed through either draft debounce or explicit
+  submission, Search displays grouped Artist, Album, and Soundtrack results and
+  does not display a Recent Content section.
 - Artist results open Artist details, Album results open Album details, and Soundtrack results use the shared playback queue.
 - On native clients with device-local download support, valid downloaded Albums
   and Soundtracks may be shown when the server search endpoint is unavailable;

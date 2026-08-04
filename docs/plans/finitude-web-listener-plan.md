@@ -629,6 +629,7 @@ Tasks:
   and resolved creator metadata.
 - Implement top-bar and route-level search with a 300 ms cancellable debounce,
   explicit submit, URL query synchronization, and stale-response protection.
+  Draft edits request the latest results but do not record intermediate queries.
 - Show grouped Artist, Album, and Soundtrack results. Do not show a Recent
   Content group after a query is submitted.
 - Open Artist and Album results and launch Soundtrack playback through the
@@ -811,7 +812,7 @@ rules.
   lifecycle.
 - API refresh coalescing, one retry, cancellation, and cache clearing.
 - Page-item discriminators and ordered rendering.
-- Search debounce/history/isolation.
+- Search debounce/submission/history/navigation/isolation.
 - Library filters, sorts, cursor reset, deduplication, and Save-state updates.
 - Artwork/avatar fallback, long/missing text, error/empty/loading states, focus
   management, and reduced motion.

@@ -5,6 +5,8 @@ import { listenerHomeQuery } from '../../api/listener';
 import { browserSessionQuery } from '../../api/session';
 import { PageSection } from '../../components/PageSection';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
+import { useSearchQuery } from '../search/SearchQueryProvider';
+import { useSearchHistoryRecorder } from '../search/useSearchHistoryRecorder';
 import styles from '../../styles/Pages.module.css';
 
 const moods = [
@@ -13,26 +15,40 @@ const moods = [
   { title: 'Slow mornings', meta: 'A softer way to begin', query: 'morning', art: styles.moodArtWarm }
 ];
 
-const MoodFallback = () => (
-  <section className={styles.section} aria-labelledby="moods-title">
-    <div className={styles.sectionHeader}>
-      <div>
-        <p className={styles.eyebrow}>Listening moods</p>
-        <h2 className={styles.sectionTitle} id="moods-title">Begin with a feeling</h2>
+const MoodFallback = () => {
+  const { cancelPendingPreview } = useSearchQuery();
+  const { recordSubmittedQuery } = useSearchHistoryRecorder();
+
+  return (
+    <section className={styles.section} aria-labelledby="moods-title">
+      <div className={styles.sectionHeader}>
+        <div>
+          <p className={styles.eyebrow}>Listening moods</p>
+          <h2 className={styles.sectionTitle} id="moods-title">Begin with a feeling</h2>
+        </div>
+        <p className={styles.sectionHint}>Explore the public catalog</p>
       </div>
-      <p className={styles.sectionHint}>Explore the public catalog</p>
-    </div>
-    <div className={styles.cardGrid}>
-      {moods.map((mood) => (
-        <Link className={styles.moodCard} key={mood.title} to={`/search?q=${encodeURIComponent(mood.query)}`}>
-          <div className={`${styles.moodArt} ${mood.art}`} aria-hidden="true" />
-          <p className={styles.cardTitle}>{mood.title}</p>
-          <p className={styles.cardMeta}>{mood.meta}</p>
-        </Link>
-      ))}
-    </div>
-  </section>
-);
+      <div className={styles.cardGrid}>
+        {moods.map((mood) => (
+          <Link
+            className={styles.moodCard}
+            key={mood.title}
+            onClick={() => {
+              cancelPendingPreview();
+              recordSubmittedQuery(mood.query);
+            }}
+            state={null}
+            to={`/search?q=${encodeURIComponent(mood.query)}`}
+          >
+            <div className={`${styles.moodArt} ${mood.art}`} aria-hidden="true" />
+            <p className={styles.cardTitle}>{mood.title}</p>
+            <p className={styles.cardMeta}>{mood.meta}</p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+};
 
 /** Renders the configured listener Home while retaining a useful public fallback. */
 export const HomePage = () => {

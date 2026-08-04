@@ -1,11 +1,13 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { type FormEvent, type KeyboardEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router';
 
 import { browserSessionQuery } from '../api/session';
 import { Avatar } from '../components/Avatar';
 import { Icon, type IconName } from '../components/Icon';
 import { PlayerBar } from '../components/PlayerBar';
+import { SearchQueryProvider, useSearchQuery } from '../features/search/SearchQueryProvider';
+import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
 import { RouteAnnouncer } from './RouteAnnouncer';
 import styles from './AppShell.module.css';
 
@@ -33,17 +35,27 @@ const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => (
 );
 
 const TopSearch = () => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const routeQuery = new URLSearchParams(location.search).get('q') ?? '';
-  const [query, setQuery] = useState(routeQuery);
-
-  useEffect(() => setQuery(routeQuery), [routeQuery]);
+  const { recordSubmittedQuery } = useSearchHistoryRecorder();
+  const {
+    commitDraft,
+    draftQuery,
+    finishComposition,
+    isComposing,
+    startComposition,
+    updateDraft
+  } = useSearchQuery();
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const normalized = query.trim();
-    navigate(normalized ? `/search?q=${encodeURIComponent(normalized)}` : '/search');
+    if (isComposing) return;
+    const normalized = commitDraft();
+    if (normalized) recordSubmittedQuery(normalized);
+  };
+
+  const preventCompositionSubmit = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) {
+      event.preventDefault();
+    }
   };
 
   return (
@@ -53,12 +65,16 @@ const TopSearch = () => {
       </button>
       <label className="visually-hidden" htmlFor="shell-search">Search artists, albums, and soundtracks</label>
       <input
+        enterKeyHint="search"
         id="shell-search"
         name="q"
-        onChange={(event) => setQuery(event.currentTarget.value)}
+        onChange={(event) => updateDraft(event.currentTarget.value)}
+        onCompositionEnd={(event) => finishComposition(event.currentTarget.value)}
+        onCompositionStart={startComposition}
+        onKeyDown={preventCompositionSubmit}
         placeholder="Search music"
         type="search"
-        value={query}
+        value={draftQuery}
       />
     </form>
   );
@@ -83,7 +99,7 @@ const AccountEntry = () => {
 };
 
 /** Keeps navigation, route content, and the single player mounted together. */
-export const AppShell = () => {
+const AppShellContent = () => {
   const navigate = useNavigate();
 
   return (
@@ -124,3 +140,10 @@ export const AppShell = () => {
     </div>
   );
 };
+
+/** Shares one Search draft across the shell search field and Search page. */
+export const AppShell = () => (
+  <SearchQueryProvider>
+    <AppShellContent />
+  </SearchQueryProvider>
+);

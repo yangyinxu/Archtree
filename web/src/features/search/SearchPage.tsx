@@ -1,9 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Link } from 'react-router';
 
 import { listenerSearchQuery } from '../../api/listener';
-import { browserSessionQuery } from '../../api/session';
 import { ContentCard } from '../../components/ContentCard';
 import { Icon } from '../../components/Icon';
 import { PageSection } from '../../components/PageSection';
@@ -11,43 +10,58 @@ import { launchStandalonePlayback } from '../playback/launchPlayback';
 import {
   clearSearchHistory,
   readSearchHistory,
-  rememberSearchQuery
+  searchHistoryChangedEvent
 } from './searchHistory';
+import { useSearchQuery } from './SearchQueryProvider';
+import { useSearchHistoryRecorder } from './useSearchHistoryRecorder';
 import styles from '../../styles/Pages.module.css';
 
 const suggestions = ['Ambient', 'Piano', 'Soundtracks', 'Evening', 'Acoustic'];
 
 /** Provides grouped, cancellable public Search with account-scoped local history. */
 export const SearchPage = () => {
-  const [params] = useSearchParams();
-  const navigate = useNavigate();
-  const session = useQuery(browserSessionQuery());
-  const viewerId = session.data?.user.id ?? null;
-  const submittedQuery = params.get('q')?.trim() ?? '';
-  const [query, setQuery] = useState(submittedQuery);
-  const [history, setHistory] = useState<string[]>(() => readSearchHistory(viewerId));
-  const results = useQuery(listenerSearchQuery(submittedQuery));
+  const {
+    historyIsReady,
+    recordSubmittedQuery,
+    viewerId
+  } = useSearchHistoryRecorder();
+  const {
+    activeQuery,
+    cancelPendingPreview,
+    commitDraft,
+    draftQuery,
+    finishComposition,
+    isComposing,
+    isPreview,
+    startComposition,
+    updateDraft
+  } = useSearchQuery();
+  const [history, setHistory] = useState<string[]>([]);
+  const results = useQuery(listenerSearchQuery(activeQuery));
 
-  useEffect(() => setQuery(submittedQuery), [submittedQuery]);
   useEffect(() => {
-    setHistory(submittedQuery
-      ? rememberSearchQuery(viewerId, submittedQuery)
-      : readSearchHistory(viewerId));
-  }, [submittedQuery, viewerId]);
-
-  useEffect(() => {
-    const normalized = query.trim();
-    if (normalized === submittedQuery) return;
-    const timer = window.setTimeout(() => {
-      navigate(normalized ? `?q=${encodeURIComponent(normalized)}` : '/search', { replace: true });
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [navigate, query, submittedQuery]);
+    if (!historyIsReady) {
+      setHistory([]);
+      return;
+    }
+    const refreshHistory = () => setHistory(readSearchHistory(viewerId));
+    refreshHistory();
+    window.addEventListener(searchHistoryChangedEvent, refreshHistory);
+    return () => window.removeEventListener(searchHistoryChangedEvent, refreshHistory);
+  }, [historyIsReady, viewerId]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const normalized = query.trim();
-    navigate(normalized ? `?q=${encodeURIComponent(normalized)}` : '/search');
+    if (isComposing) return;
+    const normalized = commitDraft();
+    if (normalized) recordSubmittedQuery(normalized);
+  };
+
+  /** Prevents an IME candidate-confirmation Enter from becoming a form submit. */
+  const submitFromInput = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) {
+      event.preventDefault();
+    }
   };
 
   const hasResults = Boolean(results.data && (
@@ -66,18 +80,21 @@ export const SearchPage = () => {
         <Icon name="search" />
         <label className="visually-hidden" htmlFor="page-search">Search artists, albums, and soundtracks</label>
         <input
+          enterKeyHint="search"
           id="page-search"
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          onChange={(event) => updateDraft(event.currentTarget.value)}
+          onCompositionEnd={(event) => finishComposition(event.currentTarget.value)}
+          onCompositionStart={startComposition}
+          onKeyDown={submitFromInput}
           placeholder="What do you want to hear?"
           type="search"
-          value={query}
+          value={draftQuery}
         />
-        <button className={`${styles.button} ${styles.buttonPrimary}`} type="submit">Search</button>
       </form>
 
-      {submittedQuery ? (
+      {activeQuery ? (
         <section className={styles.searchResults} aria-labelledby="results-title" aria-busy={results.isPending}>
-          <h2 className={styles.sectionTitle} id="results-title">Results for “{submittedQuery}”</h2>
+          <h2 className={styles.sectionTitle} id="results-title">Results for “{activeQuery}”</h2>
           {results.isPending ? (
             <div className={styles.compactState}>Searching the listening room…</div>
           ) : results.isError ? (
@@ -137,7 +154,17 @@ export const SearchPage = () => {
           </div>
           <div className={styles.chipList}>
             {(history.length > 0 ? history : suggestions).map((suggestion) => (
-              <Link className={styles.chip} key={suggestion} to={`?q=${encodeURIComponent(suggestion)}`}>
+              <Link
+                className={styles.chip}
+                key={suggestion}
+                onClick={() => {
+                  cancelPendingPreview();
+                  recordSubmittedQuery(suggestion);
+                }}
+                replace={isPreview}
+                state={null}
+                to={`?q=${encodeURIComponent(suggestion)}`}
+              >
                 {suggestion}
               </Link>
             ))}

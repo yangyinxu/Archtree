@@ -81,6 +81,11 @@ player control still works.
 
 - Navigate Home, Search, Library authentication state, Album, Artist, Account,
   and browser back/forward using only the keyboard.
+- In both Search fields, type and delete without submitting, confirm results
+  update after the debounce while Recent searches remains unchanged, then use
+  Enter or the mobile-keyboard Search action and confirm only that final query
+  is recorded. Repeat with a Chinese or Japanese IME and verify composition
+  text is not searched or submitted before the candidate is committed.
 - Confirm focus is visible, follows route changes sensibly, remains trapped in
   modal dialogs, and returns to the invoking control when a dialog closes.
 - Start Album playback, select an individual Soundtrack, use Previous/Next,

@@ -1,5 +1,6 @@
 const searchHistoryPrefix = 'finitude:search-history:';
 const maximumSearchHistoryEntries = 10;
+export const searchHistoryChangedEvent = 'finitude:search-history-changed';
 
 const storageKey = (accountId: string | null | undefined) =>
   `${searchHistoryPrefix}${accountId?.trim() || 'anonymous'}`;
@@ -9,6 +10,12 @@ const browserStorage = () => {
     return typeof window === 'undefined' ? null : window.localStorage;
   } catch {
     return null;
+  }
+};
+
+const notifySearchHistoryChanged = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new window.Event(searchHistoryChangedEvent));
   }
 };
 
@@ -38,7 +45,11 @@ export const rememberSearchQuery = (accountId: string | null | undefined, query:
   );
   const next = [normalized, ...history].slice(0, maximumSearchHistoryEntries);
   try {
-    browserStorage()?.setItem(storageKey(accountId), JSON.stringify(next));
+    const storage = browserStorage();
+    if (storage) {
+      storage.setItem(storageKey(accountId), JSON.stringify(next));
+      notifySearchHistoryChanged();
+    }
   } catch {
     // Private browsing and storage quotas must not block a public search.
   }
@@ -48,7 +59,11 @@ export const rememberSearchQuery = (accountId: string | null | undefined, query:
 /** Removes only the signed-out or authenticated identity supplied by the caller. */
 export const clearSearchHistory = (accountId?: string | null) => {
   try {
-    browserStorage()?.removeItem(storageKey(accountId));
+    const storage = browserStorage();
+    if (storage) {
+      storage.removeItem(storageKey(accountId));
+      notifySearchHistoryChanged();
+    }
   } catch {
     // Logout still succeeds when browser storage is unavailable.
   }
