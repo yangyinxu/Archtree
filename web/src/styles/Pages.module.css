@@ -252,10 +252,18 @@
   border-radius: var(--radius-md);
   display: grid;
   gap: 0.7rem;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr);
   margin-top: 1.8rem;
   max-width: 48rem;
-  padding: 0.45rem 0.55rem 0.45rem 1rem;
+  padding: 0.45rem 1rem;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.searchForm:focus-within {
+  border-color: var(--color-focus);
+  box-shadow: inset 0 0 0 1px var(--color-focus);
 }
 
 .searchForm svg {
@@ -275,12 +283,20 @@
   width: 100%;
 }
 
-.searchForm input:focus-visible,
 .field input:focus-visible {
   border-color: var(--color-focus);
   box-shadow: 0 0 0 3px var(--color-focus-soft);
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  .searchForm:focus-within {
+    border-color: Highlight;
+    box-shadow: none;
+    outline: 2px solid Highlight;
+    outline-offset: -3px;
+  }
 }
 
 .chipList {
@@ -648,14 +664,6 @@
 
   .moodCard {
     scroll-snap-align: start;
-  }
-
-  .searchForm {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .searchForm .button {
-    grid-column: 1 / -1;
   }
 
   .accountDetail {
