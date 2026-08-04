@@ -8,19 +8,19 @@ import {
 
 import { Artwork } from './Artwork';
 import { Icon } from './Icon';
-import { playerStore, usePlayer, type PlayerStore } from '../player';
+import { SeekSlider, formatPlaybackTime } from './SeekSlider';
+import {
+  playerStore,
+  usePlayer,
+  type PlayerSnapshot,
+  type PlayerStore
+} from '../player';
 import styles from './PlayerBar.module.css';
 
 const MOBILE_PLAYER_QUERY = '(max-width: 767px)';
 const VERTICAL_GESTURE_THRESHOLD = 48;
 const HORIZONTAL_GESTURE_THRESHOLD = 56;
 const GESTURE_AXIS_RATIO = 1.15;
-
-const formatTime = (seconds: number) => {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
-};
 
 /** Prevents playback shortcuts from intercepting typing and native range-input keys. */
 const isEditableTarget = (target: EventTarget | null) => {
@@ -87,11 +87,114 @@ interface PlayerBarProps {
   store?: PlayerStore;
 }
 
+interface TransportControlsProps {
+  player: PlayerSnapshot;
+  store: PlayerStore;
+  surface?: 'compact' | 'expanded';
+}
+
+const repeatControlLabel = (repeatMode: PlayerSnapshot['repeatMode']) => {
+  switch (repeatMode) {
+    case 'all':
+      return 'Repeat all enabled. Turn on repeat one';
+    case 'one':
+      return 'Repeat one enabled. Turn repeat off';
+    default:
+      return 'Repeat off. Turn on repeat all';
+  }
+};
+
+/** Keeps visible transport actions synchronized across compact and expanded surfaces. */
+const TransportControls = ({
+  player,
+  store,
+  surface = 'compact'
+}: TransportControlsProps) => {
+  const current = player.currentItem;
+  const playbackActive = player.status === 'playing' || player.status === 'loading';
+  const playLabel = player.status === 'error'
+    ? 'Retry playback'
+    : playbackActive ? 'Pause' : 'Play';
+  const expanded = surface === 'expanded';
+  const repeatLabel = repeatControlLabel(player.repeatMode);
+
+  return (
+    <div
+      className={expanded ? styles.expandedTransport : styles.transportButtons}
+      role="group"
+      aria-label={expanded ? 'Expanded playback controls' : 'Playback controls'}
+    >
+      <button
+        aria-label={player.shuffleEnabled ? 'Shuffle enabled. Turn shuffle off' : 'Shuffle off. Turn shuffle on'}
+        aria-pressed={player.shuffleEnabled}
+        className={`${styles.secondaryControl} ${styles.modeControl}`}
+        data-active={player.shuffleEnabled || undefined}
+        data-player-control
+        disabled={!current || (player.queue.length < 2 && !player.shuffleEnabled)}
+        onClick={() => store.toggleShuffle()}
+        title={player.shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
+        type="button"
+      >
+        <Icon name="shuffle" />
+      </button>
+      <button
+        aria-label="Previous soundtrack"
+        className={styles.secondaryControl}
+        data-player-control
+        disabled={!player.canPrevious}
+        onClick={() => { void store.previous(); }}
+        title="Previous"
+        type="button"
+      >
+        <Icon name="previous" />
+      </button>
+      <button
+        aria-busy={player.isBuffering || undefined}
+        aria-label={playLabel}
+        className={`${styles.control} ${expanded ? styles.expandedPlay : ''}`}
+        data-buffering={player.isBuffering || undefined}
+        data-player-control
+        disabled={!current}
+        onClick={() => playbackActive ? store.pause() : void store.play()}
+        title={playLabel}
+        type="button"
+      >
+        <Icon name={playbackActive ? 'pause' : 'play'} />
+      </button>
+      <button
+        aria-label="Next soundtrack"
+        className={styles.secondaryControl}
+        data-player-control
+        disabled={!player.canNext}
+        onClick={() => { void store.next(); }}
+        title="Next"
+        type="button"
+      >
+        <Icon name="next" />
+      </button>
+      <button
+        aria-label={repeatLabel}
+        aria-pressed={player.repeatMode !== 'off'}
+        className={`${styles.secondaryControl} ${styles.modeControl}`}
+        data-active={player.repeatMode !== 'off' || undefined}
+        data-player-control
+        disabled={!current}
+        onClick={() => store.cycleRepeatMode()}
+        title={repeatLabel}
+        type="button"
+      >
+        <Icon name={player.repeatMode === 'one' ? 'repeat-one' : 'repeat'} />
+      </button>
+    </div>
+  );
+};
+
 /** Presents compact, expanded, and keyboard surfaces over one route-independent player store. */
 export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
   const player = usePlayer(store);
   const current = player.currentItem;
   const playing = player.status === 'playing';
+  const playbackActive = playing || player.status === 'loading';
   const mobile = useMobileViewport();
   const [expanded, setExpanded] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -164,7 +267,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
           if (event.target instanceof HTMLElement
             && event.target.closest('button, a, [role="button"]')) return;
           event.preventDefault();
-          if (playing) store.pause();
+          if (playbackActive) store.pause();
           else void store.play();
           break;
         case 'ArrowLeft':
@@ -182,7 +285,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
 
     document.addEventListener('keydown', handleShortcut);
     return () => document.removeEventListener('keydown', handleShortcut);
-  }, [current, expanded, helpOpen, playing, store]);
+  }, [current, expanded, helpOpen, playbackActive, store]);
 
   const startCompactGesture = (event: ReactPointerEvent<HTMLElement>) => {
     if (!mobile || !current || event.currentTarget !== event.target
@@ -246,6 +349,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
         aria-hidden={helpOpen || (mobile && expanded) || undefined}
         className={styles.player}
         aria-label="Now playing"
+        inert={helpOpen || (mobile && expanded) ? true : undefined}
         onPointerCancel={() => { gestureStart.current = null; }}
         onPointerDown={startCompactGesture}
         onPointerUp={finishCompactGesture}
@@ -273,53 +377,17 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
           <div className={styles.identity}>{compactIdentity}</div>
         )}
 
-        <div className={styles.transport} role="group" aria-label="Playback controls">
-          <div className={styles.transportButtons}>
-            <button
-              className={styles.secondaryControl}
-              data-player-control
-              type="button"
-              aria-label="Previous soundtrack"
-              disabled={!player.canPrevious}
-              onClick={() => { void store.previous(); }}
-            >
-              <Icon name="previous" />
-            </button>
-            <button
-              className={styles.control}
-              data-player-control
-              type="button"
-              aria-label={playing ? 'Pause' : 'Play'}
-              disabled={!current}
-              onClick={() => playing ? store.pause() : void store.play()}
-            >
-              <Icon name={playing ? 'pause' : 'play'} />
-            </button>
-            <button
-              className={styles.secondaryControl}
-              data-player-control
-              type="button"
-              aria-label="Next soundtrack"
-              disabled={!player.canNext}
-              onClick={() => { void store.next(); }}
-            >
-              <Icon name="next" />
-            </button>
-          </div>
+        <div className={styles.transport}>
+          <TransportControls player={player} store={store} />
           <div className={styles.timeline}>
-            <span className={styles.time}>{formatTime(player.currentTime)}</span>
-            <input
-              aria-label="Playback position"
-              className={styles.progress}
-              disabled={!current || player.duration <= 0}
-              max={Math.max(player.duration, 0)}
-              min="0"
-              onChange={(event) => store.seek(Number(event.currentTarget.value))}
-              step="0.1"
-              type="range"
-              value={Math.min(player.currentTime, Math.max(player.duration, 0))}
+            <span className={styles.time}>{formatPlaybackTime(player.currentTime)}</span>
+            <SeekSlider
+              currentTime={player.currentTime}
+              duration={current ? player.duration : 0}
+              itemKey={current?.id}
+              onSeek={(time) => store.seek(time)}
             />
-            <span className={styles.time}>{formatTime(player.duration)}</span>
+            <span className={styles.time}>{formatPlaybackTime(player.duration)}</span>
           </div>
         </div>
 
@@ -370,6 +438,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
           aria-labelledby="expanded-player-heading"
           aria-modal="true"
           className={styles.expandedPlayer}
+          inert={helpOpen ? true : undefined}
           onKeyDown={trapDialogFocus}
           role="dialog"
         >
@@ -416,54 +485,19 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
             </div>
 
             <div className={styles.expandedTimeline}>
-              <input
-                aria-label="Playback position"
-                disabled={player.duration <= 0}
-                max={Math.max(player.duration, 0)}
-                min="0"
-                onChange={(event) => store.seek(Number(event.currentTarget.value))}
-                step="0.1"
-                type="range"
-                value={Math.min(player.currentTime, Math.max(player.duration, 0))}
+              <SeekSlider
+                currentTime={player.currentTime}
+                duration={player.duration}
+                itemKey={current.id}
+                onSeek={(time) => store.seek(time)}
               />
               <div className={styles.expandedTimes}>
-                <span>{formatTime(player.currentTime)}</span>
-                <span>−{formatTime(Math.max(0, player.duration - player.currentTime))}</span>
+                <span>{formatPlaybackTime(player.currentTime)}</span>
+                <span>{formatPlaybackTime(player.duration)}</span>
               </div>
             </div>
 
-            <div className={styles.expandedTransport} role="group" aria-label="Expanded playback controls">
-              <button
-                aria-label="Previous soundtrack"
-                disabled={!player.canPrevious}
-                onClick={() => { void store.previous(); }}
-                type="button"
-              >
-                <Icon name="previous" />
-              </button>
-              <button aria-label="Skip backward 10 seconds" onClick={() => store.skipBackward()} type="button">
-                <span aria-hidden="true">−10</span>
-              </button>
-              <button
-                aria-label={playing ? 'Pause' : 'Play'}
-                className={styles.expandedPlay}
-                onClick={() => playing ? store.pause() : void store.play()}
-                type="button"
-              >
-                <Icon name={playing ? 'pause' : 'play'} />
-              </button>
-              <button aria-label="Skip forward 10 seconds" onClick={() => store.skipForward()} type="button">
-                <span aria-hidden="true">+10</span>
-              </button>
-              <button
-                aria-label="Next soundtrack"
-                disabled={!player.canNext}
-                onClick={() => { void store.next(); }}
-                type="button"
-              >
-                <Icon name="next" />
-              </button>
-            </div>
+            <TransportControls player={player} store={store} surface="expanded" />
 
             <div className={styles.expandedVolume}>
               <button

@@ -12,12 +12,15 @@ It covers bundled Chromium, Firefox, and WebKit engines, critical/serious axe
 findings, keyboard skip navigation, reduced motion, direct route refreshes, and
 320 px, 768 px, and 1440 px reflow checks. It also verifies that wheel input
 over the desktop player cannot move the application shell while the main content
-remains independently scrollable.
+remains independently scrollable. Player coverage includes persisted
+Shuffle/Repeat state, hover-only seek preview, release-time pointer seeking,
+keyboard seeking, 24 px seek hit targets, and axe scans of the expanded mobile
+player and shortcut-help layers.
 
-Latest local automated evidence (2026-08-03): 39/39 Playwright projects passed
-against the production bundle; server tests passed 112/112 and Web unit/component
-tests passed 103/103; Mongo-backed integration tests passed 24/24. The largest
-initial route is 140.9 KiB gzip against the 150 KiB budget. CI repeats the
+Latest local automated evidence (2026-08-03): 45/45 Playwright projects passed
+against the production bundle; server tests passed 138/138 and Web unit/component
+tests passed 114/114; Mongo-backed integration tests passed 24/24. The largest
+initial route is 142.7 KiB gzip against the 150 KiB budget. CI repeats the
 browser gate through `.github/workflows/finitude-web-release.yml`.
 
 Passing these projects does not prove support for a branded browser release.
@@ -81,8 +84,12 @@ player control still works.
 - Confirm focus is visible, follows route changes sensibly, remains trapped in
   modal dialogs, and returns to the invoking control when a dialog closes.
 - Start Album playback, select an individual Soundtrack, use Previous/Next,
-  seek, change volume, mute, open keyboard help, and recover from a stream
-  failure without a gesture-only dependency.
+  cycle Shuffle and Repeat Off/All/One, and confirm Previous restarts the
+  current soundtrack at or after three seconds but otherwise follows actual
+  playback history.
+- Hover the seek track without changing playback, commit pointer seeking only
+  on release, seek by keyboard, change volume, mute, open keyboard help, and
+  recover from a stream failure without a gesture-only dependency.
 - Confirm signed-out Save remains visible, announces the sign-in requirement,
   and does not open Login automatically.
 - At 200% browser zoom, confirm all content remains reachable without

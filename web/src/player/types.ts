@@ -11,6 +11,8 @@ export interface PlayerQueueItem {
 
 export type PlayerStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'ended' | 'error';
 
+export type PlayerRepeatMode = 'off' | 'all' | 'one';
+
 export type PlayerErrorCode =
   | 'autoplayBlocked'
   | 'network'
@@ -48,6 +50,8 @@ export interface PlayerSnapshot {
   duration: number;
   volume: number;
   muted: boolean;
+  shuffleEnabled: boolean;
+  repeatMode: PlayerRepeatMode;
   error: PlayerErrorState | null;
   canPrevious: boolean;
   canNext: boolean;
@@ -117,6 +121,9 @@ export interface CreatePlayerStoreOptions {
   }) => unknown;
   initialVolume?: number;
   initiallyMuted?: boolean;
+  initiallyShuffleEnabled?: boolean;
+  initialRepeatMode?: PlayerRepeatMode;
+  random?: () => number;
   onPlaybackError?: (event: PlayerPlaybackErrorEvent) => void;
 }
 
@@ -138,6 +145,8 @@ export interface PlayerStore {
   seek(time: number): void;
   skipBackward(seconds?: number): void;
   skipForward(seconds?: number): void;
+  toggleShuffle(): void;
+  cycleRepeatMode(): void;
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
   toggleMute(): void;

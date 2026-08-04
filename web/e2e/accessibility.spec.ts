@@ -48,3 +48,23 @@ for (const target of pages) {
     await expectNoReleaseBlockingViolations(page, target.label);
   });
 }
+
+test('mobile expanded player and shortcut help have no release-blocking axe findings', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/listen/albums/${catalogIds.album}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Quiet Hours' })).toBeVisible();
+
+  await page.getByRole('main')
+    .locator('header')
+    .getByRole('button', { name: 'Play', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Open Now Playing: First Light' }).click();
+
+  const expanded = page.getByRole('dialog', { name: 'First Light' });
+  await expect(expanded).toBeVisible();
+  await expectNoReleaseBlockingViolations(page, 'mobile-expanded-player');
+
+  await expanded.getByRole('button', { name: 'Keyboard shortcuts' }).click();
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
+  await expectNoReleaseBlockingViolations(page, 'mobile-expanded-player-help');
+});

@@ -17,6 +17,7 @@ export type {
   PlayerPlaybackErrorEvent,
   PlayerPlaybackErrorStage,
   PlayerQueueItem,
+  PlayerRepeatMode,
   PlayerSnapshot,
   PlayerStatus,
   PlayerStore

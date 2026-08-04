@@ -43,9 +43,22 @@ test('keeps the Album route and persistent player while navigating', async ({ pa
   await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
   await expect(player.getByText('First Light', { exact: true })).toBeVisible();
 
+  const controls = player.getByRole('group', { name: 'Playback controls' });
+  await controls.getByRole('button', { name: 'Shuffle off. Turn shuffle on' }).click();
+  await expect(controls.getByRole('button', { name: 'Shuffle enabled. Turn shuffle off' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await controls.getByRole('button', { name: 'Repeat off. Turn on repeat all' }).click();
+  await controls.getByRole('button', { name: 'Repeat all enabled. Turn on repeat one' }).click();
+  await expect(controls.getByRole('button', { name: 'Repeat one enabled. Turn repeat off' }))
+    .toHaveAttribute('aria-pressed', 'true');
+
   await page.getByRole('link', { name: 'Search' }).click();
   await expect(page).toHaveURL(/\/listen\/search$/);
   await expect(player.getByText('First Light', { exact: true })).toBeVisible();
+  await expect(controls.getByRole('button', { name: 'Shuffle enabled. Turn shuffle off' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await expect(controls.getByRole('button', { name: 'Repeat one enabled. Turn repeat off' }))
+    .toHaveAttribute('aria-pressed', 'true');
 
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
@@ -54,6 +67,50 @@ test('keeps the Album route and persistent player while navigating', async ({ pa
   await page.goForward();
   await expect(page).toHaveURL(/\/listen\/search$/);
   await expect(player.getByText('First Light', { exact: true })).toBeVisible();
+});
+
+test('previews seek position and commits pointer or keyboard changes at the expected time', async ({ page }) => {
+  await page.setViewportSize({ width: 1_280, height: 800 });
+  await page.goto(albumPath);
+  await page.getByRole('main')
+    .locator('header')
+    .getByRole('button', { name: 'Play', exact: true })
+    .click();
+
+  const player = page.getByRole('region', { name: 'Now playing' });
+  const controls = player.getByRole('group', { name: 'Playback controls' });
+  const slider = player.getByRole('slider', { name: 'Playback position' });
+  await expect(slider).toBeEnabled();
+  await expect(slider).toHaveAttribute('max', '15');
+  await controls.getByRole('button', { name: 'Pause' }).click();
+
+  const box = await slider.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeGreaterThanOrEqual(24);
+  const middle = box!.x + (box!.width / 2);
+  const verticalCenter = box!.y + (box!.height / 2);
+  const initialValue = await slider.inputValue();
+  const readElapsed = () => slider.evaluate((input) =>
+    input.parentElement?.previousElementSibling?.textContent ?? ''
+  );
+  const initialElapsed = await readElapsed();
+
+  await page.mouse.move(middle, verticalCenter);
+  await expect(slider.locator('..').locator('output')).toHaveText('0:07');
+  expect(await slider.inputValue()).toBe(initialValue);
+  expect(await readElapsed()).toBe(initialElapsed);
+
+  await page.mouse.move(box!.x + (box!.width * 0.25), verticalCenter);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + (box!.width * 0.75), verticalCenter);
+  expect(Number(await slider.inputValue())).toBeGreaterThan(10);
+  expect(await readElapsed()).toBe(initialElapsed);
+  await page.mouse.up();
+  await expect.poll(readElapsed).toBe('0:11');
+
+  await slider.focus();
+  await page.keyboard.press('Home');
+  await expect.poll(readElapsed).toBe('0:00');
 });
 
 test('keeps the desktop player anchored when the wheel originates over it', async ({ page }) => {

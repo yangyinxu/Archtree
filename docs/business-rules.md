@@ -138,6 +138,24 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - The Web listener owns one long-lived audio element, queue, and playback
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player.
+- Web Shuffle changes only the upcoming order of ready items already present in
+  the current queue. Enabling it keeps the current soundtrack, elapsed time,
+  and actual playback history in place; disabling it restores canonical queue
+  order for subsequent navigation. Shuffle never inserts recommendations,
+  missing items, or Smart Shuffle content.
+- Web Repeat cycles through Off, All, and One. Repeat All wraps the current
+  playback order, including a shuffled order; Repeat One restarts the current
+  soundtrack only after natural completion, while an explicit Next or Previous
+  action still navigates normally. Shuffle and Repeat mode changes do not add
+  Recently Played activity.
+- Web Previous restarts the current soundtrack when at least three seconds have
+  elapsed. Before that threshold it navigates to the available previous item;
+  at an unavailable boundary it remains a no-op. Repeat All may make the
+  opposite queue boundary available.
+- Hovering or dragging the Web progress control may preview a candidate time
+  without changing playback. Pointer seeking commits on release, keyboard
+  seeking commits with the range control, and every committed value is clamped
+  to the known soundtrack duration.
 - The compact Web player remains anchored to the viewport bottom. Scrolling
   page content, including a wheel gesture that begins over the player, must not
   move the player or the surrounding application shell.

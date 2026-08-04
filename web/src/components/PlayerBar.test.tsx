@@ -107,18 +107,25 @@ test('opens and closes the mobile expanded surface without creating another play
   expect(compactArtwork).toHaveAttribute('sizes', '(max-width: 767px) 2.55rem, 3.4rem');
   await user.click(screen.getByRole('button', { name: 'Open Now Playing: Still Water' }));
   const expanded = screen.getByRole('dialog', { name: 'Still Water' });
+  expect(document.querySelector('section[aria-label="Now playing"]')).toHaveAttribute('inert');
 
   expect(within(expanded).getByRole('img', { name: 'Still Water cover' }))
     .toHaveAttribute(
       'sizes',
       '(max-width: 767px) and (orientation: landscape) and (max-height: 500px) min(32vh, 14rem), min(72vw, 22rem)'
     );
-  expect(within(expanded).getByRole('button', { name: 'Skip backward 10 seconds' })).toBeEnabled();
-  expect(within(expanded).getByRole('button', { name: 'Skip forward 10 seconds' })).toBeEnabled();
+  expect(within(expanded).getByRole('button', { name: 'Shuffle off. Turn shuffle on' }))
+    .toHaveAttribute('aria-pressed', 'false');
+  expect(within(expanded).getByRole('button', { name: 'Repeat off. Turn on repeat all' }))
+    .toHaveAttribute('aria-pressed', 'false');
   expect(within(expanded).getByRole('slider', { name: 'Volume' })).toHaveValue('1');
 
-  await user.click(within(expanded).getByRole('button', { name: 'Skip forward 10 seconds' }));
-  expect(store.getSnapshot().currentTime).toBe(40);
+  await user.click(within(expanded).getByRole('button', { name: 'Shuffle off. Turn shuffle on' }));
+  expect(store.getSnapshot().shuffleEnabled).toBe(true);
+  await user.click(within(expanded).getByRole('button', { name: 'Repeat off. Turn on repeat all' }));
+  expect(store.getSnapshot().repeatMode).toBe('all');
+  expect(within(expanded).getByRole('button', { name: 'Repeat all enabled. Turn on repeat one' }))
+    .toHaveAttribute('aria-pressed', 'true');
 
   await user.click(within(expanded).getByRole('button', { name: 'Close expanded player' }));
   expect(screen.queryByRole('dialog', { name: 'Still Water' })).not.toBeInTheDocument();
@@ -171,6 +178,7 @@ test('applies keyboard shortcuts outside editable fields and exposes accessible 
 
   await user.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }));
   const help = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+  expect(document.querySelector('section[aria-label="Now playing"]')).toHaveAttribute('inert');
   expect(within(help).getByText('Shortcuts work anywhere except while typing in a field.')).toBeInTheDocument();
   expect(within(help).getByText('Play or pause')).toBeInTheDocument();
 
@@ -178,13 +186,27 @@ test('applies keyboard shortcuts outside editable fields and exposes accessible 
   expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument();
 });
 
-test('keeps the desktop compact surface and controls unchanged', async () => {
+test('exposes five state-driven desktop transport controls', async () => {
   setMobileViewport(false);
+  const user = userEvent.setup();
   const { store } = await playerFixture(1);
   render(<PlayerBar store={store} />);
 
   expect(screen.queryByRole('button', { name: /Open Now Playing/ })).not.toBeInTheDocument();
-  expect(screen.getByRole('group', { name: 'Playback controls' })).toBeInTheDocument();
+  const controls = screen.getByRole('group', { name: 'Playback controls' });
+  expect(within(controls).getAllByRole('button')).toHaveLength(5);
+  expect(within(controls).getByRole('button', { name: 'Previous soundtrack' })).toBeEnabled();
+  expect(within(controls).getByRole('button', { name: 'Next soundtrack' })).toBeDisabled();
+  const shuffle = within(controls).getByRole('button', { name: 'Shuffle off. Turn shuffle on' });
+  expect(shuffle).toHaveAttribute('aria-pressed', 'false');
+  await user.click(shuffle);
+  expect(within(controls).getByRole('button', { name: 'Shuffle enabled. Turn shuffle off' }))
+    .toHaveAttribute('aria-pressed', 'true');
+
+  await user.click(within(controls).getByRole('button', { name: 'Repeat off. Turn on repeat all' }));
+  await user.click(within(controls).getByRole('button', { name: 'Repeat all enabled. Turn on repeat one' }));
+  expect(within(controls).getByRole('button', { name: 'Repeat one enabled. Turn repeat off' }))
+    .toHaveAttribute('aria-pressed', 'true');
   expect(screen.getByRole('slider', { name: 'Playback position' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Keyboard shortcuts' })).toBeEnabled();
 });

@@ -161,6 +161,8 @@ test('owns one lazy audio instance and copies an album queue before launch', asy
     currentIndex: 1,
     currentItem: { id: 'track-2', title: 'Open Field' },
     status: 'paused',
+    shuffleEnabled: false,
+    repeatMode: 'off',
     canPrevious: true,
     canNext: true
   });
@@ -195,22 +197,216 @@ test('moves within queue boundaries and advances automatically on ended', async 
   expect(store.getSnapshot().currentItem?.id).toBe('track-2');
 
   audio.emit('ended');
-  await Promise.resolve();
-  expect(store.getSnapshot()).toMatchObject({
+  await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({
     currentIndex: 2,
     status: 'playing',
     canNext: false
-  });
+  }));
 
   audio.currentTime = audio.duration = 180;
   audio.emit('durationchange');
   audio.emit('ended');
-  expect(store.getSnapshot()).toMatchObject({
+  await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({
     currentIndex: 2,
     status: 'ended',
     currentTime: 180
-  });
+  }));
   await expect(store.next()).resolves.toBe(false);
+});
+
+test('shuffles only upcoming queue items without changing the current playback', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    random: () => 0
+  });
+  await store.launchAlbumQueue(tracks, 0, { autoplay: false });
+  audio.duration = 180;
+  audio.currentTime = 42;
+  audio.emit('durationchange');
+  audio.emit('timeupdate');
+
+  store.toggleShuffle();
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
+    currentTime: 42,
+    status: 'paused',
+    shuffleEnabled: true
+  });
+
+  await expect(store.next()).resolves.toBe(true);
+  expect(store.getSnapshot().currentItem?.id).toBe('track-3');
+  await expect(store.next()).resolves.toBe(true);
+  expect(store.getSnapshot().currentItem?.id).toBe('track-2');
+  await expect(store.next()).resolves.toBe(false);
+});
+
+test('keeps every unplayed item available when Shuffle starts from a selected later track', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    initiallyShuffleEnabled: true,
+    random: () => 0
+  });
+  await store.launchAlbumQueue(tracks, 2, { autoplay: false });
+
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-3' },
+    canPrevious: false,
+    canNext: true
+  });
+  await store.next();
+  expect(store.getSnapshot().currentItem?.id).toBe('track-2');
+  await store.next();
+  expect(store.getSnapshot().currentItem?.id).toBe('track-1');
+});
+
+test('preserves a forward history item when Shuffle is enabled after Previous', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    random: () => 0
+  });
+  await store.launchAlbumQueue(tracks, 0, { autoplay: false });
+  await store.next();
+  await store.next();
+  await store.previous();
+  expect(store.getSnapshot().currentItem?.id).toBe('track-2');
+
+  store.toggleShuffle();
+  await expect(store.next()).resolves.toBe(true);
+  expect(store.getSnapshot().currentItem?.id).toBe('track-3');
+});
+
+test('cycles Repeat modes and distinguishes natural completion from explicit navigation', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  await store.launchAlbumQueue(tracks, 2, { autoplay: false });
+
+  store.cycleRepeatMode();
+  expect(store.getSnapshot()).toMatchObject({ repeatMode: 'all', canNext: true });
+  audio.emit('ended');
+  await vi.waitFor(() => expect(store.getSnapshot().currentItem?.id).toBe('track-1'));
+
+  store.cycleRepeatMode();
+  expect(store.getSnapshot().repeatMode).toBe('one');
+  audio.currentTime = 90;
+  audio.emit('timeupdate');
+  const sourceBeforeRepeat = audio.src;
+  audio.emit('ended');
+  await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
+    currentTime: 0,
+    status: 'playing'
+  }));
+  expect(audio.src).toBe(sourceBeforeRepeat);
+
+  await expect(store.next()).resolves.toBe(true);
+  expect(store.getSnapshot().currentItem?.id).toBe('track-2');
+  store.cycleRepeatMode();
+  expect(store.getSnapshot().repeatMode).toBe('off');
+});
+
+test('combines shuffled traversal with Repeat All by wrapping the same playback order', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    initiallyShuffleEnabled: true,
+    initialRepeatMode: 'all',
+    random: () => 0
+  });
+  await store.launchAlbumQueue(tracks, 0, { autoplay: false });
+
+  await store.next();
+  expect(store.getSnapshot().currentItem?.id).toBe('track-3');
+  await store.next();
+  expect(store.getSnapshot().currentItem?.id).toBe('track-2');
+  await store.next();
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
+    shuffleEnabled: true,
+    repeatMode: 'all'
+  });
+});
+
+test('Previous restarts after three seconds and otherwise follows playback history', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  await store.launchAlbumQueue(tracks, 1, { autoplay: false });
+  audio.duration = 180;
+  audio.currentTime = 5;
+  audio.emit('durationchange');
+  audio.emit('timeupdate');
+
+  await expect(store.previous()).resolves.toBe(true);
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-2' },
+    currentTime: 0,
+    status: 'paused'
+  });
+
+  audio.currentTime = 2;
+  audio.emit('timeupdate');
+  await expect(store.previous()).resolves.toBe(true);
+  expect(store.getSnapshot().currentItem?.id).toBe('track-1');
+  await expect(store.previous()).resolves.toBe(false);
+
+  audio.currentTime = 3;
+  audio.emit('timeupdate');
+  expect(store.getSnapshot().canPrevious).toBe(true);
+  await expect(store.previous()).resolves.toBe(true);
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
+    currentTime: 0
+  });
+});
+
+test('Repeat All restarts a single-item queue after natural completion', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    initialRepeatMode: 'all'
+  });
+  await store.launchStandalone(tracks[0], { autoplay: false });
+
+  audio.currentTime = 180;
+  audio.emit('timeupdate');
+  audio.emit('ended');
+  await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
+    currentTime: 0,
+    status: 'playing',
+    canNext: false
+  }));
+});
+
+test('reports an honest ended state when a repeated source cannot seek to its start', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    initialRepeatMode: 'one'
+  });
+  await store.launchStandalone(tracks[0], { autoplay: false });
+  audio.duration = 180;
+  Object.defineProperty(audio, 'currentTime', {
+    configurable: true,
+    get: () => 180,
+    set: () => { throw new Error('Seeking is unavailable.'); }
+  });
+  audio.emit('durationchange');
+
+  audio.emit('ended');
+  await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
+    currentTime: 180,
+    status: 'ended'
+  }));
 });
 
 test('clamps seeking, skip controls, volume, and mute state', async () => {
@@ -278,6 +474,22 @@ test('ignores a stale play rejection after a newer source has launched', async (
 
   expect(store.getSnapshot()).toMatchObject({
     currentItem: { id: 'track-2' },
+    status: 'paused',
+    error: null
+  });
+});
+
+test('ignores stale queue-end completion after a newer source has launched', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  await store.launchAlbumQueue(tracks, 2, { autoplay: false });
+
+  audio.emit('ended');
+  await store.launchStandalone(tracks[0], { autoplay: false });
+  await Promise.resolve();
+
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
     status: 'paused',
     error: null
   });

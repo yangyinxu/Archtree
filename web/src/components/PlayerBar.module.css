@@ -81,14 +81,14 @@
   align-items: center;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.3rem;
   justify-self: stretch;
 }
 
 .transportButtons {
   align-items: center;
   display: flex;
-  gap: 0.35rem;
+  gap: 0.22rem;
   justify-content: center;
 }
 
@@ -112,7 +112,17 @@
   display: inline-flex;
   height: 2.75rem;
   justify-content: center;
+  position: relative;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
   width: 2.75rem;
+}
+
+.control {
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.22);
 }
 
 .control:disabled {
@@ -132,6 +142,41 @@
   font-weight: 750;
 }
 
+.secondaryControl,
+.volumeButton,
+.helpButton {
+  height: 2.35rem;
+  width: 2.35rem;
+}
+
+.modeControl[data-active="true"] {
+  color: var(--color-accent);
+}
+
+.modeControl[data-active="true"]::after {
+  background: currentColor;
+  border-radius: 50%;
+  bottom: 0.02rem;
+  content: "";
+  height: 0.24rem;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 0.24rem;
+}
+
+.control[data-buffering="true"]::after {
+  animation: bufferingSpin 800ms linear infinite;
+  border: 2px solid transparent;
+  border-right-color: color-mix(in srgb, var(--color-canvas) 78%, transparent);
+  border-top-color: color-mix(in srgb, var(--color-canvas) 78%, transparent);
+  border-radius: 50%;
+  content: "";
+  inset: 0.18rem;
+  pointer-events: none;
+  position: absolute;
+}
+
 .secondaryControl:disabled,
 .volumeButton:disabled {
   cursor: not-allowed;
@@ -139,9 +184,19 @@
 }
 
 .control svg,
+.secondaryControl svg,
 .volume svg {
-  height: 1.1rem;
-  width: 1.1rem;
+  height: 1.08rem;
+  width: 1.08rem;
+}
+
+.control svg {
+  height: 1.22rem;
+  width: 1.22rem;
+}
+
+.control :global(.lucide-play) {
+  margin-left: 0.1rem;
 }
 
 .time {
@@ -150,9 +205,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.progress,
 .volume input,
-.expandedTimeline input,
 .expandedVolume input {
   accent-color: var(--color-accent);
   cursor: pointer;
@@ -290,7 +343,6 @@
   gap: 0.35rem;
 }
 
-.expandedTimeline input,
 .expandedVolume input {
   min-height: 1.5rem;
 }
@@ -306,8 +358,11 @@
 .expandedTransport {
   align-items: center;
   display: grid;
-  gap: clamp(0.25rem, 2vw, 0.65rem);
+  gap: clamp(0.1rem, 1.4vw, 0.5rem);
   grid-template-columns: repeat(5, minmax(2.75rem, 1fr));
+  justify-self: center;
+  max-width: 27rem;
+  width: 100%;
 }
 
 .expandedTransport button,
@@ -339,6 +394,7 @@
 
 .expandedTransport .expandedPlay {
   background: var(--color-text);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
   color: var(--color-canvas);
   height: clamp(3.5rem, 16vw, 4.3rem);
   min-width: clamp(3.5rem, 16vw, 4.3rem);
@@ -347,6 +403,31 @@
 .expandedPlay svg {
   height: 1.75rem;
   width: 1.75rem;
+}
+
+@media (hover: hover) {
+  .control:not(:disabled):hover {
+    background: var(--color-accent-bright);
+    transform: scale(1.06);
+  }
+
+  .secondaryControl:not(:disabled):hover,
+  .volumeButton:not(:disabled):hover,
+  .helpButton:hover {
+    color: var(--color-text);
+    transform: scale(1.08);
+  }
+
+  .modeControl[data-active="true"]:not(:disabled):hover {
+    color: var(--color-accent-bright);
+  }
+}
+
+.control:not(:disabled):active,
+.secondaryControl:not(:disabled):active,
+.volumeButton:not(:disabled):active,
+.helpButton:active {
+  transform: scale(0.94);
 }
 
 .expandedVolume {
@@ -396,6 +477,10 @@
   font-family: var(--font-display);
   font-size: 1.35rem;
   margin-top: 0.15rem;
+}
+
+.helpHeader .expandedEyebrow {
+  color: var(--color-text-muted);
 }
 
 .helpHeader button {
@@ -471,6 +556,12 @@
   }
 }
 
+@keyframes bufferingSpin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 @media (max-width: 767px) {
   .player {
     background: color-mix(in srgb, var(--color-player) 97%, transparent);
@@ -513,8 +604,8 @@
     display: flex;
   }
 
-  .timeline,
-  .secondaryControl {
+  .player .timeline,
+  .player .secondaryControl {
     display: none;
   }
 

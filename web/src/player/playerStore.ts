@@ -7,6 +7,7 @@ import type {
   PlayerMediaSessionAction,
   PlayerPlaybackErrorStage,
   PlayerQueueItem,
+  PlayerRepeatMode,
   PlayerSnapshot,
   PlayerStore
 } from './types';
@@ -18,6 +19,7 @@ import {
 } from '../artwork/artworkUrls';
 
 const DEFAULT_SKIP_SECONDS = 10;
+const PREVIOUS_RESTART_SECONDS = 3;
 
 const errorMessages: Record<PlayerErrorCode, string> = {
   autoplayBlocked: 'Playback is ready. Select play to continue.',
@@ -77,7 +79,12 @@ const copyQueue = (queue: readonly PlayerQueueItem[]): readonly PlayerQueueItem[
     artistNames: Object.freeze([...item.artistNames])
   })));
 
-const initialSnapshot = (volume: number, muted: boolean): PlayerSnapshot => Object.freeze({
+const initialSnapshot = (
+  volume: number,
+  muted: boolean,
+  shuffleEnabled: boolean,
+  repeatMode: PlayerRepeatMode
+): PlayerSnapshot => Object.freeze({
   queue: Object.freeze([]) as readonly PlayerQueueItem[],
   currentIndex: -1,
   currentItem: null,
@@ -87,6 +94,8 @@ const initialSnapshot = (volume: number, muted: boolean): PlayerSnapshot => Obje
   duration: 0,
   volume,
   muted,
+  shuffleEnabled,
+  repeatMode,
   error: null,
   canPrevious: false,
   canNext: false
@@ -125,6 +134,7 @@ export const createPlayerStore = (
     ? resolveMediaSession()
     : options.mediaSession;
   const metadataFactory = options.mediaMetadataFactory ?? defaultMetadataFactory;
+  const random = options.random ?? Math.random;
   const listeners = new Set<() => void>();
   const boundAudioListeners = new Map<string, () => void>();
   const registeredMediaActions = new Set<PlayerMediaSessionAction>();
@@ -134,14 +144,75 @@ export const createPlayerStore = (
     1
   );
 
-  let snapshot = initialSnapshot(startingVolume, options.initiallyMuted ?? false);
+  let snapshot = initialSnapshot(
+    startingVolume,
+    options.initiallyMuted ?? false,
+    options.initiallyShuffleEnabled ?? false,
+    options.initialRepeatMode ?? 'off'
+  );
   let audio: PlayerAudio | null = null;
   let audioCreationAttempted = false;
   let sourceGeneration = 0;
   let playAttemptGeneration = 0;
   let lastReportedPlaybackError = '';
   let lastMediaItem: PlayerQueueItem | null | undefined;
+  let playOrder: number[] = [];
+  let playOrderPosition = -1;
+  let actualHistory: number[] = [];
+  let actualHistoryPosition = -1;
   let destroyed = false;
+
+  const readRandom = () => {
+    try {
+      const value = random();
+      return Number.isFinite(value) ? clamp(value, 0, 0.999999999999) : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const shuffled = (indices: readonly number[]) => {
+    const result = [...indices];
+    for (let index = result.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(readRandom() * (index + 1));
+      [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+    }
+    return result;
+  };
+
+  const canonicalOrder = (length: number) => Array.from({ length }, (_, index) => index);
+
+  const launchOrder = (length: number, currentIndex: number) => {
+    const canonical = canonicalOrder(length);
+    if (!snapshot.shuffleEnabled) return canonical;
+    return [currentIndex, ...shuffled(canonical.filter((index) => index !== currentIndex))];
+  };
+
+  const currentCycleHistory = () => {
+    const uniqueHistory: number[] = [];
+    actualHistory.slice(0, actualHistoryPosition + 1).forEach((index) => {
+      const earlierPosition = uniqueHistory.indexOf(index);
+      if (earlierPosition >= 0) uniqueHistory.splice(earlierPosition, 1);
+      uniqueHistory.push(index);
+    });
+    return uniqueHistory;
+  };
+
+  const recordNavigation = (index: number, direction: 'previous' | 'next') => {
+    const adjacentHistoryPosition = direction === 'previous'
+      ? actualHistoryPosition - 1
+      : actualHistoryPosition + 1;
+    if (adjacentHistoryPosition >= 0
+      && adjacentHistoryPosition < actualHistory.length
+      && actualHistory[adjacentHistoryPosition] === index) {
+      actualHistoryPosition = adjacentHistoryPosition;
+      return;
+    }
+
+    actualHistory = actualHistory.slice(0, actualHistoryPosition + 1);
+    actualHistory.push(index);
+    actualHistoryPosition = actualHistory.length - 1;
+  };
 
   const reportPlaybackError = (stage: PlayerPlaybackErrorStage, code: PlayerErrorCode) => {
     const signature = `${sourceGeneration}:${stage}:${code}`;
@@ -214,8 +285,15 @@ export const createPlayerStore = (
       ...candidate,
       currentIndex: validIndex ? candidate.currentIndex : -1,
       currentItem: validIndex ? candidate.queue[candidate.currentIndex] : null,
-      canPrevious: validIndex && candidate.currentIndex > 0,
-      canNext: validIndex && candidate.currentIndex < candidate.queue.length - 1
+      canPrevious: validIndex && (
+        candidate.currentTime >= PREVIOUS_RESTART_SECONDS
+        || playOrderPosition > 0
+        || (candidate.repeatMode === 'all' && candidate.queue.length > 1)
+      ),
+      canNext: validIndex && (
+        playOrderPosition >= 0 && playOrderPosition < playOrder.length - 1
+        || (candidate.repeatMode === 'all' && candidate.queue.length > 1)
+      )
     });
 
     const changed = Object.keys(next).some((key) =>
@@ -296,18 +374,7 @@ export const createPlayerStore = (
           error: playerError(code)
         });
       },
-      ended: () => {
-        if (!snapshot.currentItem || destroyed) return;
-        if (snapshot.canNext) {
-          void moveBy(1);
-          return;
-        }
-        updateSnapshot({
-          status: 'ended',
-          isBuffering: false,
-          currentTime: snapshot.duration || readAudioTime(target)
-        });
-      }
+      ended: () => { void handleEnded(target); }
     };
 
     Object.entries(handlers).forEach(([event, handler]) => {
@@ -376,8 +443,16 @@ export const createPlayerStore = (
     }
   };
 
-  const activateIndex = async (index: number, autoplay: boolean): Promise<void> => {
+  const activateIndex = async (
+    index: number,
+    autoplay: boolean,
+    orderPosition = playOrder.indexOf(index),
+    navigationDirection: 'previous' | 'next' | null = null
+  ): Promise<void> => {
     if (destroyed || index < 0 || index >= snapshot.queue.length) return;
+
+    playOrderPosition = orderPosition;
+    if (navigationDirection) recordNavigation(index, navigationDirection);
 
     sourceGeneration += 1;
     playAttemptGeneration += 1;
@@ -437,16 +512,89 @@ export const createPlayerStore = (
     }
   };
 
-  async function moveBy(offset: -1 | 1): Promise<boolean> {
-    const destination = snapshot.currentIndex + offset;
-    if (destroyed || destination < 0 || destination >= snapshot.queue.length) return false;
-    await activateIndex(destination, true);
+  const restartCurrent = async (autoplay: boolean): Promise<boolean> => {
+    if (destroyed || !snapshot.currentItem) return false;
+    const target = ensureAudio();
+    if (!target) return false;
+
+    try {
+      target.currentTime = 0;
+      updateSnapshot({ currentTime: 0 });
+    } catch {
+      return false;
+    }
+
+    if (autoplay) await attemptPlay(sourceGeneration);
     return true;
+  };
+
+  const moveToOrderPosition = async (
+    destination: number,
+    direction: 'previous' | 'next'
+  ): Promise<boolean> => {
+    if (destroyed || destination < 0 || destination >= playOrder.length) return false;
+    await activateIndex(playOrder[destination], true, destination, direction);
+    return true;
+  };
+
+  async function movePrevious(): Promise<boolean> {
+    if (destroyed || !snapshot.currentItem) return false;
+    if (snapshot.currentTime >= PREVIOUS_RESTART_SECONDS) {
+      return restartCurrent(snapshot.status === 'ended');
+    }
+    if (playOrderPosition > 0) return moveToOrderPosition(playOrderPosition - 1, 'previous');
+    if (snapshot.repeatMode === 'all' && playOrder.length > 1) {
+      return moveToOrderPosition(playOrder.length - 1, 'previous');
+    }
+    return false;
+  }
+
+  async function moveNext(): Promise<boolean> {
+    if (destroyed || !snapshot.currentItem) return false;
+    if (playOrderPosition >= 0 && playOrderPosition < playOrder.length - 1) {
+      return moveToOrderPosition(playOrderPosition + 1, 'next');
+    }
+    if (snapshot.repeatMode !== 'all' || playOrder.length <= 1) return false;
+    actualHistory = [];
+    actualHistoryPosition = -1;
+    return moveToOrderPosition(0, 'next');
+  }
+
+  async function handleEnded(target: PlayerAudio): Promise<void> {
+    if (!snapshot.currentItem || destroyed) return;
+    const endedGeneration = sourceGeneration;
+    const endedItem = snapshot.currentItem;
+    if (snapshot.repeatMode === 'one'
+      || (snapshot.repeatMode === 'all' && snapshot.queue.length === 1)) {
+      if (await restartCurrent(true)) return;
+      if (destroyed
+        || sourceGeneration !== endedGeneration
+        || snapshot.currentItem !== endedItem) return;
+      updateSnapshot({
+        status: 'ended',
+        isBuffering: false,
+        currentTime: snapshot.duration || readAudioTime(target)
+      });
+      return;
+    }
+    if (await moveNext()) return;
+    if (destroyed
+      || sourceGeneration !== endedGeneration
+      || snapshot.currentItem !== endedItem) return;
+    updateSnapshot({
+      status: 'ended',
+      isBuffering: false,
+      currentTime: snapshot.duration || readAudioTime(target)
+    });
   }
 
   const clearQueue = () => {
     sourceGeneration += 1;
     playAttemptGeneration += 1;
+    playOrder = [];
+    playOrderPosition = -1;
+    actualHistory = [];
+    actualHistoryPosition = -1;
     updateSnapshot({
       queue: Object.freeze([]) as readonly PlayerQueueItem[],
       currentIndex: -1,
@@ -488,6 +636,10 @@ export const createPlayerStore = (
         0,
         ownedQueue.length - 1
       );
+      playOrder = launchOrder(ownedQueue.length, boundedIndex);
+      playOrderPosition = playOrder.indexOf(boundedIndex);
+      actualHistory = [boundedIndex];
+      actualHistoryPosition = 0;
       updateSnapshot({
         queue: ownedQueue,
         currentIndex: boundedIndex,
@@ -497,11 +649,19 @@ export const createPlayerStore = (
         duration: 0,
         error: null
       });
-      await activateIndex(boundedIndex, launchOptions.autoplay ?? true);
+      await activateIndex(
+        boundedIndex,
+        launchOptions.autoplay ?? true,
+        playOrderPosition
+      );
     },
     launchStandalone: async (item, launchOptions = {}) => {
       if (destroyed) return;
       const ownedQueue = copyQueue([item]);
+      playOrder = [0];
+      playOrderPosition = 0;
+      actualHistory = [0];
+      actualHistoryPosition = 0;
       updateSnapshot({
         queue: ownedQueue,
         currentIndex: 0,
@@ -511,7 +671,7 @@ export const createPlayerStore = (
         duration: 0,
         error: null
       });
-      await activateIndex(0, launchOptions.autoplay ?? true);
+      await activateIndex(0, launchOptions.autoplay ?? true, 0);
     },
     play: async () => {
       if (destroyed || !snapshot.currentItem) return;
@@ -555,8 +715,8 @@ export const createPlayerStore = (
       }
       updateSnapshot({ status: 'paused', isBuffering: false });
     },
-    previous: () => moveBy(-1),
-    next: () => moveBy(1),
+    previous: () => movePrevious(),
+    next: () => moveNext(),
     seek: (time) => {
       if (destroyed || !audio || !snapshot.currentItem || !Number.isFinite(time)) return;
       const upperBound = snapshot.duration > 0 ? snapshot.duration : Number.MAX_SAFE_INTEGER;
@@ -575,6 +735,33 @@ export const createPlayerStore = (
     skipForward: (seconds = DEFAULT_SKIP_SECONDS) => {
       if (!Number.isFinite(seconds)) return;
       store.seek(snapshot.currentTime + Math.max(0, seconds));
+    },
+    toggleShuffle: () => {
+      if (destroyed) return;
+      const shuffleEnabled = !snapshot.shuffleEnabled;
+
+      if (snapshot.currentItem) {
+        if (shuffleEnabled) {
+          const history = currentCycleHistory();
+          const visited = new Set(history);
+          const remaining = canonicalOrder(snapshot.queue.length)
+            .filter((index) => !visited.has(index));
+          playOrder = [...history, ...shuffled(remaining)];
+          playOrderPosition = history.length - 1;
+        } else {
+          playOrder = canonicalOrder(snapshot.queue.length);
+          playOrderPosition = snapshot.currentIndex;
+        }
+      }
+
+      updateSnapshot({ shuffleEnabled });
+    },
+    cycleRepeatMode: () => {
+      if (destroyed) return;
+      const repeatMode: PlayerRepeatMode = snapshot.repeatMode === 'off'
+        ? 'all'
+        : snapshot.repeatMode === 'all' ? 'one' : 'off';
+      updateSnapshot({ repeatMode });
     },
     setVolume: (volume) => {
       if (destroyed || !Number.isFinite(volume)) return;
@@ -605,7 +792,12 @@ export const createPlayerStore = (
       destroyed = true;
       sourceGeneration += 1;
       playAttemptGeneration += 1;
-      snapshot = initialSnapshot(snapshot.volume, snapshot.muted);
+      snapshot = initialSnapshot(
+        snapshot.volume,
+        snapshot.muted,
+        snapshot.shuffleEnabled,
+        snapshot.repeatMode
+      );
       notify();
 
       if (audio) {
