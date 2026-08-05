@@ -9,6 +9,7 @@ const configDirectory = fileURLToPath(new URL('.', import.meta.url));
 export default defineConfig({
   testDir: './e2e',
   outputDir: './test-results/artifacts',
+  snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{platform}/{arg}{ext}',
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

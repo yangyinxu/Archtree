@@ -26,14 +26,25 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+test('centers the retry action when Home cannot load', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 503 })));
+  renderHome();
+
+  const retryButton = await screen.findByRole('button', { name: 'Try again' });
+
+  expect(getComputedStyle(retryButton.parentElement!).justifyContent).toBe('center');
+});
+
 test('records a mood card as an explicit suggested search', async () => {
   const user = userEvent.setup();
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-    title: 'Home',
+    title: 'Evening selection',
     sections: []
   }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
   renderHome();
 
+  expect(await screen.findByRole('heading', { name: 'Evening selection' })).toBeInTheDocument();
+  expect(screen.queryByText('Leave room for the music.')).not.toBeInTheDocument();
   await user.click(await screen.findByRole('link', { name: /Quiet focus/ }));
 
   expect(readSearchHistory(null)).toEqual(['ambient']);

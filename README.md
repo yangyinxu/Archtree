@@ -33,6 +33,9 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run test:e2e`: run the production listener bundle against Chromium,
   Firefox, and WebKit with accessibility checks
 - `npm run test:e2e:chromium`: run the faster Chromium-only browser gate
+- `npm run typecheck:e2e --workspace @archtree/finitude-web`: type-check the
+  Playwright configuration, fixtures, and browser specs without launching a
+  browser
 - `npm run test:integration`: run transactional authentication lifecycle tests
   against a disposable single-node MongoDB replica set
 - `npm run test:media-load`: run the bounded audio Range, seek/abort, artwork,
@@ -161,15 +164,26 @@ second process with `npm run dev:web`, then open
 `npm run build` first; Express then serves the generated `web/dist` bundle at
 `/listen` and supports listener deep links. The Web build measures every
 initial route's unique compressed JavaScript and fails if any route exceeds the
-reviewed 150 KiB gzip budget.
+reviewed 150 KiB gzip budget. It also caps the complete emitted stylesheet
+payload at 32 KiB gzip, emitted fonts at 128 KiB, bundled images at 256 KiB
+total, and any one bundled image at 128 KiB. Catalog artwork continues to load
+through listener DTOs rather than being bundled into the app.
 
 Install the version-matched browser runtimes once before running the local
 browser gate:
 
 ```bash
 npx playwright install chromium firefox webkit
+npm run typecheck:e2e --workspace @archtree/finitude-web
 npm run test:e2e
 ```
+
+Chromium owns the reviewed deterministic pixel baselines; Firefox and WebKit
+retain behavior and accessibility coverage. Review intentional visual changes
+before creating or updating any named Chromium screenshot rather than bulk-
+refreshing snapshots to make a failure pass. Snapshot paths are platform-
+scoped so one operating system never silently approves another system font's
+rendering.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, and authenticated Library

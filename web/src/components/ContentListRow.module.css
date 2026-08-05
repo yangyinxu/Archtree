@@ -1,31 +1,36 @@
 .row {
   align-items: center;
-  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   list-style: none;
   min-width: 0;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.row:hover,
+.row:focus-within {
+  background: var(--color-surface-hover);
 }
 
 .trailing {
-  padding-right: 0.45rem;
+  padding-right: var(--space-2);
 }
 
 .action {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: inherit;
   color: var(--color-text);
   display: flex;
   font: inherit;
-  gap: 0.85rem;
-  min-height: 4.35rem;
+  gap: var(--space-4);
+  min-height: 4rem;
   min-width: 0;
   padding: 0.55rem;
   text-align: left;
   text-decoration: none;
-  transition: background-color var(--motion-fast) var(--ease-standard);
   width: 100%;
 }
 
@@ -34,7 +39,11 @@ button.action {
 }
 
 .action:hover {
-  background: var(--color-surface-hover);
+  background: transparent;
+}
+
+.action:focus-visible {
+  outline-offset: -3px;
 }
 
 .artwork {
@@ -56,17 +65,33 @@ button.action {
 
 .title {
   font-size: 0.9rem;
-  font-weight: 650;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .metadata {
-  color: var(--color-text-subtle);
+  color: var(--color-text-muted);
   font-size: 0.76rem;
+  line-height: 1.35;
   margin-top: 0.18rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .action {
     transition: none;
+  }
+
+  .row {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .row {
+    border: 1px solid ButtonBorder;
+  }
+
+  .row:focus-within {
+    border-color: Highlight;
   }
 }

@@ -10,9 +10,9 @@ import { useSearchHistoryRecorder } from '../search/useSearchHistoryRecorder';
 import styles from '../../styles/Pages.module.css';
 
 const moods = [
-  { title: 'Quiet focus', meta: 'Space between every note', query: 'ambient', art: styles.moodArtMint },
-  { title: 'After dark', meta: 'Low light, deep color', query: 'night', art: styles.moodArtViolet },
-  { title: 'Slow mornings', meta: 'A softer way to begin', query: 'morning', art: styles.moodArtWarm }
+  { title: 'Quiet focus', meta: 'Space between every note', query: 'ambient' },
+  { title: 'After dark', meta: 'Low light, deep color', query: 'night' },
+  { title: 'Slow mornings', meta: 'A softer way to begin', query: 'morning' }
 ];
 
 const MoodFallback = () => {
@@ -40,7 +40,6 @@ const MoodFallback = () => {
             state={null}
             to={`/search?q=${encodeURIComponent(mood.query)}`}
           >
-            <div className={`${styles.moodArt} ${mood.art}`} aria-hidden="true" />
             <p className={styles.cardTitle}>{mood.title}</p>
             <p className={styles.cardMeta}>{mood.meta}</p>
           </Link>
@@ -55,25 +54,15 @@ export const HomePage = () => {
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id;
   const home = useQuery(listenerHomeQuery(viewerId));
+  const homeTitle = home.data?.title.trim() || 'Made for your moment';
+  const hasConfiguredSections = home.isSuccess && home.data.sections.length > 0;
 
   return (
     <div className={styles.page}>
-      <section className={styles.hero} aria-labelledby="home-title">
-        <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Finitude on the web</p>
-          <h1 className={styles.title} id="home-title">Leave room for the music.</h1>
-          <p className={styles.lede}>
-            Find albums and soundtracks for the pace you are in—then keep listening as you move through Finitude.
-          </p>
-          <div className={styles.actions}>
-            <Link className={styles.primaryLink} to="/search">Explore music</Link>
-            <Link className={styles.secondaryLink} to={viewerId ? '/library' : '/login'}>
-              {viewerId ? 'Open Library' : 'Log in'}
-            </Link>
-          </div>
-        </div>
-        <div className={styles.heroArt} aria-hidden="true" />
-      </section>
+      <header className={`${styles.homeHeader} ${hasConfiguredSections ? styles.homeHeaderReady : ''}`}>
+        <p className={styles.eyebrow}>Finitude</p>
+        <h1 className={styles.pageTitle} id="home-title">{homeTitle}</h1>
+      </header>
 
       {home.isPending ? (
         <section className={styles.panel} aria-busy="true" aria-label="Loading Home">
@@ -87,13 +76,13 @@ export const HomePage = () => {
           <div>
             <h2 className={styles.panelTitle}>Home is taking a quiet moment</h2>
             <p className={styles.panelCopy}>The catalog could not be loaded, but Search is still available.</p>
-            <div className={styles.actions}>
+            <div className={`${styles.actions} ${styles.panelActions}`}>
               <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={() => home.refetch()} type="button">Try again</button>
             </div>
           </div>
         </section>
       ) : home.data.sections.length > 0 ? (
-        <div className={styles.sectionStack} aria-label={home.data.title || 'Home collections'}>
+        <div className={`${styles.sectionStack} ${styles.sectionStackReady}`} aria-label={home.data.title || 'Home collections'}>
           {home.data.sections.map((section) => (
             <PageSection
               {...section}

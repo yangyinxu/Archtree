@@ -88,6 +88,7 @@ const initialSnapshot = (
   queue: Object.freeze([]) as readonly PlayerQueueItem[],
   currentIndex: -1,
   currentItem: null,
+  upNextItem: null,
   status: 'idle',
   isBuffering: false,
   currentTime: 0,
@@ -281,10 +282,22 @@ export const createPlayerStore = (
     const candidate = { ...snapshot, ...patch };
     const validIndex = candidate.currentIndex >= 0
       && candidate.currentIndex < candidate.queue.length;
+    const automaticNextIndex = !validIndex
+      ? -1
+      : candidate.repeatMode === 'one'
+        ? candidate.currentIndex
+        : playOrderPosition >= 0 && playOrderPosition < playOrder.length - 1
+          ? playOrder[playOrderPosition + 1]
+          : candidate.repeatMode === 'all' && playOrder.length > 0
+            ? playOrder[0]
+            : -1;
     const next: PlayerSnapshot = Object.freeze({
       ...candidate,
       currentIndex: validIndex ? candidate.currentIndex : -1,
       currentItem: validIndex ? candidate.queue[candidate.currentIndex] : null,
+      upNextItem: automaticNextIndex >= 0 && automaticNextIndex < candidate.queue.length
+        ? candidate.queue[automaticNextIndex]
+        : null,
       canPrevious: validIndex && (
         candidate.currentTime >= PREVIOUS_RESTART_SECONDS
         || playOrderPosition > 0

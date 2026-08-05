@@ -1,31 +1,45 @@
 .page {
   display: grid;
-  gap: clamp(2.8rem, 6vw, 5rem);
+  gap: clamp(2rem, 3vw, 2.75rem);
   margin: 0 auto;
-  max-width: var(--content-max);
-  padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 4vw, 3.5rem) 4rem;
+  max-width: none;
+  min-height: 100%;
+  padding: 0 clamp(1rem, 2.5vw, 2rem) 3rem;
   width: 100%;
+}
+
+.albumPage {
+  align-content: start;
+  gap: clamp(1rem, 2vw, 1.5rem);
+}
+
+.albumHeroBlock {
+  margin: 0 clamp(-2rem, -2.5vw, -1rem);
 }
 
 .hero {
   align-items: end;
-  background:
-    radial-gradient(circle at 76% 12%, rgb(115 217 202 / 0.16), transparent 22rem),
-    linear-gradient(145deg, #1b1e2d, #10121b);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  background: var(--color-surface-tonal);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   display: grid;
-  gap: clamp(1.5rem, 4vw, 3.2rem);
-  grid-template-columns: minmax(12rem, 20rem) minmax(0, 1fr);
-  min-height: 25rem;
+  gap: clamp(1.25rem, 3vw, 2.25rem);
+  grid-template-columns: minmax(10rem, 15rem) minmax(0, 1fr);
+  margin: 0;
+  min-height: clamp(18rem, 34vw, 24rem);
   overflow: hidden;
-  padding: clamp(1.3rem, 4vw, 3.2rem);
+  padding: clamp(1.5rem, 3vw, 2.5rem) clamp(1rem, 2.5vw, 2rem);
+}
+
+.page > .hero {
+  margin: 0 clamp(-2rem, -2.5vw, -1rem);
 }
 
 .heroArtwork,
 .artistArtwork {
-  box-shadow: 0 24px 55px rgb(0 0 0 / 0.35);
+  border-radius: 0.3rem;
+  box-shadow: var(--shadow-hero-artwork);
   width: 100%;
 }
 
@@ -36,26 +50,28 @@
 .heroCopy h1 {
   color: var(--color-text);
   font-family: var(--font-display);
-  font-size: clamp(2.2rem, 6vw, 5.4rem);
-  letter-spacing: -0.055em;
-  line-height: 0.95;
-  max-width: 15ch;
+  font-size: clamp(2.25rem, 5.5vw, 4.8rem);
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 0.98;
+  max-width: 18ch;
 }
 
 .eyebrow {
   color: var(--color-accent-bright);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 750;
-  letter-spacing: 0.12em;
-  margin-bottom: 0.75rem;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
   text-transform: uppercase;
 }
 
 .metadata,
 .bio {
   color: var(--color-text-muted);
-  line-height: 1.65;
-  margin-top: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin-top: 0.65rem;
   max-width: 52rem;
 }
 
@@ -64,7 +80,31 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.7rem;
-  margin-top: 1.6rem;
+  margin-top: 1.15rem;
+}
+
+.albumActions {
+  align-items: center;
+  margin-top: 0;
+  min-height: 5rem;
+  padding: 1rem clamp(1rem, 2.5vw, 2rem);
+}
+
+.albumActions .playButton {
+  border-radius: 50%;
+  height: 3rem;
+  justify-content: center;
+  padding: 0;
+  width: 3rem;
+}
+
+.albumActions .playButton svg {
+  height: 1.25rem;
+  width: 1.25rem;
+}
+
+.albumActions .playLabel {
+  display: none;
 }
 
 .playButton,
@@ -73,13 +113,13 @@
   background: var(--color-accent);
   border: 1px solid var(--color-accent);
   border-radius: 999px;
-  color: #09110f;
+  color: var(--color-on-accent);
   display: inline-flex;
   font: inherit;
   font-weight: 720;
   gap: 0.45rem;
-  min-height: 2.75rem;
-  padding: 0.55rem 1.15rem;
+  min-height: 2.9rem;
+  padding: 0.55rem 1.1rem;
 }
 
 .playButton:disabled {
@@ -101,13 +141,14 @@
   display: flex;
   gap: 1.5rem;
   justify-content: space-between;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .sectionHeader h2 {
   color: var(--color-text);
   font-family: var(--font-display);
-  font-size: clamp(1.35rem, 2.8vw, 2rem);
+  font-size: clamp(1.25rem, 2vw, 1.6rem);
+  font-weight: 760;
   letter-spacing: -0.03em;
 }
 
@@ -117,26 +158,38 @@
 }
 
 .trackList {
-  background: color-mix(in srgb, var(--color-surface) 68%, transparent);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   list-style: none;
   margin: 0;
   overflow: visible;
-  padding: 0.35rem;
+  padding: 0;
 }
 
 .trackRow {
   align-items: center;
   border-bottom: 1px solid var(--color-border);
+  border-radius: 0.3rem;
   display: grid;
   gap: 0.5rem;
   grid-template-columns: minmax(0, 1fr) auto;
   position: relative;
 }
 
+.trackRow:hover,
+.trackRow:focus-within {
+  background: var(--color-surface-hover);
+}
+
 .trackRow:last-child {
   border-bottom: 0;
+}
+
+.trackTrailing {
+  align-items: center;
+  display: flex;
+  gap: 0.15rem;
 }
 
 .trackAction {
@@ -149,15 +202,11 @@
   font: inherit;
   gap: 0.8rem;
   grid-template-columns: 2rem minmax(0, 1fr) auto;
-  min-height: 4.35rem;
+  min-height: 3.75rem;
   min-width: 0;
   padding: 0.55rem;
   text-align: left;
   width: 100%;
-}
-
-.trackAction:hover {
-  background: var(--color-surface-hover);
 }
 
 .trackNumber,
@@ -198,9 +247,9 @@
 
 .empty,
 .state {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  background: var(--color-surface-low);
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
   color: var(--color-text-muted);
   padding: clamp(1.4rem, 4vw, 2.5rem);
 }
@@ -209,7 +258,7 @@
   display: grid;
   gap: 0.8rem;
   justify-items: start;
-  min-height: 14rem;
+  min-height: 11rem;
   place-content: center;
 }
 
@@ -219,10 +268,72 @@
   font-size: 1.6rem;
 }
 
+/* Keep Album and Artist heroes usable when the persistent side panels narrow the content pane. */
+@container (min-width: 25rem) and (max-width: 34rem) {
+  .albumPage {
+    gap: 0.5rem;
+  }
+
+  .hero {
+    gap: 0.9rem;
+    grid-template-columns: 8rem minmax(0, 1fr);
+    min-height: 12rem;
+    padding-block: 1.15rem;
+  }
+
+  .heroCopy h1 {
+    font-size: clamp(1.7rem, 6cqi, 1.9rem);
+    line-height: 1.05;
+  }
+
+  .metadata {
+    font-size: 0.82rem;
+  }
+
+  .actions {
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+  }
+
+  .albumActions {
+    margin-top: 0;
+    min-height: 4.75rem;
+    padding-block: 0.9rem;
+  }
+
+  .playButton,
+  .actions > button {
+    min-height: 2.6rem;
+  }
+
+  .albumActions .playButton {
+    height: 3rem;
+    min-height: 3rem;
+  }
+
+  .sectionHeader {
+    align-items: center;
+    margin-bottom: 0;
+    min-height: 2rem;
+  }
+
+  .sectionHeader .eyebrow,
+  .sectionHeader > p {
+    display: none;
+  }
+
+  .sectionHeader h2 {
+    font-family: var(--font-sans);
+    font-size: 0.82rem;
+    font-weight: 650;
+    letter-spacing: 0;
+  }
+}
+
 @media (max-width: 720px) {
   .hero {
     align-items: center;
-    grid-template-columns: minmax(7rem, 10rem) minmax(0, 1fr);
+    grid-template-columns: minmax(7rem, 9rem) minmax(0, 1fr);
     min-height: auto;
   }
 

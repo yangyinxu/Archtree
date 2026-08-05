@@ -66,11 +66,45 @@ const LocationProbe = () => {
 test('renders responsive navigation and exactly one persistent player surface', async () => {
   const { container } = renderRoute('/');
 
-  expect(await screen.findByRole('heading', { name: 'Leave room for the music.' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Made for your moment' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main-content');
   expect(container.querySelectorAll('nav[aria-label="Primary"]')).toHaveLength(2);
   expect(screen.getAllByRole('link', { name: 'Library' })).toHaveLength(1);
   expect(screen.getAllByRole('region', { name: 'Now playing' })).toHaveLength(1);
+});
+
+test('moves keyboard focus to main content from the skip link', async () => {
+  const user = userEvent.setup();
+  renderRoute('/');
+
+  await user.click(screen.getByRole('link', { name: 'Skip to main content' }));
+
+  await waitFor(() => expect(screen.getByRole('main')).toHaveFocus());
+});
+
+test('toggles the read-only Now Playing pane without remounting the player', async () => {
+  const user = userEvent.setup();
+  renderRoute('/');
+
+  const aside = await screen.findByRole('complementary', { name: 'Now Playing details' });
+  const player = screen.getByRole('region', { name: 'Now playing' });
+  const hideButton = screen.getByRole('button', { name: 'Hide Now Playing view' });
+
+  expect(aside).not.toHaveAttribute('hidden');
+  expect(hideButton).toHaveAttribute('aria-controls', 'now-playing-aside');
+  expect(hideButton).toHaveAttribute('aria-expanded', 'true');
+
+  await user.click(hideButton);
+
+  expect(aside).toHaveAttribute('hidden');
+  expect(screen.getByRole('button', { name: 'Show Now Playing view' }))
+    .toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
+
+  await user.click(screen.getByRole('button', { name: 'Show Now Playing view' }));
+
+  expect(aside).not.toHaveAttribute('hidden');
+  expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
 });
 
 test('shows authentication-required Library instead of an empty success', async () => {
@@ -119,7 +153,7 @@ test('logs in through the browser session endpoint and returns Home', async () =
   await user.click(screen.getByRole('button', { name: 'Log in' }));
 
   await waitFor(() => {
-    expect(screen.getByRole('heading', { name: 'Leave room for the music.' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Made for your moment' })).toBeInTheDocument();
   });
   expect(fetchMock).toHaveBeenCalledWith(
     '/auth/browser/login',
@@ -200,6 +234,30 @@ test('previews a debounced global search but records it only on submission', asy
     timeout: 1_000
   })).toBeInTheDocument();
   expect(readSearchHistory(null)).toEqual(['Piano']);
+});
+
+test('expands the compact global Search before submitting it', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(browserSessionQueryKey, null);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<div>Home</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+
+  const globalSearch = screen.getByRole('search', { name: 'Global search' });
+  const searchbox = within(globalSearch).getByRole('searchbox');
+  await user.click(within(globalSearch).getByRole('button', { name: 'Submit search' }));
+
+  expect(searchbox).toHaveFocus();
 });
 
 test('cancels the pending preview timer when global Search is submitted', async () => {

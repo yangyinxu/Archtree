@@ -23,11 +23,17 @@ const expectNoReleaseBlockingViolations = async (page: Page, label: string) => {
   ).toEqual([]);
 };
 
+test.beforeEach(async ({ page }) => {
+  // Accessibility scans should evaluate settled colors, not a transient frame
+  // of an entrance animation or hover transition.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+});
+
 const pages = [
   {
     label: 'home',
     path: '/listen',
-    ready: (page: Page) => page.getByRole('heading', { name: 'Leave room for the music.' })
+    ready: (page: Page) => page.getByRole('heading', { name: 'Browser Test Listening Room' })
   },
   {
     label: 'album',

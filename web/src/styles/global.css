@@ -2,6 +2,8 @@
 *::before,
 *::after {
   box-sizing: border-box;
+  scrollbar-color: var(--color-text-subtle) var(--color-surface);
+  scrollbar-width: thin;
 }
 
 html,
@@ -14,18 +16,23 @@ body,
 
 html {
   background: var(--color-canvas);
+  color: var(--color-text);
   font-family: var(--font-sans);
   line-height: 1.5;
   text-rendering: optimizeLegibility;
 }
 
 body {
+  background: var(--color-canvas);
+  color: var(--color-text);
   margin: 0;
   min-width: 20rem;
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -35,7 +42,12 @@ a {
 }
 
 button {
+  color: inherit;
   cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 img,
@@ -51,13 +63,33 @@ p {
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 3px;
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 ::selection {
   background: var(--color-accent);
   color: var(--color-canvas);
+}
+
+::-webkit-scrollbar {
+  height: 0.75rem;
+  width: 0.75rem;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-text-subtle);
+  background-clip: padding-box;
+  border: 0.25rem solid transparent;
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-text-muted);
 }
 
 .visually-hidden {
@@ -74,15 +106,23 @@ p {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
   }
 }
 
 @media (forced-colors: active) {
   :focus-visible {
+    box-shadow: none;
     outline-color: Highlight;
+  }
+
+  ::selection {
+    background: Highlight;
+    color: HighlightText;
   }
 }

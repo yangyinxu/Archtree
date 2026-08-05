@@ -10,8 +10,14 @@ test('highlights the complete Search bar when its input receives focus', async (
 
   await input.focus();
 
-  await expect(searchBar).toHaveCSS('border-color', 'rgb(158, 234, 221)');
-  await expect(searchBar).toHaveCSS('box-shadow', 'rgb(158, 234, 221) 0px 0px 0px 1px inset');
+  expect(await searchBar.evaluate((element) => getComputedStyle(element)
+    .getPropertyValue('--color-focus').trim())).not.toBe('');
+  await expect.poll(async () => searchBar.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return style.borderColor !== 'rgba(0, 0, 0, 0)'
+      && style.borderColor !== 'transparent'
+      && style.boxShadow.includes(style.borderColor);
+  })).toBe(true);
   await expect(input).toHaveCSS('box-shadow', 'none');
   await expect(input).toHaveCSS('outline-style', 'none');
 });

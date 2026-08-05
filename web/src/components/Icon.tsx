@@ -2,9 +2,11 @@ import {
   ArrowLeft,
   ArrowRight,
   CircleUserRound,
+  Disc3,
   House,
   Library,
   LockKeyhole,
+  PanelRight,
   Pause,
   Play,
   Repeat1,
@@ -23,10 +25,12 @@ export type IconName =
   | 'account'
   | 'arrow-left'
   | 'arrow-right'
+  | 'brand'
   | 'home'
   | 'library'
   | 'lock'
   | 'pause'
+  | 'panel-right'
   | 'play'
   | 'previous'
   | 'repeat'
@@ -41,10 +45,12 @@ const icons: Record<IconName, LucideIcon> = {
   account: CircleUserRound,
   'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
+  brand: Disc3,
   home: House,
   library: Library,
   lock: LockKeyhole,
   pause: Pause,
+  'panel-right': PanelRight,
   play: Play,
   previous: SkipBack,
   repeat: Repeat2,

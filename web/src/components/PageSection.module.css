@@ -5,9 +5,11 @@
 .title {
   color: var(--color-text);
   font-family: var(--font-display);
-  font-size: clamp(1.25rem, 2.5vw, 1.9rem);
-  letter-spacing: -0.03em;
-  margin: 0 0 1rem;
+  font-size: var(--type-section-title);
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin: 0 0 var(--space-8);
 }
 
 .carousel,
@@ -20,14 +22,19 @@
 
 .carousel {
   display: grid;
-  gap: clamp(0.75rem, 1.7vw, 1.15rem);
-  grid-auto-columns: clamp(10.5rem, 18vw, 14rem);
+  gap: var(--space-5);
+  grid-auto-columns: clamp(10.5rem, calc((100% - 6rem) / 5), 13rem);
   grid-auto-flow: column;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  padding: 0.2rem 0.15rem 0.85rem;
+  padding: 0 0 var(--space-2);
   scroll-snap-type: inline proximity;
   scrollbar-width: thin;
+}
+
+.carousel:focus-visible {
+  border-radius: var(--radius-sm);
+  outline-offset: 2px;
 }
 
 .carousel .cardItem {
@@ -35,13 +42,15 @@
 }
 
 .grid {
+  column-gap: var(--space-5);
   display: grid;
-  gap: clamp(0.75rem, 1.7vw, 1.15rem);
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 10.5rem), 1fr));
+  row-gap: var(--space-8);
 }
 
 .list {
   display: grid;
+  gap: 0.125rem;
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -51,12 +60,18 @@
 }
 
 .empty {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   color: var(--color-text-muted);
   margin: 0;
-  padding: 1rem;
+  padding: var(--space-4);
+}
+
+@media (forced-colors: active) {
+  .empty {
+    border-color: CanvasText;
+  }
 }
 
 .visuallyHidden {
@@ -71,10 +86,11 @@
 
 @media (max-width: 480px) {
   .carousel {
-    grid-auto-columns: minmax(10.5rem, 72vw);
+    grid-auto-columns: min(72vw, 17.5rem);
   }
 
   .grid {
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.75rem), 1fr));
+    row-gap: var(--space-5);
   }
 }

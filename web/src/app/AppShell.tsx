@@ -1,4 +1,12 @@
-import { type FormEvent, type KeyboardEvent } from 'react';
+import {
+  lazy,
+  Suspense,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type MouseEvent
+} from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router';
 
@@ -16,6 +24,16 @@ const destinations: Array<{ label: string; path: string; icon: IconName }> = [
   { label: 'Search', path: '/search', icon: 'search' },
   { label: 'Library', path: '/library', icon: 'library' }
 ];
+
+const NowPlayingAside = lazy(() => import('../components/NowPlayingAside').then((module) => ({
+  default: module.NowPlayingAside
+})));
+
+/** Activates the shell skip link without changing the routed URL. */
+const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
+  event.preventDefault();
+  document.getElementById('main-content')?.focus({ preventScroll: true });
+};
 
 const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => (
   <nav className={mobile ? styles.mobileNavigation : styles.navigation} aria-label="Primary">
@@ -35,6 +53,7 @@ const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => (
 );
 
 const TopSearch = () => {
+  const input = useRef<HTMLInputElement>(null);
   const { recordSubmittedQuery } = useSearchHistoryRecorder();
   const {
     commitDraft,
@@ -58,9 +77,21 @@ const TopSearch = () => {
     }
   };
 
+  const expandCompactSearch = (event: MouseEvent<HTMLButtonElement>) => {
+    if (window.matchMedia?.('(max-width: 479px)').matches && document.activeElement !== input.current) {
+      event.preventDefault();
+      input.current?.focus();
+    }
+  };
+
   return (
     <form className={styles.search} role="search" aria-label="Global search" onSubmit={submit}>
-      <button className={styles.searchSubmit} type="submit" aria-label="Submit search">
+      <button
+        className={styles.searchSubmit}
+        onClick={expandCompactSearch}
+        type="submit"
+        aria-label="Submit search"
+      >
         <Icon name="search" />
       </button>
       <label className="visually-hidden" htmlFor="shell-search">Search artists, albums, and soundtracks</label>
@@ -73,6 +104,7 @@ const TopSearch = () => {
         onCompositionStart={startComposition}
         onKeyDown={preventCompositionSubmit}
         placeholder="Search music"
+        ref={input}
         type="search"
         value={draftQuery}
       />
@@ -101,23 +133,20 @@ const AccountEntry = () => {
 /** Keeps navigation, route content, and the single player mounted together. */
 const AppShellContent = () => {
   const navigate = useNavigate();
+  const [nowPlayingOpen, setNowPlayingOpen] = useState(true);
 
   return (
-    <div className={styles.shell}>
-      <a className={styles.skipLink} href="#main-content">Skip to main content</a>
+    <div className={styles.shell} data-now-playing-open={nowPlayingOpen}>
+      <a className={styles.skipLink} href="#main-content" onClick={skipToMainContent}>Skip to main content</a>
       <RouteAnnouncer />
 
-      <aside className={styles.sidebar} aria-label="Finitude">
+      <header className={styles.topbar}>
         <Link className={styles.brand} to="/" aria-label="Finitude home">
-          <span className={styles.brandMark} aria-hidden="true">F</span>
+          <span className={styles.brandMark} aria-hidden="true"><Icon name="brand" /></span>
           <span className={styles.brandName}>Finitude</span>
         </Link>
-        <PrimaryNavigation />
-        <p className={styles.sidebarNote}>Room for every note.</p>
-      </aside>
 
-      <div className={styles.workspace}>
-        <header className={styles.topbar}>
+        <div className={styles.topbarCenter}>
           <div className={styles.historyControls} aria-label="Page history">
             <button type="button" onClick={() => navigate(-1)} aria-label="Go back" title="Go back">
               <Icon name="arrow-left" />
@@ -127,15 +156,42 @@ const AppShellContent = () => {
             </button>
           </div>
           <TopSearch />
-          <AccountEntry />
-        </header>
+        </div>
 
+        <AccountEntry />
+      </header>
+
+      <aside className={styles.sidebar} aria-label="Finitude Library">
+        <div className={styles.sidebarHeader}>
+          <Icon name="library" />
+          <span>Your Library</span>
+        </div>
+        <PrimaryNavigation />
+      </aside>
+
+      <div className={styles.workspace}>
         <main className={styles.main} id="main-content" tabIndex={-1}>
           <Outlet />
         </main>
       </div>
 
-      <div className={styles.playerSlot}><PlayerBar /></div>
+      <aside
+        aria-label="Now Playing details"
+        className={styles.nowPlayingSlot}
+        hidden={!nowPlayingOpen}
+        id="now-playing-aside"
+      >
+        <Suspense fallback={<div className={styles.asideLoading} aria-hidden="true" />}>
+          <NowPlayingAside />
+        </Suspense>
+      </aside>
+
+      <div className={styles.playerSlot}>
+        <PlayerBar
+          nowPlayingOpen={nowPlayingOpen}
+          onToggleNowPlaying={() => setNowPlayingOpen((open) => !open)}
+        />
+      </div>
       <PrimaryNavigation mobile />
     </div>
   );

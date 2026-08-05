@@ -160,6 +160,7 @@ test('owns one lazy audio instance and copies an album queue before launch', asy
   expect(store.getSnapshot()).toMatchObject({
     currentIndex: 1,
     currentItem: { id: 'track-2', title: 'Open Field' },
+    upNextItem: { id: 'track-3', title: 'Night Window' },
     status: 'paused',
     shuffleEnabled: false,
     repeatMode: 'off',
@@ -180,6 +181,7 @@ test('owns one lazy audio instance and copies an album queue before launch', asy
   expect(audioFactory).toHaveBeenCalledTimes(1);
   expect(store.getSnapshot()).toMatchObject({
     currentIndex: 0,
+    upNextItem: null,
     status: 'playing',
     canPrevious: false,
     canNext: false
@@ -230,15 +232,22 @@ test('shuffles only upcoming queue items without changing the current playback',
   store.toggleShuffle();
   expect(store.getSnapshot()).toMatchObject({
     currentItem: { id: 'track-1' },
+    upNextItem: { id: 'track-3' },
     currentTime: 42,
     status: 'paused',
     shuffleEnabled: true
   });
 
   await expect(store.next()).resolves.toBe(true);
-  expect(store.getSnapshot().currentItem?.id).toBe('track-3');
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-3' },
+    upNextItem: { id: 'track-2' }
+  });
   await expect(store.next()).resolves.toBe(true);
-  expect(store.getSnapshot().currentItem?.id).toBe('track-2');
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-2' },
+    upNextItem: null
+  });
   await expect(store.next()).resolves.toBe(false);
 });
 
@@ -287,12 +296,22 @@ test('cycles Repeat modes and distinguishes natural completion from explicit nav
   await store.launchAlbumQueue(tracks, 2, { autoplay: false });
 
   store.cycleRepeatMode();
-  expect(store.getSnapshot()).toMatchObject({ repeatMode: 'all', canNext: true });
+  expect(store.getSnapshot()).toMatchObject({
+    repeatMode: 'all',
+    canNext: true,
+    upNextItem: { id: 'track-1' }
+  });
   audio.emit('ended');
-  await vi.waitFor(() => expect(store.getSnapshot().currentItem?.id).toBe('track-1'));
+  await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
+    upNextItem: { id: 'track-2' }
+  }));
 
   store.cycleRepeatMode();
-  expect(store.getSnapshot().repeatMode).toBe('one');
+  expect(store.getSnapshot()).toMatchObject({
+    repeatMode: 'one',
+    upNextItem: { id: 'track-1' }
+  });
   audio.currentTime = 90;
   audio.emit('timeupdate');
   const sourceBeforeRepeat = audio.src;
@@ -305,9 +324,15 @@ test('cycles Repeat modes and distinguishes natural completion from explicit nav
   expect(audio.src).toBe(sourceBeforeRepeat);
 
   await expect(store.next()).resolves.toBe(true);
-  expect(store.getSnapshot().currentItem?.id).toBe('track-2');
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-2' },
+    upNextItem: { id: 'track-2' }
+  });
   store.cycleRepeatMode();
-  expect(store.getSnapshot().repeatMode).toBe('off');
+  expect(store.getSnapshot()).toMatchObject({
+    repeatMode: 'off',
+    upNextItem: { id: 'track-3' }
+  });
 });
 
 test('combines shuffled traversal with Repeat All by wrapping the same playback order', async () => {
@@ -328,6 +353,7 @@ test('combines shuffled traversal with Repeat All by wrapping the same playback 
   await store.next();
   expect(store.getSnapshot()).toMatchObject({
     currentItem: { id: 'track-1' },
+    upNextItem: { id: 'track-3' },
     shuffleEnabled: true,
     repeatMode: 'all'
   });
@@ -373,6 +399,7 @@ test('Repeat All restarts a single-item queue after natural completion', async (
     initialRepeatMode: 'all'
   });
   await store.launchStandalone(tracks[0], { autoplay: false });
+  expect(store.getSnapshot().upNextItem?.id).toBe('track-1');
 
   audio.currentTime = 180;
   audio.emit('timeupdate');

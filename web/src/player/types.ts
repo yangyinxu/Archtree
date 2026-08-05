@@ -44,6 +44,8 @@ export interface PlayerSnapshot {
   queue: readonly PlayerQueueItem[];
   currentIndex: number;
   currentItem: PlayerQueueItem | null;
+  /** Item natural completion will make current, including Shuffle and Repeat semantics. */
+  upNextItem: PlayerQueueItem | null;
   status: PlayerStatus;
   isBuffering: boolean;
   currentTime: number;

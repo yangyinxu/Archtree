@@ -14,7 +14,7 @@ test('opens the listener from the Archtree landing page without replacing accoun
 
   await page.getByRole('link', { name: 'Open Finitude' }).click();
   await expect(page).toHaveURL(/\/listen$/);
-  await expect(page.getByRole('heading', { name: 'Leave room for the music.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
 });
 
 test('serves a production bundle deep link and survives a document reload', async ({ page }) => {
@@ -29,7 +29,7 @@ test('serves a production bundle deep link and survives a document reload', asyn
 
 test('keeps the Album route and persistent player while navigating', async ({ page }) => {
   await page.goto('/listen');
-  await expect(page.getByRole('heading', { name: 'Leave room for the music.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
 
   await page.getByRole('link', { name: 'Quiet Hours, album' }).click();
   await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
@@ -83,6 +83,15 @@ test('previews seek position and commits pointer or keyboard changes at the expe
   await expect(slider).toBeEnabled();
   await expect(slider).toHaveAttribute('max', '15');
   await controls.getByRole('button', { name: 'Pause' }).click();
+  await expect(controls.getByRole('button', { name: 'Play' })).toBeVisible();
+
+  // WebKit may deliver one final timeupdate after pause; establish a settled
+  // baseline so that this test measures pointer-preview behavior, not media timing.
+  await expect.poll(async () => {
+    const before = await slider.inputValue();
+    await page.waitForTimeout(150);
+    return (await slider.inputValue()) === before;
+  }).toBe(true);
 
   const box = await slider.boundingBox();
   expect(box).not.toBeNull();
@@ -216,7 +225,7 @@ for (const width of [320, 768, 1_440]) {
   test(`keeps the Home document within a ${width}px viewport`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/listen');
-    await expect(page.getByRole('heading', { name: 'Leave room for the music.' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
 
     const dimensions = await page.evaluate(() => ({
       body: document.body.scrollWidth,
@@ -229,10 +238,8 @@ for (const width of [320, 768, 1_440]) {
 }
 
 test.describe('reduced motion', () => {
-  test.use({ reducedMotion: 'reduce' });
-
   test('retains navigation and playback actions', async ({ page }) => {
-    // Apply on the Page as well as the Context so every engine exposes the media query.
+    // Page media emulation is the cross-engine contract exposed by Playwright.
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/listen');
     expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);

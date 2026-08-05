@@ -63,42 +63,46 @@ export const AlbumPage = () => {
   const albumTarget: LibraryTarget = { contentType: 'album', contentId: album.id };
 
   return (
-    <div className={styles.page}>
-      <header className={styles.hero}>
-        <Artwork
-          alt={`${album.title} cover`}
-          className={styles.heroArtwork}
-          fetchPriority="high"
-          kind="album"
-          loading="eager"
-          sizes="(max-width: 520px) 12rem, (max-width: 720px) 10rem, 20rem"
-          src={album.artworkUrl}
-        />
-        <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Album</p>
-          <h1>{album.title || 'Untitled album'}</h1>
-          <p className={styles.metadata}>
-            {[album.artistNames.join(', '), releaseLabel(album.releaseDate?.year), `${tracks.length} soundtrack${tracks.length === 1 ? '' : 's'}`]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          <div className={styles.actions}>
-            <button
-              className={styles.playButton}
-              disabled={tracks.length === 0}
-              onClick={() => { void launchAlbumPlayback(album.id, tracks, viewerId); }}
-              type="button"
-            >
-              <Icon name="play" />
-              Play
-            </button>
-            <SaveButton
-              onSavedChange={(saved) => setSaved(albumTarget, saved)}
-              saved={savedFor(albumTarget)}
-              target={albumTarget}
-              viewerId={viewerId}
-            />
+    <div className={`${styles.page} ${styles.albumPage}`}>
+      <header className={styles.albumHeroBlock}>
+        <div className={styles.hero}>
+          <Artwork
+            alt={`${album.title} cover`}
+            className={styles.heroArtwork}
+            fetchPriority="high"
+            kind="album"
+            loading="eager"
+            sizes="(max-width: 520px) 12rem, (max-width: 720px) 10rem, 20rem"
+            src={album.artworkUrl}
+          />
+          <div className={styles.heroCopy}>
+            <p className={styles.eyebrow}>Album</p>
+            <h1>{album.title || 'Untitled album'}</h1>
+            <p className={styles.metadata}>
+              {[album.artistNames.join(', '), releaseLabel(album.releaseDate?.year), `${tracks.length} soundtrack${tracks.length === 1 ? '' : 's'}`]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
           </div>
+        </div>
+        <div className={`${styles.actions} ${styles.albumActions}`}>
+          <button
+            aria-label="Play"
+            className={styles.playButton}
+            disabled={tracks.length === 0}
+            onClick={() => { void launchAlbumPlayback(album.id, tracks, viewerId); }}
+            type="button"
+          >
+            <Icon name="play" />
+            <span className={styles.playLabel}>Play</span>
+          </button>
+          <SaveButton
+            compact
+            onSavedChange={(saved) => setSaved(albumTarget, saved)}
+            saved={savedFor(albumTarget)}
+            target={albumTarget}
+            viewerId={viewerId}
+          />
         </div>
       </header>
 

@@ -118,7 +118,10 @@ test('cards link artist and album details while tracks dispatch onPlay', async (
 
   expect(screen.getByRole('link', { name: 'Finitude Ensemble, artist' })).toHaveAttribute('href', '/artists/artist-1');
   expect(screen.getByRole('link', { name: 'Still Water, album' })).toHaveAttribute('href', '/albums/album-1');
-  await user.click(screen.getByRole('button', { name: 'Play First Light by Finitude Ensemble' }));
+  const playButton = screen.getByRole('button', { name: 'Play First Light by Finitude Ensemble' });
+  expect(playButton.querySelector('.lucide-play')).toBeInTheDocument();
+  expect(playButton.querySelector('button')).toBeNull();
+  await user.click(playButton);
   expect(onPlay).toHaveBeenCalledWith(audioTrack);
 });
 
@@ -164,7 +167,7 @@ test('section presentations describe the rendered card and list artwork widths',
 
   expect(container.querySelector('img')).toHaveAttribute(
     'sizes',
-    '(max-width: 480px) calc(72vw - 1.3rem - 2px), calc(clamp(10.5rem, 18vw, 14rem) - 1.3rem - 2px)'
+    '(max-width: 480px) calc(min(72vw, 17.5rem) - 1.3rem - 2px), calc(clamp(10.5rem, 16vw, 13rem) - 1.3rem - 2px)'
   );
 
   rerender(

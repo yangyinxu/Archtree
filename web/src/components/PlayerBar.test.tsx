@@ -63,8 +63,19 @@ const tracks: PlayerQueueItem[] = [
   }
 ];
 
+class PlayerBarPointerEvent extends MouseEvent {
+  readonly pointerId: number;
+  readonly pointerType: string;
+
+  constructor(type: string, init: PointerEventInit = {}) {
+    super(type, init);
+    this.pointerId = init.pointerId ?? 1;
+    this.pointerType = init.pointerType ?? '';
+  }
+}
+
 const setMobileViewport = (matches: boolean) => {
-  vi.stubGlobal('PointerEvent', MouseEvent);
+  vi.stubGlobal('PointerEvent', PlayerBarPointerEvent);
   vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
     matches: query === '(max-width: 767px)' ? matches : false,
     media: query,
@@ -134,23 +145,66 @@ test('opens and closes the mobile expanded surface without creating another play
   expect(audioFactory).toHaveBeenCalledTimes(1);
 });
 
+test('keeps a mouse tap on the compact identity button instead of capturing it as a swipe', async () => {
+  setMobileViewport(true);
+  const user = userEvent.setup();
+  const { store } = await playerFixture();
+  render(<PlayerBar store={store} />);
+  const compact = screen.getByRole('region', { name: 'Now playing' });
+  const capturePointer = vi.fn();
+  Object.defineProperty(compact, 'setPointerCapture', { value: capturePointer });
+
+  await user.click(screen.getByRole('button', { name: 'Open Now Playing: Still Water' }));
+
+  expect(capturePointer).not.toHaveBeenCalled();
+  expect(screen.getByRole('dialog', { name: 'Still Water' })).toBeInTheDocument();
+});
+
 test('handles conservative vertical and horizontal compact-player gestures', async () => {
   setMobileViewport(true);
   const { audioFactory, store } = await playerFixture();
   render(<PlayerBar store={store} />);
   const compact = screen.getByRole('region', { name: 'Now playing' });
+  const capturePointer = vi.fn();
+  Object.defineProperty(compact, 'setPointerCapture', { value: capturePointer });
 
   fireEvent.pointerDown(compact, { button: 0, clientX: 120, clientY: 140, pointerType: 'touch' });
+  expect(capturePointer).not.toHaveBeenCalled();
+  fireEvent.pointerMove(compact, { button: 0, clientX: 118, clientY: 80, pointerType: 'touch' });
+  expect(capturePointer).toHaveBeenCalledWith(1);
   fireEvent.pointerUp(compact, { button: 0, clientX: 116, clientY: 72, pointerType: 'touch' });
   expect(screen.getByRole('dialog', { name: 'Still Water' })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Close expanded player' }));
+  capturePointer.mockClear();
   fireEvent.pointerDown(compact, { button: 0, clientX: 170, clientY: 80, pointerType: 'touch' });
+  expect(capturePointer).not.toHaveBeenCalled();
+  fireEvent.pointerMove(compact, { button: 0, clientX: 120, clientY: 83, pointerType: 'touch' });
+  expect(capturePointer).toHaveBeenCalledWith(1);
+  expect(compact.style.getPropertyValue('--compact-swipe-x')).toBe('-50px');
   fireEvent.pointerUp(compact, { button: 0, clientX: 92, clientY: 85, pointerType: 'touch' });
+  expect(compact.style.getPropertyValue('--compact-swipe-x')).toBe('0px');
 
   await waitFor(() => expect(store.getSnapshot().currentItem?.id).toBe('track-2'));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(audioFactory).toHaveBeenCalledTimes(1);
+});
+
+test('resets compact-player drag feedback when the pointer gesture is cancelled', async () => {
+  setMobileViewport(true);
+  const { store } = await playerFixture();
+  render(<PlayerBar store={store} />);
+  const compact = screen.getByRole('region', { name: 'Now playing' });
+
+  fireEvent.pointerDown(compact, { button: 0, clientX: 160, clientY: 80, pointerType: 'touch' });
+  fireEvent.pointerMove(compact, { button: 0, clientX: 118, clientY: 82, pointerType: 'touch' });
+  expect(compact.style.getPropertyValue('--compact-swipe-x')).toBe('-42px');
+
+  fireEvent.pointerCancel(compact, { clientX: 118, clientY: 82, pointerType: 'touch' });
+
+  expect(compact.style.getPropertyValue('--compact-swipe-x')).toBe('0px');
+  expect(compact).not.toHaveAttribute('data-compact-dragging');
+  expect(store.getSnapshot().currentItem?.id).toBe('track-1');
 });
 
 test('applies keyboard shortcuts outside editable fields and exposes accessible help', async () => {

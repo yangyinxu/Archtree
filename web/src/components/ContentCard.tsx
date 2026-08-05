@@ -1,4 +1,5 @@
 import { Link } from 'react-router';
+import { Play } from 'lucide-react';
 
 import type { AudioTrackSummary, ContentSummary } from '../api/contentSchemas';
 import { Artwork } from './Artwork';
@@ -44,9 +45,17 @@ export const ContentCard = ({
 }: ContentCardProps) => {
   const title = contentTitle(item);
   const metadata = contentMetadata(item);
+  const showPlayReveal = item.contentType === 'audioTrack' && Boolean(onPlay);
   const body = (
     <>
-      <Artwork alt="" kind={item.contentType} sizes={artworkSizes} src={item.artworkUrl} />
+      <span className={styles.artworkFrame}>
+        <Artwork alt="" kind={item.contentType} sizes={artworkSizes} src={item.artworkUrl} />
+        {showPlayReveal ? (
+          <span aria-hidden="true" className={styles.playReveal}>
+            <Play fill="currentColor" focusable="false" strokeWidth={1.8} />
+          </span>
+        ) : null}
+      </span>
       <span className={styles.copy}>
         <span className={styles.title} title={title}>{title}</span>
         <span className={styles.metadata}>{metadata}</span>

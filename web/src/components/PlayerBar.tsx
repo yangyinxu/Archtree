@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from 'react';
 
@@ -20,7 +21,16 @@ import styles from './PlayerBar.module.css';
 const MOBILE_PLAYER_QUERY = '(max-width: 767px)';
 const VERTICAL_GESTURE_THRESHOLD = 48;
 const HORIZONTAL_GESTURE_THRESHOLD = 56;
+const GESTURE_FEEDBACK_THRESHOLD = 8;
+const MAX_HORIZONTAL_FEEDBACK = 96;
 const GESTURE_AXIS_RATIO = 1.15;
+
+type CompactGesture = {
+  axis: 'pending' | 'horizontal' | 'vertical';
+  pointerId: number;
+  x: number;
+  y: number;
+};
 
 /** Prevents playback shortcuts from intercepting typing and native range-input keys. */
 const isEditableTarget = (target: EventTarget | null) => {
@@ -85,6 +95,9 @@ const trapDialogFocus = (event: ReactKeyboardEvent<HTMLElement>) => {
 interface PlayerBarProps {
   /** Tests may inject a store; the application always uses the one shared browser store. */
   store?: PlayerStore;
+  /** The shell owns this presentation state so playback never remounts with the side pane. */
+  nowPlayingOpen?: boolean;
+  onToggleNowPlaying?: () => void;
 }
 
 interface TransportControlsProps {
@@ -190,7 +203,11 @@ const TransportControls = ({
 };
 
 /** Presents compact, expanded, and keyboard surfaces over one route-independent player store. */
-export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
+export const PlayerBar = ({
+  nowPlayingOpen = false,
+  onToggleNowPlaying,
+  store = playerStore
+}: PlayerBarProps) => {
   const player = usePlayer(store);
   const current = player.currentItem;
   const playing = player.status === 'playing';
@@ -198,7 +215,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
   const mobile = useMobileViewport();
   const [expanded, setExpanded] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const gestureStart = useRef<{ x: number; y: number } | null>(null);
+  const gestureStart = useRef<CompactGesture | null>(null);
   const suppressNextOpen = useRef(false);
   const compactOpenButton = useRef<HTMLButtonElement>(null);
   const expandedCloseButton = useRef<HTMLButtonElement>(null);
@@ -214,10 +231,10 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
     if (restoreFocus) onNextFrame(() => compactOpenButton.current?.focus());
   };
 
-  const openHelp = () => {
-    helpReturnFocus.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+  const openHelp = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    // Safari does not focus a button for every pointer click, so retain the
+    // explicit trigger instead of relying on document.activeElement.
+    helpReturnFocus.current = event.currentTarget;
     setHelpOpen(true);
   };
 
@@ -229,6 +246,16 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
   const suppressGestureClick = () => {
     suppressNextOpen.current = true;
     setTimeout(() => { suppressNextOpen.current = false; }, 0);
+  };
+
+  /** Returns compact-player content to rest while CSS handles the optional settle animation. */
+  const resetCompactGesture = (surface: HTMLElement, pointerId?: number) => {
+    gestureStart.current = null;
+    surface.removeAttribute('data-compact-dragging');
+    surface.style.setProperty('--compact-swipe-x', '0px');
+    if (pointerId !== undefined && surface.hasPointerCapture?.(pointerId)) {
+      surface.releasePointerCapture(pointerId);
+    }
   };
 
   useEffect(() => {
@@ -290,19 +317,60 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
   const startCompactGesture = (event: ReactPointerEvent<HTMLElement>) => {
     if (!mobile || !current || event.currentTarget !== event.target
       && (event.target as HTMLElement).closest('[data-player-control]')) return;
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
-    gestureStart.current = { x: event.clientX, y: event.clientY };
+    // Compact-player swipes are a direct-touch interaction. Capturing a mouse
+    // pointer here would retarget the identity button's subsequent click.
+    if (event.pointerType === 'mouse') return;
+    gestureStart.current = {
+      axis: 'pending',
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY
+    };
+    event.currentTarget.setAttribute('data-compact-dragging', 'true');
+  };
+
+  const moveCompactGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = gestureStart.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || !mobile || !current) return;
+
+    const horizontalDelta = event.clientX - gesture.x;
+    const verticalDelta = event.clientY - gesture.y;
+    const horizontalDistance = Math.abs(horizontalDelta);
+    const verticalDistance = Math.abs(verticalDelta);
+
+    if (gesture.axis === 'pending') {
+      if (Math.max(horizontalDistance, verticalDistance) < GESTURE_FEEDBACK_THRESHOLD) return;
+      if (horizontalDistance > verticalDistance * GESTURE_AXIS_RATIO) {
+        gesture.axis = 'horizontal';
+      } else if (verticalDistance > horizontalDistance * GESTURE_AXIS_RATIO) {
+        gesture.axis = 'vertical';
+      } else {
+        return;
+      }
+      // Wait until movement has resolved to a gesture before capturing so a
+      // normal tap keeps its original interactive click target.
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
+
+    if (gesture.axis !== 'horizontal') return;
+    event.preventDefault();
+    const directionAvailable = horizontalDelta < 0 ? player.canNext : player.canPrevious;
+    const resistedDelta = horizontalDelta * (directionAvailable ? 1 : 0.28);
+    const feedback = Math.sign(resistedDelta)
+      * Math.min(Math.abs(resistedDelta), MAX_HORIZONTAL_FEEDBACK);
+    event.currentTarget.style.setProperty('--compact-swipe-x', `${Math.round(feedback)}px`);
   };
 
   const finishCompactGesture = (event: ReactPointerEvent<HTMLElement>) => {
     const start = gestureStart.current;
-    gestureStart.current = null;
-    if (!start || !mobile || !current) return;
+    if (!start || start.pointerId !== event.pointerId) return;
 
     const horizontalDelta = event.clientX - start.x;
     const verticalDelta = event.clientY - start.y;
     const horizontalDistance = Math.abs(horizontalDelta);
     const verticalDistance = Math.abs(verticalDelta);
+    resetCompactGesture(event.currentTarget, event.pointerId);
+    if (!mobile || !current) return;
 
     if (verticalDelta < 0
       && verticalDistance >= VERTICAL_GESTURE_THRESHOLD
@@ -315,9 +383,20 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
     if (horizontalDistance >= HORIZONTAL_GESTURE_THRESHOLD
       && horizontalDistance > verticalDistance * GESTURE_AXIS_RATIO) {
       suppressGestureClick();
-      if (horizontalDelta < 0) void store.next();
-      else void store.previous();
+      if (horizontalDelta < 0 && player.canNext) void store.next();
+      else if (horizontalDelta > 0 && player.canPrevious) void store.previous();
+      return;
     }
+
+    if (horizontalDistance >= GESTURE_FEEDBACK_THRESHOLD
+      && horizontalDistance > verticalDistance * GESTURE_AXIS_RATIO) {
+      suppressGestureClick();
+    }
+  };
+
+  const cancelCompactGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    if (gestureStart.current?.pointerId !== event.pointerId) return;
+    resetCompactGesture(event.currentTarget, event.pointerId);
   };
 
   const compactIdentity = (
@@ -331,7 +410,13 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
           src={current.artworkUrl}
         />
       ) : (
-        <span className={styles.artworkFallback} aria-hidden="true">F</span>
+        <Artwork
+          alt=""
+          className={styles.artwork}
+          kind="audioTrack"
+          sizes="(max-width: 767px) 2.55rem, 3.4rem"
+          src=""
+        />
       )}
       <span className={styles.copy}>
         <span className={styles.title}>{current?.title || 'Nothing playing'}</span>
@@ -350,8 +435,9 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
         className={styles.player}
         aria-label="Now playing"
         inert={helpOpen || (mobile && expanded) ? true : undefined}
-        onPointerCancel={() => { gestureStart.current = null; }}
+        onPointerCancel={cancelCompactGesture}
         onPointerDown={startCompactGesture}
+        onPointerMove={moveCompactGesture}
         onPointerUp={finishCompactGesture}
       >
         {mobile ? (
@@ -401,6 +487,20 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
           >
             <span aria-hidden="true">?</span>
           </button>
+          {onToggleNowPlaying && (
+            <button
+              aria-controls="now-playing-aside"
+              aria-expanded={nowPlayingOpen}
+              aria-label={nowPlayingOpen ? 'Hide Now Playing view' : 'Show Now Playing view'}
+              className={`${styles.secondaryControl} ${styles.nowPlayingToggle}`}
+              data-active={nowPlayingOpen || undefined}
+              onClick={onToggleNowPlaying}
+              title={nowPlayingOpen ? 'Hide Now Playing view' : 'Show Now Playing view'}
+              type="button"
+            >
+              <Icon name="panel-right" />
+            </button>
+          )}
           <button
             aria-label={player.muted ? 'Unmute' : 'Mute'}
             className={styles.volumeButton}
@@ -412,6 +512,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
           </button>
           <input
             aria-label="Volume"
+            className={styles.volumeSlider}
             disabled={!current}
             max="1"
             min="0"
@@ -442,7 +543,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
           onKeyDown={trapDialogFocus}
           role="dialog"
         >
-          <header className={styles.expandedHeader}>
+          <div className={styles.expandedHeader}>
             <button
               aria-label="Close expanded player"
               className={styles.expandedHeaderButton}
@@ -450,7 +551,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
               ref={expandedCloseButton}
               type="button"
             >
-              <span aria-hidden="true">⌄</span>
+              <Icon className={styles.collapseIcon} name="arrow-left" />
             </button>
             <div>
               <p className={styles.expandedEyebrow}>Now Playing</p>
@@ -465,7 +566,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
             >
               <span aria-hidden="true">?</span>
             </button>
-          </header>
+          </div>
 
           <div className={styles.expandedBody}>
             <Artwork
@@ -509,6 +610,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
               </button>
               <input
                 aria-label="Volume"
+                className={styles.volumeSlider}
                 max="1"
                 min="0"
                 onChange={(event) => store.setVolume(Number(event.currentTarget.value))}
@@ -540,7 +642,7 @@ export const PlayerBar = ({ store = playerStore }: PlayerBarProps) => {
                 <h2 id="player-shortcuts-heading">Keyboard shortcuts</h2>
               </div>
               <button aria-label="Close keyboard shortcuts" onClick={closeHelp} ref={helpCloseButton} type="button">
-                <span aria-hidden="true">×</span>
+                <span className={styles.helpCloseLabel}>Close</span>
               </button>
             </div>
             <p className={styles.helpIntro}>Shortcuts work anywhere except while typing in a field.</p>
