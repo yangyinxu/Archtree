@@ -80,10 +80,12 @@ test('previews seek position and commits pointer or keyboard changes at the expe
   const player = page.getByRole('region', { name: 'Now playing' });
   const controls = player.getByRole('group', { name: 'Playback controls' });
   const slider = player.getByRole('slider', { name: 'Playback position' });
-  await expect(slider).toBeEnabled();
-  await expect(slider).toHaveAttribute('max', '15');
+  // Stop playback before metadata assertions so seeking does not depend on
+  // the browser host providing a working audio output sink.
   await controls.getByRole('button', { name: 'Pause' }).click();
   await expect(controls.getByRole('button', { name: 'Play' })).toBeVisible();
+  await expect(slider).toBeEnabled();
+  await expect(slider).toHaveAttribute('max', '15');
 
   // WebKit may deliver one final timeupdate after pause; establish a settled
   // baseline so that this test measures pointer-preview behavior, not media timing.
@@ -160,14 +162,29 @@ test('keeps the desktop player anchored when the wheel originates over it', asyn
   expect(after.windowScrollY).toBe(0);
   expect(Math.abs(after.bottom - after.viewportHeight)).toBeLessThanOrEqual(1);
   expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(1);
+});
 
+test('scrolls main independently while keeping the desktop player anchored', async ({ page }) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto('/listen');
+  await expect(page.getByRole('heading', { level: 2, name: 'Featured albums' })).toBeVisible();
+
+  const player = page.getByRole('region', { name: 'Now playing' });
+  await expect(player).toBeVisible();
   const main = page.getByRole('main');
-  await main.evaluate((element) => {
+  const scrollRange = await main.evaluate((element) => {
     const overflowProbe = document.createElement('div');
     overflowProbe.setAttribute('aria-hidden', 'true');
     overflowProbe.style.height = '75rem';
     element.append(overflowProbe);
+    return new Promise<{ clientHeight: number; scrollHeight: number }>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight
+      })));
+    });
   });
+  expect(scrollRange.scrollHeight).toBeGreaterThan(scrollRange.clientHeight);
   const mainBox = await main.boundingBox();
   expect(mainBox).not.toBeNull();
   const mainWheelPoint = {
@@ -186,7 +203,14 @@ test('keeps the desktop player anchored when the wheel originates over it', asyn
     { message: 'wheel over main should scroll the main container' }
   ).toBeGreaterThan(0);
 
-  const afterMainScroll = await readLayout();
+  const afterMainScroll = await player.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: rect.bottom,
+      viewportHeight: window.innerHeight,
+      windowScrollY: window.scrollY
+    };
+  });
   expect(afterMainScroll.windowScrollY).toBe(0);
   expect(Math.abs(afterMainScroll.bottom - afterMainScroll.viewportHeight)).toBeLessThanOrEqual(1);
 });
