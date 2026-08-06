@@ -1,0 +1,365 @@
+.settings {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: grid;
+  gap: 0.85rem 1rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1.25rem;
+  text-align: left;
+}
+
+.settingsCopy h2,
+.dialog h2,
+.confirmDialog h2 {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}
+
+.settingsCopy p,
+.instructions {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  margin-top: 0.35rem;
+}
+
+.avatarButton {
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  padding: 0;
+  position: relative;
+}
+
+.avatarButton:not(:disabled) {
+  cursor: pointer;
+}
+
+.avatarButton:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.avatarEditOverlay {
+  align-items: center;
+  background: color-mix(in srgb, var(--color-canvas) 62%, transparent);
+  border-radius: inherit;
+  color: var(--color-text);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard);
+}
+
+.avatarEditOverlay svg {
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
+.avatarButton:not(:disabled):focus-visible .avatarEditOverlay,
+.avatarButton:not(:disabled):active .avatarEditOverlay {
+  opacity: 1;
+}
+
+.avatarButton:not(:disabled):active .avatarEditOverlay {
+  background: color-mix(in srgb, var(--color-canvas) 72%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .avatarButton:not(:disabled):hover .avatarEditOverlay {
+    opacity: 1;
+  }
+}
+
+.settingsActions,
+.dialogActions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.primaryButton,
+.secondaryButton,
+.dangerButton,
+.textDangerButton,
+.iconButton {
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.85rem;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.primaryButton {
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  color: var(--color-canvas);
+}
+
+.secondaryButton {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.dangerButton {
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 38%, transparent);
+  color: var(--color-danger);
+}
+
+.textDangerButton {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-danger);
+}
+
+.iconButton {
+  align-items: center;
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+  display: inline-flex;
+  height: 2.75rem;
+  justify-content: center;
+  padding: 0;
+  width: 2.75rem;
+}
+
+.iconButton svg {
+  height: 1.25rem;
+  width: 1.25rem;
+}
+
+.primaryButton:not(:disabled):hover {
+  background: var(--color-accent-bright);
+  border-color: var(--color-accent-bright);
+}
+
+.secondaryButton:not(:disabled):hover,
+.iconButton:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-surface-hover) 82%, var(--color-text));
+  border-color: var(--color-text-muted);
+}
+
+.dangerButton:not(:disabled):hover,
+.textDangerButton:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-danger) 22%, transparent);
+  border-color: var(--color-danger);
+}
+
+.primaryButton:not(:disabled):active,
+.secondaryButton:not(:disabled):active,
+.dangerButton:not(:disabled):active,
+.textDangerButton:not(:disabled):active,
+.iconButton:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.dangerButton:disabled,
+.textDangerButton:disabled,
+.iconButton:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.feedback {
+  grid-column: 2 / -1;
+  min-height: 1.5rem;
+}
+
+.error,
+.progress,
+.success {
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  padding: 0.55rem 0.7rem;
+}
+
+.error {
+  background: color-mix(in srgb, var(--color-danger) 13%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger) 28%, transparent);
+  color: var(--color-danger);
+}
+
+.progress {
+  background: var(--color-surface-raised);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.success {
+  background: var(--color-accent-soft);
+  border-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  color: var(--color-accent-bright);
+}
+
+.overlay {
+  align-items: center;
+  background: var(--color-backdrop);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: var(--layer-modal);
+}
+
+.dialog,
+.confirmDialog {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-text);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: clamp(1rem, 4vw, 1.6rem);
+  width: min(100%, 38rem);
+}
+
+.confirmDialog {
+  width: min(100%, 30rem);
+}
+
+.dialogHeader {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.kicker {
+  color: var(--color-accent-bright);
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+}
+
+.editorStage,
+.previewStage {
+  display: grid;
+  justify-items: center;
+}
+
+.cropCanvas {
+  aspect-ratio: 1;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: grab;
+  max-width: 22.5rem;
+  touch-action: none;
+  width: min(76vw, 22.5rem);
+}
+
+.cropCanvas:active {
+  cursor: grabbing;
+}
+
+.cropControls {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1.25rem;
+  width: min(100%, 28rem);
+}
+
+.cropControls label {
+  color: var(--color-text-muted);
+  display: grid;
+  font-size: 0.82rem;
+  gap: 0.35rem;
+}
+
+.cropControls input {
+  accent-color: var(--color-accent);
+  min-height: 2rem;
+  width: 100%;
+}
+
+.editorStage > .instructions,
+.previewStage > .instructions {
+  max-width: 30rem;
+  text-align: center;
+}
+
+.dialogActions {
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+  width: 100%;
+}
+
+.circularPreview {
+  aspect-ratio: 1;
+  border: 2px solid var(--color-border-strong);
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+  object-fit: cover;
+  width: min(68vw, 18rem);
+}
+
+@media (max-width: 46rem) {
+  .settings {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .settingsActions,
+  .feedback {
+    grid-column: 1 / -1;
+  }
+
+  .dialogActions > button {
+    flex: 1 1 auto;
+  }
+}
+
+@media (forced-colors: active) {
+  .avatarEditOverlay {
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .cropCanvas,
+  .circularPreview,
+  .dialog,
+  .confirmDialog,
+  .primaryButton,
+  .secondaryButton,
+  .dangerButton,
+  .iconButton,
+  .error,
+  .progress,
+  .success {
+    border-color: CanvasText;
+  }
+}
+
+@media (pointer: coarse) {
+  .primaryButton,
+  .secondaryButton,
+  .dangerButton,
+  .textDangerButton,
+  .iconButton {
+    min-height: var(--control-min-size);
+  }
+}

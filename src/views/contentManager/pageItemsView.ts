@@ -16,7 +16,7 @@ export const renderPageItemsHierarchy = (
     contentCollections: any[]
 ) => {
     if (pages.length === 0) {
-        return '<h3>My Pages</h3><p class="empty-linked-content">No pages yet.</p>';
+        return '<h3>Pages</h3><p class="empty-linked-content">No pages yet.</p>';
     }
 
     const carouselsById = new Map(carousels.map((carousel) => [identifier(carousel), carousel]));
@@ -36,7 +36,7 @@ export const renderPageItemsHierarchy = (
                 const carousel = carouselsById.get(referenceId);
                 const name = carousel
                     ? String(carousel.name ?? 'Untitled carousel')
-                    : 'Unavailable carousel';
+                    : 'Carousel not loaded on this inventory page';
                 const mode = carousel?.mode === 'artist'
                     ? 'Artist'
                     : carousel?.mode === 'personalized' ? 'Personalized' : 'Manual';
@@ -47,7 +47,7 @@ export const renderPageItemsHierarchy = (
                 const collection = collectionsById.get(referenceId);
                 const name = collection
                     ? String(collection.name ?? `Untitled ${type.toLowerCase()}`)
-                    : `Unavailable ${type.toLowerCase()}`;
+                    : `${type} not loaded on this inventory page`;
                 const mode = collection?.mode === 'dynamic' ? 'Dynamic' : 'Manual';
                 const source = collection?.dynamicSource
                     ? ` · ${String(collection.dynamicSource)}`
@@ -65,5 +65,5 @@ export const renderPageItemsHierarchy = (
         return `<div class="hierarchy-item"><strong>${escapeHtml(title)} [${escapeHtml(slug)}]</strong><span>${items.length} page item${items.length === 1 ? '' : 's'}</span>${pageItems}</div>`;
     }).join('');
 
-    return `<h3>My Pages</h3><div class="content-hierarchy">${pageCards}</div>`;
+    return `<h3>Pages</h3><div class="content-hierarchy">${pageCards}</div>`;
 };

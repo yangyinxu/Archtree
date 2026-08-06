@@ -2,9 +2,11 @@
 
 ## Status
 
-Draft. This document is implementation guidance, not the canonical product
-contract. Promote agreed behavior to `../business-rules.md` in the same change
-as implementation.
+**Status: Not started**
+
+This document is implementation guidance, not the canonical product contract.
+Promote agreed behavior to `../business-rules.md` in the same change as
+implementation.
 
 ## Objective
 
@@ -70,7 +72,7 @@ Before implementation, confirm and record the agreed behavior in
 The first release should not include queue editing, “Play next,” “Add to
 queue,” queue reordering, or a persistent Up Next screen.
 
-The output button is not a Spotify Connect-style remote playback system. It
+The output button is not a third-party remote playback system. It
 does not discover another signed-in phone or transfer the queue to a Finitude
 process running on another device. That would require a separate backend,
 device-presence, authorization, and queue-handoff design.
@@ -117,6 +119,8 @@ device-presence, authorization, and queue-handoff design.
 
 ### Phase 1: Separate playback state from player presentation
 
+**Status: Not started**
+
 - Refactor `AudioPlayer` so playback configuration and reusable player content
   are separate from the presentation route.
 - Ensure only the originating playback screen starts a new queue. The mini-
@@ -133,6 +137,8 @@ device-presence, authorization, and queue-handoff design.
 - Preserve the existing `AudioManager` dependency injection and test seams.
 
 ### Phase 2: Implement the mini-player shell
+
+**Status: Not started**
 
 - Add a reusable `NowPlayingMiniPlayer` SwiftUI view driven by `AudioManager`.
 - Add artwork loading with the same placeholder and retry-safe behavior as the
@@ -157,6 +163,8 @@ device-presence, authorization, and queue-handoff design.
   authentication sheets do not create competing bars or obscure controls.
 
 ### Phase 3: Add interactive expansion and collapse
+
+**Status: Not started**
 
 - Implement upward drag and tap-to-expand behavior using a single interactive
   presentation mechanism. Crossing the upward threshold presents the native
@@ -183,6 +191,8 @@ device-presence, authorization, and queue-handoff design.
 
 ### Phase 4: Reconcile navigation and lifecycle behavior
 
+**Status: Not started**
+
 - Preserve the canonical restoration rule: returning from background with a
   current Now Playing item selects the recorded origin tab and presents the
   existing player without restarting its queue or position. Implement this by
@@ -199,6 +209,8 @@ device-presence, authorization, and queue-handoff design.
   item whose artwork or metadata cannot be loaded without leaving stale UI.
 
 ### Phase 5: Test and document
+
+**Status: Not started**
 
 - Add unit tests for presentation-state transitions, including queue creation,
   queue clearing, current-item changes, collapse, expansion, and restoration.

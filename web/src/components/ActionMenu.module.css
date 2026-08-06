@@ -1,0 +1,96 @@
+.wrapper {
+  display: inline-flex;
+  position: relative;
+}
+
+.trigger {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  height: var(--control-min-size);
+  justify-content: center;
+  padding: 0;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+  width: var(--control-min-size);
+}
+
+.trigger:hover,
+.trigger[aria-expanded='true'] {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.trigger:focus-visible {
+  border-color: var(--color-focus);
+}
+
+.trigger svg {
+  height: 1.25rem;
+  width: 1.25rem;
+}
+
+.menu {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  min-width: 10.5rem;
+  padding: 0.35rem;
+  position: fixed;
+  z-index: var(--layer-menu);
+}
+
+.menu button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  min-height: 2.5rem;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu button:hover,
+.menu button:focus-visible {
+  background: var(--color-surface-hover);
+}
+
+.menu button:disabled {
+  color: var(--color-text-subtle);
+  cursor: not-allowed;
+}
+
+.menu .destructive {
+  color: var(--color-danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger {
+    transition: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .menu button {
+    min-height: var(--control-min-size);
+  }
+}
+
+@media (forced-colors: active) {
+  .trigger,
+  .menu {
+    border-color: ButtonBorder;
+  }
+
+  .trigger:focus-visible,
+  .menu button:focus-visible {
+    border-color: Highlight;
+  }
+}

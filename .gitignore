@@ -1,3 +1,8 @@
 node_modules
 nodemon.json
 .env
+web/coverage
+web/dist
+web/playwright-report
+web/test-results
+/elastic-beanstalk-artifact/

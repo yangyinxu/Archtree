@@ -69,8 +69,10 @@ export const renderAudioStorageAuditPage = (report: any, userEmail: string) => {
         <strong>${escapeHtml(String(track.originalFileName || track.title || 'Unnamed track'))}</strong>
         <div class="item-meta">
           <span>Track ID: <code>${escapeHtml(String(track.audioTrackId ?? ''))}</code></span>
-          <span>Status: ${escapeHtml(String(track.uploadStatus ?? 'legacy'))}</span>
+          <span>Upload: ${escapeHtml(String(track.uploadStatus ?? 'legacy'))}</span>
+          <span>Publication: ${escapeHtml(String(track.publicationStatus ?? 'legacy'))}</span>
           ${track.uploadError ? `<span class="status-error">${escapeHtml(String(track.uploadError))}</span>` : ''}
+          ${track.publicationError ? `<span class="status-error">${escapeHtml(String(track.publicationError))}</span>` : ''}
         </div>
       </li>`)}
     </section>
@@ -81,10 +83,13 @@ export const renderAudioStorageAuditPage = (report: any, userEmail: string) => {
         <strong>${escapeHtml(String(track.originalFileName || track.title || 'Unnamed track'))}</strong>
         <div class="item-meta">
           <span>Track ID: <code>${escapeHtml(String(track.audioTrackId ?? ''))}</code></span>
-          <span>Status: ${escapeHtml(String(track.uploadStatus ?? 'unknown'))}</span>
+          <span>Upload: ${escapeHtml(String(track.uploadStatus ?? 'unknown'))}</span>
           <span>S3 object: ${track.objectExists ? 'Present' : 'Missing'}</span>
-          <span>Updated: ${escapeHtml(formatDate(track.uploadUpdatedAt))}</span>
+          <span>Upload updated: ${escapeHtml(formatDate(track.uploadUpdatedAt))}</span>
+          <span>Publication: ${escapeHtml(String(track.publicationStatus ?? 'legacy'))}</span>
+          <span>Publication updated: ${escapeHtml(formatDate(track.publicationUpdatedAt))}</span>
           ${track.uploadError ? `<span class="status-error">${escapeHtml(String(track.uploadError))}</span>` : ''}
+          ${track.publicationError ? `<span class="status-error">${escapeHtml(String(track.publicationError))}</span>` : ''}
         </div>
       </li>`)}
     </section>

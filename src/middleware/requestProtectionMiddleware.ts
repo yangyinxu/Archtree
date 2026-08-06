@@ -9,6 +9,12 @@ type WindowEntry = {
 const windows = new Map<string, WindowEntry>();
 let lastSweep = 0;
 
+/** Resets process-local rate windows so sequential integration cases remain isolated. */
+export const resetRateLimitWindowsForTests = () => {
+    windows.clear();
+    lastSweep = 0;
+};
+
 const clientKey = (req: Request) => req.ip || req.socket.remoteAddress || 'unknown';
 
 export const rateLimit = (
@@ -131,11 +137,20 @@ export const asyncHandler = (
 };
 
 export const authRateLimit = rateLimit('auth', 20, 15 * 60_000);
+export const browserRefreshRateLimit = rateLimit('browser-refresh', 120, 15 * 60_000);
 export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
 export const authConcurrencyLimit = limitConcurrency('auth-password', 2, 20);
 export const publicReadRateLimit = rateLimit('public-read', 120, 60_000);
+/** Bounds private Playlist reads and writes before they consume database work. */
+export const playlistRateLimit = rateLimit('playlist', 240, 60_000);
+/** Prevents one client from occupying the transactional Playlist write pool. */
+export const playlistMutationConcurrencyLimit = limitConcurrency('playlist-mutation', 4, 40);
+/** Bounds anonymous listener diagnostics before any request body is parsed. */
+export const listenerTelemetryRateLimit = rateLimit('listener-telemetry', 20, 60_000);
 export const uploadRateLimit = rateLimit('upload', 20, 60 * 60_000);
 export const uploadConcurrencyLimit = limitConcurrency('upload', 1, 4);
+/** Prevents telemetry uploads from occupying meaningful API capacity. */
+export const listenerTelemetryConcurrencyLimit = limitConcurrency('listener-telemetry', 2, 10);
 export const reconciliationConcurrencyLimit = limitConcurrency('reconciliation', 1, 1);
 
 const requestAbortControllers = new WeakMap<Request, AbortController>();

@@ -10,6 +10,7 @@ import {
     verifyGoogleIdentity
 } from '../services/federatedIdentityService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
+import { normalizeUserRole } from '../services/authRoleService';
 
 const conflict = () => {
     const error = new Error(
@@ -101,7 +102,7 @@ const completeFederatedAuthentication = async (
         ...tokens,
         userId: user._id.toString(),
         email: user.email,
-        role: user.role ?? 'user'
+        role: normalizeUserRole(user.role)
     });
 };
 

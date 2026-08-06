@@ -4,6 +4,8 @@ import { ObjectId } from 'mongodb';
 import Post from '../models/post';
 import { getDb } from '../infrastructure/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
+import { toPublicFeedPost } from '../services/publicCatalogService';
+import { boundedLimit, boundedOffset } from '../utils/pagination';
 
 export const getPost = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -14,7 +16,9 @@ export const getPost = async (req: Request, res: Response, next: NextFunction) =
         const post = await getDb()!.collection('posts').findOne({
             _id: ObjectId.createFromHexString(rawPostId)
         });
-        return res.status(post ? 200 : 404).json({ post });
+        return res.status(post ? 200 : 404).json({
+            post: post ? toPublicFeedPost(post) : null
+        });
     } catch (error) {
         return next(error);
     }
@@ -22,16 +26,20 @@ export const getPost = async (req: Request, res: Response, next: NextFunction) =
 
 export const getPosts = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
-        const offset = Math.max(0, Number(req.query.offset) || 0);
+        const limit = boundedLimit(req.query.limit, 50, 100);
+        const offset = boundedOffset(req.query.offset);
         const posts = await getDb()!
             .collection('posts')
             .find()
-            .sort({ createdAt: -1 })
+            .sort({ createdAt: -1, _id: -1 })
             .skip(offset)
             .limit(limit)
             .toArray();
-        return res.status(200).json({ posts, limit, offset });
+        return res.status(200).json({
+            posts: posts.map(toPublicFeedPost),
+            limit,
+            offset
+        });
     } catch (error) {
         return next(error);
     }
@@ -39,6 +47,12 @@ export const getPosts = async (req: Request, res: Response, next: NextFunction) 
 
 export const createPost = async (req: Request, res: Response, next: NextFunction) => {
     try {
+        const auth = (req as AuthenticatedRequest).auth;
+        if (!auth) return res.status(401).json({ message: 'Unauthorized.' });
+        if (auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
+
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             return res.status(422).json({
@@ -46,9 +60,6 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
                 errors: errors.array()
             });
         }
-        const auth = (req as AuthenticatedRequest).auth;
-        if (!auth) return res.status(401).json({ message: 'Unauthorized.' });
-
         const post = new Post(
             String(req.body.title ?? ''),
             String(req.body.description ?? ''),
@@ -69,18 +80,19 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
 
 export const deletePost = async (req: Request, res: Response, next: NextFunction) => {
     try {
+        const auth = (req as AuthenticatedRequest).auth;
+        if (!auth) return res.status(401).json({ message: 'Unauthorized.' });
+        if (auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
+
         const rawPostId = String(req.query.postId ?? '');
         if (!ObjectId.isValid(rawPostId)) {
             return res.status(400).json({ error: 'Invalid postId' });
         }
-        const auth = (req as AuthenticatedRequest).auth;
-        if (!auth) return res.status(401).json({ message: 'Unauthorized.' });
 
         const postId = ObjectId.createFromHexString(rawPostId);
-        const filter = auth.role === 'admin'
-            ? { _id: postId }
-            : { _id: postId, userId: ObjectId.createFromHexString(auth.userId) };
-        const result = await getDb()!.collection('posts').deleteOne(filter);
+        const result = await getDb()!.collection('posts').deleteOne({ _id: postId });
         if (result.deletedCount !== 1) {
             return res.status(404).json({ message: 'Post not found or cannot be deleted.' });
         }

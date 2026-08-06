@@ -1,6 +1,15 @@
 import { escapeHtml } from '../html';
+import type { ManagementInventoryPage } from './inventoryPagination';
 
-export const renderAudioTracksPage = (userEmail: string, tracks: any[]) => {
+type AudioTrackPagination = Omit<ManagementInventoryPage<unknown>, 'items'>;
+
+/** Renders one bounded page of the administrator's global Soundtrack inventory. */
+export const renderAudioTracksPage = (
+    userId: string,
+    userEmail: string,
+    tracks: any[],
+    pagination: AudioTrackPagination = { page: 1, hasPrevious: false, hasNext: false }
+) => {
     const trackItems = tracks.length > 0
         ? tracks.map((track) => {
             const id = String(track._id ?? '');
@@ -37,13 +46,15 @@ export const renderAudioTracksPage = (userEmail: string, tracks: any[]) => {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My Audio Tracks - Archtree</title>
+  <title>Audio Tracks - Archtree</title>
   <link rel="stylesheet" href="/assets/archtree.css" />
   <style>
     .track-toolbar { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 18px; }
     .track-title-row { align-items: center; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
     .pill--muted { color: #58635e; background: #e8ebe7; }
     [data-track-item] { display: grid; gap: 10px; }
+    .inventory-pagination { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+    .inventory-pagination span { color: var(--muted); font-size: 14px; font-weight: 700; }
     @media (max-width: 600px) { .track-toolbar { align-items: stretch; grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -53,13 +64,13 @@ export const renderAudioTracksPage = (userEmail: string, tracks: any[]) => {
       <div>
         <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
         <p class="eyebrow" style="margin-top:18px;">Audio library</p>
-        <h1 style="margin-bottom:8px;">My Audio Tracks</h1>
-        <p class="muted">Signed in as <strong>${escapeHtml(userEmail)}</strong> · ${tracks.length} track${tracks.length === 1 ? '' : 's'}</p>
+        <h1 style="margin-bottom:8px;">Audio Tracks</h1>
+        <p class="muted">Global catalog · signed in as <strong>${escapeHtml(userEmail)}</strong> · ${tracks.length} track${tracks.length === 1 ? '' : 's'} on page ${pagination.page}</p>
       </div>
       <div class="header-actions">
         <a class="button" href="/content/manage#create">Create and upload</a>
         <a class="button button--secondary" href="/content/manage">Content Manager</a>
-        <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
       </div>
     </header>
     <section class="card card--raised">
@@ -72,8 +83,14 @@ export const renderAudioTracksPage = (userEmail: string, tracks: any[]) => {
       </div>
       <ul class="item-list" id="track-list">${trackItems}</ul>
       <div class="empty-state" id="track-filter-empty" hidden>No tracks match this search.</div>
+      ${(pagination.hasPrevious || pagination.hasNext) ? `<nav class="inventory-pagination" aria-label="Audio Track pages">
+        ${pagination.hasPrevious ? `<a class="button button--secondary" href="/content/manage/audio-tracks?page=${pagination.page - 1}">Previous Audio Tracks</a>` : ''}
+        <span>Page ${pagination.page}</span>
+        ${pagination.hasNext ? `<a class="button button--secondary" href="/content/manage/audio-tracks?page=${pagination.page + 1}">Next Audio Tracks</a>` : ''}
+      </nav>` : ''}
     </section>
   </main>
+  <script src="/assets/browser-session-forms.js"></script>
   <script src="/assets/audio-tracks.js"></script>
 </body>
 </html>`;

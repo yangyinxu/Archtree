@@ -1,5 +1,9 @@
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import {
+    touchActiveAccount,
+    withActiveAccount
+} from '../services/accountReferenceFenceService';
 
 const collectionId = 'imageAssets';
 
@@ -20,8 +24,24 @@ export interface ImageAssetRecord {
 }
 
 export class ImageAsset {
-    static insert(asset: ImageAssetRecord) {
-        return getDb()!.collection(collectionId).insertOne(asset);
+    static async insert(asset: ImageAssetRecord, session?: ClientSession) {
+        if (asset.ownerType === 'user') {
+            return getDb()!.collection(collectionId).insertOne(
+                asset,
+                session ? { session } : {}
+            );
+        }
+        if (session) {
+            await touchActiveAccount(asset.createdBy, session);
+            return getDb()!.collection(collectionId).insertOne(asset, { session });
+        }
+        return withActiveAccount(
+            asset.createdBy,
+            (activeSession) => getDb()!.collection(collectionId).insertOne(
+                asset,
+                { session: activeSession }
+            )
+        );
     }
 
     static findById(imageId: string) {
@@ -37,8 +57,33 @@ export class ImageAsset {
         );
     }
 
+    /** Applies a lifecycle transition only while the exact observed state still owns the row. */
+    static updateByIdWhere(
+        imageId: string,
+        expected: Record<string, unknown>,
+        update: Record<string, unknown>,
+        session?: ClientSession
+    ) {
+        const imageObjectId = ObjectId.createFromHexString(imageId);
+        return getDb()!.collection(collectionId).updateOne(
+            { _id: imageObjectId, ...expected },
+            { $set: update },
+            session ? { session } : {}
+        );
+    }
+
     static deleteById(imageId: string) {
         const imageObjectId = ObjectId.createFromHexString(imageId);
         return getDb()!.collection(collectionId).deleteOne({ _id: imageObjectId });
+    }
+
+
+    /** Removes only a lifecycle row that remains in the caller's finalized state. */
+    static deleteByIdWhere(imageId: string, expected: Record<string, unknown>) {
+        const imageObjectId = ObjectId.createFromHexString(imageId);
+        return getDb()!.collection(collectionId).deleteOne({
+            _id: imageObjectId,
+            ...expected
+        });
     }
 }

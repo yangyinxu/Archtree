@@ -1,0 +1,232 @@
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-top: 1.25rem;
+  overflow: hidden;
+  text-align: left;
+}
+
+.headingBlock {
+  padding: 1rem 1.1rem 0.85rem;
+}
+
+.eyebrow,
+.dialogEyebrow {
+  color: var(--color-accent-bright);
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.heading,
+.dialogTitle {
+  color: var(--color-text);
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}
+
+.heading {
+  font-size: 1.15rem;
+  margin-top: 0.3rem;
+}
+
+.actionList {
+  border-top: 1px solid var(--color-border);
+}
+
+.actionRow {
+  align-items: center;
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0.85rem 1.1rem;
+}
+
+.actionRow + .actionRow {
+  border-top: 1px solid var(--color-border);
+}
+
+.actionRow h3 {
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.actionRow p,
+.dialogCopy {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  margin-top: 0.25rem;
+  max-width: 38rem;
+}
+
+.dangerRow {
+  background: color-mix(in srgb, var(--color-danger) 6%, transparent);
+}
+
+.secondaryButton,
+.dangerButton,
+.cancelButton,
+.confirmButton {
+  border-radius: var(--radius-pill);
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.85rem;
+}
+
+.secondaryButton,
+.cancelButton {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.dangerButton,
+.confirmButton {
+  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 36%, transparent);
+  color: var(--color-danger);
+}
+
+.secondaryButton,
+.dangerButton,
+.cancelButton,
+.confirmButton {
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.secondaryButton:not(:disabled):hover,
+.cancelButton:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-surface-hover) 82%, var(--color-text));
+  border-color: var(--color-text-muted);
+}
+
+.dangerButton:not(:disabled):hover,
+.confirmButton:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-danger) 24%, transparent);
+  border-color: var(--color-danger);
+}
+
+.secondaryButton:not(:disabled):active,
+.dangerButton:not(:disabled):active,
+.cancelButton:not(:disabled):active,
+.confirmButton:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+.secondaryButton:disabled,
+.dangerButton:disabled,
+.cancelButton:disabled,
+.confirmButton:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.status,
+.error {
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  margin: 0 1.1rem 1rem;
+  padding: 0.7rem 0.8rem;
+}
+
+.status {
+  background: var(--color-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, transparent);
+  color: var(--color-accent-bright);
+}
+
+.error {
+  background: color-mix(in srgb, var(--color-danger) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 28%, transparent);
+  color: var(--color-danger);
+  margin: 1rem 0 0;
+}
+
+.backdrop {
+  align-items: center;
+  background: var(--color-backdrop);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: var(--layer-confirmation);
+}
+
+.dialog {
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  max-width: 31rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
+  width: 100%;
+}
+
+.dialogTitle {
+  font-size: 1.35rem;
+  margin-top: 0.35rem;
+}
+
+.dialogCopy {
+  font-size: 0.86rem;
+  margin-top: 0.7rem;
+}
+
+.dialogActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .actionRow {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .secondaryButton,
+  .dangerButton {
+    width: 100%;
+  }
+
+  .dialogActions {
+    flex-direction: column-reverse;
+  }
+
+  .dialogActions button {
+    width: 100%;
+  }
+}
+
+@media (forced-colors: active) {
+  .dialog,
+  .panel,
+  .secondaryButton,
+  .dangerButton,
+  .cancelButton,
+  .confirmButton,
+  .status,
+  .error {
+    border-color: CanvasText;
+  }
+}
+
+@media (pointer: coarse) {
+  .secondaryButton,
+  .dangerButton,
+  .cancelButton,
+  .confirmButton {
+    min-height: var(--control-min-size);
+  }
+}

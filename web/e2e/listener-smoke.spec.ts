@@ -1,0 +1,281 @@
+import { catalogIds } from './fixtures/catalog';
+import { expect, test } from './support/test';
+
+const albumPath = `/finitude/albums/${catalogIds.album}`;
+
+test('opens the listener from the Archtree landing page without replacing account actions', async ({ page }) => {
+  const response = await page.goto('/');
+
+  expect(response?.status()).toBe(200);
+  await expect(page.locator('.site-header').getByRole('link', { name: 'Open Finitude' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Open Finitude' })).toHaveCount(1);
+  await expect(page.getByRole('link', { name: 'Log in' })).toHaveCount(2);
+  await expect(page.getByRole('link', { name: 'Create account' })).toHaveCount(2);
+
+  await page.getByRole('link', { name: 'Open Finitude' }).click();
+  await expect(page).toHaveURL(/\/finitude$/);
+  await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
+});
+
+test('serves a production bundle deep link and survives a document reload', async ({ page }) => {
+  const response = await page.goto(albumPath);
+
+  expect(response?.status()).toBe(200);
+  await expect(page.getByRole('heading', { level: 1, name: 'Quiet Hours' })).toBeVisible();
+  await page.reload();
+  await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
+  await expect(page.getByRole('heading', { level: 1, name: 'Quiet Hours' })).toBeVisible();
+});
+
+test('keeps the Album route and persistent player while navigating', async ({ page }) => {
+  await page.goto('/finitude');
+  await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Quiet Hours, album' }).click();
+  await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
+
+  await page.getByRole('main')
+    .locator('header')
+    .getByRole('button', { name: 'Play', exact: true })
+    .click();
+
+  const player = page.getByRole('region', { name: 'Now playing' });
+  await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
+  await expect(player.getByText('First Light', { exact: true })).toBeVisible();
+
+  const controls = player.getByRole('group', { name: 'Playback controls' });
+  await controls.getByRole('button', { name: 'Shuffle off. Turn shuffle on' }).click();
+  await expect(controls.getByRole('button', { name: 'Shuffle enabled. Turn shuffle off' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await controls.getByRole('button', { name: 'Repeat off. Turn on repeat all' }).click();
+  await controls.getByRole('button', { name: 'Repeat all enabled. Turn on repeat one' }).click();
+  await expect(controls.getByRole('button', { name: 'Repeat one enabled. Turn repeat off' }))
+    .toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('link', { name: 'Search' }).click();
+  await expect(page).toHaveURL(/\/finitude\/search$/);
+  await expect(player.getByText('First Light', { exact: true })).toBeVisible();
+  await expect(controls.getByRole('button', { name: 'Shuffle enabled. Turn shuffle off' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  await expect(controls.getByRole('button', { name: 'Repeat one enabled. Turn repeat off' }))
+    .toHaveAttribute('aria-pressed', 'true');
+
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
+  await expect(player.getByText('First Light', { exact: true })).toBeVisible();
+
+  await page.goForward();
+  await expect(page).toHaveURL(/\/finitude\/search$/);
+  await expect(player.getByText('First Light', { exact: true })).toBeVisible();
+});
+
+test('previews seek position and commits pointer or keyboard changes at the expected time', async ({ page }) => {
+  await page.setViewportSize({ width: 1_280, height: 800 });
+  await page.goto(albumPath);
+  await page.getByRole('main')
+    .locator('header')
+    .getByRole('button', { name: 'Play', exact: true })
+    .click();
+
+  const player = page.getByRole('region', { name: 'Now playing' });
+  const controls = player.getByRole('group', { name: 'Playback controls' });
+  const slider = player.getByRole('slider', { name: 'Playback position' });
+  // Stop playback before metadata assertions so seeking does not depend on
+  // the browser host providing a working audio output sink.
+  await controls.getByRole('button', { name: 'Pause' }).click();
+  await expect(controls.getByRole('button', { name: 'Play' })).toBeVisible();
+  await expect(slider).toBeEnabled();
+  await expect(slider).toHaveAttribute('max', '15');
+
+  // WebKit may deliver one final timeupdate after pause; establish a settled
+  // baseline so that this test measures pointer-preview behavior, not media timing.
+  await expect.poll(async () => {
+    const before = await slider.inputValue();
+    await page.waitForTimeout(150);
+    return (await slider.inputValue()) === before;
+  }).toBe(true);
+
+  const box = await slider.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeGreaterThanOrEqual(24);
+  const middle = box!.x + (box!.width / 2);
+  const verticalCenter = box!.y + (box!.height / 2);
+  const initialValue = await slider.inputValue();
+  const readElapsed = () => slider.evaluate((input) =>
+    input.parentElement?.previousElementSibling?.textContent ?? ''
+  );
+  const initialElapsed = await readElapsed();
+
+  await page.mouse.move(middle, verticalCenter);
+  await expect(slider.locator('..').locator('output')).toHaveText('0:07');
+  expect(await slider.inputValue()).toBe(initialValue);
+  expect(await readElapsed()).toBe(initialElapsed);
+
+  await page.mouse.move(box!.x + (box!.width * 0.25), verticalCenter);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + (box!.width * 0.75), verticalCenter);
+  expect(Number(await slider.inputValue())).toBeGreaterThan(10);
+  expect(await readElapsed()).toBe(initialElapsed);
+  await page.mouse.up();
+  await expect.poll(readElapsed).toBe('0:11');
+
+  await slider.focus();
+  await page.keyboard.press('Home');
+  await expect.poll(readElapsed).toBe('0:00');
+});
+
+test('keeps the desktop player anchored when the wheel originates over it', async ({ page }) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto('/finitude');
+  await expect(page.getByRole('heading', { level: 2, name: 'Featured albums' })).toBeVisible();
+
+  // Force a root scroll range without making the deterministic catalog fixture
+  // repetitive; the application shell must reject that accidental scroll path.
+  await page.evaluate(() => {
+    const overflowProbe = document.createElement('div');
+    overflowProbe.setAttribute('aria-hidden', 'true');
+    overflowProbe.style.height = '75rem';
+    document.body.append(overflowProbe);
+  });
+  const player = page.getByRole('region', { name: 'Now playing' });
+  await expect(player).toBeVisible();
+  const readLayout = () => player.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: rect.bottom,
+      top: rect.top,
+      viewportHeight: window.innerHeight,
+      windowScrollY: window.scrollY
+    };
+  });
+  const before = await readLayout();
+  await player.getByText('Nothing playing', { exact: true }).hover();
+  const wheelSettled = page.evaluate(() => new Promise<void>((resolve) => {
+    window.addEventListener('wheel', () => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }, { once: true });
+  }));
+  await page.mouse.wheel(0, 1_200);
+  await wheelSettled;
+
+  const after = await readLayout();
+  expect(after.windowScrollY).toBe(0);
+  expect(Math.abs(after.bottom - after.viewportHeight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(1);
+});
+
+test('scrolls main independently while keeping the desktop player anchored', async ({ page }) => {
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto('/finitude');
+  await expect(page.getByRole('heading', { level: 2, name: 'Featured albums' })).toBeVisible();
+
+  const player = page.getByRole('region', { name: 'Now playing' });
+  await expect(player).toBeVisible();
+  const main = page.getByRole('main');
+  const scrollRange = await main.evaluate((element) => {
+    const overflowProbe = document.createElement('div');
+    overflowProbe.setAttribute('aria-hidden', 'true');
+    overflowProbe.style.height = '75rem';
+    element.append(overflowProbe);
+    return new Promise<{ clientHeight: number; scrollHeight: number }>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight
+      })));
+    });
+  });
+  expect(scrollRange.scrollHeight).toBeGreaterThan(scrollRange.clientHeight);
+  const mainBox = await main.boundingBox();
+  expect(mainBox).not.toBeNull();
+  const mainWheelPoint = {
+    x: mainBox!.x + (mainBox!.width / 2),
+    y: mainBox!.y + Math.min(64, mainBox!.height / 2)
+  };
+  await page.mouse.move(mainWheelPoint.x, mainWheelPoint.y);
+  const wheelTargetsMain = await main.evaluate((element, point) => {
+    const target = document.elementFromPoint(point.x, point.y);
+    return target instanceof Element && target.closest('main') === element;
+  }, mainWheelPoint);
+  expect(wheelTargetsMain).toBe(true);
+  await page.mouse.wheel(0, 600);
+  await expect.poll(
+    () => main.evaluate((element) => element.scrollTop),
+    { message: 'wheel over main should scroll the main container' }
+  ).toBeGreaterThan(0);
+
+  const afterMainScroll = await player.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: rect.bottom,
+      viewportHeight: window.innerHeight,
+      windowScrollY: window.scrollY
+    };
+  });
+  expect(afterMainScroll.windowScrollY).toBe(0);
+  expect(Math.abs(afterMainScroll.bottom - afterMainScroll.viewportHeight)).toBeLessThanOrEqual(1);
+});
+
+test('keeps signed-out Save in place without sending a mutation', async ({ api, page }) => {
+  await page.goto(albumPath);
+  const albumSave = page.getByRole('main')
+    .getByRole('button', { name: 'Save to Library' })
+    .first();
+
+  await expect(albumSave).toHaveAttribute('aria-disabled', 'false');
+  await albumSave.click();
+
+  await expect(page.getByRole('alert')).toHaveText('Log in to save albums and soundtracks.');
+  await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
+  expect(api.calls.filter((call) =>
+    ['PUT', 'DELETE'].includes(call.method)
+      && call.pathname.startsWith('/content/me/saves/')
+  )).toEqual([]);
+});
+
+test('activates the skip link and moves focus to main content', async ({ page }) => {
+  await page.goto('/finitude');
+  const skipLink = page.getByRole('link', { name: 'Skip to main content' });
+
+  // Safari/WebKit inherits the platform's optional link-tab preference, so begin
+  // from the link itself and verify the product-owned activation/focus contract.
+  await skipLink.focus();
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press('Enter');
+
+  await expect(page.getByRole('main')).toBeFocused();
+});
+
+for (const width of [320, 768, 1_440]) {
+  test(`keeps the Home document within a ${width}px viewport`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/finitude');
+    await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
+
+    const dimensions = await page.evaluate(() => ({
+      body: document.body.scrollWidth,
+      document: document.documentElement.scrollWidth,
+      viewport: document.documentElement.clientWidth
+    }));
+    expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
+    expect(dimensions.body).toBeLessThanOrEqual(dimensions.viewport + 1);
+  });
+}
+
+test.describe('reduced motion', () => {
+  test('retains navigation and playback actions', async ({ page }) => {
+    // Page media emulation is the cross-engine contract exposed by Playwright.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/finitude');
+    expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+
+    await page.getByRole('link', { name: 'Quiet Hours, album' }).click();
+    await page.getByRole('main')
+      .locator('header')
+      .getByRole('button', { name: 'Play', exact: true })
+      .click();
+
+    await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
+    await expect(page.getByRole('region', { name: 'Now playing' })
+      .getByText('First Light', { exact: true })).toBeVisible();
+  });
+});

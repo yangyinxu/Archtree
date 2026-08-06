@@ -1,12 +1,12 @@
-import express, { Router, RequestHandler} from 'express';
+import express, { Router } from 'express';
 
 import { getVideo, getVideoById } from '../controllers/videoController';
-import { limitMediaConcurrency } from '../middleware/mediaDeliveryMiddleware';
+import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
 
 const router: Router = express.Router();
 
-router.get('/', limitMediaConcurrency, getVideo);
+router.get('/', limitMediaConcurrencyFor('video'), getVideo);
 
-router.get('/:videoId', limitMediaConcurrency, getVideoById);
+router.get('/:videoId', limitMediaConcurrencyFor('video'), getVideoById);
 
 export default router;

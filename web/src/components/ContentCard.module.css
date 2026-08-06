@@ -1,0 +1,145 @@
+.card {
+  height: 100%;
+  min-width: 0;
+}
+
+.action {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+  font: inherit;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  text-decoration: none;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+  width: 100%;
+}
+
+button.action {
+  cursor: pointer;
+}
+
+.artworkFrame {
+  display: block;
+  position: relative;
+  width: 100%;
+}
+
+.playReveal {
+  align-items: center;
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: 50%;
+  bottom: var(--space-3);
+  box-shadow: var(--shadow-control);
+  color: var(--color-on-accent);
+  display: flex;
+  height: 3rem;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  right: var(--space-3);
+  transform: translateY(var(--space-2)) scale(0.92);
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+  width: 3rem;
+}
+
+.playReveal svg {
+  height: 1.25rem;
+  width: 1.25rem;
+}
+
+.action:hover {
+  background: var(--color-surface-hover);
+  border-color: transparent;
+}
+
+.action:focus-visible {
+  background: var(--color-surface-hover);
+  border-color: var(--color-focus);
+  outline-offset: -3px;
+}
+
+button.action:hover .playReveal,
+button.action:focus-visible .playReveal {
+  opacity: 1;
+  transform: none;
+}
+
+.copy {
+  display: block;
+  min-width: 0;
+  padding: 0.75rem 0 0.25rem;
+}
+
+.title,
+.metadata {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.metadata {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  margin-top: 0.23rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action {
+    transition: none;
+  }
+
+  .playReveal {
+    transform: none;
+    transition: none;
+  }
+
+  .action:hover {
+    background: var(--color-surface-hover);
+  }
+}
+
+@media (pointer: coarse) {
+  .playReveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .action {
+    border-color: ButtonBorder;
+  }
+
+  .action:focus-visible {
+    border-color: Highlight;
+  }
+
+  .playReveal {
+    background: ButtonFace;
+    border-color: ButtonText;
+    box-shadow: none;
+    color: ButtonText;
+    opacity: 1;
+    transform: none;
+  }
+}

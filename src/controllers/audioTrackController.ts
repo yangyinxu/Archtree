@@ -8,15 +8,20 @@ import {
     GetObjectCommand,
     HeadObjectCommand
 } from '@aws-sdk/client-s3';
-import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { ObjectId } from 'mongodb';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import {
     deleteAudioObjectAndTrack,
+    isAudioObjectKeyForTrack,
     uploadAudioObject
 } from '../services/audioStorageService';
-import { validateOwnedContentReferences } from '../services/contentReferenceService';
-import { deleteCoverArt, uploadCoverArt } from '../services/imageStorageService';
+import { validateContentReferences } from '../services/contentReferenceService';
+import {
+    attachCoverArtToNewOwner,
+    updateCoverArtOwnerAndCleanup,
+    uploadCoverArt
+} from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import {
     attachmentContentDisposition,
@@ -26,24 +31,34 @@ import {
     shouldHonorRange
 } from '../services/mediaDeliveryService';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
+import { listPublicAudioTracks } from '../services/publicCatalogService';
+import { boundedLimit, boundedOffset } from '../utils/pagination';
+import {
+    publishUploadedAudioTracks
+} from '../services/albumTrackLinkService';
+import { retryAudioTrackPublications } from '../services/audioPublicationRecoveryService';
 
 const s3ErrorStatus = (error: any) => {
     const status = Number(error?.$metadata?.httpStatusCode ?? 0);
     return status === 403 ? 403 : status === 404 ? 404 : 502;
 };
 
-/** Resolves only database-confirmed ready assets for authenticated downloads. */
-const resolveReadyDownloadAsset = async (
+/** Resolves the stored object only after its database lifecycle is playable. */
+const resolveReadyAudioAsset = async (
     audioTrackId: string,
     abortSignal: AbortSignal
 ) => {
-    if (!ObjectId.isValid(audioTrackId)) return { status: 'notFound' as const };
-    const track: any = await AudioTrack.findById(audioTrackId);
+    const normalizedAudioTrackId = String(audioTrackId ?? '').trim().toLowerCase();
+    if (!/^[0-9a-f]{24}$/.test(normalizedAudioTrackId)) {
+        return { status: 'notFound' as const };
+    }
+    const track: any = await AudioTrack.findReadyPublicById(normalizedAudioTrackId);
     if (!track) return { status: 'notFound' as const };
-    if (track.uploadStatus !== 'ready') return { status: 'notReady' as const };
 
     const s3Key = String(track.s3Key ?? '').trim();
-    if (!s3Key) return { status: 'notReady' as const };
+    if (!isAudioObjectKeyForTrack(s3Key, normalizedAudioTrackId)) {
+        return { status: 'notReady' as const };
+    }
     const params = {
         Bucket: process.env.S3_BUCKET_NAME!,
         Key: s3Key
@@ -59,7 +74,7 @@ const resolveReadyDownloadAsset = async (
 
 const setDownloadHeaders = (
     res: Response,
-    asset: Extract<Awaited<ReturnType<typeof resolveReadyDownloadAsset>>, { status: 'ready' }>,
+    asset: Extract<Awaited<ReturnType<typeof resolveReadyAudioAsset>>, { status: 'ready' }>,
     contentLength: number
 ) => {
     const { track, metadata } = asset;
@@ -99,6 +114,9 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
 
     const uploadFile = getUploadedFile(req, 'audioFile');
     if (!uploadFile) {
@@ -120,10 +138,6 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     if (artists.some((artist) => !artist)) {
         return res.status(404).json({ message: 'One or more artists were not found.' });
     }
-    if (artists.some((artist) => !ensureOwnerOrAdmin(authReq, String(artist.createdBy ?? '')))) {
-        return res.status(403).json({ message: 'One or more artists cannot be modified by this user.' });
-    }
-
     const genres = parseStringArray(req.body.genres);
     const albumId: string = req.body.albumId;
     const releaseDateValue = parseJsonField(req.body.releaseDate);
@@ -157,7 +171,12 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
 
     try {
         await track.save();
-        await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId, getRequestAbortSignal(req));
+        const upload = await uploadAudioObject(
+            audioTrackId,
+            uploadFile,
+            authReq.auth.userId,
+            getRequestAbortSignal(req)
+        );
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) {
             const coverArt = await uploadCoverArt(
@@ -166,16 +185,21 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
                 coverArtFile,
                 authReq.auth.userId
             );
-            await AudioTrack.updateById(audioTrackId, {
-                coverArtId: coverArt.imageId,
-                coverArtUrl: coverArt.coverArtUrl
+            await attachCoverArtToNewOwner(audioTrackId, coverArt, {
+                ownerType: 'audioTrack',
+                updateOwner: (id, update) => AudioTrack.updateById(id, update),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    AudioTrack.updateCoverArtById(id, expectedImageId, update)
             });
         }
+        await publishUploadedAudioTracks(albumId, [audioTrackId]);
 
         return res.status(201).json({
             message: `Audio Track ${title} Added Successfully`,
             audioTrackId,
-            uploadStatus: 'ready'
+            uploadStatus: 'ready',
+            publicationStatus: 'ready',
+            cleanupPending: upload.cleanupPending
         });
     } catch (error) {
         console.log(error);
@@ -191,6 +215,9 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     if (!authReq.auth) {
         return res.status(401).json({ message: 'Unauthorized' });
     }
+    if (authReq.auth.role !== 'admin') {
+        return res.status(403).json({ message: 'Administrator access is required.' });
+    }
 
     const audioTrackId: string = req.params.audioTrackId;
     const audioTrack = await AudioTrack.findById(audioTrackId);
@@ -198,20 +225,19 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
         return res.status(404).json({ message: 'Audio track not found.' });
     }
 
-    if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
-        return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
-    }
-
     const updatePayload: Record<string, unknown> = {};
+    let requestedAlbumId: string | undefined;
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
     let replacementCoverArtId: string | undefined;
+    const removeCoverArt = !coverArtFile
+        && String(req.body.removeCoverArt ?? '').toLowerCase() === 'true';
     if (req.body.title !== undefined) updatePayload.title = req.body.title;
     if (req.body.artistIds !== undefined) {
         const artistIds = parseStringArray(req.body.artistIds);
         if (!artistIds[0]) {
             return res.status(400).json({ message: 'At least one artistId is required.' });
         }
-        const validation = await validateOwnedContentReferences(authReq, 'artist', artistIds);
+        const validation = await validateContentReferences('artist', artistIds);
         if (!validation.valid) {
             return res.status(400).json({ message: validation.message });
         }
@@ -221,13 +247,13 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     if (req.body.albumId !== undefined) {
         const albumId = String(req.body.albumId ?? '').trim();
         if (albumId) {
-            const validation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+            const validation = await validateContentReferences('album', [albumId]);
             if (!validation.valid) {
                 return res.status(400).json({ message: validation.message });
             }
-            updatePayload.albumId = validation.ids[0];
+            requestedAlbumId = validation.ids[0];
         } else {
-            updatePayload.albumId = '';
+            requestedAlbumId = '';
         }
     }
     if (req.body.duration !== undefined) updatePayload.duration = req.body.duration;
@@ -245,21 +271,53 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
         replacementCoverArtId = coverArt.imageId;
         updatePayload.coverArtId = coverArt.imageId;
         updatePayload.coverArtUrl = coverArt.coverArtUrl;
-    } else if (String(req.body.removeCoverArt ?? '').toLowerCase() === 'true') {
-        await deleteCoverArt(audioTrack.coverArtId);
+    } else if (removeCoverArt) {
         updatePayload.coverArtId = null;
         updatePayload.coverArtUrl = '';
     }
 
-    await AudioTrack.updateById(audioTrackId, updatePayload);
-    let cleanupPending = false;
-    if (replacementCoverArtId && audioTrack.coverArtId && audioTrack.coverArtId !== replacementCoverArtId) {
-        await deleteCoverArt(audioTrack.coverArtId).catch((error) => {
-            cleanupPending = true;
-            console.log(`Unable to delete replaced audio-track cover art ${audioTrack.coverArtId}:`, error);
+    const cleanup = Object.keys(updatePayload).length > 0 || requestedAlbumId !== undefined
+        ? await updateCoverArtOwnerAndCleanup(
+            audioTrackId,
+            updatePayload,
+            audioTrack.coverArtId,
+            removeCoverArt || Boolean(
+                replacementCoverArtId && audioTrack.coverArtId !== replacementCoverArtId
+            ),
+            {
+                ownerType: 'audioTrack',
+                updateOwner: requestedAlbumId === undefined
+                    ? (id, update) => AudioTrack.updateById(id, update)
+                    : (id, update) => AudioTrack.updateWithAlbumById(
+                        id,
+                        requestedAlbumId,
+                        update
+                    ),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    requestedAlbumId === undefined
+                        ? AudioTrack.updateCoverArtById(id, expectedImageId, update)
+                        : AudioTrack.updateWithAlbumAndCoverArtById(
+                            id,
+                            requestedAlbumId,
+                            expectedImageId,
+                            update
+                        )
+            }
+        )
+        : { updateApplied: true, cleanupPending: false, cleanupError: undefined };
+    if (cleanup.cleanupError) {
+        console.log(`Unable to delete detached audio-track cover art ${audioTrack.coverArtId}:`, cleanup.cleanupError);
+    }
+    if (!cleanup.updateApplied) {
+        return res.status((cleanup as any).outcomeUnknown ? 503 : 409).json({
+            message: 'Audio track was not updated because its cover art changed concurrently or its lifecycle evidence is invalid.',
+            cleanupPending: cleanup.cleanupPending
         });
     }
-    return res.status(200).json({ message: 'Audio track updated successfully.', cleanupPending });
+    return res.status(200).json({
+        message: 'Audio track updated successfully.',
+        cleanupPending: cleanup.cleanupPending
+    });
 };
 
 // Get an audio track via the model and return it
@@ -273,21 +331,17 @@ export const getAudioTrackById = async (req: Request, res: Response, next: NextF
 
 // Stream an audio track by id from AWS S3 with support for HTTP Range requests
 export const headAudioTrackStream = async (req: Request, res: Response, next: NextFunction) => {
-    const audioTrackId = req.params.audioTrackId;
     const context = createMediaAbortContext(req, res);
     try {
-        const metadata = await getS3().send(new HeadObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: audioTrackId
-        }), { abortSignal: context.signal });
-        if (metadata.ContentLength === undefined) {
-            return res.status(404).end();
-        }
+        const asset = await resolveReadyAudioAsset(req.params.audioTrackId, context.signal);
+        // Public streaming deliberately does not reveal a non-ready lifecycle state.
+        if (asset.status !== 'ready') return res.status(404).end();
 
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Type', metadata.ContentType || 'audio/mpeg');
-        res.setHeader('Content-Length', metadata.ContentLength);
-        if (metadata.ETag) res.setHeader('ETag', metadata.ETag);
+        res.setHeader('Content-Type', asset.metadata.ContentType || asset.track.contentType || 'audio/mpeg');
+        res.setHeader('Content-Length', asset.metadata.ContentLength!);
+        res.setHeader('Cache-Control', 'no-transform');
+        if (asset.metadata.ETag) res.setHeader('ETag', asset.metadata.ETag);
         return res.status(200).end();
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
@@ -303,24 +357,14 @@ export const headAudioTrackStream = async (req: Request, res: Response, next: Ne
 
 export const streamAudioTrack = async (req: Request, res: Response, next: NextFunction) => {
     const audioTrackId: string = req.params.audioTrackId;
-    const s3 = getS3();
-    const params = {
-        Bucket: process.env.S3_BUCKET_NAME!,
-        Key: audioTrackId
-    };
-
     const range = req.headers.range;
     const context = createMediaAbortContext(req, res);
     try {
-        const metadata = await s3.send(
-            new HeadObjectCommand(params),
-            { abortSignal: context.signal }
-        );
-        if (!metadata.ContentLength) {
-            return res.status(404).end();
-        }
+        const asset = await resolveReadyAudioAsset(audioTrackId, context.signal);
+        // Missing and non-ready tracks share the same public response.
+        if (asset.status !== 'ready') return res.status(404).end();
 
-        const fileSize = metadata.ContentLength;
+        const fileSize = asset.metadata.ContentLength!;
         let start = 0;
         let end = fileSize - 1;
 
@@ -342,16 +386,16 @@ export const streamAudioTrack = async (req: Request, res: Response, next: NextFu
         }
 
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Type', metadata.ContentType || 'audio/mpeg');
+        res.setHeader('Content-Type', asset.metadata.ContentType || asset.track.contentType || 'audio/mpeg');
         res.setHeader('Content-Length', end - start + 1);
         res.setHeader('Content-Disposition', `inline; filename="${audioTrackId}"`);
         res.setHeader('X-Accel-Buffering', 'no');
         res.setHeader('Cache-Control', 'no-transform');
-        if (metadata.ETag) res.setHeader('ETag', metadata.ETag);
+        if (asset.metadata.ETag) res.setHeader('ETag', asset.metadata.ETag);
 
-        const object = await s3.send(
+        const object = await getS3().send(
             new GetObjectCommand({
-                ...params,
+                ...asset.params,
                 Range: range ? `bytes=${start}-${end}` : undefined
             }),
             { abortSignal: context.signal }
@@ -381,7 +425,7 @@ export const headAudioTrackDownload = async (
 ) => {
     const context = createMediaAbortContext(req, res);
     try {
-        const asset = await resolveReadyDownloadAsset(
+        const asset = await resolveReadyAudioAsset(
             req.params.audioTrackId,
             context.signal
         );
@@ -410,7 +454,7 @@ export const downloadAudioTrack = async (
 ) => {
     const context = createMediaAbortContext(req, res);
     try {
-        const asset = await resolveReadyDownloadAsset(
+        const asset = await resolveReadyAudioAsset(
             req.params.audioTrackId,
             context.signal
         );
@@ -483,9 +527,9 @@ export const downloadAudioTrack = async (
 // Get all audio tracks via the model and return them
 export const getAudioTracks = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
-        const offset = Math.max(0, Number(req.query.offset) || 0);
-        const audioTracks = await AudioTrack.fetchAll(limit, offset);
+        const limit = boundedLimit(req.query.limit, 50, 100);
+        const offset = boundedOffset(req.query.offset);
+        const audioTracks = await listPublicAudioTracks(limit, offset);
         return res.status(200).json({ audioTracks, limit, offset });
     } catch (error) {
         return next(error);
@@ -499,6 +543,9 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const audioTrackId: string = req.params.audioTrackId;
         const audioTrack = await AudioTrack.findById(audioTrackId);
@@ -507,22 +554,26 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
             return res.status(404).json({ message: 'Audio track not found.' });
         }
 
-        if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
-            return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
-        }
-
         try {
-            await deleteAudioObjectAndTrack(audioTrackId);
+            const deletion = await deleteAudioObjectAndTrack(audioTrackId);
+            return res.status(200).json({
+                message: 'Audio track deleted successfully.',
+                cleanupPending: deletion.cleanupPending
+            });
         } catch (s3Error) {
             console.log('Audio track deletion failed for audioTrackId:', audioTrackId, s3Error);
-            return res.status(502).json({
-                message: 'The S3 file could not be deleted. Track metadata was retained for reconciliation.'
+            const conflict = Number((s3Error as any)?.statusCode) === 409;
+            const outcomeUnknown = (s3Error as any)?.code === 'audio_deletion_outcome_unknown';
+            return res.status(conflict ? 409 : 502).json({
+                message: conflict
+                    ? String((s3Error as Error).message)
+                    : outcomeUnknown
+                        ? 'Audio track deletion outcome could not be confirmed. Reconciliation is required.'
+                        : 'Audio track deletion could not complete. Track metadata was retained for retry and reconciliation.',
+                cleanupPending: true
             });
         }
 
-        return res.status(200).json({
-            message: 'Audio track deleted successfully.'
-        });
     } catch (error: any) {
         console.log(error);
         return res.status(500).json({ message: 'Failed to delete audio track.' });
@@ -538,22 +589,43 @@ export const getAudioFile = (req: Request, res: Response, next: NextFunction) =>
     );
 };
 
-export const uploadAudioTrackFile = async (req: Request, res: Response, next: NextFunction) => {
+interface AudioTrackFileUploadDependencies {
+    findTrack: typeof AudioTrack.findById;
+    uploadObject: typeof uploadAudioObject;
+    retryPublications: typeof retryAudioTrackPublications;
+}
+
+const defaultAudioTrackFileUploadDependencies: AudioTrackFileUploadDependencies = {
+    findTrack: AudioTrack.findById.bind(AudioTrack),
+    uploadObject: uploadAudioObject,
+    retryPublications: retryAudioTrackPublications
+};
+
+/** Uploads one object, then reports only the publication state re-read by recovery. */
+export const uploadAudioTrackFile = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    dependencyOverrides: Partial<AudioTrackFileUploadDependencies> = {}
+) => {
     try {
+        const dependencies = {
+            ...defaultAudioTrackFileUploadDependencies,
+            ...dependencyOverrides
+        };
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Unauthorized' });
         }
+        if (authReq.auth.role !== 'admin') {
+            return res.status(403).json({ message: 'Administrator access is required.' });
+        }
 
         const audioTrackId: string = req.params.audioTrackId;
-        const audioTrack = await AudioTrack.findById(audioTrackId);
+        const audioTrack = await dependencies.findTrack(audioTrackId);
 
         if (!audioTrack) {
             return res.status(404).json({ message: 'Audio track not found.' });
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, audioTrack.createdBy ?? '')) {
-            return res.status(403).json({ message: 'Forbidden: owner or admin only.' });
         }
 
         const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
@@ -561,15 +633,59 @@ export const uploadAudioTrackFile = async (req: Request, res: Response, next: Ne
             return res.status(400).json({ message: 'Missing audio file. Use multipart form field: audioFile.' });
         }
 
-        await uploadAudioObject(audioTrackId, uploadFile, String(audioTrack.createdBy ?? authReq.auth.userId), getRequestAbortSignal(req));
+        const upload = await dependencies.uploadObject(
+            audioTrackId,
+            uploadFile,
+            String(audioTrack.createdBy ?? authReq.auth.userId),
+            getRequestAbortSignal(req)
+        );
+        const publication = await dependencies.retryPublications([audioTrackId]);
+        const publicationResult = publication.results.find(
+            (result) => result.audioTrackId === audioTrackId.toLowerCase()
+        );
+        if (!publicationResult) {
+            throw Object.assign(new Error('Audio publication result could not be read back.'), {
+                outcomeUnknown: true,
+                cleanupPending: upload.cleanupPending,
+                reconciliationRequired: true
+            });
+        }
+        if (publicationResult.outcome !== 'ready') {
+            const outcomeUnknown = publicationResult.outcome === 'unknown';
+            return res.status(outcomeUnknown ? 503 : 409).json({
+                message: outcomeUnknown
+                    ? 'Audio file uploaded, but publication outcome could not be confirmed. Reconciliation is required.'
+                    : 'Audio file uploaded, but publication failed. Retry publication without uploading the file again.',
+                audioTrackId,
+                uploadStatus: 'ready',
+                publicationStatus: publicationResult.publicationStatus,
+                publicationOutcome: publicationResult.outcome,
+                publicationRetryRequired: true,
+                reconciliationRequired: outcomeUnknown,
+                cleanupPending: upload.cleanupPending,
+                error: publicationResult.error
+            });
+        }
 
         return res.status(200).json({
             message: 'Audio file uploaded successfully.',
             audioTrackId,
-            uploadStatus: 'ready'
+            uploadStatus: 'ready',
+            publicationStatus: publicationResult.publicationStatus,
+            cleanupPending: upload.cleanupPending
         });
     } catch (error) {
         console.log(error);
-        return res.status(500).json({ message: 'Failed to upload audio file.' });
+        const statusCode = Number((error as any)?.statusCode);
+        const conflict = statusCode === 409;
+        const outcomeUnknown = (error as any)?.outcomeUnknown === true;
+        return res.status(conflict ? 409 : outcomeUnknown ? 503 : 500).json({
+            message: conflict
+                ? String((error as Error).message)
+                : outcomeUnknown
+                    ? 'Audio upload outcome could not be confirmed. Reconciliation is required.'
+                    : 'Failed to upload audio file.',
+            cleanupPending: Boolean((error as any)?.cleanupPending)
+        });
     }
 };

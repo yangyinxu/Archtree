@@ -1,0 +1,44 @@
+.avatar {
+  align-items: center;
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  color: var(--color-text);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  height: 2rem;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  width: 2rem;
+}
+
+.large {
+  font-size: 1.5rem;
+  height: 6rem;
+  width: 6rem;
+}
+
+.image {
+  border-radius: inherit;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.avatar svg {
+  height: 1.15rem;
+  width: 1.15rem;
+}
+
+.large svg {
+  height: 2.5rem;
+  width: 2.5rem;
+}
+
+@media (forced-colors: active) {
+  .avatar {
+    border-color: CanvasText;
+  }
+}

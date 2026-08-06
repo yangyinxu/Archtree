@@ -19,6 +19,7 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'users', keys: { email: 1 }, options: { unique: true } },
     { collection: 'users', keys: { username: 1 } },
     { collection: 'authSessions', keys: { refreshTokenHash: 1 }, options: { unique: true } },
+    { collection: 'authSessions', keys: { previousRefreshTokenHash: 1 }, options: { sparse: true } },
     { collection: 'authSessions', keys: { userId: 1, revokedAt: 1, expiresAt: -1 } },
     { collection: 'authSessions', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'authActionTokens', keys: { codeHash: 1 } },
@@ -32,7 +33,21 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'passkeyChallenges', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'userSaves', keys: { userId: 1, contentType: 1, contentId: 1 }, options: { unique: true } },
     { collection: 'userSaves', keys: { userId: 1, savedAt: -1 } },
+    { collection: 'userSaves', keys: { userId: 1, lastPlayedAt: -1, _id: -1 } },
+    { collection: 'userSaves', keys: { userId: 1, lastActivityAt: -1, _id: -1 } },
     { collection: 'userActivity', keys: { userId: 1 }, options: { unique: true } },
+    { collection: 'playlists', keys: { ownerUserId: 1, updatedAt: -1, _id: -1 } },
+    {
+      collection: 'accountMutations',
+      keys: { ownerUserId: 1, idempotencyKeyHash: 1 },
+      options: { unique: true }
+    },
+    { collection: 'accountMutations', keys: { ownerUserId: 1, expiresAt: 1 } },
+    {
+      collection: 'accountMutations',
+      keys: { expiresAt: 1 },
+      options: { expireAfterSeconds: 0 }
+    },
     { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'carousels', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'contentCollections', keys: { createdBy: 1, updatedAt: -1 } },
@@ -41,6 +56,9 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'audioTracks', keys: { createdBy: 1 } },
     { collection: 'audioTracks', keys: { artistIds: 1 } },
     { collection: 'audioTracks', keys: { uploadStatus: 1, uploadUpdatedAt: -1 } },
+    { collection: 'audioTracks', keys: { publicationStatus: 1, uploadStatus: 1 } },
+    { collection: 'imageAssets', keys: { ownerType: 1, ownerId: 1, _id: 1 } },
+    { collection: 'imageAssets', keys: { createdBy: 1, ownerType: 1 } },
     { collection: 'posts', keys: { createdAt: -1 } }
   ];
 

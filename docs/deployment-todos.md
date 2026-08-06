@@ -5,20 +5,21 @@ be completed solely through application code.
 
 ## Production HTTPS for Authentication
 
-Status: Recovery is prepared on `develop` following the 2026-08-02 production
-deployment, after which the healthy single instance was observed serving HTTP
-without a port 443 listener. Redeployment and HTTPS re-verification remain
-pending.
+Status: Recovered on 2026-08-05 at 23:38 EDT. Production commit `9b62537`
+deployed successfully through CodePipeline and Elastic Beanstalk, restoring a
+trusted HTTPS listener and the managed HTTP-to-HTTPS redirect.
 
 Current state:
 
-- Route 53 resolves the production domain to the healthy single-instance
-  Elastic Beanstalk environment; public HTTP and `/health` both returned `200`
-  during the 2026-08-05 incident check.
-- Nginx is serving the ACME HTTP-01 challenge location, which is consistent
-  with the hook's missing-certificate challenge configuration, while port 443
-  refuses connections until issuance succeeds.
-- The recovery candidate starts missing-certificate retry after a five-minute
+- Route 53 resolves the production domain to the single-instance Elastic
+  Beanstalk environment, which reported `Ok` after deploying the recovery
+  commit.
+- Public HTTP returns `308` to the equivalent `https://kashewt.com` URL, and
+  repeated HTTPS `/health` checks return `200` with a trusted certificate.
+- The deployed Let's Encrypt certificate covers `kashewt.com` and expires on
+  2026-11-04. Direct instance-level timer status remains to be captured during
+  the next authorized instance inspection.
+- The deployed recovery starts missing-certificate retry after a five-minute
   base delay plus a bounded randomized delay, then uses an hourly base interval
   without requiring another deployment. Its separate twice-daily maintenance
   path preserves a working certificate when renewal fails.
@@ -41,9 +42,10 @@ Remaining rollout and capability gates:
 - [x] Point production DNS to the Elastic Beanstalk environment.
 - [x] Set `HTTPS_DOMAIN`, `ACME_EMAIL`, and `TRUST_PROXY_HOPS=1` in Elastic
       Beanstalk, then deploy after DNS resolves to the instance.
-- [ ] Deploy the HTTPS recovery candidate and confirm the bootstrap retry and
-      twice-daily renewal timers are active.
-- [ ] Reconfirm Let's Encrypt issuance, port 443, and the HTTP-to-HTTPS redirect.
+- [x] Deploy the HTTPS recovery candidate through the production pipeline.
+- [ ] Capture direct `systemctl` evidence that the bootstrap retry and
+      twice-daily renewal timers are active on the production instance.
+- [x] Reconfirm Let's Encrypt issuance, port 443, and the HTTP-to-HTTPS redirect.
 - [x] Verify `TRUST_PROXY_HOPS` against the deployed proxy chain.
 - [x] Change the iOS Release `ARCHTREE_AUTH_BASE_URL` to the production
       `https://` domain.
