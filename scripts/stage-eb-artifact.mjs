@@ -67,6 +67,18 @@ const expectedRootEntries = new Set([
   'web'
 ]);
 
+const requiredPlatformHooks = [
+  '.platform/confighooks/postdeploy/01_configure_https.sh',
+  '.platform/hooks/prebuild/01_install_certbot.sh',
+  '.platform/hooks/postdeploy/01_configure_https.sh',
+  '.platform/hooks/postdeploy/02_install_certbot_timer.sh'
+];
+
+const requiredDeploymentFiles = [
+  '.ebextensions/https-instance.config',
+  ...requiredPlatformHooks
+];
+
 /** Locks destructive replacement to the dedicated, marker-owned staging directory. */
 const assertSafeOutputDirectory = async (sourceRoot, outputDirectory) => {
   const requiredOutputDirectory = path.join(sourceRoot, 'elastic-beanstalk-artifact');
@@ -336,10 +348,19 @@ const validateExactLayout = async (artifactRoot) => {
 };
 
 const validateHookPermissions = async (artifactRoot) => {
-  const hooksRoot = path.join(artifactRoot, '.platform', 'hooks');
-  const hooks = await listFiles(hooksRoot);
-  if (hooks.length === 0) throw new Error('Elastic Beanstalk platform hooks are missing.');
-  for (const hook of hooks) {
+  const platformScripts = [];
+  for (const directory of ['hooks', 'confighooks']) {
+    const scripts = await listFiles(path.join(artifactRoot, '.platform', directory));
+    platformScripts.push(...scripts);
+  }
+  if (platformScripts.length === 0) throw new Error('Elastic Beanstalk platform hooks are missing.');
+  for (const relativeHook of requiredDeploymentFiles) {
+    await requireRegularFile(
+      path.join(artifactRoot, relativeHook),
+      `Required Elastic Beanstalk deployment file ${relativeHook}`
+    );
+  }
+  for (const hook of platformScripts) {
     const stats = await lstat(hook);
     if ((stats.mode & 0o111) === 0) {
       throw new Error(`Elastic Beanstalk platform hook is not executable: ${hook}`);

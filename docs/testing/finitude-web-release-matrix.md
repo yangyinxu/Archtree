@@ -23,7 +23,7 @@ Search coverage verifies cancellable debounced result previews without history
 writes, explicit history commits, and committed query restoration through
 browser Back and Forward.
 
-The current local uncommitted candidate, verified on 2026-08-05, passes 222/222
+The current local uncommitted candidate, verified on 2026-08-05, passes 235/235
 server tests, 204/204 Web unit/component tests, 126/126 Mongo-backed integration
 tests, both production builds, and E2E TypeScript. The strict local
 three-engine Playwright matrix passes 191 tests with 10 documented

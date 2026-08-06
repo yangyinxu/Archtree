@@ -15,6 +15,10 @@ canonical in [`../business-rules.md`](../business-rules.md).
 - The bundle must contain only the explicit runtime allowlist produced by
   `npm run stage:eb-artifact`; credentials and `.env` files must remain in the
   deployment environment.
+- Artifact staging requires the Certbot installer, application and
+  configuration-deployment HTTPS entry points, and bootstrap/renewal timer
+  hooks. A candidate missing any one of those hooks is not deployable to the
+  single-instance environment.
 - The Playlist release adds private `playlists` and account-mutation receipt
   collections plus their owner, replay, and expiry indexes. These changes are
   additive and own no S3 objects; verify every required production index before
@@ -127,6 +131,14 @@ Run these checks against the staging origin:
    indistinguishable from a missing ID and never appears in sidebar, index,
    cache, logs, or telemetry.
 
+For a new or replaced single instance, also verify that the Certbot bootstrap
+and renewal timers are loaded. If the first HTTP-01 attempt is transiently
+unsuccessful, port 80 may remain available while the bootstrap timer retries
+after its base and randomized delay; do not promote until a trusted certificate
+is active, port 443 responds, and port 80 redirects application requests to
+HTTPS. Confirm the readiness condition gates further bootstrap service work and
+the twice-daily renewal timer remains active.
+
 Run the checked-in media workload only on a target explicitly approved for
 load testing. Remote targets require `ALLOW_REMOTE_MEDIA_LOAD=1` and an exact
 `MEDIA_LOAD_ALLOWED_HOSTS` entry. Retain only its aggregate result and server
@@ -147,6 +159,7 @@ environment, treat replacement or restart as a user-visible risk and use the
 approved maintenance/traffic procedure. During and after deployment, watch:
 
 - Elastic Beanstalk environment health and process restarts;
+- HTTPS bootstrap/renewal unit state, port 443, and the port 80 redirect;
 - `/health` media admission, rejection, and 5xx outcomes by resource;
 - listener page/API/playback error telemetry;
 - authentication success and refresh failures;
@@ -191,7 +204,10 @@ release also affects authentication, playback, or shared infrastructure.
 
 Application rollback does not guarantee reversal of persistent instance
 infrastructure such as issued TLS certificates or systemd timer state. Inspect
-those separately if a release changed `.platform` or `.ebextensions`. The
+those separately if a release changed `.platform` or `.ebextensions`. The HTTPS
+timer installer keeps a stable copy of the configurator under
+`/usr/local/sbin`, so explicitly verify that persisted copy and both timer unit
+definitions when rolling back across this recovery change. The
 additive Playlist collections and receipts must remain intact during rollback;
 the previous application may ignore them, but rollback must not delete listener
 data or remove their indexes. Playlist artwork has no persistent derivative or

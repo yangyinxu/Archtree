@@ -44,10 +44,17 @@ const createSourceFixture = async () => {
   await writeFixtureFile(root, 'web/dist/assets/index-AbCd1234.js', 'console.log("fixture");\n');
   await writeFixtureFile(root, 'web/dist/assets/index-XyZ_5678.css', 'body { color: black; }\n');
   await writeFixtureFile(root, 'web/dist/assets/logo-Qwer1234.webp', 'fixture image\n');
-  await writeFixtureFile(root, '.platform/hooks/postdeploy/01_fixture.sh', '#!/usr/bin/env bash\n');
-  await chmod(path.join(root, '.platform/hooks/postdeploy/01_fixture.sh'), 0o755);
+  for (const hook of [
+    '.platform/confighooks/postdeploy/01_configure_https.sh',
+    '.platform/hooks/prebuild/01_install_certbot.sh',
+    '.platform/hooks/postdeploy/01_configure_https.sh',
+    '.platform/hooks/postdeploy/02_install_certbot_timer.sh'
+  ]) {
+    await writeFixtureFile(root, hook, '#!/usr/bin/env bash\n');
+    await chmod(path.join(root, hook), 0o755);
+  }
   await writeFixtureFile(root, '.platform/nginx/conf.d/fixture.conf', 'send_timeout 120s;\n');
-  await writeFixtureFile(root, '.ebextensions/fixture.config', 'Resources: {}\n');
+  await writeFixtureFile(root, '.ebextensions/https-instance.config', 'Resources: {}\n');
   await writeFixtureFile(root, 'README.md', 'must not be staged\n');
   return root;
 };
@@ -197,6 +204,22 @@ test('rejects an empty forbidden directory from an allowlisted source path', asy
   await mkdir(path.join(sourceRoot, 'src/node_modules'), { recursive: true });
 
   await assert.rejects(stageFixture(sourceRoot), /forbidden path component/i);
+});
+
+test('rejects an artifact without the HTTPS recovery hook', async (t) => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await rm(path.join(sourceRoot, '.platform/hooks/postdeploy/02_install_certbot_timer.sh'));
+
+  await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
+});
+
+test('rejects an artifact without the port 443 security-group contract', async (t) => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await rm(path.join(sourceRoot, '.ebextensions/https-instance.config'));
+
+  await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
 });
 
 test('rejects a manifest reference whose asset is not content-hashed', async (t) => {
