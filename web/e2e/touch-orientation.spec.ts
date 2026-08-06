@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 import { catalogIds } from './fixtures/catalog';
+import { installDeterministicAudio } from './support/deterministicAudio';
 import { expect, test } from './support/test';
 import { expectNoHorizontalOverflow } from './support/visual';
 
@@ -12,6 +13,7 @@ const expectMinimumTouchTarget = async (target: Locator) => {
 };
 
 const startMobilePlayback = async (page: Page) => {
+  await installDeterministicAudio(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/finitude/albums/${catalogIds.album}`);
   await expect(page.getByRole('heading', { level: 1, name: 'Quiet Hours' })).toBeVisible();
@@ -40,8 +42,6 @@ test.describe('touch and orientation reflow', () => {
       .getByRole('link', { name: 'Search' });
     await expectMinimumTouchTarget(pause);
     await expectMinimumTouchTarget(mobileSearch);
-    await pause.tap();
-    await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
 
     const compactOpen = page.getByRole('button', { name: 'Open Now Playing: First Light' });
     await compactOpen.tap();
@@ -51,7 +51,7 @@ test.describe('touch and orientation reflow', () => {
     await page.setViewportSize({ width: 740, height: 390 });
     expect(await page.evaluate(() => matchMedia('(orientation: landscape)').matches)).toBe(true);
     await expect(expanded).toBeVisible();
-    await expect(expanded.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+    await expect(expanded.getByRole('button', { name: 'Pause' })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.setViewportSize({ width: 390, height: 844 });

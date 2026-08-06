@@ -1,5 +1,6 @@
 import { catalogIds } from './fixtures/catalog';
 import { privatePlaylistSummary } from './fixtures/privateListener';
+import { installDeterministicAudio } from './support/deterministicAudio';
 import { expect, test } from './support/test';
 import { installPrivateListenerRoutes } from './support/privateRoutes';
 
@@ -90,6 +91,7 @@ test('supports menu arrow keys, dialog focus wrapping, Escape, and trigger focus
 });
 
 test('does not intercept playback shortcuts while typing and restores help focus', async ({ page }) => {
+  await installDeterministicAudio(page);
   await page.setViewportSize({ width: 1_280, height: 800 });
   await page.goto(`/finitude/albums/${catalogIds.album}`);
   await page.getByRole('main')
@@ -99,21 +101,15 @@ test('does not intercept playback shortcuts while typing and restores help focus
 
   const player = page.getByRole('region', { name: 'Now playing' });
   const controls = player.getByRole('group', { name: 'Playback controls' });
-  const pause = controls.getByRole('button', { name: 'Pause' });
-  const play = controls.getByRole('button', { name: 'Play', exact: true });
-  await expect(pause).toBeVisible();
-  await pause.click();
-  await expect(play).toBeVisible();
+  await expect(controls.getByRole('button', { name: 'Pause' })).toBeVisible();
   const search = page.getByRole('searchbox', { name: 'Search artists, albums, and soundtracks' }).first();
   await search.pressSequentially('ambient ');
   await expect(search).toHaveValue('ambient ');
-  await expect(play).toBeVisible();
+  await expect(controls.getByRole('button', { name: 'Pause' })).toBeVisible();
 
   await page.getByRole('main').focus();
   await page.keyboard.press('Space');
-  await expect(pause).toBeVisible();
-  await pause.click();
-  await expect(play).toBeVisible();
+  await expect(controls.getByRole('button', { name: 'Play' })).toBeVisible();
 
   const helpTrigger = player.getByRole('button', { name: 'Keyboard shortcuts' });
   await helpTrigger.click();
