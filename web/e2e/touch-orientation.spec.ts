@@ -40,6 +40,8 @@ test.describe('touch and orientation reflow', () => {
       .getByRole('link', { name: 'Search' });
     await expectMinimumTouchTarget(pause);
     await expectMinimumTouchTarget(mobileSearch);
+    await pause.tap();
+    await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
 
     const compactOpen = page.getByRole('button', { name: 'Open Now Playing: First Light' });
     await compactOpen.tap();
@@ -49,7 +51,7 @@ test.describe('touch and orientation reflow', () => {
     await page.setViewportSize({ width: 740, height: 390 });
     expect(await page.evaluate(() => matchMedia('(orientation: landscape)').matches)).toBe(true);
     await expect(expanded).toBeVisible();
-    await expect(expanded.getByRole('button', { name: 'Pause' })).toBeVisible();
+    await expect(expanded.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.setViewportSize({ width: 390, height: 844 });

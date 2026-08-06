@@ -185,6 +185,10 @@ test('scrolls main independently while keeping the desktop player anchored', asy
     });
   });
   expect(scrollRange.scrollHeight).toBeGreaterThan(scrollRange.clientHeight);
+  // Linux headless Chromium routes synthetic wheel input consistently once
+  // the intended scroll container owns focus.
+  await main.focus();
+  await expect(main).toBeFocused();
   const mainBox = await main.boundingBox();
   expect(mainBox).not.toBeNull();
   const mainWheelPoint = {

@@ -99,15 +99,21 @@ test('does not intercept playback shortcuts while typing and restores help focus
 
   const player = page.getByRole('region', { name: 'Now playing' });
   const controls = player.getByRole('group', { name: 'Playback controls' });
-  await expect(controls.getByRole('button', { name: 'Pause' })).toBeVisible();
+  const pause = controls.getByRole('button', { name: 'Pause' });
+  const play = controls.getByRole('button', { name: 'Play', exact: true });
+  await expect(pause).toBeVisible();
+  await pause.click();
+  await expect(play).toBeVisible();
   const search = page.getByRole('searchbox', { name: 'Search artists, albums, and soundtracks' }).first();
   await search.pressSequentially('ambient ');
   await expect(search).toHaveValue('ambient ');
-  await expect(controls.getByRole('button', { name: 'Pause' })).toBeVisible();
+  await expect(play).toBeVisible();
 
   await page.getByRole('main').focus();
   await page.keyboard.press('Space');
-  await expect(controls.getByRole('button', { name: 'Play' })).toBeVisible();
+  await expect(pause).toBeVisible();
+  await pause.click();
+  await expect(play).toBeVisible();
 
   const helpTrigger = player.getByRole('button', { name: 'Keyboard shortcuts' });
   await helpTrigger.click();

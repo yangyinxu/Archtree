@@ -1,6 +1,4 @@
-// Use the conventional 44.1 kHz PCM rate so Linux Firefox's media decoder can
-// consume the complete fixture instead of failing partway through playback.
-const sampleRate = 44_100;
+const sampleRate = 8_000;
 const durationSeconds = 15;
 const channelCount = 1;
 const bytesPerSample = 2;
