@@ -311,11 +311,20 @@ Linux 2023 Elastic Beanstalk environment without a load balancer:
 
 The first successful post-deployment run obtains a public Let's Encrypt
 certificate through the HTTP-01 challenge, enables port 443, and redirects
-requests for `HTTPS_DOMAIN` to HTTPS. If DNS is not ready, deployment remains
-healthy over HTTP and a later deployment retries issuance. A systemd timer
-checks renewal twice daily. Certificate files remain on the instance, so
-replacing the single instance requires issuance again; Let's Encrypt rate
-limits should be considered before repeated environment rebuilds.
+requests for `HTTPS_DOMAIN` to HTTPS. If DNS or the certificate authority is
+temporarily unavailable, deployment remains healthy over HTTP and a bootstrap
+timer starts with a five-minute base delay plus a bounded randomized delay,
+then retries on an hourly base interval until a usable certificate is active.
+Successful activation writes a readiness marker that gates further bootstrap
+work; a separate systemd timer checks renewal twice daily and preserves the
+current HTTPS configuration when renewal fails. Certificate files remain on
+the instance, so replacing the single instance requires issuance again; the
+same bootstrap recovery applies.
+The timers retrieve `HTTPS_DOMAIN` and `ACME_EMAIL` from Elastic Beanstalk with
+`get-config`, because scheduled services do not inherit the application
+process environment directly. Configuration-only deployments also rerun the
+same idempotent configurator, so correcting the domain or ACME properties does
+not require an unrelated application release.
 
 Important:
 - Build phase should not run `npm start`.
