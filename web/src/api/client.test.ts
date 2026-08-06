@@ -1,11 +1,13 @@
 import { z } from 'zod';
 
 import { apiRequest } from './client';
+import { captureAccountOperation, isAccountOperationCurrent } from './accountEpoch';
 import { browserSessionSchema } from './schemas';
 import {
   flushListenerTelemetry,
   resetListenerTelemetryForTests
 } from '../telemetry/client';
+import { subscribeToAccountSessionChanges } from './accountSessionEvents';
 
 const sessionBody = {
   user: {
@@ -19,15 +21,16 @@ const sessionBody = {
   }
 };
 
-const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
-  status,
-  headers: { 'Content-Type': 'application/json' }
-});
+const jsonResponse = (body: unknown, status = 200, viewer: string | undefined = 'listener-1') => {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  if (viewer) headers.set('X-Finitude-Account-Viewer', viewer);
+  return new Response(JSON.stringify(body), { status, headers });
+};
 
 const waitForCondition = async (condition: () => boolean, message: string) => {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (condition()) return;
-    await Promise.resolve();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   }
   throw new Error(message);
 };
@@ -60,8 +63,8 @@ test('coalesces concurrent 401 responses into one cookie refresh', async () => {
   vi.stubGlobal('fetch', fetchMock);
 
   const responseSchema = z.object({ ready: z.boolean() }).strict();
-  const first = apiRequest('/content/protected-one', responseSchema);
-  const second = apiRequest('/content/protected-two', responseSchema);
+  const first = apiRequest('/content/protected-one', responseSchema, { accountViewer: 'listener-1' });
+  const second = apiRequest('/content/protected-two', responseSchema, { accountViewer: 'listener-1' });
   await waitForCondition(
     () => fetchMock.mock.calls.some(([path]) => path === '/auth/browser/refresh'),
     'Refresh request did not start.'
@@ -90,7 +93,9 @@ test('accepts a current session when refresh reports that the old cookie was con
   vi.stubGlobal('fetch', fetchMock);
 
   const responseSchema = z.object({ ready: z.boolean() }).strict();
-  await expect(apiRequest('/content/protected', responseSchema)).resolves.toEqual({ ready: true });
+  await expect(apiRequest('/content/protected', responseSchema, {
+    accountViewer: 'listener-1'
+  })).resolves.toEqual({ ready: true });
   expect(fetchMock.mock.calls.filter(([path]) => path === '/auth/browser/refresh')).toHaveLength(1);
   expect(sessionChecks).toBe(2);
 });
@@ -140,10 +145,14 @@ test('waits for another tab and reuses its newly rotated access cookie', async (
   const secondTab = await import('./client');
   const responseSchema = z.object({ ready: z.boolean() }).strict();
 
-  const firstRequest = firstTab.apiRequest('/content/first-tab', responseSchema);
-  const secondRequest = secondTab.apiRequest('/content/second-tab', responseSchema);
+  const firstRequest = firstTab.apiRequest('/content/first-tab', responseSchema, {
+    accountViewer: 'listener-1'
+  });
+  const secondRequest = secondTab.apiRequest('/content/second-tab', responseSchema, {
+    accountViewer: 'listener-1'
+  });
   await waitForCondition(
-    () => lockRequest.mock.calls.length === 2
+    () => lockRequest.mock.calls.length === 1
       && fetchMock.mock.calls.filter(([path]) => path === '/auth/browser/refresh').length === 1,
     'The second tab did not wait behind the first tab refresh.'
   );
@@ -154,8 +163,8 @@ test('waits for another tab and reuses its newly rotated access cookie', async (
     { ready: true }
   ]);
   expect(lockRequest.mock.calls.map(([name]) => name)).toEqual([
-    'finitude:browser-session-refresh',
-    'finitude:browser-session-refresh'
+    'finitude:browser-session-transition',
+    'finitude:browser-session-transition'
   ]);
   expect(fetchMock.mock.calls.filter(([path]) => path === '/auth/browser/refresh')).toHaveLength(1);
   expect(sessionChecks).toBe(2);
@@ -165,7 +174,7 @@ test('waits for another tab and reuses its newly rotated access cookie', async (
 
 test('reports a terminal listener API failure using only bounded classifications', async () => {
   resetListenerTelemetryForTests();
-  window.history.replaceState({}, '', '/listen/albums/private-content-id');
+  window.history.replaceState({}, '', '/finitude/albums/private-content-id');
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     if (String(input) === '/api/listener/v1/telemetry') {
       return new Response(null, { status: 204 });
@@ -193,4 +202,71 @@ test('reports a terminal listener API failure using only bounded classifications
   }] });
   expect(String(telemetryInit.body)).not.toContain('private');
   resetListenerTelemetryForTests();
+});
+
+test('rejects a private response that is not echoed for its cache viewer', async () => {
+  const changes: string[] = [];
+  const unsubscribe = subscribeToAccountSessionChanges((event) => changes.push(event.reason));
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ready: true }, 200, undefined));
+  vi.stubGlobal('fetch', fetchMock);
+
+  await expect(apiRequest(
+    '/content/private',
+    z.object({ ready: z.boolean() }).strict(),
+    { accountViewer: 'viewer-a' }
+  )).rejects.toMatchObject({
+    status: 409,
+    code: 'account_viewer_mismatch'
+  });
+
+  expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get(
+    'X-Finitude-Account-Viewer'
+  )).toBe('viewer-a');
+  expect(changes).toContain('viewer-mismatch');
+  unsubscribe();
+});
+
+test('recovers an expired access A plus refresh B without retrying into A caches', async () => {
+  const priorGuard = captureAccountOperation('viewer-a');
+  const changes: string[] = [];
+  const unsubscribe = subscribeToAccountSessionChanges((event) => changes.push(event.reason));
+  let protectedCalls = 0;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path === '/content/private-a') {
+      protectedCalls += 1;
+      return jsonResponse({}, 401, undefined);
+    }
+    if (path === '/auth/browser/session') return jsonResponse({}, 401, undefined);
+    if (path === '/auth/browser/refresh') {
+      const headers = new Headers(init?.headers);
+      expect(headers.get('X-Finitude-Account-Viewer')).toBe('viewer-a');
+      expect(headers.get('X-Finitude-Session-Transition')).toBe('web-locks-v1');
+      return jsonResponse({
+        code: 'browser_session_identity_conflict',
+        message: 'Conflicting credentials.'
+      }, 409, undefined);
+    }
+    if (path === '/auth/browser/logout') {
+      const headers = new Headers(init?.headers);
+      expect(headers.get('X-Finitude-Session-Transition')).toBe('web-locks-v1');
+      expect(headers.has('X-Finitude-Account-Viewer')).toBe(false);
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected request ${path}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  await expect(apiRequest(
+    '/content/private-a',
+    z.object({ ready: z.boolean() }).strict(),
+    { accountViewer: 'viewer-a' }
+  )).rejects.toMatchObject({ status: 401 });
+
+  expect(protectedCalls).toBe(1);
+  expect(fetchMock.mock.calls.filter(([path]) => path === '/auth/browser/refresh')).toHaveLength(1);
+  expect(fetchMock.mock.calls.filter(([path]) => path === '/auth/browser/logout')).toHaveLength(1);
+  expect(isAccountOperationCurrent(priorGuard)).toBe(false);
+  expect(changes).toEqual(['logout']);
+  unsubscribe();
 });

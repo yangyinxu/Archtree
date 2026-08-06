@@ -126,3 +126,6 @@ p {
     color: HighlightText;
   }
 }
+#root[data-account-transitioning='true'] {
+  display: none !important;
+}

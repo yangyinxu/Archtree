@@ -1,7 +1,12 @@
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import { normalizeAudioTrackText } from './audioTrack';
 import { withDerivedCoverArtUrl, withDisplayCoverArtUrl } from '../utils/coverArt';
+import { readyArtistLifecycleFilter } from '../services/artistReferenceFenceService';
+import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
+import { withReadyCatalogItemReferences } from '../services/catalogItemReferenceFenceService';
+import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { touchActiveAccount } from '../services/accountReferenceFenceService';
 
 export type LibraryContentType = 'album' | 'audioTrack';
 export type ActivitySource = 'recentlySaved' | 'recentlyPlayed';
@@ -51,7 +56,12 @@ export class UserLibrary {
         const objectId = ObjectId.createFromHexString(normalized);
         return Boolean(await getDb()!
             .collection(backingCollection(contentType))
-            .find({ _id: objectId })
+            .find({
+                _id: objectId,
+                ...(contentType === 'album'
+                    ? readyAlbumLifecycleFilter
+                    : readyAudioStorageFilter)
+            })
             .project({ _id: 1 })
             .maxTimeMS(3_000)
             .next());
@@ -59,20 +69,31 @@ export class UserLibrary {
 
     static async save(userId: string, contentType: LibraryContentType, contentId: string) {
         const now = new Date();
-        await getDb()!.collection(savesCollection).updateOne(
-            { userId, contentType, contentId },
-            {
-                $setOnInsert: {
-                    userId,
+        await withReadyCatalogItemReferences(
+            [{ contentType, contentId }],
+            async (session, [reference]) => {
+                await touchActiveAccount(userId, session);
+                const normalizedContentId = String(reference.contentId);
+                await getDb()!.collection(savesCollection).updateOne(
+                    { userId, contentType, contentId: normalizedContentId },
+                    {
+                        $setOnInsert: {
+                            userId,
+                            contentType,
+                            contentId: normalizedContentId,
+                            savedAt: now,
+                            lastActivityAt: now
+                        }
+                    },
+                    { upsert: true, session }
+                );
+                await this.recordActivity(userId, 'recentlySaved', [{
                     contentType,
-                    contentId,
-                    savedAt: now,
-                    lastActivityAt: now
-                }
-            },
-            { upsert: true }
+                    contentId: normalizedContentId,
+                    occurredAt: now
+                }], session);
+            }
         );
-        await this.recordActivity(userId, 'recentlySaved', [{ contentType, contentId, occurredAt: now }]);
     }
 
     static async unsave(userId: string, contentType: LibraryContentType, contentId: string) {
@@ -100,17 +121,25 @@ export class UserLibrary {
 
     static async recordPlayed(userId: string, contentType: LibraryContentType, contentId: string) {
         const now = new Date();
-        // Only saved items belong to the server Library. Recent playback history
-        // still records unsaved items through the existing bounded activity list.
-        await getDb()!.collection(savesCollection).updateOne(
-            { userId, contentType, contentId },
-            { $set: { lastPlayedAt: now, lastActivityAt: now } }
+        await withReadyCatalogItemReferences(
+            [{ contentType, contentId }],
+            async (session, [reference]) => {
+                await touchActiveAccount(userId, session);
+                const normalizedContentId = String(reference.contentId);
+                // Only saved items belong to the server Library. Recent playback history
+                // still records unsaved items through the existing bounded activity list.
+                await getDb()!.collection(savesCollection).updateOne(
+                    { userId, contentType, contentId: normalizedContentId },
+                    { $set: { lastPlayedAt: now, lastActivityAt: now } },
+                    { session }
+                );
+                await this.recordActivity(userId, 'recentlyPlayed', [{
+                    contentType,
+                    contentId: normalizedContentId,
+                    occurredAt: now
+                }], session);
+            }
         );
-        await this.recordActivity(userId, 'recentlyPlayed', [{
-            contentType,
-            contentId,
-            occurredAt: now
-        }]);
     }
 
     static async list(userId: string, options: LibraryListOptions = {}) {
@@ -172,10 +201,17 @@ export class UserLibrary {
         const db = getDb()!;
         const [albums, tracks] = await Promise.all([
             albumIds.length > 0
-                ? db.collection('albums').find({ _id: { $in: albumIds } }).maxTimeMS(3_000).toArray()
+                ? db.collection('albums').find({
+                    _id: { $in: albumIds },
+                    ...readyAlbumLifecycleFilter
+                }).maxTimeMS(3_000).toArray()
                 : [],
             trackIds.length > 0
-                ? db.collection('audioTracks').find({ _id: { $in: trackIds } }).maxTimeMS(3_000).toArray()
+                ? db.collection('audioTracks').find({
+                    // Existing saves remain visible when their audio becomes
+                    // unavailable; the listener projection disables playback.
+                    _id: { $in: trackIds }
+                }).maxTimeMS(3_000).toArray()
                 : []
         ]);
         const linkedAlbumIds = tracks
@@ -183,7 +219,8 @@ export class UserLibrary {
             .filter((id) => ObjectId.isValid(id));
         const linkedAlbums = linkedAlbumIds.length > 0
             ? await db.collection('albums').find({
-                _id: { $in: linkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) }
+                _id: { $in: linkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) },
+                ...readyAlbumLifecycleFilter
             }).maxTimeMS(3_000).toArray()
             : [];
         const trackArtistIds = tracks.flatMap((track: any) =>
@@ -201,7 +238,10 @@ export class UserLibrary {
             artistQueries.push({ albumIds: { $in: albumIds.map(String) } });
         }
         const artists = artistQueries.length > 0
-            ? await db.collection('artists').find({ $or: artistQueries }).maxTimeMS(3_000).toArray()
+            ? await db.collection('artists')
+                .find({ $and: [readyArtistLifecycleFilter, { $or: artistQueries }] })
+                .maxTimeMS(3_000)
+                .toArray()
             : [];
         const artistNamesById = new Map(
             artists.map((artist: any) => [String(artist._id), String(artist.name ?? '')])
@@ -241,12 +281,16 @@ export class UserLibrary {
                 .map((id: unknown) => artistNamesById.get(String(id))?.trim() ?? '')
                 .filter(Boolean)
                 .join(', ');
+            const linkedAlbum = albumsById.get(String(track.albumId ?? ''));
             return {
                 ...common,
                 creator: creator || null,
                 audioTrack: withDisplayCoverArtUrl(
-                    normalizeAudioTrackText(track),
-                    albumsById.get(String(track.albumId ?? ''))
+                    {
+                        ...normalizeAudioTrackText(track),
+                        albumId: linkedAlbum ? track.albumId : null
+                    },
+                    linkedAlbum
                 )
             };
         }).filter((item): item is any => item !== null);
@@ -276,14 +320,26 @@ export class UserLibrary {
 
     static async cleanupContent(contentType: LibraryContentType, contentId: string) {
         const db = getDb()!;
+        const contentIds: Array<string | ObjectId> = [];
+        if (/^[0-9a-fA-F]{24}$/.test(contentId)) {
+            const objectId = ObjectId.createFromHexString(contentId);
+            const canonicalContentId = objectId.toHexString();
+            contentIds.push(canonicalContentId, canonicalContentId.toUpperCase(), objectId);
+            if (contentId !== canonicalContentId) contentIds.push(contentId);
+        } else {
+            contentIds.push(contentId);
+        }
         await Promise.all([
-            db.collection(savesCollection).deleteMany({ contentType, contentId }),
+            db.collection(savesCollection).deleteMany({
+                contentType,
+                contentId: { $in: contentIds }
+            }),
             db.collection(activityCollection).updateMany(
                 {},
                 {
                     $pull: {
-                        recentlySaved: { contentType, contentId },
-                        recentlyPlayed: { contentType, contentId }
+                        recentlySaved: { contentType, contentId: { $in: contentIds } },
+                        recentlyPlayed: { contentType, contentId: { $in: contentIds } }
                     }
                 } as any
             )
@@ -298,7 +354,12 @@ export class UserLibrary {
         ]);
     }
 
-    private static async recordActivity(userId: string, source: ActivitySource, entries: ActivityEntry[]) {
+    private static async recordActivity(
+        userId: string,
+        source: ActivitySource,
+        entries: ActivityEntry[],
+        session?: ClientSession
+    ) {
         const keys = entries.map((entry) => `${entry.contentType}:${entry.contentId}`);
         await getDb()!.collection(activityCollection).updateOne(
             { userId },
@@ -326,7 +387,7 @@ export class UserLibrary {
                     updatedAt: new Date()
                 }
             }],
-            { upsert: true }
+            { upsert: true, ...(session ? { session } : {}) }
         );
     }
 

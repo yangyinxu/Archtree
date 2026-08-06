@@ -2,29 +2,29 @@
 
 ## Status
 
-In progress as of 2026-08-02. The first four implementation slices now provide
-the `/listen` workspace and responsive shell, browser-only HttpOnly cookie
-sessions, safe versioned listener DTOs for Home, Search, Album, Artist, Track,
-and Library, ready-only public streaming, real configured discovery content,
-grouped search, detail pages, one persistent browser player, Save/Library UI,
-per-account search history, registration/verification/recovery, signed-in
-device and password management, an expanded mobile player, accessible keyboard
-controls, private revision-bound avatar loading and crop/preview management,
-listening-history clearing, sign out everywhere, account deletion, strict
-listener CSP/security headers, route-level code splitting, a 150 KiB initial
-route JavaScript budget, Express deep-link integration, and server/Web tests.
-Browser E2E/accessibility automation, observability, load/cross-browser checks,
-and rollout work remain in later slices.
+Repository implementation for Phases 0–6 and the implemented portions of
+Phases 7–8 is complete for the current local integrated candidate as of
+2026-08-05. It includes the `/finitude` workspace, responsive and resizable
+shell, browser-only HttpOnly cookie sessions, safe listener DTOs, ready-only
+streaming, discovery/detail/Library/Playlist surfaces, one persistent player,
+account and avatar management, security headers, telemetry, route-level code
+splitting, automated browser/accessibility coverage, and release packaging.
+
+The candidate remains uncommitted and therefore has no current GitHub SHA,
+Linux pixel baseline, or retained deployment artifact. Current-CI, staging,
+real-browser/assistive-technology, Web Vitals, approved media-load, rollout,
+and rollback evidence remain Phase 7 release work. Future provider and passkey
+account flows in Phase 8 do not block the first Web rollout.
 
 This document is implementation guidance, not the canonical product contract.
 Before implementing a Web-specific behavior, promote the agreed rule to
 `../business-rules.md` in the same change as the implementation.
 
 This plan intentionally treats Finitude as the source for product behavior and
-content semantics, while using Spotify Web and YouTube Music only as references
-for desktop information density, persistent navigation, and player placement.
-It must not copy either product's branding, exact components, assets, or visual
-details.
+content semantics, while using established commercial music services only as
+references for desktop information density, persistent navigation, and player
+placement. It must not copy another product's branding, exact components,
+assets, or visual details.
 
 ## Objective
 
@@ -183,28 +183,30 @@ The repository already provides most foundational data and media operations:
 - Lyrics, comments, social features, and voice search.
 - Video playback unless a separate product contract defines its relationship
   to Albums and Soundtracks.
-- Spotify Connect-style device discovery or cross-device queue handoff.
+- Third-party device discovery or cross-device queue handoff.
 - Guaranteed lock-screen or background behavior beyond what the active
   browser and operating system permit.
 - iOS-only gestures, Liquid Glass controls, and the system audio-route picker.
 
 ## Proposed information architecture
 
-The recommended production base path is `/listen`. It keeps the listener app
+The production base path is `/finitude`. It keeps the listener app
 separate from the current `/` workspace landing page and `/content/manage`
 creator tools during development and rollout.
 
 | Route | Purpose | Signed-out behavior | Primary action |
 | --- | --- | --- | --- |
-| `/listen` | Configured Home | Public content; personalized groups are empty | Open Album or play Soundtrack |
-| `/listen/search?q=` | Search and recent queries | Fully public | Open Artist/Album or play Soundtrack |
-| `/listen/library` | Complete server Library | Authentication-required state; not an empty success | Filter, sort, open, or play saved content |
-| `/listen/albums/:albumId` | Album details and ordered track list | Public | Album Play or explicit track playback |
-| `/listen/artists/:artistId` | Artist profile and releases | Public | Open a release |
-| `/listen/account` | Identity and account management | Login/create-account entry | Manage current account |
-| `/listen/login` | Browser login | Public | Establish HttpOnly browser session |
-| `/listen/signup` | Email registration and verification | Public | Create and verify account |
-| `/listen/recover` | Password recovery | Public | Request and complete password reset |
+| `/finitude` | Configured Home | Public content; personalized groups are empty | Open Album or play Soundtrack |
+| `/finitude/search?q=` | Search and recent queries | Fully public | Open Artist/Album or play Soundtrack |
+| `/finitude/library` | Complete server Library | Authentication-required state; not an empty success | Filter, sort, open, or play saved content |
+| `/finitude/albums/:albumId` | Album details and ordered track list | Public | Album Play or explicit track playback |
+| `/finitude/artists/:artistId` | Artist profile and releases | Public | Open a release |
+| `/finitude/account` | Identity and account management | Login/create-account entry | Manage current account |
+| `/finitude/login` | Browser login | Public | Establish HttpOnly browser session |
+| `/finitude/register` | Email registration | Public | Create an account |
+| `/finitude/verify-email` | Email verification | Public | Verify a new account |
+| `/finitude/forgot-password` | Password recovery request | Public | Request a password-reset code |
+| `/finitude/reset-password` | Password recovery completion | Public | Set the replacement password |
 
 Settings should live in the desktop account menu rather than occupy a fourth
 primary navigation item. Mobile Web may expose Account as an avatar button or
@@ -216,8 +218,8 @@ sheet while preserving Home, Search, and Library as the three primary tabs.
 
 - A persistent left navigation rail contains the Finitude identity and the
   primary Home, Search, and Library destinations. Account access remains in
-  the top bar; a Spotify-style secondary saved-item sidebar is not assumed
-  until its behavior is separately defined.
+  the top bar; a secondary saved-item sidebar patterned on another service is
+  not assumed until its behavior is separately defined.
 - A sticky top bar contains browser-like back/forward controls, contextual
   search, and the account entry.
 - The main content pane is the only primary vertical scrolling region.
@@ -247,7 +249,7 @@ sheet while preserving Home, Search, and Library as the three primary tabs.
 
 - Start with neutral dark surfaces suitable for artwork-heavy browsing, with
   restrained blue, purple, mint, and warm gradient accents derived from
-  Finitude's ambient background rather than Spotify green or YouTube red.
+  Finitude's ambient background rather than recognizable competitor colors.
 - Define typography, spacing, radii, elevation, focus rings, motion, and
   artwork ratios as design tokens.
 - Use artwork-derived color only as a bounded enhancement in detail headers;
@@ -277,7 +279,7 @@ sheet while preserving Home, Search, and Library as the three primary tabs.
   and `@axe-core/playwright` for automated accessibility checks supplemented by
   manual assessment.
 - Build hashed assets into `web/dist/`. Express serves those assets under
-  `/listen/` and returns the SPA document for recognized listener routes.
+  `/finitude/` and returns the SPA document for recognized listener routes.
 - In development, Vite proxies `/auth`, `/content`, `/feed`, and `/video` to
   Express so cookies remain same-site from the browser's point of view.
 - Keep backend TypeScript and Web TypeScript configurations separate so JSX,
@@ -402,11 +404,13 @@ them.
 
 ### Phase 0 — Contract, scope, and design baseline
 
+**Status: Complete**
+
 **Estimate:** 3–5 developer days.
 
 Tasks:
 
-- Confirm `/listen` as the initial base path and decide whether `/` remains the
+- Confirm `/finitude` as the base path and decide whether `/` remains the
   workspace landing page after general release.
 - Confirm that Web remains streaming-only and all Download and offline UI are
   absent.
@@ -448,9 +452,11 @@ Exit criteria:
 - Album Play, selected-track play, standalone-track play, Previous/Next, and
   automatic advancement each have an unambiguous activity expectation.
 - Product review accepts the visual direction as Finitude rather than a copied
-  Spotify or YouTube Music skin.
+  third-party music-service skin.
 
 ### Phase 1 — Web build, routing, API, and session foundation
+
+**Status: Complete**
 
 **Estimate:** 5–8 developer days.
 
@@ -463,7 +469,7 @@ Tasks:
 - Add root scripts for Web development, Web tests, Web build, full build, and
   full test execution.
 - Add Express production asset serving and SPA fallback routing under
-  `/listen`, without intercepting `/auth`, `/content`, `/feed`, admin, or
+  `/finitude`, without intercepting `/auth`, `/content`, `/feed`, admin, or
   content-manager routes.
 - Add Vite development proxying and document the two-process local workflow.
 - Implement route definitions, an application error boundary, not-found state,
@@ -476,7 +482,7 @@ Tasks:
   listener accounts; repair or stop linking the legacy auto-verified Web signup
   path.
 - Validate every authentication return path against an allowed relative
-  `/listen` destination before redirecting or returning it.
+  `/finitude` destination before redirecting or returning it.
 - Report Web provider capabilities separately enough that an iOS Apple/Google
   client configuration cannot accidentally expose a nonfunctional browser
   provider button.
@@ -489,7 +495,7 @@ Tasks:
 
 Exit criteria:
 
-- `/listen`, nested routes, direct refreshes, and browser back/forward work in
+- `/finitude`, nested routes, direct refreshes, and browser back/forward work in
   development and a production build.
 - A listener can log in, survive access-token expiry through one cookie-backed
   rotation, and log out without any token being readable by JavaScript.
@@ -497,6 +503,8 @@ Exit criteria:
 - Existing backend tests and Content Manager routes remain green.
 
 ### Phase 2 — Responsive shell and design system
+
+**Status: Complete**
 
 **Estimate:** 5–7 developer days.
 
@@ -528,6 +536,8 @@ Exit criteria:
 - Visual review approves the independent Finitude design language.
 
 ### Phase 3 — Public Home, Artist, and Album discovery
+
+**Status: Complete**
 
 **Estimate:** 7–10 developer days.
 
@@ -569,6 +579,8 @@ Exit criteria:
 - A creator configuration warning does not crash or silently reorder the page.
 
 ### Phase 4 — Persistent player and playback policy
+
+**Status: Complete**
 
 **Estimate:** 8–12 developer days.
 
@@ -621,6 +633,8 @@ Library are not yet complete.
 
 ### Phase 5 — Search
 
+**Status: Complete**
+
 **Estimate:** 4–6 developer days.
 
 Tasks:
@@ -651,6 +665,8 @@ Exit criteria:
 - Every result type performs the canonical action.
 
 ### Phase 6 — Save, Library, and listener account flows
+
+**Status: Complete**
 
 **Estimate:** 7–10 developer days.
 
@@ -699,6 +715,8 @@ playback, authenticated Save, and Library now form a complete listener loop.
 
 ### Phase 7 — Hardening, accessibility, performance, and rollout
 
+**Status: In progress**
+
 **Estimate:** 6–9 developer days.
 
 Tasks:
@@ -726,7 +744,7 @@ Tasks:
 - Verify artwork requests cannot exhaust the same capacity needed by active
   audio streams; split image/audio limits or reserve playback capacity if the
   measured shared pool allows artwork-heavy Home pages to starve playback.
-- Serve `/listen` behind an environment flag or unlinked route for internal
+- Serve `/finitude` behind an environment flag or unlinked route for internal
   validation, then link it from the landing page after beta acceptance.
 - Keep `/content/manage` and the current landing/auth routes unchanged during
   rollout. Retain the previous deployment artifact for immediate rollback.
@@ -742,7 +760,7 @@ Exit criteria:
 - Monitoring distinguishes page/API failures from audio delivery failures.
 - Rollout and rollback have both been rehearsed.
 
-Implementation evidence updated on 2026-08-03:
+Historical implementation evidence recorded on 2026-08-03:
 
 - Complete in the repository: strict anonymous Web Vitals and error telemetry,
   private-avatar public-route denial, playback-reserved media admission and
@@ -756,7 +774,8 @@ Implementation evidence updated on 2026-08-03:
   derivative S3 objects. CI also validates a strict runtime allowlist, records its source
   identity, and retains a commit-named rollback bundle; the rollout runbook
   requires the same tested bytes for staging and production.
-- Passing locally: server 112/112, Web unit/component 103/103, Mongo integration
+- At that checkpoint, local gates passed: server 112/112, Web unit/component
+  103/103, Mongo integration
   24/24, browser/axe 39/39, server/Web production builds, and the 150 KiB
   initial-route JavaScript budget (largest route 140.9 KiB gzip). The validated
   Elastic Beanstalk staging artifact also contains the hashed listener assets
@@ -768,13 +787,27 @@ Implementation evidence updated on 2026-08-03:
   and locally validated bundle are the contract, not the rehearsal evidence.
 - Beta acceptance and navigation update recorded on 2026-08-03 by user
   direction: the existing Archtree landing page now links signed-out and
-  signed-in visitors to `/listen` without replacing its creator, account, or
+  signed-in visitors to `/finitude` without replacing its creator, account, or
   authentication actions.
+
+Current local integrated-candidate evidence recorded on 2026-08-05:
+
+- Server 222/222, Web unit/component 204/204, Mongo-backed integration 126/126,
+  and the complete three-engine browser matrix 191 passed with 10 documented
+  capability-specific skips and no failures.
+- The focused Chromium visual gate passed 10/10 without snapshot updates;
+  production builds and E2E TypeScript passed; the largest initial route is
+  147.5 KiB gzip and CSS is 26.7 KiB gzip.
+- These are local results only. The current candidate still requires a commit-
+  identified CI run, a separately reviewed Linux baseline, staging evidence,
+  and exact-artifact rollout and rollback verification.
 
 **Milestone C: general availability.** Only after this gate should product
 navigation make the listener Web app the primary public destination.
 
 ### Phase 8 — Post-MVP account completeness
+
+**Status: In progress**
 
 This phase is intentionally not scheduled into the first release.
 
@@ -883,7 +916,7 @@ shared integration gates rather than fully parallel tasks.
 | Misconfigured or deleted page references | Crashes or silent content loss | Truthful warning/empty states and additive reconciliation diagnostics |
 | Web Library accidentally copies configured iOS page history | Saved content disappears or caps at 20 | Use complete `/me/library`; test full Saved vs bounded recent histories |
 | Half-built Download UI expands scope | Misleading offline promise and unsafe local lifecycle | Hide Download until the separate lifecycle phase is complete |
-| Spotify/YouTube visual imitation becomes too literal | Weak identity and possible asset/trade-dress concerns | Independent tokens, Finitude colors/motion, no copied assets or exact components |
+| Competitor visual imitation becomes too literal | Weak identity and possible asset/trade-dress concerns | Independent tokens, Finitude colors/motion, no copied assets or exact components |
 
 ## Definition of done for the Web MVP
 
@@ -904,20 +937,3 @@ The MVP is complete only when:
   gates are satisfied.
 - Deferred features are absent or explicitly labeled unavailable; none appear
   partially functional.
-
-## Immediate next implementation slice
-
-After the Phase 0 decisions are approved, the first implementation PR should
-stay deliberately narrow:
-
-1. Add the `web/` Vite/React/TypeScript foundation and `/listen` route.
-2. Add production asset serving, development proxying, and build/test scripts.
-3. Implement the empty responsive shell with Home/Search/Library routes and a
-   reserved player area.
-4. Add cookie-backed JSON login/refresh/logout plus the one-retry API client.
-5. Add tests for direct route refresh, session rotation, failed refresh, and
-   existing route non-regression.
-
-It should not yet implement audio playback, Save, Library mutations, or new
-catalog response shapes. That keeps the first review focused on the application
-boundary and the highest-risk browser-session behavior.

@@ -15,13 +15,29 @@ over the desktop player cannot move the application shell while the main content
 remains independently scrollable. Player coverage includes persisted
 Shuffle/Repeat state, hover-only seek preview, release-time pointer seeking,
 keyboard seeking, 24 px seek hit targets, and axe scans of the expanded mobile
-player and shortcut-help layers.
+player and shortcut-help layers. Responsive-shell coverage verifies the exact
+1008, 1007, 800, 799, 768, and 767 px panel boundaries, the 72 px compact
+Library rail, delayed Now Playing dismissal, the narrow Album hero, and player
+identity while the real Now Playing control closes and restores the pane.
+Search coverage verifies cancellable debounced result previews without history
+writes, explicit history commits, and committed query restoration through
+browser Back and Forward.
 
-Latest local automated evidence (2026-08-03): 45/45 Playwright projects passed
-against the production bundle; server tests passed 138/138 and Web unit/component
-tests passed 114/114; Mongo-backed integration tests passed 24/24. The largest
-initial route is 142.7 KiB gzip against the 150 KiB budget. CI repeats the
-browser gate through `.github/workflows/finitude-web-release.yml`.
+The current local uncommitted candidate, verified on 2026-08-05, passes 222/222
+server tests, 204/204 Web unit/component tests, 126/126 Mongo-backed integration
+tests, both production builds, and E2E TypeScript. The strict local
+three-engine Playwright matrix passes 191 tests with 10 documented
+capability-specific skips and no failures. Chromium passes all 67 planned
+checks, including eight `toHaveScreenshot` golden comparisons without snapshot
+updates; Firefox and WebKit each pass 62 checks with five intentional
+capability-specific skips. The latest reviewed in-app Browser design checkpoint
+had no warning or error log entries. The largest initial route is Playlist
+Detail at 147.5 KiB gzip against the 150 KiB budget; CSS is 26.7 KiB gzip
+against the 32 KiB budget, and the build ships no bundled font or image payload.
+CI repeats the browser gate through `.github/workflows/finitude-web-release.yml`;
+the platform-scoped path prevents Linux CI from silently comparing against
+macOS font rendering. A separately reviewed Linux baseline and a subsequent
+strict no-update CI pass remain required before release.
 
 Passing these projects does not prove support for a branded browser release.
 Playwright WebKit is not Safari, and bundled Chromium is not a substitute for
@@ -59,7 +75,14 @@ Follow
 to promote the exact same archive, retain the immediately previous successful
 archive, execute smoke/observation gates, and roll back without rebuilding. The
 artifact contract has local automated evidence; the staging rollout and
-rollback rehearsal remain pending external evidence.
+rollback rehearsal remain pending external evidence. A temporary structural
+rehearsal also proved that an archived revision can build, stage, zip, pass
+`unzip -t`, and reproduce its staged tree without touching the working tree.
+It is deliberately not accepted as rollback evidence: an older retained
+release uses `/listen/assets/`, while the current stager requires
+`/finitude/assets/`. Rebuilding an old commit with a newer script would
+therefore change the artifact contract; the previous original CI archive is
+mandatory.
 
 ## Manual browser matrix
 
@@ -97,8 +120,30 @@ player control still works.
   recover from a stream failure without a gesture-only dependency.
 - Confirm signed-out Save remains visible, announces the sign-in requirement,
   and does not open Login automatically.
+- Confirm signed-out New Playlist remains visible, announces the sign-in
+  requirement, and does not open Login automatically.
+- With a signed-in listener, create and rename a Playlist, add multiple
+  Soundtracks, reject a duplicate without moving it, use Move Up/Down, start
+  playback from the middle, remove one member, and delete the Playlist. Confirm
+  the active queue remains unchanged after the source Playlist is edited or
+  deleted.
+- Repeat a mutation after simulating a lost response, then force a stale
+  revision from a second browser session. Confirm replay is idempotent and the
+  conflict refreshes current state without silently overwriting it.
+- Switch accounts and confirm Playlist summaries, details, dialogs, and cached
+  membership state never cross the account boundary. An ID owned by the first
+  account must look missing to the second account.
+- In two same-origin tabs, repeat login, refresh, logout, and account switching
+  across both Listener and Content Manager. Confirm old private DOM and caches
+  disappear before the replacement account renders, no stale mutation reaches
+  the new account, and only the departed account's Search history is cleared.
 - At 200% browser zoom, confirm all content remains reachable without
   two-dimensional page scrolling. Repeat the narrowest flow at 320 CSS pixels.
+- Resize through 1008, 1007, 800, 799, 768, and 767 CSS px. Confirm the full
+  Library pane becomes a 72 px rail before the right pane disappears, the rail
+  persists after that dismissal, and the dedicated mobile shell appears only
+  at 767 px and below. Toggle Now Playing at a wide width and confirm the
+  current track, elapsed time, queue, and route do not reset.
 - Enable Reduce Motion and confirm navigation, player, dialogs, crop controls,
   and status announcements remain understandable and operable.
 - Verify missing artwork, long and missing text, loading, empty, partial-error,
@@ -121,6 +166,9 @@ background parity.
   playback defect in the manual matrix.
 - Full-stack E2E passes against an isolated Mongo database and a
   production-equivalent media store.
+- Playlist owner isolation, account deletion, Soundtrack-reference cleanup,
+  idempotency replay, stale-revision recovery, and maximum-size behavior pass
+  against a transactional Mongo replica set.
 - Current and previous branded-browser results are attached to the release.
 - Any accepted browser-specific difference is documented with a visible-control
   fallback and an owner for follow-up.

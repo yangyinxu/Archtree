@@ -14,10 +14,11 @@ const authRoutes = new Set([
 
 /** Reduces dynamic listener paths to a fixed privacy-safe route dimension. */
 export const classifyListenerRoute = (pathname: string): ListenerRouteName => {
-  const path = pathname.split('?', 1)[0].replace(/^\/listen\/?/, '').replace(/^\/+|\/+$/g, '');
+  const path = pathname.split('?', 1)[0].replace(/^\/finitude\/?/, '').replace(/^\/+|\/+$/g, '');
   const [first] = path.split('/');
   if (!first) return 'home';
   if (first === 'search' || first === 'library' || first === 'account') return first;
+  if (first === 'playlists') return path.split('/').length > 1 ? 'playlist' : 'playlists';
   if (first === 'albums') return 'album';
   if (first === 'artists') return 'artist';
   if (authRoutes.has(first)) return 'auth';
@@ -32,6 +33,7 @@ export const statusBucket = (status?: number): TelemetryStatusBucket => {
     case 403:
     case 404:
     case 409:
+    case 428:
     case 422:
     case 429:
       return String(status) as TelemetryStatusBucket;
@@ -50,6 +52,7 @@ export const classifyApiOperation = (
   const path = rawPath.split('?', 1)[0];
   // Authentication and account endpoints use a separate, deliberately bounded funnel contract.
   if (path === '/auth' || path.startsWith('/auth/')) return null;
+  if (path === '/api/listener/v1/capabilities') return 'listener_capabilities';
   if (path === '/api/listener/v1/home') return 'listener_home';
   if (path === '/api/listener/v1/search') return 'listener_search';
   if (path === '/api/listener/v1/library') return 'listener_library';
@@ -65,5 +68,22 @@ export const classifyApiOperation = (
   }
   if (path.startsWith('/content/me/recently-played')
     || path.startsWith('/content/me/listening-history')) return 'recent_activity';
+  if (path === '/content/me/playlists') {
+    if (method.toUpperCase() === 'GET') return 'playlist_list';
+    if (method.toUpperCase() === 'POST') return 'playlist_create';
+    return null;
+  }
+  if (path === '/content/me/playlists/memberships' && method.toUpperCase() === 'GET') {
+    return 'playlist_memberships';
+  }
+  if (path.startsWith('/content/me/playlists/')) {
+    const normalizedMethod = method.toUpperCase();
+    if (path.endsWith('/items/order') && normalizedMethod === 'PUT') return 'playlist_reorder';
+    if (/\/items\/[^/]+$/.test(path) && normalizedMethod === 'DELETE') return 'playlist_remove';
+    if (path.endsWith('/items') && normalizedMethod === 'POST') return 'playlist_add';
+    if (normalizedMethod === 'GET') return 'playlist_detail';
+    if (normalizedMethod === 'PATCH') return 'playlist_rename';
+    if (normalizedMethod === 'DELETE') return 'playlist_delete';
+  }
   return null;
 };

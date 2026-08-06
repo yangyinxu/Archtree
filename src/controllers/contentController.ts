@@ -26,8 +26,13 @@ import {
     deleteAudioObjectAndTrack,
     uploadAudioObject
 } from '../services/audioStorageService';
-import { cleanupDeletedContentReferences, validateContentReferences } from '../services/contentReferenceService';
-import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
+import { validateContentReferences } from '../services/contentReferenceService';
+import {
+    attachCoverArtToNewOwner,
+    updateCoverArtOwnerAndCleanup,
+    uploadCoverArt,
+    validateCoverArtFile
+} from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import { boundedSearchQuery } from '../utils/search';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
@@ -41,6 +46,15 @@ import {
 } from '../views/contentManager/inventoryPagination';
 import { searchPublicCatalog } from '../services/publicCatalogService';
 import { boundedLimit } from '../utils/pagination';
+import { deleteArtistAndReferences } from '../services/artistLifecycleService';
+import { deleteAlbumAndReferences } from '../services/albumLifecycleService';
+import {
+    linkReadyAudioTracksToAlbum,
+    publishUploadedAudioTracks
+} from '../services/albumTrackLinkService';
+import { retryAudioTrackPublications } from '../services/audioPublicationRecoveryService';
+import { publishNewArtist } from './artistController';
+import { publishNewAlbum } from './albumController';
 
 const parseCsv = (value: string) => {
     return value
@@ -212,6 +226,7 @@ const renderNestedList = (items: string[]) => {
 };
 
 const renderManagePage = (params: {
+    userId: string;
     userEmail: string;
     isAdmin?: boolean;
     message?: string;
@@ -383,7 +398,7 @@ const renderManagePage = (params: {
       <a class="button" href="/content/manage/audio-tracks">Audio Tracks</a>
       ${params.isAdmin ? '<a class="button button--secondary" href="/admin/audio-storage/reconciliation">Audit Audio Storage</a><a class="button button--secondary" href="/admin/image-storage/reconciliation">Audit Image Storage</a>' : ''}
       <a class="button button--secondary" href="/">Home</a>
-      <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+      <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(params.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
     </div>
   </header>
   ${messageBlock}
@@ -811,6 +826,7 @@ const renderManagePage = (params: {
     </div>
   </div>
   </main>
+  <script src="/assets/browser-session-forms.js"></script>
   <script src="/assets/content-manager.js"></script>
 </body>
 </html>`;
@@ -852,7 +868,7 @@ export const renderAudioTracksPageForWeb = async (req: Request, res: Response, n
             managementInventoryOffset(page)
         );
         const tracks = toManagementInventoryPage(records, page);
-        return res.status(200).send(renderAudioTracksPage(authReq.auth.email, tracks.items, {
+        return res.status(200).send(renderAudioTracksPage(authReq.auth.userId, authReq.auth.email, tracks.items, {
             page: tracks.page,
             hasPrevious: tracks.hasPrevious,
             hasNext: tracks.hasNext
@@ -927,6 +943,7 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
         }
 
         return res.status(200).send(renderManagePage({
+            userId: authReq.auth.userId,
             userEmail: authReq.auth.email,
             isAdmin: authReq.auth.role === 'admin',
             message,
@@ -967,6 +984,7 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
         ]);
 
         return res.status(200).send(renderManagePage({
+            userId: authReq.auth.userId,
             userEmail: authReq.auth.email,
             isAdmin: authReq.auth.role === 'admin',
             searchQuery: rawQuery,
@@ -997,38 +1015,45 @@ export const createArtistWeb = async (req: Request, res: Response, next: NextFun
             return redirectWithMessage(res, albumValidation.message!);
         }
 
+        const artistObjectId = new ObjectId();
         const artist = new Artist(
             String(req.body.name ?? ''),
             parseDateInput(String(req.body.birthDate ?? '')),
             String(req.body.bio ?? ''),
             String(req.body.coverArtUrl ?? ''),
             albumValidation.ids as [string],
-            authReq.auth.userId
+            authReq.auth.userId,
+            artistObjectId
         );
 
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) await validateCoverArtFile(coverArtFile);
-        const result = await artist.save();
-        const artistId = result.insertedId.toHexString();
-        try {
-            if (coverArtFile) {
-                const coverArt = await uploadCoverArt(
-                    'artist',
-                    artistId,
-                    coverArtFile,
-                    authReq.auth.userId
-                );
-                await Artist.updateById(artistId, {
-                    coverArtId: coverArt.imageId,
-                    coverArtUrl: coverArt.coverArtUrl
-                });
-            }
-        } catch (error) {
-            await Artist.deleteById(artistId).catch(() => undefined);
-            throw error;
+        const artistId = artistObjectId.toHexString();
+        let coverArt: { imageId: string; coverArtUrl: string } | undefined;
+        if (coverArtFile) {
+            coverArt = await uploadCoverArt(
+                'artist',
+                artistId,
+                coverArtFile,
+                authReq.auth.userId,
+                { allowMissingOwner: true }
+            );
         }
+        await publishNewArtist(artist, coverArt);
         return redirectWithMessage(res, 'Artist created successfully.');
     } catch (error) {
+        if ((error as any)?.outcomeUnknown) {
+            return redirectWithMessage(
+                res,
+                'Artist creation outcome could not be confirmed. Reconciliation is required before retrying.'
+            );
+        }
+        if ((error as any)?.code === 'artist_creation_cleanup_pending') {
+            return redirectWithMessage(
+                res,
+                'Artist was not created. Uploaded cover-art cleanup requires reconciliation.'
+            );
+        }
         return next(error);
     }
 };
@@ -1052,6 +1077,7 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
         const updatePayload: Record<string, unknown> = {};
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         let replacementCoverArtId: string | undefined;
+        const removeCoverArt = !coverArtFile && req.body.removeCoverArt === 'true';
         if (req.body.name) updatePayload.name = String(req.body.name);
         if (req.body.bio) updatePayload.bio = String(req.body.bio);
         if (req.body.albumIds) {
@@ -1072,22 +1098,38 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
             replacementCoverArtId = coverArt.imageId;
             updatePayload.coverArtId = coverArt.imageId;
             updatePayload.coverArtUrl = coverArt.coverArtUrl;
-        } else if (req.body.removeCoverArt === 'true') {
-            await deleteCoverArt(artist.coverArtId);
+        } else if (removeCoverArt) {
             updatePayload.coverArtId = null;
             updatePayload.coverArtUrl = '';
         }
-        await Artist.updateById(artistId, updatePayload);
-        let cleanupPending = false;
-        if (replacementCoverArtId && artist.coverArtId && artist.coverArtId !== replacementCoverArtId) {
-            await deleteCoverArt(artist.coverArtId).catch((error) => {
-                cleanupPending = true;
-                console.log(`Unable to delete replaced artist cover art ${artist.coverArtId}:`, error);
-            });
+        const cleanup = await updateCoverArtOwnerAndCleanup(
+            artistId,
+            updatePayload,
+            artist.coverArtId,
+            removeCoverArt || Boolean(
+                replacementCoverArtId && artist.coverArtId !== replacementCoverArtId
+            ),
+            {
+                ownerType: 'artist',
+                updateOwner: (id, update) => Artist.updateById(id, update),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    Artist.updateCoverArtById(id, expectedImageId, update)
+            }
+        );
+        if (cleanup.cleanupError) {
+            console.log(`Unable to delete detached artist cover art ${artist.coverArtId}:`, cleanup.cleanupError);
+        }
+        if (!cleanup.updateApplied) {
+            return redirectWithMessage(
+                res,
+                cleanup.cleanupPending
+                    ? 'Artist was not updated because its cover-art lifecycle evidence requires reconciliation.'
+                    : 'Artist was not updated because its cover art changed concurrently.'
+            );
         }
         return redirectWithMessage(
             res,
-            cleanupPending
+            cleanup.cleanupPending
                 ? 'Artist updated successfully. Previous cover-art cleanup will need to be retried.'
                 : 'Artist updated successfully.'
         );
@@ -1105,16 +1147,28 @@ export const deleteArtistWeb = async (req: Request, res: Response, next: NextFun
         if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const artistId = String(req.body.artistId ?? '').trim();
-        const artistValidation = await validateContentReferences('artist', [artistId]);
-        if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
+        if (!ObjectId.isValid(artistId)
+            || String(new ObjectId(artistId)) !== artistId.toLowerCase()) {
+            return redirectWithMessage(res, 'Artist ID is not valid.');
+        }
         const artist = await Artist.findById(artistId);
         if (!artist) {
             return redirectWithMessage(res, 'Artist not found.');
         }
 
-        await deleteCoverArt(artist.coverArtId);
-        await Artist.deleteById(artistId);
-        return redirectWithMessage(res, 'Artist deleted successfully.');
+        const cleanup = await deleteArtistAndReferences(artistId);
+        if (!cleanup.ownerDeleted) {
+            return redirectWithMessage(
+                res,
+                'Artist was retained for retry and lifecycle reconciliation.'
+            );
+        }
+        return redirectWithMessage(
+            res,
+            cleanup.cleanupPending
+                ? 'Artist deleted successfully. Cover-art cleanup will need to be retried.'
+                : 'Artist deleted successfully.'
+        );
     } catch (error) {
         return next(error);
     }
@@ -1134,37 +1188,44 @@ export const createAlbumWeb = async (req: Request, res: Response, next: NextFunc
             return redirectWithMessage(res, trackValidation.message!);
         }
 
+        const albumObjectId = new ObjectId();
         const album = new Album(
             String(req.body.title ?? ''),
             String(req.body.coverArtUrl ?? ''),
             trackValidation.ids as [string],
             parseDateInput(String(req.body.releaseDate ?? '')),
-            authReq.auth.userId
+            authReq.auth.userId,
+            albumObjectId
         );
 
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) await validateCoverArtFile(coverArtFile);
-        const result = await album.save();
-        const albumId = result.insertedId.toHexString();
-        try {
-            if (coverArtFile) {
-                const coverArt = await uploadCoverArt(
-                    'album',
-                    albumId,
-                    coverArtFile,
-                    authReq.auth.userId
-                );
-                await Album.updateById(albumId, {
-                    coverArtId: coverArt.imageId,
-                    coverArtUrl: coverArt.coverArtUrl
-                });
-            }
-        } catch (error) {
-            await Album.deleteById(albumId).catch(() => undefined);
-            throw error;
+        const albumId = albumObjectId.toHexString();
+        let coverArt: { imageId: string; coverArtUrl: string } | undefined;
+        if (coverArtFile) {
+            coverArt = await uploadCoverArt(
+                'album',
+                albumId,
+                coverArtFile,
+                authReq.auth.userId,
+                { allowMissingOwner: true }
+            );
         }
+        await publishNewAlbum(album, coverArt);
         return redirectWithMessage(res, 'Album created successfully.');
     } catch (error) {
+        if ((error as any)?.outcomeUnknown) {
+            return redirectWithMessage(
+                res,
+                'Album creation outcome could not be confirmed. Reconciliation is required before retrying.'
+            );
+        }
+        if ((error as any)?.code === 'album_creation_cleanup_pending') {
+            return redirectWithMessage(
+                res,
+                'Album was not created. Uploaded cover-art cleanup requires reconciliation.'
+            );
+        }
         return next(error);
     }
 };
@@ -1180,7 +1241,7 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
         const albumId = String(req.body.albumId ?? '').trim();
         const albumValidation = await validateContentReferences('album', [albumId]);
         if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
-        const album = await Album.findById(albumId);
+        const album = await Album.findReadyById(albumId);
         if (!album) {
             return redirectWithMessage(res, 'Album not found.');
         }
@@ -1188,8 +1249,9 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
         const updatePayload: Record<string, unknown> = {};
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         let replacementCoverArtId: string | undefined;
+        const removeCoverArt = !coverArtFile && req.body.removeCoverArt === 'true';
         if (req.body.title) updatePayload.title = String(req.body.title);
-        if (req.body.audioTrackIds) {
+        if (req.body.audioTrackIds !== undefined) {
             const validation = await validateContentReferences(
                 'audioTrack',
                 parseCsv(String(req.body.audioTrackIds))
@@ -1208,23 +1270,39 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
             replacementCoverArtId = coverArt.imageId;
             updatePayload.coverArtId = coverArt.imageId;
             updatePayload.coverArtUrl = coverArt.coverArtUrl;
-        } else if (req.body.removeCoverArt === 'true') {
-            await deleteCoverArt(album.coverArtId);
+        } else if (removeCoverArt) {
             updatePayload.coverArtId = null;
             updatePayload.coverArtUrl = '';
         }
 
-        await Album.updateById(albumId, updatePayload);
-        let cleanupPending = false;
-        if (replacementCoverArtId && album.coverArtId && album.coverArtId !== replacementCoverArtId) {
-            await deleteCoverArt(album.coverArtId).catch((error) => {
-                cleanupPending = true;
-                console.log(`Unable to delete replaced album cover art ${album.coverArtId}:`, error);
-            });
+        const cleanup = await updateCoverArtOwnerAndCleanup(
+            albumId,
+            updatePayload,
+            album.coverArtId,
+            removeCoverArt || Boolean(
+                replacementCoverArtId && album.coverArtId !== replacementCoverArtId
+            ),
+            {
+                ownerType: 'album',
+                updateOwner: (id, update) => Album.updateById(id, update),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    Album.updateCoverArtById(id, expectedImageId, update)
+            }
+        );
+        if (cleanup.cleanupError) {
+            console.log(`Unable to delete detached album cover art ${album.coverArtId}:`, cleanup.cleanupError);
+        }
+        if (!cleanup.updateApplied) {
+            return redirectWithMessage(
+                res,
+                cleanup.cleanupPending
+                    ? 'Album was not updated because its cover-art lifecycle evidence requires reconciliation.'
+                    : 'Album was not updated because its cover art changed concurrently.'
+            );
         }
         return redirectWithMessage(
             res,
-            cleanupPending
+            cleanup.cleanupPending
                 ? 'Album updated successfully. Previous cover-art cleanup will need to be retried.'
                 : 'Album updated successfully.'
         );
@@ -1242,17 +1320,28 @@ export const deleteAlbumWeb = async (req: Request, res: Response, next: NextFunc
         if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const albumId = String(req.body.albumId ?? '').trim();
-        const albumValidation = await validateContentReferences('album', [albumId]);
-        if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
+        if (!ObjectId.isValid(albumId)
+            || String(new ObjectId(albumId)) !== albumId.toLowerCase()) {
+            return redirectWithMessage(res, 'Album ID is not valid.');
+        }
         const album = await Album.findById(albumId);
         if (!album) {
             return redirectWithMessage(res, 'Album not found.');
         }
 
-        await deleteCoverArt(album.coverArtId);
-        await cleanupDeletedContentReferences('album', albumId);
-        await Album.deleteById(albumId);
-        return redirectWithMessage(res, 'Album deleted successfully.');
+        const cleanup = await deleteAlbumAndReferences(albumId);
+        if (!cleanup.ownerDeleted) {
+            return redirectWithMessage(
+                res,
+                'Album was retained for retry and lifecycle reconciliation.'
+            );
+        }
+        return redirectWithMessage(
+            res,
+            cleanup.cleanupPending
+                ? 'Album deleted successfully. Cover-art cleanup will need to be retried.'
+                : 'Album deleted successfully.'
+        );
     } catch (error) {
         return next(error);
     }
@@ -1313,7 +1402,12 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         );
 
         await track.save();
-        await uploadAudioObject(audioTrackId, uploadFile, getContentProvenanceId(track) || authReq.auth.userId, getRequestAbortSignal(req));
+        const upload = await uploadAudioObject(
+            audioTrackId,
+            uploadFile,
+            getContentProvenanceId(track) || authReq.auth.userId,
+            getRequestAbortSignal(req)
+        );
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) {
             const coverArt = await uploadCoverArt(
@@ -1322,21 +1416,22 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
                 coverArtFile,
                 authReq.auth.userId
             );
-            await AudioTrack.updateById(audioTrackId, {
-                coverArtId: coverArt.imageId,
-                coverArtUrl: coverArt.coverArtUrl
+            await attachCoverArtToNewOwner(audioTrackId, coverArt, {
+                ownerType: 'audioTrack',
+                updateOwner: (id, update) => AudioTrack.updateById(id, update),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    AudioTrack.updateCoverArtById(id, expectedImageId, update)
             });
         }
 
-        if (album) {
-            const albumTrackIds = uniqueStrings([
-                ...(Array.isArray(album.audioTrackIds) ? album.audioTrackIds.map(String) : []),
-                audioTrackId
-            ]);
-            await Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] });
-        }
+        await publishUploadedAudioTracks(albumId, [audioTrackId]);
 
-        return redirectWithMessage(res, 'Audio track and file created successfully.');
+        return redirectWithMessage(
+            res,
+            upload.cleanupPending
+                ? 'Audio track and file created successfully. Previous object cleanup will need to be retried.'
+                : 'Audio track and file created successfully.'
+        );
     } catch (error) {
         return next(error);
     }
@@ -1351,16 +1446,20 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
         if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
-        const trackValidation = await validateContentReferences('audioTrack', [audioTrackId]);
-        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
+        if (!ObjectId.isValid(audioTrackId)
+            || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
+            return redirectWithMessage(res, 'Audio track ID is not valid.');
+        }
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
         }
 
         const updatePayload: Record<string, unknown> = {};
+        let requestedAlbumId: string | undefined;
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         let replacementCoverArtId: string | undefined;
+        const removeCoverArt = !coverArtFile && req.body.removeCoverArt === 'true';
         if (req.body.title) updatePayload.title = String(req.body.title);
         if (req.body.artistIds) {
             const validation = await validateContentReferences(
@@ -1371,13 +1470,15 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
             updatePayload.artistIds = validation.ids;
         }
         if (req.body.genres) updatePayload.genres = parseCsv(String(req.body.genres));
-        if (req.body.albumId) {
-            const validation = await validateContentReferences(
-                'album',
-                [String(req.body.albumId)]
-            );
-            if (!validation.valid) return redirectWithMessage(res, validation.message!);
-            updatePayload.albumId = validation.ids[0];
+        if (req.body.albumId !== undefined) {
+            const albumId = String(req.body.albumId ?? '').trim();
+            if (albumId) {
+                const validation = await validateContentReferences('album', [albumId]);
+                if (!validation.valid) return redirectWithMessage(res, validation.message!);
+                requestedAlbumId = validation.ids[0];
+            } else {
+                requestedAlbumId = '';
+            }
         }
         if (req.body.releaseDate) updatePayload.releaseDate = parseDateInput(String(req.body.releaseDate));
         if (req.body.duration) updatePayload.duration = String(req.body.duration);
@@ -1399,23 +1500,54 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
             replacementCoverArtId = coverArt.imageId;
             updatePayload.coverArtId = coverArt.imageId;
             updatePayload.coverArtUrl = coverArt.coverArtUrl;
-        } else if (req.body.removeCoverArt === 'true') {
-            await deleteCoverArt(track.coverArtId);
+        } else if (removeCoverArt) {
             updatePayload.coverArtId = null;
             updatePayload.coverArtUrl = '';
         }
 
-        await AudioTrack.updateById(audioTrackId, updatePayload);
-        let cleanupPending = false;
-        if (replacementCoverArtId && track.coverArtId && track.coverArtId !== replacementCoverArtId) {
-            await deleteCoverArt(track.coverArtId).catch((error) => {
-                cleanupPending = true;
-                console.log(`Unable to delete replaced audio-track cover art ${track.coverArtId}:`, error);
-            });
+        const cleanup = Object.keys(updatePayload).length > 0 || requestedAlbumId !== undefined
+            ? await updateCoverArtOwnerAndCleanup(
+                audioTrackId,
+                updatePayload,
+                track.coverArtId,
+                removeCoverArt || Boolean(
+                    replacementCoverArtId && track.coverArtId !== replacementCoverArtId
+                ),
+                {
+                    ownerType: 'audioTrack',
+                    updateOwner: requestedAlbumId === undefined
+                        ? (id, update) => AudioTrack.updateById(id, update)
+                        : (id, update) => AudioTrack.updateWithAlbumById(
+                            id,
+                            requestedAlbumId,
+                            update
+                        ),
+                    updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                        requestedAlbumId === undefined
+                            ? AudioTrack.updateCoverArtById(id, expectedImageId, update)
+                            : AudioTrack.updateWithAlbumAndCoverArtById(
+                                id,
+                                requestedAlbumId,
+                                expectedImageId,
+                                update
+                            )
+                }
+            )
+            : { updateApplied: true, cleanupPending: false, cleanupError: undefined };
+        if (cleanup.cleanupError) {
+            console.log(`Unable to delete detached audio-track cover art ${track.coverArtId}:`, cleanup.cleanupError);
+        }
+        if (!cleanup.updateApplied) {
+            return redirectWithMessage(
+                res,
+                cleanup.cleanupPending
+                    ? 'Audio track was not updated because its cover-art lifecycle evidence requires reconciliation.'
+                    : 'Audio track was not updated because its cover art changed concurrently.'
+            );
         }
         return redirectWithMessage(
             res,
-            cleanupPending
+            cleanup.cleanupPending
                 ? 'Audio track updated successfully. Previous cover-art cleanup will need to be retried.'
                 : 'Audio track updated successfully.'
         );
@@ -1433,19 +1565,32 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
         if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
-        const trackValidation = await validateContentReferences('audioTrack', [audioTrackId]);
-        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
+        if (!ObjectId.isValid(audioTrackId)
+            || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
+            return redirectWithMessage(res, 'Audio track ID is not valid.');
+        }
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
         }
 
         try {
-            await deleteAudioObjectAndTrack(audioTrackId);
-            return redirectWithMessage(res, 'Audio track deleted successfully.');
+            const deletion = await deleteAudioObjectAndTrack(audioTrackId);
+            return redirectWithMessage(
+                res,
+                deletion.cleanupPending
+                    ? 'Audio track deleted successfully. Cover-art cleanup will need to be retried.'
+                    : 'Audio track deleted successfully.'
+            );
         } catch (s3Error) {
             console.log('Audio track deletion failed for audioTrackId:', audioTrackId, s3Error);
-            return redirectWithMessage(res, 'The uploaded file could not be deleted. Track metadata was retained for reconciliation.');
+            const outcomeUnknown = (s3Error as any)?.code === 'audio_deletion_outcome_unknown';
+            return redirectWithMessage(
+                res,
+                outcomeUnknown
+                    ? 'Audio track deletion outcome could not be confirmed. Reconciliation is required.'
+                    : 'Audio track deletion could not complete. Track metadata was retained for retry and reconciliation.'
+            );
         }
     } catch (error) {
         return next(error);
@@ -1474,45 +1619,54 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
             return redirectWithMessage(res, `Delete no more than ${maximumBatchDeletes} audio tracks at once.`);
         }
 
-        const [albumValidation, trackValidation] = await Promise.all([
-            validateContentReferences('album', [albumId]),
-            validateContentReferences('audioTrack', selectedTrackIds)
-        ]);
+        const albumValidation = await validateContentReferences('album', [albumId]);
         if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
-        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
 
         const album = await Album.findById(albumId);
         if (!album) {
             return redirectWithMessage(res, 'Album not found.');
         }
 
-        const tracks = await Promise.all(selectedTrackIds.map((trackId) => AudioTrack.findById(trackId)));
+        const tracks = await Promise.all(selectedTrackIds.map((trackId) =>
+            ObjectId.isValid(trackId) ? AudioTrack.findById(trackId) : Promise.resolve(null)
+        ));
         const associatedTrackIds = new Set(uniqueStrings([
             ...(Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds.map(String) : []),
             ...tracks.filter(Boolean).filter((track: any) => String(track.albumId ?? '') === albumId).map(contentId)
         ]));
-        if (tracks.some((track) => !track) || selectedTrackIds.some((trackId) => !associatedTrackIds.has(trackId))) {
-            return redirectWithMessage(res, 'One or more selected tracks do not belong to this album.');
-        }
         const deletedTrackIds: string[] = [];
         const failedTrackIds: string[] = [];
-        for (const trackId of selectedTrackIds) {
+        const outcomeUnknownTrackIds: string[] = [];
+        const cleanupPendingTrackIds: string[] = [];
+        for (const [index, trackId] of selectedTrackIds.entries()) {
+            if (!tracks[index] || !associatedTrackIds.has(trackId)) {
+                failedTrackIds.push(trackId);
+                continue;
+            }
             try {
-                await deleteAudioObjectAndTrack(trackId);
+                const deletion = await deleteAudioObjectAndTrack(trackId);
                 deletedTrackIds.push(trackId);
+                if (deletion.cleanupPending) cleanupPendingTrackIds.push(trackId);
             } catch (deleteError) {
                 console.log(`Unable to delete audio track ${trackId}:`, deleteError);
                 failedTrackIds.push(trackId);
+                if ((deleteError as any)?.code === 'audio_deletion_outcome_unknown') {
+                    outcomeUnknownTrackIds.push(trackId);
+                }
             }
         }
 
-        const remainingTrackIds = uniqueStrings(
-            (Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []).map(String)
-        ).filter((trackId) => !deletedTrackIds.includes(trackId));
-        await Album.updateById(albumId, { audioTrackIds: remainingTrackIds as [string] });
-
         if (failedTrackIds.length > 0) {
-            return redirectWithMessage(res, `${deletedTrackIds.length} audio track(s) deleted. ${failedTrackIds.length} could not be deleted and remain recorded for reconciliation.`);
+            return redirectWithMessage(
+                res,
+                `${deletedTrackIds.length} audio track(s) deleted. ${failedTrackIds.length} could not be deleted.${outcomeUnknownTrackIds.length > 0 ? ` ${outcomeUnknownTrackIds.length} deletion outcome(s) require reconciliation.` : ' Failed tracks remain recorded for retry and reconciliation.'}${cleanupPendingTrackIds.length > 0 ? ` ${cleanupPendingTrackIds.length} deleted track(s) still require cover-art lifecycle cleanup.` : ''}`
+            );
+        }
+        if (cleanupPendingTrackIds.length > 0) {
+            return redirectWithMessage(
+                res,
+                `${deletedTrackIds.length} audio track(s) deleted. ${cleanupPendingTrackIds.length} still require cover-art lifecycle cleanup.`
+            );
         }
 
         return redirectWithMessage(res, `${deletedTrackIds.length} audio track(s) deleted successfully.`);
@@ -1521,8 +1675,32 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
     }
 };
 
-export const uploadAudioTrackWeb = async (req: Request, res: Response, next: NextFunction) => {
+interface WebAudioTrackUploadDependencies {
+    findTrack: typeof AudioTrack.findById;
+    uploadObject: typeof uploadAudioObject;
+    retryPublications: typeof retryAudioTrackPublications;
+}
+
+const defaultWebAudioTrackUploadDependencies: WebAudioTrackUploadDependencies = {
+    findTrack: AudioTrack.findById.bind(AudioTrack),
+    uploadObject: uploadAudioObject,
+    retryPublications: retryAudioTrackPublications
+};
+
+const publicationStatusForMessage = (value: string) => value === '' ? 'empty' : value;
+
+/** Keeps the one-file Content Manager result aligned with persisted publication state. */
+export const uploadAudioTrackWeb = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    dependencyOverrides: Partial<WebAudioTrackUploadDependencies> = {}
+) => {
     try {
+        const dependencies = {
+            ...defaultWebAudioTrackUploadDependencies,
+            ...dependencyOverrides
+        };
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
@@ -1530,9 +1708,11 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
         if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
-        const trackValidation = await validateContentReferences('audioTrack', [audioTrackId]);
-        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
-        const track = await AudioTrack.findById(audioTrackId);
+        if (!ObjectId.isValid(audioTrackId)
+            || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
+            return redirectWithMessage(res, 'Audio track ID is not valid.');
+        }
+        const track = await dependencies.findTrack(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
         }
@@ -1542,10 +1722,49 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Missing audio file.');
         }
 
-        await uploadAudioObject(audioTrackId, uploadFile, getContentProvenanceId(track) || authReq.auth.userId, getRequestAbortSignal(req));
+        const upload = await dependencies.uploadObject(
+            audioTrackId,
+            uploadFile,
+            getContentProvenanceId(track) || authReq.auth.userId,
+            getRequestAbortSignal(req)
+        );
+        const publication = await dependencies.retryPublications([audioTrackId]);
+        const publicationResult = publication.results.find(
+            (result) => result.audioTrackId === audioTrackId.toLowerCase()
+        );
+        if (!publicationResult) {
+            return redirectWithMessage(
+                res,
+                'Audio file uploaded, but publication outcome could not be read back. Reconciliation is required.'
+            );
+        }
+        if (publicationResult.outcome !== 'ready') {
+            const publicationMessage = publicationResult.outcome === 'unknown'
+                ? 'Audio file uploaded, but publication outcome could not be confirmed. Reconciliation is required.'
+                : `Audio file uploaded, but publication status is ${publicationStatusForMessage(publicationResult.publicationStatus)}. Retry publication without uploading the file again.`;
+            return redirectWithMessage(
+                res,
+                `${publicationMessage}${upload.cleanupPending ? ' Previous object cleanup also needs to be retried.' : ''}`
+            );
+        }
 
-        return redirectWithMessage(res, 'Audio file uploaded successfully.');
+        return redirectWithMessage(
+            res,
+            upload.cleanupPending
+                ? `Audio file uploaded successfully. Publication status is ${publicationStatusForMessage(publicationResult.publicationStatus)}. Previous object cleanup will need to be retried.`
+                : `Audio file uploaded successfully. Publication status is ${publicationStatusForMessage(publicationResult.publicationStatus)}.`
+        );
     } catch (error) {
+        if ((error as any)?.cleanupPending !== undefined) {
+            return redirectWithMessage(
+                res,
+                (error as any)?.outcomeUnknown
+                    ? 'Audio upload outcome could not be confirmed. Reconciliation is required.'
+                    : (error as any)?.cleanupPending
+                        ? 'Audio upload failed and storage cleanup must be retried.'
+                        : String((error as Error).message || 'Audio upload failed.')
+            );
+        }
         return next(error);
     }
 };
@@ -1584,7 +1803,16 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
         }
 
         const uploadedTrackIds: string[] = [];
-        const failures: string[] = [];
+        const outcomes: Array<{
+            originalFileName: string;
+            audioTrackId: string | null;
+            uploadStatus: string;
+            publicationStatus: string;
+            cleanupPending: boolean;
+            error: string | null;
+        }> = [];
+        const cleanupPendingTrackIds: string[] = [];
+        let failedCleanupPendingCount = 0;
 
         for (const uploadFile of uploadFiles) {
             const originalFileName = normalizeUtf8Text(uploadFile.originalname);
@@ -1592,7 +1820,14 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                 || uploadFile.mimetype === 'video/mp4'
                 || uploadFile.mimetype === 'application/ogg';
             if (!isAudioFile) {
-                failures.push(originalFileName);
+                outcomes.push({
+                    originalFileName,
+                    audioTrackId: null,
+                    uploadStatus: 'rejected',
+                    publicationStatus: 'notAttempted',
+                    cleanupPending: false,
+                    error: 'The selected file is not a supported audio type.'
+                });
                 continue;
             }
 
@@ -1640,27 +1875,65 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
 
             try {
                 await track.save();
-                await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId, getRequestAbortSignal(req));
+                const upload = await uploadAudioObject(
+                    audioTrackId,
+                    uploadFile,
+                    authReq.auth.userId,
+                    getRequestAbortSignal(req)
+                );
                 uploadedTrackIds.push(audioTrackId);
+                if (upload.cleanupPending) cleanupPendingTrackIds.push(audioTrackId);
+                outcomes.push({
+                    originalFileName,
+                    audioTrackId,
+                    uploadStatus: 'ready',
+                    publicationStatus: 'pending',
+                    cleanupPending: upload.cleanupPending,
+                    error: null
+                });
             } catch (uploadError) {
                 console.log(`Unable to upload ${originalFileName}:`, uploadError);
-                failures.push(originalFileName);
+                if ((uploadError as any)?.cleanupPending) failedCleanupPendingCount += 1;
+                outcomes.push({
+                    originalFileName,
+                    audioTrackId,
+                    uploadStatus: (uploadError as any)?.outcomeUnknown ? 'unknown' : 'failed',
+                    publicationStatus: 'notAttempted',
+                    cleanupPending: Boolean((uploadError as any)?.cleanupPending),
+                    error: String((uploadError as Error)?.message ?? 'Audio upload failed.').slice(0, 500)
+                });
             }
         }
 
-        if (album && uploadedTrackIds.length > 0) {
-            const albumTrackIds = uniqueStrings([
-                ...(Array.isArray(album.audioTrackIds) ? album.audioTrackIds.map(String) : []),
-                ...uploadedTrackIds
-            ]);
-            await Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] });
+        const publication = uploadedTrackIds.length > 0
+            ? await retryAudioTrackPublications(uploadedTrackIds)
+            : { requestedCount: 0, readyCount: 0, failedCount: 0, results: [] };
+        const publicationById = new Map(
+            publication.results.map((result) => [result.audioTrackId, result] as const)
+        );
+        for (const outcome of outcomes) {
+            if (!outcome.audioTrackId || outcome.uploadStatus !== 'ready') continue;
+            const result = publicationById.get(outcome.audioTrackId);
+            outcome.publicationStatus = result?.publicationStatus ?? 'failed';
+            if (result?.outcome !== 'ready') outcome.error = result?.error ?? 'Publication failed.';
         }
-        const message = `${uploadedTrackIds.length} audio track${uploadedTrackIds.length === 1 ? '' : 's'} created and uploaded.${failures.length > 0 ? ` ${failures.length} file${failures.length === 1 ? '' : 's'} failed.` : ''}`;
+        const cleanupPendingCount = cleanupPendingTrackIds.length + failedCleanupPendingCount;
+        const uploadFailureCount = outcomes.filter((outcome) => outcome.uploadStatus !== 'ready').length;
+        const publicationFailureCount = publication.failedCount;
+        const itemSummary = outcomes
+            .filter((outcome) => outcome.audioTrackId)
+            .map((outcome) => `${outcome.audioTrackId}: upload=${outcome.uploadStatus}, publication=${outcome.publicationStatus}`)
+            .join('; ');
+        const message = `${uploadedTrackIds.length} audio track${uploadedTrackIds.length === 1 ? '' : 's'} uploaded; ${publication.readyCount} published.${uploadFailureCount > 0 ? ` ${uploadFailureCount} file${uploadFailureCount === 1 ? '' : 's'} failed upload validation or storage.` : ''}${publicationFailureCount > 0 ? ` ${publicationFailureCount} publication${publicationFailureCount === 1 ? '' : 's'} failed and can be retried without another upload.` : ''}${cleanupPendingCount > 0 ? ` ${cleanupPendingCount} upload${cleanupPendingCount === 1 ? '' : 's'} require storage reconciliation or cleanup.` : ''}${itemSummary ? ` ${itemSummary}` : ''}`;
         if (req.get('X-Requested-With') === 'XMLHttpRequest') {
             return res.status(uploadedTrackIds.length > 0 ? 200 : 422).json({
                 message,
                 uploadedCount: uploadedTrackIds.length,
-                failureCount: failures.length
+                publishedCount: publication.readyCount,
+                uploadFailureCount,
+                publicationFailureCount,
+                cleanupPendingCount,
+                outcomes
             });
         }
         return redirectWithMessage(res, message);
@@ -1693,12 +1966,7 @@ export const linkTrackToAlbumWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Track or album not found.');
         }
 
-        const albumTrackIds = uniqueStrings([...(Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []), audioTrackId]);
-
-        await Promise.all([
-            AudioTrack.updateById(audioTrackId, { albumId }),
-            Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] })
-        ]);
+        await linkReadyAudioTracksToAlbum(albumId, [audioTrackId]);
 
         return redirectWithMessage(res, 'Track linked to album successfully.');
     } catch (error) {

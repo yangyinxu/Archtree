@@ -3,7 +3,7 @@ import { configDefaults, defineConfig } from 'vitest/config';
 
 /** Keeps the listener on one origin while Express remains the API authority. */
 export default defineConfig({
-  base: '/listen/',
+  base: '/finitude/',
   plugins: [react()],
   build: {
     manifest: true,

@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   browser-release:
-    name: Unit, build, browser, and accessibility gates
+    name: Unit, integration, build, browser, and accessibility gates
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -29,8 +29,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install the MongoDB integration-test daemon
+        env:
+          MONGODB_CI_VERSION: 8.0.12
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes curl gnupg
+          curl -fsSL https://pgp.mongodb.com/server-8.0.asc \
+            --output "${RUNNER_TEMP}/mongodb-server-8.0.asc"
+          sudo gpg --batch --yes --dearmor \
+            --output /usr/share/keyrings/mongodb-server-8.0.gpg \
+            "${RUNNER_TEMP}/mongodb-server-8.0.asc"
+          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" \
+            | sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install --yes "mongodb-org-server=${MONGODB_CI_VERSION}"
+          mongod --version
+
       - name: Run server and Web unit tests
         run: npm test
+
+      - name: Run Mongo-backed lifecycle integration tests
+        run: npm run test:integration
 
       - name: Build production server and listener
         run: npm run build
@@ -42,7 +62,7 @@ jobs:
         run: npx playwright install --with-deps chromium firefox webkit
 
       - name: Run production-bundle browser and accessibility tests
-        run: npm run test:e2e
+        run: npm run test:e2e -- --update-snapshots=none
 
       - name: Stage the Elastic Beanstalk deployment artifact
         run: npm run stage:eb-artifact
@@ -71,5 +91,6 @@ jobs:
           path: |
             web/playwright-report
             web/test-results
+            web/e2e/visual-regression.spec.ts-snapshots/linux
           if-no-files-found: ignore
           retention-days: 30

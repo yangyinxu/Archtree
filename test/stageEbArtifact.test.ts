@@ -26,8 +26,8 @@ const createSourceFixture = async () => {
   await writeFixtureFile(
     root,
     'web/dist/index.html',
-    '<script type="module" src="/listen/assets/index-AbCd1234.js"></script>'
-      + '<link rel="stylesheet" href="/listen/assets/index-XyZ_5678.css">\n'
+    '<script type="module" src="/finitude/assets/index-AbCd1234.js"></script>'
+      + '<link rel="stylesheet" href="/finitude/assets/index-XyZ_5678.css">\n'
   );
   await writeFixtureFile(
     root,

@@ -8,6 +8,8 @@ const titleFor = (pathname: string, search: string) => {
     return query ? `Search results for ${query}` : 'Search';
   }
   if (pathname === '/library') return 'Library';
+  if (pathname === '/playlists') return 'Playlists';
+  if (/^\/playlists\/[^/]+$/.test(pathname)) return 'Playlist';
   if (/^\/albums\/[^/]+$/.test(pathname)) return 'Album';
   if (/^\/artists\/[^/]+$/.test(pathname)) return 'Artist';
   if (pathname === '/register') return 'Create account';

@@ -5,12 +5,14 @@ import { RouterProvider } from 'react-router';
 
 import { queryClient } from './app/queryClient';
 import { router } from './app/router';
+import { startBrowserSessionCoordinator } from './app/BrowserSessionCoordinator';
 import { startListenerTelemetryLifecycle } from './telemetry/client';
 import './styles/tokens.css';
 import './styles/global.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Finitude could not find its application root.');
+startBrowserSessionCoordinator(queryClient);
 
 createRoot(root).render(
   <StrictMode>

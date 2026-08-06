@@ -11,7 +11,15 @@ const viewerId = 'listener-1';
 
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
-  headers: { 'Content-Type': 'application/json' }
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Finitude-Account-Viewer': viewerId
+  }
+});
+
+const noContentResponse = () => new Response(null, {
+  status: 204,
+  headers: { 'X-Finitude-Account-Viewer': viewerId }
 });
 
 const renderPanel = () => {
@@ -50,7 +58,7 @@ test('confirms and clears listening history without touching saved data or searc
   expect(screen.getByRole('button', { name: 'Clearing…' })).toBeDisabled();
   fireEvent.keyDown(dialog, { key: 'Tab' });
   expect(dialog).toHaveFocus();
-  finishRequest(new Response(null, { status: 204 }));
+  finishRequest(noContentResponse());
 
   expect(await screen.findByRole('status')).toHaveTextContent(
     'Listening history cleared. Your saved Library was not changed.'
@@ -99,7 +107,7 @@ test('closes a stale confirmation as soon as the displayed account changes', asy
 
 test('signs out every session, clears account state, and then clears browser cookies', async () => {
   const user = userEvent.setup();
-  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  const fetchMock = vi.fn().mockResolvedValue(noContentResponse());
   vi.stubGlobal('fetch', fetchMock);
   const { queryClient } = renderPanel();
   queryClient.setQueryData(['account', viewerId, 'private'], { secret: true });
@@ -158,7 +166,7 @@ test('preserves the safe creator-owned conflict returned by account deletion', a
 test('deletes the account before clearing cookies and local account state', async () => {
   const user = userEvent.setup();
   const fetchMock = vi.fn()
-    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(noContentResponse())
     .mockRejectedValueOnce(new TypeError('cookie cleanup connection dropped'));
   vi.stubGlobal('fetch', fetchMock);
   const { queryClient } = renderPanel();

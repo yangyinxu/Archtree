@@ -47,7 +47,7 @@ test('public Artist and Album DTOs expose only database-confirmed relationships'
         _id: '64b000000000000000000001',
         name: 'Public Artist',
         albumIds: [
-            '64b000000000000000000002',
+            '64B000000000000000000002',
             '64b000000000000000000003',
             'not-an-object-id'
         ],
@@ -67,7 +67,7 @@ test('public Artist and Album DTOs expose only database-confirmed relationships'
         ],
         releaseDate: { year: 2026, month: 8, day: 3 },
         createdBy: 'private-owner'
-    }, ['64b000000000000000000006']);
+    }, ['64B000000000000000000006']);
 
     assert.deepEqual(artist.albumIds, ['64b000000000000000000002']);
     assert.equal(artist.coverArtUrl, '/content/images/64b000000000000000000004');
@@ -113,6 +113,26 @@ test('legacy Albums receive independent 500-track fallback windows beyond 10,000
         assert.equal(album.audioTrackIds[0], objectIdFor(100_000 + albumIndex * 1_000));
         assert.equal(album.audioTrackIds[499], objectIdFor(100_499 + albumIndex * 1_000));
     }
+});
+
+test('a lifecycle Album with an empty canonical order never uses reverse-link fallback', async () => {
+    const albumId = objectIdFor(22);
+    let fallbackCalls = 0;
+    const [projected] = await projectPublicAlbums([{
+        _id: albumId,
+        title: 'Lifecycle Album',
+        audioTrackIds: [],
+        lifecycleStatus: 'ready'
+    }], {
+        findReadyDeclaredTracks: async () => [],
+        findReadyFallbackTracksForAlbum: async () => {
+            fallbackCalls += 1;
+            return [{ _id: objectIdFor(22_001), albumId }];
+        }
+    });
+
+    assert.equal(fallbackCalls, 0);
+    assert.deepEqual(projected.audioTrackIds, []);
 });
 
 test('an Album with declared track IDs never appends reverse-linked fallback tracks', async () => {
@@ -161,19 +181,25 @@ test('public Soundtrack DTO requires a ready record with a traceable object key'
     assert.equal(toPublicAudioTrack(pending), null);
     assert.equal(isReadyPublicAudioTrack(missingObjectKey), false);
     assert.equal(toPublicAudioTrack(missingObjectKey), null);
+    assert.equal(isReadyPublicAudioTrack({
+        ...pending,
+        uploadStatus: 'ready',
+        s3Key: pending._id,
+        publicationStatus: null
+    }), false);
 
     const ready = toPublicAudioTrack({
         _id: '64b000000000000000000011',
         title: 'Ready Track',
-        artistIds: ['64b000000000000000000012', 'invalid'],
+        artistIds: ['64B000000000000000000012', 'invalid'],
         genres: ['Ambient', ''],
-        albumId: '64b000000000000000000013',
+        albumId: '64B000000000000000000013',
         releaseDate: { year: 2026 },
         duration: '03:15',
         format: { type: 'FLAC', bitrate: 960 },
         coverArtUrl: '',
         uploadStatus: 'ready',
-        s3Key: 'audio/ready-track',
+        s3Key: '64b000000000000000000011',
         uploadError: 'must not leak',
         originalFileName: 'private-name.flac',
         createdBy: 'private-owner'
@@ -183,6 +209,7 @@ test('public Soundtrack DTO requires a ready record with a traceable object key'
 
     assert.ok(ready);
     assert.equal(ready.displayCoverArtUrl, '/content/images/64b000000000000000000014');
+    assert.equal(ready.albumId, '64b000000000000000000013');
     assert.deepEqual(ready.artistIds, ['64b000000000000000000012']);
     assert.deepEqual(ready.format, { type: 'FLAC', bitrate: 960 });
     assertNoInternalFields(ready);

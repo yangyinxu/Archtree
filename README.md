@@ -2,7 +2,7 @@
 
 Archtree is an Express + TypeScript service for authentication, content
 management, and media upload/streaming. It also hosts the React-based Finitude
-Web listener under `/listen`.
+Web listener under `/finitude`.
 
 Product behavior shared by the backend and iOS client is documented in
 [`docs/business-rules.md`](docs/business-rules.md).
@@ -25,7 +25,7 @@ rather than repeat the code and must stay synchronized with behavior.
 ## Scripts
 
 - `npm run dev`: start development server
-- `npm run dev:web`: start the listener Vite server at `/listen/`; run the
+- `npm run dev:web`: start the listener Vite server at `/finitude/`; run the
   Express development server separately so API requests can be proxied
 - `npm start`: start production-mode server
 - `npm run build`: type-check the server and build the listener bundle
@@ -36,8 +36,9 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run typecheck:e2e --workspace @archtree/finitude-web`: type-check the
   Playwright configuration, fixtures, and browser specs without launching a
   browser
-- `npm run test:integration`: run transactional authentication lifecycle tests
-  against a disposable single-node MongoDB replica set
+- `npm run test:integration`: run transactional authentication, account,
+  Playlist, storage, and content-reference lifecycle tests against a disposable
+  single-node MongoDB replica set
 - `npm run test:media-load`: run the bounded audio Range, seek/abort, artwork,
   and health-recovery workload against an explicitly authorized environment
 - `npm run stage:eb-artifact`: validate and stage the exact allowlisted Elastic
@@ -46,6 +47,9 @@ rather than repeat the code and must stay synchronized with behavior.
 The integration suite requires a trusted `mongod` executable on `PATH`. On
 macOS, approve or install that binary according to the machine's security
 policy before running the suite; the tests never weaken Gatekeeper themselves.
+The Linux release workflow installs the pinned, GPG-verified MongoDB Community
+server package from MongoDB's official Ubuntu repository before running this
+gate.
 Each run owns a uniquely prefixed temporary database directory, verifies its
 removal during teardown, and conservatively removes abandoned test directories
 whose recorded owner process is no longer running.
@@ -79,6 +83,10 @@ Required variables:
 - `BROWSER_ALLOWED_ORIGINS`: optional comma-separated additional exact origins
   for cookie-authenticated browser mutations; same-origin requests are always
   accepted
+- `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web
+  entry points, or `false` for an emergency rollout stop without deleting
+  Playlist or mutation-receipt data. An omitted value defaults to disabled in
+  production and enabled in non-production environments.
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 operations
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region
@@ -99,7 +107,12 @@ Required variables:
 - `MEDIA_PLAYBACK_RESERVED_GLOBAL`: slots within the process media limit
   reserved from non-playback traffic (defaults to 40% of the configured limit,
   currently 16)
-- `MAX_RECONCILIATION_OBJECTS`: safety ceiling for storage reconciliation reports (defaults to 50000)
+- `MAX_RECONCILIATION_OBJECTS`: safety ceiling for storage objects and
+  content-reference source records in one reconciliation report (defaults to
+  50000)
+- `MAX_RECONCILIATION_REFERENCES`: report-wide scan ceiling for embedded
+  content, activity, Page, Carousel, Grid/List, and Playlist references and for
+  total reference findings (defaults to 50000)
 - `MAX_STORAGE_SUMMARY_OBJECTS`: safety ceiling for synchronous S3 storage summaries (defaults to 1000000)
 - `TRUST_PROXY_HOPS`: trusted reverse-proxy hop count; the single-instance
   Elastic Beanstalk Nginx configuration uses 1
@@ -160,14 +173,15 @@ Security:
 
 To develop the listener with hot reload, keep the server running and start a
 second process with `npm run dev:web`, then open
-`http://localhost:5173/listen/`. For a production-style local run, use
+`http://localhost:5173/finitude/`. For a production-style local run, use
 `npm run build` first; Express then serves the generated `web/dist` bundle at
-`/listen` and supports listener deep links. The Web build measures every
-initial route's unique compressed JavaScript and fails if any route exceeds the
-reviewed 150 KiB gzip budget. It also caps the complete emitted stylesheet
-payload at 32 KiB gzip, emitted fonts at 128 KiB, bundled images at 256 KiB
-total, and any one bundled image at 128 KiB. Catalog artwork continues to load
-through listener DTOs rather than being bundled into the app.
+`/finitude` and supports listener deep links. Requests to the legacy `/listen`
+prefix permanently redirect to the equivalent `/finitude` path. The Web build
+measures every initial route's unique compressed JavaScript and fails if any
+route exceeds the reviewed 150 KiB gzip budget. It also caps the complete
+emitted stylesheet payload at 32 KiB gzip, emitted fonts at 128 KiB, bundled
+images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
+continues to load through listener DTOs rather than being bundled into the app.
 
 Install the version-matched browser runtimes once before running the local
 browser gate:
@@ -175,7 +189,7 @@ browser gate:
 ```bash
 npx playwright install chromium firefox webkit
 npm run typecheck:e2e --workspace @archtree/finitude-web
-npm run test:e2e
+CI=1 npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 ```
 
 Chromium owns the reviewed deterministic pixel baselines; Firefox and WebKit
@@ -193,8 +207,9 @@ Legacy native-client reads under `/content` and `/feed` also remain available
 without authentication. Their Artist, Album, Soundtrack, Page, Carousel,
 Grid/List, and Feed Post responses use explicit public projections rather than
 raw MongoDB documents. Soundtrack list, search, Album relationship, personalized
-section, and expanded-page queries filter for `uploadStatus: ready` plus a
-non-blank `s3Key` before applying item limits or pagination. Public responses do
+section, and expanded-page queries require a published (or legacy) Track with
+`uploadStatus: ready` and an S3 key bound to that Track ID before applying item
+limits or pagination. Public responses do
 not expose `createdBy`, `updatedBy`, `coverArtId`, object keys, upload errors,
 original filenames, or lifecycle timestamps. Feed Posts retain only their
 existing opaque author reference; it cannot be used to read private account or
@@ -210,7 +225,7 @@ avatars remain private behind `/auth/avatar`. Finitude Web derives responsive
 CPU-concurrency bounded responses and never create extra S3 objects; the
 original image route remains the fallback and native-client contract.
 The Archtree landing page links both signed-out and signed-in visitors to
-`/listen` while preserving its existing content-management and authentication
+`/finitude` while preserving its existing content-management and authentication
 actions. Content-management actions are rendered only for administrators.
 
 `POST /api/listener/v1/telemetry` accepts only same-origin JSON envelopes of
@@ -270,12 +285,11 @@ platform hooks. `RELEASE.json` records the source commit and build identity;
 Elastic Beanstalk performs a clean dependency install on each instance.
 
 The separate `.github/workflows/finitude-web-release.yml` gate follows the
-Playwright CI installation flow and runs unit/component tests, both production
-builds, and all three browser/axe projects on pull requests and pushes to
-`develop` or `main`. Browser traces, screenshots, videos, JUnit output, and the
-HTML report are retained as workflow artifacts. The Mongo-backed integration
-suite remains a distinct gate on runners that provide a trusted `mongod`
-binary.
+Playwright CI installation flow and runs unit/component tests, the Mongo-backed
+lifecycle integration suite, both production builds, and all three browser/axe
+projects on pull requests and pushes to `develop` or `main`. Browser traces,
+screenshots, videos, JUnit output, and the HTML report are retained as workflow
+artifacts. A missing or failed integration environment blocks artifact staging.
 
 After the browser gate, CI retains a commit-named Elastic Beanstalk ZIP for 30
 days so staging and production can promote the same tested bytes and the
@@ -331,6 +345,12 @@ returned to JavaScript):
 - `GET /auth/browser/session`
 - `POST /auth/browser/logout`
 
+Public Listener capability discovery:
+
+- `GET /api/listener/v1/capabilities` returns only deploy-safe feature
+  availability. The Web client uses its `playlists` boolean to hide Playlist
+  routes and controls when the server-side rollout switch is off.
+
 Browser authentication mutations require same-origin JSON. Registration,
 verification resend, and recovery-request responses are deliberately generic
 so account existence is not disclosed. Browser capability discovery reports
@@ -385,7 +405,7 @@ Shared-content authorization:
 - Public Catalog, Search, Home, Feed, artwork, and ready stream reads do not
   require authentication and do not filter by `createdBy` or viewer role.
 - Personal `/content/me/*`, account, avatar, session, activity, Save, Library,
-  download, and future own-Playlist operations remain owner-scoped rather than
+  download, and own-Playlist operations remain owner-scoped rather than
   administrator-only.
 
 Web content management:
@@ -406,7 +426,20 @@ Web content management:
 - Content Manager reference fields validate IDs against the expected shared content type before saving.
 - Artist, album, and audio-track create/update forms accept optional JPG, PNG, or WebP cover art through the `coverArtFile` multipart field.
 - Cover art is stored in the private S3 bucket and referenced by `coverArtId`. API responses derive `coverArtUrl` as `/content/images/:imageId`.
-- Replacing cover art attaches the new image before deleting the old object. Deleting an artist, album, or audio track deletes its tracked cover-art object before removing its database record.
+- New Artist/Album cover art reaches ready storage before the owner is inserted;
+  the ready owner and exact `coverArtId` are then published in one insert, so a
+  failed upload cannot expose a partially created catalog record.
+- Replacing cover art attaches the new image before deleting the old object.
+  For an existing owner, the post-S3 `pending` to `ready` transition rechecks
+  owner readiness and commits with an exact lifecycle CAS in one short
+  transaction. Deletion retains the owner and evidence while a Put is pending;
+  whichever owner fence commits first determines whether deletion proceeds or
+  the uploader removes the exact newly written key. A lost staging or
+  finalization response proceeds only after an exact pending/ready lifecycle
+  readback; otherwise it preserves the evidence and requires reconciliation.
+  Deleting an Artist, Album, or Soundtrack retries every current or detached
+  asset recorded for that owner before removing the owner; a storage failure
+  keeps the owner and lifecycle evidence retryable.
 - Existing tracks support replacing their uploaded audio file
 - S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 
@@ -423,6 +456,11 @@ Personalized Library:
 
 - Authenticated users can save and unsave albums or audio tracks through
   `/content/me/saves/:contentType/:contentId`.
+- Both `/content/me/library` and `/api/listener/v1/library` return private,
+  allowlisted DTOs rather than catalog storage/lifecycle records. Existing
+  non-ready saves remain visible as unavailable, with no stream URL; the legacy
+  native Album shape retains an empty `audioTrackIds` field and resolves detail
+  order separately.
 - `POST /content/me/saves/status` resolves saved state for up to 100 visible
   items, and `POST /content/me/recently-played` records explicit playback
   actions.
@@ -448,6 +486,52 @@ Personalized Library:
   authenticated traffic. Release builds require HTTPS; DEBUG builds additionally
   permit HTTP only for `localhost` and `127.0.0.1`.
 
+User Playlists:
+
+- Authenticated listeners manage private, owner-only Playlists under
+  `/content/me/playlists`. Reads accept either the native Bearer session or the
+  Web HttpOnly-cookie session, return only allowlisted DTOs, and use
+  `Cache-Control: private, no-store`.
+- `GET /content/me/playlists?limit=&cursor=` returns newest-updated summaries;
+  `POST /content/me/playlists` creates one empty Playlist; and
+  `GET`, `PATCH`, or `DELETE /content/me/playlists/:playlistId` reads, renames,
+  or deletes an owner-scoped Playlist.
+- Playlist summary and detail DTOs include a non-persisted `artworkUrl`. Read
+  projection scans persisted member order and selects the first Soundtrack
+  that is published, has `uploadStatus: ready`, an identity-bound `s3Key`, and usable track-specific or
+  inherited Album artwork. Missing, pending, deleting, unsafe, or artwork-free
+  candidates are skipped; `artworkUrl: ""` instructs clients to render the
+  Finitude placeholder. List projection is bounded to 100 Playlists and 500
+  member candidates each, using page-wide Soundtrack and Album reads rather
+  than one catalog query per Playlist. Only single-slash same-origin paths and
+  credential-free HTTPS artwork URLs are returned.
+- `POST /content/me/playlists/:playlistId/items` adds one ready Soundtrack,
+  optionally at a zero-based `position`;
+  `DELETE /content/me/playlists/:playlistId/items/:itemId` removes one exact
+  membership; and `PUT /content/me/playlists/:playlistId/items/order` accepts
+  the complete current `itemIds` permutation.
+- `GET /content/me/playlists/memberships?audioTrackIds=id1,id2` returns only
+  the current owner's Playlist IDs containing up to 50 requested Soundtracks,
+  so Add controls can show existing membership without exposing names or
+  another account's data.
+- Every mutation requires `Idempotency-Key`, replayable for 24 hours. A replay
+  returns the original success status and rehydrates the current owner detail;
+  if that Playlist was subsequently deleted, a non-delete replay returns the
+  same owner-safe `404`, while a Delete receipt continues to replay `204`.
+  Mutations of an existing Playlist also require its quoted revision ETag in
+  `If-Match`; missing revisions return `428` and stale revisions return `409`.
+  Every cookie-authenticated Web Playlist request also sends
+  `X-Finitude-Account-Viewer` so a stale browser tab cannot read or mutate the
+  newly switched account's private data. Bearer-authenticated native requests
+  remain bound to their access-token identity.
+- Names contain 1–100 trimmed Unicode characters. Each account may own at most
+  100 Playlists, each containing at most 500 unique Soundtracks. Playlist order
+  is explicit; unavailable members remain represented but only ready members
+  are projected into playback.
+- Playlist writes own no S3 objects. Deleting a Playlist does not unsave or
+  delete its Soundtracks, and deleting a Soundtrack or listener account cleans
+  Playlist references through the database lifecycle before final removal.
+
 Session behavior:
 - API login returns a short-lived access token and a rotating opaque refresh
   token. `authSessions` stores only SHA-256 hashes; the immediately previous
@@ -459,11 +543,32 @@ Session behavior:
   active, allowing logout and logout-all to revoke access immediately.
 - Web login stores the access and refresh credentials in separate HttpOnly
   cookies and rotates them transparently when the access cookie expires.
+- Cookie-authenticated Web requests for account-owned or personalized reads
+  and writes send `X-Finitude-Account-Viewer` with the identity currently
+  projected by the tab. The server validates it before controller work and
+  echoes the same header on a successful private response. Missing or stale
+  identity returns `409` with stable code `account_viewer_mismatch` without
+  reading or mutating the replacement account. `GET /auth/browser/session`
+  remains the unbound authoritative identity resolver, and native Bearer
+  requests remain bound to their access-token identity.
+- Web publishes login, logout, logout-all, account deletion, and viewer
+  mismatch transitions across tabs using BroadcastChannel with a bounded
+  storage-event fallback. A transition cancels in-flight queries, hides the
+  previous session, removes every non-session query cache, and refetches the
+  authoritative browser session; detached late responses cannot repopulate
+  those caches. Account changes are intentionally treated as security
+  boundaries, so public catalog data may refetch afterward.
+  Storage or BroadcastChannel unavailability does not block the originating
+  authentication action.
 - Listener avatar reads bind private bytes to the requesting account and
   authoritative revision; a stale account projection receives no image bytes.
 - Listener avatar writes and destructive account actions also bind to the
   account projected in the page. A stale tab receives a conflict instead of
   mutating whichever account most recently replaced the browser cookies.
+- Avatar mutations reserve a pending account-scoped lease in the same
+  transaction that touches the active account. Account deletion takes that
+  fence and refuses to commit while an avatar reference, pending lease, or any
+  current/detached private avatar lifecycle record remains.
 - Protected web pages redirect to login if unauthenticated. Content Manager
   additionally requires the current database role to be `admin`.
 
@@ -479,9 +584,26 @@ Upload:
 - Playback: `GET /content/audioTrack/stream/:audioTrackId` supports bounded single-range responses and cancels the upstream S3 request when the client disconnects.
 - Legacy audio download routes redirect to the streaming endpoint and no longer buffer whole objects in server memory.
 - Authorization required; admin enforced before multipart parsing or upload work
-- New tracks are saved with `uploadStatus: pending` before S3 upload, then marked `ready` or `failed`.
+- New tracks are saved with `uploadStatus: pending` and
+  `publicationStatus: pending` before S3 upload. Storage may become ready first;
+  public/reference readiness is committed only when publication and the
+  Album's canonical `audioTrackIds` relationship succeed in one transaction
+  (or a no-Album publication condition succeeds). Legacy rows without the new
+  publication field remain readable.
+- Assigning or clearing a Soundtrack Album relationship transactionally removes
+  that Soundtrack from every prior Album `audioTrackIds` list, updates
+  `audioTrack.albumId`, and adds it to the requested Album when present. An
+  empty canonical list uses reverse-link fallback only for a truly legacy Album
+  whose `lifecycleStatus` field is absent; lifecycle Albums treat even an empty
+  `audioTrackIds` list as authoritative.
 - S3 objects include track ID, owner ID, and encoded original filename metadata.
 - Failed or interrupted uploads remain identifiable in MongoDB and can be retried against the same track.
+- Content Manager bulk-upload JSON responses include one `outcomes` row per
+  selected file with its recoverable `audioTrackId` when a record was created,
+  plus separate `uploadStatus`, `publicationStatus`, `cleanupPending`, and
+  bounded `error` fields. The browser result panel preserves and displays those
+  per-item lifecycle outcomes after navigation. A publication failure does not
+  require re-uploading the successful storage object.
 
 Delete:
 
@@ -493,16 +615,31 @@ Delete:
 Reconciliation:
 
 - Admin-only report: `GET /admin/audio-storage/reconciliation`
+- Admin-only publication retry: `POST /admin/audio-storage/publication-retry`
+  with `{"audioTrackIds":["..."]}` (1–100 items). It reuses existing
+  database-confirmed ready objects, isolates every item, and returns stable
+  outcomes for ready, non-ready, missing, malformed, and duplicate IDs without
+  stopping the rest of the batch.
 - Browser requests receive a readable audit page; append `?format=json` for the structured report.
 - Compares every `audioTracks` record against the objects in `S3_BUCKET_NAME`.
-- Reports orphaned S3 objects, database tracks with missing objects, and pending/failed lifecycle records.
+- Reports orphaned S3 objects, database tracks with missing objects, and
+  pending/failed storage or publication lifecycle records. Incomplete rows
+  include `publicationStatus`, `publicationUpdatedAt`, and bounded
+  `publicationError` evidence.
 - The report is read-only; it never deletes S3 objects automatically.
 - Admin-only image report: `GET /admin/image-storage/reconciliation`
 - The image report audits the `images/` namespace against `imageAssets`, including orphaned, detached, missing, pending, and failed image records.
 - Admin-only content-reference report: `GET /admin/content-references/reconciliation`
 - The content-reference report detects dangling saved/activity references,
-  manual carousel items, artist-album links, album-track links, and track-album
-  links without mutating data.
+  Page-to-Carousel and Page-to-Grid/List references (including presentation
+  mismatches), manual carousel and Grid/List items, artist-album links,
+  album-track links, and track-album links, plus both directions of
+  Album/Soundtrack mismatch (a stale canonical membership or a published
+  reverse Track link missing from a lifecycle Album's canonical order);
+  dangling Playlist items and missing owners; invalid Playlist mutation receipt
+  ownership/targets; and stalled Soundtrack reference cleanup without mutating
+  data. Page target deletion and detachment are atomic, and each reconciliation
+  source scan and embedded finding remains bounded by the two limits above.
 
 ## Troubleshooting
 

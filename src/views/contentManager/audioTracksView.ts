@@ -5,6 +5,7 @@ type AudioTrackPagination = Omit<ManagementInventoryPage<unknown>, 'items'>;
 
 /** Renders one bounded page of the administrator's global Soundtrack inventory. */
 export const renderAudioTracksPage = (
+    userId: string,
     userEmail: string,
     tracks: any[],
     pagination: AudioTrackPagination = { page: 1, hasPrevious: false, hasNext: false }
@@ -69,7 +70,7 @@ export const renderAudioTracksPage = (
       <div class="header-actions">
         <a class="button" href="/content/manage#create">Create and upload</a>
         <a class="button button--secondary" href="/content/manage">Content Manager</a>
-        <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
       </div>
     </header>
     <section class="card card--raised">
@@ -89,6 +90,7 @@ export const renderAudioTracksPage = (
       </nav>` : ''}
     </section>
   </main>
+  <script src="/assets/browser-session-forms.js"></script>
   <script src="/assets/audio-tracks.js"></script>
 </body>
 </html>`;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type RefObject } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Pencil } from 'lucide-react';
 
 import {
   deleteAvatar,
@@ -134,7 +135,7 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const settingsRef = useRef<HTMLElement>(null);
-  const changeButtonRef = useRef<HTMLButtonElement>(null);
+  const avatarButtonRef = useRef<HTMLButtonElement>(null);
   const removeButtonRef = useRef<HTMLButtonElement>(null);
   const candidateUrlRef = useRef('');
   const previousViewerRef = useRef(user.id);
@@ -258,39 +259,50 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
 
   return (
     <section aria-labelledby="profile-photo-title" className={styles.settings} ref={settingsRef} tabIndex={-1}>
-      <Avatar
-        ariaLabel="Current profile photo"
-        avatar={user.avatar}
-        displayName={user.displayName}
-        email={user.email}
-        size="large"
-        viewerId={user.id}
+      <button
+        aria-busy={upload.isPending}
+        aria-label="Edit profile photo"
+        className={styles.avatarButton}
+        disabled={busy}
+        onClick={() => inputRef.current?.click()}
+        ref={avatarButtonRef}
+        type="button"
+      >
+        <Avatar
+          avatar={user.avatar}
+          displayName={user.displayName}
+          email={user.email}
+          size="large"
+          viewerId={user.id}
+        />
+        <span aria-hidden="true" className={styles.avatarEditOverlay}>
+          <Pencil aria-hidden="true" focusable="false" strokeWidth={2.1} />
+        </span>
+      </button>
+      <input
+        accept="image/jpeg,image/png,image/webp"
+        aria-label="Choose profile photo"
+        disabled={busy}
+        hidden
+        onChange={chooseFile}
+        ref={inputRef}
+        type="file"
       />
       <div className={styles.settingsCopy}>
         <h2 id="profile-photo-title">Profile photo</h2>
-        <p>Your photo is private to your account. Crop changes are uploaded only after you confirm the circular preview.</p>
+        <p>Select your avatar to choose a photo. It stays private to your account, and the crop is uploaded only after you confirm the circular preview.</p>
       </div>
-      <div className={styles.settingsActions}>
-        <input
-          accept="image/jpeg,image/png,image/webp"
-          aria-label="Choose profile photo"
-          className={styles.fileInput}
-          disabled={busy}
-          onChange={chooseFile}
-          ref={inputRef}
-          type="file"
-        />
-        <button className={styles.primaryButton} disabled={busy} onClick={() => inputRef.current?.click()} ref={changeButtonRef} type="button">
-          {upload.isPending ? 'Uploading…' : 'Change photo'}
-        </button>
-        {user.avatar && (
+      {user.avatar && (
+        <div className={styles.settingsActions}>
           <button className={styles.textDangerButton} disabled={busy} onClick={() => setIsConfirmingDelete(true)} ref={removeButtonRef} type="button">
             Remove photo
           </button>
-        )}
-      </div>
+        </div>
+      )}
       <div aria-live="polite" className={styles.feedback}>
-        {accountStateIsCurrent && feedback && (
+        {accountStateIsCurrent && upload.isPending ? (
+          <p className={styles.progress} role="status">Uploading photo…</p>
+        ) : accountStateIsCurrent && feedback && (
           <p className={feedback.kind === 'error' ? styles.error : styles.success} role={feedback.kind === 'error' ? 'alert' : 'status'}>
             {feedback.message}
           </p>
@@ -302,7 +314,7 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
           fallbackFocusRef={settingsRef}
           onCancel={discardCandidate}
           onUsePhoto={confirmCrop}
-          returnFocusRef={changeButtonRef}
+          returnFocusRef={avatarButtonRef}
           sourceUrl={candidateUrl}
         />
       )}
@@ -314,7 +326,7 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
             setFeedback(null);
             removal.mutate({ viewerId: user.id, revision: user.avatarRevision });
           }}
-          fallbackFocusRef={changeButtonRef}
+          fallbackFocusRef={avatarButtonRef}
           returnFocusRef={removeButtonRef}
         />
       )}

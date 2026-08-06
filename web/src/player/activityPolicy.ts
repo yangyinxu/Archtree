@@ -1,6 +1,7 @@
 export type PlaybackActivityEvent =
   | { type: 'albumPlay'; albumId: string }
   | { type: 'explicitAlbumTrack'; trackId: string }
+  | { type: 'playlistTrack'; trackId: string }
   | { type: 'standaloneTrack'; trackId: string }
   | { type: 'previous' }
   | { type: 'next' }
@@ -20,6 +21,7 @@ export const playbackActivityTarget = (
     case 'albumPlay':
       return { contentType: 'album', contentId: event.albumId };
     case 'explicitAlbumTrack':
+    case 'playlistTrack':
     case 'standaloneTrack':
       return { contentType: 'audioTrack', contentId: event.trackId };
     case 'previous':

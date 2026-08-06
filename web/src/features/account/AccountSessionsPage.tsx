@@ -8,7 +8,7 @@ import {
 } from '../../api/account';
 import { ApiError } from '../../api/client';
 import { browserSessionQuery } from '../../api/session';
-import styles from '../../styles/Pages.module.css';
+import styles from './AccountSurfaces.module.css';
 
 const timestamp = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -22,7 +22,7 @@ export const AccountSessionsPage = () => {
   const viewerId = session.data?.user.id ?? '';
   const sessions = useQuery(accountSessionsQuery(viewerId));
   const revoke = useMutation({
-    mutationFn: revokeAccountSession,
+    mutationFn: (sessionId: string) => revokeAccountSession(viewerId, sessionId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: accountSessionsQueryKey(viewerId) })
   });
 

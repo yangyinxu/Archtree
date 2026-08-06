@@ -7,6 +7,13 @@ import {
   classifyListenerRoute,
   statusBucket
 } from '../telemetry/routeClassifier';
+import { publishAccountSessionChange } from './accountSessionEvents';
+import {
+  advanceAccountEpoch,
+  captureAccountOperation,
+  isAccountOperationCurrent,
+  type AccountOperationGuard
+} from './accountEpoch';
 
 export type ApiErrorKind = 'http' | 'network' | 'invalid-response';
 
@@ -26,19 +33,14 @@ export class ApiError extends Error {
 export interface ApiRequestOptions extends RequestInit {
   /** Login and refresh must opt out to avoid recursive refresh attempts. */
   retryAuthentication?: boolean;
+  /** Binds a private Web response to the same viewer that keyed its cache. */
+  accountViewer?: string;
+  /** Allows only the authoritative browser-session bootstrap to rotate without a known viewer. */
+  bootstrapBrowserSession?: boolean;
 }
 
 let authGeneration = 0;
 let refreshInFlight: Promise<boolean> | null = null;
-const browserRefreshLockName = 'finitude:browser-session-refresh';
-
-interface BrowserLockManager {
-  request<Output>(
-    name: string,
-    options: { mode: 'exclusive' },
-    callback: () => Promise<Output>
-  ): Promise<Output>;
-}
 
 const reportTerminalApiFailure = (
   path: string,
@@ -55,7 +57,7 @@ const reportTerminalApiFailure = (
     kind: error.kind === 'invalid-response' ? 'invalid_response' : error.kind,
     statusBucket: error.kind === 'http' ? statusBucket(error.status) : 'none',
     route: classifyListenerRoute(
-      typeof window === 'undefined' ? '/listen' : window.location.pathname
+      typeof window === 'undefined' ? '/finitude' : window.location.pathname
     ),
     attempt
   });
@@ -86,19 +88,25 @@ const responseError = async (response: Response) => {
     // Non-JSON error pages are reduced to the bounded fallback above.
   }
 
+  if (response.status === 409 && code === 'account_viewer_mismatch') {
+    publishAccountSessionChange('viewer-mismatch');
+  }
+
   return new ApiError(message, 'http', response.status, code);
 };
 
-const fetchResponse = async (path: string, init?: RequestInit) => {
+const fetchResponse = async (path: string, init?: RequestInit, accountViewer?: string) => {
   if (!path.startsWith('/') || path.startsWith('//')) {
     throw new ApiError('API requests must use a same-origin path.', 'network');
   }
 
   try {
+    const headers = requestHeaders(init);
+    if (accountViewer) headers.set('X-Finitude-Account-Viewer', accountViewer);
     return await fetch(path, {
       ...init,
       credentials: 'same-origin',
-      headers: requestHeaders(init)
+      headers
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
@@ -121,60 +129,158 @@ const parseJson = async <Output>(response: Response, schema: z.ZodType<Output>) 
   return result.data;
 };
 
+const assertAccountBoundResponse = (response: Response, accountViewer?: string) => {
+  if (!accountViewer) return;
+  const returned = response.headers.get('X-Finitude-Account-Viewer')?.trim();
+  if (returned === accountViewer) return;
+  publishAccountSessionChange('viewer-mismatch');
+  throw new ApiError(
+    'The active account changed. Refresh the account before trying again.',
+    'invalid-response',
+    409,
+    'account_viewer_mismatch'
+  );
+};
+
+const assertAccountEpoch = (guard?: AccountOperationGuard) => {
+  if (!guard || isAccountOperationCurrent(guard)) return;
+  throw new ApiError(
+    'The active account changed. Refresh the account before trying again.',
+    'invalid-response',
+    409,
+    'account_viewer_mismatch'
+  );
+};
+
 const requestOnce = async <Output>(
   path: string,
   schema: z.ZodType<Output>,
-  init?: RequestInit
+  init?: RequestInit,
+  accountViewer?: string
 ) => {
-  const response = await fetchResponse(path, init);
+  const response = await fetchResponse(path, init, accountViewer);
   if (!response.ok) throw await responseError(response);
+  assertAccountBoundResponse(response, accountViewer);
   return parseJson(response, schema);
 };
 
-const hasCurrentBrowserSession = async () => {
+const readCurrentBrowserSession = async () => {
   try {
-    await requestOnce('/auth/browser/session', browserSessionSchema);
-    return true;
+    return await requestOnce('/auth/browser/session', browserSessionSchema);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) return false;
+    if (error instanceof ApiError && error.status === 401) return null;
     throw error;
   }
 };
 
-const rotateBrowserSession = async () => {
-  try {
-    await requestOnce('/auth/browser/refresh', browserSessionSchema, {
-      method: 'POST',
-      body: '{}'
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      // Another tab can win the rotation just before this request consumes the old cookie.
-      return hasCurrentBrowserSession();
-    }
-    throw error;
+const isBrowserSessionIdentityConflict = (error: unknown) => error instanceof ApiError
+  && error.status === 409
+  && error.code === 'browser_session_identity_conflict';
+
+/** Clears conflicting credentials before one identity can consume another identity's cache. */
+export const recoverBrowserSessionIdentityConflict = async (
+  transitionCapability: 'web-locks-v1' | undefined
+) => {
+  advanceAccountEpoch();
+  const response = await fetchResponse('/auth/browser/logout', {
+    method: 'POST',
+    body: '{}',
+    headers: transitionCapability
+      ? { 'X-Finitude-Session-Transition': transitionCapability }
+      : undefined
+  });
+  if (!response.ok) throw await responseError(response);
+  if (response.status !== 204) {
+    throw new ApiError('The server returned an unexpected response.', 'invalid-response', response.status);
   }
+  publishAccountSessionChange('logout', { includeCurrentTab: true });
 };
 
-const runWithBrowserRefreshLock = <Output>(operation: () => Promise<Output>) => {
-  if (typeof navigator === 'undefined') return operation();
-  const lockManager = (navigator as Navigator & { locks?: BrowserLockManager }).locks;
-  if (!lockManager) return operation();
-  return lockManager.request(browserRefreshLockName, { mode: 'exclusive' }, operation);
+const adoptUnboundBrowserSession = () => {
+  advanceAccountEpoch();
+  publishAccountSessionChange('login', { includeCurrentTab: true });
+};
+
+const rotateBrowserSession = async (expectedViewer?: string) => {
+  const response = await fetchResponse('/auth/browser/refresh', {
+    method: 'POST',
+    body: '{}',
+    headers: { 'X-Finitude-Session-Transition': 'web-locks-v1' }
+  }, expectedViewer);
+  if (!response.ok) throw await responseError(response);
+  const session = await parseJson(response, browserSessionSchema);
+  const returnedViewer = response.headers.get('X-Finitude-Account-Viewer')?.trim();
+  if (!returnedViewer
+    || returnedViewer !== session.user.id
+    || (expectedViewer && returnedViewer !== expectedViewer)) {
+    throw new ApiError(
+      'The active account changed. Refresh the account before trying again.',
+      'invalid-response',
+      409,
+      'browser_session_identity_conflict'
+    );
+  }
+  return session;
 };
 
 /** Rechecks the shared cookie after waiting so only one tab rotates it. */
-const coordinateBrowserSessionRefresh = () => runWithBrowserRefreshLock(async () => {
-  if (await hasCurrentBrowserSession()) return true;
-  return rotateBrowserSession();
-});
+const coordinateBrowserSessionRefresh = async (
+  expectedViewer: string | undefined,
+  bootstrapBrowserSession: boolean
+) => {
+  const transition = await import('./sessionTransition');
+  try {
+    return await transition.runBrowserSessionTransition({ kind: 'refresh' }, async (capability) => {
+      const recoverConflict = async () => {
+        await recoverBrowserSessionIdentityConflict(capability);
+        return false;
+      };
+      let current;
+      try {
+        current = await readCurrentBrowserSession();
+      } catch (error) {
+        if (isBrowserSessionIdentityConflict(error)) return recoverConflict();
+        throw error;
+      }
+      if (current) {
+        if (expectedViewer && current.user.id !== expectedViewer) return recoverConflict();
+        if (!expectedViewer) adoptUnboundBrowserSession();
+        return true;
+      }
+      if (!expectedViewer && !bootstrapBrowserSession) return false;
+      try {
+        await rotateBrowserSession(expectedViewer);
+        if (!expectedViewer) adoptUnboundBrowserSession();
+        return true;
+      } catch (error) {
+        if (isBrowserSessionIdentityConflict(error)) return recoverConflict();
+        if (error instanceof ApiError && error.status === 401) {
+          // Another tab can consume the rotating token just before this request.
+          const winner = await readCurrentBrowserSession();
+          if (!winner) return false;
+          if (expectedViewer && winner.user.id !== expectedViewer) return recoverConflict();
+          if (!expectedViewer) adoptUnboundBrowserSession();
+          return true;
+        }
+        throw error;
+      }
+    });
+  } catch (error) {
+    if (error instanceof transition.BrowserSessionTransitionUnavailableError
+      || error instanceof transition.BrowserSessionTransitionConflictError) return false;
+    throw error;
+  }
+};
 
 /** Coalesces failures in this tab while Web Locks coordinate all same-origin tabs. */
-const refreshAfter = (observedGeneration: number) => {
+const refreshAfter = (
+  observedGeneration: number,
+  expectedViewer: string | undefined,
+  bootstrapBrowserSession: boolean
+) => {
   if (observedGeneration !== authGeneration) return Promise.resolve(true);
   if (!refreshInFlight) {
-    refreshInFlight = coordinateBrowserSessionRefresh()
+    refreshInFlight = coordinateBrowserSessionRefresh(expectedViewer, bootstrapBrowserSession)
       .then((refreshed) => {
         if (refreshed) authGeneration += 1;
         return refreshed;
@@ -192,11 +298,20 @@ export const apiRequest = async <Output>(
   schema: z.ZodType<Output>,
   options: ApiRequestOptions = {}
 ) => {
-  const { retryAuthentication = true, ...init } = options;
+  const {
+    retryAuthentication = true,
+    accountViewer,
+    bootstrapBrowserSession = false,
+    ...init
+  } = options;
+  const viewer = accountViewer?.trim() || undefined;
+  const accountGuard = viewer ? captureAccountOperation(viewer) : undefined;
   const observedGeneration = authGeneration;
 
   try {
-    return await requestOnce(path, schema, init);
+    const result = await requestOnce(path, schema, init, viewer);
+    assertAccountEpoch(accountGuard);
+    return result;
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 401 || !retryAuthentication) {
       reportTerminalApiFailure(path, init.method, error, 'initial');
@@ -205,7 +320,7 @@ export const apiRequest = async <Output>(
 
     let refreshed: boolean;
     try {
-      refreshed = await refreshAfter(observedGeneration);
+      refreshed = await refreshAfter(observedGeneration, viewer, bootstrapBrowserSession);
     } catch (refreshError) {
       reportTerminalApiFailure(path, init.method, error, 'initial');
       throw refreshError;
@@ -215,7 +330,9 @@ export const apiRequest = async <Output>(
       throw error;
     }
     try {
-      return await requestOnce(path, schema, init);
+      const result = await requestOnce(path, schema, init, viewer);
+      assertAccountEpoch(accountGuard);
+      return result;
     } catch (retryError) {
       reportTerminalApiFailure(path, init.method, retryError, 'after_refresh');
       throw retryError;
@@ -228,15 +345,24 @@ export const apiRequestNoContent = async (
   path: string,
   options: ApiRequestOptions = {}
 ) => {
-  const { retryAuthentication = true, ...init } = options;
+  const {
+    retryAuthentication = true,
+    accountViewer,
+    bootstrapBrowserSession = false,
+    ...init
+  } = options;
+  const viewer = accountViewer?.trim() || undefined;
+  const accountGuard = viewer ? captureAccountOperation(viewer) : undefined;
   const observedGeneration = authGeneration;
 
   const run = async () => {
-    const response = await fetchResponse(path, init);
+    const response = await fetchResponse(path, init, viewer);
     if (!response.ok) throw await responseError(response);
+    assertAccountBoundResponse(response, viewer);
     if (response.status !== 204) {
       throw new ApiError('The server returned an unexpected response.', 'invalid-response', response.status);
     }
+    assertAccountEpoch(accountGuard);
   };
 
   try {
@@ -248,7 +374,7 @@ export const apiRequestNoContent = async (
     }
     let refreshed: boolean;
     try {
-      refreshed = await refreshAfter(observedGeneration);
+      refreshed = await refreshAfter(observedGeneration, viewer, bootstrapBrowserSession);
     } catch (refreshError) {
       reportTerminalApiFailure(path, init.method, error, 'initial');
       throw refreshError;

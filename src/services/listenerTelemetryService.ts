@@ -2,6 +2,8 @@ export const listenerTelemetryRoutes = [
     'home',
     'search',
     'library',
+    'playlists',
+    'playlist',
     'album',
     'artist',
     'account',
@@ -15,8 +17,9 @@ export type ListenerTelemetryRoute = typeof listenerTelemetryRoutes[number];
 const webVitalMetrics = ['LCP', 'CLS', 'INP'] as const;
 const navigationTypes = ['navigate', 'reload', 'back_forward', 'prerender', 'unknown'] as const;
 const routeErrorKinds = ['render', 'route_response', 'lazy_chunk', 'unknown'] as const;
-const statusBuckets = ['none', '400', '401', '403', '404', '409', '422', '429', '5xx', 'other'] as const;
+const statusBuckets = ['none', '400', '401', '403', '404', '409', '422', '428', '429', '5xx', 'other'] as const;
 const apiOperations = [
+    'listener_capabilities',
     'listener_home',
     'listener_search',
     'listener_library',
@@ -26,7 +29,16 @@ const apiOperations = [
     'save_status',
     'save',
     'unsave',
-    'recent_activity'
+    'recent_activity',
+    'playlist_list',
+    'playlist_memberships',
+    'playlist_detail',
+    'playlist_create',
+    'playlist_rename',
+    'playlist_delete',
+    'playlist_add',
+    'playlist_remove',
+    'playlist_reorder'
 ] as const;
 const apiErrorKinds = ['http', 'network', 'invalid_response'] as const;
 const apiAttempts = ['initial', 'after_refresh'] as const;

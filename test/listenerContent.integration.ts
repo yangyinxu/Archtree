@@ -8,6 +8,7 @@ import { ObjectId } from 'mongodb';
 
 import { createApp } from '../src/app';
 import { getDb } from '../src/infrastructure/database';
+import { getS3 } from '../src/infrastructure/s3';
 import { Carousel } from '../src/models/carousel';
 import {
     MongoReplicaSetHarness,
@@ -30,6 +31,7 @@ const ids = {
     readyOne: new ObjectId(),
     readyTwo: new ObjectId(),
     pending: new ObjectId(),
+    unpublished: new ObjectId(),
     blankKey: new ObjectId(),
     unlistedReady: new ObjectId(),
     missing: new ObjectId(),
@@ -144,7 +146,7 @@ before(async () => {
                 duration: '03:10',
                 coverArtUrl: '',
                 uploadStatus: 'ready',
-                s3Key: 'private/ready-one',
+                s3Key: ids.readyOne.toString(),
                 uploadError: null,
                 createdBy: 'private-owner'
             },
@@ -156,7 +158,7 @@ before(async () => {
                 duration: '04:20',
                 coverArtUrl: '/track-two.jpg',
                 uploadStatus: 'ready',
-                s3Key: 'private/ready-two',
+                s3Key: ids.readyTwo.toString(),
                 uploadError: null,
                 createdBy: 'private-owner'
             },
@@ -169,6 +171,18 @@ before(async () => {
                 uploadStatus: 'pending',
                 s3Key: ids.pending.toString(),
                 uploadError: 'private failure detail',
+                createdBy: 'private-owner'
+            },
+            {
+                _id: ids.unpublished,
+                title: 'Hidden Unpublished Track',
+                artistIds: [artistId],
+                albumId,
+                coverArtUrl: '',
+                uploadStatus: 'ready',
+                s3Key: ids.unpublished.toString(),
+                publicationStatus: 'pending',
+                publicationError: null,
                 createdBy: 'private-owner'
             },
             {
@@ -188,7 +202,7 @@ before(async () => {
                 albumId,
                 coverArtUrl: '',
                 uploadStatus: 'ready',
-                s3Key: 'private/unlisted-ready',
+                s3Key: ids.unlistedReady.toString(),
                 createdBy: 'private-owner'
             }
         ]),
@@ -400,6 +414,47 @@ test('listener read layer preserves composition and exposes only ready safe DTOs
     assert.equal(pendingHead.status, 404);
     const pendingStream = await fetch(`${baseUrl}/content/audioTrack/stream/${ids.pending}`);
     assert.equal(pendingStream.status, 404);
+    const unpublishedMetadata = await fetch(`${baseUrl}/api/listener/v1/tracks/${ids.unpublished}`);
+    assert.equal(unpublishedMetadata.status, 404);
+    const unpublishedHead = await fetch(
+        `${baseUrl}/content/audioTrack/stream/${ids.unpublished}`,
+        { method: 'HEAD' }
+    );
+    assert.equal(unpublishedHead.status, 404);
+    const unpublishedStream = await fetch(
+        `${baseUrl}/content/audioTrack/stream/${ids.unpublished}`
+    );
+    assert.equal(unpublishedStream.status, 404);
+});
+
+test('public stream and HEAD strictly reject malformed IDs before any S3 request', async () => {
+    const s3: any = getS3();
+    const originalSend = s3.send;
+    let storageCalls = 0;
+    s3.send = async () => {
+        storageCalls += 1;
+        throw new Error('Malformed IDs must never reach storage.');
+    };
+    try {
+        for (const malformedId of [
+            '123456789012',
+            'abcdefghijkl',
+            'gggggggggggggggggggggggg'
+        ]) {
+            const stream = await fetch(
+                `${baseUrl}/content/audioTrack/stream/${malformedId}`
+            );
+            assert.equal(stream.status, 404);
+            const head = await fetch(
+                `${baseUrl}/content/audioTrack/stream/${malformedId}`,
+                { method: 'HEAD' }
+            );
+            assert.equal(head.status, 404);
+        }
+    } finally {
+        s3.send = originalSend;
+    }
+    assert.equal(storageCalls, 0);
 });
 
 test('listener Library requires authentication and retains non-ready items safely', async () => {
@@ -423,6 +478,18 @@ test('listener Library requires authentication and retains non-ready items safel
     assert.equal(pending.audioTrack.streamUrl, null);
     assert.equal(response.headers.get('cache-control'), 'private, no-store');
     expectSafe(library);
+
+    const legacyResponse = await fetch(`${baseUrl}/content/me/library?limit=100`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    assert.equal(legacyResponse.status, 200);
+    assert.equal(legacyResponse.headers.get('cache-control'), 'private, no-store');
+    const legacyLibrary: any = await legacyResponse.json();
+    assert.deepEqual(legacyLibrary, library);
+    assert.deepEqual(
+        legacyLibrary.items.find((item: any) => item.contentType === 'album').album.audioTrackIds,
+        []
+    );
 });
 
 test('legacy public catalog is role-independent, allowlisted, and ready-filtered', async () => {

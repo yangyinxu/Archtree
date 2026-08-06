@@ -1,7 +1,7 @@
 .panel {
-  background: #121212;
-  border: 1px solid #2f2f2f;
-  border-radius: 0.5rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   margin-top: 1.25rem;
   overflow: hidden;
   text-align: left;
@@ -63,14 +63,14 @@
 }
 
 .dangerRow {
-  background: rgb(129 47 52 / 0.06);
+  background: color-mix(in srgb, var(--color-danger) 6%, transparent);
 }
 
 .secondaryButton,
 .dangerButton,
 .cancelButton,
 .confirmButton {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.78rem;
   font-weight: 700;
   min-height: 2.5rem;
@@ -79,16 +79,46 @@
 
 .secondaryButton,
 .cancelButton {
-  background: #242424;
-  border: 1px solid #3f3f3f;
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-strong);
   color: var(--color-text);
 }
 
 .dangerButton,
 .confirmButton {
-  background: rgb(145 51 57 / 0.24);
-  border: 1px solid rgb(255 170 168 / 0.38);
+  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 36%, transparent);
   color: var(--color-danger);
+}
+
+.secondaryButton,
+.dangerButton,
+.cancelButton,
+.confirmButton {
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.secondaryButton:not(:disabled):hover,
+.cancelButton:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-surface-hover) 82%, var(--color-text));
+  border-color: var(--color-text-muted);
+}
+
+.dangerButton:not(:disabled):hover,
+.confirmButton:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-danger) 24%, transparent);
+  border-color: var(--color-danger);
+}
+
+.secondaryButton:not(:disabled):active,
+.dangerButton:not(:disabled):active,
+.cancelButton:not(:disabled):active,
+.confirmButton:not(:disabled):active {
+  transform: scale(0.97);
 }
 
 .secondaryButton:disabled,
@@ -103,38 +133,38 @@
 .error {
   border-radius: var(--radius-sm);
   font-size: 0.8rem;
-  margin: 0 1.35rem 1rem;
+  margin: 0 1.1rem 1rem;
   padding: 0.7rem 0.8rem;
 }
 
 .status {
-  background: rgb(68 142 124 / 0.18);
-  border: 1px solid rgb(115 217 202 / 0.25);
+  background: var(--color-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, transparent);
   color: var(--color-accent-bright);
 }
 
 .error {
-  background: rgb(129 47 52 / 0.2);
-  border: 1px solid rgb(255 170 168 / 0.26);
+  background: color-mix(in srgb, var(--color-danger) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 28%, transparent);
   color: var(--color-danger);
   margin: 1rem 0 0;
 }
 
 .backdrop {
   align-items: center;
-  background: rgb(4 5 10 / 0.76);
+  background: var(--color-backdrop);
   display: flex;
   inset: 0;
   justify-content: center;
   padding: 1rem;
   position: fixed;
-  z-index: 120;
+  z-index: var(--layer-confirmation);
 }
 
 .dialog {
-  background: #282828;
-  border: 1px solid #3f3f3f;
-  border-radius: 0.55rem;
+  background: var(--color-surface-hover);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   max-width: 31rem;
   padding: clamp(1.25rem, 4vw, 2rem);
@@ -176,5 +206,27 @@
 
   .dialogActions button {
     width: 100%;
+  }
+}
+
+@media (forced-colors: active) {
+  .dialog,
+  .panel,
+  .secondaryButton,
+  .dangerButton,
+  .cancelButton,
+  .confirmButton,
+  .status,
+  .error {
+    border-color: CanvasText;
+  }
+}
+
+@media (pointer: coarse) {
+  .secondaryButton,
+  .dangerButton,
+  .cancelButton,
+  .confirmButton {
+    min-height: var(--control-min-size);
   }
 }

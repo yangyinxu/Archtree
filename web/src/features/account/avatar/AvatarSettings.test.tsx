@@ -86,14 +86,26 @@ beforeEach(() => {
   });
 });
 
-test('crop modal traps focus, cancels without a request, and restores the change button', async () => {
+test('the avatar is the photo chooser and crop cancellation restores focus to it', async () => {
   const user = userEvent.setup();
   const fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
   renderSettings(listenerWithoutAvatar);
 
-  const changeButton = screen.getByRole('button', { name: 'Change photo' });
+  const avatarButton = screen.getByRole('button', { name: 'Edit profile photo' });
   const input = screen.getByLabelText('Choose profile photo');
+  const inputClick = vi.spyOn(input, 'click');
+  expect(input).not.toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Change photo' })).not.toBeInTheDocument();
+  expect(avatarButton.querySelector('.lucide-pencil')).toHaveAttribute('aria-hidden', 'true');
+
+  avatarButton.focus();
+  await user.keyboard('{Enter}');
+  expect(inputClick).toHaveBeenCalledOnce();
+  await user.keyboard(' ');
+  expect(inputClick).toHaveBeenCalledTimes(2);
+  await user.click(avatarButton);
+  expect(inputClick).toHaveBeenCalledTimes(3);
   await user.upload(input, new File(['photo'], 'photo.jpg', { type: 'image/jpeg' }));
 
   const dialog = await screen.findByRole('dialog', { name: 'Position your photo' });
@@ -104,7 +116,7 @@ test('crop modal traps focus, cancels without a request, and restores the change
 
   await user.click(close);
   expect(dialog).not.toBeInTheDocument();
-  expect(changeButton).toHaveFocus();
+  expect(avatarButton).toHaveFocus();
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
@@ -115,10 +127,9 @@ test('requires a separate circular preview confirmation before uploading', async
     avatar: { assetId: 'avatar-1', revision: 1 },
     cleanupPending: false
   };
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify(response), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' }
-  }));
+  let finishUpload!: (response: Response) => void;
+  const uploadResponse = new Promise<Response>((resolve) => { finishUpload = resolve; });
+  const fetchMock = vi.fn(() => uploadResponse);
   vi.stubGlobal('fetch', fetchMock);
   const { onAvatarChange, queryClient } = renderSettings(listenerWithoutAvatar);
 
@@ -148,7 +159,21 @@ test('requires a separate circular preview confirmation before uploading', async
 
   await user.click(screen.getByRole('button', { name: 'Use photo' }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  expect(onAvatarChange).toHaveBeenCalledWith(response);
+  const avatarButton = screen.getByRole('button', { name: 'Edit profile photo' });
+  expect(avatarButton).toBeDisabled();
+  expect(avatarButton).toHaveAttribute('aria-busy', 'true');
+  expect(screen.getByRole('status')).toHaveTextContent('Uploading photo…');
+
+  await act(async () => finishUpload(new Response(JSON.stringify(response), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Finitude-Account-Viewer': 'listener-1'
+    }
+  })));
+  await waitFor(() => expect(onAvatarChange).toHaveBeenCalledWith(response));
+  expect(avatarButton).toBeEnabled();
+  expect(avatarButton).toHaveAttribute('aria-busy', 'false');
   expect(queryClient.getQueryData<BrowserSession>(browserSessionQueryKey)?.user).toMatchObject({
     id: 'listener-1',
     avatarRevision: 1,
@@ -199,7 +224,7 @@ test('discards a failed upload candidate without presenting a retry action', asy
   expect(await screen.findByRole('alert')).toHaveTextContent('current photo has not changed');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Change photo' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Edit profile photo' })).toBeEnabled();
 });
 
 test('hides and discards an editor candidate on the first render of an account switch', async () => {
@@ -240,7 +265,10 @@ test('delete confirmation stays open while pending and clears only after server 
     if (String(input) === '/auth/avatar' && init?.method === 'DELETE') return deleteResponse;
     return Promise.resolve(new Response(new Blob(['current avatar']), {
       status: 200,
-      headers: { 'Content-Type': 'image/jpeg' }
+      headers: {
+        'Content-Type': 'image/jpeg',
+        'X-Finitude-Account-Viewer': 'listener-1'
+      }
     }));
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -262,7 +290,10 @@ test('delete confirmation stays open while pending and clears only after server 
     avatar: null
   }), {
     status: 200,
-    headers: { 'Content-Type': 'application/json' }
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Finitude-Account-Viewer': 'listener-1'
+    }
   })));
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Remove your photo?' })).not.toBeInTheDocument());
   expect(queryClient.getQueryData<BrowserSession>(browserSessionQueryKey)?.user.avatar).toBeNull();

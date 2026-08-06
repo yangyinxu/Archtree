@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 
 import { ApiError } from '../../api/client';
+import { isAccountOperationCurrent } from '../../api/accountEpoch';
 import {
   browserSessionQuery,
   browserSessionQueryKey,
@@ -11,7 +12,7 @@ import { Icon } from '../../components/Icon';
 import { clearSearchHistory } from '../search/searchHistory';
 import { AccountLifecyclePanel } from './AccountLifecyclePanel';
 import { AvatarSettings } from './avatar';
-import styles from '../../styles/Pages.module.css';
+import styles from './AccountSurfaces.module.css';
 
 /** Converts safe method identifiers into familiar account labels. */
 const methodLabel = (method: string) => ({
@@ -28,8 +29,13 @@ export const AccountPage = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const logout = useMutation({
-    mutationFn: () => logoutBrowserSession(session.data?.user.id),
-    onSuccess: () => {
+    mutationFn: () => {
+      const viewerId = session.data?.user.id;
+      if (!viewerId) throw new Error('A current account is required to sign out.');
+      return logoutBrowserSession(viewerId);
+    },
+    onSuccess: (guard) => {
+      if (!isAccountOperationCurrent(guard)) return;
       clearSearchHistory(session.data?.user.id);
       queryClient.clear();
       queryClient.setQueryData(browserSessionQueryKey, null);

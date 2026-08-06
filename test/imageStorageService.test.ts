@@ -6,12 +6,18 @@ import sharp from 'sharp';
 import {
     coverArtVariantEtag,
     coverArtVariantWidths,
+    deleteCoverArt,
+    finalizeStagedCoverArtLifecycleRecord,
     getCoverArtObject,
     getCoverArtVariant,
     isCoverArtVariantWidth,
     isPublicCoverArtAsset,
+    markStagedCoverArtUploadFailed,
     resolvePublicCoverArtAsset,
+    stageCoverArtLifecycleRecord,
     transformCoverArtVariant,
+    updateCoverArtOwnerAndCleanup,
+    uploadCoverArt,
     validateCoverArtFile
 } from '../src/services/imageStorageService';
 
@@ -23,7 +29,12 @@ const readyAsset = (ownerType: 'artist' | 'album' | 'audioTrack' | 'user') => ({
     s3Key: `images/${imageId}`,
     contentType: 'image/jpeg'
 });
-const attachedOwner = { coverArtId: imageId };
+const attachedOwner = {
+    coverArtId: imageId,
+    lifecycleStatus: 'ready',
+    uploadStatus: 'ready',
+    s3Key: '507f191e810c19729de860ea'
+};
 const uploadedFile = (buffer: Buffer, mimetype: string): Express.Multer.File => ({
     fieldname: 'coverArtFile',
     originalname: 'cover-art',
@@ -35,6 +46,492 @@ const uploadedFile = (buffer: Buffer, mimetype: string): Express.Multer.File => 
     filename: '',
     path: '',
     buffer
+});
+
+test('an unknown relationship transaction preserves both previous and replacement artwork', async () => {
+    const previousImageId = '507f1f77bcf86cd799439012';
+    const replacementImageId = '507f1f77bcf86cd799439013';
+    let ownerReadCalls = 0;
+    let previousDeleteCalls = 0;
+    let replacementDeleteCalls = 0;
+    const result = await updateCoverArtOwnerAndCleanup(
+        '507f191e810c19729de860ea',
+        { coverArtId: replacementImageId },
+        previousImageId,
+        true,
+        {
+            ownerType: 'album',
+            verifyPreviousAsset: async () => true,
+            updateOwner: async () => ({ matchedCount: 1 }),
+            updateOwnerIfCoverArtMatches: async () => {
+                throw Object.assign(new Error('commit reply lost'), { outcomeUnknown: true });
+            },
+            findOwner: async () => {
+                ownerReadCalls += 1;
+                return { coverArtId: replacementImageId };
+            },
+            deleteAsset: async () => { previousDeleteCalls += 1; },
+            deleteReplacementAsset: async () => { replacementDeleteCalls += 1; }
+        }
+    );
+
+    assert.equal(result.updateApplied, false);
+    assert.equal(result.cleanupPending, true);
+    assert.equal(result.outcomeUnknown, true);
+    assert.equal(result.replacementCleanupPending, true);
+    assert.equal(ownerReadCalls, 0);
+    assert.equal(previousDeleteCalls, 0);
+    assert.equal(replacementDeleteCalls, 0);
+});
+
+test('a definite combined-owner failure is not inferred successful from an unchanged empty cover', async () => {
+    let ownerReadCalls = 0;
+    const result = await updateCoverArtOwnerAndCleanup(
+        '507f191e810c19729de860ea',
+        { coverArtId: null, artistIds: ['507f1f77bcf86cd799439014'] },
+        null,
+        true,
+        {
+            ownerType: 'audioTrack',
+            updateOwner: async () => ({ matchedCount: 1 }),
+            updateOwnerIfCoverArtMatches: async () => {
+                throw Object.assign(new Error('Artist is deleting'), {
+                    code: 'artist_reference_unavailable'
+                });
+            },
+            findOwner: async () => {
+                ownerReadCalls += 1;
+                return { coverArtId: null };
+            }
+        }
+    );
+
+    assert.equal(result.updateApplied, false);
+    assert.equal(result.cleanupPending, false);
+    assert.equal(ownerReadCalls, 0);
+});
+
+test('a zero-match concurrent remove is a conflict and never deletes the prior asset', async () => {
+    let ownerReadCalls = 0;
+    let previousDeleteCalls = 0;
+    const result = await updateCoverArtOwnerAndCleanup(
+        '507f191e810c19729de860ea',
+        { coverArtId: null, title: 'Requested title' },
+        '507f1f77bcf86cd799439012',
+        true,
+        {
+            ownerType: 'album',
+            verifyPreviousAsset: async () => true,
+            updateOwner: async () => ({ matchedCount: 1 }),
+            updateOwnerIfCoverArtMatches: async () => ({ matchedCount: 0 }),
+            findOwner: async () => {
+                ownerReadCalls += 1;
+                return { coverArtId: null, title: 'Concurrent title' };
+            },
+            deleteAsset: async () => { previousDeleteCalls += 1; }
+        }
+    );
+
+    assert.equal(result.updateApplied, false);
+    assert.equal(result.cleanupPending, false);
+    assert.equal(ownerReadCalls, 0);
+    assert.equal(previousDeleteCalls, 0);
+});
+
+test('a possible lost write response requires an exact full-owner readback', async () => {
+    const previousImageId = '507f1f77bcf86cd799439012';
+    const replacementImageId = '507f1f77bcf86cd799439013';
+    const networkError = Object.assign(new Error('response lost'), {
+        name: 'MongoNetworkError'
+    });
+    let previousDeleteCalls = 0;
+    const exact = await updateCoverArtOwnerAndCleanup(
+        '507f191e810c19729de860ea',
+        { coverArtId: replacementImageId, title: 'Exact title' },
+        previousImageId,
+        true,
+        {
+            ownerType: 'album',
+            verifyPreviousAsset: async () => true,
+            updateOwner: async () => ({ matchedCount: 1 }),
+            updateOwnerIfCoverArtMatches: async () => { throw networkError; },
+            findOwner: async () => ({
+                coverArtId: replacementImageId,
+                title: 'Exact title'
+            }),
+            deleteAsset: async () => { previousDeleteCalls += 1; }
+        }
+    );
+    assert.equal(exact.updateApplied, true);
+    assert.equal(exact.cleanupPending, false);
+    assert.equal(previousDeleteCalls, 1);
+
+    let replacementDeleteCalls = 0;
+    const partial = await updateCoverArtOwnerAndCleanup(
+        '507f191e810c19729de860ea',
+        { coverArtId: replacementImageId, title: 'Requested title' },
+        previousImageId,
+        true,
+        {
+            ownerType: 'album',
+            verifyPreviousAsset: async () => true,
+            updateOwner: async () => ({ matchedCount: 1 }),
+            updateOwnerIfCoverArtMatches: async () => { throw networkError; },
+            findOwner: async () => ({
+                coverArtId: replacementImageId,
+                title: 'Concurrent title'
+            }),
+            deleteAsset: async () => { previousDeleteCalls += 1; },
+            deleteReplacementAsset: async () => { replacementDeleteCalls += 1; }
+        }
+    );
+    assert.equal(partial.updateApplied, false);
+    assert.equal(partial.outcomeUnknown, true);
+    assert.equal(partial.cleanupPending, true);
+    assert.equal(previousDeleteCalls, 1);
+    assert.equal(replacementDeleteCalls, 0);
+});
+
+const exactMatches = (record: Record<string, any>, expected: Record<string, any>) =>
+    Object.entries(expected).every(([key, value]) => {
+        if (value && typeof value === 'object' && '$exists' in value) {
+            return Object.prototype.hasOwnProperty.call(record, key) === Boolean(value.$exists);
+        }
+        return record[key] === value;
+    });
+
+const validCoverFile = async () => uploadedFile(await sharp({
+    create: { width: 12, height: 12, channels: 3, background: '#31598a' }
+}).png().toBuffer(), 'image/png');
+
+const unknownCommitError = () => Object.assign(new Error('commit response lost'), {
+    hasErrorLabel: (label: string) => label === 'UnknownTransactionCommitResult'
+});
+
+test('upload orchestrator continues only after an exact pending staging readback', async () => {
+    const file = await validCoverFile();
+    let record: any;
+    let putCalls = 0;
+    const result = await uploadCoverArt(
+        'album',
+        '507f191e810c19729de860ea',
+        file,
+        '507f191e810c19729de860eb',
+        {},
+        {
+            stageAsset: (asset, options) => stageCoverArtLifecycleRecord(
+                asset,
+                options,
+                {
+                    runWithOwnerFence: async (_asset, _options, mutation) => {
+                        await mutation();
+                        throw unknownCommitError();
+                    },
+                    insertAsset: async (assetToInsert) => { record = { ...assetToInsert }; },
+                    findAsset: async () => record
+                }
+            ),
+            putObject: async () => { putCalls += 1; },
+            finalizeAsset: async () => { record.uploadStatus = 'ready'; },
+            deleteObject: async () => assert.fail('confirmed staging must not clean storage'),
+            markFailedAsset: async () => assert.fail('confirmed staging must not fail the row')
+        }
+    );
+    assert.equal(result.imageId, String(record._id));
+    assert.equal(record.uploadStatus, 'ready');
+    assert.equal(putCalls, 1);
+});
+
+test('upload orchestrator does not Put when an unknown staging commit cannot be confirmed', async () => {
+    const file = await validCoverFile();
+    for (const readback of ['missing', 'unavailable'] as const) {
+        let putCalls = 0;
+        let cleanupCalls = 0;
+        await assert.rejects(
+            uploadCoverArt(
+                'album',
+                '507f191e810c19729de860ea',
+                file,
+                '507f191e810c19729de860eb',
+                {},
+                {
+                    stageAsset: (asset, options) => stageCoverArtLifecycleRecord(
+                        asset,
+                        options,
+                        {
+                            runWithOwnerFence: async () => { throw unknownCommitError(); },
+                            insertAsset: async () => undefined,
+                            findAsset: async () => {
+                                if (readback === 'unavailable') throw new Error('readback failed');
+                                return null;
+                            }
+                        }
+                    ),
+                    putObject: async () => { putCalls += 1; },
+                    finalizeAsset: async () => undefined,
+                    deleteObject: async () => { cleanupCalls += 1; },
+                    markFailedAsset: async () => { cleanupCalls += 1; }
+                }
+            ),
+            (error: any) => error?.code === 'cover_art_upload_outcome_unknown'
+                && error?.cleanupPending === true
+                && error?.reconciliationRequired === true
+        );
+        assert.equal(putCalls, 0);
+        assert.equal(cleanupCalls, 0);
+    }
+});
+
+test('upload orchestrator preserves a definite staging failure when no row could commit', async () => {
+    const file = await validCoverFile();
+    let putCalls = 0;
+    const definiteError = Object.assign(new Error('owner is already deleting'), {
+        code: 'album_reference_unavailable'
+    });
+    await assert.rejects(
+        uploadCoverArt(
+            'album',
+            '507f191e810c19729de860ea',
+            file,
+            '507f191e810c19729de860eb',
+            {},
+            {
+                stageAsset: (asset, options) => stageCoverArtLifecycleRecord(
+                    asset,
+                    options,
+                    {
+                        runWithOwnerFence: async () => { throw definiteError; },
+                        insertAsset: async () => undefined,
+                        findAsset: async () => assert.fail('definite failure needs no readback')
+                    }
+                ),
+                putObject: async () => { putCalls += 1; },
+                finalizeAsset: async () => undefined,
+                deleteObject: async () => undefined,
+                markFailedAsset: async () => undefined
+            }
+        ),
+        (error: any) => error === definiteError
+    );
+    assert.equal(putCalls, 0);
+});
+
+test('upload orchestrator cleans the exact Put when owner deletion wins and leaves a retryable failed row', async () => {
+    const file = await validCoverFile();
+    let record: any | null = null;
+    const storedKeys = new Set<string>();
+    const deletedKeys: string[] = [];
+    const conditionalUpdate = async (
+        id: string,
+        expected: Record<string, unknown>,
+        update: Record<string, unknown>
+    ) => {
+        const matched = record
+            && String(record._id) === id
+            && exactMatches(record, expected);
+        if (matched) Object.assign(record, update);
+        return { matchedCount: matched ? 1 : 0 };
+    };
+    const ownerError = Object.assign(new Error('Album deletion won.'), {
+        code: 'album_reference_unavailable'
+    });
+
+    await assert.rejects(
+        uploadCoverArt(
+            'album',
+            '507f191e810c19729de860ea',
+            file,
+            '507f191e810c19729de860eb',
+            {},
+            {
+                stageAsset: async (asset) => { record = { ...asset }; },
+                putObject: async (asset) => { storedKeys.add(asset.s3Key); },
+                finalizeAsset: async () => { throw ownerError; },
+                deleteObject: async (key) => {
+                    assert.equal(key, `images/${String(record!._id)}`);
+                    deletedKeys.push(key);
+                    storedKeys.delete(key);
+                },
+                markFailedAsset: (asset, error) => markStagedCoverArtUploadFailed(
+                    asset,
+                    error,
+                    conditionalUpdate
+                )
+            }
+        ),
+        (error: any) => error?.code === 'album_reference_unavailable'
+    );
+    assert.equal(record!.uploadStatus, 'failed');
+    assert.equal(storedKeys.size, 0);
+    assert.deepEqual(deletedKeys, [record!.s3Key]);
+    assert.equal(record!.ownerType, 'album');
+    assert.equal(record!.ownerId, '507f191e810c19729de860ea');
+    assert.equal(record!.createdBy, '507f191e810c19729de860eb');
+
+    for (const protectedStatus of ['ready', 'deleting', 'deleteFailed']) {
+        record!.uploadStatus = protectedStatus;
+        const before = { ...record };
+        const result = await markStagedCoverArtUploadFailed(
+            record!,
+            new Error('late failure'),
+            conditionalUpdate
+        );
+        assert.equal(result.matchedCount, 0);
+        assert.deepEqual(record, before);
+    }
+
+    record!.uploadStatus = 'failed';
+    const exactKey = record!.s3Key;
+    await deleteCoverArt(String(record!._id), {
+        expectedOwnerType: 'album',
+        expectedOwnerId: record!.ownerId,
+        findAsset: async () => record,
+        updateAsset: (id, update, expected = {}) => conditionalUpdate(
+            id,
+            expected,
+            update
+        ),
+        deleteObject: async (key) => { deletedKeys.push(key); },
+        deleteAsset: async () => {
+            assert.equal(record!.uploadStatus, 'deleting');
+            record = null;
+            return { deletedCount: 1 };
+        }
+    });
+    assert.equal(record, null);
+    assert.deepEqual(deletedKeys, [
+        exactKey,
+        exactKey
+    ]);
+});
+
+test('upload orchestrator reports cleanup uncertainty and retains exact lifecycle evidence', async () => {
+    const file = await validCoverFile();
+    let record: any;
+    const storedKeys = new Set<string>();
+    const conditionalUpdate = async (
+        id: string,
+        expected: Record<string, unknown>,
+        update: Record<string, unknown>
+    ) => {
+        const matched = String(record._id) === id && exactMatches(record, expected);
+        if (matched) Object.assign(record, update);
+        return { matchedCount: matched ? 1 : 0 };
+    };
+
+    await assert.rejects(
+        uploadCoverArt(
+            'album',
+            '507f191e810c19729de860ea',
+            file,
+            '507f191e810c19729de860eb',
+            {},
+            {
+                stageAsset: async (asset) => { record = { ...asset }; },
+                putObject: async (asset) => { storedKeys.add(asset.s3Key); },
+                finalizeAsset: async () => { throw new Error('owner unavailable'); },
+                deleteObject: async () => { throw new Error('delete response lost'); },
+                markFailedAsset: (asset, error) => markStagedCoverArtUploadFailed(
+                    asset,
+                    error,
+                    conditionalUpdate
+                )
+            }
+        ),
+        (error: any) => error?.statusCode === 503
+            && error?.code === 'cover_art_upload_cleanup_pending'
+            && error?.cleanupPending === true
+            && error?.reconciliationRequired === true
+    );
+    assert.equal(record.uploadStatus, 'failed');
+    assert.equal(record.uploadError, 'delete response lost');
+    assert.equal(storedKeys.has(record.s3Key), true);
+    assert.equal(record.s3Key, `images/${String(record._id)}`);
+});
+
+test('upload orchestrator accepts only an exact ready readback after a lost finalize response', async () => {
+    const file = await validCoverFile();
+    let record: any;
+    let cleanupCalls = 0;
+    const result = await uploadCoverArt(
+        'album',
+        '507f191e810c19729de860ea',
+        file,
+        '507f191e810c19729de860eb',
+        {},
+        {
+            stageAsset: async (asset) => { record = { ...asset }; },
+            putObject: async () => undefined,
+            finalizeAsset: (asset, options) => finalizeStagedCoverArtLifecycleRecord(
+                asset,
+                options,
+                {
+                    runWithOwnerFence: async (_asset, _options, mutation) => {
+                        await mutation();
+                        throw Object.assign(new Error('commit response lost'), {
+                            hasErrorLabel: (label: string) => label === 'UnknownTransactionCommitResult'
+                        });
+                    },
+                    updatePendingAsset: async (_asset, update) => {
+                        Object.assign(record, update);
+                        return { matchedCount: 1 };
+                    },
+                    findAsset: async () => record
+                }
+            ),
+            deleteObject: async () => { cleanupCalls += 1; },
+            markFailedAsset: async () => { cleanupCalls += 1; }
+        }
+    );
+    assert.equal(result.imageId, String(record._id));
+    assert.equal(record.uploadStatus, 'ready');
+    assert.equal(cleanupCalls, 0);
+});
+
+test('upload orchestrator preserves pending evidence when finalize readback is pending or unavailable', async () => {
+    const file = await validCoverFile();
+    for (const readbackFails of [false, true]) {
+        let record: any;
+        let deleteCalls = 0;
+        let failedUpdates = 0;
+        await assert.rejects(
+            uploadCoverArt(
+                'album',
+                '507f191e810c19729de860ea',
+                file,
+                '507f191e810c19729de860eb',
+                {},
+                {
+                    stageAsset: async (asset) => { record = { ...asset }; },
+                    putObject: async () => undefined,
+                    finalizeAsset: (asset, options) => finalizeStagedCoverArtLifecycleRecord(
+                        asset,
+                        options,
+                        {
+                            runWithOwnerFence: async () => {
+                                throw Object.assign(new Error('commit response lost'), {
+                                    hasErrorLabel: (label: string) => label === 'UnknownTransactionCommitResult'
+                                });
+                            },
+                            updatePendingAsset: async () => ({ matchedCount: 0 }),
+                            findAsset: async () => {
+                                if (readbackFails) throw new Error('readback unavailable');
+                                return record;
+                            }
+                        }
+                    ),
+                    deleteObject: async () => { deleteCalls += 1; },
+                    markFailedAsset: async () => { failedUpdates += 1; }
+                }
+            ),
+            (error: any) => error?.code === 'cover_art_upload_outcome_unknown'
+                && error?.cleanupPending === true
+                && error?.reconciliationRequired === true
+        );
+        assert.equal(record.uploadStatus, 'pending');
+        assert.equal(deleteCalls, 0);
+        assert.equal(failedUpdates, 0);
+    }
 });
 
 test('public cover art accepts ready catalog images', () => {
@@ -64,6 +561,23 @@ test('public cover art rejects a ready private avatar before requesting storage'
         }
     });
 
+    assert.equal(result, null);
+    assert.equal(storageCalls, 0);
+});
+
+test('public cover art rejects an attached catalog record whose key targets another image identity', async () => {
+    let storageCalls = 0;
+    const result = await getCoverArtObject(imageId, {}, {
+        findAsset: async () => ({
+            ...readyAsset('album'),
+            s3Key: 'images/507f1f77bcf86cd799439012'
+        }),
+        findOwner: async () => attachedOwner,
+        getObject: async () => {
+            storageCalls += 1;
+            return {};
+        }
+    });
     assert.equal(result, null);
     assert.equal(storageCalls, 0);
 });
@@ -110,6 +624,44 @@ test('public cover art requires the current owner to retain the image reference'
         findOwner: async () => attachedOwner
     });
     assert.equal(attached?.s3Key, `images/${imageId}`);
+});
+
+test('public cover art requires an exact ready Soundtrack owner lifecycle', async () => {
+    const asset = readyAsset('audioTrack');
+    for (const owner of [
+        { ...attachedOwner, uploadStatus: 'failed' },
+        { ...attachedOwner, uploadStatus: 'deleting' },
+        { ...attachedOwner, uploadStatus: 'deleteFailed' },
+        { ...attachedOwner, s3Key: '507f191e810c19729de860eb' },
+        { ...attachedOwner, publicationStatus: null },
+        { ...attachedOwner, publicationStatus: '' },
+        { ...attachedOwner, publicationStatus: 'unexpected' }
+    ]) {
+        assert.equal(await resolvePublicCoverArtAsset(imageId, {
+            findAsset: async () => asset,
+            findOwner: async () => owner
+        }), null);
+    }
+
+    for (const owner of [
+        attachedOwner,
+        { ...attachedOwner, publicationStatus: 'ready' }
+    ]) {
+        assert.equal((await resolvePublicCoverArtAsset(imageId, {
+            findAsset: async () => asset,
+            findOwner: async () => owner
+        }))?.s3Key, `images/${imageId}`);
+    }
+});
+
+test('public cover art excludes non-ready Album owners', async () => {
+    const asset = readyAsset('album');
+    for (const lifecycleStatus of ['deleting', 'deleteFailed']) {
+        assert.equal(await resolvePublicCoverArtAsset(imageId, {
+            findAsset: async () => asset,
+            findOwner: async () => ({ ...attachedOwner, lifecycleStatus })
+        }), null);
+    }
 });
 
 test('original artwork keeps forwarding its own conditional validator after owner validation', async () => {

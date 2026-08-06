@@ -50,7 +50,7 @@ const server = await new Promise<Server>((resolve, reject) => {
   listening.once('error', reject);
 });
 
-console.log(`Finitude browser-test server listening at http://${host}:${port}/listen`);
+console.log(`Finitude browser-test server listening at http://${host}:${port}/finitude`);
 
 /** Lets Playwright stop the isolated server without leaving an occupied port. */
 const shutdown = () => {

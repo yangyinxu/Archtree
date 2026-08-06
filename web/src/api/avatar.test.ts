@@ -13,7 +13,10 @@ const mutationResult = {
 
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
-  headers: { 'Content-Type': 'application/json' }
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Finitude-Account-Viewer': 'listener-1'
+  }
 });
 
 const blobText = (blob: Blob) => new Promise<string>((resolve, reject) => {
@@ -98,7 +101,10 @@ test('does not retry private bytes after authentication resolves another account
 test('accepts only non-empty image responses for the current account', async () => {
   const fetchMock = vi.fn(async () => new Response(new Blob(['private image']), {
     status: 200,
-    headers: { 'Content-Type': 'image/jpeg' }
+    headers: {
+      'Content-Type': 'image/jpeg',
+      'X-Finitude-Account-Viewer': 'listener-1'
+    }
   }));
   vi.stubGlobal('fetch', fetchMock);
 
@@ -109,7 +115,8 @@ test('accepts only non-empty image responses for the current account', async () 
     credentials: 'same-origin',
     headers: expect.objectContaining({
       'X-Finitude-Avatar-Revision': '3',
-      'X-Finitude-Avatar-Viewer': 'listener-1'
+      'X-Finitude-Avatar-Viewer': 'listener-1',
+      'X-Finitude-Account-Viewer': 'listener-1'
     })
   }));
 });

@@ -11,6 +11,7 @@ import {
 } from 'react-router';
 
 import { browserSessionQueryKey } from '../api/session';
+import { listenerCapabilitiesQueryKey } from '../api/listenerCapabilities';
 import { HomePage } from '../features/home/HomePage';
 import { LoginPage } from '../features/account/LoginPage';
 import { SearchQueryProvider } from '../features/search/SearchQueryProvider';
@@ -18,12 +19,14 @@ import { SearchPage } from '../features/search/SearchPage';
 import { readSearchHistory } from '../features/search/searchHistory';
 import { AppShell } from './AppShell';
 import { appRoutes } from './router';
+import { shellLayoutStorageKey } from './shellLayoutPreferences';
 
 const renderRoute = (path: string) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   });
   queryClient.setQueryData(browserSessionQueryKey, null);
+  queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true });
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   const view = render(
     <QueryClientProvider client={queryClient}>
@@ -96,15 +99,98 @@ test('toggles the read-only Now Playing pane without remounting the player', asy
 
   await user.click(hideButton);
 
-  expect(aside).toHaveAttribute('hidden');
+  expect(aside).toHaveAttribute('aria-hidden', 'true');
+  expect(aside).toHaveAttribute('inert');
   expect(screen.getByRole('button', { name: 'Show Now Playing view' }))
     .toHaveAttribute('aria-expanded', 'false');
   expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
 
   await user.click(screen.getByRole('button', { name: 'Show Now Playing view' }));
 
-  expect(aside).not.toHaveAttribute('hidden');
+  expect(aside).not.toHaveAttribute('aria-hidden');
+  expect(aside).not.toHaveAttribute('inert');
   expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
+});
+
+test('resizes and restores wide panels without remounting the player', async () => {
+  const user = userEvent.setup();
+  const originalWidth = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1_728 });
+
+  try {
+    const firstView = renderRoute('/');
+    const player = await screen.findByRole('region', { name: 'Now playing' });
+    const sidebarHandle = await screen.findByRole('separator', { name: 'Resize Library panel' });
+    const nowPlayingHandle = await screen.findByRole('separator', {
+      name: 'Resize Now Playing panel'
+    });
+
+    expect(sidebarHandle).toHaveAttribute('aria-valuenow', '303');
+    expect(sidebarHandle).toHaveAttribute('aria-valuemax', '420');
+    expect(nowPlayingHandle).toHaveAttribute('aria-valuenow', '303');
+
+    fireEvent.keyDown(sidebarHandle, { key: 'End' });
+    fireEvent.keyDown(nowPlayingHandle, { key: 'End' });
+
+    await waitFor(() => {
+      expect(screen.getByRole('separator', { name: 'Resize Library panel' }))
+        .toHaveAttribute('aria-valuenow', '420');
+      expect(screen.getByRole('separator', { name: 'Resize Now Playing panel' }))
+        .toHaveAttribute('aria-valuenow', '420');
+    });
+    expect(JSON.parse(window.localStorage.getItem(shellLayoutStorageKey) ?? '{}')).toEqual({
+      version: 1,
+      sidebarWidth: 420,
+      nowPlayingWidth: 420
+    });
+    expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
+
+    await user.click(screen.getByRole('button', { name: 'Hide Now Playing view' }));
+    expect(screen.queryByRole('separator', { name: 'Resize Now Playing panel' }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Resize Library panel' }))
+      .toHaveAttribute('aria-valuenow', '420');
+    expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
+
+    await user.click(screen.getByRole('button', { name: 'Show Now Playing view' }));
+    expect(screen.getByRole('separator', { name: 'Resize Now Playing panel' }))
+      .toHaveAttribute('aria-valuenow', '420');
+    expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
+
+    firstView.unmount();
+    renderRoute('/');
+    expect(await screen.findByRole('separator', { name: 'Resize Library panel' }))
+      .toHaveAttribute('aria-valuenow', '420');
+    expect(screen.getByRole('separator', { name: 'Resize Now Playing panel' }))
+      .toHaveAttribute('aria-valuenow', '420');
+  } finally {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+    fireEvent(window, new Event('resize'));
+  }
+});
+
+test('removes panel separators when the compact shell takes control', async () => {
+  const originalWidth = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1_280 });
+
+  try {
+    renderRoute('/');
+    expect(await screen.findByRole('separator', { name: 'Resize Library panel' }))
+      .toBeInTheDocument();
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1_007 });
+    fireEvent(window, new Event('resize'));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('separator', { name: 'Resize Library panel' }))
+        .not.toBeInTheDocument();
+      expect(screen.queryByRole('separator', { name: 'Resize Now Playing panel' }))
+        .not.toBeInTheDocument();
+    });
+  } finally {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+    fireEvent(window, new Event('resize'));
+  }
 });
 
 test('shows authentication-required Library instead of an empty success', async () => {
@@ -241,6 +327,7 @@ test('expands the compact global Search before submitting it', async () => {
   vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(browserSessionQueryKey, null);
+  queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true });
   render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/']}>
@@ -264,6 +351,7 @@ test('cancels the pending preview timer when global Search is submitted', async 
   const user = userEvent.setup();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(browserSessionQueryKey, null);
+  queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true });
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
     query: 'Edge',
     artists: [],
@@ -312,6 +400,7 @@ test('waits for global Search IME composition before previewing or recording', a
   const user = userEvent.setup();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(browserSessionQueryKey, null);
+  queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true });
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
     query: '夜',
     artists: [],

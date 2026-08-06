@@ -76,7 +76,7 @@ export const setBrowserSessionCookies = (
     res.setHeader('Set-Cookie', browserSessionCookieHeaders(tokens));
 };
 
-/** Clears both browser credentials even when server revocation is unavailable. */
+/** Clears both browser credentials after the caller has established a safe terminal state. */
 export const clearBrowserSessionCookies = (res: Response) => {
     res.setHeader('Set-Cookie', clearedBrowserSessionCookieHeaders());
 };
@@ -237,6 +237,22 @@ export const requireBrowserRefreshCookie = (
     setBrowserSessionPrivacyHeaders(res);
     if (!getCookieValue(req, 'refresh_token')) {
         return res.status(401).json({ message: 'Authentication failed.' });
+    }
+    return next();
+};
+
+/** Allows credential-setting JSON responses only for a client holding the shared Web Lock. */
+export const requireBrowserSessionTransitionCapability = (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    setBrowserSessionPrivacyHeaders(res);
+    if (req.get('X-Finitude-Session-Transition') !== 'web-locks-v1') {
+        return res.status(409).json({
+            code: 'browser_session_transition_required',
+            message: 'This browser cannot safely coordinate account changes across tabs.'
+        });
     }
     return next();
 };

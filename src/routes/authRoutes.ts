@@ -2,9 +2,7 @@ import express, { Router } from 'express';
 import { body } from 'express-validator';
 import { RequestHandler } from 'express';
 
-import User from '../models/user';
 import {
-    signup,
     login,
     refresh,
     logout,
@@ -73,31 +71,13 @@ import {
 import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
 import {
     requireBrowserRefreshCookie,
+    requireBrowserSessionTransitionCapability,
     requireSameOriginBrowserFormMutation,
     requireSameOriginBrowserMutation,
     setBrowserSessionPrivacyHeaders
 } from '../services/authCookieService';
 
 const router: Router = express.Router();
-
-const signupValidation: RequestHandler[] = [
-    body('email')
-        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
-        .isEmail()
-        .withMessage('Please enter a valid email.')
-        .custom((email, { req }) => {
-            // check if the user has registered
-            return User.findByEmail(email)
-                .then(userDoc => {
-                    if (userDoc) {
-                        return Promise.reject('email address already exists!');
-                    }
-                });
-        })
-        .normalizeEmail(),
-    body('password').custom(requireAcceptablePassword),
-    body('username').trim().isLength({ min: 1, max: 64 })
-];
 
 const signupWebValidation: RequestHandler[] = [
     body('email')
@@ -140,7 +120,10 @@ router.get('/capabilities', (_req, res) => {
     res.status(200).json(getAuthenticationCapabilities());
 });
 
-router.put('/signup', authRateLimit, authAccountRateLimit, authConcurrencyLimit, signupValidation, asyncHandler(signup));
+router.put('/signup', (_req, res) => {
+    res.setHeader('Allow', 'POST');
+    res.status(405).json({ message: 'Use POST /auth/signup.' });
+});
 router.post(
     '/signup',
     authRateLimit,
@@ -217,6 +200,7 @@ router.post(
 router.post(
     '/browser/login',
     requireSameOriginBrowserMutation,
+    requireBrowserSessionTransitionCapability,
     authRateLimit,
     authAccountRateLimit,
     authConcurrencyLimit,
@@ -225,6 +209,7 @@ router.post(
 router.post(
     '/browser/refresh',
     requireSameOriginBrowserMutation,
+    requireBrowserSessionTransitionCapability,
     requireBrowserRefreshCookie,
     browserRefreshRateLimit,
     asyncHandler(browserRefresh)
@@ -244,11 +229,18 @@ router.post('/logout', authRateLimit, asyncHandler(logout));
 
 router.post('/logout-all', requireAuth, requireCurrentAccountViewer, asyncHandler(logoutAll));
 
-router.get('/me', requireAuth, asyncHandler(me));
-router.get('/avatar', requireAuth, limitMediaConcurrencyFor('avatar'), asyncHandler(getAvatar));
+router.get('/me', requireAuth, requireCurrentAccountViewer, asyncHandler(me));
+router.get(
+    '/avatar',
+    requireAuth,
+    requireCurrentAccountViewer,
+    limitMediaConcurrencyFor('avatar'),
+    asyncHandler(getAvatar)
+);
 router.put(
     '/avatar',
     requireAuth,
+    requireCurrentAccountViewer,
     uploadRateLimit,
     uploadConcurrencyLimit,
     avatarUpload.single('avatar'),
@@ -257,17 +249,19 @@ router.put(
 router.delete(
     '/avatar',
     requireAuth,
+    requireCurrentAccountViewer,
     uploadRateLimit,
     uploadConcurrencyLimit,
     asyncHandler(deleteAvatar)
 );
-router.get('/sessions', requireAuth, asyncHandler(listSessions));
-router.delete('/sessions/:id', requireAuth, asyncHandler(revokeSession));
+router.get('/sessions', requireAuth, requireCurrentAccountViewer, asyncHandler(listSessions));
+router.delete('/sessions/:id', requireAuth, requireCurrentAccountViewer, asyncHandler(revokeSession));
 router.post(
     '/password/change',
     authRateLimit,
     authConcurrencyLimit,
     requireAuth,
+    requireCurrentAccountViewer,
     body('currentPassword').optional().isString().isLength({ max: 256 }),
     body('newPassword').custom(requireAcceptablePassword),
     asyncHandler(changePassword)
@@ -278,10 +272,10 @@ router.delete(
     requireCurrentAccountViewer,
     asyncHandler(clearListeningHistory)
 );
-router.delete('/identities/:provider', requireAuth, asyncHandler(unlinkProvider));
+router.delete('/identities/:provider', requireAuth, requireCurrentAccountViewer, asyncHandler(unlinkProvider));
 router.delete('/account', requireAuth, requireCurrentAccountViewer, asyncHandler(deleteAccount));
-router.post('/passkeys/register/options', requireAuth, asyncHandler(registrationOptions));
-router.post('/passkeys/register/verify', requireAuth, asyncHandler(verifyRegistration));
+router.post('/passkeys/register/options', requireAuth, requireCurrentAccountViewer, asyncHandler(registrationOptions));
+router.post('/passkeys/register/verify', requireAuth, requireCurrentAccountViewer, asyncHandler(verifyRegistration));
 router.post('/passkeys/authenticate/options', authRateLimit, asyncHandler(authenticationOptions));
 router.post('/passkeys/authenticate/verify', authRateLimit, asyncHandler(verifyAuthentication));
 

@@ -296,7 +296,7 @@ const validateListenerDistribution = async (artifactRoot) => {
     ...(Array.isArray(entryChunk.css) ? entryChunk.css : [])
   ];
   for (const filename of directEntryAssets) {
-    if (!indexHtml.includes(`/listen/${filename}`)) {
+    if (!indexHtml.includes(`/finitude/${filename}`)) {
       throw new Error(`Listener index does not reference its entry asset: ${filename}`);
     }
   }

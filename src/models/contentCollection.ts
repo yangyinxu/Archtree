@@ -1,6 +1,12 @@
 import { ObjectId } from 'mongodb';
 
 import { getDb } from '../infrastructure/database';
+import { withReadyCatalogItemReferences } from '../services/catalogItemReferenceFenceService';
+import {
+    touchActiveAccount,
+    withActiveAccount
+} from '../services/accountReferenceFenceService';
+import { deleteContentCollectionAndPageReferences } from '../services/pageReferenceLifecycleService';
 
 const collectionId = 'contentCollections';
 const maximumManualItems = 500;
@@ -66,7 +72,17 @@ export class ContentCollection {
     }
 
     save() {
-        return getDb()!.collection(collectionId).insertOne(this);
+        if (this.mode === 'manual') {
+            return withReadyCatalogItemReferences(this.items, async (session, items) => {
+                this.items = normalizeOrder(items as unknown as ContentCollectionItemRef[]);
+                await touchActiveAccount(this.createdBy, session);
+                return getDb()!.collection(collectionId).insertOne(this, { session });
+            });
+        }
+        return withActiveAccount(
+            this.createdBy,
+            (session) => getDb()!.collection(collectionId).insertOne(this, { session })
+        );
     }
 
     static findById(id: string) {
@@ -118,10 +134,13 @@ export class ContentCollection {
             : nextItems.length;
         nextItems.splice(insertAt, 0, { ...item, order: insertAt });
         const items = normalizeOrder(nextItems);
-        await getDb()!.collection(collectionId).updateOne(
-            { _id: ObjectId.createFromHexString(id), mode: 'manual' },
-            { $set: { items, updatedBy, updatedAt: new Date() } }
-        );
+        await withReadyCatalogItemReferences(items, async (session, normalizedItems) => {
+            await getDb()!.collection(collectionId).updateOne(
+                { _id: ObjectId.createFromHexString(id), mode: 'manual' },
+                { $set: { items: normalizedItems, updatedBy, updatedAt: new Date() } },
+                { session }
+            );
+        });
         return items;
     }
 
@@ -133,16 +152,18 @@ export class ContentCollection {
             return null;
         }
         const reordered = normalizeOrder(moveByIndex(items, fromIndex, toIndex));
-        await getDb()!.collection(collectionId).updateOne(
-            { _id: ObjectId.createFromHexString(id), mode: 'manual' },
-            { $set: { items: reordered, updatedBy, updatedAt: new Date() } }
-        );
+        await withReadyCatalogItemReferences(reordered, async (session, normalizedItems) => {
+            await getDb()!.collection(collectionId).updateOne(
+                { _id: ObjectId.createFromHexString(id), mode: 'manual' },
+                { $set: { items: normalizedItems, updatedBy, updatedAt: new Date() } },
+                { session }
+            );
+        });
         return reordered;
     }
 
-    static deleteById(id: string) {
-        return getDb()!.collection(collectionId).deleteOne({
-            _id: ObjectId.createFromHexString(id)
-        });
+    /** Deletes a Grid/List only through the atomic Page-detachment lifecycle. */
+    static deleteById(id: string, updatedBy: string) {
+        return deleteContentCollectionAndPageReferences(id, updatedBy);
     }
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
 
@@ -9,6 +9,7 @@ import { Artwork } from '../../components/Artwork';
 import { Icon } from '../../components/Icon';
 import { SaveButton } from '../../components/SaveButton';
 import { launchAlbumPlayback } from '../playback/launchPlayback';
+import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton';
 import styles from './CatalogPages.module.css';
 
 const releaseLabel = (year?: number) => year ? String(year) : 'Album';
@@ -19,7 +20,13 @@ export const AlbumPage = () => {
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id;
   const albumQuery = useQuery(listenerAlbumQuery(albumId));
-  const [savedOverrides, setSavedOverrides] = useState<Record<string, boolean>>({});
+  const overrideOwner = `${viewerId ?? 'signed-out'}:${albumId}`;
+  const [savedOverrides, setSavedOverrides] = useState<{
+    owner: string;
+    values: Record<string, boolean>;
+  }>({ owner: overrideOwner, values: {} });
+  useEffect(() => setSavedOverrides({ owner: overrideOwner, values: {} }), [overrideOwner]);
+  const currentOverrides = savedOverrides.owner === overrideOwner ? savedOverrides.values : {};
   const targets = useMemo<LibraryTarget[]>(() => {
     if (!albumQuery.data) return [];
     return [
@@ -37,11 +44,17 @@ export const AlbumPage = () => {
   const savedFor = (target: LibraryTarget) => {
     if (!viewerId) return false;
     const key = `${target.contentType}:${target.contentId}`;
-    return savedOverrides[key] ?? savedByKey.get(key) ?? null;
+    return currentOverrides[key] ?? savedByKey.get(key) ?? null;
   };
   const setSaved = (target: LibraryTarget, saved: boolean) => {
     const key = `${target.contentType}:${target.contentId}`;
-    setSavedOverrides((current) => ({ ...current, [key]: saved }));
+    setSavedOverrides((current) => ({
+      owner: overrideOwner,
+      values: {
+        ...(current.owner === overrideOwner ? current.values : {}),
+        [key]: saved
+      }
+    }));
   };
 
   if (albumQuery.isPending) {
@@ -133,13 +146,21 @@ export const AlbumPage = () => {
                     </span>
                     <span className={styles.duration}>{track.duration || ''}</span>
                   </button>
-                  <SaveButton
-                    compact
-                    onSavedChange={(saved) => setSaved(target, saved)}
-                    saved={savedFor(target)}
-                    target={target}
-                    viewerId={viewerId}
-                  />
+                  <span className={styles.trackTrailing}>
+                    <AddTrackToPlaylistButton
+                      accountPending={session.isPending}
+                      accountUnavailable={session.isError}
+                      track={track}
+                      viewerId={viewerId}
+                    />
+                    <SaveButton
+                      compact
+                      onSavedChange={(saved) => setSaved(target, saved)}
+                      saved={savedFor(target)}
+                      target={target}
+                      viewerId={viewerId}
+                    />
+                  </span>
                 </li>
               );
             })}

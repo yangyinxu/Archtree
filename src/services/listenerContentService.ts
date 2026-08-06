@@ -9,6 +9,18 @@ import {
 import { resolvedCoverArtUrl } from '../utils/coverArt';
 import { escapeRegex } from '../utils/search';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import {
+    isAudioObjectKeyForTrack,
+    readyAudioStorageFilter
+} from '../utils/audioStorageKey';
+import {
+    isReadyArtistLifecycle,
+    readyArtistLifecycleFilter
+} from './artistReferenceFenceService';
+import {
+    isReadyAlbumLifecycle,
+    readyAlbumLifecycleFilter
+} from './albumReferenceFenceService';
 
 export interface ListenerDate {
     year?: number;
@@ -89,7 +101,8 @@ const albumProjection = {
     coverArtId: 1,
     coverArtUrl: 1,
     audioTrackIds: 1,
-    releaseDate: 1
+    releaseDate: 1,
+    lifecycleStatus: 1
 };
 const audioTrackProjection = {
     _id: 1,
@@ -101,21 +114,23 @@ const audioTrackProjection = {
     duration: 1,
     releaseDate: 1
 };
-const readyAudioFilter = {
-    uploadStatus: 'ready',
-    s3Key: { $type: 'string', $regex: /\S/ }
-};
+const readyAudioFilter = readyAudioStorageFilter;
 
 const isHexObjectId = (value: unknown): value is string =>
     /^[0-9a-fA-F]{24}$/.test(String(value ?? '').trim());
 
 const toObjectId = (value: string) => ObjectId.createFromHexString(value);
+const storedObjectIdValues = (value: string) => [
+    value,
+    value.toUpperCase(),
+    toObjectId(value)
+];
 
 const uniqueIds = (values: unknown[], limit = maximumHydratedAlbumTracks) => {
     const seen = new Set<string>();
     const result: string[] = [];
     for (const value of values) {
-        const id = String(value ?? '').trim();
+        const id = String(value ?? '').trim().toLowerCase();
         if (!isHexObjectId(id) || seen.has(id)) continue;
         seen.add(id);
         result.push(id);
@@ -145,7 +160,7 @@ const orderedRefs = (items: unknown, limit = maximumSectionItems): ListenerConte
         .slice(0, limit)
         .flatMap((item: any, index) => {
             const contentType = item?.contentType;
-            const contentId = String(item?.contentId ?? '').trim();
+            const contentId = String(item?.contentId ?? '').trim().toLowerCase();
             if ((contentType !== 'album' && contentType !== 'audioTrack') || !isHexObjectId(contentId)) {
                 return [];
             }
@@ -156,15 +171,15 @@ const orderedRefs = (items: unknown, limit = maximumSectionItems): ListenerConte
 const documentsById = (documents: any[]) => new Map(
     documents
         .filter((document) => document?._id)
-        .map((document) => [String(document._id), document] as const)
+        .map((document) => [String(document._id).toLowerCase(), document] as const)
 );
 
 const trackBelongsToAlbum = (track: any, albumId: string) =>
-    String(track?.albumId ?? '').trim() === albumId;
+    String(track?.albumId ?? '').trim().toLowerCase() === albumId.toLowerCase();
 
 const artistReferencesAlbum = (artist: any, albumId: string) =>
     (Array.isArray(artist?.albumIds) ? artist.albumIds : [])
-        .some((id: unknown) => String(id) === albumId);
+        .some((id: unknown) => String(id).trim().toLowerCase() === albumId.toLowerCase());
 
 const compareTitleAndId = (left: any, right: any) =>
     normalizeText(left?.title).localeCompare(normalizeText(right?.title))
@@ -177,7 +192,7 @@ const createCatalogContext = async (
     seedArtists: any[] = []
 ): Promise<CatalogContext> => {
     const db = getDb()!;
-    const albumsById = documentsById(seedAlbums);
+    const albumsById = documentsById(seedAlbums.filter(isReadyAlbumLifecycle));
     const tracksById = documentsById(seedTracks);
 
     const linkedAlbumIds = uniqueIds(
@@ -186,11 +201,14 @@ const createCatalogContext = async (
     ).filter((id) => !albumsById.has(id));
     if (linkedAlbumIds.length > 0) {
         const linkedAlbums = await db.collection('albums')
-            .find({ _id: { $in: linkedAlbumIds.map(toObjectId) } })
+            .find({
+                _id: { $in: linkedAlbumIds.map(toObjectId) },
+                ...readyAlbumLifecycleFilter
+            })
             .project(albumProjection)
             .maxTimeMS(queryTimeoutMs)
             .toArray();
-        for (const album of linkedAlbums) albumsById.set(String(album._id), album);
+        for (const album of linkedAlbums) albumsById.set(String(album._id).toLowerCase(), album);
     }
 
     // Album attribution follows ready component tracks, even on summary surfaces.
@@ -211,25 +229,32 @@ const createCatalogContext = async (
             .project(audioTrackProjection)
             .maxTimeMS(queryTimeoutMs)
             .toArray();
-        for (const track of declaredTracks) tracksById.set(String(track._id), track);
+        for (const track of declaredTracks) tracksById.set(String(track._id).toLowerCase(), track);
     }
 
     const legacyAlbumIds = [...albumsById.values()]
-        .filter((album) => !Array.isArray(album?.audioTrackIds) || album.audioTrackIds.length === 0)
-        .map((album) => String(album._id));
+        .filter((album) => album?.lifecycleStatus === undefined
+            && (!Array.isArray(album?.audioTrackIds) || album.audioTrackIds.length === 0))
+        .map((album) => String(album._id).toLowerCase());
     if (legacyAlbumIds.length > 0) {
-        const legacyObjectIds = legacyAlbumIds.map(toObjectId);
-        const legacyTracks = await db.collection('audioTracks')
-            .find({
-                ...readyAudioFilter,
-                albumId: { $in: [...legacyAlbumIds, ...legacyObjectIds] }
-            })
-            .project(audioTrackProjection)
-            .sort({ title: 1, _id: 1 })
-            .limit(maximumHydratedAlbumTracks)
-            .maxTimeMS(queryTimeoutMs)
-            .toArray();
-        for (const track of legacyTracks) tracksById.set(String(track._id), track);
+        for (let index = 0; index < legacyAlbumIds.length; index += 10) {
+            const batch = legacyAlbumIds.slice(index, index + 10);
+            const legacyTrackBatches = await Promise.all(batch.map((albumId) =>
+                db.collection('audioTracks')
+                    .find({
+                        ...readyAudioFilter,
+                        albumId: { $in: storedObjectIdValues(albumId) }
+                    })
+                    .project(audioTrackProjection)
+                    .sort({ title: 1, _id: 1 })
+                    .limit(maximumAlbumTracks)
+                    .maxTimeMS(queryTimeoutMs)
+                    .toArray()
+            ));
+            for (const track of legacyTrackBatches.flat()) {
+                tracksById.set(String(track._id).toLowerCase(), track);
+            }
+        }
     }
 
     const explicitArtistIds = uniqueIds(
@@ -244,18 +269,20 @@ const createCatalogContext = async (
     }
     if (allAlbumIds.length > 0) {
         artistClauses.push({
-            albumIds: { $in: [...allAlbumIds, ...allAlbumIds.map(toObjectId)] }
+            albumIds: { $in: allAlbumIds.flatMap(storedObjectIdValues) }
         });
     }
     const relatedArtists = artistClauses.length > 0
         ? await db.collection('artists')
-            .find({ $or: artistClauses })
+            .find({ $and: [readyArtistLifecycleFilter, { $or: artistClauses }] })
             .project(artistProjection)
             .sort({ name: 1, _id: 1 })
             .maxTimeMS(queryTimeoutMs)
             .toArray()
         : [];
-    const artistsById = documentsById([...relatedArtists, ...seedArtists]);
+    const artistsById = documentsById(
+        [...relatedArtists, ...seedArtists].filter(isReadyArtistLifecycle)
+    );
     const artists = [...artistsById.values()].sort((left, right) =>
         normalizeText(left?.name).localeCompare(normalizeText(right?.name))
         || String(left?._id ?? '').localeCompare(String(right?._id ?? ''))
@@ -263,7 +290,7 @@ const createCatalogContext = async (
 
     const albumTrackIds = new Map<string, string[]>();
     for (const album of albumsById.values()) {
-        const albumId = String(album._id);
+        const albumId = String(album._id).toLowerCase();
         const declared = Array.isArray(album?.audioTrackIds) ? album.audioTrackIds : [];
         if (declared.length > 0) {
             albumTrackIds.set(
@@ -273,13 +300,17 @@ const createCatalogContext = async (
             );
             continue;
         }
+        if (album.lifecycleStatus !== undefined) {
+            albumTrackIds.set(albumId, []);
+            continue;
+        }
         albumTrackIds.set(
             albumId,
             [...tracksById.values()]
                 .filter((track) => trackBelongsToAlbum(track, albumId))
                 .sort(compareTitleAndId)
                 .slice(0, maximumAlbumTracks)
-                .map((track) => String(track._id))
+                .map((track) => String(track._id).toLowerCase())
         );
     }
 
@@ -289,10 +320,10 @@ const createCatalogContext = async (
 const artistNamesForAlbum = (album: any, context: CatalogContext) => {
     const names: string[] = [];
     const seen = new Set<string>();
-    for (const trackId of context.albumTrackIds.get(String(album._id)) ?? []) {
+    for (const trackId of context.albumTrackIds.get(String(album._id).toLowerCase()) ?? []) {
         const track = context.tracksById.get(trackId);
         for (const artistId of Array.isArray(track?.artistIds) ? track.artistIds : []) {
-            const name = normalizeText(context.artistsById.get(String(artistId))?.name);
+            const name = normalizeText(context.artistsById.get(String(artistId).toLowerCase())?.name);
             if (!name || seen.has(name)) continue;
             seen.add(name);
             names.push(name);
@@ -301,7 +332,7 @@ const artistNamesForAlbum = (album: any, context: CatalogContext) => {
     if (names.length > 0) return names;
 
     for (const artist of context.artists) {
-        if (!artistReferencesAlbum(artist, String(album._id))) continue;
+        if (!artistReferencesAlbum(artist, String(album._id).toLowerCase())) continue;
         const name = normalizeText(artist?.name);
         if (!name || seen.has(name)) continue;
         seen.add(name);
@@ -331,10 +362,15 @@ const toAudioTrackSummary = (
     track: any,
     context: CatalogContext
 ): ListenerAudioTrackSummary => {
-    const albumId = isHexObjectId(track?.albumId) ? String(track.albumId) : null;
-    const album = albumId ? context.albumsById.get(albumId) : null;
+    const referencedAlbumId = isHexObjectId(track?.albumId)
+        ? String(track.albumId).toLowerCase()
+        : null;
+    const album = referencedAlbumId ? context.albumsById.get(referencedAlbumId) : null;
+    const albumId = album ? referencedAlbumId : null;
     const artistNames = (Array.isArray(track?.artistIds) ? track.artistIds : [])
-        .map((artistId: unknown) => normalizeText(context.artistsById.get(String(artistId))?.name))
+        .map((artistId: unknown) => normalizeText(
+            context.artistsById.get(String(artistId).toLowerCase())?.name
+        ))
         .filter((name: string, index: number, values: string[]) => Boolean(name) && values.indexOf(name) === index);
     return {
         contentType: 'audioTrack',
@@ -373,7 +409,10 @@ const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
         const db = getDb()!;
         const [albums, tracks] = await Promise.all([
             albumIds.length > 0
-                ? db.collection('albums').find({ _id: { $in: albumIds.map(toObjectId) } })
+                ? db.collection('albums').find({
+                    _id: { $in: albumIds.map(toObjectId) },
+                    ...readyAlbumLifecycleFilter
+                })
                     .project({ _id: 1 }).maxTimeMS(queryTimeoutMs).toArray()
                 : [],
             trackIds.length > 0
@@ -388,27 +427,30 @@ const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
             ...tracks.map((item) => `audioTrack:${item._id}`)
         ]);
         return entries
-            .filter((entry) => validKeys.has(`${entry.contentType}:${entry.contentId}`))
+            .filter((entry) => validKeys.has(
+                `${entry.contentType}:${String(entry.contentId).toLowerCase()}`
+            ))
             .slice(0, limit)
             .map((entry, order) => ({
                 contentType: entry.contentType,
-                contentId: entry.contentId,
+                contentId: String(entry.contentId).toLowerCase(),
                 order
             }));
     }
 
     const config = carousel?.artistConfig;
-    const artistId = String(config?.artistId ?? '').trim();
+    const artistId = String(config?.artistId ?? '').trim().toLowerCase();
     const contentType = config?.contentType;
     if (!isHexObjectId(artistId) || (contentType !== 'album' && contentType !== 'audioTrack')) return [];
     const limit = Math.max(1, Math.min(Number(config?.limit ?? 20) || 20, 100));
     const db = getDb()!;
+    const artist = await db.collection('artists')
+        .find({ _id: toObjectId(artistId), ...readyArtistLifecycleFilter })
+        .project({ albumIds: 1 })
+        .maxTimeMS(queryTimeoutMs)
+        .next();
+    if (!artist) return [];
     if (contentType === 'album') {
-        const artist = await db.collection('artists')
-            .find({ _id: toObjectId(artistId) })
-            .project({ albumIds: 1 })
-            .maxTimeMS(queryTimeoutMs)
-            .next();
         const albumIds = uniqueIds(
             Array.isArray(artist?.albumIds) ? artist.albumIds : [],
             maximumAlbumTracks
@@ -424,7 +466,10 @@ const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
                 _id: 1
             };
         const albums = await db.collection('albums')
-            .find({ _id: { $in: albumIds.map(toObjectId) } })
+            .find({
+                _id: { $in: albumIds.map(toObjectId) },
+                ...readyAlbumLifecycleFilter
+            })
             .project({ _id: 1 })
             .sort(sort)
             .limit(limit)
@@ -449,7 +494,7 @@ const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
     const tracks = await db.collection('audioTracks')
         .find({
             ...readyAudioFilter,
-            artistIds: { $in: [artistId, toObjectId(artistId)] }
+            artistIds: { $in: storedObjectIdValues(artistId) }
         })
         .project({ _id: 1 })
         .sort(sort)
@@ -511,7 +556,7 @@ export const getListenerHome = async (viewerUserId?: string) => {
     }> = [];
     for (const [order, item] of pageItems.entries()) {
         if (item?.itemType === 'carousel') {
-            const carousel = carouselMap.get(String(item.carouselId ?? ''));
+            const carousel = carouselMap.get(String(item.carouselId ?? '').toLowerCase());
             if (!carousel) continue;
             sectionDefinitions.push({
                 id: `carousel:${carousel._id}:${order}`,
@@ -522,7 +567,7 @@ export const getListenerHome = async (viewerUserId?: string) => {
             continue;
         }
         if (item?.itemType !== 'grid' && item?.itemType !== 'list') continue;
-        const collection = collectionMap.get(String(item.collectionId ?? ''));
+        const collection = collectionMap.get(String(item.collectionId ?? '').toLowerCase());
         if (!collection) continue;
         sectionDefinitions.push({
             id: `${item.itemType}:${collection._id}:${order}`,
@@ -542,7 +587,10 @@ export const getListenerHome = async (viewerUserId?: string) => {
     const [albums, tracks] = await Promise.all([
         albumIds.length > 0
             ? db.collection('albums')
-                .find({ _id: { $in: albumIds.map(toObjectId) } })
+                .find({
+                    _id: { $in: albumIds.map(toObjectId) },
+                    ...readyAlbumLifecycleFilter
+                })
                 .project(albumProjection)
                 .maxTimeMS(queryTimeoutMs)
                 .toArray()
@@ -580,10 +628,13 @@ export const searchListenerContent = async (query: string, limit = 20) => {
     const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 50));
     const expression = { $regex: escapeRegex(query), $options: 'i' };
     const [artists, albums, tracks] = await Promise.all([
-        db.collection('artists').find({ name: expression })
+        db.collection('artists').find({ name: expression, ...readyArtistLifecycleFilter })
             .project(artistProjection).sort({ name: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray(),
-        db.collection('albums').find({ title: expression })
+        db.collection('albums').find({
+            title: expression,
+            ...readyAlbumLifecycleFilter
+        })
             .project(albumProjection).sort({ title: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray(),
         db.collection('audioTracks').find({ ...readyAudioFilter, title: expression })
@@ -602,9 +653,10 @@ export const searchListenerContent = async (query: string, limit = 20) => {
 /** Returns an album and its ready tracks in the canonical declared order. */
 export const getListenerAlbum = async (albumId: string) => {
     if (!isHexObjectId(albumId)) return null;
+    const normalizedAlbumId = albumId.trim().toLowerCase();
     const db = getDb()!;
     const album: any = await db.collection('albums')
-        .find({ _id: toObjectId(albumId) })
+        .find({ _id: toObjectId(normalizedAlbumId), ...readyAlbumLifecycleFilter })
         .project(albumProjection)
         .maxTimeMS(queryTimeoutMs)
         .next();
@@ -623,17 +675,19 @@ export const getListenerAlbum = async (albumId: string) => {
             : [];
         const byId = documentsById(found);
         tracks = ids.flatMap((id) => byId.has(id) ? [byId.get(id)] : []);
-    } else {
+    } else if (album.lifecycleStatus === undefined) {
         tracks = await db.collection('audioTracks')
             .find({
                 ...readyAudioFilter,
-                albumId: { $in: [albumId, toObjectId(albumId)] }
+                albumId: { $in: storedObjectIdValues(normalizedAlbumId) }
             })
             .project(audioTrackProjection)
             .sort({ title: 1, _id: 1 })
             .limit(maximumAlbumTracks)
             .maxTimeMS(queryTimeoutMs)
             .toArray();
+    } else {
+        tracks = [];
     }
     const context = await createCatalogContext([album], tracks);
     return {
@@ -645,9 +699,10 @@ export const getListenerAlbum = async (albumId: string) => {
 /** Returns one public artist with linked albums and ready soundtracks. */
 export const getListenerArtist = async (artistId: string) => {
     if (!isHexObjectId(artistId)) return null;
+    const normalizedArtistId = artistId.trim().toLowerCase();
     const db = getDb()!;
     const artist: any = await db.collection('artists')
-        .find({ _id: toObjectId(artistId) })
+        .find({ _id: toObjectId(normalizedArtistId), ...readyArtistLifecycleFilter })
         .project(artistProjection)
         .maxTimeMS(queryTimeoutMs)
         .next();
@@ -660,7 +715,10 @@ export const getListenerArtist = async (artistId: string) => {
     const [unorderedAlbums, tracks] = await Promise.all([
         albumIds.length > 0
             ? db.collection('albums')
-                .find({ _id: { $in: albumIds.map(toObjectId) } })
+                .find({
+                    _id: { $in: albumIds.map(toObjectId) },
+                    ...readyAlbumLifecycleFilter
+                })
                 .project(albumProjection)
                 .maxTimeMS(queryTimeoutMs)
                 .toArray()
@@ -668,7 +726,7 @@ export const getListenerArtist = async (artistId: string) => {
         db.collection('audioTracks')
             .find({
                 ...readyAudioFilter,
-                artistIds: { $in: [artistId, toObjectId(artistId)] }
+                artistIds: { $in: storedObjectIdValues(normalizedArtistId) }
             })
             .project(audioTrackProjection)
             .sort({ title: 1, _id: 1 })
@@ -689,8 +747,9 @@ export const getListenerArtist = async (artistId: string) => {
 /** Returns metadata only when the corresponding audio lifecycle is playable. */
 export const getListenerAudioTrack = async (audioTrackId: string) => {
     if (!isHexObjectId(audioTrackId)) return null;
+    const normalizedAudioTrackId = audioTrackId.trim().toLowerCase();
     const track: any = await getDb()!.collection('audioTracks')
-        .find({ ...readyAudioFilter, _id: toObjectId(audioTrackId) })
+        .find({ ...readyAudioFilter, _id: toObjectId(normalizedAudioTrackId) })
         .project(audioTrackProjection)
         .maxTimeMS(queryTimeoutMs)
         .next();
@@ -704,7 +763,7 @@ export const sanitizeListenerLibraryPage = (page: any) => ({
     items: (Array.isArray(page?.items) ? page.items : []).flatMap((item: any) => {
         const common = {
             contentType: item?.contentType,
-            contentId: String(item?.contentId ?? ''),
+            contentId: String(item?.contentId ?? '').toLowerCase(),
             savedAt: item?.savedAt,
             lastPlayedAt: item?.lastPlayedAt ?? null,
             lastActivityAt: item?.lastActivityAt ?? item?.savedAt,
@@ -718,14 +777,22 @@ export const sanitizeListenerLibraryPage = (page: any) => ({
                     _id: String(item.album._id),
                     title: normalizeText(item.album.title),
                     coverArtUrl: resolvedCoverArtUrl(item.album),
+                    // The native Library contract requires this field. Album
+                    // detail resolves the canonical ready order separately.
+                    audioTrackIds: [],
                     releaseDate: safeDate(item.album.releaseDate)
                 }
             }];
         }
         if (item?.contentType === 'audioTrack' && item.audioTrack?._id) {
-            const available = item.audioTrack.uploadStatus === 'ready'
-                && Boolean(String(item.audioTrack.s3Key ?? '').trim());
             const audioTrackId = String(item.audioTrack._id);
+            const hasPublicationStatus = Object.prototype.hasOwnProperty.call(
+                item.audioTrack,
+                'publicationStatus'
+            );
+            const available = item.audioTrack.uploadStatus === 'ready'
+                && (!hasPublicationStatus || item.audioTrack.publicationStatus === 'ready')
+                && isAudioObjectKeyForTrack(item.audioTrack.s3Key, audioTrackId);
             return [{
                 ...common,
                 contentType: 'audioTrack' as const,
@@ -735,7 +802,7 @@ export const sanitizeListenerLibraryPage = (page: any) => ({
                     displayCoverArtUrl: String(item.audioTrack.displayCoverArtUrl ?? '').trim(),
                     coverArtUrl: resolvedCoverArtUrl(item.audioTrack),
                     albumId: isHexObjectId(item.audioTrack.albumId)
-                        ? String(item.audioTrack.albumId)
+                        ? String(item.audioTrack.albumId).toLowerCase()
                         : null,
                     duration: normalizeText(item.audioTrack.duration) || null,
                     available,

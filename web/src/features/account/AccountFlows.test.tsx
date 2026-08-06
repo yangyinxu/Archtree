@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
+import { advanceAccountEpoch } from '../../api/accountEpoch';
 import { browserSessionQueryKey } from '../../api/session';
 import { AccountPage } from './AccountPage';
 import { AccountSessionsPage } from './AccountSessionsPage';
@@ -23,7 +24,10 @@ const capabilities = {
 
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
-  headers: { 'Content-Type': 'application/json' }
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Finitude-Account-Viewer': 'listener-1'
+  }
 });
 
 const renderAccountRoutes = (
@@ -36,6 +40,7 @@ const renderAccountRoutes = (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
+          <Route path="/" element={<h1>Home</h1>} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
@@ -98,6 +103,103 @@ test('keeps username login and does not prefill it as a verification email', asy
 
   expect(screen.getByRole('heading', { name: 'Verify your email' })).toBeInTheDocument();
   expect(screen.getByLabelText('Email')).toHaveValue('');
+});
+
+test('finishes login navigation after a cross-tab event already reconciled the same viewer', async () => {
+  const user = userEvent.setup();
+  const currentSession = {
+    user: {
+      id: 'listener-1',
+      email: 'listener@example.com',
+      role: 'user',
+      displayName: 'Quiet Listener',
+      avatarRevision: 0,
+      avatar: null,
+      emailVerified: true,
+      authenticationMethods: ['password']
+    }
+  };
+  let releaseLogin!: () => void;
+  const loginGate = new Promise<void>((resolve) => { releaseLogin = resolve; });
+  const fetchMock = vi.fn(async (path: string) => {
+    if (path === '/auth/browser/capabilities') return jsonResponse(capabilities);
+    if (path === '/auth/browser/login') {
+      await loginGate;
+      return jsonResponse(currentSession);
+    }
+    throw new Error(`Unexpected request ${path}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const { queryClient } = renderAccountRoutes('/login');
+
+  await user.type(screen.getByLabelText('Email or username'), 'listener@example.com');
+  await user.type(screen.getByLabelText('Password'), 'a private password');
+  await user.click(screen.getByRole('button', { name: 'Log in' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    '/auth/browser/login',
+    expect.objectContaining({ method: 'POST' })
+  ));
+
+  advanceAccountEpoch();
+  queryClient.setQueryData(browserSessionQueryKey, currentSession);
+  releaseLogin();
+
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument();
+});
+
+test('does not navigate for a stale login after reconciliation selected another viewer', async () => {
+  const user = userEvent.setup();
+  const loginSession = {
+    user: {
+      id: 'listener-b',
+      email: 'listener-b@example.com',
+      role: 'user',
+      displayName: 'Listener B',
+      avatarRevision: 0,
+      avatar: null,
+      emailVerified: true,
+      authenticationMethods: ['password']
+    }
+  };
+  const reconciledSession = {
+    user: {
+      ...loginSession.user,
+      id: 'listener-c',
+      email: 'listener-c@example.com',
+      displayName: 'Listener C'
+    }
+  };
+  let releaseLogin!: () => void;
+  const loginGate = new Promise<void>((resolve) => { releaseLogin = resolve; });
+  const fetchMock = vi.fn(async (path: string) => {
+    if (path === '/auth/browser/capabilities') return jsonResponse(capabilities);
+    if (path === '/auth/browser/login') {
+      await loginGate;
+      return jsonResponse(loginSession);
+    }
+    throw new Error(`Unexpected request ${path}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const { queryClient } = renderAccountRoutes('/login');
+
+  await user.type(screen.getByLabelText('Email or username'), 'listener-b@example.com');
+  await user.type(screen.getByLabelText('Password'), 'a private password');
+  await user.click(screen.getByRole('button', { name: 'Log in' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    '/auth/browser/login',
+    expect.objectContaining({ method: 'POST' })
+  ));
+
+  advanceAccountEpoch();
+  queryClient.setQueryData(browserSessionQueryKey, reconciledSession);
+  releaseLogin();
+  await waitFor(() => expect(queryClient.getMutationCache().getAll()[0]?.state.status)
+    .toBe('success'));
+
+  expect(screen.getByRole('heading', {
+    name: 'You are already listening as Listener C'
+  })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Home' })).not.toBeInTheDocument();
 });
 
 test('password recovery keeps its success response non-enumerating', async () => {
@@ -216,7 +318,10 @@ test('signed-in devices use friendly labels and revoke only another session', as
       });
     }
     if (path === '/auth/sessions/other-session' && init?.method === 'DELETE') {
-      return new Response(null, { status: 204 });
+      return new Response(null, {
+        status: 204,
+        headers: { 'X-Finitude-Account-Viewer': 'listener-1' }
+      });
     }
     throw new Error(`Unexpected request ${path}`);
   });
@@ -247,7 +352,10 @@ test('signed-in devices use friendly labels and revoke only another session', as
 
 test('changing a password keeps the current session and announces other-device revocation', async () => {
   const user = userEvent.setup();
-  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+    status: 204,
+    headers: { 'X-Finitude-Account-Viewer': 'listener-1' }
+  }));
   vi.stubGlobal('fetch', fetchMock);
   renderAccountRoutes('/account/password', {
     user: {

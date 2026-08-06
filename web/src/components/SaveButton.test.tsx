@@ -37,7 +37,13 @@ test('Save changes authoritative state only after the server confirms it', async
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
     ...target,
     saved: true
-  }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  }), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Finitude-Account-Viewer': 'listener-1'
+    }
+  }));
   vi.stubGlobal('fetch', fetchMock);
   renderButton({ viewerId: 'listener-1', onSavedChange });
 

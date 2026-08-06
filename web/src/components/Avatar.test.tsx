@@ -11,10 +11,16 @@ const renderAvatar = (node: React.ReactNode) => {
   return render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>);
 };
 
-const imageResponse = (label: string) => new Response(new Blob([label], { type: 'image/jpeg' }), {
-  status: 200,
-  headers: { 'Content-Type': 'image/jpeg' }
-});
+const imageResponse = (label: string, viewerId: string) => new Response(
+  new Blob([label], { type: 'image/jpeg' }),
+  {
+    status: 200,
+    headers: {
+      'Content-Type': 'image/jpeg',
+      'X-Finitude-Account-Viewer': viewerId
+    }
+  }
+);
 
 beforeEach(() => {
   Object.defineProperty(URL, 'createObjectURL', {
@@ -69,7 +75,7 @@ test('gates the old object URL on the first render of an account switch', async 
   let resolveSecond!: (response: Response) => void;
   const second = new Promise<Response>((resolve) => { resolveSecond = resolve; });
   const fetchMock = vi.fn()
-    .mockResolvedValueOnce(imageResponse('first account'))
+    .mockResolvedValueOnce(imageResponse('first account', 'listener-1'))
     .mockImplementationOnce(() => second);
   vi.stubGlobal('fetch', fetchMock);
   const createObjectURL = vi.mocked(URL.createObjectURL);
@@ -95,7 +101,7 @@ test('gates the old object URL on the first render of an account switch', async 
     queryClient.getQueryData(privateAvatarQueryKey('listener-1', 1))
   ).toBeUndefined());
 
-  await act(async () => resolveSecond(imageResponse('second account')));
+  await act(async () => resolveSecond(imageResponse('second account', 'listener-2')));
   await waitFor(() => expect(document.querySelector('img')).toHaveAttribute('src', 'blob:second-account'));
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first-account');
 });

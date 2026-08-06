@@ -1,11 +1,67 @@
 import { Request, Response, NextFunction } from 'express';
+import { ObjectId } from 'mongodb';
 import { Artist } from '../models/artist';
 import { SimpleDate } from '../models/simpleDate';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
-import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
+import {
+    deleteCoverArt,
+    updateCoverArtOwnerAndCleanup,
+    uploadCoverArt,
+    validateCoverArtFile
+} from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import { getPublicArtist, listPublicArtists } from '../services/publicCatalogService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
+import { deleteArtistAndReferences } from '../services/artistLifecycleService';
+
+type UploadedCoverArt = { imageId: string; coverArtUrl: string };
+
+interface NewArtistPublicationDependencies {
+    saveArtist?: () => Promise<unknown>;
+    deleteUploadedCoverArt?: (imageId: string, artistId: string) => Promise<void>;
+}
+
+/** Publishes a ready Artist only after optional artwork is ready and attached in the insert. */
+export const publishNewArtist = async (
+    artist: Artist,
+    coverArt?: UploadedCoverArt,
+    dependencies: NewArtistPublicationDependencies = {}
+) => {
+    const artistId = artist._id?.toHexString();
+    if (!artistId) throw new Error('A server-generated Artist ID is required before publication.');
+    if (coverArt) {
+        artist.coverArtId = coverArt.imageId;
+        artist.coverArtUrl = coverArt.coverArtUrl;
+    }
+
+    try {
+        return await (dependencies.saveArtist ?? (() => artist.save()))();
+    } catch (error) {
+        if (!coverArt || (error as any)?.outcomeUnknown) throw error;
+        try {
+            if (dependencies.deleteUploadedCoverArt) {
+                await dependencies.deleteUploadedCoverArt(coverArt.imageId, artistId);
+            } else {
+                await deleteCoverArt(coverArt.imageId, {
+                    expectedOwnerType: 'artist',
+                    expectedOwnerId: artistId
+                });
+            }
+        } catch (cleanupError) {
+            throw Object.assign(
+                new Error('Artist creation failed and uploaded cover-art cleanup requires reconciliation.'),
+                {
+                    statusCode: 503,
+                    code: 'artist_creation_cleanup_pending',
+                    cleanupPending: true,
+                    reconciliationRequired: true,
+                    cause: { creationError: error, cleanupError }
+                }
+            );
+        }
+        throw error;
+    }
+};
 
 // Create a new artist via the model and save it to the db
 export const postArtist = async (req: Request, res: Response, next: NextFunction) => {
@@ -25,40 +81,52 @@ export const postArtist = async (req: Request, res: Response, next: NextFunction
     const albumIds: [string] = req.body.albumIds;
 
     // Create a new artist
+    const artistObjectId = new ObjectId();
     const artist = new Artist(
         name,
         birthDate,
         bio,
         coverArtUrl,
         albumIds,
-        authReq.auth.userId
+        authReq.auth.userId,
+        artistObjectId
     );
 
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
 
     try {
         if (coverArtFile) await validateCoverArtFile(coverArtFile);
-        const result = await artist.save();
-        const artistId = result.insertedId.toHexString();
-        try {
-            if (coverArtFile) {
-                const coverArt = await uploadCoverArt('artist', artistId, coverArtFile, authReq.auth.userId);
-                await Artist.updateById(artistId, {
-                    coverArtId: coverArt.imageId,
-                    coverArtUrl: coverArt.coverArtUrl
-                });
-            }
-        } catch (error) {
-            await Artist.deleteById(artistId).catch(() => undefined);
-            throw error;
+        const artistId = artistObjectId.toHexString();
+        let coverArt: UploadedCoverArt | undefined;
+        if (coverArtFile) {
+            coverArt = await uploadCoverArt(
+                'artist',
+                artistId,
+                coverArtFile,
+                authReq.auth.userId,
+                { allowMissingOwner: true }
+            );
         }
-        const createdArtist = await Artist.findById(artistId);
+        await publishNewArtist(artist, coverArt);
         return res.status(201).json({
             message: `Artist ${name} Added Successfully`,
-            artist: createdArtist
+            artist
         });
     } catch (error) {
-        console.log(error);
+        if ((error as any)?.outcomeUnknown) {
+            return res.status(503).json({
+                message: 'Artist creation outcome could not be confirmed. Reconciliation is required before retrying.',
+                cleanupPending: true,
+                reconciliationRequired: true
+            });
+        }
+        if ((error as any)?.code === 'artist_creation_cleanup_pending') {
+            return res.status(503).json({
+                message: 'Artist was not created. Uploaded cover-art cleanup requires reconciliation.',
+                cleanupPending: true,
+                reconciliationRequired: true
+            });
+        }
         return next(error);
     }
 };
@@ -73,7 +141,7 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     }
 
     const artistId = req.params.artistId;
-    const artist = await Artist.findById(artistId);
+    const artist = await Artist.findReadyById(artistId);
     if (!artist) {
         return res.status(404).json({ message: 'Artist not found.' });
     }
@@ -81,6 +149,8 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     const updatePayload: Record<string, unknown> = {};
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
     let replacementCoverArtId: string | undefined;
+    const removeCoverArt = !coverArtFile
+        && String(req.body.removeCoverArt ?? '').toLowerCase() === 'true';
     if (req.body.name !== undefined) updatePayload.name = req.body.name;
     if (req.body.bio !== undefined) updatePayload.bio = req.body.bio;
     if (req.body.coverArtUrl !== undefined) updatePayload.coverArtUrl = req.body.coverArtUrl;
@@ -92,21 +162,38 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
         replacementCoverArtId = coverArt.imageId;
         updatePayload.coverArtId = coverArt.imageId;
         updatePayload.coverArtUrl = coverArt.coverArtUrl;
-    } else if (String(req.body.removeCoverArt ?? '').toLowerCase() === 'true') {
-        await deleteCoverArt(artist.coverArtId);
+    } else if (removeCoverArt) {
         updatePayload.coverArtId = null;
         updatePayload.coverArtUrl = '';
     }
 
-    await Artist.updateById(artistId, updatePayload);
-    let cleanupPending = false;
-    if (replacementCoverArtId && artist.coverArtId && artist.coverArtId !== replacementCoverArtId) {
-        await deleteCoverArt(artist.coverArtId).catch((error) => {
-            cleanupPending = true;
-            console.log(`Unable to delete replaced artist cover art ${artist.coverArtId}:`, error);
+    const cleanup = await updateCoverArtOwnerAndCleanup(
+        artistId,
+        updatePayload,
+        artist.coverArtId,
+        removeCoverArt || Boolean(
+            replacementCoverArtId && artist.coverArtId !== replacementCoverArtId
+        ),
+        {
+            ownerType: 'artist',
+            updateOwner: (id, update) => Artist.updateById(id, update),
+            updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                Artist.updateCoverArtById(id, expectedImageId, update)
+        }
+    );
+    if (cleanup.cleanupError) {
+        console.log(`Unable to delete detached artist cover art ${artist.coverArtId}:`, cleanup.cleanupError);
+    }
+    if (!cleanup.updateApplied) {
+        return res.status(409).json({
+            message: 'Artist was not updated because its cover art changed concurrently or its lifecycle evidence is invalid.',
+            cleanupPending: cleanup.cleanupPending
         });
     }
-    return res.status(200).json({ message: 'Artist updated successfully.', cleanupPending });
+    return res.status(200).json({
+        message: 'Artist updated successfully.',
+        cleanupPending: cleanup.cleanupPending
+    });
 };
 
 export const deleteArtist = async (req: Request, res: Response, next: NextFunction) => {
@@ -124,9 +211,17 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
         return res.status(404).json({ message: 'Artist not found.' });
     }
 
-    await deleteCoverArt(artist.coverArtId);
-    await Artist.deleteById(artistId);
-    return res.status(200).json({ message: 'Artist deleted successfully.' });
+    const cleanup = await deleteArtistAndReferences(artistId);
+    if (!cleanup.ownerDeleted) {
+        return res.status(409).json({
+            message: 'Artist was retained for retry and lifecycle reconciliation.',
+            cleanupPending: true
+        });
+    }
+    return res.status(200).json({
+        message: 'Artist deleted successfully.',
+        cleanupPending: cleanup.cleanupPending
+    });
 };
 
 // get an artist via the model and return it

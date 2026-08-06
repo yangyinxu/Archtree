@@ -197,6 +197,71 @@ test('browser registration and verification require same-origin JSON and single-
     assert.equal(reused.status, 400);
 });
 
+test('retired PUT registration is identical across account states and has no side effects', async () => {
+    const email = 'retired-registration@example.com';
+    const submit = (candidateEmail: string) => fetch(`${baseUrl}/auth/signup`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            email: candidateEmail,
+            password: 'retired-registration-password',
+            username: 'Retired Listener'
+        })
+    });
+
+    const missingAccount = await submit(email);
+    const existingAccount = await submit('new-listener@example.com');
+    assert.equal(missingAccount.status, 405);
+    assert.equal(existingAccount.status, 405);
+    assert.equal(missingAccount.headers.get('allow'), 'POST');
+    assert.equal(existingAccount.headers.get('allow'), 'POST');
+    const missingBody = await missingAccount.json();
+    const existingBody = await existingAccount.json();
+    assert.deepEqual(missingBody, existingBody);
+    assert.deepEqual(missingBody, {
+        message: 'Use POST /auth/signup.'
+    });
+    assert.equal(await User.findByEmail(email), null);
+    assert.deepEqual(deliveredCodes.get(email), undefined);
+});
+
+test('Web form registration stays generic across delivery and account states', async () => {
+    const email = 'generic-web-registration@example.com';
+    const submit = () => fetch(`${baseUrl}/auth/signup-web`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Origin: baseUrl,
+            'Sec-Fetch-Site': 'same-origin'
+        },
+        body: new URLSearchParams({
+            email,
+            password: 'generic-web-registration-password',
+            username: 'Generic Listener'
+        })
+    });
+
+    failedRecipients.add(email);
+    const newAccount = await submit();
+    assert.equal(newAccount.status, 202);
+    const genericBody = await newAccount.text();
+    assert.match(genericBody, /If the account can be created, a verification code has been sent/);
+    assert.doesNotMatch(genericBody, /Creating the account failed/);
+    assert.equal((await User.findByEmail(email))?.emailVerified, false);
+
+    const existingUnverified = await submit();
+    assert.equal(existingUnverified.status, 202);
+    assert.equal(await existingUnverified.text(), genericBody);
+
+    const user = await User.findByEmail(email);
+    assert.ok(user);
+    await User.markEmailVerified(user._id.toString());
+    const existingVerified = await submit();
+    assert.equal(existingVerified.status, 202);
+    assert.equal(await existingVerified.text(), genericBody);
+    failedRecipients.delete(email);
+});
+
 test('password recovery is non-enumerating and reset revokes every session', async () => {
     const email = 'new-listener@example.com';
     const user = await User.findByEmail(email);

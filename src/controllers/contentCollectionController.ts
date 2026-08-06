@@ -12,6 +12,7 @@ import {
 } from '../models/contentCollection';
 import { Page, PageSlug } from '../models/page';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
+import { deleteContentCollectionAndPageReferences } from '../services/pageReferenceLifecycleService';
 
 export type ContentCollectionDefinition = {
     presentation: CollectionPresentation;
@@ -20,7 +21,7 @@ export type ContentCollectionDefinition = {
     dynamicSource?: CollectionDynamicSource;
 };
 
-const isObjectId = (value: string) => ObjectId.isValid(value);
+const isObjectId = (value: string) => /^[0-9a-f]{24}$/i.test(value);
 const pageSlug = (value: unknown): PageSlug | null => {
     const normalized = String(value ?? '').trim().toLowerCase();
     return normalized === 'home' || normalized === 'library' ? normalized : null;
@@ -237,8 +238,11 @@ export const deleteContentCollection = async (req: Request, res: Response, next:
         if (!isObjectId(collectionId)) return res.status(400).json({ message: 'Invalid collectionId.' });
         const collection: any = await ContentCollection.findById(collectionId);
         if (!collection) return res.status(404).json({ message: 'Grid/List not found.' });
-        await Page.detachCollectionFromAllPages(collectionId, authReq.auth.userId);
-        await ContentCollection.deleteById(collectionId);
+        const deleted = await deleteContentCollectionAndPageReferences(
+            collectionId,
+            authReq.auth.userId
+        );
+        if (!deleted) return res.status(404).json({ message: 'Grid/List not found.' });
         return res.status(200).json({ message: 'Grid/List deleted successfully.' });
     } catch (error) {
         return next(error);

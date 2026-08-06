@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  useEffect,
   useRef,
   useState,
   type FormEvent,
@@ -8,12 +9,12 @@ import {
   type MouseEvent
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { browserSessionQuery } from '../api/session';
+import { listenerCapabilitiesQuery } from '../api/listenerCapabilities';
 import { Avatar } from '../components/Avatar';
 import { Icon, type IconName } from '../components/Icon';
-import { PlayerBar } from '../components/PlayerBar';
 import { SearchQueryProvider, useSearchQuery } from '../features/search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
 import { RouteAnnouncer } from './RouteAnnouncer';
@@ -25,8 +26,15 @@ const destinations: Array<{ label: string; path: string; icon: IconName }> = [
   { label: 'Library', path: '/library', icon: 'library' }
 ];
 
+const PlaylistSidebar = lazy(() => import('../features/playlists/PlaylistSidebar'));
+const ShellPanelResizers = lazy(() => import('./ShellPanelResizers').then((module) => ({
+  default: module.ShellPanelResizers
+})));
 const NowPlayingAside = lazy(() => import('../components/NowPlayingAside').then((module) => ({
   default: module.NowPlayingAside
+})));
+const PlayerBar = lazy(() => import('../components/PlayerBar').then((module) => ({
+  default: module.PlayerBar
 })));
 
 /** Activates the shell skip link without changing the routed URL. */
@@ -35,22 +43,30 @@ const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
   document.getElementById('main-content')?.focus({ preventScroll: true });
 };
 
-const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => (
-  <nav className={mobile ? styles.mobileNavigation : styles.navigation} aria-label="Primary">
-    {destinations.map((destination) => (
-      <NavLink
-        aria-label={destination.label}
-        className={({ isActive }) => `${styles.navigationLink} ${isActive ? styles.active : ''}`}
-        end={destination.path === '/'}
-        key={destination.path}
-        to={destination.path}
-      >
-        <Icon name={destination.icon} />
-        <span>{destination.label}</span>
-      </NavLink>
-    ))}
-  </nav>
-);
+const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => {
+  const location = useLocation();
+  return (
+    <nav className={mobile ? styles.mobileNavigation : styles.navigation} aria-label="Primary">
+      {destinations.map((destination) => {
+        const libraryOwnsRoute = destination.path === '/library'
+          && (location.pathname === '/playlists' || location.pathname.startsWith('/playlists/'));
+        return (
+          <NavLink
+            aria-current={libraryOwnsRoute ? 'page' : undefined}
+            aria-label={destination.label}
+            className={({ isActive }) => `${styles.navigationLink} ${isActive || libraryOwnsRoute ? styles.active : ''}`}
+            end={destination.path === '/'}
+            key={destination.path}
+            to={destination.path}
+          >
+            <Icon name={destination.icon} />
+            <span>{destination.label}</span>
+          </NavLink>
+        );
+      })}
+    </nav>
+  );
+};
 
 const TopSearch = () => {
   const input = useRef<HTMLInputElement>(null);
@@ -133,10 +149,30 @@ const AccountEntry = () => {
 /** Keeps navigation, route content, and the single player mounted together. */
 const AppShellContent = () => {
   const navigate = useNavigate();
+  const capabilities = useQuery(listenerCapabilitiesQuery());
   const [nowPlayingOpen, setNowPlayingOpen] = useState(true);
+  const [widePanelResizersEnabled, setWidePanelResizersEnabled] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') {
+      setWidePanelResizersEnabled(window.innerWidth >= 1008);
+      return undefined;
+    }
+
+    const wideLayout = window.matchMedia('(min-width: 1008px)');
+    const updateAvailability = () => setWidePanelResizersEnabled(wideLayout.matches);
+    updateAvailability();
+    wideLayout.addEventListener?.('change', updateAvailability);
+    return () => wideLayout.removeEventListener?.('change', updateAvailability);
+  }, []);
 
   return (
-    <div className={styles.shell} data-now-playing-open={nowPlayingOpen}>
+    <div
+      className={styles.shell}
+      data-now-playing-open={nowPlayingOpen}
+      ref={shellRef}
+    >
       <a className={styles.skipLink} href="#main-content" onClick={skipToMainContent}>Skip to main content</a>
       <RouteAnnouncer />
 
@@ -161,13 +197,24 @@ const AppShellContent = () => {
         <AccountEntry />
       </header>
 
-      <aside className={styles.sidebar} aria-label="Finitude Library">
+      <aside className={styles.sidebar} aria-label="Finitude Library" id="library-sidebar">
         <div className={styles.sidebarHeader}>
           <Icon name="library" />
           <span>Your Library</span>
         </div>
         <PrimaryNavigation />
+        {capabilities.data?.playlists && (
+          <Suspense fallback={<div className={styles.sidebarLoading} aria-hidden="true" />}>
+            <PlaylistSidebar />
+          </Suspense>
+        )}
       </aside>
+
+      {widePanelResizersEnabled && (
+        <Suspense fallback={null}>
+          <ShellPanelResizers nowPlayingOpen={nowPlayingOpen} shellRef={shellRef} />
+        </Suspense>
+      )}
 
       <div className={styles.workspace}>
         <main className={styles.main} id="main-content" tabIndex={-1}>
@@ -176,10 +223,11 @@ const AppShellContent = () => {
       </div>
 
       <aside
+        aria-hidden={!nowPlayingOpen || undefined}
         aria-label="Now Playing details"
         className={styles.nowPlayingSlot}
-        hidden={!nowPlayingOpen}
         id="now-playing-aside"
+        inert={!nowPlayingOpen ? true : undefined}
       >
         <Suspense fallback={<div className={styles.asideLoading} aria-hidden="true" />}>
           <NowPlayingAside />
@@ -187,10 +235,12 @@ const AppShellContent = () => {
       </aside>
 
       <div className={styles.playerSlot}>
-        <PlayerBar
-          nowPlayingOpen={nowPlayingOpen}
-          onToggleNowPlaying={() => setNowPlayingOpen((open) => !open)}
-        />
+        <Suspense fallback={<div className={styles.playerLoading} aria-hidden="true" />}>
+          <PlayerBar
+            nowPlayingOpen={nowPlayingOpen}
+            onToggleNowPlaying={() => setNowPlayingOpen((open) => !open)}
+          />
+        </Suspense>
       </div>
       <PrimaryNavigation mobile />
     </div>

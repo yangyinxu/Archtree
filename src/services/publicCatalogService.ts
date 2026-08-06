@@ -4,6 +4,18 @@ import { getDb } from '../infrastructure/database';
 import { resolvedCoverArtUrl } from '../utils/coverArt';
 import { escapeRegex } from '../utils/search';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import {
+    isAudioObjectKeyForTrack,
+    readyAudioStorageFilter
+} from '../utils/audioStorageKey';
+import {
+    isReadyArtistLifecycle,
+    readyArtistLifecycleFilter
+} from './artistReferenceFenceService';
+import {
+    isReadyAlbumLifecycle,
+    readyAlbumLifecycleFilter
+} from './albumReferenceFenceService';
 
 export interface PublicSimpleDate {
     year?: number;
@@ -51,10 +63,7 @@ export interface PublicFeedPost {
     createdAt: string;
 }
 
-export const readyPublicAudioFilter = {
-    uploadStatus: 'ready',
-    s3Key: { $type: 'string', $regex: /\S/ }
-};
+export const readyPublicAudioFilter = readyAudioStorageFilter;
 
 const artistProjection = {
     _id: 1,
@@ -71,7 +80,8 @@ const albumProjection = {
     coverArtId: 1,
     coverArtUrl: 1,
     audioTrackIds: 1,
-    releaseDate: 1
+    releaseDate: 1,
+    lifecycleStatus: 1
 };
 const audioTrackProjection = {
     _id: 1,
@@ -105,9 +115,14 @@ export interface PublicAlbumProjectionDependencies {
 const normalizedText = (value: unknown) => normalizeUtf8Text(String(value ?? '').trim());
 const objectIdString = (value: unknown) => {
     const id = String(value ?? '').trim();
-    return objectIdPattern.test(id) ? id : null;
+    return objectIdPattern.test(id) ? id.toLowerCase() : null;
 };
 const toObjectId = (value: string) => ObjectId.createFromHexString(value);
+const storedObjectIdValues = (value: string) => [
+    value,
+    value.toUpperCase(),
+    toObjectId(value)
+];
 const uniqueObjectIdStrings = (values: unknown[], limit = maximumRelatedIds) => {
     const ids: string[] = [];
     const seen = new Set<string>();
@@ -145,7 +160,10 @@ const publicFormat = (value: unknown): PublicAudioTrack['format'] => {
 
 /** Returns true only when MongoDB records a playable object lifecycle. */
 export const isReadyPublicAudioTrack = (track: any) =>
-    track?.uploadStatus === 'ready' && Boolean(String(track?.s3Key ?? '').trim());
+    track?.uploadStatus === 'ready'
+    && (!Object.prototype.hasOwnProperty.call(track ?? {}, 'publicationStatus')
+        || track?.publicationStatus === 'ready')
+    && isAudioObjectKeyForTrack(track?.s3Key, String(track?._id ?? ''));
 
 /** Projects one Artist without provenance, storage, or unrelated database fields. */
 export const toPublicArtist = (
@@ -176,16 +194,19 @@ export const toPublicAlbum = (
 /** Projects one ready Soundtrack to the legacy Web/iOS-compatible public DTO. */
 export const toPublicAudioTrack = (
     track: any,
-    album?: any
+    album?: any,
+    visibleArtistIds?: ReadonlySet<string>
 ): PublicAudioTrack | null => {
     if (!isReadyPublicAudioTrack(track)) return null;
+    const visibleAlbumId = album ? objectIdString(track?.albumId) : null;
     return {
         _id: String(track?._id ?? ''),
         title: normalizedText(track?.title),
         coverArtUrl: resolvedCoverArtUrl(track),
         displayCoverArtUrl: resolvedCoverArtUrl(track) || resolvedCoverArtUrl(album),
-        albumId: objectIdString(track?.albumId),
-        artistIds: uniqueObjectIdStrings(Array.isArray(track?.artistIds) ? track.artistIds : []),
+        albumId: visibleAlbumId,
+        artistIds: uniqueObjectIdStrings(Array.isArray(track?.artistIds) ? track.artistIds : [])
+            .filter((id) => visibleArtistIds === undefined || visibleArtistIds.has(id)),
         genres: (Array.isArray(track?.genres) ? track.genres : [])
             .map(normalizedText)
             .filter(Boolean),
@@ -219,7 +240,10 @@ const loadVisibleAlbumIds = async (artists: any[]) => {
     ));
     if (albumIds.length === 0) return new Set<string>();
     const albums = await getDb()!.collection('albums')
-        .find({ _id: { $in: albumIds.map(toObjectId) } })
+        .find({
+            _id: { $in: albumIds.map(toObjectId) },
+            ...readyAlbumLifecycleFilter
+        })
         .project({ _id: 1 })
         .maxTimeMS(queryTimeoutMs)
         .toArray();
@@ -228,8 +252,9 @@ const loadVisibleAlbumIds = async (artists: any[]) => {
 
 /** Adds database-confirmed Album references to public Artist DTOs. */
 export const projectPublicArtists = async (artists: any[]) => {
-    const visibleAlbumIds = await loadVisibleAlbumIds(artists);
-    return artists.map((artist) => toPublicArtist(artist, visibleAlbumIds));
+    const readyArtists = artists.filter(isReadyArtistLifecycle);
+    const visibleAlbumIds = await loadVisibleAlbumIds(readyArtists);
+    return readyArtists.map((artist) => toPublicArtist(artist, visibleAlbumIds));
 };
 
 const findReadyDeclaredTracks = (trackIds: readonly string[]) => getDb()!
@@ -246,7 +271,7 @@ const findReadyFallbackTracksForAlbum = (albumId: string, limit: number) => getD
     .collection('audioTracks')
     .find({
         ...readyPublicAudioFilter,
-        albumId: { $in: [albumId, toObjectId(albumId)] }
+        albumId: { $in: storedObjectIdValues(albumId) }
     })
     .project({ _id: 1, albumId: 1, title: 1 })
     .sort({ title: 1, _id: 1 })
@@ -282,7 +307,8 @@ const loadReadyAlbumTrackIds = async (
     dependencies: PublicAlbumProjectionDependencies = {}
 ) => {
     const fallbackAlbumIds = uniqueObjectIdStrings(albums
-        .filter((album) => !Array.isArray(album?.audioTrackIds) || album.audioTrackIds.length === 0)
+        .filter((album) => album?.lifecycleStatus === undefined
+            && (!Array.isArray(album?.audioTrackIds) || album.audioTrackIds.length === 0))
         .map((album) => album?._id), Math.max(1, albums.length));
     const declaredTrackIds = uniqueObjectIdStrings(
         albums.flatMap((album) =>
@@ -301,15 +327,21 @@ const loadReadyAlbumTrackIds = async (
             ? loadFallbackTrackIdsByAlbum(fallbackAlbumIds, fallbackLoader)
             : new Map<string, string[]>()
     ]);
-    const readyIds = new Set(declaredTracks.map((track) => String(track._id)));
+    const readyIds = new Set(declaredTracks.flatMap((track) => {
+        const id = objectIdString(track?._id);
+        return id ? [id] : [];
+    }));
 
     return new Map(albums.map((album) => {
-        const albumId = String(album?._id ?? '');
+        const albumId = objectIdString(album?._id) ?? '';
         const declared = uniqueObjectIdStrings(
             Array.isArray(album?.audioTrackIds) ? album.audioTrackIds : [],
             maximumAlbumTracks
         ).filter((id) => readyIds.has(id));
         if (Array.isArray(album?.audioTrackIds) && album.audioTrackIds.length > 0) {
+            return [albumId, declared] as const;
+        }
+        if (album?.lifecycleStatus !== undefined) {
             return [albumId, declared] as const;
         }
         const seen = new Set(declared);
@@ -325,10 +357,11 @@ export const projectPublicAlbums = async (
     albums: any[],
     dependencies: PublicAlbumProjectionDependencies = {}
 ) => {
-    const trackIdsByAlbum = await loadReadyAlbumTrackIds(albums, dependencies);
-    return albums.map((album) => toPublicAlbum(
+    const readyAlbums = albums.filter(isReadyAlbumLifecycle);
+    const trackIdsByAlbum = await loadReadyAlbumTrackIds(readyAlbums, dependencies);
+    return readyAlbums.map((album) => toPublicAlbum(
         album,
-        trackIdsByAlbum.get(String(album?._id ?? '')) ?? []
+        trackIdsByAlbum.get(objectIdString(album?._id) ?? '') ?? []
     ));
 };
 
@@ -336,18 +369,44 @@ export const projectPublicAlbums = async (
 export const projectPublicAudioTracks = async (tracks: any[]) => {
     const readyTracks = tracks.filter(isReadyPublicAudioTrack);
     const albumIds = uniqueObjectIdStrings(readyTracks.map((track) => track?.albumId));
-    const albums = albumIds.length > 0
-        ? await getDb()!.collection('albums')
-            .find({ _id: { $in: albumIds.map(toObjectId) } })
+    const artistIds = uniqueObjectIdStrings(readyTracks.flatMap((track) =>
+        Array.isArray(track?.artistIds) ? track.artistIds : []
+    ));
+    const [albums, artists] = await Promise.all([
+        albumIds.length > 0
+            ? getDb()!.collection('albums')
+            .find({
+                _id: { $in: albumIds.map(toObjectId) },
+                ...readyAlbumLifecycleFilter
+            })
             .project({ _id: 1, coverArtId: 1, coverArtUrl: 1 })
             .maxTimeMS(queryTimeoutMs)
             .toArray()
-        : [];
-    const albumsById = new Map(albums.map((album) => [String(album._id), album] as const));
+            : [],
+        artistIds.length > 0
+            ? getDb()!.collection('artists')
+                .find({
+                    _id: { $in: artistIds.map(toObjectId) },
+                    ...readyArtistLifecycleFilter
+                })
+                .project({ _id: 1 })
+                .maxTimeMS(queryTimeoutMs)
+                .toArray()
+            : []
+    ]);
+    const albumsById = new Map(albums.map((album) => [
+        objectIdString(album._id) ?? '',
+        album
+    ] as const));
+    const visibleArtistIds = new Set(artists.flatMap((artist) => {
+        const id = objectIdString(artist._id);
+        return id ? [id] : [];
+    }));
     return readyTracks.flatMap((track): PublicAudioTrack[] => {
         const projected = toPublicAudioTrack(
             track,
-            albumsById.get(String(track?.albumId ?? ''))
+            albumsById.get(objectIdString(track?.albumId) ?? ''),
+            visibleArtistIds
         );
         return projected ? [projected] : [];
     });
@@ -355,7 +414,7 @@ export const projectPublicAudioTracks = async (tracks: any[]) => {
 
 export const listPublicArtists = async (limit: number, offset: number) => {
     const artists = await getDb()!.collection('artists')
-        .find()
+        .find(readyArtistLifecycleFilter)
         .project(artistProjection)
         .sort({ name: 1, _id: 1 })
         .skip(offset)
@@ -369,7 +428,7 @@ export const getPublicArtist = async (artistId: string) => {
     const id = objectIdString(artistId);
     if (!id) return null;
     const artist = await getDb()!.collection('artists')
-        .find({ _id: toObjectId(id) })
+        .find({ _id: toObjectId(id), ...readyArtistLifecycleFilter })
         .project(artistProjection)
         .maxTimeMS(queryTimeoutMs)
         .next();
@@ -378,7 +437,7 @@ export const getPublicArtist = async (artistId: string) => {
 
 export const listPublicAlbums = async (limit: number, offset: number) => {
     const albums = await getDb()!.collection('albums')
-        .find()
+        .find(readyAlbumLifecycleFilter)
         .project(albumProjection)
         .sort({ title: 1, _id: 1 })
         .skip(offset)
@@ -392,7 +451,7 @@ export const getPublicAlbum = async (albumId: string) => {
     const id = objectIdString(albumId);
     if (!id) return null;
     const album = await getDb()!.collection('albums')
-        .find({ _id: toObjectId(id) })
+        .find({ _id: toObjectId(id), ...readyAlbumLifecycleFilter })
         .project(albumProjection)
         .maxTimeMS(queryTimeoutMs)
         .next();
@@ -414,10 +473,16 @@ export const listPublicAudioTracks = async (limit: number, offset: number) => {
 export const searchPublicCatalog = async (query: string, limit: number) => {
     const expression = { $regex: escapeRegex(query), $options: 'i' };
     const [artists, albums, tracks] = await Promise.all([
-        getDb()!.collection('artists').find({ name: expression })
+        getDb()!.collection('artists').find({
+            name: expression,
+            ...readyArtistLifecycleFilter
+        })
             .project(artistProjection).sort({ name: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray(),
-        getDb()!.collection('albums').find({ title: expression })
+        getDb()!.collection('albums').find({
+            title: expression,
+            ...readyAlbumLifecycleFilter
+        })
             .project(albumProjection).sort({ title: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray(),
         getDb()!.collection('audioTracks').find({ ...readyPublicAudioFilter, title: expression })

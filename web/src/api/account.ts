@@ -88,27 +88,29 @@ export const resetBrowserPassword = (input: ResetPasswordInput) => {
 export const accountSessionsQueryKey = (viewerId: string) => ['account', viewerId, 'sessions'] as const;
 
 /** Keeps active-session data in a viewer-keyed cache to prevent account crossover. */
-export const listAccountSessions = (viewerId: string) => apiRequest(
+export const listAccountSessions = (viewerId: string, signal?: AbortSignal) => apiRequest(
   '/auth/sessions',
-  accountSessionsSchema
+  accountSessionsSchema,
+  { accountViewer: viewerId, signal }
 ).then((result) => ({ viewerId, sessions: result.sessions }));
 
 export const accountSessionsQuery = (viewerId: string) => queryOptions({
   queryKey: accountSessionsQueryKey(viewerId),
-  queryFn: () => listAccountSessions(viewerId),
+  queryFn: ({ signal }) => listAccountSessions(viewerId, signal),
   enabled: Boolean(viewerId),
   retry: false
 });
 
-export const revokeAccountSession = (sessionId: string) => apiRequestNoContent(
+export const revokeAccountSession = (viewerId: string, sessionId: string) => apiRequestNoContent(
   `/auth/sessions/${encodeURIComponent(sessionId)}`,
-  { method: 'DELETE' }
+  { method: 'DELETE', accountViewer: viewerId }
 );
 
-export const changeAccountPassword = (input: ChangePasswordInput) => {
+export const changeAccountPassword = (viewerId: string, input: ChangePasswordInput) => {
   const body = changePasswordInputSchema.parse(input);
   return apiRequestNoContent('/auth/password/change', {
     method: 'POST',
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    accountViewer: viewerId
   });
 };

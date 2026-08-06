@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { ApiError, apiRequest } from './client';
 import { getBrowserSession } from './session';
+import { publishAccountSessionChange } from './accountSessionEvents';
 
 const avatarMetadataSchema = z
   .object({
@@ -30,6 +31,7 @@ const readPrivateAvatar = (viewerId: string, revision: number, signal?: AbortSig
   credentials: 'same-origin',
   headers: {
     Accept: 'image/*',
+    'X-Finitude-Account-Viewer': viewerId,
     'X-Finitude-Avatar-Revision': String(revision),
     'X-Finitude-Avatar-Viewer': viewerId
   },
@@ -64,12 +66,25 @@ export const getPrivateAvatar = async (
   }
 
   if (!response.ok) {
+    if (response.status === 409) {
+      publishAccountSessionChange('viewer-mismatch');
+    }
     throw new ApiError(
       response.status === 404
         ? 'The profile photo is no longer available.'
         : 'Finitude could not load your profile photo.',
       'http',
       response.status
+    );
+  }
+
+  if (response.headers.get('X-Finitude-Account-Viewer')?.trim() !== viewerId) {
+    publishAccountSessionChange('viewer-mismatch');
+    throw new ApiError(
+      'The active account changed. Refresh the account before trying again.',
+      'invalid-response',
+      409,
+      'account_viewer_mismatch'
     );
   }
 
@@ -129,6 +144,7 @@ export const replaceAvatar = (
       'Content-Type': `multipart/form-data; boundary=${boundary}`,
       'X-Finitude-Avatar-Viewer': viewerId
     },
+    accountViewer: viewerId,
     body
   });
 };
@@ -144,5 +160,6 @@ export const deleteAvatar = (
   headers: {
     ...mutationHeaders(revision, idempotencyKey),
     'X-Finitude-Avatar-Viewer': viewerId
-  }
+  },
+  accountViewer: viewerId
 });

@@ -13,10 +13,15 @@ import { ObjectId } from 'mongodb';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import {
     deleteAudioObjectAndTrack,
+    isAudioObjectKeyForTrack,
     uploadAudioObject
 } from '../services/audioStorageService';
 import { validateContentReferences } from '../services/contentReferenceService';
-import { deleteCoverArt, uploadCoverArt } from '../services/imageStorageService';
+import {
+    attachCoverArtToNewOwner,
+    updateCoverArtOwnerAndCleanup,
+    uploadCoverArt
+} from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import {
     attachmentContentDisposition,
@@ -28,6 +33,10 @@ import {
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
 import { listPublicAudioTracks } from '../services/publicCatalogService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
+import {
+    publishUploadedAudioTracks
+} from '../services/albumTrackLinkService';
+import { retryAudioTrackPublications } from '../services/audioPublicationRecoveryService';
 
 const s3ErrorStatus = (error: any) => {
     const status = Number(error?.$metadata?.httpStatusCode ?? 0);
@@ -39,13 +48,17 @@ const resolveReadyAudioAsset = async (
     audioTrackId: string,
     abortSignal: AbortSignal
 ) => {
-    if (!ObjectId.isValid(audioTrackId)) return { status: 'notFound' as const };
-    const track: any = await AudioTrack.findById(audioTrackId);
+    const normalizedAudioTrackId = String(audioTrackId ?? '').trim().toLowerCase();
+    if (!/^[0-9a-f]{24}$/.test(normalizedAudioTrackId)) {
+        return { status: 'notFound' as const };
+    }
+    const track: any = await AudioTrack.findReadyPublicById(normalizedAudioTrackId);
     if (!track) return { status: 'notFound' as const };
-    if (track.uploadStatus !== 'ready') return { status: 'notReady' as const };
 
     const s3Key = String(track.s3Key ?? '').trim();
-    if (!s3Key) return { status: 'notReady' as const };
+    if (!isAudioObjectKeyForTrack(s3Key, normalizedAudioTrackId)) {
+        return { status: 'notReady' as const };
+    }
     const params = {
         Bucket: process.env.S3_BUCKET_NAME!,
         Key: s3Key
@@ -158,7 +171,12 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
 
     try {
         await track.save();
-        await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId, getRequestAbortSignal(req));
+        const upload = await uploadAudioObject(
+            audioTrackId,
+            uploadFile,
+            authReq.auth.userId,
+            getRequestAbortSignal(req)
+        );
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) {
             const coverArt = await uploadCoverArt(
@@ -167,16 +185,21 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
                 coverArtFile,
                 authReq.auth.userId
             );
-            await AudioTrack.updateById(audioTrackId, {
-                coverArtId: coverArt.imageId,
-                coverArtUrl: coverArt.coverArtUrl
+            await attachCoverArtToNewOwner(audioTrackId, coverArt, {
+                ownerType: 'audioTrack',
+                updateOwner: (id, update) => AudioTrack.updateById(id, update),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    AudioTrack.updateCoverArtById(id, expectedImageId, update)
             });
         }
+        await publishUploadedAudioTracks(albumId, [audioTrackId]);
 
         return res.status(201).json({
             message: `Audio Track ${title} Added Successfully`,
             audioTrackId,
-            uploadStatus: 'ready'
+            uploadStatus: 'ready',
+            publicationStatus: 'ready',
+            cleanupPending: upload.cleanupPending
         });
     } catch (error) {
         console.log(error);
@@ -203,8 +226,11 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     }
 
     const updatePayload: Record<string, unknown> = {};
+    let requestedAlbumId: string | undefined;
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
     let replacementCoverArtId: string | undefined;
+    const removeCoverArt = !coverArtFile
+        && String(req.body.removeCoverArt ?? '').toLowerCase() === 'true';
     if (req.body.title !== undefined) updatePayload.title = req.body.title;
     if (req.body.artistIds !== undefined) {
         const artistIds = parseStringArray(req.body.artistIds);
@@ -225,9 +251,9 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
             if (!validation.valid) {
                 return res.status(400).json({ message: validation.message });
             }
-            updatePayload.albumId = validation.ids[0];
+            requestedAlbumId = validation.ids[0];
         } else {
-            updatePayload.albumId = '';
+            requestedAlbumId = '';
         }
     }
     if (req.body.duration !== undefined) updatePayload.duration = req.body.duration;
@@ -245,21 +271,53 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
         replacementCoverArtId = coverArt.imageId;
         updatePayload.coverArtId = coverArt.imageId;
         updatePayload.coverArtUrl = coverArt.coverArtUrl;
-    } else if (String(req.body.removeCoverArt ?? '').toLowerCase() === 'true') {
-        await deleteCoverArt(audioTrack.coverArtId);
+    } else if (removeCoverArt) {
         updatePayload.coverArtId = null;
         updatePayload.coverArtUrl = '';
     }
 
-    await AudioTrack.updateById(audioTrackId, updatePayload);
-    let cleanupPending = false;
-    if (replacementCoverArtId && audioTrack.coverArtId && audioTrack.coverArtId !== replacementCoverArtId) {
-        await deleteCoverArt(audioTrack.coverArtId).catch((error) => {
-            cleanupPending = true;
-            console.log(`Unable to delete replaced audio-track cover art ${audioTrack.coverArtId}:`, error);
+    const cleanup = Object.keys(updatePayload).length > 0 || requestedAlbumId !== undefined
+        ? await updateCoverArtOwnerAndCleanup(
+            audioTrackId,
+            updatePayload,
+            audioTrack.coverArtId,
+            removeCoverArt || Boolean(
+                replacementCoverArtId && audioTrack.coverArtId !== replacementCoverArtId
+            ),
+            {
+                ownerType: 'audioTrack',
+                updateOwner: requestedAlbumId === undefined
+                    ? (id, update) => AudioTrack.updateById(id, update)
+                    : (id, update) => AudioTrack.updateWithAlbumById(
+                        id,
+                        requestedAlbumId,
+                        update
+                    ),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    requestedAlbumId === undefined
+                        ? AudioTrack.updateCoverArtById(id, expectedImageId, update)
+                        : AudioTrack.updateWithAlbumAndCoverArtById(
+                            id,
+                            requestedAlbumId,
+                            expectedImageId,
+                            update
+                        )
+            }
+        )
+        : { updateApplied: true, cleanupPending: false, cleanupError: undefined };
+    if (cleanup.cleanupError) {
+        console.log(`Unable to delete detached audio-track cover art ${audioTrack.coverArtId}:`, cleanup.cleanupError);
+    }
+    if (!cleanup.updateApplied) {
+        return res.status((cleanup as any).outcomeUnknown ? 503 : 409).json({
+            message: 'Audio track was not updated because its cover art changed concurrently or its lifecycle evidence is invalid.',
+            cleanupPending: cleanup.cleanupPending
         });
     }
-    return res.status(200).json({ message: 'Audio track updated successfully.', cleanupPending });
+    return res.status(200).json({
+        message: 'Audio track updated successfully.',
+        cleanupPending: cleanup.cleanupPending
+    });
 };
 
 // Get an audio track via the model and return it
@@ -497,17 +555,25 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
         }
 
         try {
-            await deleteAudioObjectAndTrack(audioTrackId);
+            const deletion = await deleteAudioObjectAndTrack(audioTrackId);
+            return res.status(200).json({
+                message: 'Audio track deleted successfully.',
+                cleanupPending: deletion.cleanupPending
+            });
         } catch (s3Error) {
             console.log('Audio track deletion failed for audioTrackId:', audioTrackId, s3Error);
-            return res.status(502).json({
-                message: 'The S3 file could not be deleted. Track metadata was retained for reconciliation.'
+            const conflict = Number((s3Error as any)?.statusCode) === 409;
+            const outcomeUnknown = (s3Error as any)?.code === 'audio_deletion_outcome_unknown';
+            return res.status(conflict ? 409 : 502).json({
+                message: conflict
+                    ? String((s3Error as Error).message)
+                    : outcomeUnknown
+                        ? 'Audio track deletion outcome could not be confirmed. Reconciliation is required.'
+                        : 'Audio track deletion could not complete. Track metadata was retained for retry and reconciliation.',
+                cleanupPending: true
             });
         }
 
-        return res.status(200).json({
-            message: 'Audio track deleted successfully.'
-        });
     } catch (error: any) {
         console.log(error);
         return res.status(500).json({ message: 'Failed to delete audio track.' });
@@ -523,8 +589,30 @@ export const getAudioFile = (req: Request, res: Response, next: NextFunction) =>
     );
 };
 
-export const uploadAudioTrackFile = async (req: Request, res: Response, next: NextFunction) => {
+interface AudioTrackFileUploadDependencies {
+    findTrack: typeof AudioTrack.findById;
+    uploadObject: typeof uploadAudioObject;
+    retryPublications: typeof retryAudioTrackPublications;
+}
+
+const defaultAudioTrackFileUploadDependencies: AudioTrackFileUploadDependencies = {
+    findTrack: AudioTrack.findById.bind(AudioTrack),
+    uploadObject: uploadAudioObject,
+    retryPublications: retryAudioTrackPublications
+};
+
+/** Uploads one object, then reports only the publication state re-read by recovery. */
+export const uploadAudioTrackFile = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    dependencyOverrides: Partial<AudioTrackFileUploadDependencies> = {}
+) => {
     try {
+        const dependencies = {
+            ...defaultAudioTrackFileUploadDependencies,
+            ...dependencyOverrides
+        };
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) {
             return res.status(401).json({ message: 'Unauthorized' });
@@ -534,7 +622,7 @@ export const uploadAudioTrackFile = async (req: Request, res: Response, next: Ne
         }
 
         const audioTrackId: string = req.params.audioTrackId;
-        const audioTrack = await AudioTrack.findById(audioTrackId);
+        const audioTrack = await dependencies.findTrack(audioTrackId);
 
         if (!audioTrack) {
             return res.status(404).json({ message: 'Audio track not found.' });
@@ -545,15 +633,59 @@ export const uploadAudioTrackFile = async (req: Request, res: Response, next: Ne
             return res.status(400).json({ message: 'Missing audio file. Use multipart form field: audioFile.' });
         }
 
-        await uploadAudioObject(audioTrackId, uploadFile, String(audioTrack.createdBy ?? authReq.auth.userId), getRequestAbortSignal(req));
+        const upload = await dependencies.uploadObject(
+            audioTrackId,
+            uploadFile,
+            String(audioTrack.createdBy ?? authReq.auth.userId),
+            getRequestAbortSignal(req)
+        );
+        const publication = await dependencies.retryPublications([audioTrackId]);
+        const publicationResult = publication.results.find(
+            (result) => result.audioTrackId === audioTrackId.toLowerCase()
+        );
+        if (!publicationResult) {
+            throw Object.assign(new Error('Audio publication result could not be read back.'), {
+                outcomeUnknown: true,
+                cleanupPending: upload.cleanupPending,
+                reconciliationRequired: true
+            });
+        }
+        if (publicationResult.outcome !== 'ready') {
+            const outcomeUnknown = publicationResult.outcome === 'unknown';
+            return res.status(outcomeUnknown ? 503 : 409).json({
+                message: outcomeUnknown
+                    ? 'Audio file uploaded, but publication outcome could not be confirmed. Reconciliation is required.'
+                    : 'Audio file uploaded, but publication failed. Retry publication without uploading the file again.',
+                audioTrackId,
+                uploadStatus: 'ready',
+                publicationStatus: publicationResult.publicationStatus,
+                publicationOutcome: publicationResult.outcome,
+                publicationRetryRequired: true,
+                reconciliationRequired: outcomeUnknown,
+                cleanupPending: upload.cleanupPending,
+                error: publicationResult.error
+            });
+        }
 
         return res.status(200).json({
             message: 'Audio file uploaded successfully.',
             audioTrackId,
-            uploadStatus: 'ready'
+            uploadStatus: 'ready',
+            publicationStatus: publicationResult.publicationStatus,
+            cleanupPending: upload.cleanupPending
         });
     } catch (error) {
         console.log(error);
-        return res.status(500).json({ message: 'Failed to upload audio file.' });
+        const statusCode = Number((error as any)?.statusCode);
+        const conflict = statusCode === 409;
+        const outcomeUnknown = (error as any)?.outcomeUnknown === true;
+        return res.status(conflict ? 409 : outcomeUnknown ? 503 : 500).json({
+            message: conflict
+                ? String((error as Error).message)
+                : outcomeUnknown
+                    ? 'Audio upload outcome could not be confirmed. Reconciliation is required.'
+                    : 'Failed to upload audio file.',
+            cleanupPending: Boolean((error as any)?.cleanupPending)
+        });
     }
 };

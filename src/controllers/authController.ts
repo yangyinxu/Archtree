@@ -71,29 +71,6 @@ const normalizeEmail = (email: string) => {
   return String(email ?? '').trim().toLowerCase();
 };
 
-const createUser = async (email: string, username: string, password: string) => {
-  const normalizedEmail = normalizeEmail(email);
-
-  const existing = await User.findByEmail(normalizedEmail);
-  if (existing) {
-    const error: ErrorWithStatusCode = new Error('email address already exists!');
-    error.statusCode = 409;
-    throw error;
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 12);
-
-  const user = new User(
-    normalizedEmail,
-    hashedPassword,
-    username,
-    [],
-    'user'
-  );
-
-  return user.save();
-};
-
 const normalizeIdentifier = (value: string) => {
   return String(value ?? '').trim();
 };
@@ -111,12 +88,20 @@ export const safeWebReturnTo = (value: unknown) => {
       '/content/manage/audio-tracks',
       '/content/manage/search'
     ].includes(destination.pathname);
-    const listenerDestination = destination.pathname === '/listen'
+    const listenerDestination = destination.pathname === '/finitude'
+      || destination.pathname.startsWith('/finitude/');
+    const legacyListenerDestination = destination.pathname === '/listen'
       || destination.pathname.startsWith('/listen/');
-    if (!contentManagerDestination && !listenerDestination && destination.pathname !== '/') {
+    if (!contentManagerDestination
+      && !listenerDestination
+      && !legacyListenerDestination
+      && destination.pathname !== '/') {
       return '/';
     }
-    return `${destination.pathname}${destination.search}${destination.hash}`;
+    const pathname = legacyListenerDestination
+      ? destination.pathname.replace(/^\/listen(?=\/|$)/, '/finitude')
+      : destination.pathname;
+    return `${pathname}${destination.search}${destination.hash}`;
   } catch {
     return '/';
   }
@@ -307,7 +292,7 @@ const loadBrowserSessionPayload = async (userId: string) => {
   });
 };
 
-/** Recovers only a signed session identity so logout can revoke an expired access token. */
+/** Recovers only a signed identity so browser transitions can fence an expired access token. */
 const browserAccessSessionIdentity = (req: Request) => {
   const accessToken = getCookieValue(req, 'session_token');
   if (!accessToken) return null;
@@ -351,51 +336,33 @@ const revokeBrowserRequestSession = async (
   if (failed?.status === 'rejected') throw failed.reason;
 };
 
+/** Revokes the request's previous browser identity before new cookies can be committed. */
+const revokePreviousBrowserSessionForLogin = async (
+  req: Request,
+  createdSession: { userId: string; sessionId: string }
+) => {
+  try {
+    await revokeBrowserRequestSession(req);
+  } catch (error) {
+    // Credential replacement is fail-closed: a newly-created session must not
+    // survive when the request's prior browser session could not be revoked.
+    await AuthSession.revokeById(createdSession.userId, createdSession.sessionId).catch(() => {
+      recordSecurityEvent('browser_login_cleanup_failed', {
+        userId: createdSession.userId,
+        sessionId: createdSession.sessionId
+      });
+    });
+    throw error;
+  }
+};
+
 export const renderSignupPage = (req: Request, res: Response) => {
   res.status(200).send(renderSignupHtml({}));
 };
 
 export const renderLoginPage = (req: Request, res: Response) => {
   const returnTo = safeWebReturnTo(req.query.returnTo);
-  res.status(200).send(renderLoginHtml({ returnTo }));
-};
-
-export const signup = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const errors = validationResult(req);
-    // check if there are any validation errors
-    if (!errors.isEmpty()) {
-      const error: ErrorWithStatusCode = new Error('Validation failed.');
-      error.statusCode = 422;
-      error.data = errors.array();
-      throw error;
-    }
-
-    const email = normalizeEmail(req.body.email);
-    const username = req.body.username;
-    const password = req.body.password;
-    createUser(email, username, password)
-      .then(result => {
-        // return 201 status code for successful creation
-        res.status(201).json({
-          message: 'User created',
-          userId: result.insertedId.toString()
-        });
-      })
-      .catch(err => {
-        console.log(err);
-        const statusCode = err?.statusCode ?? 500;
-        res.status(statusCode).json({
-          message: statusCode === 409 ? 'email address already exists!' : 'Creating the user failed.'
-        });
-      });
-  } catch (error: any) {
-    // return 500 status code for server error
-    if (!error.statusCode) {
-      error.statusCode = 500;
-    }
-    next(error);
-  }
+  res.redirect(303, `/finitude/login?returnTo=${encodeURIComponent(returnTo)}`);
 };
 
 export const signupFromWeb = async (req: Request, res: Response, next: NextFunction) => {
@@ -415,17 +382,16 @@ export const signupFromWeb = async (req: Request, res: Response, next: NextFunct
       return;
     }
 
-    await registerEmailAccount(email, password, username, username);
-    res.status(202).send(renderSignupHtml({
+    try {
+      await registerEmailAccount(email, password, username, username);
+    } catch {
+      recordSecurityEvent('email_registration_request_failed');
+    }
+    return res.status(202).send(renderSignupHtml({
       successMessage: 'If the account can be created, a verification code has been sent. Verify the email before logging in.'
     }));
   } catch (error: any) {
-    console.log(error);
-    res.status(error?.statusCode ?? 500).send(renderSignupHtml({
-      email: normalizeEmail(req.body.email),
-      username: String(req.body.username ?? ''),
-      errorMessage: 'Creating the account failed.'
-    }));
+    next(error);
   }
 };
 
@@ -461,36 +427,11 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 };
 
 export const loginFromWeb = async (req: Request, res: Response) => {
-  const identifier = normalizeIdentifier(req.body.identifier ?? req.body.email ?? req.body.username);
-  const password = String(req.body.password ?? '');
   const returnTo = safeWebReturnTo(req.body.returnTo);
-
-  if (!identifier || !password) {
-    res.status(422).send(renderLoginHtml({
-      identifier,
-      returnTo,
-      errorMessage: 'Identifier and password are required.'
-    }));
-    return;
-  }
-
-  try {
-    const authResult = await authenticateUser(identifier, password, req);
-    recordSecurityEvent('browser_login_succeeded', {
-      userId: authResult.userId,
-      sessionId: authResult.sessionId
-    });
-    setBrowserSessionCookies(res, authResult);
-    res.redirect(returnTo || '/');
-  } catch (error: any) {
-    const message = error?.message || 'Login failed.';
-    const statusCode = error?.statusCode ?? 401;
-    res.status(statusCode).send(renderLoginHtml({
-      identifier,
-      returnTo,
-      errorMessage: message
-    }));
-  }
+  // Legacy HTML forms cannot prove ownership of the origin-wide Web Lock, so
+  // they never install cookies. The listener SPA owns the coordinated login.
+  recordSecurityEvent('browser_form_login_redirected');
+  res.redirect(303, `/finitude/login?returnTo=${encodeURIComponent(returnTo)}`);
 };
 
 /** Establishes an HttpOnly listener session without exposing either credential. */
@@ -503,8 +444,12 @@ export const browserLogin = async (req: Request, res: Response, next: NextFuncti
     return res.status(422).json({ message: 'Identifier and password are required.' });
   }
 
+  let authResult: Awaited<ReturnType<typeof authenticateUser>> | undefined;
+  let previousSessionRevoked = false;
   try {
-    const authResult = await authenticateUser(identifier, password, req);
+    authResult = await authenticateUser(identifier, password, req);
+    await revokePreviousBrowserSessionForLogin(req, authResult);
+    previousSessionRevoked = true;
     const payload = await loadBrowserSessionPayload(authResult.userId);
     setBrowserSessionCookies(res, authResult);
     recordSecurityEvent('browser_json_login_succeeded', {
@@ -514,6 +459,15 @@ export const browserLogin = async (req: Request, res: Response, next: NextFuncti
     recordAuthFunnelEvent('login', 'password', 'succeeded');
     return res.status(200).json(payload);
   } catch (error: any) {
+    if (authResult) {
+      await AuthSession.revokeById(authResult.userId, authResult.sessionId).catch(() => {
+        recordSecurityEvent('browser_login_cleanup_failed', {
+          userId: authResult?.userId,
+          sessionId: authResult?.sessionId
+        });
+      });
+      if (previousSessionRevoked) clearBrowserSessionCookies(res);
+    }
     recordSecurityEvent('browser_json_login_rejected');
     recordAuthFunnelEvent('login', 'password', 'rejected');
     if (!error.statusCode) {
@@ -526,7 +480,37 @@ export const browserLogin = async (req: Request, res: Response, next: NextFuncti
 /** Rotates the refresh cookie once and returns only safe account metadata. */
 export const browserRefresh = async (req: Request, res: Response) => {
   setBrowserSessionPrivacyHeaders(res);
+  const requestedViewer = String(req.get('X-Finitude-Account-Viewer') ?? '').trim();
   const refreshToken = getCookieValue(req, 'refresh_token');
+  let refreshIdentity: Awaited<ReturnType<typeof refreshSessionIdentity>>;
+  try {
+    refreshIdentity = await refreshSessionIdentity(refreshToken);
+  } catch {
+    recordSecurityEvent('browser_json_refresh_identity_unavailable');
+    return res.status(503).json({
+      message: 'Finitude could not safely confirm the active account.'
+    });
+  }
+  if (!refreshIdentity) {
+    recordSecurityEvent('browser_json_refresh_rejected');
+    return res.status(401).json({ message: 'Authentication failed.' });
+  }
+
+  // Recover even an expired or revoked signed access identity. Its account is
+  // still a trustworthy fence against rotating a different account's refresh
+  // credential after another tab has changed the shared cookie jar.
+  const accessIdentity = browserAccessSessionIdentity(req);
+  if (
+    (requestedViewer && requestedViewer !== refreshIdentity.userId)
+    || (accessIdentity && accessIdentity.userId !== refreshIdentity.userId)
+  ) {
+    recordSecurityEvent('browser_json_refresh_identity_conflict');
+    return res.status(409).json({
+      code: 'browser_session_identity_conflict',
+      message: 'The browser session contains conflicting account credentials.'
+    });
+  }
+
   const tokens = await refreshSession(refreshToken);
   if (!tokens) {
     recordSecurityEvent('browser_json_refresh_rejected');
@@ -537,6 +521,7 @@ export const browserRefresh = async (req: Request, res: Response) => {
   // not strand the browser with the refresh token that was just consumed.
   setBrowserSessionCookies(res, tokens);
   const claims = jwt.verify(tokens.accessToken, getJwtSecret()) as AccessTokenPayload;
+  res.setHeader('X-Finitude-Account-Viewer', claims.userId);
   const payload = await loadBrowserSessionPayload(claims.userId);
   recordSecurityEvent('browser_json_refresh_succeeded', { sessionId: tokens.sessionId });
   return res.status(200).json(payload);
@@ -549,12 +534,26 @@ export const browserSession = async (req: Request, res: Response) => {
   if (!auth) {
     return res.status(401).json({ message: 'Missing or invalid browser session.' });
   }
+  let refreshIdentity: Awaited<ReturnType<typeof refreshSessionIdentity>>;
+  try {
+    refreshIdentity = await refreshSessionIdentity(getCookieValue(req, 'refresh_token'));
+  } catch {
+    return res.status(503).json({ message: 'Finitude could not safely confirm the active account.' });
+  }
+  if (refreshIdentity && refreshIdentity.userId !== auth.userId) {
+    recordSecurityEvent('browser_json_session_identity_conflict');
+    return res.status(409).json({
+      code: 'browser_session_identity_conflict',
+      message: 'The browser session contains conflicting account credentials.'
+    });
+  }
   return res.status(200).json(await loadBrowserSessionPayload(auth.userId));
 };
 
 /** Revokes the refresh session and clears both cookies without a redirect. */
 export const browserLogout = async (req: Request, res: Response) => {
   setBrowserSessionPrivacyHeaders(res);
+  const canClearCookies = req.get('X-Finitude-Session-Transition') === 'web-locks-v1';
   const requestedViewer = String(req.get('X-Finitude-Account-Viewer') ?? '').trim();
   const accessIdentity = browserAccessSessionIdentity(req);
   let refreshIdentity: Awaited<ReturnType<typeof refreshSessionIdentity>>;
@@ -569,9 +568,31 @@ export const browserLogout = async (req: Request, res: Response) => {
   const credentialIdentities = [accessIdentity, refreshIdentity].filter(
     (identity): identity is NonNullable<typeof identity> => Boolean(identity)
   );
-  if (requestedViewer && credentialIdentities.some(({ userId }) => userId !== requestedViewer)) {
+  const credentialViewers = new Set(credentialIdentities.map(({ userId }) => userId));
+  if (credentialViewers.size > 1) {
+    if (!canClearCookies) {
+      return res.status(409).json({
+        code: 'browser_session_identity_conflict',
+        message: 'The browser session contains conflicting account credentials.'
+      });
+    }
+    try {
+      await revokeBrowserRequestSession(req, credentialIdentities);
+    } catch {
+      recordSecurityEvent('browser_json_logout_revocation_failed');
+      return res.status(503).json({ message: 'Sign out could not be confirmed.' });
+    }
+    clearBrowserSessionCookies(res);
+    recordSecurityEvent('browser_json_logout_identity_conflict_recovered');
+    return res.status(204).send();
+  }
+  if (credentialIdentities.length > 0 && (
+    !requestedViewer
+    || credentialIdentities.some(({ userId }) => userId !== requestedViewer)
+  )) {
     recordSecurityEvent('browser_json_logout_viewer_mismatch');
     return res.status(409).json({
+      code: 'account_viewer_mismatch',
       message: 'The active account changed. Refresh the account before trying again.'
     });
   }
@@ -579,11 +600,15 @@ export const browserLogout = async (req: Request, res: Response) => {
     await revokeBrowserRequestSession(req, credentialIdentities);
     recordSecurityEvent('browser_json_logout_completed');
   } catch {
-    // Client-side logout must still complete if server-side revocation is temporarily unavailable.
     recordSecurityEvent('browser_json_logout_revocation_failed');
-  } finally {
-    clearBrowserSessionCookies(res);
+    return res.status(503).json({ message: 'Sign out could not be confirmed.' });
   }
+  // Only a caller serialized by the origin-wide Web Lock may return a cookie-
+  // clearing response; fallback clients are revoke-only so a late response
+  // cannot erase credentials installed by a newer account transition.
+  if (canClearCookies) clearBrowserSessionCookies(res);
+  const responseViewer = credentialIdentities[0]?.userId ?? requestedViewer;
+  if (responseViewer) res.setHeader('X-Finitude-Account-Viewer', responseViewer);
   return res.status(204).send();
 };
 
@@ -644,13 +669,36 @@ export const me = async (req: Request, res: Response) => {
 };
 
 export const logoutFromWeb = async (req: Request, res: Response) => {
+  setBrowserSessionPrivacyHeaders(res);
+  const requestedViewer = String(req.body.viewerId ?? '').trim();
+  const accessIdentity = browserAccessSessionIdentity(req);
+  let refreshIdentity: Awaited<ReturnType<typeof refreshSessionIdentity>>;
   try {
-    await revokeBrowserRequestSession(req);
+    refreshIdentity = await refreshSessionIdentity(getCookieValue(req, 'refresh_token'));
+  } catch {
+    recordSecurityEvent('browser_form_logout_identity_unavailable');
+    return res.status(503).type('text/plain').send('The active account could not be confirmed.');
+  }
+  const credentialIdentities = [accessIdentity, refreshIdentity].filter(
+    (identity): identity is NonNullable<typeof identity> => Boolean(identity)
+  );
+  if (credentialIdentities.length > 0 && (
+    !requestedViewer
+    || credentialIdentities.some(({ userId }) => userId !== requestedViewer)
+  )) {
+    recordSecurityEvent('browser_form_logout_viewer_mismatch');
+    return res.status(409).type('text/plain').send(
+      'The active account changed. Reload the page before signing out.'
+    );
+  }
+  try {
+    await revokeBrowserRequestSession(req, credentialIdentities);
     recordSecurityEvent('browser_logout_completed');
   } catch {
     recordSecurityEvent('browser_logout_revocation_failed');
-  } finally {
-    clearBrowserSessionCookies(res);
+    return res.status(503).type('text/plain').send('Sign out could not be confirmed.');
   }
-  res.redirect('/');
+  // The uncoordinated legacy form is revoke-only: a delayed response must
+  // never clear cookies installed by a newer account transition.
+  return res.redirect(303, '/finitude?sessionTransition=logout');
 };

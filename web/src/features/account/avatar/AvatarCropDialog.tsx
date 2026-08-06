@@ -5,6 +5,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject
 } from 'react';
+import { X } from 'lucide-react';
 
 import {
   avatarEditorSide,
@@ -180,7 +181,9 @@ export const AvatarCropDialog = ({
             <p className={styles.kicker}>{preview ? 'Final preview' : 'Square crop'}</p>
             <h2 id="avatar-editor-title">{preview ? 'Use this profile photo?' : 'Position your photo'}</h2>
           </div>
-          <button aria-label="Cancel profile photo" className={styles.iconButton} disabled={isPreparing} onClick={onCancel} ref={closeButtonRef} type="button">×</button>
+          <button aria-label="Cancel profile photo" className={styles.iconButton} disabled={isPreparing} onClick={onCancel} ref={closeButtonRef} type="button">
+            <X aria-hidden="true" focusable="false" />
+          </button>
         </div>
 
         {preview ? (

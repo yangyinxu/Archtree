@@ -36,6 +36,14 @@ const validEvents = [
         route: 'artist',
         stage: 'media_element',
         code: 'decode'
+    },
+    {
+        category: 'api_error',
+        route: 'playlist',
+        operation: 'playlist_reorder',
+        kind: 'http',
+        statusBucket: '428',
+        attempt: 'initial'
     }
 ] as const;
 
@@ -47,8 +55,8 @@ test('records every bounded event with only server-owned metadata', () => {
         () => new Date('2026-08-03T12:00:00.000Z')
     );
 
-    assert.equal(count, 4);
-    assert.equal(recorded.length, 4);
+    assert.equal(count, 5);
+    assert.equal(recorded.length, 5);
     assert.deepEqual(recorded[0], {
         schemaVersion: 1,
         occurredAt: '2026-08-03T12:00:00.000Z',
@@ -114,7 +122,7 @@ test('rejects unknown event fields and every identity or raw diagnostic field', 
         email: 'listener@example.com',
         userId: 'account-id',
         sessionId: 'session-id',
-        url: '/listen/search?q=private-query',
+        url: '/finitude/search?q=private-query',
         query: 'private-query',
         contentId: 'track-id',
         contentTitle: 'private title',

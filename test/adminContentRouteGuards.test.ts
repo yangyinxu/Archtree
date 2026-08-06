@@ -6,6 +6,7 @@ import catalogRoutes from '../src/routes/content/catalogRoutes';
 import compositionRoutes from '../src/routes/content/compositionRoutes';
 import contentManagerRoutes from '../src/routes/content/contentManagerRoutes';
 import feedRoutes from '../src/routes/feedRoutes';
+import adminRoutes from '../src/routes/adminRoutes';
 
 interface RouteLayer {
     name: string;
@@ -130,4 +131,8 @@ test('feed reads stay public while post mutations require admins', () => {
     assertAdminRoute(feedRoutes, 'delete', '/post');
     assert.equal(handlerNames(feedRoutes, 'get', '/post').includes('requireAdmin'), false);
     assert.equal(handlerNames(feedRoutes, 'get', '/posts').includes('requireAdmin'), false);
+});
+
+test('audio publication recovery is an explicitly guarded admin mutation', () => {
+    assertAdminRoute(adminRoutes, 'post', '/audio-storage/publication-retry');
 });

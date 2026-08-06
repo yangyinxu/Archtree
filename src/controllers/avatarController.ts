@@ -9,8 +9,11 @@ import {
     releaseAvatarMutation
 } from '../services/avatarMutationService';
 import {
-    deleteAvatarAsset,
+    AvatarMutationOutcomeUnknownError,
+    cleanupDetachedAvatarAssets,
+    deleteAvatarOwnerAndAllAssets,
     getAvatarObject,
+    replaceAvatarOwnerAndCleanup,
     uploadAvatar
 } from '../services/avatarStorageService';
 import { createMediaAbortContext, pipeMediaStream } from '../services/mediaDeliveryService';
@@ -153,36 +156,54 @@ export const putAvatar = async (req: Request, res: Response, next: NextFunction)
 
         const replacementId = await uploadAvatar(auth.userId, uploadFile);
         const previousId = String(user.avatarAssetId ?? '');
-        const replacement = await User.replaceAvatar(auth.userId, expectedRevision, replacementId);
-        const previousUser = replacement.value as Record<string, any> | null;
-        if (!previousUser) {
-            await deleteAvatarAsset(replacementId, auth.userId).catch(() => undefined);
-            const current = await User.findById(auth.userId) as Record<string, any> | null;
-            const result = { statusCode: 409, body: { message: 'Avatar changed on another device.', ...avatarProfile(current) } };
+        const replacement = await replaceAvatarOwnerAndCleanup(
+            replacementId,
+            auth.userId,
+            previousId,
+            expectedRevision,
+            () => User.replaceAvatar(auth.userId, expectedRevision, replacementId),
+            () => User.findById(auth.userId) as Promise<Record<string, any> | null>
+        );
+        if (!replacement.ownerReplaced) {
+            const current = replacement.currentOwner
+                ?? await User.findById(auth.userId) as Record<string, any> | null;
+            const result = {
+                statusCode: 409,
+                body: {
+                    message: 'Avatar changed on another device.',
+                    ...avatarProfile(current),
+                    cleanupPending: replacement.cleanupPending
+                }
+            };
             await completeAvatarMutation(mutationId, result);
             return sendMutationResult(res, result);
         }
 
-        let cleanupPending = false;
-        if (previousId && previousId !== replacementId) {
-            try {
-                await deleteAvatarAsset(previousId, auth.userId);
-            } catch {
-                cleanupPending = true;
-            }
-        }
+        const detachedCleanup = await cleanupDetachedAvatarAssets(auth.userId);
+
         const revision = expectedRevision + 1;
         const result = {
             statusCode: 200,
             body: {
                 avatarRevision: revision,
                 avatar: { assetId: replacementId, revision },
-                cleanupPending
+                cleanupPending: replacement.cleanupPending || detachedCleanup.cleanupPending
             }
         };
         await completeAvatarMutation(mutationId, result);
         return sendMutationResult(res, result);
     } catch (error) {
+        if (error instanceof AvatarMutationOutcomeUnknownError && mutationId) {
+            const result = {
+                statusCode: 503,
+                body: {
+                    message: 'Avatar update outcome could not be confirmed. Reconciliation is required.',
+                    cleanupPending: true
+                }
+            };
+            await completeAvatarMutation(mutationId, result).catch(() => undefined);
+            return sendMutationResult(res, result);
+        }
         if (mutationId) await releaseAvatarMutation(mutationId).catch(() => undefined);
         return next(error);
     }
@@ -212,29 +233,67 @@ export const deleteAvatar = async (req: Request, res: Response, next: NextFuncti
         }
         const imageId = String(user.avatarAssetId ?? '');
         if (!imageId) {
+            const cleanup = await cleanupDetachedAvatarAssets(auth.userId);
             const result = {
                 statusCode: 200,
-                body: { avatarRevision: expectedRevision, avatar: null }
+                body: {
+                    avatarRevision: expectedRevision,
+                    avatar: null,
+                    cleanupPending: cleanup.cleanupPending
+                }
             };
             await completeAvatarMutation(mutationId, result);
             return sendMutationResult(res, result);
         }
 
-        await deleteAvatarAsset(imageId, auth.userId);
-        const cleared = await User.clearAvatar(auth.userId, expectedRevision, imageId);
-        if (!cleared.value) {
+        const deletion = await deleteAvatarOwnerAndAllAssets(
+            imageId,
+            auth.userId,
+            () => User.clearAvatar(auth.userId, expectedRevision, imageId),
+            {
+                confirmOwnerCleared: async () => {
+                    const current = await User.findById(auth.userId) as Record<string, any> | null;
+                    return Boolean(current)
+                        && revisionOf(current) === expectedRevision + 1
+                        && !String(current?.avatarAssetId ?? '');
+                }
+            }
+        );
+        if (!deletion.ownerCleared) {
             const current = await User.findById(auth.userId) as Record<string, any> | null;
-            const result = { statusCode: 409, body: { message: 'Avatar changed on another device.', ...avatarProfile(current) } };
+            const result = {
+                statusCode: 409,
+                body: {
+                    message: 'Avatar changed on another device.',
+                    ...avatarProfile(current),
+                    cleanupPending: true
+                }
+            };
             await completeAvatarMutation(mutationId, result);
             return sendMutationResult(res, result);
         }
         const result = {
             statusCode: 200,
-            body: { avatarRevision: expectedRevision + 1, avatar: null }
+            body: {
+                avatarRevision: expectedRevision + 1,
+                avatar: null,
+                cleanupPending: deletion.cleanupPending
+            }
         };
         await completeAvatarMutation(mutationId, result);
         return sendMutationResult(res, result);
     } catch (error) {
+        if (error instanceof AvatarMutationOutcomeUnknownError && mutationId) {
+            const result = {
+                statusCode: 503,
+                body: {
+                    message: 'Avatar deletion outcome could not be confirmed. Reconciliation is required.',
+                    cleanupPending: true
+                }
+            };
+            await completeAvatarMutation(mutationId, result).catch(() => undefined);
+            return sendMutationResult(res, result);
+        }
         if (mutationId) await releaseAvatarMutation(mutationId).catch(() => undefined);
         return next(error);
     }

@@ -134,6 +134,12 @@ export interface PlayerStore {
   getSnapshot(): PlayerSnapshot;
   getServerSnapshot(): PlayerSnapshot;
   subscribe(listener: () => void): () => void;
+  launchQueue(
+    queue: readonly PlayerQueueItem[],
+    initialIndex: number,
+    options?: PlayerLaunchOptions
+  ): Promise<void>;
+  /** Compatibility alias retained for existing Album launch callers. */
   launchAlbumQueue(
     queue: readonly PlayerQueueItem[],
     initialIndex: number,

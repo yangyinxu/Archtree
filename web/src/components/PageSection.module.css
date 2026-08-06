@@ -20,16 +20,29 @@
   padding: 0;
 }
 
+.carouselFrame {
+  --carousel-card-width: clamp(10.5rem, 16vw, 13rem);
+
+  isolation: isolate;
+  min-width: 0;
+  position: relative;
+}
+
 .carousel {
   display: grid;
   gap: var(--space-5);
-  grid-auto-columns: clamp(10.5rem, calc((100% - 6rem) / 5), 13rem);
+  grid-auto-columns: var(--carousel-card-width);
   grid-auto-flow: column;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   padding: 0 0 var(--space-2);
+  scroll-behavior: smooth;
   scroll-snap-type: inline proximity;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.carousel::-webkit-scrollbar {
+  display: none;
 }
 
 .carousel:focus-visible {
@@ -39,6 +52,68 @@
 
 .carousel .cardItem {
   scroll-snap-align: start;
+}
+
+.carouselControls {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.carouselControl {
+  align-items: center;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  box-shadow: var(--shadow-floating-control);
+  color: var(--color-text);
+  display: inline-flex;
+  height: var(--control-min-size);
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  top: calc(var(--carousel-card-width) / 2);
+  transform: translateY(-50%) scale(0.92);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+  width: var(--control-min-size);
+}
+
+.carouselControlPrevious {
+  inset-inline-start: var(--space-2);
+}
+
+.carouselControlNext {
+  inset-inline-end: var(--space-2);
+}
+
+.carouselFrame:hover .carouselControl,
+.carouselFrame:focus-within .carouselControl,
+.carouselFrame[data-recently-scrolled="true"] .carouselControl {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) scale(1);
+}
+
+.carouselControl:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-control);
+}
+
+.carouselControl:active {
+  background: var(--color-surface-active);
+  transform: translateY(-50%) scale(0.96);
+}
+
+.carouselControl svg {
+  height: 1.25rem;
+  width: 1.25rem;
 }
 
 .grid {
@@ -69,6 +144,14 @@
 }
 
 @media (forced-colors: active) {
+  .carouselControl {
+    background: ButtonFace;
+    border-color: ButtonText;
+    box-shadow: none;
+    color: ButtonText;
+    forced-color-adjust: auto;
+  }
+
   .empty {
     border-color: CanvasText;
   }
@@ -85,12 +168,37 @@
 }
 
 @media (max-width: 480px) {
-  .carousel {
-    grid-auto-columns: min(72vw, 17.5rem);
+  .carouselFrame {
+    --carousel-card-width: min(72vw, 17.5rem);
   }
 
   .grid {
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.75rem), 1fr));
     row-gap: var(--space-5);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .carouselControl {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .carousel {
+    scroll-behavior: auto;
+  }
+
+  .carouselControl {
+    transition: none;
+  }
+
+  .carouselControl:active,
+  .carouselFrame:hover .carouselControl,
+  .carouselFrame:focus-within .carouselControl,
+  .carouselFrame[data-recently-scrolled="true"] .carouselControl {
+    transform: translateY(-50%);
   }
 }

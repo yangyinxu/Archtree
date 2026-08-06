@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 import { requestBrowserPasswordReset } from '../../api/account';
-import styles from '../../styles/Pages.module.css';
+import styles from './AccountSurfaces.module.css';
 import {
   AuthFormFeedback,
   AuthPageFrame,

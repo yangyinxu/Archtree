@@ -7,6 +7,7 @@ import { ContentCard } from '../../components/ContentCard';
 import { Icon } from '../../components/Icon';
 import { PageSection } from '../../components/PageSection';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
+import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton';
 import {
   clearSearchHistory,
   readSearchHistory,
@@ -127,6 +128,13 @@ export const SearchPage = () => {
                   items={results.data.audioTracks}
                   onPlay={(track) => { void launchStandalonePlayback(track, viewerId); }}
                   presentation="list"
+                  renderTrackTrailing={(track) => (
+                    <AddTrackToPlaylistButton
+                      accountPending={!historyIsReady}
+                      track={track}
+                      viewerId={viewerId}
+                    />
+                  )}
                   title="Soundtracks"
                 />
               )}

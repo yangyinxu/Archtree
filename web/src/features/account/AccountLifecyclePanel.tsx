@@ -14,6 +14,11 @@ import {
   isAvatarDeletionRequired,
   signOutAccountEverywhere
 } from '../../api/accountLifecycle';
+import {
+  captureAccountOperation,
+  isAccountOperationCurrent,
+  type AccountOperationGuard
+} from '../../api/accountEpoch';
 import { ApiError } from '../../api/client';
 import { browserSessionQueryKey } from '../../api/session';
 import { clearSearchHistory } from '../search/searchHistory';
@@ -171,6 +176,10 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
   const returnFocus = useRef<HTMLButtonElement | null>(null);
   const activeViewer = useRef(viewerId);
   activeViewer.current = viewerId;
+  const localOwner = useRef(viewerId);
+  const ownsLocalState = localOwner.current === viewerId;
+  const visibleConfirmation = ownsLocalState ? confirmation : null;
+  const visibleNotice = ownsLocalState ? notice : null;
 
   const closeConfirmation = () => {
     setConfirmation(null);
@@ -179,8 +188,12 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
     requestAnimationFrame(() => target?.focus());
   };
 
-  const finishSessionExit = (actedViewerId: string, message: string) => {
-    if (actedViewerId !== activeViewer.current) return;
+  const finishSessionExit = (
+    actedViewerId: string,
+    guard: AccountOperationGuard,
+    message: string
+  ) => {
+    if (actedViewerId !== activeViewer.current || !isAccountOperationCurrent(guard)) return;
     clearSearchHistory(actedViewerId);
     queryClient.clear();
     queryClient.setQueryData(browserSessionQueryKey, null);
@@ -191,8 +204,9 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
 
   const clearHistory = useMutation({
     mutationFn: clearAccountListeningHistory,
-    onSuccess: (_result, actedViewerId) => {
-      if (actedViewerId !== activeViewer.current) return;
+    onMutate: (actedViewerId) => captureAccountOperation(actedViewerId),
+    onSuccess: (_result, actedViewerId, guard) => {
+      if (actedViewerId !== activeViewer.current || !isAccountOperationCurrent(guard)) return;
       closeConfirmation();
       setNotice('Listening history cleared. Your saved Library was not changed.');
       void queryClient.invalidateQueries({ queryKey: ['listener', 'home', actedViewerId] });
@@ -201,20 +215,23 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
   });
   const signOutEverywhere = useMutation({
     mutationFn: signOutAccountEverywhere,
-    onSuccess: (_result, actedViewerId) => finishSessionExit(
+    onSuccess: (guard, actedViewerId) => finishSessionExit(
       actedViewerId,
+      guard,
       'You have been signed out everywhere.'
     )
   });
   const deleteAccount = useMutation({
     mutationFn: deleteListenerAccount,
-    onSuccess: (_result, actedViewerId) => finishSessionExit(
+    onSuccess: (guard, actedViewerId) => finishSessionExit(
       actedViewerId,
+      guard,
       'Your account has been deleted.'
     )
   });
 
   useEffect(() => {
+    localOwner.current = viewerId;
     setConfirmation(null);
     setNotice(null);
     returnFocus.current = null;
@@ -235,16 +252,16 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
     setConfirmation(action);
   };
 
-  const currentMutation = confirmation === 'clearHistory'
+  const currentMutation = visibleConfirmation === 'clearHistory'
     ? clearHistory
-    : confirmation === 'signOutEverywhere'
+    : visibleConfirmation === 'signOutEverywhere'
       ? signOutEverywhere
       : deleteAccount;
 
   const confirm = () => {
-    if (confirmation === 'clearHistory') clearHistory.mutate(viewerId);
-    if (confirmation === 'signOutEverywhere') signOutEverywhere.mutate(viewerId);
-    if (confirmation === 'deleteAccount') deleteAccount.mutate(viewerId);
+    if (visibleConfirmation === 'clearHistory') clearHistory.mutate(viewerId);
+    if (visibleConfirmation === 'signOutEverywhere') signOutEverywhere.mutate(viewerId);
+    if (visibleConfirmation === 'deleteAccount') deleteAccount.mutate(viewerId);
   };
 
   return (
@@ -254,7 +271,7 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
         <h2 className={styles.heading} id="account-lifecycle-heading">Your Finitude data</h2>
       </div>
 
-      {notice && <p className={styles.status} role="status">{notice}</p>}
+      {visibleNotice && <p className={styles.status} role="status">{visibleNotice}</p>}
 
       <div className={styles.actionList}>
         <div className={styles.actionRow}>
@@ -288,9 +305,9 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
         </div>
       </div>
 
-      {confirmation && (
+      {visibleConfirmation && (
         <ConfirmationDialog
-          action={confirmation}
+          action={visibleConfirmation}
           error={currentMutation.error}
           onCancel={closeConfirmation}
           onConfirm={confirm}

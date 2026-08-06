@@ -36,7 +36,9 @@ test('complete Library resolves mixed content with stable cursor pagination', as
             title: 'Soundtrack',
             coverArtUrl: '',
             albumId: albumId.toString(),
-            artistIds: [artistId.toString()]
+            artistIds: [artistId.toString()],
+            uploadStatus: 'ready',
+            s3Key: trackId.toHexString()
         }),
         getDb()!.collection('artists').insertOne({
             _id: artistId,
@@ -158,12 +160,15 @@ test('recently played pagination continues from played into unplayed saves', asy
 test('recording playback updates durable saved activity and bounded history together', async () => {
     const userId = new ObjectId().toString();
     const albumId = new ObjectId();
-    await getDb()!.collection('albums').insertOne({
-        _id: albumId,
-        title: 'Album',
-        coverArtUrl: '',
-        audioTrackIds: []
-    });
+    await Promise.all([
+        getDb()!.collection('albums').insertOne({
+            _id: albumId,
+            title: 'Album',
+            coverArtUrl: '',
+            audioTrackIds: []
+        }),
+        getDb()!.collection('users').insertOne({ _id: ObjectId.createFromHexString(userId) })
+    ]);
     await getDb()!.collection('userSaves').insertOne({
         userId,
         contentType: 'album',

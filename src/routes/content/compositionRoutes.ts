@@ -1,15 +1,33 @@
 import express, { Router } from 'express';
 import * as pageController from '../../controllers/pageController';
 import * as contentCollectionController from '../../controllers/contentCollectionController';
-import { attachOptionalAuth, requireAdmin, requireAuth } from '../../middleware/authMiddleware';
+import {
+    attachOptionalAuth,
+    requireAdmin,
+    requireAuth,
+    requireCurrentAccountViewer,
+    requireCurrentAccountViewerWhenAuthenticated
+} from '../../middleware/authMiddleware';
 import { asyncHandler, publicReadRateLimit } from '../../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
 
 router.get('/pages', publicReadRateLimit, asyncHandler(pageController.listPages));
 router.get('/pages/:slug', publicReadRateLimit, asyncHandler(pageController.getPageBySlug));
-router.get('/pages/:slug(library)/expanded', publicReadRateLimit, requireAuth, asyncHandler(pageController.getExpandedPageBySlug));
-router.get('/pages/:slug/expanded', publicReadRateLimit, attachOptionalAuth, asyncHandler(pageController.getExpandedPageBySlug));
+router.get(
+    '/pages/:slug(library)/expanded',
+    publicReadRateLimit,
+    requireAuth,
+    requireCurrentAccountViewer,
+    asyncHandler(pageController.getExpandedPageBySlug)
+);
+router.get(
+    '/pages/:slug/expanded',
+    publicReadRateLimit,
+    attachOptionalAuth,
+    requireCurrentAccountViewerWhenAuthenticated,
+    asyncHandler(pageController.getExpandedPageBySlug)
+);
 router.post('/pages', requireAuth, requireAdmin, pageController.upsertPage);
 router.post('/pages/:slug/items/carousel', requireAuth, requireAdmin, pageController.attachCarouselToPage);
 router.delete('/pages/:slug/items/carousel/:carouselId', requireAuth, requireAdmin, pageController.removeCarouselFromPage);

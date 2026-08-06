@@ -40,6 +40,8 @@ export interface CreateAppOptions {
 }
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const listenerApplicationPath = '/finitude';
+const legacyListenerApplicationPath = '/listen';
 
 /** Identifies shared-content mutations that must authorize before body parsing. */
 export const requiresEarlySharedContentAdmin = (method: string, originalUrl: string) => {
@@ -91,17 +93,26 @@ const readListenerManifestAssets = (listenerDistPath: string) => {
 
 /** Distinguishes missing bundle resources from extensionless listener routes. */
 const isListenerAssetRequest = (req: Request) => {
-  const listenerPath = req.path.replace(/^\/listen\/?/, '');
+  const listenerPath = req.path.replace(/^\/finitude\/?/, '');
   return listenerPath === 'assets'
     || listenerPath.startsWith('assets/')
     || path.posix.extname(listenerPath) !== '';
 };
 
+/** Preserves legacy bookmarks while making `/finitude` the only served SPA prefix. */
+const redirectLegacyListener = (req: Request, res: Response) => {
+  const suffix = req.originalUrl.slice(legacyListenerApplicationPath.length);
+  return res.redirect(308, `${listenerApplicationPath}${suffix}`);
+};
+
 /** Mounts the built listener SPA without allowing its fallback to capture backend routes. */
 const mountListenerApplication = (app: Application, listenerDistPath: string) => {
+  app.get(legacyListenerApplicationPath, redirectLegacyListener);
+  app.get(`${legacyListenerApplicationPath}/*`, redirectLegacyListener);
+
   const indexPath = path.join(listenerDistPath, 'index.html');
   if (!fs.existsSync(indexPath)) {
-    app.use('/listen', (_req, res) => {
+    app.use(listenerApplicationPath, (_req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       return res.status(503).json({
         message: 'The Finitude Web listener bundle is unavailable. Build web/dist before starting the listener.'
@@ -112,7 +123,7 @@ const mountListenerApplication = (app: Application, listenerDistPath: string) =>
 
   const immutableAssets = readListenerManifestAssets(listenerDistPath);
 
-  app.use('/listen', express.static(listenerDistPath, {
+  app.use(listenerApplicationPath, express.static(listenerDistPath, {
     index: false,
     redirect: false,
     setHeaders: (res, filePath) => {
@@ -132,8 +143,8 @@ const mountListenerApplication = (app: Application, listenerDistPath: string) =>
       if (error) next(error);
     });
   };
-  app.get('/listen', sendListenerIndex);
-  app.get('/listen/*', (req, res, next) => {
+  app.get(listenerApplicationPath, sendListenerIndex);
+  app.get(`${listenerApplicationPath}/*`, (req, res, next) => {
     if (isListenerAssetRequest(req)) {
       res.setHeader('Cache-Control', 'no-store');
       return res.status(404).json({ message: 'The requested listener asset was not found.' });
@@ -149,9 +160,9 @@ export interface LandingActions {
 
 /** Keeps public listening visible while exposing management actions only to administrators. */
 export const renderLandingActions = (
-  auth?: Pick<AuthContext, 'email' | 'role'>
+  auth?: Pick<AuthContext, 'userId' | 'email' | 'role'>
 ): LandingActions => {
-  const listenerButton = '<a class="button button--listener" href="/listen">Open Finitude</a>';
+  const listenerButton = '<a class="button button--listener" href="/finitude">Open Finitude</a>';
   if (auth) {
     const contentManagerHeaderAction = auth.role === 'admin'
       ? '<a class="button" href="/content/manage">Content Manager</a>'
@@ -164,7 +175,7 @@ export const renderLandingActions = (
       headerActions: `<div class="header-actions">
         <span class="muted">${escapeHtml(auth.email)}</span>
         ${contentManagerHeaderAction}
-        <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(auth.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
       </div>`,
       heroActions: `<div class="action-row">
         ${listenerButton}
@@ -204,9 +215,9 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST, PUT, PATCH, DELETE');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match'
+      'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match, X-Finitude-Account-Viewer'
     );
-    res.setHeader('Access-Control-Expose-Headers', 'ETag');
+    res.setHeader('Access-Control-Expose-Headers', 'ETag, X-Finitude-Account-Viewer');
     next();
   });
 
@@ -293,7 +304,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
         ? 'listener_telemetry'
         : req.path.startsWith('/api/listener/v1')
           ? 'listener_api'
-          : req.path === '/listen' || req.path.startsWith('/listen/')
+          : req.path === listenerApplicationPath || req.path.startsWith(`${listenerApplicationPath}/`)
             ? 'listener_page'
             : req.path.startsWith('/auth')
               ? 'auth'

@@ -1,7 +1,7 @@
 import { expect, test } from './support/test';
 
 test('previews debounced searches but records only explicit submissions', async ({ api, page }) => {
-  await page.goto('/listen/search');
+  await page.goto('/finitude/search');
 
   const search = page.getByRole('main').getByRole('search', { name: 'Search results' });
   const input = search.getByRole('searchbox', {
@@ -15,7 +15,7 @@ test('previews debounced searches but records only explicit submissions', async 
   const searchCalls = () => api.calls.filter(
     (call) => call.method === 'GET' && call.pathname === '/api/listener/v1/search'
   );
-  await expect(page).toHaveURL(/\/listen\/search\?q=Night$/);
+  await expect(page).toHaveURL(/\/finitude\/search\?q=Night$/);
   await expect(page.getByRole('heading', { name: 'Results for “Night”' })).toBeVisible();
   expect(searchCalls()).toEqual([
     expect.objectContaining({ search: '?q=Night' })
@@ -27,7 +27,7 @@ test('previews debounced searches but records only explicit submissions', async 
   await input.press('Backspace');
   await page.waitForTimeout(350);
 
-  await expect(page).toHaveURL(/\/listen\/search\?q=Nigh$/);
+  await expect(page).toHaveURL(/\/finitude\/search\?q=Nigh$/);
   await expect(page.getByRole('heading', { name: 'Results for “Nigh”' })).toBeVisible();
   expect(searchCalls()).toEqual([
     expect.objectContaining({ search: '?q=Night' }),
@@ -36,7 +36,7 @@ test('previews debounced searches but records only explicit submissions', async 
 
   await input.press('Enter');
 
-  await expect(page).toHaveURL(/\/listen\/search\?q=Nigh$/);
+  await expect(page).toHaveURL(/\/finitude\/search\?q=Nigh$/);
   await expect(page.getByRole('heading', { name: 'Results for “Nigh”' })).toBeVisible();
   expect(searchCalls()).toHaveLength(2);
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem(
@@ -45,14 +45,14 @@ test('previews debounced searches but records only explicit submissions', async 
 
   await input.fill('Dawn');
   await page.waitForTimeout(350);
-  await expect(page).toHaveURL(/\/listen\/search\?q=Dawn$/);
+  await expect(page).toHaveURL(/\/finitude\/search\?q=Dawn$/);
   expect(searchCalls()).toHaveLength(3);
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem(
     'finitude:search-history:anonymous'
   )) ?? 'null')).toEqual(['Nigh']);
 
   await input.press('Enter');
-  await expect(page).toHaveURL(/\/listen\/search\?q=Dawn$/);
+  await expect(page).toHaveURL(/\/finitude\/search\?q=Dawn$/);
   await expect(page.getByRole('heading', { name: 'Results for “Dawn”' })).toBeVisible();
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem(
     'finitude:search-history:anonymous'
@@ -60,7 +60,7 @@ test('previews debounced searches but records only explicit submissions', async 
 
   await page.goBack();
 
-  await expect(page).toHaveURL(/\/listen\/search\?q=Nigh$/);
+  await expect(page).toHaveURL(/\/finitude\/search\?q=Nigh$/);
   await expect(page.getByRole('heading', { name: 'Results for “Nigh”' })).toBeVisible();
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem(
     'finitude:search-history:anonymous'
@@ -68,7 +68,7 @@ test('previews debounced searches but records only explicit submissions', async 
 
   await page.goForward();
 
-  await expect(page).toHaveURL(/\/listen\/search\?q=Dawn$/);
+  await expect(page).toHaveURL(/\/finitude\/search\?q=Dawn$/);
   await expect(page.getByRole('heading', { name: 'Results for “Dawn”' })).toBeVisible();
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem(
     'finitude:search-history:anonymous'

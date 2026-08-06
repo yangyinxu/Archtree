@@ -1,4 +1,12 @@
-import { getDb } from '../infrastructure/database';
+import { getDatabaseClient, getDb } from '../infrastructure/database';
+import {
+    touchActiveAccount,
+    withActiveAccount
+} from '../services/accountReferenceFenceService';
+import {
+    PageItemReferenceUnavailableError,
+    touchAvailablePageItemReferences
+} from '../services/pageReferenceLifecycleService';
 
 const collectionId = 'pages';
 const maximumPageItems = 100;
@@ -35,6 +43,75 @@ const moveByIndex = <T>(items: T[], fromIndex: number, toIndex: number) => {
     return copy;
 };
 
+export interface PageItemMutationHooks {
+    /** Test-only barrier immediately before a newly attached target is touched. */
+    beforeReferenceFence?: () => Promise<void>;
+    /** Test-only barrier after the Page write and before transaction commit. */
+    afterPageWrite?: () => Promise<void>;
+}
+
+type PreparedPageMutation = {
+    items: PageItemRef[];
+    newReferenceIndexes?: number[];
+};
+
+/** Reads and writes one Page in a transaction so concurrent detachment cannot be overwritten. */
+const mutatePageItems = async (
+    slug: PageSlug,
+    updatedBy: string,
+    prepare: (items: PageItemRef[]) => PreparedPageMutation | null,
+    hooks: PageItemMutationHooks = {}
+) => {
+    const session = getDatabaseClient().startSession();
+    let result: PageItemRef[] | null = null;
+    try {
+        await session.withTransaction(async () => {
+            const page: any = await getDb()!.collection(collectionId).findOne({ slug }, { session });
+            if (!page) {
+                result = null;
+                return;
+            }
+            const prepared = prepare(Array.isArray(page.items) ? [...page.items] : []);
+            if (!prepared || prepared.items.length > maximumPageItems) {
+                result = null;
+                return;
+            }
+            await touchActiveAccount(updatedBy, session);
+            const indexes = prepared.newReferenceIndexes ?? [];
+            if (indexes.length > 0) {
+                await hooks.beforeReferenceFence?.();
+                const normalizedReferences = await touchAvailablePageItemReferences(
+                    indexes.map((index) => prepared.items[index]),
+                    session
+                );
+                indexes.forEach((index, referenceIndex) => {
+                    prepared.items[index] = normalizedReferences[referenceIndex] as PageItemRef;
+                });
+            }
+            const items = normalizeOrder(prepared.items);
+            const updated = await getDb()!.collection(collectionId).updateOne(
+                { _id: page._id },
+                {
+                    $set: {
+                        items,
+                        updatedBy,
+                        updatedAt: new Date()
+                    }
+                },
+                { session }
+            );
+            if (updated.matchedCount !== 1) {
+                throw new Error(`Page ${slug} changed during mutation.`);
+            }
+            result = items;
+            await hooks.afterPageWrite?.();
+        });
+    } finally {
+        await session.endSession();
+    }
+    return result;
+};
+
 // Page stores top-level composition for one screen (home/library).
 export class Page {
     slug: PageSlug;
@@ -55,12 +132,24 @@ export class Page {
         this.updatedAt = updatedAt;
     }
 
-    save() {
-        const db = getDb();
-
-        return db!
-            .collection(collectionId)
-            .insertOne(this);
+    async save() {
+        if (this.items.length > maximumPageItems) {
+            throw new PageItemReferenceUnavailableError();
+        }
+        const session = getDatabaseClient().startSession();
+        let result;
+        try {
+            await session.withTransaction(async () => {
+                await touchActiveAccount(this.createdBy, session);
+                this.items = normalizeOrder(
+                    await touchAvailablePageItemReferences(this.items, session) as PageItemRef[]
+                );
+                result = await getDb()!.collection(collectionId).insertOne(this, { session });
+            });
+        } finally {
+            await session.endSession();
+        }
+        return result!;
     }
 
     static findBySlug(slug: PageSlug) {
@@ -99,9 +188,9 @@ export class Page {
     static upsertBySlug(slug: PageSlug, title: string, userId: string) {
         const db = getDb();
 
-        return db!
-            .collection(collectionId)
-            .updateOne(
+        return withActiveAccount(
+            userId,
+            (session) => db!.collection(collectionId).updateOne(
                 { slug },
                 {
                     $set: {
@@ -117,47 +206,30 @@ export class Page {
                         createdAt: new Date()
                     }
                 },
-                { upsert: true }
-            );
+                { upsert: true, session }
+            )
+        );
     }
 
-    static async addCarouselItem(slug: PageSlug, carouselId: string, updatedBy: string, position?: number) {
-        const page: any = await this.findBySlug(slug);
-        if (!page) {
-            return null;
-        }
-
-        const nextItems = Array.isArray(page.items) ? [...page.items] : [];
-        if (nextItems.length >= maximumPageItems) {
-            return null;
-        }
-        const insertAt = typeof position === 'number'
-            ? Math.max(0, Math.min(position, nextItems.length))
-            : nextItems.length;
-
-        nextItems.splice(insertAt, 0, {
-            itemType: 'carousel',
-            carouselId,
-            order: insertAt
-        });
-
-        const normalizedItems = normalizeOrder(nextItems);
-
-        const db = getDb();
-        await db!
-            .collection(collectionId)
-            .updateOne(
-                { slug },
-                {
-                    $set: {
-                        items: normalizedItems,
-                        updatedBy,
-                        updatedAt: new Date()
-                    }
-                }
-            );
-
-        return normalizedItems;
+    static addCarouselItem(
+        slug: PageSlug,
+        carouselId: string,
+        updatedBy: string,
+        position?: number,
+        hooks: PageItemMutationHooks = {}
+    ) {
+        return mutatePageItems(slug, updatedBy, (nextItems) => {
+            if (nextItems.length >= maximumPageItems) return null;
+            const insertAt = typeof position === 'number'
+                ? Math.max(0, Math.min(position, nextItems.length))
+                : nextItems.length;
+            nextItems.splice(insertAt, 0, {
+                itemType: 'carousel',
+                carouselId,
+                order: insertAt
+            });
+            return { items: nextItems, newReferenceIndexes: [insertAt] };
+        }, hooks);
     }
 
     static async addCollectionItem(
@@ -165,134 +237,50 @@ export class Page {
         itemType: 'grid' | 'list',
         collectionRefId: string,
         updatedBy: string,
-        position?: number
+        position?: number,
+        hooks: PageItemMutationHooks = {}
     ) {
-        const page: any = await this.findBySlug(slug);
-        if (!page) return null;
-        const nextItems = Array.isArray(page.items) ? [...page.items] : [];
-        if (nextItems.length >= maximumPageItems) return null;
-        const insertAt = typeof position === 'number'
-            ? Math.max(0, Math.min(position, nextItems.length))
-            : nextItems.length;
-        nextItems.splice(insertAt, 0, {
-            itemType,
-            collectionId: collectionRefId,
-            order: insertAt
-        });
-        const items = normalizeOrder(nextItems);
-        await getDb()!.collection(collectionId).updateOne(
-            { slug },
-            { $set: { items, updatedBy, updatedAt: new Date() } }
-        );
-        return items;
+        return mutatePageItems(slug, updatedBy, (nextItems) => {
+            if (nextItems.length >= maximumPageItems) return null;
+            const insertAt = typeof position === 'number'
+                ? Math.max(0, Math.min(position, nextItems.length))
+                : nextItems.length;
+            nextItems.splice(insertAt, 0, {
+                itemType,
+                collectionId: collectionRefId,
+                order: insertAt
+            });
+            return { items: nextItems, newReferenceIndexes: [insertAt] };
+        }, hooks);
     }
 
     static async removeCarouselItem(slug: PageSlug, carouselId: string, updatedBy: string) {
-        const page: any = await this.findBySlug(slug);
-        if (!page) {
-            return null;
-        }
-
-        const nextItems = Array.isArray(page.items)
-            ? page.items.filter((item: PageItemRef) =>
-                item.itemType !== 'carousel' || item.carouselId !== carouselId
+        const canonicalCarouselId = String(carouselId).toLowerCase();
+        return mutatePageItems(slug, updatedBy, (items) => ({
+            items: items.filter((item: PageItemRef) =>
+                item.itemType !== 'carousel'
+                    || String(item.carouselId).toLowerCase() !== canonicalCarouselId
             )
-            : [];
-
-        const normalizedItems = normalizeOrder(nextItems);
-
-        const db = getDb();
-        await db!
-            .collection(collectionId)
-            .updateOne(
-                { slug },
-                {
-                    $set: {
-                        items: normalizedItems,
-                        updatedBy,
-                        updatedAt: new Date()
-                    }
-                }
-            );
-
-        return normalizedItems;
+        }));
     }
 
     static async removeCollectionItem(slug: PageSlug, collectionRefId: string, updatedBy: string) {
-        const page: any = await this.findBySlug(slug);
-        if (!page) return null;
-        const nextItems = Array.isArray(page.items)
-            ? page.items.filter((item: PageItemRef) =>
-                item.itemType === 'carousel' || item.collectionId !== collectionRefId
+        const canonicalCollectionId = String(collectionRefId).toLowerCase();
+        return mutatePageItems(slug, updatedBy, (items) => ({
+            items: items.filter((item: PageItemRef) =>
+                item.itemType === 'carousel'
+                    || String(item.collectionId).toLowerCase() !== canonicalCollectionId
             )
-            : [];
-        const items = normalizeOrder(nextItems);
-        await getDb()!.collection(collectionId).updateOne(
-            { slug },
-            { $set: { items, updatedBy, updatedAt: new Date() } }
-        );
-        return items;
+        }));
     }
 
     static async reorderItem(slug: PageSlug, fromIndex: number, toIndex: number, updatedBy: string) {
-        const page: any = await this.findBySlug(slug);
-        if (!page) {
-            return null;
-        }
-
-        const nextItems = Array.isArray(page.items) ? [...page.items] : [];
-        if (fromIndex < 0 || toIndex < 0 || fromIndex >= nextItems.length || toIndex >= nextItems.length) {
-            return null;
-        }
-
-        const reordered = moveByIndex(nextItems, fromIndex, toIndex);
-        const normalizedItems = normalizeOrder(reordered);
-
-        const db = getDb();
-        await db!
-            .collection(collectionId)
-            .updateOne(
-                { slug },
-                {
-                    $set: {
-                        items: normalizedItems,
-                        updatedBy,
-                        updatedAt: new Date()
-                    }
-                }
-            );
-
-        return normalizedItems;
-    }
-
-    static detachCarouselFromAllPages(carouselId: string, updatedBy: string) {
-        const db = getDb();
-
-        return db!
-            .collection(collectionId)
-            .updateMany(
-                { 'items.carouselId': carouselId },
-                {
-                    $pull: {
-                        items: {
-                            carouselId
-                        }
-                    } as any,
-                    $set: {
-                        updatedBy,
-                        updatedAt: new Date()
-                    }
-                }
-            );
-    }
-
-    static detachCollectionFromAllPages(collectionRefId: string, updatedBy: string) {
-        return getDb()!.collection(collectionId).updateMany(
-            { 'items.collectionId': collectionRefId },
-            {
-                $pull: { items: { collectionId: collectionRefId } } as any,
-                $set: { updatedBy, updatedAt: new Date() }
+        return mutatePageItems(slug, updatedBy, (items) => {
+            if (fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) {
+                return null;
             }
-        );
+            return { items: moveByIndex(items, fromIndex, toIndex) };
+        });
     }
+
 }

@@ -1,7 +1,7 @@
 import { expect, test } from './support/test';
 
 test('highlights the complete Search bar when its input receives focus', async ({ page }) => {
-  await page.goto('/listen/search');
+  await page.goto('/finitude/search');
 
   const searchBar = page.getByRole('search', { name: 'Search results' });
   const input = searchBar.getByRole('searchbox', {

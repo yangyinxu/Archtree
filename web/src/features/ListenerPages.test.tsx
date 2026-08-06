@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
 import { browserSessionQueryKey } from '../api/session';
+import { advanceAccountEpoch } from '../api/accountEpoch';
+import { listenerCapabilitiesQueryKey } from '../api/listenerCapabilities';
 import { playerStore } from '../player';
 import { AlbumPage } from './catalog/AlbumPage';
 import { LibraryPage } from './library/LibraryPage';
@@ -57,7 +59,10 @@ const unresolvedSession = Symbol('unresolved browser session');
 
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
-  headers: { 'Content-Type': 'application/json' }
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Finitude-Account-Viewer': 'listener-1'
+  }
 });
 
 const waitForSearchDebounce = () => act(async () => {
@@ -71,8 +76,9 @@ const renderRoute = (
   session: unknown = null
 ) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true });
   if (session !== unresolvedSession) queryClient.setQueryData(browserSessionQueryKey, session);
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
@@ -84,6 +90,7 @@ const renderRoute = (
       </MemoryRouter>
     </QueryClientProvider>
   );
+  return { queryClient, ...view };
 };
 
 afterEach(() => {
@@ -114,6 +121,10 @@ test('Album Play and explicit soundtrack selection share the ordered Album queue
   expect(launch).toHaveBeenLastCalledWith([
     expect.objectContaining({ id: track.id })
   ], 0);
+
+  await user.click(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' }));
+  expect(screen.getByRole('dialog', { name: 'Log in to add to a Playlist' })).toBeInTheDocument();
+  expect(launch).toHaveBeenCalledTimes(2);
 });
 
 test('Search renders grouped public results and keeps content actions canonical', async () => {
@@ -133,6 +144,7 @@ test('Search renders grouped public results and keeps content actions canonical'
     `/artists/${artist.id}`
   );
   expect(screen.getByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
   expect(readSearchHistory(null)).toEqual([]);
 });
 
@@ -319,6 +331,36 @@ test('Search defers history until the pending account identity resolves', async 
   expect(readSearchHistory(null)).toEqual([]);
 });
 
+test('a pending Search submission cannot write history after the account epoch changes', async () => {
+  const user = userEvent.setup();
+  let finishSession!: (response: Response) => void;
+  const sessionRequest = new Promise<Response>((resolve) => { finishSession = resolve; });
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => (
+    String(input) === '/auth/browser/session'
+      ? sessionRequest
+      : Promise.resolve(jsonResponse({
+          query: 'Old account query',
+          artists: [],
+          albums: [],
+          audioTracks: []
+        }))
+  )));
+  const view = renderRoute('/search', '/search', <SearchPage />, unresolvedSession);
+
+  const input = screen.getByRole('searchbox', {
+    name: 'Search artists, albums, and soundtracks'
+  });
+  await user.type(input, 'Old account query');
+  await user.keyboard('{Enter}');
+  advanceAccountEpoch();
+  finishSession(jsonResponse(listenerSession));
+
+  await waitFor(() => expect(view.queryClient.getQueryData(browserSessionQueryKey))
+    .toEqual(listenerSession));
+  expect(readSearchHistory('listener-1')).toEqual([]);
+  expect(readSearchHistory(null)).toEqual([]);
+});
+
 test('clearing an edited Search draft returns to the default state without a new request', async () => {
   const user = userEvent.setup();
   const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
@@ -385,6 +427,7 @@ test('Library sends type filters to the server and retains the mixed saved list'
   renderRoute('/library', '/library', <LibraryPage />, listenerSession);
 
   expect(await screen.findByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Downloads' })).not.toBeInTheDocument();
   expect(screen.queryByText(/offline/i)).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Albums' }));

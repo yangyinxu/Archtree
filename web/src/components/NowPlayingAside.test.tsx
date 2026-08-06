@@ -58,7 +58,7 @@ test('renders a quiet read-only state until the shared player has a current soun
 test('shows only current metadata and the store-derived effective next item', async () => {
   const store = createPlayerStore({ audioFactory: () => new AsideAudio(), mediaSession: null });
   stores.push(store);
-  await store.launchAlbumQueue(tracks, 0, { autoplay: false });
+  await store.launchQueue(tracks, 0, { autoplay: false });
   render(<NowPlayingAside store={store} />);
 
   const aside = screen.getByRole('region', { name: 'Current soundtrack' });
@@ -73,7 +73,7 @@ test('shows only current metadata and the store-derived effective next item', as
 test('labels the current soundtrack honestly when Repeat One is effective', async () => {
   const store = createPlayerStore({ audioFactory: () => new AsideAudio(), mediaSession: null });
   stores.push(store);
-  await store.launchAlbumQueue(tracks, 0, { autoplay: false });
+  await store.launchQueue(tracks, 0, { autoplay: false });
   store.cycleRepeatMode();
   store.cycleRepeatMode();
   render(<NowPlayingAside store={store} />);

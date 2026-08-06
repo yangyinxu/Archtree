@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router';
 
 import { browserAuthenticationCapabilitiesQuery } from '../../api/account';
+import { isAccountOperationCurrent } from '../../api/accountEpoch';
 import { ApiError } from '../../api/client';
 import {
   browserSessionQuery,
@@ -9,15 +11,24 @@ import {
   loginBrowserSession
 } from '../../api/session';
 import { Icon } from '../../components/Icon';
-import styles from '../../styles/Pages.module.css';
+import styles from './AccountSurfaces.module.css';
 import { AuthFormFeedback, noticeFromRouteState } from './AuthFormSupport';
 
-const safeDestination = (state: unknown) => {
-  if (!state || typeof state !== 'object' || !('from' in state)) return '/';
-  const candidate = (state as { from?: unknown }).from;
-  return typeof candidate === 'string' && candidate.startsWith('/') && !candidate.startsWith('//')
-    ? candidate
-    : '/';
+const safeDestination = (state: unknown, query: string) => {
+  const fromState = state && typeof state === 'object' && 'from' in state
+    ? (state as { from?: unknown }).from
+    : undefined;
+  const candidate = fromState ?? new URLSearchParams(query).get('returnTo');
+  if (typeof candidate !== 'string'
+    || !candidate.startsWith('/')
+    || candidate.startsWith('//')
+    || candidate.includes('\\')) return '/';
+  if (candidate === '/content/manage'
+    || candidate.startsWith('/content/manage?')
+    || candidate.startsWith('/content/manage/')) return candidate;
+  const listenerPath = candidate.replace(/^\/finitude(?=\/|$)/, '') || '/';
+  const allowedListenerPath = /^\/(?:$|search(?:[/?#]|$)|library(?:[/?#]|$)|playlists(?:[/?#]|$)|albums\/(?:[^/?#]+)(?:[?#]|$)|artists\/(?:[^/?#]+)(?:[?#]|$)|account(?:[/?#]|$))/.test(listenerPath);
+  return allowedListenerPath ? listenerPath : '/';
 };
 
 /** Submits credentials only to the same-origin cookie session contract. */
@@ -29,14 +40,34 @@ export const LoginPage = () => {
   const capabilities = useQuery(browserAuthenticationCapabilitiesQuery());
   const login = useMutation({
     mutationFn: loginBrowserSession,
-    onSuccess: (data) => {
+    onSuccess: ({ session: data, guard }) => {
+      if (!isAccountOperationCurrent(guard)) return;
       // Removing all server-state prevents a previous identity from flashing after account change.
       queryClient.clear();
       queryClient.setQueryData(browserSessionQueryKey, data);
       void queryClient.invalidateQueries({ queryKey: ['listener', 'home'] });
-      navigate(safeDestination(location.state), { replace: true });
     }
   });
+
+  useEffect(() => {
+    const loggedInViewer = login.data?.session.user.id;
+    // Navigation follows the authoritative session query, so a stale login
+    // response cannot redirect a tab that has already reconciled to another viewer.
+    if (!login.isSuccess || !loggedInViewer || session.data?.user.id !== loggedInViewer) return;
+    const destination = safeDestination(location.state, location.search);
+    if (destination === '/content/manage' || destination.startsWith('/content/manage/')) {
+      window.location.assign(destination);
+    } else {
+      navigate(destination, { replace: true });
+    }
+  }, [
+    location.search,
+    location.state,
+    login.data?.session.user.id,
+    login.isSuccess,
+    navigate,
+    session.data?.user.id
+  ]);
 
   if (session.data) {
     return (

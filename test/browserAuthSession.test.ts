@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { browserSessionPayload, safeWebReturnTo } from '../src/controllers/authController';
+import jwt from 'jsonwebtoken';
+import { ObjectId } from 'mongodb';
+import {
+    browserLogout,
+    browserSessionPayload,
+    safeWebReturnTo
+} from '../src/controllers/authController';
+import AuthSession from '../src/models/authSession';
 import {
     browserMutationRejection,
     browserSessionCookieHeaders,
     clearedBrowserSessionCookieHeaders,
-    cookieMutationRejection
+    cookieMutationRejection,
+    requireBrowserSessionTransitionCapability
 } from '../src/services/authCookieService';
+import type { Request, Response } from 'express';
 import { normalizeUserRole } from '../src/services/authRoleService';
 
 const tokenPair = (accessToken: string, refreshToken: string) => ({
@@ -192,10 +201,103 @@ test('cookie-authenticated writes require same-origin browser evidence', () => {
 });
 
 test('legacy browser login redirects only to known local pages', () => {
-    assert.equal(safeWebReturnTo('/listen/library?sort=recent#saved'), '/listen/library?sort=recent#saved');
+    assert.equal(safeWebReturnTo('/finitude/library?sort=recent#saved'), '/finitude/library?sort=recent#saved');
+    assert.equal(safeWebReturnTo('/listen/library?sort=recent#saved'), '/finitude/library?sort=recent#saved');
     assert.equal(safeWebReturnTo('/content/manage/audio-tracks'), '/content/manage/audio-tracks');
     assert.equal(safeWebReturnTo('https://attacker.example'), '/');
     assert.equal(safeWebReturnTo('//attacker.example'), '/');
     assert.equal(safeWebReturnTo('/\\attacker.example'), '/');
     assert.equal(safeWebReturnTo('/auth/browser/session'), '/');
+});
+
+test('credential-setting capability rejects headerless clients before any cookie response', () => {
+    const headers: Record<string, string | string[]> = {};
+    let statusCode = 200;
+    let body: unknown;
+    const response = {
+        setHeader(name: string, value: string | string[]) {
+            headers[name.toLowerCase()] = value;
+            return response;
+        },
+        status(code: number) {
+            statusCode = code;
+            return response;
+        },
+        json(value: unknown) {
+            body = value;
+            return response;
+        }
+    } as unknown as Response;
+    let proceeded = false;
+    requireBrowserSessionTransitionCapability(
+        { get: () => undefined } as unknown as Request,
+        response,
+        () => { proceeded = true; }
+    );
+    assert.equal(proceeded, false);
+    assert.equal(statusCode, 409);
+    assert.deepEqual(body, {
+        code: 'browser_session_transition_required',
+        message: 'This browser cannot safely coordinate account changes across tabs.'
+    });
+    assert.equal(headers['set-cookie'], undefined);
+});
+
+test('logout revocation failure preserves browser credentials and returns 503', { concurrency: false }, async () => {
+    const previousSecret = process.env.JWT_SECRET;
+    const originalRevokeById = AuthSession.revokeById;
+    process.env.JWT_SECRET = 'browser-logout-unit-test-secret';
+    AuthSession.revokeById = async () => {
+        throw new Error('database unavailable');
+    };
+    try {
+        const userId = new ObjectId().toHexString();
+        const sessionId = new ObjectId().toHexString();
+        const accessToken = jwt.sign({
+            userId,
+            email: 'listener@example.com',
+            role: 'user',
+            sessionId,
+            tokenType: 'access'
+        }, process.env.JWT_SECRET, { expiresIn: 60 });
+        const headers: Record<string, string | string[]> = {};
+        let statusCode = 200;
+        let body: unknown;
+        const response = {
+            setHeader(name: string, value: string | string[]) {
+                headers[name.toLowerCase()] = value;
+                return response;
+            },
+            status(code: number) {
+                statusCode = code;
+                return response;
+            },
+            json(value: unknown) {
+                body = value;
+                return response;
+            },
+            send(value?: unknown) {
+                body = value;
+                return response;
+            }
+        } as unknown as Response;
+        const request = {
+            get(name: string) {
+                const normalized = name.toLowerCase();
+                if (normalized === 'cookie') return `session_token=${accessToken}`;
+                if (normalized === 'x-finitude-account-viewer') return userId;
+                if (normalized === 'x-finitude-session-transition') return 'web-locks-v1';
+                return undefined;
+            }
+        } as unknown as Request;
+
+        await browserLogout(request, response);
+        assert.equal(statusCode, 503);
+        assert.deepEqual(body, { message: 'Sign out could not be confirmed.' });
+        assert.equal(headers['set-cookie'], undefined);
+    } finally {
+        AuthSession.revokeById = originalRevokeById;
+        if (previousSecret === undefined) delete process.env.JWT_SECRET;
+        else process.env.JWT_SECRET = previousSecret;
+    }
 });

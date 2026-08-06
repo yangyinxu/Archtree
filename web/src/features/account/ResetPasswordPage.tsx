@@ -5,7 +5,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { resetBrowserPassword } from '../../api/account';
 import type { BrowserSession } from '../../api/schemas';
 import { browserSessionQueryKey } from '../../api/session';
-import styles from '../../styles/Pages.module.css';
+import styles from './AccountSurfaces.module.css';
 import { clearSearchHistory } from '../search/searchHistory';
 import {
   AuthFormFeedback,

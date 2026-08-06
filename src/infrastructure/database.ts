@@ -36,6 +36,18 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'userSaves', keys: { userId: 1, lastPlayedAt: -1, _id: -1 } },
     { collection: 'userSaves', keys: { userId: 1, lastActivityAt: -1, _id: -1 } },
     { collection: 'userActivity', keys: { userId: 1 }, options: { unique: true } },
+    { collection: 'playlists', keys: { ownerUserId: 1, updatedAt: -1, _id: -1 } },
+    {
+      collection: 'accountMutations',
+      keys: { ownerUserId: 1, idempotencyKeyHash: 1 },
+      options: { unique: true }
+    },
+    { collection: 'accountMutations', keys: { ownerUserId: 1, expiresAt: 1 } },
+    {
+      collection: 'accountMutations',
+      keys: { expiresAt: 1 },
+      options: { expireAfterSeconds: 0 }
+    },
     { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'carousels', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'contentCollections', keys: { createdBy: 1, updatedAt: -1 } },
@@ -44,6 +56,9 @@ const ensureIndexes = async (db: mongoDb.Db) => {
     { collection: 'audioTracks', keys: { createdBy: 1 } },
     { collection: 'audioTracks', keys: { artistIds: 1 } },
     { collection: 'audioTracks', keys: { uploadStatus: 1, uploadUpdatedAt: -1 } },
+    { collection: 'audioTracks', keys: { publicationStatus: 1, uploadStatus: 1 } },
+    { collection: 'imageAssets', keys: { ownerType: 1, ownerId: 1, _id: 1 } },
+    { collection: 'imageAssets', keys: { createdBy: 1, ownerType: 1 } },
     { collection: 'posts', keys: { createdAt: -1 } }
   ];
 

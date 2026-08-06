@@ -35,10 +35,48 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Authenticated listeners can create, edit, and delete their own Playlists.
   Archtree provides the shared server-backed Playlist contract used by Web and
   future iOS clients.
+- A Playlist is private and owner-only. The first release has no public,
+  unlisted, shared, or collaborative Playlist state, and another listener
+  cannot read or infer it from its ID.
+- A Playlist has one required trimmed name of 1–100 Unicode characters.
+  Different Playlists owned by the same listener may have the same name.
+- A Playlist contains an explicitly ordered set of Soundtracks. Albums,
+  Artists, duplicate Soundtracks, folders, pinned Playlists, and smart or
+  automatically populated Playlists are not part of the first release.
+- A listener may own at most 100 Playlists, and each Playlist may contain at
+  most 500 Soundtracks. Repeating Add for an existing Soundtrack leaves its
+  existing membership and order unchanged.
+- Playlist artwork is a non-persisted read projection. In persisted member
+  order, it uses the first ready, playable Soundtrack that provides usable
+  track-specific artwork or inherited Album artwork; unavailable members and
+  members without usable artwork are skipped. Summary and detail DTOs return
+  that value as `artworkUrl`, or an empty string so the client uses the
+  Finitude placeholder. The first release has no custom Playlist artwork
+  upload or Playlist-owned storage object.
+- A listener's Playlist list is ordered by most recent update first with a
+  deterministic tie-breaker. Soundtrack order inside a Playlist is manual and
+  can be changed with accessible move controls.
 - Desktop Web displays a New Playlist control and the signed-in listener's
   Playlist list in the left sidebar below primary navigation. The reference
   layout informs hierarchy without copying another product's branding or exact
   components.
+- On tablet and mobile Web, Playlists are available as a Library-owned
+  destination rather than as an additional primary-navigation tab. Playlists
+  remain separate from the Saved/Downloaded Album and Soundtrack union and its
+  filters and sorting.
+- The New Playlist control remains visible while signed out. Activating it
+  reports that sign-in is required and does not automatically navigate to
+  login.
+- Playlist playback copies the currently ready members, in persisted order,
+  into the shared player queue. Starting Play records the first ready
+  Soundtrack once; starting from a row records that selected Soundtrack once.
+  Previous, Next, and automatic advancement do not add activity entries.
+- Unavailable members retain their position in the persisted Playlist but are
+  skipped by playback. Editing or deleting a Playlist does not mutate or stop
+  a queue that has already started.
+- Deleting a Playlist removes only that Playlist and its memberships. It does
+  not unsave, delete, download, or otherwise mutate its Soundtracks or shared
+  Catalog content.
 - Server-backed Playlists do not add Web downloads or implement iOS Downloaded
   Playlists. Web remains streaming-only, and native offline Playlist behavior
   requires a separate future contract.
@@ -393,6 +431,11 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   product decision and does not happen implicitly through a storage URL.
 - Missing, malformed, offline, or failed avatar loading falls back to initials
   or the neutral placeholder without hiding or disabling the account entry.
+- In Web and iOS account settings, the displayed profile avatar is the only
+  photo-selection and replacement control. Activating it opens the existing
+  photo workflow; a separate **Change Photo** control is not shown. The avatar
+  remains operable by keyboard and assistive technologies, and avatar removal
+  remains a separate explicit action.
 - After selecting a photo, the listener can reposition and scale it in an
   in-app square crop editor and preview the final circular avatar before any
   upload begins. Upload requires explicit confirmation of that preview.
@@ -401,9 +444,9 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   photo is never modified.
 - While a confirmed crop uploads, the last server-confirmed avatar remains
   visible. A failed upload preserves that avatar, discards the failed crop, and
-  shows an error; the listener starts again through Change Photo rather
-  than a separate retry action. The replacement appears only after Archtree
-  confirms it.
+  shows an error; the listener activates the displayed avatar to start again
+  rather than using a separate retry action. The replacement appears only
+  after Archtree confirms it.
 - Archtree is the source of truth for avatar identity and revision. Stale
   profile or image responses from a previous account or revision must not
   replace current session state.
@@ -495,6 +538,29 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - The expanded Library page requires valid authentication and returns `401`
   for missing or expired credentials so clients can refresh their sessions.
 - Expanded public pages such as Home may use optional authentication.
+- Cookie-authenticated Web requests for account-owned or personalized data are
+  bound to the account identity currently displayed by that tab. A missing or
+  stale tab identity fails closed before private data is read or changed;
+  native Bearer requests remain bound to the identity in their access token.
+- A browser account transition immediately hides the previous identity and
+  removes its private cached data before resolving the authoritative shared
+  cookie session. Tabs reconcile login, logout, logout-all, account deletion,
+  and identity mismatch with one another, and a late response for the previous
+  account cannot restore its data. Account exit clears only that account's
+  device-local search history.
+- Browser login and refresh may install or rotate HttpOnly credentials only
+  while the client holds the shared origin-wide session-transition lock. A
+  client without that capability cannot set credentials. A refresh from a tab
+  with a resolved account is fenced to that viewer and must return the same
+  authoritative identity. A first-load refresh without a resolved viewer may
+  adopt only the identity returned after the server has compared every present
+  signed access and refresh credential; the client treats that adoption as an
+  account transition before using private data. Logout or prior-session login
+  revocation failure preserves the existing cookies and reports a retryable
+  failure; uncoordinated legacy logout is revoke-only so a delayed response
+  cannot clear a newer account's cookies. Conflicting access and refresh
+  identities do not rotate credentials, fail closed, and may be cleared only
+  by the locked signed-out recovery path, which notifies every open tab.
 - Backend requests validate that referenced albums and audio tracks exist and
   match the declared content type.
 - Deleted content is removed from saved and recent-activity references and is

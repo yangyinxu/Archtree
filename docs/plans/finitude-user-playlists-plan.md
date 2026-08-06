@@ -2,7 +2,13 @@
 
 ## Status
 
-Planned as of 2026-08-03. No Playlist implementation has started.
+Web v1 implementation and local automated gates are complete as of 2026-08-05.
+The current integrated candidate passes 222 server, 204 Web, 126 Mongo-backed
+integration, and 191 three-engine browser checks with 10 documented skips, but
+it remains uncommitted and has no current CI or deployment artifact. P5 remains
+in progress for production index verification, staging/manual evidence, and
+controlled rollout; P6 iOS adoption remains a separate future stage and does
+not block the first Web release.
 
 This is an independent product track with stages **P0–P6**. It does not
 renumber or reopen the existing Finitude Web listener phases. Web is the first
@@ -28,7 +34,7 @@ Add listener-owned Playlists that let an authenticated user:
 The reference screenshot establishes information hierarchy only: primary
 navigation, a distinct New Playlist action, then the user's Playlist list. The
 implementation keeps Finitude's own typography, colors, spacing, icons, and
-interaction language instead of copying YouTube Music or Spotify components.
+interaction language instead of copying third-party music-service components.
 
 ## Agreed scope
 
@@ -42,41 +48,35 @@ already reflected in the shared business rules:
 4. Web Playlist playback remains streaming-only. This feature does not add
    browser downloads or implement native Downloaded Playlists.
 
-## Proposed P0 product baseline
+## Confirmed P0 product baseline
 
-The user has not yet confirmed the choices in this table. They are recommended
-defaults that make the first implementation bounded and testable, not canonical
-rules. P0 must confirm or replace every row and then promote the accepted
-behavior to `business-rules.md` before P1 begins.
+The user confirmed these defaults on 2026-08-04. They are canonical product
+behavior and are reflected in `business-rules.md`.
 
-| Area | Recommended default |
+| Area | Confirmed first-release behavior |
 | --- | --- |
 | Visibility | Private and owner-only; no public pages, sharing, or collaboration |
 | Member type | Ordered Soundtracks (`audioTrack`) only |
 | Duplicate membership | Not allowed; repeated Add returns the existing membership state |
 | Metadata | Required name only; 1–100 Unicode characters; duplicate names allowed |
 | Size | At most 500 Soundtracks per Playlist |
-| Artwork | Derived from member artwork or the Finitude placeholder; no custom upload |
+| Artwork | Non-persisted `artworkUrl` from the first persisted-order ready member with usable track or inherited Album artwork; `""` selects the Finitude placeholder; no custom upload |
 | List ordering | Newest `updatedAt`, then `_id`, first; no manual sidebar ordering |
 | Playback activity | Record the selected starting Soundtrack once; queue navigation is inert |
 | Signed-out Create | Keep the action visible and report that sign-in is required without an automatic redirect |
 | Library relationship | Library may own the navigation entry, but Playlists do not join the Saved/Downloaded union, filters, or sorting |
 | Offline behavior | None on Web; native Downloaded Playlists remain a separate future feature |
 
-An account-level Playlist quota must also be fixed during P0. The recommended
-starting value is 100 Playlists per account, enforced server-side with a clear
-limit response. Because that limit changes user-visible behavior, the accepted
-value belongs in `business-rules.md` with the other confirmed baseline rules.
+The account-level quota is 100 Playlists per account, enforced server-side with
+a clear limit response.
 
-The architecture and stage detail below use these recommended defaults so the
-plan is concrete. If P0 changes visibility, member types, duplicate semantics,
-or limits, it must revise the affected schema, API, lifecycle, and tests before
-P1 starts.
+The architecture and stage detail below use these confirmed defaults. Any later
+change to visibility, member types, duplicate semantics, or limits must revise
+the affected business rules, schema, API, lifecycle, and tests together.
 
-## Proposed P0 non-goals for the first Web release
+## Confirmed P0 non-goals for the first Web release
 
-P0 confirms this boundary together with the baseline above; these exclusions
-are not canonical until accepted.
+These exclusions are confirmed for the first release.
 
 - Public, unlisted, or shared Playlists.
 - Collaborative editing, followers, likes, comments, or social discovery.
@@ -155,8 +155,8 @@ launcher, and preserve local-download ownership boundaries.
 
 | Route | Purpose | Signed-out behavior |
 | --- | --- | --- |
-| `/listen/playlists` | Complete Playlist index for tablet/mobile and a desktop fallback | Sign-in-required state |
-| `/listen/playlists/:playlistId` | Owner-only Playlist detail and ordered members | Sign-in-required state; another owner's ID is never disclosed |
+| `/finitude/playlists` | Complete Playlist index for tablet/mobile and a desktop fallback | Sign-in-required state |
+| `/finitude/playlists/:playlistId` | Owner-only Playlist detail and ordered members | Sign-in-required state; another owner's ID is never disclosed |
 
 Create and rename use modal forms over the current route. Delete uses a
 confirmation dialog. A successful desktop create may navigate directly to the
@@ -251,8 +251,10 @@ boundary, such as `accountMutations`, keyed by a hash of user ID and
 `Idempotency-Key`. A receipt stores operation, target, request fingerprint,
 state, a compact replay response, and expiry.
 
-- P0 freezes and documents a minimum replay window; 24 hours is the proposed
-  default. A retry inside that window returns the original operation outcome.
+- The minimum replay window is 24 hours. A retry inside that window returns the
+  original success status and rehydrates the current owner detail. If the
+  Playlist was subsequently deleted, a non-delete replay returns the same
+  owner-safe `404`; a Delete receipt continues to replay `204`.
 - Once that advertised window has elapsed, clients use a new key and must not
   assume an old Create key still prevents a second intentional creation.
 - Reusing the key for different input returns `409`.
@@ -276,13 +278,19 @@ interface PlaylistSummaryV1 {
   id: string;
   name: string;
   itemCount: number;
+  artworkUrl: string;
   revision: number;
   createdAt: string;
   updatedAt: string;
 }
 ```
 
-Sidebar and index reads use summaries only.
+Sidebar and index reads use summaries only. `artworkUrl` is derived at read
+time from the first persisted-order member that satisfies the existing ready
+audio predicate (`uploadStatus: 'ready'` plus a nonblank `s3Key`) and provides
+safe track-specific or inherited Album artwork. The bounded page projection
+uses shared Soundtrack and Album reads rather than one lookup per Playlist;
+an empty string preserves the client-owned Finitude placeholder fallback.
 
 ### Detail
 
@@ -334,10 +342,11 @@ also require `If-Match` with the last confirmed revision:
 - zero matched records are resolved into owner-safe `404` or revision `409`;
 - create uses idempotency but has no pre-existing revision to match.
 
-The API documentation must state the confirmed idempotency replay window. A
+The API documentation states the confirmed idempotency replay window. A
 mutation's compact receipt response contains enough ID/revision information for
 the client to refetch current detail rather than storing a 500-member response
-in every receipt.
+in every receipt. A later deletion never resurrects the Playlist solely to
+serve an older receipt.
 
 The recommended write fences are monotonically increasing, implementation-only
 generations: every Playlist mutation increments an active User's
@@ -351,11 +360,12 @@ Add, remove, and reorder must not use an unguarded read-modify-write. Reorder
 accepts the complete current `itemIds` set in its desired order; missing,
 unknown, or repeated IDs reject the whole request without mutation.
 
-Every Web mutation sends `X-Finitude-Account-Viewer` with the viewer ID that
-owns its cache. Cookie-authenticated mutations require that value to match the
-authenticated user, including Create, so a stale browser tab cannot create data
-for a newly switched account. Native Bearer requests remain bound to their
-authenticated account without a Web-only header.
+Every cookie-authenticated Web Playlist request sends
+`X-Finitude-Account-Viewer` with the viewer ID that owns its cache. Reads and
+mutations require that value to match the authenticated user, including Create,
+so a stale browser tab cannot display or change a newly switched account's
+private data. Native Bearer requests remain bound to their authenticated
+account without a Web-only header.
 
 Every Playlist mutation transaction also conditionally touches an active owner
 record. Account deletion updates/deletes that same owner record in its deletion
@@ -462,7 +472,7 @@ action until their component can expose a separate accessible menu target.
 
 ### P0 — Contract freeze and UX specification
 
-**Status: Not started**
+**Status: Complete**
 
 **Dependencies:** none.
 
@@ -484,7 +494,7 @@ that changes persistence, endpoint shapes, ownership, or playback activity.
 
 ### P1 — Backend metadata CRUD and ownership foundation
 
-**Status: Not started**
+**Status: Complete**
 
 **Dependencies:** P0.
 
@@ -513,7 +523,7 @@ CRUD is production-safe behind a disabled flag.
 
 ### P2 — Membership, playback projection, and deletion lifecycle
 
-**Status: Not started**
+**Status: Complete**
 
 **Dependencies:** P1.
 
@@ -546,7 +556,7 @@ reference, and no Playlist operation can delete or save Catalog content.
 
 ### P3 — Web discovery, sidebar, and Playlist CRUD
 
-**Status: Not started**
+**Status: Complete**
 
 **Dependencies:** P1 for UI scaffolding; P2 before public enablement.
 
@@ -573,7 +583,7 @@ bundle-budget regression.
 
 ### P4 — Web composition, ordering, and playback
 
-**Status: Not started**
+**Status: Complete**
 
 **Dependencies:** P2 and P3.
 
@@ -601,7 +611,14 @@ and ordered playback without introducing a second queue or changing Downloads.
 
 ### P5 — Hardening, observability, and Web rollout
 
-**Status: Not started**
+**Status: In progress**
+
+Local implementation, security, bundle, three-engine E2E, and automated axe
+gates are complete. The integrated candidate has no current GitHub SHA or CI
+artifact. Production index verification, staging load evidence, branded-
+browser/manual assistive-technology checks, disabled-state deployment,
+cross-account isolation smoke coverage, and rollout evidence remain external
+release work.
 
 **Dependencies:** P4.
 
@@ -616,8 +633,10 @@ and ordered playback without introducing a second queue or changing Downloads.
 - Test 500-member hydration/reorder and maximum account list performance.
 - Preserve the existing initial-route JavaScript budget through lazy chunks;
   keep sidebar summary logic small.
-- Dark-deploy indexes and API, validate index presence, then enable internal
-  Web accounts, a small cohort, and finally all accounts.
+- Dark-deploy indexes and API with the production-default-off flag, validate
+  index presence, then enable staging and the approved production environment.
+  Per-account cohorts require separate traffic-routing controls; the binary
+  feature flag does not select individual listeners.
 - Update API/runbook/test documentation and add rollback checks.
 
 **Exit gate:** cross-browser and accessibility matrices pass, private data is
@@ -674,11 +693,13 @@ semantics.
    migration. Do not repurpose or copy `contentCollections`.
 2. Verify owner index, idempotency TTL index, account deletion, and content
    reconciliation in staging and production diagnostics.
-3. Enable backend reads/writes for internal accounts, then enable the lazy Web
-   routes and sidebar for the same cohort.
+3. Keep the binary feature flag disabled during deployment, then enable it in
+   staging and the approved production environment only after index and health
+   verification. Use separate routing controls if a per-account cohort is
+   required.
 4. Monitor fixed, non-identifying rates for create, mutation conflicts,
    validation failure, hydration failure, and cleanup/reconciliation findings.
-5. Expand the cohort only when no private cache, authorization, dangling
+5. Expand rollout only when no private cache, authorization, dangling
    reference, or fixed-shell regression is observed.
 
 Rollback disables new create/mutation entry points and hides the sidebar/index

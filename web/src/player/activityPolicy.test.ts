@@ -9,6 +9,7 @@ test('records an album only when its album play control launches playback', () =
 
 test.each([
   { type: 'explicitAlbumTrack' as const, trackId: 'track-in-album' },
+  { type: 'playlistTrack' as const, trackId: 'track-in-playlist' },
   { type: 'standaloneTrack' as const, trackId: 'standalone-track' }
 ])('records an explicitly launched track for $type', (event) => {
   expect(playbackActivityTarget(event)).toEqual({

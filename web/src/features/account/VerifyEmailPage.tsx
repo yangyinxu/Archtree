@@ -6,7 +6,7 @@ import {
   resendBrowserVerification,
   verifyBrowserEmail
 } from '../../api/account';
-import styles from '../../styles/Pages.module.css';
+import styles from './AccountSurfaces.module.css';
 import {
   AuthFormFeedback,
   AuthPageFrame,

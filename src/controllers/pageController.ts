@@ -21,6 +21,8 @@ import {
 } from '../services/publicCatalogService';
 import { toPublicExpandedPage, toPublicPage } from '../services/publicPageService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
+import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
+import { deleteCarouselAndPageReferences } from '../services/pageReferenceLifecycleService';
 
 // v1 only allows composition pages for Home and Library.
 const allowedSlugs: PageSlug[] = ['home', 'library'];
@@ -249,7 +251,8 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         const [albums, audioTracks, posts] = await Promise.all([
             albumIds.length > 0
                 ? db.collection('albums').find({
-                    _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) }
+                    _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) },
+                    ...readyAlbumLifecycleFilter
                 }).maxTimeMS(3_000).toArray()
                 : [],
             audioTrackIds.length > 0
@@ -279,7 +282,8 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         const missingLinkedAlbumIds = linkedAlbumIds.filter((id) => !fetchedAlbumIds.has(id));
         const linkedAlbums = missingLinkedAlbumIds.length > 0
             ? await db.collection('albums').find({
-                _id: { $in: missingLinkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) }
+                _id: { $in: missingLinkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) },
+                ...readyAlbumLifecycleFilter
             }).maxTimeMS(3_000).toArray()
             : [];
         const includedAlbums = [...albums, ...linkedAlbums];
@@ -769,9 +773,13 @@ export const deleteCarousel = async (req: Request, res: Response, next: NextFunc
             return res.status(404).json({ message: 'Carousel not found.' });
         }
 
-        // Deletion policy: detach from all pages first, then delete the carousel.
-        await Page.detachCarouselFromAllPages(carouselId, authReq.auth.userId);
-        await Carousel.deleteById(carouselId);
+        const deleted = await deleteCarouselAndPageReferences(
+            carouselId,
+            authReq.auth.userId
+        );
+        if (!deleted) {
+            return res.status(404).json({ message: 'Carousel not found.' });
+        }
 
         return res.status(200).json({
             message: 'Carousel deleted and detached from all pages.'
@@ -1165,8 +1173,13 @@ export const deleteCarouselWeb = async (req: Request, res: Response, next: NextF
             return redirectWithMessage(res, 'Carousel not found.');
         }
 
-        await Page.detachCarouselFromAllPages(carouselId, authReq.auth.userId);
-        await Carousel.deleteById(carouselId);
+        const deleted = await deleteCarouselAndPageReferences(
+            carouselId,
+            authReq.auth.userId
+        );
+        if (!deleted) {
+            return redirectWithMessage(res, 'Carousel not found.');
+        }
 
         return redirectWithMessage(res, 'Carousel deleted and detached from all pages.');
     } catch (error) {

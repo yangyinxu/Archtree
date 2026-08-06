@@ -7,6 +7,7 @@ import {
     normalizeLibraryContentId,
     UserLibrary
 } from '../models/userLibrary';
+import { listListenerLibrary } from '../services/listenerContentService';
 
 const parseTarget = (req: Request) => {
     const contentType = String(req.params.contentType ?? '').trim();
@@ -77,10 +78,14 @@ export const listLibrary = async (req: Request, res: Response, next: NextFunctio
         if (!Number.isFinite(requestedLimit) || requestedLimit < 1) {
             return res.status(400).json({ message: 'Library limit must be a positive number.' });
         }
-        return res.status(200).json(await UserLibrary.list(auth.userId, {
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.setHeader('Pragma', 'no-cache');
+        res.vary('Cookie');
+        res.vary('Authorization');
+        return res.status(200).json(await listListenerLibrary(auth.userId, {
             contentTypes: requestedTypes as LibraryContentType[],
             sort: requestedSort as LibrarySort,
-            limit: requestedLimit,
+            limit: Math.floor(requestedLimit),
             cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined
         }));
     } catch (error) {

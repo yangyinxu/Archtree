@@ -11,6 +11,7 @@ export default defineConfig({
   outputDir: './test-results/artifacts',
   snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{platform}/{arg}{ext}',
   fullyParallel: false,
+  failOnFlakyTests: Boolean(process.env.CI),
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
@@ -38,7 +39,7 @@ export default defineConfig({
     cwd: configDirectory,
     reuseExistingServer: false,
     timeout: 30_000,
-    url: `${origin}/listen`
+    url: `${origin}/finitude`
   },
   projects: [
     {

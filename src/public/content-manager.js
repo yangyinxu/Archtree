@@ -44,6 +44,17 @@
       item.append(fileName, document.createElement('br'), reason);
       return item;
     });
+    addResultList('Per-item lifecycle outcomes', results.outcomes || [], 'upload-results__outcomes', (outcome) => {
+      const item = document.createElement('li');
+      const fileName = document.createElement('strong');
+      fileName.textContent = outcome.originalFileName || 'Unnamed file';
+      const lifecycle = document.createElement('small');
+      const trackId = outcome.audioTrackId ? `Track ${outcome.audioTrackId}; ` : '';
+      const error = outcome.error ? `; ${outcome.error}` : '';
+      lifecycle.textContent = `${trackId}upload=${outcome.uploadStatus}; publication=${outcome.publicationStatus}${error}`;
+      item.append(fileName, document.createElement('br'), lifecycle);
+      return item;
+    });
 
     uploadResultsPanel.hidden = grid.children.length === 0;
   };
@@ -312,14 +323,30 @@
       }
       const failures = [];
       const succeeded = [];
+      const outcomes = [];
 
       for (let index = 0; index < files.length; index += 1) {
         try {
-          await uploadFile(files[index], artistId, albumId, index, files.length, (fileProgress) => {
+          const response = await uploadFile(files[index], artistId, albumId, index, files.length, (fileProgress) => {
             const percentage = Math.round(((index + fileProgress) / files.length) * 100);
             showStatus(`Uploading ${index + 1} of ${files.length}… ${percentage}%`, percentage);
           });
-          succeeded.push(files[index].name);
+          const itemOutcomes = Array.isArray(response.outcomes) ? response.outcomes : [];
+          outcomes.push(...itemOutcomes);
+          const publicationFailed = itemOutcomes.some((outcome) =>
+            outcome.uploadStatus !== 'ready' || outcome.publicationStatus !== 'ready'
+          );
+          if (publicationFailed) {
+            const firstFailure = itemOutcomes.find((outcome) => outcome.error) || itemOutcomes[0];
+            failures.push({
+              name: files[index].name,
+              error: firstFailure
+                ? `${firstFailure.audioTrackId ? `Track ${firstFailure.audioTrackId}: ` : ''}${firstFailure.error || `upload=${firstFailure.uploadStatus}, publication=${firstFailure.publicationStatus}`}`
+                : 'Publication did not complete.'
+            });
+          } else {
+            succeeded.push(files[index].name);
+          }
         } catch (error) {
           failures.push({
             name: files[index].name,
@@ -330,14 +357,14 @@
         showStatus(`Processed ${index + 1} of ${files.length} files…`, Math.round(((index + 1) / files.length) * 100));
       }
 
-      const results = { succeeded, failed: failures };
+      const results = { succeeded, failed: failures, outcomes };
       if (succeeded.length > 0) {
         try {
           sessionStorage.setItem(uploadResultsKey, JSON.stringify(results));
         } catch (error) {
           // The count summary still appears when session storage is unavailable.
         }
-        const message = `${succeeded.length} audio track${succeeded.length === 1 ? '' : 's'} created and uploaded.${failures.length > 0 ? ` ${failures.length} failed.` : ''}`;
+        const message = `${succeeded.length} audio track${succeeded.length === 1 ? '' : 's'} uploaded and published.${failures.length > 0 ? ` ${failures.length} require attention; their Track IDs and lifecycle outcomes are listed below.` : ''}`;
         window.location.assign(`/content/manage?message=${encodeURIComponent(message)}`);
         return;
       }

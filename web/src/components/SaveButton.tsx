@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bookmark, BookmarkCheck } from 'lucide-react';
 
@@ -7,6 +7,7 @@ import {
   unsaveContent
 } from '../api/listener';
 import type { LibraryTarget } from '../api/contentSchemas';
+import { captureAccountOperation, isAccountOperationCurrent } from '../api/accountEpoch';
 import styles from './SaveButton.module.css';
 
 export interface SaveButtonProps {
@@ -27,9 +28,16 @@ export const SaveButton = ({
 }: SaveButtonProps) => {
   const queryClient = useQueryClient();
   const [message, setMessage] = useState('');
+  const ownerKey = `${viewerId ?? 'signed-out'}:${target.contentType}:${target.contentId}`;
+  const ownerRef = useRef(ownerKey);
+  const visibleMessage = ownerRef.current === ownerKey ? message : '';
   const mutation = useMutation({
-    mutationFn: () => saved ? unsaveContent(target) : saveContent(target),
-    onSuccess: (result) => {
+    mutationFn: () => saved
+      ? unsaveContent(viewerId ?? '', target)
+      : saveContent(viewerId ?? '', target),
+    onMutate: () => captureAccountOperation(viewerId ?? ''),
+    onSuccess: (result, _variables, guard) => {
+      if (!isAccountOperationCurrent(guard, viewerId ?? '')) return;
       setMessage(result.saved ? 'Saved to your Library.' : 'Removed from your Library.');
       onSavedChange?.(result.saved);
       void Promise.all([
@@ -38,8 +46,18 @@ export const SaveButton = ({
         queryClient.invalidateQueries({ queryKey: ['listener', 'save-statuses'] })
       ]);
     },
-    onError: () => setMessage('Finitude could not update your Library. Try again.')
+    onError: (_error, _variables, guard) => {
+      if (isAccountOperationCurrent(guard, viewerId ?? '')) {
+        setMessage('Finitude could not update your Library. Try again.');
+      }
+    }
   });
+
+  useEffect(() => {
+    ownerRef.current = ownerKey;
+    setMessage('');
+    mutation.reset();
+  }, [ownerKey]);
 
   const signedOut = !viewerId;
   const label = saved ? 'Remove from Library' : 'Save to Library';
@@ -66,7 +84,7 @@ export const SaveButton = ({
         {saved ? <BookmarkCheck aria-hidden="true" /> : <Bookmark aria-hidden="true" />}
         {!compact && <span>{mutation.isPending ? 'Updating…' : label}</span>}
       </button>
-      {message && <span className={styles.message} role={mutation.isError || signedOut ? 'alert' : 'status'}>{message}</span>}
+      {visibleMessage && <span className={styles.message} role={mutation.isError || signedOut ? 'alert' : 'status'}>{visibleMessage}</span>}
     </span>
   );
 };

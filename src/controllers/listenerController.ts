@@ -15,9 +15,16 @@ import {
     LibrarySort
 } from '../models/userLibrary';
 import { boundedSearchQuery } from '../utils/search';
+import { isPlaylistFeatureEnabled } from '../services/playlistFeatureService';
 
 const setPublicCatalogCache = (res: Response) => {
     res.setHeader('Cache-Control', 'public, max-age=60');
+};
+
+/** Exposes only rollout-safe listener feature flags used to hide unavailable UI. */
+export const capabilities = async (_req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({ playlists: isPlaylistFeatureEnabled() });
 };
 
 /** Returns the ordered listener Home without caching viewer-specific sections. */

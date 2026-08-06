@@ -628,6 +628,44 @@ export const createPlayerStore = (
     }
   };
 
+  /** Owns a source-neutral immutable queue launch shared by Albums and Playlists. */
+  const launchQueue: PlayerStore['launchQueue'] = async (
+    queue,
+    initialIndex,
+    launchOptions = {}
+  ) => {
+    if (destroyed) return;
+    if (queue.length === 0) {
+      clearQueue();
+      return;
+    }
+
+    const ownedQueue = copyQueue(queue);
+    const boundedIndex = clamp(
+      Number.isFinite(initialIndex) ? Math.trunc(initialIndex) : 0,
+      0,
+      ownedQueue.length - 1
+    );
+    playOrder = launchOrder(ownedQueue.length, boundedIndex);
+    playOrderPosition = playOrder.indexOf(boundedIndex);
+    actualHistory = [boundedIndex];
+    actualHistoryPosition = 0;
+    updateSnapshot({
+      queue: ownedQueue,
+      currentIndex: boundedIndex,
+      status: 'loading',
+      isBuffering: true,
+      currentTime: 0,
+      duration: 0,
+      error: null
+    });
+    await activateIndex(
+      boundedIndex,
+      launchOptions.autoplay ?? true,
+      playOrderPosition
+    );
+  };
+
   const store: PlayerStore = {
     getSnapshot: () => snapshot,
     getServerSnapshot: () => snapshot,
@@ -636,38 +674,8 @@ export const createPlayerStore = (
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    launchAlbumQueue: async (queue, initialIndex, launchOptions = {}) => {
-      if (destroyed) return;
-      if (queue.length === 0) {
-        clearQueue();
-        return;
-      }
-
-      const ownedQueue = copyQueue(queue);
-      const boundedIndex = clamp(
-        Number.isFinite(initialIndex) ? Math.trunc(initialIndex) : 0,
-        0,
-        ownedQueue.length - 1
-      );
-      playOrder = launchOrder(ownedQueue.length, boundedIndex);
-      playOrderPosition = playOrder.indexOf(boundedIndex);
-      actualHistory = [boundedIndex];
-      actualHistoryPosition = 0;
-      updateSnapshot({
-        queue: ownedQueue,
-        currentIndex: boundedIndex,
-        status: 'loading',
-        isBuffering: true,
-        currentTime: 0,
-        duration: 0,
-        error: null
-      });
-      await activateIndex(
-        boundedIndex,
-        launchOptions.autoplay ?? true,
-        playOrderPosition
-      );
-    },
+    launchQueue,
+    launchAlbumQueue: launchQueue,
     launchStandalone: async (item, launchOptions = {}) => {
       if (destroyed) return;
       const ownedQueue = copyQueue([item]);
@@ -887,7 +895,7 @@ export const playerStore = createPlayerStore({
     enqueueListenerTelemetry({
       category: 'playback_error',
       route: classifyListenerRoute(
-        typeof window === 'undefined' ? '/listen' : window.location.pathname
+        typeof window === 'undefined' ? '/finitude' : window.location.pathname
       ),
       ...event
     });

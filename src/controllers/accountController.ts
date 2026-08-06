@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
-import { ObjectId } from 'mongodb';
 import bcrypt from 'bcryptjs';
-import { getDatabaseClient, getDb } from '../infrastructure/database';
+import { getDb } from '../infrastructure/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import AuthSession from '../models/authSession';
 import AuthIdentity, { AuthProvider } from '../models/authIdentity';
@@ -10,16 +9,7 @@ import User from '../models/user';
 import { recordSecurityEvent } from '../services/securityAuditService';
 import { evaluatePassword } from '../services/passwordPolicyService';
 import { describeSessionDevice } from '../services/deviceSessionService';
-
-const catalogProvenanceCollections = [
-    'artists',
-    'albums',
-    'audioTracks',
-    'carousels',
-    'contentCollections',
-    'pages',
-    'imageAssets'
-];
+import { deleteListenerAccountData } from '../services/accountDeletionService';
 
 /** Lists revocable devices while marking the access token's own session. */
 export const listSessions = async (req: Request, res: Response) => {
@@ -134,45 +124,23 @@ export const unlinkProvider = async (req: Request, res: Response) => {
 /** Deletes personal data while preserving shared-catalog provenance references. */
 export const deleteAccount = async (req: Request, res: Response) => {
     const auth = (req as AuthenticatedRequest).auth!;
-    const db = getDb()!;
-    for (const collection of catalogProvenanceCollections) {
-        const provenanceQuery = collection === 'imageAssets'
-            ? { createdBy: auth.userId, ownerType: { $ne: 'user' } }
-            : { createdBy: auth.userId };
-        if (await db.collection(collection).findOne(provenanceQuery, { projection: { _id: 1 } })) {
-            return res.status(409).json({
-                message: 'Shared catalog records still reference this account as provenance. An administrator must reassign that provenance or delete those records before the account can be removed.'
-            });
-        }
+    const deletion = await deleteListenerAccountData(auth.userId);
+    if (deletion.status === 'sharedProvenance') {
+        return res.status(409).json({
+            message: 'Shared catalog records still reference this account as provenance. An administrator must reassign that provenance or delete those records before the account can be removed.'
+        });
     }
-
-    const user = await User.findById(auth.userId);
-    if (user?.avatarAssetId) {
+    if (deletion.status === 'avatarAttached') {
         return res.status(409).json({
             message: 'The profile avatar must finish deleting before the account can be removed.',
             requiresAvatarDeletion: true
         });
     }
-
-    const databaseSession = getDatabaseClient().startSession();
-    try {
-        await databaseSession.withTransaction(async () => {
-            const options = { session: databaseSession };
-            await db.collection('userSaves').deleteMany({ userId: auth.userId }, options);
-            await db.collection('userActivity').deleteMany({ userId: auth.userId }, options);
-            await db.collection('authActionTokens').deleteMany({ userId: auth.userId }, options);
-            await db.collection('authIdentities').deleteMany({ userId: auth.userId }, options);
-            await db.collection('passkeys').deleteMany({ userId: auth.userId }, options);
-            await db.collection('passkeyChallenges').deleteMany({ userId: auth.userId }, options);
-            await db.collection('avatarMutations').deleteMany({ userId: auth.userId }, options);
-            await db.collection('authSessions').deleteMany({ userId: auth.userId }, options);
-            await db.collection('users').deleteOne(
-                { _id: new ObjectId(auth.userId) },
-                options
-            );
+    if (deletion.status === 'avatarCleanupPending') {
+        return res.status(409).json({
+            code: 'avatar_cleanup_pending',
+            message: 'A profile photo update or cleanup must finish before the account can be removed.'
         });
-    } finally {
-        await databaseSession.endSession();
     }
     recordSecurityEvent('account_deleted', { userId: auth.userId });
     return res.status(204).send();

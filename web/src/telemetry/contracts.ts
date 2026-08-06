@@ -2,6 +2,8 @@ export const listenerRouteNames = [
   'home',
   'search',
   'library',
+  'playlists',
+  'playlist',
   'album',
   'artist',
   'account',
@@ -18,6 +20,7 @@ export type TelemetryStatusBucket =
   | '403'
   | '404'
   | '409'
+  | '428'
   | '422'
   | '429'
   | '5xx'
@@ -40,6 +43,7 @@ export type ListenerTelemetryEvent =
   | {
       category: 'api_error';
       operation:
+        | 'listener_capabilities'
         | 'listener_home'
         | 'listener_search'
         | 'listener_library'
@@ -49,7 +53,16 @@ export type ListenerTelemetryEvent =
         | 'save_status'
         | 'save'
         | 'unsave'
-        | 'recent_activity';
+        | 'recent_activity'
+        | 'playlist_list'
+        | 'playlist_memberships'
+        | 'playlist_detail'
+        | 'playlist_create'
+        | 'playlist_rename'
+        | 'playlist_delete'
+        | 'playlist_add'
+        | 'playlist_remove'
+        | 'playlist_reorder';
       kind: 'http' | 'network' | 'invalid_response';
       statusBucket: TelemetryStatusBucket;
       route: ListenerRouteName;

@@ -139,6 +139,10 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
       await jsonResponse(route, 200, browserCapabilities);
       return;
     }
+    if (call.method === 'GET' && call.pathname === '/api/listener/v1/capabilities') {
+      await jsonResponse(route, 200, { playlists: true });
+      return;
+    }
     if (call.method === 'GET' && call.pathname === '/api/listener/v1/home') {
       await jsonResponse(route, 200, homeFixture);
       return;

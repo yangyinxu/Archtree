@@ -77,28 +77,38 @@ test('production defaults to the single trusted Nginx proxy hop', () => {
 
 test('landing actions expose Finitude while reserving Content Manager for admins', () => {
   const signedOut = renderLandingActions();
-  assert.doesNotMatch(signedOut.headerActions, /href="\/listen">Open Finitude/);
-  assert.match(signedOut.heroActions, /href="\/listen">Open Finitude/);
+  assert.doesNotMatch(signedOut.headerActions, /href="\/finitude">Open Finitude/);
+  assert.match(signedOut.heroActions, /href="\/finitude">Open Finitude/);
   assert.match(signedOut.headerActions, /href="\/auth\/login-web">Log in/);
   assert.match(signedOut.heroActions, /href="\/auth\/signup-web">Create account/);
 
   const signedInUser = renderLandingActions({
+    userId: 'listener-id',
     email: 'listener+<beta>@example.com',
     role: 'user'
   });
-  assert.doesNotMatch(signedInUser.headerActions, /href="\/listen">Open Finitude/);
-  assert.match(signedInUser.heroActions, /href="\/listen">Open Finitude/);
+  assert.doesNotMatch(signedInUser.headerActions, /href="\/finitude">Open Finitude/);
+  assert.match(signedInUser.heroActions, /href="\/finitude">Open Finitude/);
   assert.match(signedInUser.headerActions, /listener\+&lt;beta&gt;@example\.com/);
   assert.doesNotMatch(signedInUser.headerActions, /<beta>/);
   assert.doesNotMatch(signedInUser.headerActions, /content\/manage/);
   assert.doesNotMatch(signedInUser.heroActions, /content\/manage/);
   assert.match(signedInUser.headerActions, /action="\/auth\/logout-web"/);
+  assert.match(signedInUser.headerActions, /name="viewerId" value="listener-id"/);
 
-  const legacyRole = renderLandingActions({ email: 'legacy@example.com', role: 'creator' });
+  const legacyRole = renderLandingActions({
+    userId: 'legacy-id',
+    email: 'legacy@example.com',
+    role: 'creator'
+  });
   assert.doesNotMatch(legacyRole.headerActions, /content\/manage/);
   assert.doesNotMatch(legacyRole.heroActions, /content\/manage/);
 
-  const admin = renderLandingActions({ email: 'admin@example.com', role: 'admin' });
+  const admin = renderLandingActions({
+    userId: 'admin-id',
+    email: 'admin@example.com',
+    role: 'admin'
+  });
   assert.match(admin.headerActions, /href="\/content\/manage">Content Manager/);
   assert.match(admin.heroActions, /href="\/content\/manage">Open Content Manager/);
   assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks">Browse audio tracks/);
@@ -108,7 +118,14 @@ test('listener routes report a clear service error when the bundle is absent', a
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-listener-missing-'));
   const { server, baseUrl } = await listen(path.join(temporaryRoot, 'missing-dist'));
   try {
-    const response = await fetch(`${baseUrl}/listen/library`);
+    const legacyResponse = await fetch(`${baseUrl}/listen/library?sort=recent`, {
+      redirect: 'manual'
+    });
+    assert.equal(legacyResponse.status, 308);
+    assert.equal(legacyResponse.headers.get('location'), '/finitude/library?sort=recent');
+    assertSecurityHeaders(legacyResponse);
+
+    const response = await fetch(`${baseUrl}/finitude/library`);
     assert.equal(response.status, 503);
     assertSecurityHeaders(response);
     assert.match((await response.json()).message, /Build web\/dist/);
@@ -119,10 +136,16 @@ test('listener routes report a clear service error when the bundle is absent', a
     assertSecurityHeaders(authResponse);
     assert.equal((await authResponse.json()).password, true);
 
-    const loginPage = await fetch(`${baseUrl}/auth/login-web`);
-    assert.equal(loginPage.status, 200);
+    const listenerCapabilities = await fetch(`${baseUrl}/api/listener/v1/capabilities`);
+    assert.equal(listenerCapabilities.status, 200);
+    assert.equal(listenerCapabilities.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await listenerCapabilities.json(), { playlists: true });
+
+    const loginPage = await fetch(`${baseUrl}/auth/login-web`, { redirect: 'manual' });
+    assert.equal(loginPage.status, 303);
+    assert.equal(loginPage.headers.get('location'), '/finitude/login?returnTo=%2F');
     assertSecurityHeaders(loginPage, { inlineStyles: true });
-    assert.match(await loginPage.text(), /Log in to Archtree/);
+    assert.equal(loginPage.headers.getSetCookie().length, 0);
 
     const contentManagerRedirect = await fetch(`${baseUrl}/content/manage`, {
       redirect: 'manual'
@@ -139,7 +162,7 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.equal(landingPage.status, 200);
     assertSecurityHeaders(landingPage);
     const landingHtml = await landingPage.text();
-    assert.equal(landingHtml.match(/href="\/listen"/g)?.length, 1);
+    assert.equal(landingHtml.match(/href="\/finitude"/g)?.length, 1);
   } finally {
     await close(server);
     await rm(temporaryRoot, { recursive: true, force: true });
@@ -166,7 +189,7 @@ test('listener caches only manifested assets and reserves SPA fallbacks for rout
 
   const { server, baseUrl } = await listen(distPath);
   try {
-    for (const pathname of ['/listen', '/listen/albums/example']) {
+    for (const pathname of ['/finitude', '/finitude/albums/example']) {
       const response = await fetch(`${baseUrl}${pathname}`);
       assert.equal(response.status, 200);
       assertSecurityHeaders(response);
@@ -174,7 +197,17 @@ test('listener caches only manifested assets and reserves SPA fallbacks for rout
       assert.equal(response.headers.get('cache-control'), 'no-cache');
     }
 
-    const hashedAsset = await fetch(`${baseUrl}/listen/assets/app-1234abcd.js`);
+    for (const [legacyPath, canonicalPath] of [
+      ['/listen', '/finitude'],
+      ['/listen/albums/example?from=bookmark', '/finitude/albums/example?from=bookmark'],
+      ['/listen/assets/app-1234abcd.js', '/finitude/assets/app-1234abcd.js']
+    ]) {
+      const legacyResponse = await fetch(`${baseUrl}${legacyPath}`, { redirect: 'manual' });
+      assert.equal(legacyResponse.status, 308);
+      assert.equal(legacyResponse.headers.get('location'), canonicalPath);
+    }
+
+    const hashedAsset = await fetch(`${baseUrl}/finitude/assets/app-1234abcd.js`);
     assert.equal(hashedAsset.status, 200);
     assertSecurityHeaders(hashedAsset);
     assert.equal(
@@ -182,7 +215,7 @@ test('listener caches only manifested assets and reserves SPA fallbacks for rout
       'public, max-age=31536000, immutable'
     );
 
-    const manifestedStylesheet = await fetch(`${baseUrl}/listen/assets/theme-87654321.css`);
+    const manifestedStylesheet = await fetch(`${baseUrl}/finitude/assets/theme-87654321.css`);
     assert.equal(manifestedStylesheet.status, 200);
     assertSecurityHeaders(manifestedStylesheet);
     assert.equal(
@@ -191,12 +224,12 @@ test('listener caches only manifested assets and reserves SPA fallbacks for rout
     );
 
     for (const filename of ['player-controls.js', 'runtime.js']) {
-      const unmanifestedAsset = await fetch(`${baseUrl}/listen/assets/${filename}`);
+      const unmanifestedAsset = await fetch(`${baseUrl}/finitude/assets/${filename}`);
       assert.equal(unmanifestedAsset.status, 200);
       assert.doesNotMatch(unmanifestedAsset.headers.get('cache-control') ?? '', /immutable/);
     }
 
-    for (const pathname of ['/listen/assets/missing-deadbeef.js', '/listen/missing.css']) {
+    for (const pathname of ['/finitude/assets/missing-deadbeef.js', '/finitude/missing.css']) {
       const missingAsset = await fetch(`${baseUrl}${pathname}`);
       assert.equal(missingAsset.status, 404);
       assert.equal(missingAsset.headers.get('cache-control'), 'no-store');
@@ -322,7 +355,7 @@ test('listener telemetry rejects cross-origin, non-JSON, unbounded, and oversize
       headers: telemetryHeaders(baseUrl, '198.51.100.22'),
       body: JSON.stringify({ events: [{
         ...telemetryEvent,
-        url: '/listen/search?q=private'
+        url: '/finitude/search?q=private'
       }] })
     });
     assert.equal(rawField.status, 422);
@@ -392,7 +425,7 @@ test('unexpected telemetry sink failures emit only bounded server error fields',
   const originalError = console.error;
   const records: string[] = [];
   console.info = () => {
-    throw new Error('listener@example.com /listen/search?q=private access-token');
+    throw new Error('listener@example.com /finitude/search?q=private access-token');
   };
   console.error = (value?: unknown) => { records.push(String(value)); };
   try {

@@ -1,12 +1,67 @@
 import { Request, Response, NextFunction } from 'express';
+import { ObjectId } from 'mongodb';
 import { Album } from '../models/album';
 import { SimpleDate } from '../models/simpleDate';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
-import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
+import {
+    deleteCoverArt,
+    updateCoverArtOwnerAndCleanup,
+    uploadCoverArt,
+    validateCoverArtFile
+} from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
-import { cleanupDeletedContentReferences } from '../services/contentReferenceService';
 import { getPublicAlbum, listPublicAlbums } from '../services/publicCatalogService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
+import { deleteAlbumAndReferences } from '../services/albumLifecycleService';
+
+type UploadedCoverArt = { imageId: string; coverArtUrl: string };
+
+interface NewAlbumPublicationDependencies {
+    saveAlbum?: () => Promise<unknown>;
+    deleteUploadedCoverArt?: (imageId: string, albumId: string) => Promise<void>;
+}
+
+/** Publishes a ready Album only after optional artwork is ready and attached in the insert. */
+export const publishNewAlbum = async (
+    album: Album,
+    coverArt?: UploadedCoverArt,
+    dependencies: NewAlbumPublicationDependencies = {}
+) => {
+    const albumId = album._id?.toHexString();
+    if (!albumId) throw new Error('A server-generated Album ID is required before publication.');
+    if (coverArt) {
+        album.coverArtId = coverArt.imageId;
+        album.coverArtUrl = coverArt.coverArtUrl;
+    }
+
+    try {
+        return await (dependencies.saveAlbum ?? (() => album.save()))();
+    } catch (error) {
+        if (!coverArt || (error as any)?.outcomeUnknown) throw error;
+        try {
+            if (dependencies.deleteUploadedCoverArt) {
+                await dependencies.deleteUploadedCoverArt(coverArt.imageId, albumId);
+            } else {
+                await deleteCoverArt(coverArt.imageId, {
+                    expectedOwnerType: 'album',
+                    expectedOwnerId: albumId
+                });
+            }
+        } catch (cleanupError) {
+            throw Object.assign(
+                new Error('Album creation failed and uploaded cover-art cleanup requires reconciliation.'),
+                {
+                    statusCode: 503,
+                    code: 'album_creation_cleanup_pending',
+                    cleanupPending: true,
+                    reconciliationRequired: true,
+                    cause: { creationError: error, cleanupError }
+                }
+            );
+        }
+        throw error;
+    }
+};
 
 // Create a new album via the model and save it to the db
 export const postAlbum = async (req: Request, res: Response, next: NextFunction) => {
@@ -20,43 +75,58 @@ export const postAlbum = async (req: Request, res: Response, next: NextFunction)
 
     const title: string = req.body.title;
     const coverArtUrl: string = req.body.coverArtUrl;
-    const audioTrackIds: [string] = req.body.audioTrackIds;
+    if (req.body.audioTrackIds !== undefined && !Array.isArray(req.body.audioTrackIds)) {
+        return res.status(400).json({ message: 'audioTrackIds must be an array.' });
+    }
+    const audioTrackIds = (req.body.audioTrackIds ?? []).map(String) as [string];
     const releaseDate: SimpleDate = SimpleDate.fromJson(req.body.releaseDate);
 
     // Create a new album
+    const albumObjectId = new ObjectId();
     const album = new Album(
         title,
         coverArtUrl,
         audioTrackIds,
         releaseDate,
-        authReq.auth.userId
+        authReq.auth.userId,
+        albumObjectId
     );
 
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
 
     try {
         if (coverArtFile) await validateCoverArtFile(coverArtFile);
-        const result = await album.save();
-        const albumId = result.insertedId.toHexString();
-        try {
-            if (coverArtFile) {
-                const coverArt = await uploadCoverArt('album', albumId, coverArtFile, authReq.auth.userId);
-                await Album.updateById(albumId, {
-                    coverArtId: coverArt.imageId,
-                    coverArtUrl: coverArt.coverArtUrl
-                });
-            }
-        } catch (error) {
-            await Album.deleteById(albumId).catch(() => undefined);
-            throw error;
+        const albumId = albumObjectId.toHexString();
+        let coverArt: UploadedCoverArt | undefined;
+        if (coverArtFile) {
+            coverArt = await uploadCoverArt(
+                'album',
+                albumId,
+                coverArtFile,
+                authReq.auth.userId,
+                { allowMissingOwner: true }
+            );
         }
-        const createdAlbum = await Album.findById(albumId);
+        await publishNewAlbum(album, coverArt);
         return res.status(201).json({
             message: `Album ${title} Added Successfully`,
-            album: createdAlbum
+            album
         });
     } catch (error) {
-        console.log(error);
+        if ((error as any)?.outcomeUnknown) {
+            return res.status(503).json({
+                message: 'Album creation outcome could not be confirmed. Reconciliation is required before retrying.',
+                cleanupPending: true,
+                reconciliationRequired: true
+            });
+        }
+        if ((error as any)?.code === 'album_creation_cleanup_pending') {
+            return res.status(503).json({
+                message: 'Album was not created. Uploaded cover-art cleanup requires reconciliation.',
+                cleanupPending: true,
+                reconciliationRequired: true
+            });
+        }
         return next(error);
     }
 };
@@ -71,7 +141,7 @@ export const updateAlbum = async (req: Request, res: Response, next: NextFunctio
     }
 
     const albumId = req.params.albumId;
-    const album = await Album.findById(albumId);
+    const album = await Album.findReadyById(albumId);
     if (!album) {
         return res.status(404).json({ message: 'Album not found.' });
     }
@@ -79,9 +149,16 @@ export const updateAlbum = async (req: Request, res: Response, next: NextFunctio
     const updatePayload: Record<string, unknown> = {};
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
     let replacementCoverArtId: string | undefined;
+    const removeCoverArt = !coverArtFile
+        && String(req.body.removeCoverArt ?? '').toLowerCase() === 'true';
     if (req.body.title !== undefined) updatePayload.title = req.body.title;
     if (req.body.coverArtUrl !== undefined) updatePayload.coverArtUrl = req.body.coverArtUrl;
-    if (req.body.audioTrackIds !== undefined) updatePayload.audioTrackIds = req.body.audioTrackIds;
+    if (req.body.audioTrackIds !== undefined) {
+        if (!Array.isArray(req.body.audioTrackIds)) {
+            return res.status(400).json({ message: 'audioTrackIds must be an array.' });
+        }
+        updatePayload.audioTrackIds = req.body.audioTrackIds.map(String);
+    }
     if (req.body.releaseDate !== undefined) updatePayload.releaseDate = SimpleDate.fromJson(req.body.releaseDate);
 
     if (coverArtFile) {
@@ -89,21 +166,38 @@ export const updateAlbum = async (req: Request, res: Response, next: NextFunctio
         replacementCoverArtId = coverArt.imageId;
         updatePayload.coverArtId = coverArt.imageId;
         updatePayload.coverArtUrl = coverArt.coverArtUrl;
-    } else if (String(req.body.removeCoverArt ?? '').toLowerCase() === 'true') {
-        await deleteCoverArt(album.coverArtId);
+    } else if (removeCoverArt) {
         updatePayload.coverArtId = null;
         updatePayload.coverArtUrl = '';
     }
 
-    await Album.updateById(albumId, updatePayload);
-    let cleanupPending = false;
-    if (replacementCoverArtId && album.coverArtId && album.coverArtId !== replacementCoverArtId) {
-        await deleteCoverArt(album.coverArtId).catch((error) => {
-            cleanupPending = true;
-            console.log(`Unable to delete replaced album cover art ${album.coverArtId}:`, error);
+    const cleanup = await updateCoverArtOwnerAndCleanup(
+        albumId,
+        updatePayload,
+        album.coverArtId,
+        removeCoverArt || Boolean(
+            replacementCoverArtId && album.coverArtId !== replacementCoverArtId
+        ),
+        {
+            ownerType: 'album',
+            updateOwner: (id, update) => Album.updateById(id, update),
+            updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                Album.updateCoverArtById(id, expectedImageId, update)
+        }
+    );
+    if (cleanup.cleanupError) {
+        console.log(`Unable to delete detached album cover art ${album.coverArtId}:`, cleanup.cleanupError);
+    }
+    if (!cleanup.updateApplied) {
+        return res.status((cleanup as any).outcomeUnknown ? 503 : 409).json({
+            message: 'Album was not updated because its cover art changed concurrently or its lifecycle evidence is invalid.',
+            cleanupPending: cleanup.cleanupPending
         });
     }
-    return res.status(200).json({ message: 'Album updated successfully.', cleanupPending });
+    return res.status(200).json({
+        message: 'Album updated successfully.',
+        cleanupPending: cleanup.cleanupPending
+    });
 };
 
 export const deleteAlbum = async (req: Request, res: Response, next: NextFunction) => {
@@ -121,10 +215,17 @@ export const deleteAlbum = async (req: Request, res: Response, next: NextFunctio
         return res.status(404).json({ message: 'Album not found.' });
     }
 
-    await deleteCoverArt(album.coverArtId);
-    await cleanupDeletedContentReferences('album', albumId);
-    await Album.deleteById(albumId);
-    return res.status(200).json({ message: 'Album deleted successfully.' });
+    const cleanup = await deleteAlbumAndReferences(albumId);
+    if (!cleanup.ownerDeleted) {
+        return res.status(409).json({
+            message: 'Album was retained for retry and lifecycle reconciliation.',
+            cleanupPending: true
+        });
+    }
+    return res.status(200).json({
+        message: 'Album deleted successfully.',
+        cleanupPending: cleanup.cleanupPending
+    });
 };
 
 // get an album via the model and return it

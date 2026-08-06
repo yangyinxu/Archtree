@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 
@@ -34,6 +34,69 @@ const audioTrack: AudioTrackSummary = {
   albumTitle: 'Still Water',
   duration: '3:48',
   streamUrl: '/content/audioTrack/stream/track-1'
+};
+
+interface CarouselGeometryOptions {
+  cardGap?: number;
+  cardWidth?: number;
+  clientWidth?: number;
+  scrollLeft?: number;
+  scrollWidth?: number;
+}
+
+/** Supplies the layout geometry that JSDOM does not calculate for overflow collections. */
+const configureCarouselGeometry = (
+  carousel: HTMLUListElement,
+  {
+    cardGap = 20,
+    cardWidth = 100,
+    clientWidth = 240,
+    scrollLeft = 0,
+    scrollWidth = 540
+  }: CarouselGeometryOptions = {}
+) => {
+  let currentClientWidth = clientWidth;
+  let currentScrollLeft = scrollLeft;
+  let currentScrollWidth = scrollWidth;
+  Object.defineProperties(carousel, {
+    clientWidth: {
+      configurable: true,
+      get: () => currentClientWidth
+    },
+    scrollLeft: {
+      configurable: true,
+      get: () => currentScrollLeft,
+      set: (value: number) => { currentScrollLeft = value; }
+    },
+    scrollWidth: {
+      configurable: true,
+      get: () => currentScrollWidth
+    }
+  });
+  Array.from(carousel.children).forEach((child, index) => {
+    Object.defineProperties(child, {
+      offsetLeft: { configurable: true, value: index * (cardWidth + cardGap) },
+      offsetWidth: { configurable: true, value: cardWidth }
+    });
+  });
+  const scrollTo = vi.fn((options: ScrollToOptions) => {
+    if (typeof options.left === 'number') currentScrollLeft = options.left;
+  });
+  Object.defineProperty(carousel, 'scrollTo', {
+    configurable: true,
+    value: scrollTo
+  });
+
+  return {
+    scrollTo,
+    setClientWidth: (value: number) => { currentClientWidth = value; },
+    setScrollLeft: (value: number) => { currentScrollLeft = value; },
+    setScrollWidth: (value: number) => { currentScrollWidth = value; }
+  };
+};
+
+const requestCarouselRemeasure = () => {
+  act(() => window.dispatchEvent(new Event('resize')));
 };
 
 test('Artwork exposes an accessible fallback after image failure', () => {
@@ -147,6 +210,150 @@ test.each(['carousel', 'grid', 'list'] as const)('preserves the %s presentation 
     expect(collection).toHaveAttribute('tabindex', '0');
     expect(collection).toHaveAccessibleName('carousel music carousel');
   }
+});
+
+test('shows only the available carousel directions as overflow moves between edges', async () => {
+  const { container } = render(
+    <MemoryRouter>
+      <PageSection
+        id="overflow-directions"
+        items={[album, audioTrack]}
+        presentation="carousel"
+        title="Overflow picks"
+      />
+    </MemoryRouter>
+  );
+  const carousel = container.querySelector('[data-presentation="carousel"]') as HTMLUListElement;
+  const geometry = configureCarouselGeometry(carousel);
+
+  requestCarouselRemeasure();
+  const next = screen.getByRole('button', { name: 'Show next items in Overflow picks' });
+  expect(screen.queryByRole('button', { name: 'Show previous items in Overflow picks' })).not.toBeInTheDocument();
+  expect(next).toHaveAttribute('aria-controls', 'listener-section-overflow-directions-carousel');
+  expect(screen.getByRole('group', { name: 'Overflow picks carousel controls' })).toBeInTheDocument();
+
+  geometry.setScrollLeft(120);
+  fireEvent.scroll(carousel);
+  expect(screen.getByRole('button', { name: 'Show previous items in Overflow picks' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Show next items in Overflow picks' })).toBeInTheDocument();
+
+  screen.getByRole('button', { name: 'Show next items in Overflow picks' }).focus();
+  geometry.setScrollLeft(300);
+  fireEvent.scroll(carousel);
+  expect(screen.queryByRole('button', { name: 'Show next items in Overflow picks' })).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Show previous items in Overflow picks' })).toHaveFocus();
+  });
+
+  geometry.setScrollLeft(0.5);
+  fireEvent.scroll(carousel);
+  expect(screen.queryByRole('button', { name: 'Show previous items in Overflow picks' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Show next items in Overflow picks' })).toBeInTheDocument();
+});
+
+test('uses stable page and boundary commands without intercepting keys from cards', () => {
+  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false }));
+  const { container } = render(
+    <MemoryRouter>
+      <PageSection
+        id="keyboard-carousel"
+        items={[album, audioTrack]}
+        presentation="carousel"
+        title="Keyboard picks"
+      />
+    </MemoryRouter>
+  );
+  const carousel = container.querySelector('[data-presentation="carousel"]') as HTMLUListElement;
+  const geometry = configureCarouselGeometry(carousel);
+  requestCarouselRemeasure();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show next items in Keyboard picks' }));
+  expect(geometry.scrollTo).toHaveBeenLastCalledWith({ behavior: 'smooth', left: 120 });
+
+  carousel.focus();
+  fireEvent.keyDown(carousel, { key: 'End' });
+  expect(geometry.scrollTo).toHaveBeenLastCalledWith({ behavior: 'smooth', left: 300 });
+  fireEvent.keyDown(carousel, { key: 'Home' });
+  expect(geometry.scrollTo).toHaveBeenLastCalledWith({ behavior: 'smooth', left: 0 });
+  fireEvent.keyDown(carousel, { key: 'PageDown' });
+  expect(geometry.scrollTo).toHaveBeenLastCalledWith({ behavior: 'smooth', left: 120 });
+  fireEvent.keyDown(carousel, { key: 'PageUp' });
+  expect(geometry.scrollTo).toHaveBeenLastCalledWith({ behavior: 'smooth', left: 0 });
+
+  const callCount = geometry.scrollTo.mock.calls.length;
+  fireEvent.keyDown(screen.getByRole('link', { name: 'Still Water, album' }), { key: 'PageDown' });
+  fireEvent.keyDown(carousel, { key: 'ArrowRight' });
+  expect(geometry.scrollTo).toHaveBeenCalledTimes(callCount);
+});
+
+test('uses immediate carousel scrolling when reduced motion is requested', () => {
+  vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+    matches: query === '(prefers-reduced-motion: reduce)'
+  })));
+  const { container } = render(
+    <MemoryRouter>
+      <PageSection
+        id="reduced-motion-carousel"
+        items={[album, audioTrack]}
+        presentation="carousel"
+        title="Quiet movement"
+      />
+    </MemoryRouter>
+  );
+  const carousel = container.querySelector('[data-presentation="carousel"]') as HTMLUListElement;
+  const geometry = configureCarouselGeometry(carousel);
+  requestCarouselRemeasure();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show next items in Quiet movement' }));
+  expect(geometry.scrollTo).toHaveBeenCalledWith({ behavior: 'auto', left: 120 });
+});
+
+test('recalculates carousel overflow with ResizeObserver and item-count changes', () => {
+  let resizeCallback: ResizeObserverCallback | undefined;
+  const observe = vi.fn();
+  const disconnect = vi.fn();
+  class CarouselResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      resizeCallback = callback;
+    }
+
+    disconnect = disconnect;
+    observe = observe;
+  }
+  vi.stubGlobal('ResizeObserver', CarouselResizeObserver);
+
+  const { container, rerender, unmount } = render(
+    <MemoryRouter>
+      <PageSection
+        id="resizing-carousel"
+        items={[album, audioTrack]}
+        presentation="carousel"
+        title="Resizing picks"
+      />
+    </MemoryRouter>
+  );
+  const carousel = container.querySelector('[data-presentation="carousel"]') as HTMLUListElement;
+  const geometry = configureCarouselGeometry(carousel);
+
+  act(() => resizeCallback?.([], {} as ResizeObserver));
+  expect(observe).toHaveBeenCalledWith(carousel);
+  expect(screen.getByRole('button', { name: 'Show next items in Resizing picks' })).toBeInTheDocument();
+
+  geometry.setScrollWidth(240);
+  rerender(
+    <MemoryRouter>
+      <PageSection
+        id="resizing-carousel"
+        items={[album]}
+        presentation="carousel"
+        title="Resizing picks"
+      />
+    </MemoryRouter>
+  );
+  expect(screen.queryByRole('group', { name: 'Resizing picks carousel controls' })).not.toBeInTheDocument();
+
+  unmount();
+  expect(disconnect).toHaveBeenCalled();
 });
 
 test('section presentations describe the rendered card and list artwork widths', () => {

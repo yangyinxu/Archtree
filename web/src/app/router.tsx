@@ -17,6 +17,9 @@ const AlbumPage = lazy(() => import('../features/catalog/AlbumPage').then(({ Alb
 const ArtistPage = lazy(() => import('../features/catalog/ArtistPage').then(({ ArtistPage }) => ({ default: ArtistPage })));
 const HomePage = lazy(() => import('../features/home/HomePage').then(({ HomePage }) => ({ default: HomePage })));
 const LibraryPage = lazy(() => import('../features/library/LibraryPage').then(({ LibraryPage }) => ({ default: LibraryPage })));
+const PlaylistDetailPage = lazy(() => import('../features/playlists/PlaylistDetailPage').then(({ PlaylistDetailPage }) => ({ default: PlaylistDetailPage })));
+const PlaylistFeatureGate = lazy(() => import('../features/playlists/PlaylistFeatureGate').then(({ PlaylistFeatureGate }) => ({ default: PlaylistFeatureGate })));
+const PlaylistIndexPage = lazy(() => import('../features/playlists/PlaylistIndexPage').then(({ PlaylistIndexPage }) => ({ default: PlaylistIndexPage })));
 const SearchPage = lazy(() => import('../features/search/SearchPage').then(({ SearchPage }) => ({ default: SearchPage })));
 
 /** Provides an announced route placeholder while a page-specific bundle loads. */
@@ -45,6 +48,8 @@ export const appRoutes: RouteObject[] = [
       { index: true, element: loadRoute(<HomePage />), errorElement: <RouteErrorPage /> },
       { path: 'search', element: loadRoute(<SearchPage />), errorElement: <RouteErrorPage /> },
       { path: 'library', element: loadRoute(<LibraryPage />), errorElement: <RouteErrorPage /> },
+      { path: 'playlists', element: loadRoute(<PlaylistFeatureGate><PlaylistIndexPage /></PlaylistFeatureGate>), errorElement: <RouteErrorPage /> },
+      { path: 'playlists/:playlistId', element: loadRoute(<PlaylistFeatureGate><PlaylistDetailPage /></PlaylistFeatureGate>), errorElement: <RouteErrorPage /> },
       { path: 'albums/:albumId', element: loadRoute(<AlbumPage />), errorElement: <RouteErrorPage /> },
       { path: 'artists/:artistId', element: loadRoute(<ArtistPage />), errorElement: <RouteErrorPage /> },
       { path: 'login', element: loadRoute(<LoginPage />), errorElement: <RouteErrorPage /> },
@@ -60,5 +65,5 @@ export const appRoutes: RouteObject[] = [
   }
 ];
 
-/** Applies the stable listener base path while retaining native browser history. */
-export const router = createBrowserRouter(appRoutes, { basename: '/listen' });
+/** Applies the stable Finitude base path while retaining native browser history. */
+export const router = createBrowserRouter(appRoutes, { basename: '/finitude' });

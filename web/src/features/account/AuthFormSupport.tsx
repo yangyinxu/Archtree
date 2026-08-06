@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
 import { ApiError } from '../../api/client';
-import styles from '../../styles/Pages.module.css';
+import styles from './AccountSurfaces.module.css';
 
 interface AuthPageFrameProps {
   eyebrow: string;

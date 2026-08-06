@@ -15,6 +15,7 @@ import {
   listenerQueryKeys,
   type LibraryPageOptions
 } from '../../api/listener';
+import { listenerCapabilitiesQuery } from '../../api/listenerCapabilities';
 import {
   browserSessionQuery,
   browserSessionQueryKey
@@ -23,6 +24,7 @@ import { ContentListRow } from '../../components/ContentListRow';
 import { Icon } from '../../components/Icon';
 import { SaveButton } from '../../components/SaveButton';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
+import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton';
 import styles from './LibraryPage.module.css';
 
 const librarySummary = (item: LibraryItem): ContentSummary => item.contentType === 'album'
@@ -52,6 +54,21 @@ const sortOptions: Array<{ value: LibrarySort; label: string }> = [
   { value: 'recentlyPlayed', label: 'Recently Played' }
 ];
 
+/** Keeps Playlists reachable from the Library-owned mobile and tablet hierarchy. */
+const LibrarySections = () => (
+  <LibrarySectionsContent />
+);
+
+const LibrarySectionsContent = () => {
+  const capabilities = useQuery(listenerCapabilitiesQuery());
+  return (
+    <nav aria-label="Library sections" className={styles.sections}>
+      <span aria-current="page">Saved music</span>
+      {capabilities.data?.playlists && <Link to="/playlists">Playlists</Link>}
+    </nav>
+  );
+};
+
 /** Renders the complete mixed Saved Library with server-side filters and cursor pagination. */
 export const LibraryPage = () => {
   const session = useQuery(browserSessionQuery());
@@ -67,7 +84,7 @@ export const LibraryPage = () => {
   }), [selectedTypes, sort]);
   const library = useInfiniteQuery({
     queryKey: listenerQueryKeys.library(viewerId, options),
-    queryFn: ({ pageParam, signal }) => getLibraryPage({
+    queryFn: ({ pageParam, signal }) => getLibraryPage(viewerId, {
       ...options,
       cursor: typeof pageParam === 'string' ? pageParam : undefined
     }, signal),
@@ -101,11 +118,12 @@ export const LibraryPage = () => {
   };
 
   if (session.isPending) {
-    return <div className={styles.page}><div className={styles.state} aria-busy="true">Gathering your Library…</div></div>;
+    return <div className={styles.page}><LibrarySections /><div className={styles.state} aria-busy="true">Gathering your Library…</div></div>;
   }
   if (session.isError) {
     return (
       <div className={styles.page}>
+        <LibrarySections />
         <div className={styles.state} role="alert">
           <h1>Your Library is out of reach</h1>
           <button onClick={() => session.refetch()} type="button">Try again</button>
@@ -116,6 +134,7 @@ export const LibraryPage = () => {
   if (!session.data) {
     return (
       <div className={styles.page}>
+        <LibrarySections />
         <p className={styles.eyebrow}>Saved for you</p>
         <h1 className={styles.title}>Your Library</h1>
         <div className={styles.state}>
@@ -130,6 +149,7 @@ export const LibraryPage = () => {
 
   return (
     <div className={styles.page}>
+      <LibrarySections />
       <div className={styles.heading}>
         <div>
           <p className={styles.eyebrow}>Saved for you</p>
@@ -180,6 +200,9 @@ export const LibraryPage = () => {
                   trailing={(
                     <span className={styles.rowActions}>
                       {!playable && <span className={styles.unavailable}>Unavailable</span>}
+                      {summary.contentType === 'audioTrack' && playable && (
+                        <AddTrackToPlaylistButton track={summary} viewerId={viewerId} />
+                      )}
                       <SaveButton
                         compact
                         onSavedChange={(saved) => {

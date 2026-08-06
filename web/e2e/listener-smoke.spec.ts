@@ -1,7 +1,7 @@
 import { catalogIds } from './fixtures/catalog';
 import { expect, test } from './support/test';
 
-const albumPath = `/listen/albums/${catalogIds.album}`;
+const albumPath = `/finitude/albums/${catalogIds.album}`;
 
 test('opens the listener from the Archtree landing page without replacing account actions', async ({ page }) => {
   const response = await page.goto('/');
@@ -13,7 +13,7 @@ test('opens the listener from the Archtree landing page without replacing accoun
   await expect(page.getByRole('link', { name: 'Create account' })).toHaveCount(2);
 
   await page.getByRole('link', { name: 'Open Finitude' }).click();
-  await expect(page).toHaveURL(/\/listen$/);
+  await expect(page).toHaveURL(/\/finitude$/);
   await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
 });
 
@@ -28,7 +28,7 @@ test('serves a production bundle deep link and survives a document reload', asyn
 });
 
 test('keeps the Album route and persistent player while navigating', async ({ page }) => {
-  await page.goto('/listen');
+  await page.goto('/finitude');
   await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
 
   await page.getByRole('link', { name: 'Quiet Hours, album' }).click();
@@ -53,7 +53,7 @@ test('keeps the Album route and persistent player while navigating', async ({ pa
     .toHaveAttribute('aria-pressed', 'true');
 
   await page.getByRole('link', { name: 'Search' }).click();
-  await expect(page).toHaveURL(/\/listen\/search$/);
+  await expect(page).toHaveURL(/\/finitude\/search$/);
   await expect(player.getByText('First Light', { exact: true })).toBeVisible();
   await expect(controls.getByRole('button', { name: 'Shuffle enabled. Turn shuffle off' }))
     .toHaveAttribute('aria-pressed', 'true');
@@ -65,7 +65,7 @@ test('keeps the Album route and persistent player while navigating', async ({ pa
   await expect(player.getByText('First Light', { exact: true })).toBeVisible();
 
   await page.goForward();
-  await expect(page).toHaveURL(/\/listen\/search$/);
+  await expect(page).toHaveURL(/\/finitude\/search$/);
   await expect(player.getByText('First Light', { exact: true })).toBeVisible();
 });
 
@@ -126,7 +126,7 @@ test('previews seek position and commits pointer or keyboard changes at the expe
 
 test('keeps the desktop player anchored when the wheel originates over it', async ({ page }) => {
   await page.setViewportSize({ width: 1_440, height: 900 });
-  await page.goto('/listen');
+  await page.goto('/finitude');
   await expect(page.getByRole('heading', { level: 2, name: 'Featured albums' })).toBeVisible();
 
   // Force a root scroll range without making the deterministic catalog fixture
@@ -166,7 +166,7 @@ test('keeps the desktop player anchored when the wheel originates over it', asyn
 
 test('scrolls main independently while keeping the desktop player anchored', async ({ page }) => {
   await page.setViewportSize({ width: 1_440, height: 900 });
-  await page.goto('/listen');
+  await page.goto('/finitude');
   await expect(page.getByRole('heading', { level: 2, name: 'Featured albums' })).toBeVisible();
 
   const player = page.getByRole('region', { name: 'Now playing' });
@@ -233,7 +233,7 @@ test('keeps signed-out Save in place without sending a mutation', async ({ api, 
 });
 
 test('activates the skip link and moves focus to main content', async ({ page }) => {
-  await page.goto('/listen');
+  await page.goto('/finitude');
   const skipLink = page.getByRole('link', { name: 'Skip to main content' });
 
   // Safari/WebKit inherits the platform's optional link-tab preference, so begin
@@ -248,7 +248,7 @@ test('activates the skip link and moves focus to main content', async ({ page })
 for (const width of [320, 768, 1_440]) {
   test(`keeps the Home document within a ${width}px viewport`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto('/listen');
+    await page.goto('/finitude');
     await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
 
     const dimensions = await page.evaluate(() => ({
@@ -265,7 +265,7 @@ test.describe('reduced motion', () => {
   test('retains navigation and playback actions', async ({ page }) => {
     // Page media emulation is the cross-engine contract exposed by Playwright.
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto('/listen');
+    await page.goto('/finitude');
     expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
     await page.getByRole('link', { name: 'Quiet Hours, album' }).click();

@@ -56,8 +56,13 @@ export const listenerQueryKeys = {
   ] as const
 };
 
-export const getListenerHome = (signal?: AbortSignal) =>
-  apiRequest(`${listenerBasePath}/home`, listenerHomeSchema, { signal });
+export const getListenerHome = (viewerKey?: string | null, signal?: AbortSignal) => {
+  const viewer = viewerKey?.trim();
+  return apiRequest(`${listenerBasePath}/home`, listenerHomeSchema, {
+    signal,
+    ...(viewer ? { accountViewer: viewer } : {})
+  });
+};
 
 export const getListenerSearch = (query: string, signal?: AbortSignal) => {
   const parameters = new URLSearchParams({ q: normalizedSearchQuery(query) });
@@ -75,7 +80,7 @@ export const getListenerTrack = (audioTrackId: string, signal?: AbortSignal) =>
 
 export const listenerHomeQuery = (viewerKey?: string | null) => queryOptions({
   queryKey: listenerQueryKeys.home(viewerKey),
-  queryFn: ({ signal }) => getListenerHome(signal)
+  queryFn: ({ signal }) => getListenerHome(viewerKey, signal)
 });
 
 export const listenerSearchQuery = (query: string) => {
@@ -105,7 +110,11 @@ export const listenerTrackQuery = (audioTrackId: string) => queryOptions({
   enabled: audioTrackId.trim().length > 0
 });
 
-export const getLibraryPage = (options: LibraryPageOptions = {}, signal?: AbortSignal) => {
+export const getLibraryPage = (
+  viewerKey: string,
+  options: LibraryPageOptions = {},
+  signal?: AbortSignal
+) => {
   const normalized = normalizedLibraryOptions(options);
   const parameters = new URLSearchParams({
     sort: normalized.sort,
@@ -113,7 +122,10 @@ export const getLibraryPage = (options: LibraryPageOptions = {}, signal?: AbortS
   });
   if (normalized.contentTypes.length > 0) parameters.set('types', normalized.contentTypes.join(','));
   if (normalized.cursor) parameters.set('cursor', normalized.cursor);
-  return apiRequest(`${listenerBasePath}/library?${parameters}`, libraryPageSchema, { signal });
+  return apiRequest(`${listenerBasePath}/library?${parameters}`, libraryPageSchema, {
+    signal,
+    accountViewer: viewerKey
+  });
 };
 
 export const libraryPageQuery = (
@@ -121,46 +133,62 @@ export const libraryPageQuery = (
   options: LibraryPageOptions = {}
 ) => queryOptions({
   queryKey: listenerQueryKeys.library(viewerKey, options),
-  queryFn: ({ signal }) => getLibraryPage(options, signal),
+  queryFn: ({ signal }) => getLibraryPage(viewerKey, options, signal),
   enabled: viewerKey.trim().length > 0
 });
 
-export const getSaveStatuses = (items: LibraryTarget[], signal?: AbortSignal) => {
+export const getSaveStatuses = (
+  viewerKey: string,
+  items: LibraryTarget[],
+  signal?: AbortSignal
+) => {
   const targets = libraryTargetSchema.array().max(100).parse(items);
   return apiRequest('/content/me/saves/status', saveStatusesSchema, {
     method: 'POST',
     body: JSON.stringify({ items: targets }),
+    accountViewer: viewerKey,
     signal
   });
 };
 
 export const saveStatusesQuery = (viewerKey: string, items: LibraryTarget[]) => queryOptions({
   queryKey: listenerQueryKeys.saveStatuses(viewerKey, items),
-  queryFn: ({ signal }) => getSaveStatuses(items, signal),
+  queryFn: ({ signal }) => getSaveStatuses(viewerKey, items, signal),
   enabled: viewerKey.trim().length > 0 && items.length > 0
 });
 
-const mutateSave = (target: LibraryTarget, method: 'PUT' | 'DELETE', signal?: AbortSignal) => {
+const mutateSave = (
+  viewerKey: string,
+  target: LibraryTarget,
+  method: 'PUT' | 'DELETE',
+  signal?: AbortSignal
+) => {
   const parsed = libraryTargetSchema.parse(target);
   const path = `/content/me/saves/${parsed.contentType}/${encodeURIComponent(parsed.contentId)}`;
   return apiRequest(path, saveStatusSchema, {
     method,
     body: '{}',
+    accountViewer: viewerKey,
     signal
   });
 };
 
-export const saveContent = (target: LibraryTarget, signal?: AbortSignal) =>
-  mutateSave(target, 'PUT', signal);
+export const saveContent = (viewerKey: string, target: LibraryTarget, signal?: AbortSignal) =>
+  mutateSave(viewerKey, target, 'PUT', signal);
 
-export const unsaveContent = (target: LibraryTarget, signal?: AbortSignal) =>
-  mutateSave(target, 'DELETE', signal);
+export const unsaveContent = (viewerKey: string, target: LibraryTarget, signal?: AbortSignal) =>
+  mutateSave(viewerKey, target, 'DELETE', signal);
 
-export const recordRecentlyPlayed = (target: LibraryTarget, signal?: AbortSignal) => {
+export const recordRecentlyPlayed = (
+  target: LibraryTarget,
+  viewerId: string,
+  signal?: AbortSignal
+) => {
   const parsed = libraryTargetSchema.parse(target);
   return apiRequest('/content/me/recently-played', recentlyPlayedResultSchema, {
     method: 'POST',
     body: JSON.stringify(parsed),
+    accountViewer: viewerId,
     signal
   });
 };
