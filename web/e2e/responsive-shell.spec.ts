@@ -36,6 +36,22 @@ const readShellBoxes = async (page: Page) => {
   } satisfies ShellBoxes;
 };
 
+/** Waits for React-managed desktop panel widths to settle after a viewport change. */
+const waitForExpandedShell = async (page: Page) => {
+  await expect.poll(async () => {
+    const boxes = await readShellBoxes(page);
+    return [
+      boxes.left.left,
+      boxes.left.width,
+      boxes.main.left - boxes.left.right,
+      boxes.main.width,
+      boxes.right.left - boxes.main.right,
+      boxes.right.width,
+      boxes.right.right
+    ].every((actual, index) => Math.abs(actual - [8, 280, 8, 416, 8, 280, 1_000][index]!) <= 1);
+  }).toBe(true);
+};
+
 /** Drags a vertical separator by a physical horizontal distance. */
 const dragSeparator = async (page: Page, label: string, deltaX: number) => {
   const handle = page.getByRole('separator', { name: label });
@@ -57,6 +73,7 @@ test('prioritizes the compact left rail before dismissing Now Playing', async ({
   await page.setViewportSize({ width: 1_008, height: 900 });
   await expect(page.getByText('Your Library', { exact: true })).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Now Playing details' })).toBeVisible();
+  await waitForExpandedShell(page);
   const expanded = await readShellBoxes(page);
   expectNear(expanded.left.left, 8);
   expectNear(expanded.left.width, 280);
