@@ -1,0 +1,97 @@
+.row {
+  align-items: center;
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  list-style: none;
+  min-width: 0;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.row:hover,
+.row:focus-within {
+  background: var(--color-surface-hover);
+}
+
+.trailing {
+  padding-right: var(--space-2);
+}
+
+.action {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  color: var(--color-text);
+  display: flex;
+  font: inherit;
+  gap: var(--space-4);
+  min-height: 4rem;
+  min-width: 0;
+  padding: 0.55rem;
+  text-align: left;
+  text-decoration: none;
+  width: 100%;
+}
+
+button.action {
+  cursor: pointer;
+}
+
+.action:hover {
+  background: transparent;
+}
+
+.action:focus-visible {
+  outline-offset: -3px;
+}
+
+.artwork {
+  width: 3.15rem;
+}
+
+.copy {
+  display: block;
+  min-width: 0;
+}
+
+.title,
+.metadata {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.metadata {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  margin-top: 0.18rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action {
+    transition: none;
+  }
+
+  .row {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .row {
+    border: 1px solid ButtonBorder;
+  }
+
+  .row:focus-within {
+    border-color: Highlight;
+  }
+}

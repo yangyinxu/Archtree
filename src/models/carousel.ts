@@ -1,9 +1,24 @@
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import { ActivitySource, UserLibrary } from './userLibrary';
+import {
+    readyArtistLifecycleFilter,
+    withReadyArtistReferences
+} from '../services/artistReferenceFenceService';
+import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
+import {
+    withReadyCatalogItemReferences
+} from '../services/catalogItemReferenceFenceService';
+import {
+    touchActiveAccount,
+    withActiveAccount
+} from '../services/accountReferenceFenceService';
+import { deleteCarouselAndPageReferences } from '../services/pageReferenceLifecycleService';
 
 const collectionId = 'carousels';
 const maximumManualCarouselItems = 500;
+const readyAudioFilter = readyAudioStorageFilter;
 const toObjectId = (value: string) => {
     try {
         return ObjectId.createFromHexString(value);
@@ -86,10 +101,27 @@ export class Carousel {
 
     save() {
         const db = getDb();
-
-        return db!
-            .collection(collectionId)
-            .insertOne(this);
+        if (this.mode === 'artist' && this.artistConfig) {
+            return withReadyArtistReferences(
+                [this.artistConfig.artistId],
+                async (session, [artistId]) => {
+                    this.artistConfig = { ...this.artistConfig!, artistId };
+                    await touchActiveAccount(this.createdBy, session);
+                    return db!.collection(collectionId).insertOne(this, { session });
+                }
+            );
+        }
+        if (this.mode === 'manual') {
+            return withReadyCatalogItemReferences(this.items, async (session, items) => {
+                this.items = normalizeOrder(items as unknown as CarouselItemRef[]);
+                await touchActiveAccount(this.createdBy, session);
+                return db!.collection(collectionId).insertOne(this, { session });
+            });
+        }
+        return withActiveAccount(
+            this.createdBy,
+            (session) => db!.collection(collectionId).insertOne(this, { session })
+        );
     }
 
     static findById(carouselId: string) {
@@ -112,6 +144,20 @@ export class Carousel {
             .limit(limit)
             .toArray()
             .then((carousels) => this.resolveCarousels(carousels, createdBy));
+    }
+
+    /** Returns a stable global Carousel inventory slice for administrator workflows. */
+    static fetchAll(limit: number = 100, offset: number = 0, viewerUserId?: string) {
+        const db = getDb();
+
+        return db!
+            .collection(collectionId)
+            .find()
+            .sort({ updatedAt: -1, _id: 1 })
+            .skip(offset)
+            .limit(limit)
+            .toArray()
+            .then((carousels) => this.resolveCarousels(carousels, viewerUserId));
     }
 
     static fetchByIds(carouselIds: string[], viewerUserId?: string) {
@@ -152,7 +198,8 @@ export class Carousel {
             if (!viewerUserId || !config || (config.source !== 'recentlySaved' && config.source !== 'recentlyPlayed')) {
                 return { ...carousel, mode, items: [] };
             }
-            const entries = await UserLibrary.recent(viewerUserId, config.source, config.limit);
+            const itemLimit = Math.max(1, Math.min(Number(config.limit ?? 20) || 20, 20));
+            const entries = await UserLibrary.recent(viewerUserId, config.source, 20);
             const db = getDb()!;
             const albumIds = entries
                 .filter((entry) => entry.contentType === 'album')
@@ -164,11 +211,17 @@ export class Carousel {
                 .filter((id): id is ObjectId => id !== null);
             const [albums, audioTracks] = await Promise.all([
                 albumIds.length > 0
-                    ? db.collection('albums').find({ _id: { $in: albumIds } })
+                    ? db.collection('albums').find({
+                        _id: { $in: albumIds },
+                        ...readyAlbumLifecycleFilter
+                    })
                         .project({ _id: 1 }).maxTimeMS(3_000).toArray()
                     : [],
                 audioTrackIds.length > 0
-                    ? db.collection('audioTracks').find({ _id: { $in: audioTrackIds } })
+                    ? db.collection('audioTracks').find({
+                        ...readyAudioFilter,
+                        _id: { $in: audioTrackIds }
+                    })
                         .project({ _id: 1 }).maxTimeMS(3_000).toArray()
                     : []
             ]);
@@ -178,6 +231,7 @@ export class Carousel {
             ]);
             const validItems: CarouselItemRef[] = entries
                 .filter((entry) => validKeys.has(`${entry.contentType}:${entry.contentId}`))
+                .slice(0, itemLimit)
                 .map((entry, order) => ({
                     contentType: entry.contentType,
                     contentId: entry.contentId,
@@ -195,7 +249,7 @@ export class Carousel {
         const db = getDb();
         const artist: any = await db!
             .collection('artists')
-            .find({ _id: artistObjectId })
+            .find({ _id: artistObjectId, ...readyArtistLifecycleFilter })
             .next();
         if (!artist) {
             return { ...carousel, mode, items: [] };
@@ -208,7 +262,8 @@ export class Carousel {
                 'releaseDate.year': -1 as const,
                 'releaseDate.month': -1 as const,
                 'releaseDate.day': -1 as const,
-                title: 1 as const
+                title: 1 as const,
+                _id: 1 as const
             };
         let content: any[] = [];
         if (config.contentType === 'album') {
@@ -219,7 +274,10 @@ export class Carousel {
             )].map((id) => toObjectId(id)).filter((id): id is ObjectId => id !== null);
             content = albumObjectIds.length > 0
                 ? await db!.collection('albums')
-                    .find({ _id: { $in: albumObjectIds } })
+                    .find({
+                        _id: { $in: albumObjectIds },
+                        ...readyAlbumLifecycleFilter
+                    })
                     .sort(sort)
                     .limit(itemLimit)
                     .maxTimeMS(3_000)
@@ -228,7 +286,10 @@ export class Carousel {
         } else {
             content = await db!
                 .collection('audioTracks')
-                .find({ artistIds: config.artistId })
+                .find({
+                    ...readyAudioFilter,
+                    artistIds: { $in: [config.artistId, artistObjectId] }
+                })
                 .sort(sort)
                 .limit(itemLimit)
                 .maxTimeMS(3_000)
@@ -257,18 +318,38 @@ export class Carousel {
     static updateById(carouselId: string, update: Record<string, unknown>) {
         const db = getDb();
         const carouselObjectId = ObjectId.createFromHexString(carouselId);
-
-        return db!
+        const persist = (normalizedUpdate: Record<string, unknown>, session?: ClientSession) => db!
             .collection(collectionId)
             .updateOne(
                 { _id: carouselObjectId },
                 {
                     $set: {
-                        ...update,
+                        ...normalizedUpdate,
                         updatedAt: new Date()
                     }
-                }
+                },
+                session ? { session } : {}
             );
+        const artistConfig = update.mode === 'artist'
+            ? update.artistConfig as ArtistCarouselConfig | undefined
+            : undefined;
+        if (artistConfig) {
+            return withReadyArtistReferences(
+                [artistConfig.artistId],
+                (session, [artistId]) => persist({
+                    ...update,
+                    artistConfig: { ...artistConfig, artistId },
+                    items: []
+                }, session)
+            );
+        }
+        if (Array.isArray(update.items)) {
+            return withReadyCatalogItemReferences(
+                update.items as CarouselItemRef[],
+                (session, items) => persist({ ...update, items }, session)
+            );
+        }
+        return persist(update);
     }
 
     static async addItem(carouselId: string, item: Omit<CarouselItemRef, 'order'>, updatedBy: string, position?: number) {
@@ -343,21 +424,33 @@ export class Carousel {
         const insertAt = Math.max(0, Math.min(toIndex, targetItems.length));
         targetItems.splice(insertAt, 0, movedItem);
 
-        // Persist both sides with normalized ordering so clients can render directly.
-        await this.updateById(sourceCarouselId, {
-            items: normalizeOrder(sourceItems),
-            updatedBy
-        });
-
-        await this.updateById(targetCarouselId, {
-            items: normalizeOrder(targetItems),
-            updatedBy
-        });
-
-        return {
-            sourceItems: normalizeOrder(sourceItems),
-            targetItems: normalizeOrder(targetItems)
-        };
+        const normalizedSourceItems = normalizeOrder(sourceItems);
+        const normalizedTargetItems = normalizeOrder(targetItems);
+        const persisted = await withReadyCatalogItemReferences(
+            [...normalizedSourceItems, ...normalizedTargetItems],
+            async (session, normalizedItems) => {
+                const normalizedSource = normalizedItems.slice(0, normalizedSourceItems.length);
+                const normalizedTarget = normalizedItems.slice(normalizedSourceItems.length);
+                const sourceUpdate = await getDb()!.collection(collectionId).updateOne(
+                    { _id: ObjectId.createFromHexString(sourceCarouselId), mode: 'manual' },
+                    { $set: { items: normalizedSource, updatedBy, updatedAt: new Date() } },
+                    { session }
+                );
+                const targetUpdate = await getDb()!.collection(collectionId).updateOne(
+                    { _id: ObjectId.createFromHexString(targetCarouselId), mode: 'manual' },
+                    { $set: { items: normalizedTarget, updatedBy, updatedAt: new Date() } },
+                    { session }
+                );
+                if (sourceUpdate.matchedCount !== 1 || targetUpdate.matchedCount !== 1) {
+                    throw new Error('Source or target Carousel changed during the move.');
+                }
+                return {
+                    sourceItems: normalizedSource as unknown as CarouselItemRef[],
+                    targetItems: normalizedTarget as unknown as CarouselItemRef[]
+                };
+            }
+        );
+        return persisted;
     }
 
     static async moveItemsBetweenCarousels(sourceCarouselId: string, targetCarouselId: string, fromIndexes: number[], updatedBy: string) {
@@ -386,27 +479,35 @@ export class Carousel {
         const nextSourceItems = normalizeOrder(remainingSourceItems);
         const nextTargetItems = normalizeOrder([...targetItems, ...movedItems]);
 
-        await this.updateById(sourceCarouselId, {
-            items: nextSourceItems,
-            updatedBy
-        });
-        await this.updateById(targetCarouselId, {
-            items: nextTargetItems,
-            updatedBy
-        });
-
-        return {
-            sourceItems: nextSourceItems,
-            targetItems: nextTargetItems
-        };
+        const persisted = await withReadyCatalogItemReferences(
+            [...nextSourceItems, ...nextTargetItems],
+            async (session, normalizedItems) => {
+                const normalizedSource = normalizedItems.slice(0, nextSourceItems.length);
+                const normalizedTarget = normalizedItems.slice(nextSourceItems.length);
+                const sourceUpdate = await getDb()!.collection(collectionId).updateOne(
+                    { _id: ObjectId.createFromHexString(sourceCarouselId), mode: 'manual' },
+                    { $set: { items: normalizedSource, updatedBy, updatedAt: new Date() } },
+                    { session }
+                );
+                const targetUpdate = await getDb()!.collection(collectionId).updateOne(
+                    { _id: ObjectId.createFromHexString(targetCarouselId), mode: 'manual' },
+                    { $set: { items: normalizedTarget, updatedBy, updatedAt: new Date() } },
+                    { session }
+                );
+                if (sourceUpdate.matchedCount !== 1 || targetUpdate.matchedCount !== 1) {
+                    throw new Error('Source or target Carousel changed during the move.');
+                }
+                return {
+                    sourceItems: normalizedSource as unknown as CarouselItemRef[],
+                    targetItems: normalizedTarget as unknown as CarouselItemRef[]
+                };
+            }
+        );
+        return persisted;
     }
 
-    static deleteById(carouselId: string) {
-        const db = getDb();
-        const carouselObjectId = ObjectId.createFromHexString(carouselId);
-
-        return db!
-            .collection(collectionId)
-            .deleteOne({ _id: carouselObjectId });
+    /** Deletes a Carousel only through the atomic Page-detachment lifecycle. */
+    static deleteById(carouselId: string, updatedBy: string) {
+        return deleteCarouselAndPageReferences(carouselId, updatedBy);
     }
 }

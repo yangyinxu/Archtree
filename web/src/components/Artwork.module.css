@@ -1,0 +1,38 @@
+.artwork {
+  align-items: center;
+  aspect-ratio: 1;
+  background: var(--color-surface-raised);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-artwork);
+  color: var(--color-text-subtle);
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  overflow: hidden;
+  width: 100%;
+}
+
+.artist {
+  border-radius: 50%;
+}
+
+.artwork img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.artwork svg {
+  height: 30%;
+  min-height: 1.4rem;
+  min-width: 1.4rem;
+  width: 30%;
+}
+
+@media (forced-colors: active) {
+  .artwork {
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+}

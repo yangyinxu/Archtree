@@ -1,0 +1,96 @@
+name: Finitude Web release gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  browser-release:
+    name: Unit, integration, build, browser, and accessibility gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install the MongoDB integration-test daemon
+        env:
+          MONGODB_CI_VERSION: 8.0.12
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes curl gnupg
+          curl -fsSL https://pgp.mongodb.com/server-8.0.asc \
+            --output "${RUNNER_TEMP}/mongodb-server-8.0.asc"
+          sudo gpg --batch --yes --dearmor \
+            --output /usr/share/keyrings/mongodb-server-8.0.gpg \
+            "${RUNNER_TEMP}/mongodb-server-8.0.asc"
+          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" \
+            | sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install --yes "mongodb-org-server=${MONGODB_CI_VERSION}"
+          mongod --version
+
+      - name: Run server and Web unit tests
+        run: npm test
+
+      - name: Run Mongo-backed lifecycle integration tests
+        run: npm run test:integration
+
+      - name: Build production server and listener
+        run: npm run build
+
+      - name: Type-check browser fixtures and release specs
+        run: npm run typecheck:e2e --workspace @archtree/finitude-web
+
+      - name: Install Playwright browsers and operating-system dependencies
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run production-bundle browser and accessibility tests
+        run: npm run test:e2e -- --update-snapshots=none
+
+      - name: Stage the Elastic Beanstalk deployment artifact
+        run: npm run stage:eb-artifact
+
+      - name: Create the versioned Elastic Beanstalk rollback bundle
+        env:
+          EB_BUNDLE_NAME: archtree-eb-${{ github.sha }}.zip
+        run: |
+          cd elastic-beanstalk-artifact
+          zip -q -r "../${EB_BUNDLE_NAME}" \
+            .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json src tsconfig.json web
+
+      - name: Retain the versioned Elastic Beanstalk rollback bundle
+        uses: actions/upload-artifact@v5
+        with:
+          name: archtree-eb-${{ github.sha }}
+          path: archtree-eb-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Retain browser evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: finitude-web-browser-evidence
+          path: |
+            web/playwright-report
+            web/test-results
+            web/e2e/visual-regression.spec.ts-snapshots/linux
+          if-no-files-found: ignore
+          retention-days: 30

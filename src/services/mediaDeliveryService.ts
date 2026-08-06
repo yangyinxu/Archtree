@@ -7,6 +7,52 @@ export type ByteRange = {
     end: number;
 };
 
+export const mediaResourceClasses = [
+    'playback',
+    'download',
+    'artwork',
+    'avatar',
+    'video'
+] as const;
+export type MediaResourceClass = typeof mediaResourceClasses[number];
+export type MediaRejectionReason = 'global' | 'perIp' | 'playbackReserved';
+export type MediaResponseOutcome = 'success' | 'clientError' | 'serverError' | 'aborted' | 'other';
+
+export interface MediaAdmissionLimitsSnapshot {
+    global: number;
+    perIp: number;
+    playbackReservedGlobal: number;
+    playbackReservedPerIp: number;
+}
+
+type MediaMetricSet = {
+    acceptedRequests: number;
+    activeRequests: number;
+    peakActiveRequests: number;
+    completedStreams: number;
+    abortedStreams: number;
+    failedStreams: number;
+    rejectedRequests: number;
+    rejectionReasons: Record<MediaRejectionReason, number>;
+    responseOutcomes: Record<MediaResponseOutcome, number>;
+};
+
+export interface MediaDeliveryMetricsSnapshot extends MediaMetricSet {
+    limits: MediaAdmissionLimitsSnapshot;
+    byResource: Record<MediaResourceClass, MediaMetricSet>;
+}
+
+export interface MediaDeliveryMetricsRegistry {
+    setAdmissionLimits(limits: MediaAdmissionLimitsSnapshot): void;
+    markRequestAccepted(resourceClass: MediaResourceClass): void;
+    markRequestFinished(resourceClass: MediaResourceClass, outcome: MediaResponseOutcome): void;
+    markRequestRejected(resourceClass: MediaResourceClass, reason: MediaRejectionReason): void;
+    markStreamCompleted(resourceClass: MediaResourceClass): void;
+    markStreamAborted(resourceClass: MediaResourceClass): void;
+    markStreamFailed(resourceClass: MediaResourceClass): void;
+    snapshot(): MediaDeliveryMetricsSnapshot;
+}
+
 /** Honors resumable byte ranges only when the supplied entity validator matches. */
 export const shouldHonorRange = (
     ifRangeHeader: string | undefined,
@@ -33,37 +79,142 @@ export const attachmentContentDisposition = (
     return `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 };
 
-type MediaMetrics = {
-    activeRequests: number;
-    peakActiveRequests: number;
-    completedStreams: number;
-    abortedStreams: number;
-    failedStreams: number;
-    rejectedRequests: number;
-};
-
-const metrics: MediaMetrics = {
+const emptyMetricSet = (): MediaMetricSet => ({
+    acceptedRequests: 0,
     activeRequests: 0,
     peakActiveRequests: 0,
     completedStreams: 0,
     abortedStreams: 0,
     failedStreams: 0,
-    rejectedRequests: 0
+    rejectedRequests: 0,
+    rejectionReasons: {
+        global: 0,
+        perIp: 0,
+        playbackReserved: 0
+    },
+    responseOutcomes: {
+        success: 0,
+        clientError: 0,
+        serverError: 0,
+        aborted: 0,
+        other: 0
+    }
+});
+
+const copyMetricSet = (metrics: MediaMetricSet): MediaMetricSet => ({
+    ...metrics,
+    rejectionReasons: { ...metrics.rejectionReasons },
+    responseOutcomes: { ...metrics.responseOutcomes }
+});
+
+/** Owns bounded, identity-free counters for one application media runtime. */
+export const createMediaDeliveryMetricsRegistry = (): MediaDeliveryMetricsRegistry => {
+    const total = emptyMetricSet();
+    const byResource = Object.fromEntries(
+        mediaResourceClasses.map((resourceClass) => [resourceClass, emptyMetricSet()])
+    ) as Record<MediaResourceClass, MediaMetricSet>;
+    let limits: MediaAdmissionLimitsSnapshot = {
+        global: 0,
+        perIp: 0,
+        playbackReservedGlobal: 0,
+        playbackReservedPerIp: 0
+    };
+
+    const updateBoth = (
+        resourceClass: MediaResourceClass,
+        update: (metrics: MediaMetricSet) => void
+    ) => {
+        update(total);
+        update(byResource[resourceClass]);
+    };
+
+    return {
+        setAdmissionLimits(nextLimits) {
+            limits = { ...nextLimits };
+        },
+        markRequestAccepted(resourceClass) {
+            updateBoth(resourceClass, (metrics) => {
+                metrics.acceptedRequests += 1;
+                metrics.activeRequests += 1;
+                metrics.peakActiveRequests = Math.max(
+                    metrics.peakActiveRequests,
+                    metrics.activeRequests
+                );
+            });
+        },
+        markRequestFinished(resourceClass, outcome) {
+            updateBoth(resourceClass, (metrics) => {
+                metrics.activeRequests = Math.max(0, metrics.activeRequests - 1);
+                metrics.responseOutcomes[outcome] += 1;
+            });
+        },
+        markRequestRejected(resourceClass, reason) {
+            updateBoth(resourceClass, (metrics) => {
+                metrics.rejectedRequests += 1;
+                metrics.rejectionReasons[reason] += 1;
+            });
+        },
+        markStreamCompleted(resourceClass) {
+            updateBoth(resourceClass, (metrics) => {
+                metrics.completedStreams += 1;
+            });
+        },
+        markStreamAborted(resourceClass) {
+            updateBoth(resourceClass, (metrics) => {
+                metrics.abortedStreams += 1;
+            });
+        },
+        markStreamFailed(resourceClass) {
+            updateBoth(resourceClass, (metrics) => {
+                metrics.failedStreams += 1;
+            });
+        },
+        snapshot() {
+            return {
+                ...copyMetricSet(total),
+                limits: { ...limits },
+                byResource: Object.fromEntries(
+                    mediaResourceClasses.map((resourceClass) => [
+                        resourceClass,
+                        copyMetricSet(byResource[resourceClass])
+                    ])
+                ) as Record<MediaResourceClass, MediaMetricSet>
+            };
+        }
+    };
 };
 
-export const getMediaDeliveryMetrics = () => ({ ...metrics });
+export const defaultMediaDeliveryMetrics = createMediaDeliveryMetricsRegistry();
 
-export const markMediaRequestStarted = () => {
-    metrics.activeRequests += 1;
-    metrics.peakActiveRequests = Math.max(metrics.peakActiveRequests, metrics.activeRequests);
+export const getMediaDeliveryMetrics = () => defaultMediaDeliveryMetrics.snapshot();
+
+// Retain the original aggregate hooks for callers outside the classified middleware.
+export const markMediaRequestStarted = (resourceClass: MediaResourceClass = 'playback') => {
+    defaultMediaDeliveryMetrics.markRequestAccepted(resourceClass);
 };
 
-export const markMediaRequestFinished = () => {
-    metrics.activeRequests = Math.max(0, metrics.activeRequests - 1);
+export const markMediaRequestFinished = (resourceClass: MediaResourceClass = 'playback') => {
+    defaultMediaDeliveryMetrics.markRequestFinished(resourceClass, 'other');
 };
 
-export const markMediaRequestRejected = () => {
-    metrics.rejectedRequests += 1;
+export const markMediaRequestRejected = (resourceClass: MediaResourceClass = 'playback') => {
+    defaultMediaDeliveryMetrics.markRequestRejected(resourceClass, 'global');
+};
+
+type MediaDeliveryResponseLocals = {
+    resourceClass: MediaResourceClass;
+    metrics: MediaDeliveryMetricsRegistry;
+};
+
+const metricsForResponse = (res: Response): MediaDeliveryResponseLocals => {
+    const candidate = res.locals?.mediaDelivery as MediaDeliveryResponseLocals | undefined;
+    if (candidate && mediaResourceClasses.includes(candidate.resourceClass)) {
+        return candidate;
+    }
+    return {
+        resourceClass: 'playback',
+        metrics: defaultMediaDeliveryMetrics
+    };
 };
 
 export const parseSingleByteRange = (
@@ -147,16 +298,17 @@ export const pipeMediaStream = async (
     stream: Readable,
     context: ReturnType<typeof createMediaAbortContext>
 ) => {
+    const delivery = metricsForResponse(res);
     context.attachSource(stream);
     try {
         await pipeline(stream, res);
-        metrics.completedStreams += 1;
+        delivery.metrics.markStreamCompleted(delivery.resourceClass);
     } catch (error) {
         if (context.aborted || req.aborted) {
-            metrics.abortedStreams += 1;
+            delivery.metrics.markStreamAborted(delivery.resourceClass);
             return;
         }
-        metrics.failedStreams += 1;
+        delivery.metrics.markStreamFailed(delivery.resourceClass);
         throw error;
     } finally {
         context.cleanup();

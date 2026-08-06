@@ -4,15 +4,18 @@ import User from '../models/user';
 import AuthSession from '../models/authSession';
 import {
     allowsLegacyAuthTokens,
-    getJwtSecret,
-    refreshSession
+    getJwtSecret
 } from '../services/authSessionService';
-import { getCookieValue, setBrowserSessionCookies } from '../services/authCookieService';
+import {
+    getCookieValue,
+    setBrowserSessionPrivacyHeaders
+} from '../services/authCookieService';
+import { normalizeUserRole, UserRole } from '../services/authRoleService';
 
 interface JwtPayload {
     userId: string;
     email: string;
-    role?: string;
+    role?: unknown;
     sessionId?: string;
     tokenType?: 'access';
 }
@@ -20,13 +23,20 @@ interface JwtPayload {
 export interface AuthContext {
     userId: string;
     email: string;
-    role: string;
+    role: UserRole;
     sessionId?: string;
 }
 
 export interface AuthenticatedRequest extends Request {
     auth?: AuthContext;
 }
+
+export const accountViewerMismatchCode = 'account_viewer_mismatch';
+
+const sendAccountViewerMismatch = (res: Response) => res.status(409).json({
+    code: accountViewerMismatchCode,
+    message: 'The active account changed. Refresh the account before trying again.'
+});
 
 /** Prefers API bearer authentication and falls back to the browser access cookie. */
 const getTokenFromRequest = (req: Request) => {
@@ -67,37 +77,16 @@ const attachAuthContext = async (req: Request, replacementToken?: string) => {
     (req as AuthenticatedRequest).auth = {
         userId: decodedToken.userId,
         email: user.email,
-        role: user.role ?? 'user'
-        ,...(decodedToken.sessionId ? { sessionId: decodedToken.sessionId } : {})
+        role: normalizeUserRole(user.role),
+        ...(decodedToken.sessionId ? { sessionId: decodedToken.sessionId } : {})
     };
 
     return (req as AuthenticatedRequest).auth;
 };
 
-/** Refreshes an expired browser access cookie without exposing the refresh token. */
-const attachOrRefreshBrowserAuth = async (req: Request, res: Response) => {
-    try {
-        const auth = await attachAuthContext(req);
-        if (auth) {
-            return auth;
-        }
-    } catch {
-        // An expired or malformed access cookie can still have a valid refresh session.
-    }
-
-    const refreshToken = getCookieValue(req, 'refresh_token');
-    if (!refreshToken) {
-        return null;
-    }
-    const tokens = await refreshSession(refreshToken);
-    if (!tokens) {
-        return null;
-    }
-    setBrowserSessionCookies(res, tokens);
-    return attachAuthContext(req, tokens.accessToken);
-};
-
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+    // Reuse the database-backed context installed by an earlier pre-body guard.
+    if ((req as AuthenticatedRequest).auth) return next();
     try {
         const auth = await attachAuthContext(req);
         if (!auth) {
@@ -110,9 +99,63 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     }
 };
 
-export const requireAuthForWeb = async (req: Request, res: Response, next: NextFunction) => {
+/** Rejects stale Web account actions while leaving Bearer-authenticated native clients compatible. */
+export const requireCurrentAccountViewer = (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    setBrowserSessionPrivacyHeaders(res);
+    const auth = (req as AuthenticatedRequest).auth;
+    if (!auth) {
+        return res.status(401).json({ message: 'Missing or invalid credentials.' });
+    }
+    if (req.get('Authorization')?.startsWith('Bearer ')) return next();
+    const requestedViewer = String(req.get('X-Finitude-Account-Viewer') ?? '').trim();
+    if (!requestedViewer || requestedViewer !== auth.userId) {
+        return sendAccountViewerMismatch(res);
+    }
+    // Successful private Web responses echo the identity fence so the client can
+    // reject a response that lost its account binding in transit.
+    res.setHeader('X-Finitude-Account-Viewer', auth.userId);
+    return next();
+};
+
+/** Fences personalized optional reads while retaining a truly anonymous response. */
+export const requireCurrentAccountViewerWhenAuthenticated = (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    const auth = (req as AuthenticatedRequest).auth;
+    const requestedViewer = String(req.get('X-Finitude-Account-Viewer') ?? '').trim();
+    if (!auth) {
+        return requestedViewer ? sendAccountViewerMismatch(res) : next();
+    }
+    return requireCurrentAccountViewer(req, res, next);
+};
+
+/** Authenticates the listener SPA from its HttpOnly access cookie only. */
+export const requireBrowserAuth = async (req: Request, res: Response, next: NextFunction) => {
+    setBrowserSessionPrivacyHeaders(res);
     try {
-        const auth = await attachOrRefreshBrowserAuth(req, res);
+        const accessCookie = getCookieValue(req, 'session_token');
+        const auth = await attachAuthContext(req, accessCookie);
+        if (!auth) {
+            return res.status(401).json({ message: 'Missing or invalid browser session.' });
+        }
+
+        return next();
+    } catch {
+        return res.status(401).json({ message: 'Authentication failed.' });
+    }
+};
+
+export const requireAuthForWeb = async (req: Request, res: Response, next: NextFunction) => {
+    // Content Manager authenticates before the application body parser runs.
+    if ((req as AuthenticatedRequest).auth) return next();
+    try {
+        const auth = await attachAuthContext(req);
         if (!auth) {
             const returnTo = encodeURIComponent(req.originalUrl || '/content/manage');
             return res.redirect(`/auth/login-web?returnTo=${returnTo}`);
@@ -125,11 +168,36 @@ export const requireAuthForWeb = async (req: Request, res: Response, next: NextF
     }
 };
 
+/** Returns a non-HTML denial when an authenticated Web user is not an administrator. */
+export const requireAdminForWeb = (req: Request, res: Response, next: NextFunction) => {
+    setBrowserSessionPrivacyHeaders(res);
+    const auth = (req as AuthenticatedRequest).auth;
+    if (!auth) {
+        return res.status(401).type('text/plain').send('Missing or invalid credentials.');
+    }
+    if (normalizeUserRole(auth.role) !== 'admin') {
+        return res.status(403).type('text/plain').send('Administrator access is required.');
+    }
+
+    return next();
+};
+
 export const attachOptionalAuth = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        await attachOrRefreshBrowserAuth(req, res);
+        await attachAuthContext(req);
     } catch (error) {
         // Intentionally ignore optional auth parsing errors.
+    }
+
+    return next();
+};
+
+/** Adds an optional viewer without rotating cookies during a public GET. */
+export const attachOptionalAccessAuth = async (req: Request, _res: Response, next: NextFunction) => {
+    try {
+        await attachAuthContext(req);
+    } catch {
+        // Expired or malformed credentials degrade to the public response.
     }
 
     return next();
@@ -147,24 +215,12 @@ export const requireAuthWhenPresented = async (
     return next();
 };
 
-export const ensureOwnerOrAdmin = (req: AuthenticatedRequest, ownerId: string) => {
-    if (!req.auth) {
-        return false;
-    }
-
-    if (req.auth.role === 'admin') {
-        return true;
-    }
-
-    return req.auth.userId === ownerId;
-};
-
 export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
     const auth = (req as AuthenticatedRequest).auth;
     if (!auth) {
         return res.status(401).json({ message: 'Missing or invalid credentials.' });
     }
-    if (auth.role !== 'admin') {
+    if (normalizeUserRole(auth.role) !== 'admin') {
         return res.status(403).json({ message: 'Administrator access is required.' });
     }
 

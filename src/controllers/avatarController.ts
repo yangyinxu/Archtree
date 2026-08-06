@@ -9,8 +9,11 @@ import {
     releaseAvatarMutation
 } from '../services/avatarMutationService';
 import {
-    deleteAvatarAsset,
+    AvatarMutationOutcomeUnknownError,
+    cleanupDetachedAvatarAssets,
+    deleteAvatarOwnerAndAllAssets,
     getAvatarObject,
+    replaceAvatarOwnerAndCleanup,
     uploadAvatar
 } from '../services/avatarStorageService';
 import { createMediaAbortContext, pipeMediaStream } from '../services/mediaDeliveryService';
@@ -43,10 +46,48 @@ const sendMutationResult = (res: Response, result: { statusCode: number; body?: 
     return res.status(result.statusCode).send();
 };
 
+/** Binds optional Web avatar reads to the session projection that requested them. */
+export const assertAvatarReadIdentity = (
+    req: Request,
+    authenticatedUserId: string,
+    user: Record<string, any> | null
+) => {
+    const requestedViewer = String(req.get('X-Finitude-Avatar-Viewer') ?? '').trim();
+    const requestedRevision = String(req.get('X-Finitude-Avatar-Revision') ?? '').trim();
+    if (requestedViewer && requestedViewer !== authenticatedUserId) {
+        throw Object.assign(new Error('The profile photo identity changed. Refresh the account.'), {
+            statusCode: 409
+        });
+    }
+    if (!requestedRevision) return;
+    const parsedRevision = Number(requestedRevision);
+    if (!Number.isSafeInteger(parsedRevision) || parsedRevision < 0) {
+        throw Object.assign(new Error('A valid avatar revision is required.'), { statusCode: 400 });
+    }
+    if (parsedRevision !== revisionOf(user)) {
+        throw Object.assign(new Error('The profile photo changed. Refresh the account.'), {
+            statusCode: 409
+        });
+    }
+};
+
+/** Prevents a stale Web page from mutating the account that replaced its cookie session. */
+export const assertAvatarMutationViewer = (req: Request, authenticatedUserId: string) => {
+    const requestedViewer = String(req.get('X-Finitude-Avatar-Viewer') ?? '').trim();
+    if (requestedViewer && requestedViewer !== authenticatedUserId) {
+        throw Object.assign(new Error('The active account changed. Refresh the account.'), {
+            statusCode: 409
+        });
+    }
+};
+
 /** Streams only the current avatar owned by the authenticated account. */
 export const getAvatar = async (req: Request, res: Response, next: NextFunction) => {
     const auth = (req as AuthenticatedRequest).auth!;
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     const user = await User.findById(auth.userId) as Record<string, any> | null;
+    assertAvatarReadIdentity(req, auth.userId, user);
     const imageId = String(user?.avatarAssetId ?? '');
     if (!imageId) return res.status(404).json({ message: 'Avatar not found.' });
 
@@ -69,8 +110,6 @@ export const getAvatar = async (req: Request, res: Response, next: NextFunction)
         res.setHeader('Content-Type', String(result.asset.contentType));
         // The app owns an account-scoped cache that it can erase on logout.
         // Shared URL caches must never retain authenticated avatar bytes.
-        res.setHeader('Cache-Control', 'private, no-store');
-        res.setHeader('X-Content-Type-Options', 'nosniff');
         if (result.object.ETag) res.setHeader('ETag', result.object.ETag);
         if (result.object.ContentLength !== undefined) {
             res.setHeader('Content-Length', result.object.ContentLength);
@@ -91,6 +130,7 @@ export const putAvatar = async (req: Request, res: Response, next: NextFunction)
     const auth = (req as AuthenticatedRequest).auth!;
     let mutationId = '';
     try {
+        assertAvatarMutationViewer(req, auth.userId);
         const { idempotencyKey, expectedRevision } = mutationHeaders(req);
         const mutation = await beginAvatarMutation(auth.userId, idempotencyKey, 'replace', expectedRevision);
         mutationId = mutation.mutationId;
@@ -116,36 +156,54 @@ export const putAvatar = async (req: Request, res: Response, next: NextFunction)
 
         const replacementId = await uploadAvatar(auth.userId, uploadFile);
         const previousId = String(user.avatarAssetId ?? '');
-        const replacement = await User.replaceAvatar(auth.userId, expectedRevision, replacementId);
-        const previousUser = replacement.value as Record<string, any> | null;
-        if (!previousUser) {
-            await deleteAvatarAsset(replacementId, auth.userId).catch(() => undefined);
-            const current = await User.findById(auth.userId) as Record<string, any> | null;
-            const result = { statusCode: 409, body: { message: 'Avatar changed on another device.', ...avatarProfile(current) } };
+        const replacement = await replaceAvatarOwnerAndCleanup(
+            replacementId,
+            auth.userId,
+            previousId,
+            expectedRevision,
+            () => User.replaceAvatar(auth.userId, expectedRevision, replacementId),
+            () => User.findById(auth.userId) as Promise<Record<string, any> | null>
+        );
+        if (!replacement.ownerReplaced) {
+            const current = replacement.currentOwner
+                ?? await User.findById(auth.userId) as Record<string, any> | null;
+            const result = {
+                statusCode: 409,
+                body: {
+                    message: 'Avatar changed on another device.',
+                    ...avatarProfile(current),
+                    cleanupPending: replacement.cleanupPending
+                }
+            };
             await completeAvatarMutation(mutationId, result);
             return sendMutationResult(res, result);
         }
 
-        let cleanupPending = false;
-        if (previousId && previousId !== replacementId) {
-            try {
-                await deleteAvatarAsset(previousId, auth.userId);
-            } catch {
-                cleanupPending = true;
-            }
-        }
+        const detachedCleanup = await cleanupDetachedAvatarAssets(auth.userId);
+
         const revision = expectedRevision + 1;
         const result = {
             statusCode: 200,
             body: {
                 avatarRevision: revision,
                 avatar: { assetId: replacementId, revision },
-                cleanupPending
+                cleanupPending: replacement.cleanupPending || detachedCleanup.cleanupPending
             }
         };
         await completeAvatarMutation(mutationId, result);
         return sendMutationResult(res, result);
     } catch (error) {
+        if (error instanceof AvatarMutationOutcomeUnknownError && mutationId) {
+            const result = {
+                statusCode: 503,
+                body: {
+                    message: 'Avatar update outcome could not be confirmed. Reconciliation is required.',
+                    cleanupPending: true
+                }
+            };
+            await completeAvatarMutation(mutationId, result).catch(() => undefined);
+            return sendMutationResult(res, result);
+        }
         if (mutationId) await releaseAvatarMutation(mutationId).catch(() => undefined);
         return next(error);
     }
@@ -156,6 +214,7 @@ export const deleteAvatar = async (req: Request, res: Response, next: NextFuncti
     const auth = (req as AuthenticatedRequest).auth!;
     let mutationId = '';
     try {
+        assertAvatarMutationViewer(req, auth.userId);
         const { idempotencyKey, expectedRevision } = mutationHeaders(req);
         const mutation = await beginAvatarMutation(auth.userId, idempotencyKey, 'delete', expectedRevision);
         mutationId = mutation.mutationId;
@@ -174,29 +233,67 @@ export const deleteAvatar = async (req: Request, res: Response, next: NextFuncti
         }
         const imageId = String(user.avatarAssetId ?? '');
         if (!imageId) {
+            const cleanup = await cleanupDetachedAvatarAssets(auth.userId);
             const result = {
                 statusCode: 200,
-                body: { avatarRevision: expectedRevision, avatar: null }
+                body: {
+                    avatarRevision: expectedRevision,
+                    avatar: null,
+                    cleanupPending: cleanup.cleanupPending
+                }
             };
             await completeAvatarMutation(mutationId, result);
             return sendMutationResult(res, result);
         }
 
-        await deleteAvatarAsset(imageId, auth.userId);
-        const cleared = await User.clearAvatar(auth.userId, expectedRevision, imageId);
-        if (!cleared.value) {
+        const deletion = await deleteAvatarOwnerAndAllAssets(
+            imageId,
+            auth.userId,
+            () => User.clearAvatar(auth.userId, expectedRevision, imageId),
+            {
+                confirmOwnerCleared: async () => {
+                    const current = await User.findById(auth.userId) as Record<string, any> | null;
+                    return Boolean(current)
+                        && revisionOf(current) === expectedRevision + 1
+                        && !String(current?.avatarAssetId ?? '');
+                }
+            }
+        );
+        if (!deletion.ownerCleared) {
             const current = await User.findById(auth.userId) as Record<string, any> | null;
-            const result = { statusCode: 409, body: { message: 'Avatar changed on another device.', ...avatarProfile(current) } };
+            const result = {
+                statusCode: 409,
+                body: {
+                    message: 'Avatar changed on another device.',
+                    ...avatarProfile(current),
+                    cleanupPending: true
+                }
+            };
             await completeAvatarMutation(mutationId, result);
             return sendMutationResult(res, result);
         }
         const result = {
             statusCode: 200,
-            body: { avatarRevision: expectedRevision + 1, avatar: null }
+            body: {
+                avatarRevision: expectedRevision + 1,
+                avatar: null,
+                cleanupPending: deletion.cleanupPending
+            }
         };
         await completeAvatarMutation(mutationId, result);
         return sendMutationResult(res, result);
     } catch (error) {
+        if (error instanceof AvatarMutationOutcomeUnknownError && mutationId) {
+            const result = {
+                statusCode: 503,
+                body: {
+                    message: 'Avatar deletion outcome could not be confirmed. Reconciliation is required.',
+                    cleanupPending: true
+                }
+            };
+            await completeAvatarMutation(mutationId, result).catch(() => undefined);
+            return sendMutationResult(res, result);
+        }
         if (mutationId) await releaseAvatarMutation(mutationId).catch(() => undefined);
         return next(error);
     }

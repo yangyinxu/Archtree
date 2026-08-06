@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getAuthenticationCapabilities } from '../src/services/authCapabilitiesService';
+import {
+    getAuthenticationCapabilities,
+    getBrowserAuthenticationCapabilities
+} from '../src/services/authCapabilitiesService';
 
 test('reports only password when optional authentication providers are absent', () => {
     assert.deepEqual(getAuthenticationCapabilities({}), {
@@ -32,6 +35,14 @@ test('requires complete email and HTTPS passkey configuration', () => {
     assert.equal(complete.passkey, true);
 });
 
+test('requires a code pepper before advertising email registration', () => {
+    const capabilities = getAuthenticationCapabilities({
+        AUTH_EMAIL_FROM: 'auth@example.com',
+        AWS_REGION: 'us-east-1'
+    });
+    assert.equal(capabilities.emailRegistration, false);
+});
+
 test('accepts comma-separated provider audiences only when one is non-empty', () => {
     const capabilities = getAuthenticationCapabilities({
         APPLE_CLIENT_IDS: ' , com.example.app ',
@@ -39,4 +50,22 @@ test('accepts comma-separated provider audiences only when one is non-empty', ()
     });
     assert.equal(capabilities.apple, true);
     assert.equal(capabilities.google, true);
+});
+
+test('browser capabilities never inherit native-only provider configuration', () => {
+    assert.deepEqual(getBrowserAuthenticationCapabilities({
+        AUTH_EMAIL_FROM: 'auth@example.com',
+        AWS_REGION: 'us-east-1',
+        JWT_SECRET: 'test-pepper',
+        APPLE_CLIENT_IDS: 'com.example.native',
+        GOOGLE_CLIENT_IDS: 'native-client-id',
+        WEBAUTHN_RP_ID: 'auth.example.com',
+        WEBAUTHN_ORIGIN: 'https://auth.example.com'
+    }), {
+        password: true,
+        emailRegistration: true,
+        apple: false,
+        google: false,
+        passkey: false
+    });
 });

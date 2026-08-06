@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { getDb } from '../infrastructure/database';
+import { getDatabaseClient, getDb } from '../infrastructure/database';
+import { touchActiveAccount } from './accountReferenceFenceService';
 
 export type AvatarMutationKind = 'replace' | 'delete';
 export type AvatarMutationResult = { statusCode: number; body?: Record<string, unknown> };
@@ -15,6 +16,11 @@ type AvatarMutationRecord = {
     completedAt?: Date;
     expiresAt: Date;
 };
+
+export interface AvatarMutationReservationDependencies {
+    /** Test-only coordination point after the pending receipt is written. */
+    afterReservationWritten?: () => Promise<void>;
+}
 
 let indexPromise: Promise<string> | null = null;
 
@@ -37,43 +43,74 @@ export const beginAvatarMutation = async (
     userId: string,
     idempotencyKey: string,
     kind: AvatarMutationKind,
-    expectedRevision: number
+    expectedRevision: number,
+    dependencies: AvatarMutationReservationDependencies = {}
 ) => {
     const _id = mutationId(userId, idempotencyKey);
     const collection = getDb()!.collection<AvatarMutationRecord>('avatarMutations');
     await ensureExpirationIndex();
+    const session = getDatabaseClient().startSession();
+    let created = false;
+    let existing: AvatarMutationRecord | null = null;
+    let conflictingPending = false;
     try {
-        const createdAt = new Date();
-        await collection.insertOne({
-            _id,
-            userId,
-            kind,
-            expectedRevision,
-            status: 'pending',
-            createdAt,
-            expiresAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1_000)
+        await session.withTransaction(async () => {
+            created = false;
+            existing = null;
+            conflictingPending = false;
+            await touchActiveAccount(userId, session);
+            existing = await collection.findOne({ _id }, { session });
+            if (existing) return;
+            conflictingPending = Boolean(await collection.findOne(
+                { userId, status: 'pending' },
+                { session, projection: { _id: 1 } }
+            ));
+            if (conflictingPending) return;
+
+            const createdAt = new Date();
+            await collection.insertOne({
+                _id,
+                userId,
+                kind,
+                expectedRevision,
+                status: 'pending',
+                createdAt,
+                expiresAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1_000)
+            }, { session });
+            created = true;
+            await dependencies.afterReservationWritten?.();
         });
+    } finally {
+        await session.endSession();
+    }
+
+    if (created) {
         return { mutationId: _id, isOwner: true, result: undefined };
-    } catch (error: any) {
-        if (error?.code !== 11000) throw error;
-        const existing = await collection.findOne({ _id });
-        if (!existing || existing.userId !== userId
-            || existing.kind !== kind || existing.expectedRevision !== expectedRevision) {
-            return {
-                mutationId: _id,
-                isOwner: false,
-                result: { statusCode: 409, body: { message: 'Idempotency key was reused for another operation.' } }
-            };
-        }
-        if (existing.status === 'completed' && existing.result) {
-            return { mutationId: _id, isOwner: false, result: existing.result };
-        }
+    }
+    if (conflictingPending) {
         return {
             mutationId: _id,
             isOwner: false,
-            result: { statusCode: 409, body: { message: 'The avatar operation is still in progress.' } }
+            result: { statusCode: 409, body: { message: 'Another avatar operation is still in progress.' } }
         };
     }
+    const prior = existing as AvatarMutationRecord | null;
+    if (!prior || prior.userId !== userId
+        || prior.kind !== kind || prior.expectedRevision !== expectedRevision) {
+        return {
+            mutationId: _id,
+            isOwner: false,
+            result: { statusCode: 409, body: { message: 'Idempotency key was reused for another operation.' } }
+        };
+    }
+    if (prior.status === 'completed' && prior.result) {
+        return { mutationId: _id, isOwner: false, result: prior.result };
+    }
+    return {
+        mutationId: _id,
+        isOwner: false,
+        result: { statusCode: 409, body: { message: 'The avatar operation is still in progress.' } }
+    };
 };
 
 export const completeAvatarMutation = async (id: string, result: AvatarMutationResult) => {

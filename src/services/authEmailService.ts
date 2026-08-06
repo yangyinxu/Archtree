@@ -1,10 +1,19 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { AuthActionPurpose } from '../models/authActionToken';
 
+/** Reports whether every server-side prerequisite for issuing auth email codes exists. */
+export const hasAuthEmailConfiguration = (
+    environment: NodeJS.ProcessEnv = process.env
+) => Boolean(
+    String(environment.AUTH_EMAIL_FROM ?? '').trim()
+    && String(environment.AWS_REGION ?? '').trim()
+    && String(environment.AUTH_CODE_PEPPER ?? environment.JWT_SECRET ?? '').trim()
+);
+
 /** Fails before account mutation when the deployment cannot deliver auth mail. */
 export const requireAuthEmailConfiguration = () => {
     const sender = String(process.env.AUTH_EMAIL_FROM ?? '').trim();
-    if (!sender || !process.env.AWS_REGION) {
+    if (!hasAuthEmailConfiguration()) {
         const error = new Error('Authentication email delivery is not configured.') as Error & {
             statusCode?: number;
         };

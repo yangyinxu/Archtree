@@ -6,7 +6,7 @@ import { SimpleDate } from '../models/simpleDate';
 import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { ContentCollection } from '../models/contentCollection';
-import { AuthenticatedRequest, ensureOwnerOrAdmin } from '../middleware/authMiddleware';
+import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { parseBuffer, parseFile } from 'music-metadata';
 import { ObjectId } from 'mongodb';
 import { normalizeUtf8Text } from '../utils/textEncoding';
@@ -26,12 +26,35 @@ import {
     deleteAudioObjectAndTrack,
     uploadAudioObject
 } from '../services/audioStorageService';
-import { cleanupDeletedContentReferences, validateOwnedContentReferences } from '../services/contentReferenceService';
-import { deleteCoverArt, uploadCoverArt, validateCoverArtFile } from '../services/imageStorageService';
+import { validateContentReferences } from '../services/contentReferenceService';
+import {
+    attachCoverArtToNewOwner,
+    updateCoverArtOwnerAndCleanup,
+    uploadCoverArt,
+    validateCoverArtFile
+} from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
 import { boundedSearchQuery } from '../utils/search';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
 import { renderPageItemsHierarchy } from '../views/contentManager/pageItemsView';
+import {
+    ManagementInventoryPage,
+    managementInventoryOffset,
+    managementInventoryPageSize,
+    normalizeManagementInventoryPage,
+    toManagementInventoryPage
+} from '../views/contentManager/inventoryPagination';
+import { searchPublicCatalog } from '../services/publicCatalogService';
+import { boundedLimit } from '../utils/pagination';
+import { deleteArtistAndReferences } from '../services/artistLifecycleService';
+import { deleteAlbumAndReferences } from '../services/albumLifecycleService';
+import {
+    linkReadyAudioTracksToAlbum,
+    publishUploadedAudioTracks
+} from '../services/albumTrackLinkService';
+import { retryAudioTrackPublications } from '../services/audioPublicationRecoveryService';
+import { publishNewArtist } from './artistController';
+import { publishNewAlbum } from './albumController';
 
 const parseCsv = (value: string) => {
     return value
@@ -81,6 +104,97 @@ const uniqueStrings = (values: string[]) => {
     return [...new Set(values.filter(Boolean))];
 };
 
+const inventoryQueryNames = {
+    artists: 'artistsPage',
+    albums: 'albumsPage',
+    audioTracks: 'audioTracksPage',
+    pages: 'pagesPage',
+    carousels: 'carouselsPage',
+    contentCollections: 'contentCollectionsPage'
+} as const;
+
+type InventoryKey = keyof typeof inventoryQueryNames;
+type InventoryPaginationEntry = Omit<ManagementInventoryPage<unknown>, 'items'>;
+type InventoryPagination = Record<InventoryKey, InventoryPaginationEntry>;
+
+const requestedInventoryPages = (query: Request['query']) => Object.fromEntries(
+    Object.entries(inventoryQueryNames).map(([key, queryName]) => [
+        key,
+        normalizeManagementInventoryPage(query[queryName])
+    ])
+) as Record<InventoryKey, number>;
+
+const inventoryOffsetFor = (pages: Record<InventoryKey, number>, key: InventoryKey) =>
+    managementInventoryOffset(pages[key]);
+
+const inventoryLimit = managementInventoryPageSize + 1;
+
+/** Loads one bounded, global page for every shared-content management type. */
+const loadGlobalManagementInventory = async (req: Request) => {
+    const requestedPages = requestedInventoryPages(req.query);
+    const [artistRecords, albumRecords, audioTrackRecords, pageRecords, carouselRecords, collectionRecords] = await Promise.all([
+        Artist.fetchAll(inventoryLimit, inventoryOffsetFor(requestedPages, 'artists')),
+        Album.fetchAll(inventoryLimit, inventoryOffsetFor(requestedPages, 'albums')),
+        AudioTrack.fetchAll(inventoryLimit, inventoryOffsetFor(requestedPages, 'audioTracks')),
+        Page.fetchAll(inventoryLimit, inventoryOffsetFor(requestedPages, 'pages')),
+        Carousel.fetchAll(inventoryLimit, inventoryOffsetFor(requestedPages, 'carousels')),
+        ContentCollection.fetchAll(inventoryLimit, inventoryOffsetFor(requestedPages, 'contentCollections'))
+    ]);
+    const artists = toManagementInventoryPage(artistRecords, requestedPages.artists);
+    const albums = toManagementInventoryPage(albumRecords, requestedPages.albums);
+    const audioTracks = toManagementInventoryPage(audioTrackRecords, requestedPages.audioTracks);
+    const pages = toManagementInventoryPage(pageRecords, requestedPages.pages);
+    const carousels = toManagementInventoryPage(carouselRecords, requestedPages.carousels);
+    const contentCollections = toManagementInventoryPage(collectionRecords, requestedPages.contentCollections);
+    const withoutItems = ({ page, hasPrevious, hasNext }: ManagementInventoryPage<unknown>) => ({
+        page,
+        hasPrevious,
+        hasNext
+    });
+
+    return {
+        catalogArtists: artists.items,
+        catalogAlbums: albums.items,
+        catalogAudioTracks: audioTracks.items,
+        catalogPages: pages.items,
+        catalogCarousels: carousels.items,
+        catalogContentCollections: contentCollections.items,
+        inventoryPagination: {
+            artists: withoutItems(artists),
+            albums: withoutItems(albums),
+            audioTracks: withoutItems(audioTracks),
+            pages: withoutItems(pages),
+            carousels: withoutItems(carousels),
+            contentCollections: withoutItems(contentCollections)
+        }
+    };
+};
+
+const renderInventoryPagination = (
+    key: InventoryKey,
+    label: string,
+    pagination: InventoryPagination
+) => {
+    const state = pagination[key];
+    if (!state.hasPrevious && !state.hasNext) return '';
+    const linkFor = (page: number) => {
+        const query = new URLSearchParams();
+        for (const [inventoryKey, queryName] of Object.entries(inventoryQueryNames)) {
+            const selectedPage = inventoryKey === key ? page : pagination[inventoryKey as InventoryKey].page;
+            if (selectedPage > 1) query.set(queryName, String(selectedPage));
+        }
+        const serialized = query.toString();
+        return `/content/manage${serialized ? `?${serialized}` : ''}#inventory-${key}`;
+    };
+    const previous = state.hasPrevious
+        ? `<a class="button button--secondary" href="${linkFor(state.page - 1)}">Previous ${escapeHtml(label)}</a>`
+        : '';
+    const next = state.hasNext
+        ? `<a class="button button--secondary" href="${linkFor(state.page + 1)}">Next ${escapeHtml(label)}</a>`
+        : '';
+    return `<nav class="inventory-pagination" aria-label="${escapeHtml(label)} pages">${previous}<span>Page ${state.page}</span>${next}</nav>`;
+};
+
 
 const renderSectionList = (title: string, items: any[], formatter: (item: any) => string) => {
     const content = items.length > 0
@@ -102,7 +216,7 @@ const renderReferencedItem = (item: any, label: string, prefillType?: string) =>
 };
 
 const renderMissingReference = (id: string) => {
-    return `Unavailable content (<code>${escapeHtml(id)}</code>)`;
+    return `Not loaded on this inventory page (<code>${escapeHtml(id)}</code>)`;
 };
 
 const renderNestedList = (items: string[]) => {
@@ -112,6 +226,7 @@ const renderNestedList = (items: string[]) => {
 };
 
 const renderManagePage = (params: {
+    userId: string;
     userEmail: string;
     isAdmin?: boolean;
     message?: string;
@@ -120,12 +235,13 @@ const renderManagePage = (params: {
     artists?: any[];
     albums?: any[];
     audioTracks?: any[];
-    ownedArtists?: any[];
-    ownedAlbums?: any[];
-    ownedAudioTracks?: any[];
-    ownedPages?: any[];
-    ownedCarousels?: any[];
-    ownedContentCollections?: any[];
+    catalogArtists?: any[];
+    catalogAlbums?: any[];
+    catalogAudioTracks?: any[];
+    catalogPages?: any[];
+    catalogCarousels?: any[];
+    catalogContentCollections?: any[];
+    inventoryPagination?: InventoryPagination;
     s3StorageSummary?: S3StorageSummary | null;
     s3StorageSummaryError?: string;
     prefillArtistId?: string;
@@ -145,56 +261,60 @@ const renderManagePage = (params: {
     const audioTracks = params.audioTracks ?? [];
     const selectedUploadTrackId = escapeHtml(params.selectedUploadTrackId ?? '');
 
-    const ownedArtists = params.ownedArtists ?? [];
-    const ownedAlbums = params.ownedAlbums ?? [];
-    const ownedAudioTracks = params.ownedAudioTracks ?? [];
-    const ownedPages = params.ownedPages ?? [];
-    const ownedCarousels = params.ownedCarousels ?? [];
-    const ownedContentCollections = params.ownedContentCollections ?? [];
+    const catalogArtists = params.catalogArtists ?? [];
+    const catalogAlbums = params.catalogAlbums ?? [];
+    const catalogAudioTracks = params.catalogAudioTracks ?? [];
+    const catalogPages = params.catalogPages ?? [];
+    const catalogCarousels = params.catalogCarousels ?? [];
+    const catalogContentCollections = params.catalogContentCollections ?? [];
+    const inventoryPagination = params.inventoryPagination;
+    const paginationFor = (key: InventoryKey, label: string) => inventoryPagination
+        ? renderInventoryPagination(key, label, inventoryPagination)
+        : '';
     const s3StorageSummary = params.s3StorageSummary ?? null;
     const s3StorageSummaryError = params.s3StorageSummaryError ?? '';
     const s3StorageBlock = s3StorageSummary
         ? `<div class="storage-summary"><strong>S3 storage</strong><span>${formatStorageSize(s3StorageSummary.totalBytes)} across ${s3StorageSummary.objectCount} object${s3StorageSummary.objectCount === 1 ? '' : 's'}</span><span>Estimated storage: $${s3StorageSummary.estimatedMonthlyStorageCost.toFixed(2)}/month</span><small>Storage-only estimate at $${s3StorageSummary.storageCostPerGbMonth.toFixed(3)}/GB-month; excludes requests, transfer, and taxes.</small></div>`
         : `<div class="storage-summary"><strong>S3 storage</strong><span>Usage unavailable${s3StorageSummaryError ? ` (${escapeHtml(s3StorageSummaryError)})` : ''}. Confirm the app has S3 ListBucket permission and that S3_BUCKET_NAME/AWS_REGION match the bucket.</span></div>`;
-    const pageOptions = ownedPages.map((page) => {
+    const pageOptions = catalogPages.map((page) => {
         const slug = String(page.slug ?? '');
         return `<option value="${escapeHtml(slug)}">${escapeHtml(String(page.title ?? slug))} (${escapeHtml(slug)})</option>`;
     }).join('');
-    const carouselOptions = ownedCarousels.map((carousel) => {
+    const carouselOptions = catalogCarousels.map((carousel) => {
         const id = contentId(carousel);
         const dynamicLabel = carousel.mode === 'artist'
             ? ' · Artist'
             : carousel.mode === 'personalized' ? ' · Personalized' : '';
         return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}${dynamicLabel}</option>`;
     }).join('');
-    const manualCarouselOptions = ownedCarousels
+    const manualCarouselOptions = catalogCarousels
         .filter((carousel) => carousel.mode === 'manual' || !carousel.mode)
         .map((carousel) => {
             const id = contentId(carousel);
             return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}</option>`;
         }).join('');
-    const artistCarouselOptions = ownedCarousels
+    const artistCarouselOptions = catalogCarousels
         .filter((carousel) => carousel.mode === 'artist')
         .map((carousel) => {
             const id = contentId(carousel);
             return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled artist carousel'))}</option>`;
         }).join('');
-    const personalizedCarouselOptions = ownedCarousels
+    const personalizedCarouselOptions = catalogCarousels
         .filter((carousel) => carousel.mode === 'personalized')
         .map((carousel) => {
             const id = contentId(carousel);
             return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled personalized carousel'))}</option>`;
         }).join('');
-    const artistOptions = ownedArtists.map((artist) => {
+    const artistOptions = catalogArtists.map((artist) => {
         const id = contentId(artist);
         return `<option value="${escapeHtml(id)}">${escapeHtml(String(artist.name ?? 'Untitled artist'))}</option>`;
     }).join('');
-    const albumOptions = ownedAlbums.map((album) => {
+    const albumOptions = catalogAlbums.map((album) => {
         const id = contentId(album);
         return `<option value="${escapeHtml(id)}">${escapeHtml(String(album.title ?? 'Untitled album'))}</option>`;
     }).join('');
     const compositionData = JSON.stringify({
-        pages: ownedPages.map((page) => ({
+        pages: catalogPages.map((page) => ({
             slug: String(page.slug ?? ''),
             title: String(page.title ?? page.slug ?? ''),
             items: Array.isArray(page.items) ? page.items.map((item: any) => ({
@@ -204,7 +324,7 @@ const renderManagePage = (params: {
                 order: Number(item.order ?? 0)
             })) : []
         })),
-        carousels: ownedCarousels.map((carousel) => ({
+        carousels: catalogCarousels.map((carousel) => ({
             id: contentId(carousel),
             name: String(carousel.name ?? 'Untitled carousel'),
             mode: carousel.mode === 'artist' ? 'artist' : carousel.mode === 'personalized' ? 'personalized' : 'manual',
@@ -212,15 +332,15 @@ const renderManagePage = (params: {
             personalizedConfig: carousel.personalizedConfig ?? null,
             items: Array.isArray(carousel.items) ? carousel.items.map((item: any) => ({ contentId: String(item.contentId ?? ''), contentType: String(item.contentType ?? 'Content'), order: Number(item.order ?? 0) })) : []
         })),
-        contentCollections: ownedContentCollections.map((collection) => ({
+        contentCollections: catalogContentCollections.map((collection) => ({
             id: contentId(collection),
             name: String(collection.name ?? 'Untitled collection'),
             presentation: String(collection.presentation ?? ''),
             mode: String(collection.mode ?? 'manual'),
             dynamicSource: collection.dynamicSource ? String(collection.dynamicSource) : null
         })),
-        albums: ownedAlbums.map((album) => ({ id: contentId(album), title: String(album.title ?? '') })),
-        audioTracks: ownedAudioTracks.map((track) => ({ id: contentId(track), title: String(track.title ?? '') }))
+        albums: catalogAlbums.map((album) => ({ id: contentId(album), title: String(album.title ?? '') })),
+        audioTracks: catalogAudioTracks.map((track) => ({ id: contentId(track), title: String(track.title ?? '') }))
     }).replace(/</g, '\\u003c');
     const prefillArtistId = escapeHtml(params.prefillArtistId ?? '');
     const prefillAlbumId = escapeHtml(params.prefillAlbumId ?? '');
@@ -259,6 +379,8 @@ const renderManagePage = (params: {
     .move-item-choice input { flex: 0 0 auto; margin: 0; }
     .manager-nav { display: flex; gap: 8px; margin: 18px 0 24px; overflow-x: auto; padding-bottom: 4px; }
     .manager-nav a { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); padding: 7px 12px; font-size: 13px; font-weight: 700; text-decoration: none; }
+    .inventory-pagination { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+    .inventory-pagination span { color: var(--muted); font-size: 14px; font-weight: 700; }
     .card h3:not(:first-child) { margin-top: 24px; }
     hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
   </style>
@@ -273,10 +395,10 @@ const renderManagePage = (params: {
       <p class="muted">Signed in as <strong>${escapeHtml(params.userEmail)}</strong></p>
     </div>
     <div class="header-actions">
-      <a class="button" href="/content/manage/audio-tracks">My Audio Tracks</a>
+      <a class="button" href="/content/manage/audio-tracks">Audio Tracks</a>
       ${params.isAdmin ? '<a class="button button--secondary" href="/admin/audio-storage/reconciliation">Audit Audio Storage</a><a class="button button--secondary" href="/admin/image-storage/reconciliation">Audit Image Storage</a>' : ''}
       <a class="button button--secondary" href="/">Home</a>
-      <form method="POST" action="/auth/logout-web"><button class="button--secondary" type="submit">Log out</button></form>
+      <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(params.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
     </div>
   </header>
   ${messageBlock}
@@ -287,7 +409,7 @@ const renderManagePage = (params: {
   ${s3StorageBlock}
   <nav class="manager-nav" aria-label="Content Manager sections">
     <a href="#search">Search</a>
-    <a href="#my-content">My Content</a>
+    <a href="#catalog-content">Catalog</a>
     <a href="#composition">Composition</a>
     <a href="#create">Create</a>
     <a href="#quick-linking">Quick Linking</a>
@@ -300,18 +422,19 @@ const renderManagePage = (params: {
       <input type="text" name="q" value="${searchQuery}" placeholder="Search artist, album, track" required />
       <button type="submit">Search</button>
     </form>
-    ${renderSectionList('Artists', artists, (item) => `${escapeHtml(item.name ?? '')} (<code>${escapeHtml(String(item._id ?? ''))}</code>)`)}
-    ${renderSectionList('Albums', albums, (item) => `${escapeHtml(item.title ?? '')} (<code>${escapeHtml(String(item._id ?? ''))}</code>)`)}
-    ${renderSectionList('Audio Tracks', audioTracks, (item) => `${escapeHtml(item.title ?? '')} (<code>${escapeHtml(String(item._id ?? ''))}</code>)`)}
+    ${renderSectionList('Artists', artists, (item) => renderReferencedItem(item, String(item.name ?? ''), 'artist'))}
+    ${renderSectionList('Albums', albums, (item) => renderReferencedItem(item, String(item.title ?? ''), 'album'))}
+    ${renderSectionList('Audio Tracks', audioTracks, (item) => renderReferencedItem(item, String(item.title ?? ''), 'audioTrack'))}
   </div>
 
-  <div class="section-heading" id="my-content"><div><p class="eyebrow">Library</p><h2>My Content</h2></div></div>
+  <div class="section-heading" id="catalog-content"><div><p class="eyebrow">Global inventory</p><h2>Catalog Content</h2></div></div>
   <div class="card">
-    <h3>My Artists</h3>
+    <section id="inventory-artists">
+    <h3>Artists</h3>
     <div class="content-hierarchy">
-      ${ownedArtists.length > 0 ? ownedArtists.map((artist) => {
+      ${catalogArtists.length > 0 ? catalogArtists.map((artist) => {
           const linkedAlbumIds = uniqueStrings(Array.isArray(artist.albumIds) ? artist.albumIds.map(String) : []);
-          const albumsById = new Map(ownedAlbums.map((album) => [contentId(album), album]));
+          const albumsById = new Map(catalogAlbums.map((album) => [contentId(album), album]));
           const linkedAlbums = linkedAlbumIds.map((albumId) => {
               const album = albumsById.get(albumId);
               if (!album) return renderMissingReference(albumId);
@@ -322,16 +445,19 @@ const renderManagePage = (params: {
           return `<div class="hierarchy-item"><strong>${renderReferencedItem(artist, String(artist.name ?? ''), 'artist')}</strong><span>${linkedAlbumIds.length} linked album${linkedAlbumIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedAlbums)}</div>`;
       }).join('') : '<p class="empty-linked-content">No artists yet.</p>'}
     </div>
+    ${paginationFor('artists', 'Artists')}
+    </section>
 
-    <h3>My Albums</h3>
+    <section id="inventory-albums">
+    <h3>Albums</h3>
     <div class="content-hierarchy">
-      ${ownedAlbums.length > 0 ? ownedAlbums.map((album) => {
+      ${catalogAlbums.length > 0 ? catalogAlbums.map((album) => {
           const albumId = contentId(album);
           const linkedTrackIds = uniqueStrings([
               ...(Array.isArray(album.audioTrackIds) ? album.audioTrackIds.map(String) : []),
-              ...ownedAudioTracks.filter((track) => String(track.albumId ?? '') === albumId).map(contentId)
+              ...catalogAudioTracks.filter((track) => String(track.albumId ?? '') === albumId).map(contentId)
           ]);
-          const tracksById = new Map(ownedAudioTracks.map((track) => [contentId(track), track]));
+          const tracksById = new Map(catalogAudioTracks.map((track) => [contentId(track), track]));
           const linkedTracks = linkedTrackIds.map((trackId) => {
               const track = tracksById.get(trackId);
               if (!track) return renderMissingReference(trackId);
@@ -343,19 +469,34 @@ const renderManagePage = (params: {
           return `<form class="hierarchy-item" data-batch-track-delete method="POST" action="/content/manage/album/delete-audio-tracks"><input type="hidden" name="albumId" value="${escapeHtml(albumId)}" /><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked track${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}${selectableTrackCount > 0 ? '<div class="batch-track-actions"><button class="select-all-tracks button--secondary" type="button">Select all</button><button class="batch-delete-button" data-danger type="submit" disabled>Delete selected tracks</button></div>' : ''}</form>`;
       }).join('') : '<p class="empty-linked-content">No albums yet.</p>'}
     </div>
+    ${paginationFor('albums', 'Albums')}
+    </section>
 
-        ${renderPageItemsHierarchy(ownedPages, ownedCarousels, ownedContentCollections)}
-        <h3>My Carousels</h3>
+        <section id="inventory-audioTracks">
+          <h3>Audio Tracks</h3>
+          <div class="content-hierarchy">
+            ${catalogAudioTracks.length > 0 ? catalogAudioTracks.map((track) => `<div class="hierarchy-item"><strong>${renderReferencedItem(track, String(track.title ?? ''), 'audioTrack')}</strong><span>${escapeHtml(String(track.uploadStatus ?? 'legacy'))}</span></div>`).join('') : '<p class="empty-linked-content">No audio tracks yet.</p>'}
+          </div>
+          ${paginationFor('audioTracks', 'Audio Tracks')}
+        </section>
+
+        <section id="inventory-pages">
+          ${renderPageItemsHierarchy(catalogPages, catalogCarousels, catalogContentCollections)}
+          ${paginationFor('pages', 'Pages')}
+        </section>
+
+        <section id="inventory-carousels">
+        <h3>Carousels</h3>
         <div class="content-hierarchy">
-          ${ownedCarousels.length > 0 ? ownedCarousels.map((carousel) => {
+          ${catalogCarousels.length > 0 ? catalogCarousels.map((carousel) => {
               const items = Array.isArray(carousel.items) ? [...carousel.items].sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0)) : [];
               const isArtistCarousel = carousel.mode === 'artist';
               const isPersonalizedCarousel = carousel.mode === 'personalized';
               const artistName = isArtistCarousel
-                  ? String(ownedArtists.find((artist) => contentId(artist) === String(carousel.artistConfig?.artistId ?? ''))?.name ?? 'Unavailable artist')
+                  ? String(catalogArtists.find((artist) => contentId(artist) === String(carousel.artistConfig?.artistId ?? ''))?.name ?? 'Artist not loaded on this inventory page')
                   : '';
-              const albumsById = new Map(ownedAlbums.map((album) => [contentId(album), album]));
-              const tracksById = new Map(ownedAudioTracks.map((track) => [contentId(track), track]));
+              const albumsById = new Map(catalogAlbums.map((album) => [contentId(album), album]));
+              const tracksById = new Map(catalogAudioTracks.map((track) => [contentId(track), track]));
               const carouselItems = items.map((item: any) => {
                   const itemId = String(item.contentId ?? '');
                   if (item.contentType === 'album' && albumsById.has(itemId)) {
@@ -375,6 +516,20 @@ const renderManagePage = (params: {
               return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><div class="item-meta">${dynamicSummary}<span>${items.length} item${items.length === 1 ? '' : 's'}</span></div>${renderNestedList(carouselItems)}</div>`;
           }).join('') : '<p class="empty-linked-content">No carousels yet.</p>'}
         </div>
+        ${paginationFor('carousels', 'Carousels')}
+        </section>
+
+        <section id="inventory-contentCollections">
+          <h3>Content Collections</h3>
+          <div class="content-hierarchy">
+            ${catalogContentCollections.length > 0 ? catalogContentCollections.map((collection) => {
+                const presentation = String(collection.presentation ?? 'collection');
+                const mode = collection.mode === 'dynamic' ? 'Dynamic' : 'Manual';
+                return `<div class="hierarchy-item"><strong>${renderReferencedItem(collection, String(collection.name ?? 'Untitled collection'))}</strong><span>${escapeHtml(presentation)} · ${mode}</span></div>`;
+            }).join('') : '<p class="empty-linked-content">No content collections yet.</p>'}
+          </div>
+          ${paginationFor('contentCollections', 'Content Collections')}
+        </section>
   </div>
 
     <div class="section-heading" id="composition"><div><p class="eyebrow">Presentation</p><h2>Composition</h2></div></div>
@@ -483,9 +638,10 @@ const renderManagePage = (params: {
             <h3>Move Items Between Carousels</h3>
             <form class="move-carousel-items" method="POST" action="/content/manage/composition/carousel/move-item">
                 <select class="move-source-carousel" name="sourceCarouselId" required><option value="" disabled selected>Select source carousel</option>${manualCarouselOptions}</select>
-                <p class="drag-help">Select the items to move. They will keep their order and be added to the end of the destination carousel.</p>
+                <p class="drag-help">Load the source through Carousel pagination, then select the items to move. They keep their order and are added to the destination.</p>
                 <ul class="move-item-list" aria-live="polite"><li class="empty-linked-content">Choose a source carousel to see its items.</li></ul>
-                <select class="move-target-carousel" name="targetCarouselId" required><option value="" disabled selected>Select destination carousel</option>${manualCarouselOptions}</select>
+                <input class="move-target-carousel" name="targetCarouselId" list="move-target-carousel-options" placeholder="Destination carousel ID" required />
+                <datalist id="move-target-carousel-options">${manualCarouselOptions}</datalist>
                 <button class="move-selected-items" type="submit" disabled>Move Selected Items</button>
             </form>
 
@@ -498,7 +654,7 @@ const renderManagePage = (params: {
         </div>
     </div>
 
-    <script id="composition-data" type="application/json">${compositionData}</script>
+    <div id="composition-data" hidden>${escapeHtml(compositionData)}</div>
 
   <div class="section-heading" id="create"><div><p class="eyebrow">New records</p><h2>Create</h2></div></div>
   <div class="grid">
@@ -670,17 +826,25 @@ const renderManagePage = (params: {
     </div>
   </div>
   </main>
+  <script src="/assets/browser-session-forms.js"></script>
   <script src="/assets/content-manager.js"></script>
 </body>
 </html>`;
 };
 
-const getOwnerId = (doc: any) => {
+const getContentProvenanceId = (doc: any) => {
     return String(doc?.createdBy ?? '');
 };
 
 const redirectWithMessage = (res: Response, message: string) => {
     res.redirect(`/content/manage?message=${encodeURIComponent(message)}`);
+};
+
+/** Keeps controller-level Content Manager access admin-only if route guards are bypassed. */
+const rejectNonAdminManagerRequest = (req: AuthenticatedRequest, res: Response) => {
+    if (req.auth?.role === 'admin') return false;
+    res.status(403).type('text/plain').send('Administrator access is required.');
+    return true;
 };
 
 const respondToUploadError = (req: Request, res: Response, message: string, status: number = 400) => {
@@ -696,9 +860,19 @@ export const renderAudioTracksPageForWeb = async (req: Request, res: Response, n
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage%2Faudio-tracks');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
-        const tracks = await AudioTrack.fetchByCreator(authReq.auth.userId);
-        return res.status(200).send(renderAudioTracksPage(authReq.auth.email, tracks));
+        const page = normalizeManagementInventoryPage(req.query.page);
+        const records = await AudioTrack.fetchAll(
+            inventoryLimit,
+            managementInventoryOffset(page)
+        );
+        const tracks = toManagementInventoryPage(records, page);
+        return res.status(200).send(renderAudioTracksPage(authReq.auth.userId, authReq.auth.email, tracks.items, {
+            page: tracks.page,
+            hasPrevious: tracks.hasPrevious,
+            hasNext: tracks.hasNext
+        }));
     } catch (error) {
         return next(error);
     }
@@ -710,15 +884,10 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
-        const ownedByUser = authReq.auth.userId;
-        const [ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels, ownedContentCollections, s3StorageSummaryResult] = await Promise.all([
-            Artist.fetchByCreator(ownedByUser),
-            Album.fetchByCreator(ownedByUser),
-            AudioTrack.fetchByCreator(ownedByUser),
-            Page.fetchByCreator(ownedByUser),
-            Carousel.fetchByCreator(ownedByUser),
-            ContentCollection.fetchByCreator(ownedByUser),
+        const [inventory, s3StorageSummaryResult] = await Promise.all([
+            loadGlobalManagementInventory(req),
             loadS3StorageSummary()
         ]);
 
@@ -739,7 +908,7 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
             try {
                 if (prefillType === 'artist') {
                     const artist = await Artist.findById(prefillId);
-                    if (artist && ensureOwnerOrAdmin(authReq, getOwnerId(artist))) {
+                    if (artist) {
                         prefillArtist = artist;
                         prefillArtistId = prefillId;
                     } else if (!message) {
@@ -749,7 +918,7 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
 
                 if (prefillType === 'album') {
                     const album = await Album.findById(prefillId);
-                    if (album && ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
+                    if (album) {
                         prefillAlbum = album;
                         prefillAlbumId = prefillId;
                     } else if (!message) {
@@ -759,7 +928,7 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
 
                 if (prefillType === 'audioTrack') {
                     const track = await AudioTrack.findById(prefillId);
-                    if (track && ensureOwnerOrAdmin(authReq, getOwnerId(track))) {
+                    if (track) {
                         prefillAudioTrack = track;
                         prefillAudioTrackId = prefillId;
                     } else if (!message) {
@@ -774,16 +943,12 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
         }
 
         return res.status(200).send(renderManagePage({
+            userId: authReq.auth.userId,
             userEmail: authReq.auth.email,
             isAdmin: authReq.auth.role === 'admin',
             message,
             selectedUploadTrackId,
-            ownedArtists,
-            ownedAlbums,
-            ownedAudioTracks,
-            ownedPages,
-            ownedCarousels,
-            ownedContentCollections,
+            ...inventory,
             s3StorageSummary: s3StorageSummaryResult.summary,
             s3StorageSummaryError: s3StorageSummaryResult.errorCode,
             prefillArtistId,
@@ -804,26 +969,22 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const rawQuery = boundedSearchQuery(req.query.q);
         const selectedUploadTrackId = String(req.query.uploadAudioTrackId ?? '');
-        const parsedLimit = Number(req.query.limit ?? 10);
-        const limit = Number.isNaN(parsedLimit) ? 10 : Math.max(1, Math.min(parsedLimit, 50));
+        const limit = boundedLimit(req.query.limit, 10, 50);
 
-        const [artists, albums, audioTracks, ownedArtists, ownedAlbums, ownedAudioTracks, ownedPages, ownedCarousels, ownedContentCollections, s3StorageSummaryResult] = await Promise.all([
+        const [artists, albums, audioTracks, inventory, s3StorageSummaryResult] = await Promise.all([
             rawQuery ? Artist.searchByName(rawQuery, limit) : Promise.resolve([]),
             rawQuery ? Album.searchByTitle(rawQuery, limit) : Promise.resolve([]),
             rawQuery ? AudioTrack.searchByTitle(rawQuery, limit) : Promise.resolve([]),
-            Artist.fetchByCreator(authReq.auth.userId),
-            Album.fetchByCreator(authReq.auth.userId),
-            AudioTrack.fetchByCreator(authReq.auth.userId),
-            Page.fetchByCreator(authReq.auth.userId),
-            Carousel.fetchByCreator(authReq.auth.userId),
-            ContentCollection.fetchByCreator(authReq.auth.userId),
+            loadGlobalManagementInventory(req),
             loadS3StorageSummary()
         ]);
 
         return res.status(200).send(renderManagePage({
+            userId: authReq.auth.userId,
             userEmail: authReq.auth.email,
             isAdmin: authReq.auth.role === 'admin',
             searchQuery: rawQuery,
@@ -831,12 +992,7 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
             artists,
             albums,
             audioTracks,
-            ownedArtists,
-            ownedAlbums,
-            ownedAudioTracks,
-            ownedPages,
-            ownedCarousels,
-            ownedContentCollections,
+            ...inventory,
             s3StorageSummary: s3StorageSummaryResult.summary,
             s3StorageSummaryError: s3StorageSummaryResult.errorCode
         }));
@@ -851,45 +1007,53 @@ export const createArtistWeb = async (req: Request, res: Response, next: NextFun
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const albumIds = parseCsv(String(req.body.albumIds ?? ''));
-        const albumValidation = await validateOwnedContentReferences(authReq, 'album', albumIds);
+        const albumValidation = await validateContentReferences('album', albumIds);
         if (!albumValidation.valid) {
             return redirectWithMessage(res, albumValidation.message!);
         }
 
+        const artistObjectId = new ObjectId();
         const artist = new Artist(
             String(req.body.name ?? ''),
             parseDateInput(String(req.body.birthDate ?? '')),
             String(req.body.bio ?? ''),
             String(req.body.coverArtUrl ?? ''),
             albumValidation.ids as [string],
-            authReq.auth.userId
+            authReq.auth.userId,
+            artistObjectId
         );
 
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) await validateCoverArtFile(coverArtFile);
-        const result = await artist.save();
-        const artistId = result.insertedId.toHexString();
-        try {
-            if (coverArtFile) {
-                const coverArt = await uploadCoverArt(
-                    'artist',
-                    artistId,
-                    coverArtFile,
-                    authReq.auth.userId
-                );
-                await Artist.updateById(artistId, {
-                    coverArtId: coverArt.imageId,
-                    coverArtUrl: coverArt.coverArtUrl
-                });
-            }
-        } catch (error) {
-            await Artist.deleteById(artistId).catch(() => undefined);
-            throw error;
+        const artistId = artistObjectId.toHexString();
+        let coverArt: { imageId: string; coverArtUrl: string } | undefined;
+        if (coverArtFile) {
+            coverArt = await uploadCoverArt(
+                'artist',
+                artistId,
+                coverArtFile,
+                authReq.auth.userId,
+                { allowMissingOwner: true }
+            );
         }
+        await publishNewArtist(artist, coverArt);
         return redirectWithMessage(res, 'Artist created successfully.');
     } catch (error) {
+        if ((error as any)?.outcomeUnknown) {
+            return redirectWithMessage(
+                res,
+                'Artist creation outcome could not be confirmed. Reconciliation is required before retrying.'
+            );
+        }
+        if ((error as any)?.code === 'artist_creation_cleanup_pending') {
+            return redirectWithMessage(
+                res,
+                'Artist was not created. Uploaded cover-art cleanup requires reconciliation.'
+            );
+        }
         return next(error);
     }
 };
@@ -900,27 +1064,24 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const artistId = String(req.body.artistId ?? '').trim();
-        const artistValidation = await validateOwnedContentReferences(authReq, 'artist', [artistId]);
+        const artistValidation = await validateContentReferences('artist', [artistId]);
         if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
         const artist = await Artist.findById(artistId);
         if (!artist) {
             return redirectWithMessage(res, 'Artist not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(artist))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this artist.');
-        }
-
         const updatePayload: Record<string, unknown> = {};
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         let replacementCoverArtId: string | undefined;
+        const removeCoverArt = !coverArtFile && req.body.removeCoverArt === 'true';
         if (req.body.name) updatePayload.name = String(req.body.name);
         if (req.body.bio) updatePayload.bio = String(req.body.bio);
         if (req.body.albumIds) {
-            const validation = await validateOwnedContentReferences(
-                authReq,
+            const validation = await validateContentReferences(
                 'album',
                 parseCsv(String(req.body.albumIds))
             );
@@ -937,22 +1098,38 @@ export const updateArtistWeb = async (req: Request, res: Response, next: NextFun
             replacementCoverArtId = coverArt.imageId;
             updatePayload.coverArtId = coverArt.imageId;
             updatePayload.coverArtUrl = coverArt.coverArtUrl;
-        } else if (req.body.removeCoverArt === 'true') {
-            await deleteCoverArt(artist.coverArtId);
+        } else if (removeCoverArt) {
             updatePayload.coverArtId = null;
             updatePayload.coverArtUrl = '';
         }
-        await Artist.updateById(artistId, updatePayload);
-        let cleanupPending = false;
-        if (replacementCoverArtId && artist.coverArtId && artist.coverArtId !== replacementCoverArtId) {
-            await deleteCoverArt(artist.coverArtId).catch((error) => {
-                cleanupPending = true;
-                console.log(`Unable to delete replaced artist cover art ${artist.coverArtId}:`, error);
-            });
+        const cleanup = await updateCoverArtOwnerAndCleanup(
+            artistId,
+            updatePayload,
+            artist.coverArtId,
+            removeCoverArt || Boolean(
+                replacementCoverArtId && artist.coverArtId !== replacementCoverArtId
+            ),
+            {
+                ownerType: 'artist',
+                updateOwner: (id, update) => Artist.updateById(id, update),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    Artist.updateCoverArtById(id, expectedImageId, update)
+            }
+        );
+        if (cleanup.cleanupError) {
+            console.log(`Unable to delete detached artist cover art ${artist.coverArtId}:`, cleanup.cleanupError);
+        }
+        if (!cleanup.updateApplied) {
+            return redirectWithMessage(
+                res,
+                cleanup.cleanupPending
+                    ? 'Artist was not updated because its cover-art lifecycle evidence requires reconciliation.'
+                    : 'Artist was not updated because its cover art changed concurrently.'
+            );
         }
         return redirectWithMessage(
             res,
-            cleanupPending
+            cleanup.cleanupPending
                 ? 'Artist updated successfully. Previous cover-art cleanup will need to be retried.'
                 : 'Artist updated successfully.'
         );
@@ -967,22 +1144,31 @@ export const deleteArtistWeb = async (req: Request, res: Response, next: NextFun
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const artistId = String(req.body.artistId ?? '').trim();
-        const artistValidation = await validateOwnedContentReferences(authReq, 'artist', [artistId]);
-        if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
+        if (!ObjectId.isValid(artistId)
+            || String(new ObjectId(artistId)) !== artistId.toLowerCase()) {
+            return redirectWithMessage(res, 'Artist ID is not valid.');
+        }
         const artist = await Artist.findById(artistId);
         if (!artist) {
             return redirectWithMessage(res, 'Artist not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(artist))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can delete this artist.');
+        const cleanup = await deleteArtistAndReferences(artistId);
+        if (!cleanup.ownerDeleted) {
+            return redirectWithMessage(
+                res,
+                'Artist was retained for retry and lifecycle reconciliation.'
+            );
         }
-
-        await deleteCoverArt(artist.coverArtId);
-        await Artist.deleteById(artistId);
-        return redirectWithMessage(res, 'Artist deleted successfully.');
+        return redirectWithMessage(
+            res,
+            cleanup.cleanupPending
+                ? 'Artist deleted successfully. Cover-art cleanup will need to be retried.'
+                : 'Artist deleted successfully.'
+        );
     } catch (error) {
         return next(error);
     }
@@ -994,44 +1180,52 @@ export const createAlbumWeb = async (req: Request, res: Response, next: NextFunc
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackIds = parseCsv(String(req.body.audioTrackIds ?? ''));
-        const trackValidation = await validateOwnedContentReferences(authReq, 'audioTrack', audioTrackIds);
+        const trackValidation = await validateContentReferences('audioTrack', audioTrackIds);
         if (!trackValidation.valid) {
             return redirectWithMessage(res, trackValidation.message!);
         }
 
+        const albumObjectId = new ObjectId();
         const album = new Album(
             String(req.body.title ?? ''),
             String(req.body.coverArtUrl ?? ''),
             trackValidation.ids as [string],
             parseDateInput(String(req.body.releaseDate ?? '')),
-            authReq.auth.userId
+            authReq.auth.userId,
+            albumObjectId
         );
 
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) await validateCoverArtFile(coverArtFile);
-        const result = await album.save();
-        const albumId = result.insertedId.toHexString();
-        try {
-            if (coverArtFile) {
-                const coverArt = await uploadCoverArt(
-                    'album',
-                    albumId,
-                    coverArtFile,
-                    authReq.auth.userId
-                );
-                await Album.updateById(albumId, {
-                    coverArtId: coverArt.imageId,
-                    coverArtUrl: coverArt.coverArtUrl
-                });
-            }
-        } catch (error) {
-            await Album.deleteById(albumId).catch(() => undefined);
-            throw error;
+        const albumId = albumObjectId.toHexString();
+        let coverArt: { imageId: string; coverArtUrl: string } | undefined;
+        if (coverArtFile) {
+            coverArt = await uploadCoverArt(
+                'album',
+                albumId,
+                coverArtFile,
+                authReq.auth.userId,
+                { allowMissingOwner: true }
+            );
         }
+        await publishNewAlbum(album, coverArt);
         return redirectWithMessage(res, 'Album created successfully.');
     } catch (error) {
+        if ((error as any)?.outcomeUnknown) {
+            return redirectWithMessage(
+                res,
+                'Album creation outcome could not be confirmed. Reconciliation is required before retrying.'
+            );
+        }
+        if ((error as any)?.code === 'album_creation_cleanup_pending') {
+            return redirectWithMessage(
+                res,
+                'Album was not created. Uploaded cover-art cleanup requires reconciliation.'
+            );
+        }
         return next(error);
     }
 };
@@ -1042,26 +1236,23 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const albumId = String(req.body.albumId ?? '').trim();
-        const albumValidation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+        const albumValidation = await validateContentReferences('album', [albumId]);
         if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
-        const album = await Album.findById(albumId);
+        const album = await Album.findReadyById(albumId);
         if (!album) {
             return redirectWithMessage(res, 'Album not found.');
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this album.');
         }
 
         const updatePayload: Record<string, unknown> = {};
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         let replacementCoverArtId: string | undefined;
+        const removeCoverArt = !coverArtFile && req.body.removeCoverArt === 'true';
         if (req.body.title) updatePayload.title = String(req.body.title);
-        if (req.body.audioTrackIds) {
-            const validation = await validateOwnedContentReferences(
-                authReq,
+        if (req.body.audioTrackIds !== undefined) {
+            const validation = await validateContentReferences(
                 'audioTrack',
                 parseCsv(String(req.body.audioTrackIds))
             );
@@ -1079,23 +1270,39 @@ export const updateAlbumWeb = async (req: Request, res: Response, next: NextFunc
             replacementCoverArtId = coverArt.imageId;
             updatePayload.coverArtId = coverArt.imageId;
             updatePayload.coverArtUrl = coverArt.coverArtUrl;
-        } else if (req.body.removeCoverArt === 'true') {
-            await deleteCoverArt(album.coverArtId);
+        } else if (removeCoverArt) {
             updatePayload.coverArtId = null;
             updatePayload.coverArtUrl = '';
         }
 
-        await Album.updateById(albumId, updatePayload);
-        let cleanupPending = false;
-        if (replacementCoverArtId && album.coverArtId && album.coverArtId !== replacementCoverArtId) {
-            await deleteCoverArt(album.coverArtId).catch((error) => {
-                cleanupPending = true;
-                console.log(`Unable to delete replaced album cover art ${album.coverArtId}:`, error);
-            });
+        const cleanup = await updateCoverArtOwnerAndCleanup(
+            albumId,
+            updatePayload,
+            album.coverArtId,
+            removeCoverArt || Boolean(
+                replacementCoverArtId && album.coverArtId !== replacementCoverArtId
+            ),
+            {
+                ownerType: 'album',
+                updateOwner: (id, update) => Album.updateById(id, update),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    Album.updateCoverArtById(id, expectedImageId, update)
+            }
+        );
+        if (cleanup.cleanupError) {
+            console.log(`Unable to delete detached album cover art ${album.coverArtId}:`, cleanup.cleanupError);
+        }
+        if (!cleanup.updateApplied) {
+            return redirectWithMessage(
+                res,
+                cleanup.cleanupPending
+                    ? 'Album was not updated because its cover-art lifecycle evidence requires reconciliation.'
+                    : 'Album was not updated because its cover art changed concurrently.'
+            );
         }
         return redirectWithMessage(
             res,
-            cleanupPending
+            cleanup.cleanupPending
                 ? 'Album updated successfully. Previous cover-art cleanup will need to be retried.'
                 : 'Album updated successfully.'
         );
@@ -1110,23 +1317,31 @@ export const deleteAlbumWeb = async (req: Request, res: Response, next: NextFunc
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const albumId = String(req.body.albumId ?? '').trim();
-        const albumValidation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
-        if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
+        if (!ObjectId.isValid(albumId)
+            || String(new ObjectId(albumId)) !== albumId.toLowerCase()) {
+            return redirectWithMessage(res, 'Album ID is not valid.');
+        }
         const album = await Album.findById(albumId);
         if (!album) {
             return redirectWithMessage(res, 'Album not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can delete this album.');
+        const cleanup = await deleteAlbumAndReferences(albumId);
+        if (!cleanup.ownerDeleted) {
+            return redirectWithMessage(
+                res,
+                'Album was retained for retry and lifecycle reconciliation.'
+            );
         }
-
-        await deleteCoverArt(album.coverArtId);
-        await cleanupDeletedContentReferences('album', albumId);
-        await Album.deleteById(albumId);
-        return redirectWithMessage(res, 'Album deleted successfully.');
+        return redirectWithMessage(
+            res,
+            cleanup.cleanupPending
+                ? 'Album deleted successfully. Cover-art cleanup will need to be retried.'
+                : 'Album deleted successfully.'
+        );
     } catch (error) {
         return next(error);
     }
@@ -1138,6 +1353,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const uploadFile = getUploadedFile(req, 'audioFile');
         if (!uploadFile) {
@@ -1145,18 +1361,18 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         }
 
         const artistId = String(req.body.artistId ?? '').trim();
-        const artistValidation = await validateOwnedContentReferences(authReq, 'artist', [artistId]);
+        const artistValidation = await validateContentReferences('artist', [artistId]);
         if (!artistId || !artistValidation.valid) {
             return redirectWithMessage(
                 res,
-                artistValidation.message ?? 'Select an artist you are allowed to modify.'
+                artistValidation.message ?? 'Select an existing artist.'
             );
         }
 
         const albumId = String(req.body.albumId ?? '').trim();
         let album: any | null = null;
         if (albumId) {
-            const albumValidation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+            const albumValidation = await validateContentReferences('album', [albumId]);
             if (!albumValidation.valid) {
                 return redirectWithMessage(res, albumValidation.message!);
             }
@@ -1186,7 +1402,12 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         );
 
         await track.save();
-        await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId, getRequestAbortSignal(req));
+        const upload = await uploadAudioObject(
+            audioTrackId,
+            uploadFile,
+            getContentProvenanceId(track) || authReq.auth.userId,
+            getRequestAbortSignal(req)
+        );
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) {
             const coverArt = await uploadCoverArt(
@@ -1195,21 +1416,22 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
                 coverArtFile,
                 authReq.auth.userId
             );
-            await AudioTrack.updateById(audioTrackId, {
-                coverArtId: coverArt.imageId,
-                coverArtUrl: coverArt.coverArtUrl
+            await attachCoverArtToNewOwner(audioTrackId, coverArt, {
+                ownerType: 'audioTrack',
+                updateOwner: (id, update) => AudioTrack.updateById(id, update),
+                updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                    AudioTrack.updateCoverArtById(id, expectedImageId, update)
             });
         }
 
-        if (album) {
-            const albumTrackIds = uniqueStrings([
-                ...(Array.isArray(album.audioTrackIds) ? album.audioTrackIds.map(String) : []),
-                audioTrackId
-            ]);
-            await Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] });
-        }
+        await publishUploadedAudioTracks(albumId, [audioTrackId]);
 
-        return redirectWithMessage(res, 'Audio track and file created successfully.');
+        return redirectWithMessage(
+            res,
+            upload.cleanupPending
+                ? 'Audio track and file created successfully. Previous object cleanup will need to be retried.'
+                : 'Audio track and file created successfully.'
+        );
     } catch (error) {
         return next(error);
     }
@@ -1221,26 +1443,26 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
-        const trackValidation = await validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]);
-        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
+        if (!ObjectId.isValid(audioTrackId)
+            || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
+            return redirectWithMessage(res, 'Audio track ID is not valid.');
+        }
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(track))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can modify this audio track.');
-        }
-
         const updatePayload: Record<string, unknown> = {};
+        let requestedAlbumId: string | undefined;
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         let replacementCoverArtId: string | undefined;
+        const removeCoverArt = !coverArtFile && req.body.removeCoverArt === 'true';
         if (req.body.title) updatePayload.title = String(req.body.title);
         if (req.body.artistIds) {
-            const validation = await validateOwnedContentReferences(
-                authReq,
+            const validation = await validateContentReferences(
                 'artist',
                 parseCsv(String(req.body.artistIds))
             );
@@ -1248,14 +1470,15 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
             updatePayload.artistIds = validation.ids;
         }
         if (req.body.genres) updatePayload.genres = parseCsv(String(req.body.genres));
-        if (req.body.albumId) {
-            const validation = await validateOwnedContentReferences(
-                authReq,
-                'album',
-                [String(req.body.albumId)]
-            );
-            if (!validation.valid) return redirectWithMessage(res, validation.message!);
-            updatePayload.albumId = validation.ids[0];
+        if (req.body.albumId !== undefined) {
+            const albumId = String(req.body.albumId ?? '').trim();
+            if (albumId) {
+                const validation = await validateContentReferences('album', [albumId]);
+                if (!validation.valid) return redirectWithMessage(res, validation.message!);
+                requestedAlbumId = validation.ids[0];
+            } else {
+                requestedAlbumId = '';
+            }
         }
         if (req.body.releaseDate) updatePayload.releaseDate = parseDateInput(String(req.body.releaseDate));
         if (req.body.duration) updatePayload.duration = String(req.body.duration);
@@ -1277,23 +1500,54 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
             replacementCoverArtId = coverArt.imageId;
             updatePayload.coverArtId = coverArt.imageId;
             updatePayload.coverArtUrl = coverArt.coverArtUrl;
-        } else if (req.body.removeCoverArt === 'true') {
-            await deleteCoverArt(track.coverArtId);
+        } else if (removeCoverArt) {
             updatePayload.coverArtId = null;
             updatePayload.coverArtUrl = '';
         }
 
-        await AudioTrack.updateById(audioTrackId, updatePayload);
-        let cleanupPending = false;
-        if (replacementCoverArtId && track.coverArtId && track.coverArtId !== replacementCoverArtId) {
-            await deleteCoverArt(track.coverArtId).catch((error) => {
-                cleanupPending = true;
-                console.log(`Unable to delete replaced audio-track cover art ${track.coverArtId}:`, error);
-            });
+        const cleanup = Object.keys(updatePayload).length > 0 || requestedAlbumId !== undefined
+            ? await updateCoverArtOwnerAndCleanup(
+                audioTrackId,
+                updatePayload,
+                track.coverArtId,
+                removeCoverArt || Boolean(
+                    replacementCoverArtId && track.coverArtId !== replacementCoverArtId
+                ),
+                {
+                    ownerType: 'audioTrack',
+                    updateOwner: requestedAlbumId === undefined
+                        ? (id, update) => AudioTrack.updateById(id, update)
+                        : (id, update) => AudioTrack.updateWithAlbumById(
+                            id,
+                            requestedAlbumId,
+                            update
+                        ),
+                    updateOwnerIfCoverArtMatches: (id, expectedImageId, update) =>
+                        requestedAlbumId === undefined
+                            ? AudioTrack.updateCoverArtById(id, expectedImageId, update)
+                            : AudioTrack.updateWithAlbumAndCoverArtById(
+                                id,
+                                requestedAlbumId,
+                                expectedImageId,
+                                update
+                            )
+                }
+            )
+            : { updateApplied: true, cleanupPending: false, cleanupError: undefined };
+        if (cleanup.cleanupError) {
+            console.log(`Unable to delete detached audio-track cover art ${track.coverArtId}:`, cleanup.cleanupError);
+        }
+        if (!cleanup.updateApplied) {
+            return redirectWithMessage(
+                res,
+                cleanup.cleanupPending
+                    ? 'Audio track was not updated because its cover-art lifecycle evidence requires reconciliation.'
+                    : 'Audio track was not updated because its cover art changed concurrently.'
+            );
         }
         return redirectWithMessage(
             res,
-            cleanupPending
+            cleanup.cleanupPending
                 ? 'Audio track updated successfully. Previous cover-art cleanup will need to be retried.'
                 : 'Audio track updated successfully.'
         );
@@ -1308,25 +1562,35 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
-        const trackValidation = await validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]);
-        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
+        if (!ObjectId.isValid(audioTrackId)
+            || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
+            return redirectWithMessage(res, 'Audio track ID is not valid.');
+        }
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(track))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can delete this audio track.');
-        }
-
         try {
-            await deleteAudioObjectAndTrack(audioTrackId);
-            return redirectWithMessage(res, 'Audio track deleted successfully.');
+            const deletion = await deleteAudioObjectAndTrack(audioTrackId);
+            return redirectWithMessage(
+                res,
+                deletion.cleanupPending
+                    ? 'Audio track deleted successfully. Cover-art cleanup will need to be retried.'
+                    : 'Audio track deleted successfully.'
+            );
         } catch (s3Error) {
             console.log('Audio track deletion failed for audioTrackId:', audioTrackId, s3Error);
-            return redirectWithMessage(res, 'The uploaded file could not be deleted. Track metadata was retained for reconciliation.');
+            const outcomeUnknown = (s3Error as any)?.code === 'audio_deletion_outcome_unknown';
+            return redirectWithMessage(
+                res,
+                outcomeUnknown
+                    ? 'Audio track deletion outcome could not be confirmed. Reconciliation is required.'
+                    : 'Audio track deletion could not complete. Track metadata was retained for retry and reconciliation.'
+            );
         }
     } catch (error) {
         return next(error);
@@ -1339,6 +1603,7 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const albumId = String(req.body.albumId ?? '').trim();
         const selectedTrackIds = uniqueStrings(
@@ -1354,49 +1619,54 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
             return redirectWithMessage(res, `Delete no more than ${maximumBatchDeletes} audio tracks at once.`);
         }
 
-        const [albumValidation, trackValidation] = await Promise.all([
-            validateOwnedContentReferences(authReq, 'album', [albumId]),
-            validateOwnedContentReferences(authReq, 'audioTrack', selectedTrackIds)
-        ]);
+        const albumValidation = await validateContentReferences('album', [albumId]);
         if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
-        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
 
         const album = await Album.findById(albumId);
-        if (!album || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
-            return redirectWithMessage(res, 'Album not found or cannot be modified.');
+        if (!album) {
+            return redirectWithMessage(res, 'Album not found.');
         }
 
-        const tracks = await Promise.all(selectedTrackIds.map((trackId) => AudioTrack.findById(trackId)));
+        const tracks = await Promise.all(selectedTrackIds.map((trackId) =>
+            ObjectId.isValid(trackId) ? AudioTrack.findById(trackId) : Promise.resolve(null)
+        ));
         const associatedTrackIds = new Set(uniqueStrings([
             ...(Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds.map(String) : []),
             ...tracks.filter(Boolean).filter((track: any) => String(track.albumId ?? '') === albumId).map(contentId)
         ]));
-        if (tracks.some((track) => !track) || selectedTrackIds.some((trackId) => !associatedTrackIds.has(trackId))) {
-            return redirectWithMessage(res, 'One or more selected tracks do not belong to this album.');
-        }
-        if (tracks.some((track) => !ensureOwnerOrAdmin(authReq, getOwnerId(track)))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can delete every selected track.');
-        }
-
         const deletedTrackIds: string[] = [];
         const failedTrackIds: string[] = [];
-        for (const trackId of selectedTrackIds) {
+        const outcomeUnknownTrackIds: string[] = [];
+        const cleanupPendingTrackIds: string[] = [];
+        for (const [index, trackId] of selectedTrackIds.entries()) {
+            if (!tracks[index] || !associatedTrackIds.has(trackId)) {
+                failedTrackIds.push(trackId);
+                continue;
+            }
             try {
-                await deleteAudioObjectAndTrack(trackId);
+                const deletion = await deleteAudioObjectAndTrack(trackId);
                 deletedTrackIds.push(trackId);
+                if (deletion.cleanupPending) cleanupPendingTrackIds.push(trackId);
             } catch (deleteError) {
                 console.log(`Unable to delete audio track ${trackId}:`, deleteError);
                 failedTrackIds.push(trackId);
+                if ((deleteError as any)?.code === 'audio_deletion_outcome_unknown') {
+                    outcomeUnknownTrackIds.push(trackId);
+                }
             }
         }
 
-        const remainingTrackIds = uniqueStrings(
-            (Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []).map(String)
-        ).filter((trackId) => !deletedTrackIds.includes(trackId));
-        await Album.updateById(albumId, { audioTrackIds: remainingTrackIds as [string] });
-
         if (failedTrackIds.length > 0) {
-            return redirectWithMessage(res, `${deletedTrackIds.length} audio track(s) deleted. ${failedTrackIds.length} could not be deleted and remain recorded for reconciliation.`);
+            return redirectWithMessage(
+                res,
+                `${deletedTrackIds.length} audio track(s) deleted. ${failedTrackIds.length} could not be deleted.${outcomeUnknownTrackIds.length > 0 ? ` ${outcomeUnknownTrackIds.length} deletion outcome(s) require reconciliation.` : ' Failed tracks remain recorded for retry and reconciliation.'}${cleanupPendingTrackIds.length > 0 ? ` ${cleanupPendingTrackIds.length} deleted track(s) still require cover-art lifecycle cleanup.` : ''}`
+            );
+        }
+        if (cleanupPendingTrackIds.length > 0) {
+            return redirectWithMessage(
+                res,
+                `${deletedTrackIds.length} audio track(s) deleted. ${cleanupPendingTrackIds.length} still require cover-art lifecycle cleanup.`
+            );
         }
 
         return redirectWithMessage(res, `${deletedTrackIds.length} audio track(s) deleted successfully.`);
@@ -1405,23 +1675,46 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
     }
 };
 
-export const uploadAudioTrackWeb = async (req: Request, res: Response, next: NextFunction) => {
+interface WebAudioTrackUploadDependencies {
+    findTrack: typeof AudioTrack.findById;
+    uploadObject: typeof uploadAudioObject;
+    retryPublications: typeof retryAudioTrackPublications;
+}
+
+const defaultWebAudioTrackUploadDependencies: WebAudioTrackUploadDependencies = {
+    findTrack: AudioTrack.findById.bind(AudioTrack),
+    uploadObject: uploadAudioObject,
+    retryPublications: retryAudioTrackPublications
+};
+
+const publicationStatusForMessage = (value: string) => value === '' ? 'empty' : value;
+
+/** Keeps the one-file Content Manager result aligned with persisted publication state. */
+export const uploadAudioTrackWeb = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    dependencyOverrides: Partial<WebAudioTrackUploadDependencies> = {}
+) => {
     try {
+        const dependencies = {
+            ...defaultWebAudioTrackUploadDependencies,
+            ...dependencyOverrides
+        };
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
-        const trackValidation = await validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]);
-        if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
-        const track = await AudioTrack.findById(audioTrackId);
+        if (!ObjectId.isValid(audioTrackId)
+            || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
+            return redirectWithMessage(res, 'Audio track ID is not valid.');
+        }
+        const track = await dependencies.findTrack(audioTrackId);
         if (!track) {
             return redirectWithMessage(res, 'Audio track not found.');
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(track))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can upload for this audio track.');
         }
 
         const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
@@ -1429,10 +1722,49 @@ export const uploadAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Missing audio file.');
         }
 
-        await uploadAudioObject(audioTrackId, uploadFile, getOwnerId(track) || authReq.auth.userId, getRequestAbortSignal(req));
+        const upload = await dependencies.uploadObject(
+            audioTrackId,
+            uploadFile,
+            getContentProvenanceId(track) || authReq.auth.userId,
+            getRequestAbortSignal(req)
+        );
+        const publication = await dependencies.retryPublications([audioTrackId]);
+        const publicationResult = publication.results.find(
+            (result) => result.audioTrackId === audioTrackId.toLowerCase()
+        );
+        if (!publicationResult) {
+            return redirectWithMessage(
+                res,
+                'Audio file uploaded, but publication outcome could not be read back. Reconciliation is required.'
+            );
+        }
+        if (publicationResult.outcome !== 'ready') {
+            const publicationMessage = publicationResult.outcome === 'unknown'
+                ? 'Audio file uploaded, but publication outcome could not be confirmed. Reconciliation is required.'
+                : `Audio file uploaded, but publication status is ${publicationStatusForMessage(publicationResult.publicationStatus)}. Retry publication without uploading the file again.`;
+            return redirectWithMessage(
+                res,
+                `${publicationMessage}${upload.cleanupPending ? ' Previous object cleanup also needs to be retried.' : ''}`
+            );
+        }
 
-        return redirectWithMessage(res, 'Audio file uploaded successfully.');
+        return redirectWithMessage(
+            res,
+            upload.cleanupPending
+                ? `Audio file uploaded successfully. Publication status is ${publicationStatusForMessage(publicationResult.publicationStatus)}. Previous object cleanup will need to be retried.`
+                : `Audio file uploaded successfully. Publication status is ${publicationStatusForMessage(publicationResult.publicationStatus)}.`
+        );
     } catch (error) {
+        if ((error as any)?.cleanupPending !== undefined) {
+            return redirectWithMessage(
+                res,
+                (error as any)?.outcomeUnknown
+                    ? 'Audio upload outcome could not be confirmed. Reconciliation is required.'
+                    : (error as any)?.cleanupPending
+                        ? 'Audio upload failed and storage cleanup must be retried.'
+                        : String((error as Error).message || 'Audio upload failed.')
+            );
+        }
         return next(error);
     }
 };
@@ -1443,6 +1775,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const uploadFiles = (req as Request & { files?: Express.Multer.File[] }).files ?? [];
         if (uploadFiles.length === 0) {
@@ -1450,19 +1783,19 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
         }
 
         const artistId = String(req.body.artistId ?? '').trim();
-        const artistValidation = await validateOwnedContentReferences(authReq, 'artist', [artistId]);
+        const artistValidation = await validateContentReferences('artist', [artistId]);
         if (!artistId || !artistValidation.valid) {
             return respondToUploadError(
                 req,
                 res,
-                artistValidation.message ?? 'Select an artist you are allowed to modify.'
+                artistValidation.message ?? 'Select an existing artist.'
             );
         }
 
         const albumId = String(req.body.albumId ?? '').trim();
         let album: any | null = null;
         if (albumId) {
-            const albumValidation = await validateOwnedContentReferences(authReq, 'album', [albumId]);
+            const albumValidation = await validateContentReferences('album', [albumId]);
             if (!albumValidation.valid) {
                 return respondToUploadError(req, res, albumValidation.message!);
             }
@@ -1470,7 +1803,16 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
         }
 
         const uploadedTrackIds: string[] = [];
-        const failures: string[] = [];
+        const outcomes: Array<{
+            originalFileName: string;
+            audioTrackId: string | null;
+            uploadStatus: string;
+            publicationStatus: string;
+            cleanupPending: boolean;
+            error: string | null;
+        }> = [];
+        const cleanupPendingTrackIds: string[] = [];
+        let failedCleanupPendingCount = 0;
 
         for (const uploadFile of uploadFiles) {
             const originalFileName = normalizeUtf8Text(uploadFile.originalname);
@@ -1478,7 +1820,14 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                 || uploadFile.mimetype === 'video/mp4'
                 || uploadFile.mimetype === 'application/ogg';
             if (!isAudioFile) {
-                failures.push(originalFileName);
+                outcomes.push({
+                    originalFileName,
+                    audioTrackId: null,
+                    uploadStatus: 'rejected',
+                    publicationStatus: 'notAttempted',
+                    cleanupPending: false,
+                    error: 'The selected file is not a supported audio type.'
+                });
                 continue;
             }
 
@@ -1526,27 +1875,65 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
 
             try {
                 await track.save();
-                await uploadAudioObject(audioTrackId, uploadFile, authReq.auth.userId, getRequestAbortSignal(req));
+                const upload = await uploadAudioObject(
+                    audioTrackId,
+                    uploadFile,
+                    authReq.auth.userId,
+                    getRequestAbortSignal(req)
+                );
                 uploadedTrackIds.push(audioTrackId);
+                if (upload.cleanupPending) cleanupPendingTrackIds.push(audioTrackId);
+                outcomes.push({
+                    originalFileName,
+                    audioTrackId,
+                    uploadStatus: 'ready',
+                    publicationStatus: 'pending',
+                    cleanupPending: upload.cleanupPending,
+                    error: null
+                });
             } catch (uploadError) {
                 console.log(`Unable to upload ${originalFileName}:`, uploadError);
-                failures.push(originalFileName);
+                if ((uploadError as any)?.cleanupPending) failedCleanupPendingCount += 1;
+                outcomes.push({
+                    originalFileName,
+                    audioTrackId,
+                    uploadStatus: (uploadError as any)?.outcomeUnknown ? 'unknown' : 'failed',
+                    publicationStatus: 'notAttempted',
+                    cleanupPending: Boolean((uploadError as any)?.cleanupPending),
+                    error: String((uploadError as Error)?.message ?? 'Audio upload failed.').slice(0, 500)
+                });
             }
         }
 
-        if (album && uploadedTrackIds.length > 0) {
-            const albumTrackIds = uniqueStrings([
-                ...(Array.isArray(album.audioTrackIds) ? album.audioTrackIds.map(String) : []),
-                ...uploadedTrackIds
-            ]);
-            await Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] });
+        const publication = uploadedTrackIds.length > 0
+            ? await retryAudioTrackPublications(uploadedTrackIds)
+            : { requestedCount: 0, readyCount: 0, failedCount: 0, results: [] };
+        const publicationById = new Map(
+            publication.results.map((result) => [result.audioTrackId, result] as const)
+        );
+        for (const outcome of outcomes) {
+            if (!outcome.audioTrackId || outcome.uploadStatus !== 'ready') continue;
+            const result = publicationById.get(outcome.audioTrackId);
+            outcome.publicationStatus = result?.publicationStatus ?? 'failed';
+            if (result?.outcome !== 'ready') outcome.error = result?.error ?? 'Publication failed.';
         }
-        const message = `${uploadedTrackIds.length} audio track${uploadedTrackIds.length === 1 ? '' : 's'} created and uploaded.${failures.length > 0 ? ` ${failures.length} file${failures.length === 1 ? '' : 's'} failed.` : ''}`;
+        const cleanupPendingCount = cleanupPendingTrackIds.length + failedCleanupPendingCount;
+        const uploadFailureCount = outcomes.filter((outcome) => outcome.uploadStatus !== 'ready').length;
+        const publicationFailureCount = publication.failedCount;
+        const itemSummary = outcomes
+            .filter((outcome) => outcome.audioTrackId)
+            .map((outcome) => `${outcome.audioTrackId}: upload=${outcome.uploadStatus}, publication=${outcome.publicationStatus}`)
+            .join('; ');
+        const message = `${uploadedTrackIds.length} audio track${uploadedTrackIds.length === 1 ? '' : 's'} uploaded; ${publication.readyCount} published.${uploadFailureCount > 0 ? ` ${uploadFailureCount} file${uploadFailureCount === 1 ? '' : 's'} failed upload validation or storage.` : ''}${publicationFailureCount > 0 ? ` ${publicationFailureCount} publication${publicationFailureCount === 1 ? '' : 's'} failed and can be retried without another upload.` : ''}${cleanupPendingCount > 0 ? ` ${cleanupPendingCount} upload${cleanupPendingCount === 1 ? '' : 's'} require storage reconciliation or cleanup.` : ''}${itemSummary ? ` ${itemSummary}` : ''}`;
         if (req.get('X-Requested-With') === 'XMLHttpRequest') {
             return res.status(uploadedTrackIds.length > 0 ? 200 : 422).json({
                 message,
                 uploadedCount: uploadedTrackIds.length,
-                failureCount: failures.length
+                publishedCount: publication.readyCount,
+                uploadFailureCount,
+                publicationFailureCount,
+                cleanupPendingCount,
+                outcomes
             });
         }
         return redirectWithMessage(res, message);
@@ -1561,12 +1948,13 @@ export const linkTrackToAlbumWeb = async (req: Request, res: Response, next: Nex
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
         const albumId = String(req.body.albumId ?? '').trim();
         const [trackValidation, albumValidation] = await Promise.all([
-            validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]),
-            validateOwnedContentReferences(authReq, 'album', [albumId])
+            validateContentReferences('audioTrack', [audioTrackId]),
+            validateContentReferences('album', [albumId])
         ]);
         if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
         if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
@@ -1578,16 +1966,7 @@ export const linkTrackToAlbumWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(res, 'Track or album not found.');
         }
 
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(track)) || !ensureOwnerOrAdmin(authReq, getOwnerId(album))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can link these records.');
-        }
-
-        const albumTrackIds = uniqueStrings([...(Array.isArray((album as any).audioTrackIds) ? (album as any).audioTrackIds : []), audioTrackId]);
-
-        await Promise.all([
-            AudioTrack.updateById(audioTrackId, { albumId }),
-            Album.updateById(albumId, { audioTrackIds: albumTrackIds as [string] })
-        ]);
+        await linkReadyAudioTracksToAlbum(albumId, [audioTrackId]);
 
         return redirectWithMessage(res, 'Track linked to album successfully.');
     } catch (error) {
@@ -1601,12 +1980,13 @@ export const linkAlbumToArtistWeb = async (req: Request, res: Response, next: Ne
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const albumId = String(req.body.albumId ?? '').trim();
         const artistId = String(req.body.artistId ?? '').trim();
         const [albumValidation, artistValidation] = await Promise.all([
-            validateOwnedContentReferences(authReq, 'album', [albumId]),
-            validateOwnedContentReferences(authReq, 'artist', [artistId])
+            validateContentReferences('album', [albumId]),
+            validateContentReferences('artist', [artistId])
         ]);
         if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
         if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
@@ -1616,10 +1996,6 @@ export const linkAlbumToArtistWeb = async (req: Request, res: Response, next: Ne
 
         if (!album || !artist) {
             return redirectWithMessage(res, 'Album or artist not found.');
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(album)) || !ensureOwnerOrAdmin(authReq, getOwnerId(artist))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can link these records.');
         }
 
         const artistAlbumIds = uniqueStrings([...(Array.isArray((artist as any).albumIds) ? (artist as any).albumIds : []), albumId]);
@@ -1637,12 +2013,13 @@ export const linkTrackToArtistWeb = async (req: Request, res: Response, next: Ne
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
         }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
 
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
         const artistId = String(req.body.artistId ?? '').trim();
         const [trackValidation, artistValidation] = await Promise.all([
-            validateOwnedContentReferences(authReq, 'audioTrack', [audioTrackId]),
-            validateOwnedContentReferences(authReq, 'artist', [artistId])
+            validateContentReferences('audioTrack', [audioTrackId]),
+            validateContentReferences('artist', [artistId])
         ]);
         if (!trackValidation.valid) return redirectWithMessage(res, trackValidation.message!);
         if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
@@ -1652,10 +2029,6 @@ export const linkTrackToArtistWeb = async (req: Request, res: Response, next: Ne
 
         if (!track || !artist) {
             return redirectWithMessage(res, 'Track or artist not found.');
-        }
-
-        if (!ensureOwnerOrAdmin(authReq, getOwnerId(track)) || !ensureOwnerOrAdmin(authReq, getOwnerId(artist))) {
-            return redirectWithMessage(res, 'Forbidden: only creator or admin can link these records.');
         }
 
         const trackArtistIds = uniqueStrings([...(Array.isArray((track as any).artistIds) ? (track as any).artistIds : []), artistId]);
@@ -1674,21 +2047,9 @@ export const searchContent = async (req: Request, res: Response, next: NextFunct
             return res.status(400).json({ message: 'Missing required query parameter: q' });
         }
 
-        const parsedLimit = Number(req.query.limit ?? 10);
-        const limit = Number.isNaN(parsedLimit) ? 10 : Math.max(1, Math.min(parsedLimit, 50));
+        const limit = boundedLimit(req.query.limit, 10, 50);
 
-        const [artists, albums, audioTracks] = await Promise.all([
-            Artist.searchByName(rawQuery, limit),
-            Album.searchByTitle(rawQuery, limit),
-            AudioTrack.searchByTitle(rawQuery, limit)
-        ]);
-
-        return res.status(200).json({
-            query: rawQuery,
-            artists,
-            albums,
-            audioTracks
-        });
+        return res.status(200).json(await searchPublicCatalog(rawQuery, limit));
     } catch (error) {
         return next(error);
     }

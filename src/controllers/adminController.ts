@@ -5,6 +5,10 @@ import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { renderAudioStorageAuditPage } from '../views/admin/audioStorageAuditView';
 import { reconcileImageStorage } from '../services/imageReconciliationService';
 import { reconcileContentReferences } from '../services/contentReferenceReconciliationService';
+import {
+    normalizeAudioPublicationRetryIds,
+    retryAudioTrackPublications
+} from '../services/audioPublicationRecoveryService';
 
 // {{baseUrl}}/admin/product
 export const getAddProduct = async (req: Request, res: Response, next: NextFunction) => {
@@ -76,6 +80,34 @@ export const getContentReferenceReconciliation = async (req: Request, res: Respo
     try {
         const report = await reconcileContentReferences();
         res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).json(report);
+    } catch (error) {
+        return next(error);
+    }
+};
+
+/** Retries publication from existing ready storage without accepting another upload. */
+export const postAudioPublicationRetry = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    try {
+        res.setHeader('Cache-Control', 'no-store');
+        const source = Array.isArray(req.body?.audioTrackIds)
+            ? req.body.audioTrackIds
+            : typeof req.body?.audioTrackIds === 'string'
+                ? req.body.audioTrackIds.split(',')
+                : [];
+        let audioTrackIds: string[];
+        try {
+            audioTrackIds = normalizeAudioPublicationRetryIds(source);
+        } catch (error) {
+            return res.status(400).json({
+                message: error instanceof Error ? error.message : 'Invalid publication retry request.'
+            });
+        }
+        const report = await retryAudioTrackPublications(audioTrackIds);
         return res.status(200).json(report);
     } catch (error) {
         return next(error);

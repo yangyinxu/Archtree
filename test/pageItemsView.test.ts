@@ -32,7 +32,7 @@ test('renders each page item in configured order with presentation and name', ()
     assert.match(html, /List/);
 });
 
-test('renders missing and unknown references instead of hiding them', () => {
+test('renders unloaded and unknown references instead of hiding them', () => {
     const html = renderPageItemsHierarchy(
         [{
             slug: 'home',
@@ -46,7 +46,7 @@ test('renders missing and unknown references instead of hiding them', () => {
         []
     );
 
-    assert.match(html, /Unavailable carousel/);
+    assert.match(html, /Carousel not loaded on this inventory page/);
     assert.match(html, /Unsupported page item/);
     assert.equal(html.includes('<Home>'), false);
     assert.match(html, /&lt;Home&gt;/);

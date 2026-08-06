@@ -1,0 +1,163 @@
+.handle {
+  background: transparent;
+  border: 0;
+  bottom: calc(var(--player-height) + var(--shell-gap, 0.5rem));
+  color: var(--color-text-muted);
+  cursor: col-resize;
+  min-height: 2.75rem;
+  min-width: 0;
+  outline: none;
+  padding: 0;
+  position: absolute;
+  top: calc(var(--topbar-height) + var(--shell-gap, 0.5rem) * 2);
+  touch-action: none;
+  user-select: none;
+  width: var(--shell-gap, 0.5rem);
+  z-index: 2;
+}
+
+.handle[data-side="left"] {
+  left: calc(var(--sidebar-column) + var(--shell-gap, 0.5rem));
+}
+
+.handle[data-side="right"] {
+  right: calc(var(--now-playing-column) + var(--shell-gap, 0.5rem));
+}
+
+.handle::after {
+  content: "";
+  height: 2.75rem;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  touch-action: none;
+  transform: translate(-50%, -50%);
+  width: 1.5rem;
+}
+
+.handle::before {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  content: "";
+  inset-block: 0.5rem;
+  left: 50%;
+  opacity: 0;
+  position: absolute;
+  transform: translateX(-50%);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard),
+    width var(--motion-fast) var(--ease-standard);
+  width: 1px;
+}
+
+.indicator {
+  align-items: center;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-control);
+  display: inline-flex;
+  height: 1.55rem;
+  justify-content: center;
+  left: 50%;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.92);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+  width: 2.15rem;
+}
+
+.indicator svg {
+  height: 0.7rem;
+  width: 0.7rem;
+}
+
+.handle:hover::before,
+.handle:focus-visible::before,
+.handle[data-dragging="true"]::before {
+  opacity: 1;
+}
+
+.handle:hover .indicator,
+.handle:focus-visible .indicator,
+.handle[data-dragging="true"] .indicator {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.handle:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.handle[data-dragging="true"] {
+  color: var(--color-accent-bright);
+}
+
+.handle[data-dragging="true"]::before {
+  background: var(--color-accent-bright);
+  transition: none;
+  width: 2px;
+}
+
+.handle[data-dragging="true"] .indicator {
+  background: var(--color-surface-active);
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .handle::before,
+  .indicator {
+    transition: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .handle::after {
+    width: 2.75rem;
+  }
+
+  .handle::before {
+    opacity: 0.65;
+  }
+
+  .handle .indicator {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@media (max-width: 1007px) {
+  .handle {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .handle::before {
+    background: CanvasText;
+  }
+
+  .handle:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .handle[data-dragging="true"]::before {
+    background: Highlight;
+  }
+
+  .indicator {
+    background: Canvas;
+    border-color: ButtonText;
+    color: ButtonText;
+    forced-color-adjust: none;
+  }
+}
