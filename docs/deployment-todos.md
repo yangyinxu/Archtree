@@ -5,21 +5,29 @@ be completed solely through application code.
 
 ## Production HTTPS for Authentication
 
-Status: Single-instance TLS is deployed and password login is verified on a
-physical device. Refresh, profile, and session-revocation lifecycle checks
-remain pending.
+Status: Recovery is prepared on `develop` following the 2026-08-02 production
+deployment, after which the healthy single instance was observed serving HTTP
+without a port 443 listener. Redeployment and HTTPS re-verification remain
+pending.
 
 Current state:
 
 - Route 53 resolves the production domain to the healthy single-instance
-  Elastic Beanstalk environment.
-- Nginx serves a trusted, renewable Let's Encrypt certificate and redirects
-  public HTTP traffic to HTTPS.
+  Elastic Beanstalk environment; public HTTP and `/health` both returned `200`
+  during the 2026-08-05 incident check.
+- Nginx is serving the ACME HTTP-01 challenge location, which is consistent
+  with the hook's missing-certificate challenge configuration, while port 443
+  refuses connections until issuance succeeds.
+- The recovery candidate starts missing-certificate retry after a five-minute
+  base delay plus a bounded randomized delay, then uses an hourly base interval
+  without requiring another deployment. Its separate twice-daily maintenance
+  path preserves a working certificate when renewal fails.
 - Physical-device Debug and Release iOS builds use
-  `https://api.example.com`;
+  `https://kashewt.com`;
   simulator Debug builds retain the localhost override.
-- Archtree trusts the single deployed Nginx proxy hop, and public HTTP cannot
-  bypass the HTTPS redirect with a forged forwarded-protocol header.
+- Archtree trusts the single deployed Nginx proxy hop. After TLS recovery
+  activates the managed redirect, Nginx overwrites the trusted forwarded
+  protocol metadata so a public request cannot bypass that redirect.
 
 Remaining rollout and capability gates:
 
@@ -33,7 +41,9 @@ Remaining rollout and capability gates:
 - [x] Point production DNS to the Elastic Beanstalk environment.
 - [x] Set `HTTPS_DOMAIN`, `ACME_EMAIL`, and `TRUST_PROXY_HOPS=1` in Elastic
       Beanstalk, then deploy after DNS resolves to the instance.
-- [x] Confirm Let's Encrypt issuance and the HTTP-to-HTTPS redirect.
+- [ ] Deploy the HTTPS recovery candidate and confirm the bootstrap retry and
+      twice-daily renewal timers are active.
+- [ ] Reconfirm Let's Encrypt issuance, port 443, and the HTTP-to-HTTPS redirect.
 - [x] Verify `TRUST_PROXY_HOPS` against the deployed proxy chain.
 - [x] Change the iOS Release `ARCHTREE_AUTH_BASE_URL` to the production
       `https://` domain.
