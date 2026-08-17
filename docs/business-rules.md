@@ -263,6 +263,14 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - The Archtree landing page presents a visible Finitude Web entry to signed-out
   and signed-in visitors. Public browsing does not require authentication, and
   the entry does not replace content-management or account actions.
+- The Archtree landing page's Log in action opens an Archtree-branded login
+  page and never redirects to Finitude's login page. Finitude remains a
+  separate explicit entry. A visitor who is already authenticated is returned
+  to the requested safe destination instead of seeing another login form.
+- Logging out from the Archtree landing page or Content Manager completes on
+  Archtree and returns to the Archtree homepage; it never redirects through a
+  Finitude route. Supported browsers coordinate cookie cleanup under the
+  shared session-transition lock, while the HTML fallback remains revoke-only.
 - Web logout clears account-scoped server-state caches and that account's local
   search history, but it does not stop an already-playing public stream.
 - Browser Media Session controls are a progressive enhancement over the same

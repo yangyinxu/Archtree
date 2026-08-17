@@ -175,14 +175,18 @@ test('credential-setting browser endpoints require the Web Lock capability', asy
     assert.equal(setCookieHeaders(headerlessRefresh).length, 0);
 });
 
-test('legacy HTML login redirects to the coordinated SPA without setting credentials', async () => {
+test('Archtree HTML login stays on Archtree and rejects uncoordinated submissions', async () => {
     const loginPage = await fetch(
         `${baseUrl}/auth/login-web?returnTo=${encodeURIComponent('/content/manage')}`,
         { redirect: 'manual' }
     );
-    assert.equal(loginPage.status, 303);
-    assert.equal(loginPage.headers.get('location'), '/finitude/login?returnTo=%2Fcontent%2Fmanage');
+    assert.equal(loginPage.status, 200);
+    assert.equal(loginPage.headers.get('location'), null);
     assert.equal(setCookieHeaders(loginPage).length, 0);
+    const loginHtml = await loginPage.text();
+    assert.match(loginHtml, /<h1>Log in to Archtree<\/h1>/);
+    assert.match(loginHtml, /name="returnTo" value="\/content\/manage"/);
+    assert.doesNotMatch(loginHtml, /\/finitude\/login/);
 
     const legacyPost = await fetch(`${baseUrl}/auth/login-web`, {
         method: 'POST',
@@ -198,9 +202,39 @@ test('legacy HTML login redirects to the coordinated SPA without setting credent
             returnTo: '/content/manage'
         })
     });
-    assert.equal(legacyPost.status, 303);
-    assert.equal(legacyPost.headers.get('location'), '/finitude/login?returnTo=%2Fcontent%2Fmanage');
+    assert.equal(legacyPost.status, 409);
+    assert.equal(legacyPost.headers.get('location'), null);
     assert.equal(setCookieHeaders(legacyPost).length, 0);
+    assert.match(await legacyPost.text(), /Enable JavaScript and try again/);
+});
+
+test('Archtree HTML logout revokes the session and returns to the Archtree homepage', async () => {
+    const login = await browserMutation('/auth/browser/login', {
+        body: { identifier: 'listener@example.com', password: 'correct horse battery staple' }
+    });
+    assert.equal(login.status, 200);
+    const viewerId = (await login.clone().json()).user.id as string;
+    const jar = cookieJar(setCookieHeaders(login));
+
+    const logout = await fetch(`${baseUrl}/auth/logout-web`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+            Cookie: jar,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Origin: baseUrl,
+            'Sec-Fetch-Site': 'same-origin'
+        },
+        body: new URLSearchParams({ viewerId })
+    });
+
+    assert.equal(logout.status, 303);
+    assert.equal(logout.headers.get('location'), '/?sessionTransition=logout');
+    assert.doesNotMatch(logout.headers.get('location') ?? '', /finitude/);
+    assert.equal(setCookieHeaders(logout).length, 0);
+    assert.equal((await fetch(`${baseUrl}/auth/browser/session`, {
+        headers: { Cookie: jar }
+    })).status, 401);
 });
 
 test('browser login, one-time refresh, session read, and logout keep tokens out of JSON', async () => {
@@ -233,6 +267,14 @@ test('browser login, one-time refresh, session read, and logout keep tokens out 
     assert.ok(initialAccess);
     assert.ok(initialRefresh);
     assert.doesNotMatch(loginText, new RegExp(`${initialAccess}|${initialRefresh}`));
+
+    const authenticatedLoginPage = await fetch(
+        `${baseUrl}/auth/login-web?returnTo=${encodeURIComponent('/content/manage')}`,
+        { headers: { Cookie: loginJar }, redirect: 'manual' }
+    );
+    assert.equal(authenticatedLoginPage.status, 303);
+    assert.equal(authenticatedLoginPage.headers.get('location'), '/content/manage');
+    assert.doesNotMatch(authenticatedLoginPage.headers.get('location') ?? '', /finitude\/login/);
 
     const bearerOnly = await fetch(`${baseUrl}/auth/browser/session`, {
         headers: { Authorization: `Bearer ${initialAccess}` }

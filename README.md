@@ -347,6 +347,18 @@ Web auth endpoints:
 - `POST /auth/login-web`
 - `POST /auth/logout-web`
 
+`GET /auth/login-web` renders the Archtree-branded login surface. Its script
+holds the shared origin-wide Web Lock while calling `POST /auth/browser/login`;
+an HTML-only `POST /auth/login-web` fails closed with `409` and never installs
+credentials or redirects to Finitude. An already-authenticated GET redirects
+to its allowlisted `returnTo` destination.
+
+Archtree logout forms use the same Web Lock to call
+`POST /auth/browser/logout`, clear the departing account's local search
+history, and return to `/`. The HTML-only `POST /auth/logout-web` remains
+revoke-only and redirects to `/?sessionTransition=logout` for Archtree-side
+completion; neither path redirects through Finitude.
+
 Listener browser-session endpoints (HttpOnly cookies; credentials are never
 returned to JavaScript):
 

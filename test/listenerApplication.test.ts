@@ -145,10 +145,14 @@ test('listener routes report a clear service error when the bundle is absent', a
     });
 
     const loginPage = await fetch(`${baseUrl}/auth/login-web`, { redirect: 'manual' });
-    assert.equal(loginPage.status, 303);
-    assert.equal(loginPage.headers.get('location'), '/finitude/login?returnTo=%2F');
+    assert.equal(loginPage.status, 200);
+    assert.equal(loginPage.headers.get('location'), null);
     assertSecurityHeaders(loginPage, { inlineStyles: true });
     assert.equal(loginPage.headers.getSetCookie().length, 0);
+    const loginHtml = await loginPage.text();
+    assert.match(loginHtml, /<h1>Log in to Archtree<\/h1>/);
+    assert.match(loginHtml, /data-browser-session-login/);
+    assert.doesNotMatch(loginHtml, /\/finitude\/login/);
 
     const contentManagerRedirect = await fetch(`${baseUrl}/content/manage`, {
       redirect: 'manual'

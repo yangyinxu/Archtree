@@ -200,7 +200,7 @@ test('cookie-authenticated writes require same-origin browser evidence', () => {
     );
 });
 
-test('legacy browser login redirects only to known local pages', () => {
+test('browser login return targets allow only known local pages', () => {
     assert.equal(safeWebReturnTo('/finitude/library?sort=recent#saved'), '/finitude/library?sort=recent#saved');
     assert.equal(safeWebReturnTo('/listen/library?sort=recent#saved'), '/finitude/library?sort=recent#saved');
     assert.equal(safeWebReturnTo('/content/manage/audio-tracks'), '/content/manage/audio-tracks');

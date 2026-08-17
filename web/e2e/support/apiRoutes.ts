@@ -125,6 +125,10 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
       pathname: url.pathname,
       search: url.search
     };
+    if (call.method === 'GET' && call.pathname === '/auth/login-web') {
+      await route.continue();
+      return;
+    }
     fixture.calls.push(call);
 
     if (call.method === 'GET' && call.pathname === '/auth/browser/session') {

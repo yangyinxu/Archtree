@@ -17,6 +17,83 @@ test('opens the listener from the Archtree landing page without replacing accoun
   await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
 });
 
+test('keeps the landing-page login on the Archtree surface', async ({ page }) => {
+  await page.goto('/');
+
+  await page.locator('.site-header').getByRole('link', { name: 'Log in' }).click();
+
+  await expect(page).toHaveURL(/\/auth\/login-web$/);
+  await expect(page.getByRole('heading', { name: 'Log in to Archtree' })).toBeVisible();
+  await expect(page.locator('form[data-browser-session-login]')).toBeVisible();
+});
+
+test('submits the Archtree login through the coordinated session endpoint', async ({ page }) => {
+  let requestHeaders: Record<string, string> = {};
+  let requestBody: unknown;
+  await page.route('**/auth/browser/login', async (route) => {
+    requestHeaders = route.request().headers();
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        user: {
+          id: 'listener-1',
+          email: 'listener@example.com',
+          role: 'user',
+          displayName: 'Test Listener',
+          avatarRevision: 0,
+          avatar: null,
+          emailVerified: true,
+          authenticationMethods: ['password']
+        }
+      })
+    });
+  });
+  await page.goto('/auth/login-web');
+
+  await page.getByLabel('Email or username').fill('listener@example.com');
+  await page.getByLabel('Password').fill('correct horse battery staple');
+  await page.getByRole('button', { name: 'Log in' }).click();
+
+  await expect(page).toHaveURL(/\/$/);
+  expect(requestHeaders['x-finitude-session-transition']).toBe('web-locks-v1');
+  expect(requestBody).toEqual({
+    identifier: 'listener@example.com',
+    password: 'correct horse battery staple'
+  });
+});
+
+test('logs out from Archtree without visiting Finitude', async ({ page }) => {
+  let requestHeaders: Record<string, string> = {};
+  await page.route('**/auth/browser/logout', async (route) => {
+    requestHeaders = route.request().headers();
+    await route.fulfill({ status: 204, body: '' });
+  });
+  await page.goto('/');
+  await page.evaluate(() => {
+    window.localStorage.setItem('finitude:search-history:listener-1', '["private query"]');
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/auth/logout-web';
+    form.innerHTML = `
+      <input type="hidden" name="viewerId" value="listener-1" />
+      <button type="submit">Log out</button>
+    `;
+    document.body.append(form);
+  });
+
+  await page.getByRole('button', { name: 'Log out' }).click();
+
+  await expect(page).toHaveURL(/\/$/);
+  expect(requestHeaders['x-finitude-account-viewer']).toBe('listener-1');
+  expect(requestHeaders['x-finitude-session-transition']).toBe('web-locks-v1');
+  expect(await page.evaluate(() => window.localStorage.getItem(
+    'finitude:search-history:listener-1'
+  ))).toBeNull();
+  expect(page.url()).not.toContain('/finitude');
+});
+
 test('serves a production bundle deep link and survives a document reload', async ({ page }) => {
   const response = await page.goto(albumPath);
 
