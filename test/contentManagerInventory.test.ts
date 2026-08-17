@@ -14,6 +14,7 @@ import { AudioTrack } from '../src/models/audioTrack';
 import { Carousel } from '../src/models/carousel';
 import { ContentCollection } from '../src/models/contentCollection';
 import { Page } from '../src/models/page';
+import { Organization } from '../src/models/organization';
 import {
     managementInventoryOffset,
     managementInventoryPageSize,
@@ -68,6 +69,8 @@ test('normalizes management inventory pages and detects limit-plus-one paginatio
 test('Content Manager loads global inventory pages instead of filtering by createdBy', async () => {
     const originals = {
         artists: Artist.fetchAll,
+        artistById: Artist.findById,
+        organizations: Organization.fetchAll,
         albums: Album.fetchAll,
         audioTracks: AudioTrack.fetchAll,
         pages: Page.fetchAll,
@@ -89,6 +92,18 @@ test('Content Manager loads global inventory pages instead of filtering by creat
     (Artist as any).fetchAll = async (limit: number, offset: number) => {
         calls.artists = { limit, offset };
         return [{ _id: 'artist-1', name: 'Legacy Global Artist', albumIds: [], createdBy: 'legacy-owner' }];
+    };
+    (Artist as any).findById = async (id: string) => id === 'artist-1'
+        ? { _id: 'artist-1', name: 'Legacy Global Artist', albumIds: [], createdBy: 'legacy-owner' }
+        : null;
+    (Organization as any).fetchAll = async (limit: number, offset: number) => {
+        calls.organizations = { limit, offset };
+        return [{
+            _id: 'organization-1',
+            name: 'Global Publisher',
+            organizationType: 'publisher',
+            createdBy: 'legacy-owner'
+        }];
     };
     (Album as any).fetchAll = async (limit: number, offset: number) => {
         calls.albums = { limit, offset };
@@ -119,6 +134,8 @@ test('Content Manager loads global inventory pages instead of filtering by creat
     };
 
     const { capture, response } = responseCapture();
+    const operationsPage = responseCapture();
+    const selectedArtistPage = responseCapture();
     let nextError: unknown;
     try {
         await renderManagePageForWeb(
@@ -126,8 +143,20 @@ test('Content Manager loads global inventory pages instead of filtering by creat
             response,
             ((error?: unknown) => { nextError = error; }) as NextFunction
         );
+        await renderManagePageForWeb(
+            adminRequest({ view: 'operations', artistsPage: '2', prefillType: 'artist', prefillId: 'invalid' }),
+            operationsPage.response,
+            ((error?: unknown) => { nextError = error; }) as NextFunction
+        );
+        await renderManagePageForWeb(
+            adminRequest({ view: 'catalog', artistsPage: '2', prefillType: 'artist', prefillId: 'artist-1' }),
+            selectedArtistPage.response,
+            ((error?: unknown) => { nextError = error; }) as NextFunction
+        );
     } finally {
         Artist.fetchAll = originals.artists;
+        Artist.findById = originals.artistById;
+        Organization.fetchAll = originals.organizations;
         Album.fetchAll = originals.albums;
         AudioTrack.fetchAll = originals.audioTracks;
         Page.fetchAll = originals.pages;
@@ -144,19 +173,39 @@ test('Content Manager loads global inventory pages instead of filtering by creat
         limit: managementInventoryPageSize + 1,
         offset: managementInventoryPageSize
     });
-    for (const key of ['albums', 'audioTracks', 'pages', 'carousels', 'contentCollections']) {
+    for (const key of ['organizations', 'albums', 'audioTracks', 'pages', 'carousels', 'contentCollections']) {
         assert.deepEqual(calls[key], { limit: managementInventoryPageSize + 1, offset: 0 });
     }
     assert.match(capture.html, /Catalog Content/);
+    assert.match(capture.html, /manager-view-overview/);
+    assert.match(capture.html, /Set up an Artist release/);
+    assert.match(capture.html, /Overview/);
+    assert.match(capture.html, /Page Layout/);
+    assert.match(capture.html, /Operations/);
     assert.match(capture.html, /Legacy Global Artist/);
+    assert.match(capture.html, /Global Publisher/);
     assert.match(capture.html, /Legacy Global Album/);
     assert.match(capture.html, /Legacy Global Track/);
     assert.match(capture.html, /Global Home/);
     assert.match(capture.html, /Legacy Global Carousel/);
     assert.match(capture.html, /Legacy Global Grid/);
+    assert.match(capture.html, /Current structure/);
+    assert.match(capture.html, /Page settings and placement/);
+    assert.match(capture.html, /Create and configure Carousels/);
     assert.match(capture.html, /Previous Artists/);
     assert.match(capture.html, /Next Audio Tracks/);
     assert.doesNotMatch(capture.html, /My Content|My Artists|My Albums|My Carousels|My Audio Tracks/);
+    assert.match(operationsPage.capture.html, /manager-view-operations/);
+    assert.match(operationsPage.capture.html, /Recent Artist release setups/);
+    assert.match(selectedArtistPage.capture.html, /manager-selection-artist/);
+    assert.match(selectedArtistPage.capture.html, /id="selected-object"/);
+    assert.match(selectedArtistPage.capture.html, /Legacy Global Artist/);
+    assert.match(selectedArtistPage.capture.html, /data-copy-id="artist-1"/);
+    assert.match(selectedArtistPage.capture.html, /id="catalog-object-workspaces"/);
+    assert.ok(
+        selectedArtistPage.capture.html.indexOf('id="selected-object"')
+            < selectedArtistPage.capture.html.indexOf('id="catalog-content"')
+    );
 });
 
 test('Audio Track inventory uses the global page and global administrator copy', async () => {
@@ -191,6 +240,11 @@ test('Audio Track inventory uses the global page and global administrator copy',
     assert.match(capture.html, /<h1[^>]*>Audio Tracks<\/h1>/);
     assert.match(capture.html, /Global catalog/);
     assert.match(capture.html, /Cross-owner Track/);
+    assert.match(capture.html, /id="track-status-filter"/);
+    assert.match(capture.html, /id="track-album-filter"/);
+    assert.match(capture.html, /data-status="ready"/);
+    assert.match(capture.html, /data-album="unassigned"/);
+    assert.match(capture.html, /data-copy-id="global-0"/);
     assert.match(capture.html, /Previous Audio Tracks/);
     assert.match(capture.html, /Next Audio Tracks/);
     assert.doesNotMatch(capture.html, /My Audio Tracks/);

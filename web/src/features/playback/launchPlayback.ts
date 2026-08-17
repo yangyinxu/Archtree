@@ -15,6 +15,7 @@ export const queueItemFromTrack = (track: AudioTrackSummary): PlayerQueueItem =>
   title: track.title,
   artworkUrl: track.artworkUrl,
   artistNames: track.artistNames,
+  displayByline: track.displayByline,
   streamUrl: track.streamUrl
 });
 

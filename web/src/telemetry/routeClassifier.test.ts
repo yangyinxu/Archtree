@@ -4,6 +4,7 @@ test('reduces dynamic listener URLs to bounded route names', () => {
   expect(classifyListenerRoute('/finitude')).toBe('home');
   expect(classifyListenerRoute('/finitude/albums/private-content-id?from=search-term')).toBe('album');
   expect(classifyListenerRoute('/finitude/artists/private-content-id')).toBe('artist');
+  expect(classifyListenerRoute('/finitude/organizations/private-content-id')).toBe('organization');
   expect(classifyListenerRoute('/finitude/playlists')).toBe('playlists');
   expect(classifyListenerRoute('/finitude/playlists/private-playlist-id')).toBe('playlist');
   expect(classifyListenerRoute('/finitude/reset-password/private-token')).toBe('auth');
@@ -14,6 +15,7 @@ test('maps only allowlisted listener operations and excludes every auth endpoint
   expect(classifyApiOperation('/api/listener/v1/capabilities')).toBe('listener_capabilities');
   expect(classifyApiOperation('/api/listener/v1/search?q=private-term')).toBe('listener_search');
   expect(classifyApiOperation('/api/listener/v1/tracks/private-id')).toBe('listener_track');
+  expect(classifyApiOperation('/api/listener/v1/organizations/private-id')).toBe('listener_organization');
   expect(classifyApiOperation('/content/me/saves/status', 'POST')).toBe('save_status');
   expect(classifyApiOperation('/content/me/saves/audioTrack/private-id', 'PUT')).toBe('save');
   expect(classifyApiOperation('/content/me/saves/audioTrack/private-id', 'DELETE')).toBe('unsave');

@@ -567,6 +567,84 @@ test('artist carousel filters non-ready Soundtracks before applying its limit', 
     ]);
 });
 
+test('artist carousel scopes separate primary, featured, and soundtrack participation', async () => {
+    const db = getDb()!;
+    const artistId = new ObjectId();
+    const primaryAlbumId = new ObjectId();
+    const featuredAlbumId = new ObjectId();
+    const appearsAlbumId = new ObjectId();
+    const appearsTrackId = new ObjectId();
+    const credit = (creditId: string, role: string) => ({
+        creditId,
+        subjectType: 'artist',
+        subjectId: artistId.toString(),
+        role,
+        order: 0
+    });
+    await Promise.all([
+        db.collection('artists').insertOne({
+            _id: artistId,
+            name: 'Scoped Artist',
+            albumIds: [primaryAlbumId.toString()]
+        }),
+        db.collection('albums').insertMany([
+            {
+                _id: primaryAlbumId,
+                title: 'Primary Release',
+                audioTrackIds: [],
+                credits: [credit('scope_primary_credit', 'primary')],
+                attributionStatus: 'documented'
+            },
+            {
+                _id: featuredAlbumId,
+                title: 'Featured Release',
+                audioTrackIds: [],
+                credits: [credit('scope_featured_credit', 'featured')],
+                attributionStatus: 'documented'
+            },
+            {
+                _id: appearsAlbumId,
+                title: 'Appears Release',
+                audioTrackIds: [appearsTrackId.toString()]
+            }
+        ]),
+        db.collection('audioTracks').insertOne({
+            _id: appearsTrackId,
+            title: 'Guest Performance',
+            albumId: appearsAlbumId,
+            artistIds: [artistId.toString()],
+            credits: [credit('scope_performer_credit', 'performer')],
+            attributionStatus: 'documented',
+            uploadStatus: 'ready',
+            s3Key: appearsTrackId.toString()
+        })
+    ]);
+
+    const idsForScope = async (scope: 'discography' | 'collaborations' | 'appearsOn' | 'allRelated') => {
+        const resolved = await Carousel.resolveCarousel({
+            mode: 'artist',
+            items: [],
+            artistConfig: {
+                artistId: artistId.toString(),
+                contentType: 'album',
+                scope,
+                sort: 'titleAsc',
+                limit: 20
+            }
+        });
+        return resolved.items.map((item: any) => item.contentId);
+    };
+
+    assert.deepEqual(await idsForScope('discography'), [primaryAlbumId.toString()]);
+    assert.deepEqual(await idsForScope('collaborations'), [featuredAlbumId.toString()]);
+    assert.deepEqual(await idsForScope('appearsOn'), [appearsAlbumId.toString()]);
+    assert.deepEqual(await idsForScope('allRelated'), [
+        appearsAlbumId.toString(),
+        featuredAlbumId.toString(),
+        primaryAlbumId.toString()
+    ]);
+});
+
 test('shared-content authorization runs before the application body parser', async () => {
     const malformedJson = async (path: string, token?: string, redirect: RequestRedirect = 'follow') =>
         fetch(`${baseUrl}${path}`, {

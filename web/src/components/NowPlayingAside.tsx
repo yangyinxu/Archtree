@@ -11,8 +11,8 @@ interface NowPlayingAsideProps {
   store?: PlayerStore;
 }
 
-const artistLabel = (artistNames: readonly string[]) =>
-  artistNames.join(', ') || 'Finitude soundtrack';
+const artistLabel = (item: { displayByline?: string; artistNames: readonly string[] }) =>
+  item.displayByline || item.artistNames.join(', ') || 'Finitude soundtrack';
 
 /** Presents read-only playback context without owning audio, queue, or activity writes. */
 export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) => {
@@ -53,7 +53,7 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
 
       <div className={styles.currentCopy}>
         <p className={styles.currentTitle} title={current.title}>{current.title}</p>
-        <p className={styles.currentArtist}>{artistLabel(current.artistNames)}</p>
+        <p className={styles.currentArtist}>{artistLabel(current)}</p>
       </div>
 
       {upNext && (
@@ -72,7 +72,7 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
             />
             <div>
               <p className={styles.upNextTitle} title={upNext.title}>{upNext.title}</p>
-              <p className={styles.upNextArtist}>{artistLabel(upNext.artistNames)}</p>
+              <p className={styles.upNextArtist}>{artistLabel(upNext)}</p>
             </div>
           </div>
         </section>

@@ -7,6 +7,7 @@ import {
   listenerAlbumSchema,
   listenerArtistSchema,
   listenerHomeSchema,
+  listenerOrganizationSchema,
   listenerSearchSchema,
   listenerTrackSchema,
   recentlyPlayedResultSchema,
@@ -45,6 +46,7 @@ export const listenerQueryKeys = {
   search: (query: string) => ['listener', 'search', normalizedSearchQuery(query)] as const,
   album: (albumId: string) => ['listener', 'album', albumId.trim()] as const,
   artist: (artistId: string) => ['listener', 'artist', artistId.trim()] as const,
+  organization: (organizationId: string) => ['listener', 'organization', organizationId.trim()] as const,
   track: (audioTrackId: string) => ['listener', 'audioTrack', audioTrackId.trim()] as const,
   library: (viewerKey: string, options: LibraryPageOptions = {}) =>
     ['listener', 'library', viewerKey, normalizedLibraryOptions(options)] as const,
@@ -75,6 +77,9 @@ export const getListenerAlbum = (albumId: string, signal?: AbortSignal) =>
 export const getListenerArtist = (artistId: string, signal?: AbortSignal) =>
   apiRequest(encodedContentPath('artists', artistId), listenerArtistSchema, { signal });
 
+export const getListenerOrganization = (organizationId: string, signal?: AbortSignal) =>
+  apiRequest(encodedContentPath('organizations', organizationId), listenerOrganizationSchema, { signal });
+
 export const getListenerTrack = (audioTrackId: string, signal?: AbortSignal) =>
   apiRequest(encodedContentPath('tracks', audioTrackId), listenerTrackSchema, { signal });
 
@@ -102,6 +107,12 @@ export const listenerArtistQuery = (artistId: string) => queryOptions({
   queryKey: listenerQueryKeys.artist(artistId),
   queryFn: ({ signal }) => getListenerArtist(artistId, signal),
   enabled: artistId.trim().length > 0
+});
+
+export const listenerOrganizationQuery = (organizationId: string) => queryOptions({
+  queryKey: listenerQueryKeys.organization(organizationId),
+  queryFn: ({ signal }) => getListenerOrganization(organizationId, signal),
+  enabled: organizationId.trim().length > 0
 });
 
 export const listenerTrackQuery = (audioTrackId: string) => queryOptions({

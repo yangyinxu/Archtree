@@ -87,6 +87,13 @@ Required variables:
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in
   production and enabled in non-production environments.
+- Catalog Credit rollout switches are documented in
+  [`docs/deployment/catalog-credit-rollout-runbook.md`](docs/deployment/catalog-credit-rollout-runbook.md):
+  `CATALOG_CREDIT_WRITES_ENABLED`, `CATALOG_CREDIT_READS_ENABLED`,
+  `CATALOG_CREDIT_SECTIONS_ENABLED`, and
+  `CATALOG_ORGANIZATION_SURFACES_ENABLED` default to `true` for the additive
+  release. `CATALOG_CREDIT_REJECT_LEGACY_WRITES` defaults to `false` until the
+  documented adoption and seven-day drift gate passes.
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 operations
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region
@@ -429,8 +436,45 @@ Web content management:
   Album, Soundtrack, Page, Carousel, and Grid/List sections use stable bounded
   pagination; internal provenance remains available for audit.
 - Create/update/delete forms for artists, albums, and audio tracks
-- Single and bulk audio-track creation record filenames and a pending upload state before sending files to S3
-- Every newly uploaded track requires at least one existing artist. `audioTrack.artistIds` is the canonical artist-to-track relationship.
+- Content Manager is organized into Overview, Catalog, Page Layout, and
+  Operations views. Artist workspaces manage named Album memberships without
+  copying database IDs and can create a new Album already linked to the Artist.
+- Catalog keeps the global inventory available, but an Artist, Album,
+  Soundtrack, or Organization opened from Edit is promoted into a focused
+  workspace near the top of the view. Database IDs remain available through
+  explicit copy actions instead of being primary labels.
+- Page Layout leads with the current Page hierarchy. Page placement, Carousel
+  configuration, and manual-item maintenance are grouped into collapsible
+  tools; Page and Carousel reorder controls support both drag-and-drop and
+  Move up/Move down buttons.
+- Operations shows the retained step status for each guided Artist release,
+  links completed content back to its workspace, and only offers retry when an
+  operation needs attention. Audio Tracks can be filtered together by search,
+  storage lifecycle status, and Album assignment.
+- The guided Artist release setup creates or reuses an Artist, creates and
+  links an Album, and can optionally create a dynamic Album Artist Carousel
+  and attach it to Home or Library in one reviewed submission.
+- Guided setup uses a retained, administrator-scoped operation record. Reusing
+  the same setup token is idempotent; partial failures keep completed IDs and
+  expose a retry action that resumes from the first incomplete step.
+- Artist metadata and Artist–Album relationship actions use non-upload routes.
+  Only file-capable endpoints consume the shared upload rate/concurrency
+  capacity. A browser upload `429` renders a recovery page with the
+  `Retry-After` time instead of a raw JSON document.
+- Album and Soundtrack attribution is managed as ordered role-bearing Credits
+  for Artist and Organization subjects. Compatibility `artistIds`, `albumIds`,
+  and flattened bylines are projected by the server during client migration.
+- The Content Manager Credit editor supports named subject search, role
+  changes, ordering, removal, Organization-only attribution, and an explicit
+  `Attribution not documented` state. Dynamic Artist Carousels can target
+  Discography, Collaborations, Appears On, or all related Credits.
+- Single and bulk Content Manager audio-track creation record filenames and a
+  pending upload state before sending files to S3. They accept Artist Credits,
+  Organization Credits, inherited Album primary Artists, or an explicitly
+  undocumented attribution state.
+- The legacy `/content/audioTrack` creation endpoint continues to require an
+  existing Artist during the compatibility window and can be disabled with
+  the Catalog Credit legacy-write cutover switch.
 - Artist responses no longer expose the legacy `audioTrackIds` field. Clients should find an artist's tracks by querying audio tracks whose `artistIds` contains the artist ID.
 - Content Manager reference fields validate IDs against the expected shared content type before saving.
 - Artist, album, and audio-track create/update forms accept optional JPG, PNG, or WebP cover art through the `coverArtFile` multipart field.
@@ -624,18 +668,30 @@ Delete:
 Reconciliation:
 
 - Admin-only report: `GET /admin/audio-storage/reconciliation`
+- Admin-only exact-orphan deletion: `POST /admin/audio-storage/orphan-delete`
+  with `{"s3Key":"audio/..."}` or the audit-page form. It re-runs
+  reconciliation, rejects any raw Soundtrack lifecycle reference, deletes only
+  the exact confirmed orphan, and verifies that S3 no longer reports it.
+- Admin-only MongoDB-only Soundtrack deletion:
+  `POST /admin/audio-storage/missing-track-delete` with `audioTrackId` and
+  `expectedS3Key`. It re-runs reconciliation, rejects stale storage identity,
+  and uses the normal Soundtrack deletion lifecycle so catalog references are
+  cleaned and partial failures retain retryable database evidence.
 - Admin-only publication retry: `POST /admin/audio-storage/publication-retry`
   with `{"audioTrackIds":["..."]}` (1–100 items). It reuses existing
   database-confirmed ready objects, isolates every item, and returns stable
   outcomes for ready, non-ready, missing, malformed, and duplicate IDs without
   stopping the rest of the batch.
-- Browser requests receive a readable audit page; append `?format=json` for the structured report.
+- Browser requests receive a readable audit page with lifecycle-specific
+  recommendations and individually confirmed actions; append `?format=json`
+  for the structured report.
 - Compares every `audioTracks` record against the objects in `S3_BUCKET_NAME`.
 - Reports orphaned S3 objects, database tracks with missing objects, and
   pending/failed storage or publication lifecycle records. Incomplete rows
   include `publicationStatus`, `publicationUpdatedAt`, and bounded
   `publicationError` evidence.
-- The report is read-only; it never deletes S3 objects automatically.
+- Generating the report is read-only; it never deletes S3 objects
+  automatically. Remediation requires a separate explicit administrator POST.
 - Admin-only image report: `GET /admin/image-storage/reconciliation`
 - The image report audits the `images/` namespace against `imageAssets`, including orphaned, detached, missing, pending, and failed image records.
 - Admin-only content-reference report: `GET /admin/content-references/reconciliation`
@@ -660,3 +716,13 @@ Reconciliation:
   - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 512 MB)
   - Cover-art limit via `MAX_IMAGE_UPLOAD_MB` (defaults to 10 MB; maximum 25 MB)
   - Content Manager bulk uploads send files sequentially, keeping each request below the proxy limit and avoiding buffering the entire selection in memory at once.
+- Catalog Credit migration is dry-run-first and bounded:
+  `npm run migrate:catalog-credits -- --limit=100`. Continue with the returned
+  `--after-album` and `--after-track` checkpoints. Apply only after reviewing
+  findings: `npm run migrate:catalog-credits -- --apply --confirm=APPLY_CATALOG_CREDITS --limit=100`.
+  `--mark-unattributed-unknown` is an explicit policy choice and is never the
+  default. The command reports bounded samples and never logs credentials.
+- `429 Upload temporarily limited`: genuine image/audio upload endpoints share
+  a per-client upload budget of 20 requests per hour and expose `Retry-After`,
+  `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset`. Metadata and
+  Artist–Album membership changes do not consume that budget.

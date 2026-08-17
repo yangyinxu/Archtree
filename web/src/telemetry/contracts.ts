@@ -6,6 +6,7 @@ export const listenerRouteNames = [
   'playlist',
   'album',
   'artist',
+  'organization',
   'account',
   'auth',
   'not_found',
@@ -49,6 +50,7 @@ export type ListenerTelemetryEvent =
         | 'listener_library'
         | 'listener_album'
         | 'listener_artist'
+        | 'listener_organization'
         | 'listener_track'
         | 'save_status'
         | 'save'

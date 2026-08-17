@@ -9,11 +9,11 @@ import {
     maxAudioUploadMb,
     requireUploadSize
 } from '../../middleware/audioUpload';
-import { audioWithCoverArtUpload, imageUpload } from '../../middleware/imageUpload';
+import { artistReleaseImageUpload, audioWithCoverArtUpload, imageUpload } from '../../middleware/imageUpload';
 import {
     attachRequestAbortSignal,
+    contentManagerUploadRateLimit,
     uploadConcurrencyLimit,
-    uploadRateLimit
 } from '../../middleware/requestProtectionMiddleware';
 import { maxImageUploadMb } from '../../middleware/imageUpload';
 
@@ -25,25 +25,42 @@ router.use(requireAuthForWeb, requireAdminForWeb);
 router.get('/', contentController.renderManagePageForWeb);
 router.get('/audio-tracks', contentController.renderAudioTracksPageForWeb);
 router.get('/search', contentController.searchContentWeb);
+router.get('/reference-search', contentController.searchManagementReferencesWeb);
+router.post('/workflows/artist-release', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize((maxImageUploadMb * 2) + 1), artistReleaseImageUpload, contentController.createArtistReleaseWorkflowWeb);
+router.post('/workflows/artist-release/retry', contentController.retryArtistReleaseWorkflowWeb);
+router.post('/organization/create', contentController.createOrganizationWeb);
+router.post('/organization/release/create', contentController.createOrganizationReleaseWeb);
+router.post('/organization/update', contentController.updateOrganizationWeb);
+router.post('/organization/delete', contentController.deleteOrganizationWeb);
+router.post('/credits/add', contentController.addCatalogCreditWeb);
+router.post('/credits/remove', contentController.removeCatalogCreditWeb);
+router.post('/credits/update-role', contentController.updateCatalogCreditRoleWeb);
+router.post('/credits/reorder', contentController.reorderCatalogCreditWeb);
+router.post('/credits/mark-unknown', contentController.markCatalogAttributionUnknownWeb);
 
-router.post('/artist/create', uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.createArtistWeb);
-router.post('/artist/update', uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.updateArtistWeb);
+router.post('/artist/create', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.createArtistWeb);
+router.post('/artist/update', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.updateArtistWeb);
+router.post('/artist/update-metadata', contentController.updateArtistMetadataWeb);
+router.post('/artist/update-cover-art', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.updateArtistCoverArtWeb);
 router.post('/artist/delete', contentController.deleteArtistWeb);
 
-router.post('/album/create', uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.createAlbumWeb);
-router.post('/album/update', uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.updateAlbumWeb);
+router.post('/album/create', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.createAlbumWeb);
+router.post('/album/update', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.updateAlbumWeb);
 router.post('/album/delete', contentController.deleteAlbumWeb);
 router.post('/album/delete-audio-tracks', contentController.deleteAlbumAudioTracksWeb);
 
-router.post('/audioTrack/create', uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + maxImageUploadMb + 2), audioWithCoverArtUpload, contentController.createAudioTrackWeb);
-router.post('/audioTrack/update', uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.updateAudioTrackWeb);
+router.post('/audioTrack/create', contentManagerUploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + maxImageUploadMb + 2), audioWithCoverArtUpload, contentController.createAudioTrackWeb);
+router.post('/audioTrack/update', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.updateAudioTrackWeb);
 router.post('/audioTrack/delete', contentController.deleteAudioTrackWeb);
-router.post('/audioTrack/upload', uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + 1), audioUpload.single('audioFile'), contentController.uploadAudioTrackWeb);
-router.post('/audioTrack/bulk-upload', uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioBatchUploadMb), audioUpload.array('audioFiles', 20), contentController.bulkUploadAudioTracksWeb);
+router.post('/audioTrack/upload', contentManagerUploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + 1), audioUpload.single('audioFile'), contentController.uploadAudioTrackWeb);
+router.post('/audioTrack/bulk-upload', contentManagerUploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioBatchUploadMb), audioUpload.array('audioFiles', 20), contentController.bulkUploadAudioTracksWeb);
 
 router.post('/link/track-album', contentController.linkTrackToAlbumWeb);
 router.post('/link/album-artist', contentController.linkAlbumToArtistWeb);
 router.post('/link/track-artist', contentController.linkTrackToArtistWeb);
+router.post('/artist/albums/add', contentController.addArtistAlbumWeb);
+router.post('/artist/albums/remove', contentController.removeArtistAlbumWeb);
+router.post('/artist/albums/create', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.createArtistAlbumWeb);
 
 router.post('/composition/page/save', pageController.createOrUpdatePageWeb);
 router.post('/composition/page/attach-carousel', pageController.attachCarouselToPageWeb);

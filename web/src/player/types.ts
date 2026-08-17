@@ -6,6 +6,7 @@ export interface PlayerQueueItem {
   title: string;
   artworkUrl: string;
   artistNames: readonly string[];
+  displayByline?: string;
   streamUrl: string;
 }
 

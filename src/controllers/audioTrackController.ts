@@ -37,6 +37,12 @@ import {
     publishUploadedAudioTracks
 } from '../services/albumTrackLinkService';
 import { retryAudioTrackPublications } from '../services/audioPublicationRecoveryService';
+import {
+    creditsForLegacyArtistIds,
+    mergeLegacyArtistIdsIntoCredits
+} from '../models/catalogCredit';
+import { replaceCatalogCredits } from '../services/catalogCreditService';
+import { catalogCreditRollout } from '../config/catalogCreditRollout';
 
 const s3ErrorStatus = (error: any) => {
     const status = Number(error?.$metadata?.httpStatusCode ?? 0);
@@ -117,6 +123,11 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     if (authReq.auth.role !== 'admin') {
         return res.status(403).json({ message: 'Administrator access is required.' });
     }
+    if (catalogCreditRollout().rejectLegacyWrites) {
+        return res.status(409).json({
+            message: 'Direct artistIds writes are retired. Use the Content Manager Credit workflow.'
+        });
+    }
 
     const uploadFile = getUploadedFile(req, 'audioFile');
     if (!uploadFile) {
@@ -168,6 +179,14 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
         uploadFile.mimetype || 'audio/mpeg',
         audioTrackObjectId
     );
+    track.credits = creditsForLegacyArtistIds(
+        'audioTrack',
+        audioTrackId,
+        artistIds,
+        'legacyUnspecified'
+    );
+    track.attributionStatus = 'documented';
+    track.creditRevision = 1;
 
     try {
         await track.save();
@@ -218,6 +237,11 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     if (authReq.auth.role !== 'admin') {
         return res.status(403).json({ message: 'Administrator access is required.' });
     }
+    if (catalogCreditRollout().rejectLegacyWrites && req.body.artistIds !== undefined) {
+        return res.status(409).json({
+            message: 'Direct artistIds writes are retired. Use Soundtrack Credits.'
+        });
+    }
 
     const audioTrackId: string = req.params.audioTrackId;
     const audioTrack = await AudioTrack.findById(audioTrackId);
@@ -227,6 +251,7 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
 
     const updatePayload: Record<string, unknown> = {};
     let requestedAlbumId: string | undefined;
+    let requestedArtistIds: string[] | undefined;
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
     let replacementCoverArtId: string | undefined;
     const removeCoverArt = !coverArtFile
@@ -241,7 +266,7 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
         if (!validation.valid) {
             return res.status(400).json({ message: validation.message });
         }
-        updatePayload.artistIds = validation.ids;
+        requestedArtistIds = validation.ids;
     }
     if (req.body.genres !== undefined) updatePayload.genres = req.body.genres;
     if (req.body.albumId !== undefined) {
@@ -313,6 +338,21 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
             message: 'Audio track was not updated because its cover art changed concurrently or its lifecycle evidence is invalid.',
             cleanupPending: cleanup.cleanupPending
         });
+    }
+    if (requestedArtistIds) {
+        const credits = mergeLegacyArtistIdsIntoCredits(
+            'audioTrack',
+            audioTrackId,
+            audioTrack.credits,
+            requestedArtistIds
+        );
+        await replaceCatalogCredits(
+            'audioTrack',
+            audioTrackId,
+            credits,
+            credits.length > 0 ? 'documented' : 'unknown',
+            Number.isInteger(audioTrack.creditRevision) ? audioTrack.creditRevision : 0
+        );
     }
     return res.status(200).json({
         message: 'Audio track updated successfully.',

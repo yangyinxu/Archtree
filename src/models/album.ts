@@ -15,6 +15,15 @@ import {
     assignReadyAudioTracksToNewAlbum,
     replaceReadyAlbumAudioTracks
 } from '../services/albumTrackLinkService';
+import {
+    type AttributionStatus,
+    type CatalogCredit,
+    normalizeCatalogCredits,
+    validateAttribution
+} from './catalogCredit';
+import { touchReadyArtistReferences } from '../services/artistReferenceFenceService';
+import { touchReadyOrganizationReferences } from '../services/organizationReferenceFenceService';
+import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
 
 const albumCreationWriteMayHaveCommitted = (error: any) =>
     error?.hasErrorLabel?.('UnknownTransactionCommitResult') === true
@@ -38,6 +47,9 @@ export class Album {
     lifecycleUpdatedAt: Date;
     lifecycleError: string | null;
     referenceRevision: number;
+    credits?: CatalogCredit[];
+    attributionStatus?: AttributionStatus;
+    creditRevision?: number;
 
     constructor(
         title: string,
@@ -68,6 +80,24 @@ export class Album {
             return await withReadyAudioTrackReferences(
                 Array.isArray(this.audioTrackIds) ? this.audioTrackIds : [],
                 async (session, audioTrackIds) => {
+                    if (Array.isArray(this.credits)) {
+                        requireCatalogCreditWrites();
+                        this.credits = normalizeCatalogCredits(this.credits);
+                        this.attributionStatus = validateAttribution(
+                            this.attributionStatus,
+                            this.credits
+                        );
+                        await touchReadyArtistReferences(
+                            this.credits.filter((credit) => credit.subjectType === 'artist')
+                                .map((credit) => credit.subjectId),
+                            session
+                        );
+                        await touchReadyOrganizationReferences(
+                            this.credits.filter((credit) => credit.subjectType === 'organization')
+                                .map((credit) => credit.subjectId),
+                            session
+                        );
+                    }
                     this.audioTrackIds = await assignReadyAudioTracksToNewAlbum(
                         session,
                         albumId,

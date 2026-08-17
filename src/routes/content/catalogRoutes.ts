@@ -15,6 +15,7 @@ import {
 const router: Router = express.Router();
 
 router.get('/search', publicReadRateLimit, asyncHandler(contentController.searchContent));
+router.get('/organization/:organizationId', publicReadRateLimit, asyncHandler(contentController.getOrganization));
 
 router.post('/album', requireAuth, requireAdmin, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), asyncHandler(albumController.postAlbum));
 router.put('/album/:albumId', requireAuth, requireAdmin, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), asyncHandler(albumController.updateAlbum));

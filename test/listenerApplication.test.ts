@@ -139,7 +139,10 @@ test('listener routes report a clear service error when the bundle is absent', a
     const listenerCapabilities = await fetch(`${baseUrl}/api/listener/v1/capabilities`);
     assert.equal(listenerCapabilities.status, 200);
     assert.equal(listenerCapabilities.headers.get('cache-control'), 'no-store');
-    assert.deepEqual(await listenerCapabilities.json(), { playlists: true });
+    assert.deepEqual(await listenerCapabilities.json(), {
+        playlists: true,
+        catalogCredits: { reads: true, sections: true, organizations: true }
+    });
 
     const loginPage = await fetch(`${baseUrl}/auth/login-web`, { redirect: 'manual' });
     assert.equal(loginPage.status, 303);

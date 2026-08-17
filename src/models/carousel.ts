@@ -31,10 +31,12 @@ export type CarouselContentType = 'post' | 'album' | 'audioTrack';
 export type CarouselMode = 'manual' | 'artist' | 'personalized';
 export type ArtistCarouselContentType = 'album' | 'audioTrack';
 export type ArtistCarouselSort = 'releaseDateDesc' | 'titleAsc';
+export type ArtistCarouselScope = 'discography' | 'collaborations' | 'appearsOn' | 'allRelated';
 
 export interface ArtistCarouselConfig {
     artistId: string;
     contentType: ArtistCarouselContentType;
+    scope?: ArtistCarouselScope;
     sort: ArtistCarouselSort;
     limit: number;
 }
@@ -267,28 +269,85 @@ export class Carousel {
             };
         let content: any[] = [];
         if (config.contentType === 'album') {
-            const albumObjectIds = [...new Set<string>(
+            const legacyDiscographyIds = [...new Set<string>(
                 (Array.isArray(artist.albumIds) ? artist.albumIds : [])
                     .map(String)
                     .filter((id: string) => Boolean(toObjectId(id)))
-            )].map((id) => toObjectId(id)).filter((id): id is ObjectId => id !== null);
-            content = albumObjectIds.length > 0
-                ? await db!.collection('albums')
-                    .find({
-                        _id: { $in: albumObjectIds },
-                        ...readyAlbumLifecycleFilter
-                    })
-                    .sort(sort)
-                    .limit(itemLimit)
-                    .maxTimeMS(3_000)
-                    .toArray()
+            )];
+            const scope = config.scope ?? 'discography';
+            const directRoles = scope === 'discography'
+                ? ['primary']
+                : scope === 'collaborations' ? ['featured'] : null;
+            const relatedTracks = scope === 'appearsOn' || scope === 'allRelated'
+                ? await db!.collection('audioTracks').find({
+                    $and: [
+                        readyAudioFilter,
+                        { $or: [
+                            { credits: { $elemMatch: { subjectType: 'artist', subjectId: config.artistId } } },
+                            { artistIds: { $in: [config.artistId, artistObjectId] } }
+                        ] }
+                    ]
+                }).project({ albumId: 1 }).limit(2_000).maxTimeMS(3_000).toArray()
+                : [];
+            const relatedAlbumIds = relatedTracks
+                .map((track) => String(track.albumId ?? '').toLowerCase())
+                .filter((id) => Boolean(toObjectId(id)));
+            const clauses: Record<string, unknown>[] = [];
+            if (directRoles) {
+                clauses.push({ credits: { $elemMatch: {
+                    subjectType: 'artist',
+                    subjectId: config.artistId,
+                    role: { $in: directRoles }
+                } } });
+            } else if (scope === 'allRelated') {
+                clauses.push({ credits: { $elemMatch: {
+                    subjectType: 'artist',
+                    subjectId: config.artistId
+                } } });
+            }
+            if (scope === 'discography' && legacyDiscographyIds.length > 0) {
+                clauses.push({ _id: { $in: legacyDiscographyIds.map(toObjectId) } });
+            }
+            if (relatedAlbumIds.length > 0) {
+                clauses.push({ _id: { $in: relatedAlbumIds.map(toObjectId) } });
+            }
+            content = clauses.length > 0
+                ? await db!.collection('albums').find({
+                    ...readyAlbumLifecycleFilter,
+                    $or: clauses
+                }).sort(sort).limit(itemLimit).maxTimeMS(3_000).toArray()
                 : [];
         } else {
+            const scope = config.scope ?? 'discography';
+            const roles = scope === 'discography'
+                ? ['primary']
+                : scope === 'collaborations'
+                    ? ['featured']
+                    : scope === 'appearsOn'
+                        ? ['performer', 'legacyUnspecified']
+                        : null;
+            const creditMatch: Record<string, unknown> = {
+                subjectType: 'artist',
+                subjectId: config.artistId,
+                ...(roles ? { role: { $in: roles } } : {})
+            };
             content = await db!
                 .collection('audioTracks')
                 .find({
-                    ...readyAudioFilter,
-                    artistIds: { $in: [config.artistId, artistObjectId] }
+                    $and: [
+                        readyAudioFilter,
+                        { $or: [
+                            { credits: { $elemMatch: creditMatch } },
+                            ...((scope === 'allRelated' || scope === 'appearsOn')
+                                ? [{ artistIds: { $in: [config.artistId, artistObjectId] } }]
+                                : scope === 'discography'
+                                    ? [{
+                                        credits: { $exists: false },
+                                        artistIds: { $in: [config.artistId, artistObjectId] }
+                                    }]
+                                    : [])
+                        ] }
+                    ]
                 })
                 .sort(sort)
                 .limit(itemLimit)

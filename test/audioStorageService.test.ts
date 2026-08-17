@@ -236,6 +236,20 @@ test('Soundtrack deletion performs no cleanup when its lifecycle fence loses the
     assert.deepEqual(updates, []);
 });
 
+test('audit-triggered deletion stops when a replacement changed the expected S3 key', async () => {
+    const calls: string[] = [];
+    const updates: Array<Record<string, unknown>> = [];
+    const dependencies = deletionDependencies(calls, updates);
+
+    await assert.rejects(
+        deleteAudioObjectAndTrack(trackId, dependencies, originalKey),
+        /storage changed before deletion could begin/
+    );
+
+    assert.deepEqual(calls, []);
+    assert.deepEqual(updates, []);
+});
+
 test('audio object keys bind legacy and versioned storage to one Soundtrack identity', () => {
     assert.equal(isAudioObjectKeyForTrack(originalKey, trackId), true);
     assert.equal(isAudioObjectKeyForTrack(replacementKey, trackId), true);

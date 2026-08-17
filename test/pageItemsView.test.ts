@@ -30,6 +30,8 @@ test('renders each page item in configured order with presentation and name', ()
     assert.match(html, /Carousel/);
     assert.match(html, /Grid/);
     assert.match(html, /List/);
+    assert.match(html, /data-copy-id="carousel-id"/);
+    assert.doesNotMatch(html, /<code>carousel-id<\/code>/);
 });
 
 test('renders unloaded and unknown references instead of hiding them', () => {

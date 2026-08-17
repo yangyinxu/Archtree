@@ -18,6 +18,18 @@ export const imageUpload = multer({
     }
 });
 
+/** Accepts the two independently bounded cover-art fields in Artist release setup. */
+export const artistReleaseImageUpload = multer({
+    storage,
+    limits: {
+        fileSize: maxImageUploadMb * 1024 * 1024,
+        files: 2
+    }
+}).fields([
+    { name: 'artistCoverArtFile', maxCount: 1 },
+    { name: 'albumCoverArtFile', maxCount: 1 }
+]);
+
 export const avatarUpload = multer({
     storage,
     limits: {

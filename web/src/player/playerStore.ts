@@ -239,7 +239,7 @@ export const createPlayerStore = (
         mediaSession.metadata = snapshot.currentItem
           ? metadataFactory({
               title: snapshot.currentItem.title,
-              artist: snapshot.currentItem.artistNames.join(', '),
+              artist: snapshot.currentItem.displayByline || snapshot.currentItem.artistNames.join(', '),
               artwork: mediaSessionArtworkSources(snapshot.currentItem.artworkUrl)
             })
           : null;

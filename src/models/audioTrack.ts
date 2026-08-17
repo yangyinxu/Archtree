@@ -2,6 +2,14 @@ import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from './simpleDate';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import {
+    AttributionStatus,
+    CatalogCredit,
+    legacyTrackArtistIdsFromCredits,
+    normalizeCatalogCredits,
+    validateAttribution
+} from './catalogCredit';
+import { touchReadyOrganizationReferences } from '../services/organizationReferenceFenceService';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
 import { escapeRegex } from '../utils/search';
 import { withReadyArtistReferences } from '../services/artistReferenceFenceService';
@@ -9,6 +17,7 @@ import { touchReadyAlbumReferences } from '../services/albumReferenceFenceServic
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { touchActiveAccount } from '../services/accountReferenceFenceService';
 import { updateReadyAudioTrackAndAlbum } from '../services/albumTrackLinkService';
+import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
 
 const collectionId = 'audioTracks';
 export type AudioUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
@@ -85,6 +94,9 @@ export class AudioTrack {
     storageCleanupError?: string | null;
     playlistReferenceRevision: number;
     contentReferenceRevision: number;
+    credits?: CatalogCredit[];
+    attributionStatus?: AttributionStatus;
+    creditRevision?: number;
     referenceCleanupStatus?: AudioReferenceCleanupStatus;
     referenceCleanupUpdatedAt?: Date;
     referenceCleanupError?: string | null;
@@ -128,9 +140,22 @@ export class AudioTrack {
 
     // save an audio track to the mongodb database
     save() {
+        if (this.credits !== undefined || this.attributionStatus !== undefined) {
+            requireCatalogCreditWrites();
+            this.credits = normalizeCatalogCredits(this.credits ?? []);
+            this.attributionStatus = validateAttribution(this.attributionStatus, this.credits);
+            this.artistIds = legacyTrackArtistIdsFromCredits(this.credits) as [string];
+            this.creditRevision = Number.isInteger(this.creditRevision) ? this.creditRevision : 1;
+        }
         const db = getDb();
         return withReadyArtistReferences(this.artistIds, async (session, artistIds) => {
             this.artistIds = artistIds as [string];
+            await touchReadyOrganizationReferences(
+                (this.credits ?? [])
+                    .filter((credit) => credit.subjectType === 'organization')
+                    .map((credit) => credit.subjectId),
+                session
+            );
             const albumIds = await touchReadyAlbumReferences(
                 this.albumId ? [this.albumId] : [],
                 session

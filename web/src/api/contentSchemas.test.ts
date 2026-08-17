@@ -1,9 +1,11 @@
 import {
   albumSummarySchema,
+  contentByline,
   contentSummarySchema,
   homeSectionSchema,
   libraryPageSchema,
-  listenerHomeSchema
+  listenerHomeSchema,
+  listenerOrganizationSchema
 } from './contentSchemas';
 
 const album = {
@@ -50,6 +52,45 @@ test('rejects internal fields and artists inside Home music sections', () => {
       bio: '',
       artworkUrl: ''
     }]
+  }).success).toBe(false);
+});
+
+test('Credit attribution is additive and prefers a resolved Organization byline', () => {
+  const attributed = albumSummarySchema.parse({
+    ...album,
+    credits: [{
+      subjectType: 'organization',
+      subjectId: 'organization-1',
+      name: 'Release House',
+      role: 'label',
+      order: 0
+    }],
+    displayByline: 'Release House',
+    attributionStatus: 'documented'
+  });
+  expect(contentByline(attributed)).toBe('Release House');
+  expect(contentByline(albumSummarySchema.parse(album))).toBe('Finitude Ensemble');
+});
+
+test('accepts a public Organization page without internal lifecycle fields', () => {
+  expect(listenerOrganizationSchema.parse({
+    organization: {
+      id: 'organization-1',
+      name: 'Release House',
+      organizationType: 'label',
+      description: 'Independent label'
+    },
+    releases: [album]
+  }).organization.name).toBe('Release House');
+  expect(listenerOrganizationSchema.safeParse({
+    organization: {
+      id: 'organization-1',
+      name: 'Release House',
+      organizationType: 'label',
+      description: '',
+      lifecycleStatus: 'ready'
+    },
+    releases: []
   }).success).toBe(false);
 });
 

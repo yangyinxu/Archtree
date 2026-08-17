@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { ApiError } from '../../api/client';
 import { captureAccountOperation, isAccountOperationCurrent } from '../../api/accountEpoch';
-import type { AudioTrackSummary } from '../../api/contentSchemas';
+import { contentByline, type AudioTrackSummary } from '../../api/contentSchemas';
 import {
   addPlaylistItem,
   createPlaylistIdempotencyKey,
@@ -160,7 +160,7 @@ export const AddSoundtracksDialog = ({
                 <Artwork alt="" className={styles.pickerArtwork} kind="audioTrack" sizes="3rem" src={track.artworkUrl} />
                 <span className={styles.pickerCopy}>
                   <span title={track.title || 'Untitled soundtrack'}>{track.title || 'Untitled soundtrack'}</span>
-                  <span>{track.artistNames.join(', ') || track.albumTitle || 'Soundtrack'}</span>
+                  <span>{contentByline(track) || track.albumTitle || 'Soundtrack'}</span>
                 </span>
                 <button
                   aria-label={exists

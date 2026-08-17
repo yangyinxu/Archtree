@@ -16,6 +16,14 @@ import {
     isReadyAlbumLifecycle,
     readyAlbumLifecycleFilter
 } from './albumReferenceFenceService';
+import {
+    AttributionStatus,
+    CatalogCreditRole,
+    normalizeCatalogCredits,
+    validateAttribution
+} from '../models/catalogCredit';
+import { readyOrganizationLifecycleFilter } from './organizationReferenceFenceService';
+import { catalogCreditRollout } from '../config/catalogCreditRollout';
 
 export interface PublicSimpleDate {
     year?: number;
@@ -32,12 +40,30 @@ export interface PublicArtist {
     birthDate: PublicSimpleDate | null;
 }
 
+export interface PublicOrganization {
+    _id: string;
+    name: string;
+    organizationType: string;
+    description: string;
+}
+
 export interface PublicAlbum {
     _id: string;
     title: string;
     coverArtUrl: string;
     audioTrackIds: string[];
     releaseDate: PublicSimpleDate | null;
+    credits?: PublicCatalogCredit[];
+    displayByline?: string;
+    attributionStatus?: AttributionStatus;
+}
+
+export interface PublicCatalogCredit {
+    subjectType: 'artist' | 'organization';
+    subjectId: string;
+    name: string;
+    role: CatalogCreditRole;
+    order: number;
 }
 
 export interface PublicAudioTrack {
@@ -51,6 +77,9 @@ export interface PublicAudioTrack {
     releaseDate: PublicSimpleDate | null;
     duration: string | null;
     format: { type: string; bitrate?: number } | null;
+    credits?: PublicCatalogCredit[];
+    displayByline?: string;
+    attributionStatus?: AttributionStatus;
 }
 
 export interface PublicFeedPost {
@@ -74,6 +103,12 @@ const artistProjection = {
     coverArtUrl: 1,
     birthDate: 1
 };
+const organizationProjection = {
+    _id: 1,
+    name: 1,
+    organizationType: 1,
+    description: 1
+};
 const albumProjection = {
     _id: 1,
     title: 1,
@@ -81,7 +116,9 @@ const albumProjection = {
     coverArtUrl: 1,
     audioTrackIds: 1,
     releaseDate: 1,
-    lifecycleStatus: 1
+    lifecycleStatus: 1,
+    credits: 1,
+    attributionStatus: 1
 };
 const audioTrackProjection = {
     _id: 1,
@@ -95,7 +132,9 @@ const audioTrackProjection = {
     duration: 1,
     format: 1,
     uploadStatus: 1,
-    s3Key: 1
+    s3Key: 1,
+    credits: 1,
+    attributionStatus: 1
 };
 
 const queryTimeoutMs = 3_000;
@@ -158,6 +197,70 @@ const publicFormat = (value: unknown): PublicAudioTrack['format'] => {
     return Number.isFinite(bitrate) && bitrate >= 0 ? { type, bitrate } : { type };
 };
 
+const validCredits = (owner: any) => {
+    if (!catalogCreditRollout().readsEnabled) return null;
+    if (!Array.isArray(owner?.credits)) return null;
+    try {
+        const credits = normalizeCatalogCredits(owner.credits);
+        validateAttribution(owner.attributionStatus, credits);
+        return credits;
+    } catch {
+        return null;
+    }
+};
+
+const loadCreditSubjectNames = async (owners: any[]) => {
+    const credits = owners.flatMap((owner) => validCredits(owner) ?? []);
+    const artistIds = uniqueObjectIdStrings(credits
+        .filter((credit) => credit.subjectType === 'artist').map((credit) => credit.subjectId));
+    const organizationIds = uniqueObjectIdStrings(credits
+        .filter((credit) => credit.subjectType === 'organization').map((credit) => credit.subjectId));
+    const [artists, organizations] = await Promise.all([
+        artistIds.length > 0 ? getDb()!.collection('artists').find({
+            _id: { $in: artistIds.map(toObjectId) },
+            ...readyArtistLifecycleFilter
+        }).project({ name: 1 }).toArray() : [],
+        organizationIds.length > 0 ? getDb()!.collection('organizations').find({
+            _id: { $in: organizationIds.map(toObjectId) },
+            ...readyOrganizationLifecycleFilter
+        }).project({ name: 1 }).toArray() : []
+    ]);
+    return new Map<string, string>([
+        ...artists.map((subject) => [`artist:${String(subject._id)}`, normalizedText(subject.name)] as const),
+        ...organizations.map((subject) => [`organization:${String(subject._id)}`, normalizedText(subject.name)] as const)
+    ]);
+};
+
+const publicCreditFields = (owner: any, subjectNames?: ReadonlyMap<string, string>) => {
+    const credits = validCredits(owner);
+    if (!credits) return {};
+    const projected = credits.flatMap((credit): PublicCatalogCredit[] => {
+        const name = subjectNames?.get(`${credit.subjectType}:${credit.subjectId}`);
+        return name ? [{ ...credit, name }] : [];
+    });
+    const preferred = projected.filter((credit) => ['primary', 'featured', 'performer']
+        .includes(credit.role));
+    const institutional = projected.filter((credit) => credit.subjectType === 'organization');
+    const byline = preferred.length > 0 ? preferred : institutional.length > 0 ? institutional : projected;
+    return {
+        credits: projected,
+        displayByline: owner.attributionStatus === 'unknown'
+            ? 'Attribution not documented'
+            : [...new Set(byline.map((credit) => credit.name))].join(', '),
+        attributionStatus: owner.attributionStatus as AttributionStatus
+    };
+};
+
+/** Resolves durable role-aware bylines for private Library projections without exposing subjects. */
+export const resolvePublicCatalogBylines = async (owners: any[]) => {
+    const subjectNames = await loadCreditSubjectNames(owners);
+    return new Map(owners.flatMap((owner): Array<[string, string]> => {
+        const id = String(owner?._id ?? '');
+        const byline = publicCreditFields(owner, subjectNames).displayByline;
+        return id && byline ? [[id, byline]] : [];
+    }));
+};
+
 /** Returns true only when MongoDB records a playable object lifecycle. */
 export const isReadyPublicAudioTrack = (track: any) =>
     track?.uploadStatus === 'ready'
@@ -182,20 +285,23 @@ export const toPublicArtist = (
 /** Projects one Album while omitting references to unavailable Soundtracks. */
 export const toPublicAlbum = (
     album: any,
-    readyAudioTrackIds: readonly string[] = []
+    readyAudioTrackIds: readonly string[] = [],
+    subjectNames?: ReadonlyMap<string, string>
 ): PublicAlbum => ({
     _id: String(album?._id ?? ''),
     title: normalizedText(album?.title),
     coverArtUrl: resolvedCoverArtUrl(album),
     audioTrackIds: uniqueObjectIdStrings([...readyAudioTrackIds], maximumAlbumTracks),
-    releaseDate: publicDate(album?.releaseDate)
+    releaseDate: publicDate(album?.releaseDate),
+    ...publicCreditFields(album, subjectNames)
 });
 
 /** Projects one ready Soundtrack to the legacy Web/iOS-compatible public DTO. */
 export const toPublicAudioTrack = (
     track: any,
     album?: any,
-    visibleArtistIds?: ReadonlySet<string>
+    visibleArtistIds?: ReadonlySet<string>,
+    subjectNames?: ReadonlyMap<string, string>
 ): PublicAudioTrack | null => {
     if (!isReadyPublicAudioTrack(track)) return null;
     const visibleAlbumId = album ? objectIdString(track?.albumId) : null;
@@ -212,7 +318,8 @@ export const toPublicAudioTrack = (
             .filter(Boolean),
         releaseDate: publicDate(track?.releaseDate),
         duration: normalizedText(track?.duration) || null,
-        format: publicFormat(track?.format)
+        format: publicFormat(track?.format),
+        ...publicCreditFields(track, subjectNames)
     };
 };
 
@@ -358,10 +465,14 @@ export const projectPublicAlbums = async (
     dependencies: PublicAlbumProjectionDependencies = {}
 ) => {
     const readyAlbums = albums.filter(isReadyAlbumLifecycle);
-    const trackIdsByAlbum = await loadReadyAlbumTrackIds(readyAlbums, dependencies);
+    const [trackIdsByAlbum, subjectNames] = await Promise.all([
+        loadReadyAlbumTrackIds(readyAlbums, dependencies),
+        loadCreditSubjectNames(readyAlbums)
+    ]);
     return readyAlbums.map((album) => toPublicAlbum(
         album,
-        trackIdsByAlbum.get(objectIdString(album?._id) ?? '') ?? []
+        trackIdsByAlbum.get(objectIdString(album?._id) ?? '') ?? [],
+        subjectNames
     ));
 };
 
@@ -372,7 +483,7 @@ export const projectPublicAudioTracks = async (tracks: any[]) => {
     const artistIds = uniqueObjectIdStrings(readyTracks.flatMap((track) =>
         Array.isArray(track?.artistIds) ? track.artistIds : []
     ));
-    const [albums, artists] = await Promise.all([
+    const [albums, artists, subjectNames] = await Promise.all([
         albumIds.length > 0
             ? getDb()!.collection('albums')
             .find({
@@ -392,7 +503,8 @@ export const projectPublicAudioTracks = async (tracks: any[]) => {
                 .project({ _id: 1 })
                 .maxTimeMS(queryTimeoutMs)
                 .toArray()
-            : []
+            : [],
+        loadCreditSubjectNames(readyTracks)
     ]);
     const albumsById = new Map(albums.map((album) => [
         objectIdString(album._id) ?? '',
@@ -406,7 +518,8 @@ export const projectPublicAudioTracks = async (tracks: any[]) => {
         const projected = toPublicAudioTrack(
             track,
             albumsById.get(objectIdString(track?.albumId) ?? ''),
-            visibleArtistIds
+            visibleArtistIds,
+            subjectNames
         );
         return projected ? [projected] : [];
     });
@@ -458,6 +571,37 @@ export const getPublicAlbum = async (albumId: string) => {
     return album ? (await projectPublicAlbums([album]))[0] : null;
 };
 
+/** Returns one ready Organization and only ready releases that credit it. */
+export const getPublicOrganization = async (organizationId: string) => {
+    if (!catalogCreditRollout().organizationSurfacesEnabled) return null;
+    const id = objectIdString(organizationId);
+    if (!id) return null;
+    const organization = await getDb()!.collection('organizations').find({
+        _id: toObjectId(id),
+        ...readyOrganizationLifecycleFilter
+    }).project(organizationProjection).maxTimeMS(queryTimeoutMs).next();
+    if (!organization) return null;
+    const albums = await getDb()!.collection('albums').find({
+        ...readyAlbumLifecycleFilter,
+        credits: { $elemMatch: { subjectType: 'organization', subjectId: id } }
+    }).project(albumProjection).sort({
+        'releaseDate.year': -1,
+        'releaseDate.month': -1,
+        'releaseDate.day': -1,
+        title: 1,
+        _id: 1
+    }).limit(maximumAlbumTracks).maxTimeMS(queryTimeoutMs).toArray();
+    return {
+        organization: {
+            _id: String(organization._id),
+            name: normalizedText(organization.name),
+            organizationType: normalizedText(organization.organizationType),
+            description: normalizedText(organization.description)
+        } satisfies PublicOrganization,
+        releases: await projectPublicAlbums(albums)
+    };
+};
+
 export const listPublicAudioTracks = async (limit: number, offset: number) => {
     const tracks = await getDb()!.collection('audioTracks')
         .find(readyPublicAudioFilter)
@@ -472,13 +616,21 @@ export const listPublicAudioTracks = async (limit: number, offset: number) => {
 
 export const searchPublicCatalog = async (query: string, limit: number) => {
     const expression = { $regex: escapeRegex(query), $options: 'i' };
-    const [artists, albums, tracks] = await Promise.all([
+    const organizationSearch = catalogCreditRollout().organizationSurfacesEnabled
+        ? getDb()!.collection('organizations').find({
+            name: expression,
+            ...readyOrganizationLifecycleFilter
+        }).project(organizationProjection).sort({ name: 1, _id: 1 })
+            .limit(limit).maxTimeMS(queryTimeoutMs).toArray()
+        : Promise.resolve([]);
+    const [artists, organizations, albums, tracks] = await Promise.all([
         getDb()!.collection('artists').find({
             name: expression,
             ...readyArtistLifecycleFilter
         })
             .project(artistProjection).sort({ name: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray(),
+        organizationSearch,
         getDb()!.collection('albums').find({
             title: expression,
             ...readyAlbumLifecycleFilter
@@ -497,6 +649,12 @@ export const searchPublicCatalog = async (query: string, limit: number) => {
     return {
         query,
         artists: publicArtists,
+        organizations: organizations.map((organization): PublicOrganization => ({
+            _id: String(organization._id),
+            name: normalizedText(organization.name),
+            organizationType: normalizedText(organization.organizationType),
+            description: normalizedText(organization.description)
+        })),
         albums: publicAlbums,
         audioTracks: publicTracks
     };

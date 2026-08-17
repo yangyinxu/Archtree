@@ -421,7 +421,7 @@ export const PlayerBar = ({
       <span className={styles.copy}>
         <span className={styles.title}>{current?.title || 'Nothing playing'}</span>
         <span className={styles.meta}>
-          {current?.artistNames.join(', ') || (current ? 'Finitude soundtrack' : 'Choose something that fits the moment')}
+          {current?.displayByline || current?.artistNames.join(', ') || (current ? 'Finitude soundtrack' : 'Choose something that fits the moment')}
         </span>
         {player.error && <span className={styles.error} role="alert">{player.error.message}</span>}
       </span>
@@ -581,7 +581,7 @@ export const PlayerBar = ({
             <div className={styles.expandedIdentity}>
               <p className={styles.expandedTitle}>{current.title}</p>
               <p className={styles.expandedArtist}>
-                {current.artistNames.join(', ') || 'Finitude soundtrack'}
+                {current.displayByline || current.artistNames.join(', ') || 'Finitude soundtrack'}
               </p>
             </div>
 

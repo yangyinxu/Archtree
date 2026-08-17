@@ -21,6 +21,17 @@ import {
     isReadyAlbumLifecycle,
     readyAlbumLifecycleFilter
 } from './albumReferenceFenceService';
+import {
+    AttributionStatus,
+    CatalogCredit,
+    CatalogCreditRole,
+    classifyArtistAlbumCredit,
+    normalizeCatalogCredits,
+    validateAttribution
+} from '../models/catalogCredit';
+import { readyOrganizationLifecycleFilter } from './organizationReferenceFenceService';
+import { Carousel } from '../models/carousel';
+import { catalogCreditRollout } from '../config/catalogCreditRollout';
 
 export interface ListenerDate {
     year?: number;
@@ -36,6 +47,14 @@ export interface ListenerArtistSummary {
     artworkUrl: string;
 }
 
+export interface ListenerOrganizationSummary {
+    contentType: 'organization';
+    id: string;
+    name: string;
+    organizationType: string;
+    description: string;
+}
+
 export interface ListenerAlbumSummary {
     contentType: 'album';
     id: string;
@@ -43,6 +62,9 @@ export interface ListenerAlbumSummary {
     artworkUrl: string;
     artistNames: string[];
     releaseDate: ListenerDate | null;
+    credits?: ListenerCatalogCredit[];
+    displayByline?: string;
+    attributionStatus?: AttributionStatus;
 }
 
 export interface ListenerAudioTrackSummary {
@@ -55,6 +77,17 @@ export interface ListenerAudioTrackSummary {
     albumTitle: string | null;
     duration: string | null;
     streamUrl: string;
+    credits?: ListenerCatalogCredit[];
+    displayByline?: string;
+    attributionStatus?: AttributionStatus;
+}
+
+export interface ListenerCatalogCredit {
+    subjectType: 'artist' | 'organization';
+    subjectId: string;
+    name: string;
+    role: CatalogCreditRole;
+    order: number;
 }
 
 export type ListenerPlayableSummary = ListenerAlbumSummary | ListenerAudioTrackSummary;
@@ -78,6 +111,7 @@ interface CatalogContext {
     tracksById: Map<string, any>;
     artistsById: Map<string, any>;
     artists: any[];
+    organizationsById: Map<string, any>;
     albumTrackIds: Map<string, string[]>;
 }
 
@@ -95,6 +129,12 @@ const artistProjection = {
     coverArtUrl: 1,
     albumIds: 1
 };
+const organizationProjection = {
+    _id: 1,
+    name: 1,
+    organizationType: 1,
+    description: 1
+};
 const albumProjection = {
     _id: 1,
     title: 1,
@@ -102,7 +142,9 @@ const albumProjection = {
     coverArtUrl: 1,
     audioTrackIds: 1,
     releaseDate: 1,
-    lifecycleStatus: 1
+    lifecycleStatus: 1,
+    credits: 1,
+    attributionStatus: 1
 };
 const audioTrackProjection = {
     _id: 1,
@@ -112,7 +154,9 @@ const audioTrackProjection = {
     artistIds: 1,
     albumId: 1,
     duration: 1,
-    releaseDate: 1
+    releaseDate: 1,
+    credits: 1,
+    attributionStatus: 1
 };
 const readyAudioFilter = readyAudioStorageFilter;
 
@@ -184,6 +228,18 @@ const artistReferencesAlbum = (artist: any, albumId: string) =>
 const compareTitleAndId = (left: any, right: any) =>
     normalizeText(left?.title).localeCompare(normalizeText(right?.title))
     || String(left?._id ?? '').localeCompare(String(right?._id ?? ''));
+
+const validStoredCredits = (owner: any): CatalogCredit[] | null => {
+    if (!catalogCreditRollout().readsEnabled) return null;
+    if (!Array.isArray(owner?.credits)) return null;
+    try {
+        const credits = normalizeCatalogCredits(owner.credits);
+        validateAttribution(owner.attributionStatus, credits);
+        return credits;
+    } catch {
+        return null;
+    }
+};
 
 /** Loads only the catalog fields needed to create public listener DTOs. */
 const createCatalogContext = async (
@@ -258,9 +314,16 @@ const createCatalogContext = async (
     }
 
     const explicitArtistIds = uniqueIds(
-        [...tracksById.values()].flatMap((track) =>
-            Array.isArray(track?.artistIds) ? track.artistIds : []
-        )
+        [
+            ...[...tracksById.values()].flatMap((track) =>
+                Array.isArray(track?.artistIds) ? track.artistIds : []
+            ),
+            ...[...albumsById.values(), ...tracksById.values()].flatMap((owner) =>
+                (validStoredCredits(owner) ?? [])
+                    .filter((credit) => credit.subjectType === 'artist')
+                    .map((credit) => credit.subjectId)
+            )
+        ]
     );
     const allAlbumIds = [...albumsById.keys()];
     const artistClauses: Record<string, unknown>[] = [];
@@ -288,6 +351,22 @@ const createCatalogContext = async (
         || String(left?._id ?? '').localeCompare(String(right?._id ?? ''))
     );
 
+    const organizationIds = uniqueIds(
+        [...albumsById.values(), ...tracksById.values()].flatMap((owner) =>
+            (validStoredCredits(owner) ?? [])
+                .filter((credit) => credit.subjectType === 'organization')
+                .map((credit) => credit.subjectId)
+        )
+    );
+    const organizations = organizationIds.length > 0
+        ? await db.collection('organizations').find({
+            _id: { $in: organizationIds.map(toObjectId) },
+            ...readyOrganizationLifecycleFilter
+        }).project({ _id: 1, name: 1, organizationType: 1 })
+            .maxTimeMS(queryTimeoutMs).toArray()
+        : [];
+    const organizationsById = documentsById(organizations);
+
     const albumTrackIds = new Map<string, string[]>();
     for (const album of albumsById.values()) {
         const albumId = String(album._id).toLowerCase();
@@ -314,7 +393,39 @@ const createCatalogContext = async (
         );
     }
 
-    return { albumsById, tracksById, artistsById, artists, albumTrackIds };
+    return { albumsById, tracksById, artistsById, artists, organizationsById, albumTrackIds };
+};
+
+const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
+    const credits = validStoredCredits(owner);
+    if (!credits) return {};
+    const publicCredits = credits.flatMap((credit): ListenerCatalogCredit[] => {
+        const subject = credit.subjectType === 'artist'
+            ? context.artistsById.get(credit.subjectId)
+            : context.organizationsById.get(credit.subjectId);
+        const name = normalizeText(subject?.name);
+        return name ? [{
+            subjectType: credit.subjectType,
+            subjectId: credit.subjectId,
+            name,
+            role: credit.role,
+            order: credit.order
+        }] : [];
+    });
+    const preferredRoles = new Set(['primary', 'featured', 'performer']);
+    const preferred = publicCredits.filter((credit) => preferredRoles.has(credit.role));
+    const institutional = publicCredits.filter((credit) => credit.subjectType === 'organization');
+    const bylineCredits = preferred.length > 0
+        ? preferred
+        : institutional.length > 0 ? institutional : publicCredits;
+    const displayByline = owner.attributionStatus === 'unknown'
+        ? 'Attribution not documented'
+        : [...new Set(bylineCredits.map((credit) => credit.name))].join(', ');
+    return {
+        credits: publicCredits,
+        displayByline,
+        attributionStatus: owner.attributionStatus as AttributionStatus
+    };
 };
 
 const artistNamesForAlbum = (album: any, context: CatalogContext) => {
@@ -354,8 +465,16 @@ const toAlbumSummary = (album: any, context: CatalogContext): ListenerAlbumSumma
     id: String(album._id),
     title: normalizeText(album?.title),
     artworkUrl: resolvedCoverArtUrl(album),
-    artistNames: artistNamesForAlbum(album, context),
-    releaseDate: safeDate(album?.releaseDate)
+    artistNames: (() => {
+        const creditNames = (validStoredCredits(album) ?? [])
+            .filter((credit) => credit.subjectType === 'artist'
+                && (credit.role === 'primary' || credit.role === 'featured'))
+            .map((credit) => normalizeText(context.artistsById.get(credit.subjectId)?.name))
+            .filter(Boolean);
+        return creditNames.length > 0 ? [...new Set(creditNames)] : artistNamesForAlbum(album, context);
+    })(),
+    releaseDate: safeDate(album?.releaseDate),
+    ...creditProjectionForOwner(album, context)
 });
 
 const toAudioTrackSummary = (
@@ -367,11 +486,17 @@ const toAudioTrackSummary = (
         : null;
     const album = referencedAlbumId ? context.albumsById.get(referencedAlbumId) : null;
     const albumId = album ? referencedAlbumId : null;
-    const artistNames = (Array.isArray(track?.artistIds) ? track.artistIds : [])
+    const creditArtistNames = (validStoredCredits(track) ?? [])
+        .filter((credit) => credit.subjectType === 'artist')
+        .map((credit) => normalizeText(context.artistsById.get(credit.subjectId)?.name))
+        .filter(Boolean);
+    const artistNames = (creditArtistNames.length > 0
+        ? creditArtistNames
+        : (Array.isArray(track?.artistIds) ? track.artistIds : [])
         .map((artistId: unknown) => normalizeText(
             context.artistsById.get(String(artistId).toLowerCase())?.name
         ))
-        .filter((name: string, index: number, values: string[]) => Boolean(name) && values.indexOf(name) === index);
+    ).filter((name: string, index: number, values: string[]) => Boolean(name) && values.indexOf(name) === index);
     return {
         contentType: 'audioTrack',
         id: String(track._id),
@@ -381,7 +506,8 @@ const toAudioTrackSummary = (
         albumId,
         albumTitle: album ? normalizeText(album.title) || null : null,
         duration: normalizeText(track?.duration) || null,
-        streamUrl: `/content/audioTrack/stream/${encodeURIComponent(String(track._id))}`
+        streamUrl: `/content/audioTrack/stream/${encodeURIComponent(String(track._id))}`,
+        ...creditProjectionForOwner(track, context)
     };
 };
 
@@ -438,74 +564,8 @@ const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
             }));
     }
 
-    const config = carousel?.artistConfig;
-    const artistId = String(config?.artistId ?? '').trim().toLowerCase();
-    const contentType = config?.contentType;
-    if (!isHexObjectId(artistId) || (contentType !== 'album' && contentType !== 'audioTrack')) return [];
-    const limit = Math.max(1, Math.min(Number(config?.limit ?? 20) || 20, 100));
-    const db = getDb()!;
-    const artist = await db.collection('artists')
-        .find({ _id: toObjectId(artistId), ...readyArtistLifecycleFilter })
-        .project({ albumIds: 1 })
-        .maxTimeMS(queryTimeoutMs)
-        .next();
-    if (!artist) return [];
-    if (contentType === 'album') {
-        const albumIds = uniqueIds(
-            Array.isArray(artist?.albumIds) ? artist.albumIds : [],
-            maximumAlbumTracks
-        );
-        if (albumIds.length === 0) return [];
-        const sort: Record<string, 1 | -1> = config?.sort === 'titleAsc'
-            ? { title: 1, _id: 1 }
-            : {
-                'releaseDate.year': -1,
-                'releaseDate.month': -1,
-                'releaseDate.day': -1,
-                title: 1,
-                _id: 1
-            };
-        const albums = await db.collection('albums')
-            .find({
-                _id: { $in: albumIds.map(toObjectId) },
-                ...readyAlbumLifecycleFilter
-            })
-            .project({ _id: 1 })
-            .sort(sort)
-            .limit(limit)
-            .maxTimeMS(queryTimeoutMs)
-            .toArray();
-        return albums.map((album, order) => ({
-            contentType: 'album' as const,
-            contentId: String(album._id),
-            order
-        }));
-    }
-
-    const sort: Record<string, 1 | -1> = config?.sort === 'titleAsc'
-        ? { title: 1, _id: 1 }
-        : {
-            'releaseDate.year': -1,
-            'releaseDate.month': -1,
-            'releaseDate.day': -1,
-            title: 1,
-            _id: 1
-        };
-    const tracks = await db.collection('audioTracks')
-        .find({
-            ...readyAudioFilter,
-            artistIds: { $in: storedObjectIdValues(artistId) }
-        })
-        .project({ _id: 1 })
-        .sort(sort)
-        .limit(limit)
-        .maxTimeMS(queryTimeoutMs)
-        .toArray();
-    return tracks.map((track, order) => ({
-        contentType: 'audioTrack' as const,
-        contentId: String(track._id),
-        order
-    }));
+    const resolved = await Carousel.resolveCarousel(carousel, viewerUserId);
+    return orderedRefs(resolved?.items);
 };
 
 /** Resolves the composed Home page to public, presentation-preserving sections. */
@@ -627,10 +687,18 @@ export const searchListenerContent = async (query: string, limit = 20) => {
     const db = getDb()!;
     const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 50));
     const expression = { $regex: escapeRegex(query), $options: 'i' };
-    const [artists, albums, tracks] = await Promise.all([
+    const organizationSearch = catalogCreditRollout().organizationSurfacesEnabled
+        ? db.collection('organizations').find({
+            name: expression,
+            ...readyOrganizationLifecycleFilter
+        }).project(organizationProjection).sort({ name: 1, _id: 1 })
+            .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray()
+        : Promise.resolve([]);
+    const [artists, organizations, albums, tracks] = await Promise.all([
         db.collection('artists').find({ name: expression, ...readyArtistLifecycleFilter })
             .project(artistProjection).sort({ name: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray(),
+        organizationSearch,
         db.collection('albums').find({
             title: expression,
             ...readyAlbumLifecycleFilter
@@ -645,6 +713,13 @@ export const searchListenerContent = async (query: string, limit = 20) => {
     return {
         query,
         artists: artists.map(toArtistSummary),
+        organizations: organizations.map((organization): ListenerOrganizationSummary => ({
+            contentType: 'organization',
+            id: String(organization._id),
+            name: normalizeText(organization.name),
+            organizationType: normalizeText(organization.organizationType),
+            description: normalizeText(organization.description)
+        })),
         albums: albums.map((album) => toAlbumSummary(album, context)),
         audioTracks: tracks.map((track) => toAudioTrackSummary(track, context))
     };
@@ -708,25 +783,37 @@ export const getListenerArtist = async (artistId: string) => {
         .next();
     if (!artist) return null;
 
-    const albumIds = uniqueIds(
+    const legacyAlbumIds = uniqueIds(
         (Array.isArray(artist.albumIds) ? artist.albumIds : []).slice(0, maximumAlbumTracks),
         maximumAlbumTracks
     );
-    const [unorderedAlbums, tracks] = await Promise.all([
-        albumIds.length > 0
-            ? db.collection('albums')
-                .find({
-                    _id: { $in: albumIds.map(toObjectId) },
-                    ...readyAlbumLifecycleFilter
-                })
-                .project(albumProjection)
-                .maxTimeMS(queryTimeoutMs)
-                .toArray()
-            : [],
+    const [creditAlbums, tracks] = await Promise.all([
+        db.collection('albums').find({
+            ...readyAlbumLifecycleFilter,
+            credits: {
+                $elemMatch: {
+                    subjectType: 'artist',
+                    subjectId: normalizedArtistId
+                }
+            }
+        }).project(albumProjection).sort({ title: 1, _id: 1 })
+            .limit(maximumAlbumTracks).maxTimeMS(queryTimeoutMs).toArray(),
         db.collection('audioTracks')
             .find({
-                ...readyAudioFilter,
-                artistIds: { $in: storedObjectIdValues(normalizedArtistId) }
+                $and: [
+                    readyAudioFilter,
+                    { $or: [
+                        { artistIds: { $in: storedObjectIdValues(normalizedArtistId) } },
+                        {
+                            credits: {
+                                $elemMatch: {
+                                    subjectType: 'artist',
+                                    subjectId: normalizedArtistId
+                                }
+                            }
+                        }
+                    ] }
+                ]
             })
             .project(audioTrackProjection)
             .sort({ title: 1, _id: 1 })
@@ -734,13 +821,97 @@ export const getListenerArtist = async (artistId: string) => {
             .maxTimeMS(queryTimeoutMs)
             .toArray()
     ]);
-    const albumsById = documentsById(unorderedAlbums);
-    const albums = albumIds.flatMap((id) => albumsById.has(id) ? [albumsById.get(id)] : []);
+    const relatedAlbumIds = uniqueIds([
+        ...legacyAlbumIds,
+        ...creditAlbums.map((album) => album._id),
+        ...tracks.map((track) => track.albumId)
+    ], maximumAlbumTracks);
+    const loadedAlbums = relatedAlbumIds.length > 0
+        ? await db.collection('albums').find({
+            _id: { $in: relatedAlbumIds.map(toObjectId) },
+            ...readyAlbumLifecycleFilter
+        }).project(albumProjection).maxTimeMS(queryTimeoutMs).toArray()
+        : [];
+    const albumsById = documentsById([...creditAlbums, ...loadedAlbums]);
+    const orderedAlbumIds = [
+        ...legacyAlbumIds,
+        ...[...albumsById.keys()].filter((id) => !legacyAlbumIds.includes(id))
+    ];
+    const albums = orderedAlbumIds.flatMap((id) => albumsById.has(id) ? [albumsById.get(id)] : []);
     const context = await createCatalogContext(albums, tracks, [artist]);
+    const sectionsEnabled = catalogCreditRollout().readsEnabled
+        && catalogCreditRollout().sectionsEnabled;
+    const sections = {
+        discography: [] as ListenerAlbumSummary[],
+        collaborations: [] as ListenerAlbumSummary[],
+        appearsOn: [] as ListenerAlbumSummary[],
+        creditAlbums: [] as ListenerAlbumSummary[]
+    };
+    for (const album of albums) {
+        const albumId = String(album._id).toLowerCase();
+        const albumCredits = sectionsEnabled ? validStoredCredits(album) ?? [] : [];
+        const relatedTrackCredits = tracks
+            .filter((track) => trackBelongsToAlbum(track, albumId))
+            .flatMap((track) => validStoredCredits(track) ?? []);
+        let section = sectionsEnabled ? classifyArtistAlbumCredit(
+            normalizedArtistId,
+            albumCredits,
+            relatedTrackCredits
+        ) : null;
+        if (!section && legacyAlbumIds.includes(albumId)) section = 'discography';
+        if (!section && tracks.some((track) => trackBelongsToAlbum(track, albumId)
+            && (Array.isArray(track.artistIds) ? track.artistIds : [])
+                .some((id: unknown) => String(id).toLowerCase() === normalizedArtistId))) {
+            section = 'appearsOn';
+        }
+        const summary = toAlbumSummary(album, context);
+        if (section === 'discography') sections.discography.push(summary);
+        else if (section === 'collaborations') sections.collaborations.push(summary);
+        else if (section === 'appearsOn') sections.appearsOn.push(summary);
+        else if (section === 'credits') sections.creditAlbums.push(summary);
+    }
     return {
         artist: toArtistSummary(artist),
-        albums: albums.map((album) => toAlbumSummary(album, context)),
-        audioTracks: tracks.map((track) => toAudioTrackSummary(track, context))
+        albums: sections.discography,
+        audioTracks: tracks.map((track) => toAudioTrackSummary(track, context)),
+        ...sections
+    };
+};
+
+/** Returns one ready Organization and Albums carrying its institutional Credits. */
+export const getListenerOrganization = async (organizationId: string) => {
+    if (!catalogCreditRollout().organizationSurfacesEnabled) return null;
+    if (!isHexObjectId(organizationId)) return null;
+    const normalizedOrganizationId = organizationId.trim().toLowerCase();
+    const db = getDb()!;
+    const organization: any = await db.collection('organizations').find({
+        _id: toObjectId(normalizedOrganizationId),
+        ...readyOrganizationLifecycleFilter
+    }).project(organizationProjection)
+        .maxTimeMS(queryTimeoutMs).next();
+    if (!organization) return null;
+    const albums = await db.collection('albums').find({
+        ...readyAlbumLifecycleFilter,
+        credits: { $elemMatch: {
+            subjectType: 'organization',
+            subjectId: normalizedOrganizationId
+        } }
+    }).project(albumProjection).sort({
+        'releaseDate.year': -1,
+        'releaseDate.month': -1,
+        'releaseDate.day': -1,
+        title: 1,
+        _id: 1
+    }).limit(maximumAlbumTracks).maxTimeMS(queryTimeoutMs).toArray();
+    const context = await createCatalogContext(albums, [], []);
+    return {
+        organization: {
+            id: String(organization._id),
+            name: normalizeText(organization.name),
+            organizationType: normalizeText(organization.organizationType),
+            description: normalizeText(organization.description)
+        },
+        releases: albums.map((album) => toAlbumSummary(album, context))
     };
 };
 

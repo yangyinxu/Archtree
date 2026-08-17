@@ -9,6 +9,10 @@ const referenceLabel = (item: any) => {
     return 'Unknown';
 };
 
+/** Keeps identifiers available for audit work without making them primary content. */
+const copyIdentifierButton = (referenceId: string) =>
+    `<button class="copy-id" type="button" data-copy-id="${escapeHtml(referenceId)}">Copy ID</button>`;
+
 /** Shows every configured page item in persisted order, including broken references. */
 export const renderPageItemsHierarchy = (
     pages: any[],
@@ -40,7 +44,7 @@ export const renderPageItemsHierarchy = (
                 const mode = carousel?.mode === 'artist'
                     ? 'Artist'
                     : carousel?.mode === 'personalized' ? 'Personalized' : 'Manual';
-                return `<li><span class="pill">Carousel</span> <strong>${escapeHtml(name)}</strong> <span class="item-meta">${escapeHtml(mode)} · <code>${escapeHtml(referenceId)}</code></span></li>`;
+                return `<li><span class="pill">Carousel</span> <strong>${escapeHtml(name)}</strong> <span class="item-meta">${escapeHtml(mode)}</span> ${copyIdentifierButton(referenceId)}</li>`;
             }
             if (type === 'Grid' || type === 'List') {
                 const referenceId = String(item.collectionId ?? '');
@@ -52,11 +56,11 @@ export const renderPageItemsHierarchy = (
                 const source = collection?.dynamicSource
                     ? ` · ${String(collection.dynamicSource)}`
                     : '';
-                return `<li><span class="pill">${type}</span> <strong>${escapeHtml(name)}</strong> <span class="item-meta">${escapeHtml(mode + source)} · <code>${escapeHtml(referenceId)}</code></span></li>`;
+                return `<li><span class="pill">${type}</span> <strong>${escapeHtml(name)}</strong> <span class="item-meta">${escapeHtml(mode + source)}</span> ${copyIdentifierButton(referenceId)}</li>`;
             }
 
             const rawReference = String(item.collectionId ?? item.carouselId ?? 'Missing ID');
-            return `<li><span class="pill pill--muted">Unknown</span> <strong>Unsupported page item</strong> <span class="item-meta"><code>${escapeHtml(rawReference)}</code></span></li>`;
+            return `<li><span class="pill pill--muted">Unknown</span> <strong>Unsupported page item</strong> ${copyIdentifierButton(rawReference)}</li>`;
         }).join('');
         const pageItems = renderedItems
             ? `<ol class="linked-content page-item-list">${renderedItems}</ol>`

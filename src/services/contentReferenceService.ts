@@ -5,11 +5,14 @@ import { cleanupAudioTrackPlaylistReferences } from './playlistLifecycleService'
 import { readyArtistLifecycleFilter } from './artistReferenceFenceService';
 import { readyAlbumLifecycleFilter } from './albumReferenceFenceService';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { readyOrganizationLifecycleFilter } from './organizationReferenceFenceService';
 
 export type ContentReferenceType = 'artist' | 'album' | 'audioTrack';
+type ValidatedContentReferenceType = ContentReferenceType | 'organization';
 
-const referenceConfig: Record<ContentReferenceType, { collection: string; label: string }> = {
+const referenceConfig: Record<ValidatedContentReferenceType, { collection: string; label: string }> = {
     artist: { collection: 'artists', label: 'Artist' },
+    organization: { collection: 'organizations', label: 'Organization' },
     album: { collection: 'albums', label: 'Album' },
     audioTrack: { collection: 'audioTracks', label: 'Audio track' }
 };
@@ -65,7 +68,7 @@ const orderedManualItemCleanup = (
 
 /** Validates administrator-selected shared references without treating provenance as permission. */
 export const validateContentReferences = async (
-    type: ContentReferenceType,
+    type: ValidatedContentReferenceType,
     values: string[]
 ): Promise<ContentReferenceValidation> => {
     const config = referenceConfig[type];
@@ -106,9 +109,11 @@ export const validateContentReferences = async (
         _id: { $in: ids.map((id) => ObjectId.createFromHexString(id)) },
         ...(type === 'artist'
             ? readyArtistLifecycleFilter
-            : type === 'album'
-                ? readyAlbumLifecycleFilter
-                : readyAudioStorageFilter)
+            : type === 'organization'
+                ? readyOrganizationLifecycleFilter
+                : type === 'album'
+                    ? readyAlbumLifecycleFilter
+                    : readyAudioStorageFilter)
     }, {
         projection: { _id: 1 }
     }).toArray();
@@ -146,10 +151,54 @@ export const cleanupDeletedContentReferences = async (
     }
 
     if (type === 'artist') {
+        const removeArtistCreditPipeline = [
+            {
+                $set: {
+                    credits: {
+                        $filter: {
+                            input: '$credits',
+                            as: 'credit',
+                            cond: { $not: [{ $and: [
+                                { $eq: ['$$credit.subjectType', 'artist'] },
+                                { $in: ['$$credit.subjectId', referenceIds] }
+                            ] }] }
+                        }
+                    }
+                }
+            },
+            {
+                $set: {
+                    credits: {
+                        $map: {
+                            input: { $range: [0, { $size: '$credits' }] },
+                            as: 'index',
+                            in: {
+                                $mergeObjects: [
+                                    { $arrayElemAt: ['$credits', '$$index'] },
+                                    { order: '$$index' }
+                                ]
+                            }
+                        }
+                    },
+                    attributionStatus: {
+                        $cond: [{ $eq: [{ $size: '$credits' }, 0] }, 'unknown', 'documented']
+                    },
+                    creditRevision: { $add: [{ $ifNull: ['$creditRevision', 0] }, 1] }
+                }
+            }
+        ];
         operations.push(
             db.collection('audioTracks').updateMany(
                 { artistIds: { $in: referenceIds } },
                 { $pull: { artistIds: { $in: referenceIds } } } as any
+            ),
+            db.collection('albums').updateMany(
+                { credits: { $elemMatch: { subjectType: 'artist', subjectId: { $in: referenceIds } } } },
+                removeArtistCreditPipeline as any
+            ),
+            db.collection('audioTracks').updateMany(
+                { credits: { $elemMatch: { subjectType: 'artist', subjectId: { $in: referenceIds } } } },
+                removeArtistCreditPipeline as any
             ),
             db.collection('carousels').updateMany(
                 {

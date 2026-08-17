@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
-import type { AudioTrackSummary, ContentSummary } from '../api/contentSchemas';
+import { contentByline, type AudioTrackSummary, type ContentSummary } from '../api/contentSchemas';
 import { Artwork } from './Artwork';
 import styles from './ContentListRow.module.css';
 
@@ -12,9 +12,9 @@ const titleFor = (item: ContentSummary) => item.contentType === 'artist'
 const metadataFor = (item: ContentSummary) => {
   if (item.contentType === 'artist') return ['Artist'];
   if (item.contentType === 'album') {
-    return ['Album', item.artistNames.join(', ') || null, item.releaseDate?.year ?? null];
+    return ['Album', contentByline(item) || null, item.releaseDate?.year ?? null];
   }
-  return ['Soundtrack', item.artistNames.join(', ') || null, item.albumTitle, item.duration];
+  return ['Soundtrack', contentByline(item) || null, item.albumTitle, item.duration];
 };
 
 export interface ContentListRowProps {
@@ -42,7 +42,7 @@ export const ContentListRow = ({ item, onPlay, trailing }: ContentListRowProps) 
       {item.contentType === 'audioTrack' ? (
         onPlay ? (
           <button
-            aria-label={`Play ${title}${item.artistNames.length ? ` by ${item.artistNames.join(', ')}` : ''}`}
+            aria-label={`Play ${title}${contentByline(item) ? ` by ${contentByline(item)}` : ''}`}
             className={styles.action}
             onClick={() => onPlay(item)}
             type="button"

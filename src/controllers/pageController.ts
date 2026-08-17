@@ -97,6 +97,12 @@ const parseCarouselDefinition = (body: any): {
 
     const artistId = String(body?.artistId ?? '').trim();
     const contentType = String(body?.artistContentType ?? '').trim();
+    const requestedScope = String(body?.artistScope ?? '').trim();
+    const scope = requestedScope === 'collaborations'
+        || requestedScope === 'appearsOn'
+        || requestedScope === 'allRelated'
+        ? requestedScope
+        : 'discography';
     const sort = body?.artistSort === 'titleAsc' ? 'titleAsc' : 'releaseDateDesc';
     const requestedLimit = Number(body?.artistLimit ?? 20);
     if (!validateObjectId(artistId) || (contentType !== 'album' && contentType !== 'audioTrack') || !Number.isFinite(requestedLimit)) {
@@ -108,6 +114,7 @@ const parseCarouselDefinition = (body: any): {
         artistConfig: {
             artistId,
             contentType,
+            scope,
             sort,
             limit: Math.max(1, Math.min(Math.floor(requestedLimit), 100))
         }
@@ -136,7 +143,7 @@ const doesContentExist = async (contentType: CarouselContentType, contentId: str
 };
 
 const redirectWithMessage = (res: Response, message: string) => {
-    res.redirect(`/content/manage?message=${encodeURIComponent(message)}`);
+    res.redirect(`/content/manage?view=layout&message=${encodeURIComponent(message)}`);
 };
 
 /** Keeps Web composition mutations admin-only if their route guard is bypassed. */

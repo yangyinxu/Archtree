@@ -21,6 +21,7 @@ export const classifyListenerRoute = (pathname: string): ListenerRouteName => {
   if (first === 'playlists') return path.split('/').length > 1 ? 'playlist' : 'playlists';
   if (first === 'albums') return 'album';
   if (first === 'artists') return 'artist';
+  if (first === 'organizations') return 'organization';
   if (authRoutes.has(first)) return 'auth';
   return 'other';
 };
@@ -58,6 +59,7 @@ export const classifyApiOperation = (
   if (path === '/api/listener/v1/library') return 'listener_library';
   if (path.startsWith('/api/listener/v1/albums/')) return 'listener_album';
   if (path.startsWith('/api/listener/v1/artists/')) return 'listener_artist';
+  if (path.startsWith('/api/listener/v1/organizations/')) return 'listener_organization';
   if (path.startsWith('/api/listener/v1/tracks/')) return 'listener_track';
   if (path === '/content/me/saves/status') return 'save_status';
   if (path.startsWith('/content/me/saves/')) {

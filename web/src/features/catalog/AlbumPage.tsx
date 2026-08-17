@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 
 import type { LibraryTarget } from '../../api/contentSchemas';
 import { listenerAlbumQuery, saveStatusesQuery } from '../../api/listener';
+import { contentByline } from '../../api/contentSchemas';
 import { browserSessionQuery } from '../../api/session';
 import { Artwork } from '../../components/Artwork';
 import { Icon } from '../../components/Icon';
@@ -13,6 +14,11 @@ import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton'
 import styles from './CatalogPages.module.css';
 
 const releaseLabel = (year?: number) => year ? String(year) : 'Album';
+const creditRoleLabel = (role: string) => ({
+  primary: 'Primary', featured: 'Featured', performer: 'Performer', composer: 'Composer',
+  producer: 'Producer', remixer: 'Remixer', label: 'Label', publisher: 'Publisher',
+  distributor: 'Distributor', presenter: 'Presenter', legacyUnspecified: 'Credit'
+}[role] ?? role);
 
 /** Renders one expanded Album and launches its canonical ready-only queue. */
 export const AlbumPage = () => {
@@ -92,7 +98,7 @@ export const AlbumPage = () => {
             <p className={styles.eyebrow}>Album</p>
             <h1>{album.title || 'Untitled album'}</h1>
             <p className={styles.metadata}>
-              {[album.artistNames.join(', '), releaseLabel(album.releaseDate?.year), `${tracks.length} soundtrack${tracks.length === 1 ? '' : 's'}`]
+              {[contentByline(album), releaseLabel(album.releaseDate?.year), `${tracks.length} soundtrack${tracks.length === 1 ? '' : 's'}`]
                 .filter(Boolean)
                 .join(' · ')}
             </p>
@@ -119,6 +125,27 @@ export const AlbumPage = () => {
         </div>
       </header>
 
+      {(album.credits?.length ?? 0) > 0 && (
+        <section className={styles.creditSection} aria-labelledby="album-credits-title">
+          <div className={styles.sectionHeader}>
+            <div>
+              <p className={styles.eyebrow}>Attribution</p>
+              <h2 id="album-credits-title">Credits</h2>
+            </div>
+          </div>
+          <ul className={styles.creditList}>
+            {album.credits?.map((credit) => (
+              <li key={`${credit.subjectType}:${credit.subjectId}:${credit.role}`}>
+                <Link to={`/${credit.subjectType === 'artist' ? 'artists' : 'organizations'}/${encodeURIComponent(credit.subjectId)}`}>
+                  <span>{credit.name}</span>
+                  <small>{creditRoleLabel(credit.role)}</small>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className={styles.trackSection} aria-labelledby="album-soundtracks-title">
         <div className={styles.sectionHeader}>
           <div>
@@ -142,7 +169,7 @@ export const AlbumPage = () => {
                     <span className={styles.trackNumber}>{index + 1}</span>
                     <span className={styles.trackCopy}>
                       <span className={styles.trackTitle}>{track.title || 'Untitled soundtrack'}</span>
-                      <span className={styles.trackMeta}>{track.artistNames.join(', ') || album.title}</span>
+                      <span className={styles.trackMeta}>{contentByline(track) || album.title}</span>
                     </span>
                     <span className={styles.duration}>{track.duration || ''}</span>
                   </button>

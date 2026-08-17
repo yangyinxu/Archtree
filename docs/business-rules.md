@@ -108,6 +108,64 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   enforce the same administrator role before processing a mutation.
 - Admins manage the global shared catalog regardless of `createdBy`, while
   retaining that field for provenance and lifecycle auditing.
+- Album primary Artist Credits are the canonical Artist-to-Album membership.
+  `Artist.albumIds` remains a server-owned compatibility projection during
+  migration. One Album may have more than one primary Artist.
+- Adding an existing Album primary Artist Credit is idempotent. Removing it
+  removes only that Credit and its compatibility membership; it does not
+  delete the Album, its Soundtracks, saves, downloads, or Carousel definitions.
+- Content Manager metadata and relationship mutations do not consume image or
+  audio upload rate/concurrency capacity when no file bytes are accepted by
+  that endpoint. Actual uploads remain bounded before multipart decoding and
+  storage work.
+- The guided Artist release workflow may create or reuse an Artist, create and
+  link an Album through a primary Credit, and optionally create or reuse a
+  dynamic Artist Album Carousel and attach it to a Page. A dynamic Artist
+  Carousel derives membership from Credits (with a transition fallback for
+  unmigrated records) and does not copy results into manual items.
+- A partially completed guided release retains successfully published catalog
+  content and traceable operation evidence for an idempotent retry. Failure of
+  an optional Carousel or Page step does not automatically delete a published
+  Artist or Album.
+- Catalog attribution uses ordered, role-bearing Credits whose subject is
+  either an Artist (a person or creative/performing group) or an Organization
+  (such as a label, publisher, distributor, archive, broadcaster, or studio).
+  An Organization is never represented as an Artist merely to satisfy content
+  validation.
+- Album and Soundtrack Credits are independent. A Soundtrack participant does
+  not silently become an Album primary Artist. Adding a Soundtrack primary
+  Artist who is not already an Album primary Artist requires an explicit
+  administrator choice to keep the Credit Soundtrack-only or also promote it
+  to the Album; Soundtrack-only is the safe default.
+- Album promotion itself updates the Album Credit and its compatibility
+  membership atomically. If promotion fails after uploaded media was safely
+  published, the Soundtrack remains valid and Soundtrack-only; Content Manager
+  reports the partial outcome and offers an idempotent Credit-editor retry
+  rather than deleting media or inviting a duplicate upload.
+- Album primary Artist Credits derive Discography, Album featured Artist
+  Credits derive Collaborations, and qualifying Soundtrack Artist Credits
+  derive Appears On when no higher Album classification exists. Composer,
+  producer, and remixer participation derives Credits. One Album appears once
+  per subject using `Discography > Collaborations > Appears On > Credits`.
+- Institutional Album Credits derive Organization Releases. An Album or
+  Soundtrack may be published with only Organization Credits, or with an
+  explicit `unknown` attribution state. Missing attribution never creates a
+  synthetic `Unknown Artist` record and a failed lookup never silently changes
+  attribution to unknown.
+- Single and bulk Soundtrack creation accept Artist Credits, Organization
+  Credits, inherited Album primary Credits, or an explicit undocumented
+  attribution state. They never require a synthetic Artist merely to publish
+  an institution-only or unattributed recording.
+- During the Credit migration, legacy `AudioTrack.artistIds`,
+  `Artist.albumIds`, and flattened artist-name fields remain server-owned
+  compatibility projections. `Artist.albumIds` projects only Album primary
+  Artist Credits; Appears On results are not inserted into that legacy field.
+  Existing explicit Artist-to-Album memberships migrate as Album primary
+  Credits, while ambiguous legacy Soundtrack Artist relationships migrate as
+  `legacyUnspecified` rather than inventing a role.
+- Dynamic Artist Carousels have an explicit `discography`, `collaborations`,
+  `appearsOn`, or `allRelated` scope and default to `discography`. Legacy
+  Carousels without a scope retain that default.
 - Ordinary users continue to manage their own saves, Library state, Recently
   Played activity, profile/avatar, account, device-local downloads, and
   Playlists. These owner-scoped actions do not mutate the shared catalog.
@@ -147,9 +205,14 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
   and reverse-linked tracks are not silently appended. Legacy albums with no
   declared soundtrack IDs may fall back to ready tracks whose `albumId`
   references that album, using a deterministic order.
-- Album artist attribution is derived from the ordered component soundtracks'
-  explicit artist relationships. When those soundtracks provide no artist,
-  Artists that explicitly reference the Album provide the display fallback.
+- Album attribution is derived from its ordered, role-bearing Credits. During
+  migration only, a client that receives no canonical Credits may display the
+  server-maintained legacy Artist relationship as a compatibility fallback;
+  it must not infer or persist Album Credits from component Soundtracks.
+- Soundtrack attribution is derived from its own ordered Credits, including
+  inherited Album primary Credits materialized by the server at creation time.
+  Adding or changing a Soundtrack Credit later does not silently mutate Album
+  attribution unless an administrator explicitly selects promotion.
 - Tapping the album Play button starts the album queue and adds only the album
   to Recently Played.
 - Explicitly tapping an individual song in an album's track list adds that
@@ -592,3 +655,23 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - Reconciliation reports detect orphaned S3 objects, missing S3 objects,
   dangling database references, and incomplete lifecycle states. Audits do not
   automatically delete unknown data.
+- The browser audio-storage audit explains the recommended action for each
+  discrepancy and exposes only explicit, administrator-confirmed remediation.
+  Generating or refreshing the report remains read-only.
+- An administrator may delete one exact S3-only audio object from the audit.
+  The server revalidates the exact key immediately before deletion and refuses
+  the action if any Soundtrack lifecycle field references the raw key or the
+  object is no longer confirmed as orphaned. Repeating an action after the
+  object is already absent is idempotent. A failed or uncertain S3 response is
+  retained as an unresolved reconciliation outcome, never confirmed deletion.
+- A MongoDB-only Soundtrack is never described as having a deletable S3
+  object. Its recommended choices are to upload a replacement file from the
+  Soundtrack workspace or use the normal Soundtrack deletion lifecycle to
+  remove the record and its references. Storage-ready publication failures may
+  use the existing idempotent publication retry without re-uploading.
+- An administrator may remove one exact MongoDB-only Soundtrack from the audit.
+  The server re-runs reconciliation, matches both the Soundtrack ID and expected
+  S3 key, and fences the normal Soundtrack deletion lifecycle against a
+  concurrent upload or storage-identity change. A successful action removes
+  catalog references before final metadata; failures retain lifecycle evidence,
+  and repeating an action after the record is absent is idempotent.

@@ -515,9 +515,11 @@ export const uploadAudioObject = async (
     }
 };
 
+/** Deletes a Soundtrack only after fencing its complete storage and reference lifecycle. */
 export const deleteAudioObjectAndTrack = async (
     audioTrackId: string,
-    dependencies: Partial<AudioTrackDeletionDependencies> = {}
+    dependencies: Partial<AudioTrackDeletionDependencies> = {},
+    expectedS3Key?: string
 ) => {
     const deletion = { ...defaultAudioTrackDeletionDependencies, ...dependencies };
     const usesLegacyCoverHooks = dependencies.prepareTrackCoverArtDeletion !== undefined
@@ -525,6 +527,11 @@ export const deleteAudioObjectAndTrack = async (
     const track = await deletion.findTrack(audioTrackId);
     if (!track) {
         throw new Error(`Audio track ${audioTrackId} no longer exists.`);
+    }
+    if (expectedS3Key !== undefined && track.s3Key !== expectedS3Key) {
+        throw storageMutationConflict(
+            `Audio track ${audioTrackId} storage changed before deletion could begin.`
+        );
     }
     if (track.pendingUploadStatus === 'pending' && track.pendingS3Key) {
         throw storageMutationConflict(`Audio track ${audioTrackId} has an upload in progress.`);

@@ -76,6 +76,11 @@ const publicArtistConfig = (value: any) => {
     return {
         artistId,
         contentType,
+        scope: value?.scope === 'collaborations'
+            || value?.scope === 'appearsOn'
+            || value?.scope === 'allRelated'
+            ? value.scope
+            : 'discography',
         sort: value?.sort === 'titleAsc' ? 'titleAsc' : 'releaseDateDesc',
         limit: Math.max(1, Math.min(Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 20, 100))
     };

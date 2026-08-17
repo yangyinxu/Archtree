@@ -3,7 +3,14 @@ import { z } from 'zod';
 
 import { apiRequest } from './client';
 
-const listenerCapabilitiesSchema = z.object({ playlists: z.boolean() }).strict();
+const listenerCapabilitiesSchema = z.object({
+  playlists: z.boolean(),
+  catalogCredits: z.object({
+    reads: z.boolean(),
+    sections: z.boolean(),
+    organizations: z.boolean()
+  }).strict().optional()
+}).strict();
 
 export const listenerCapabilitiesQueryKey = ['listener', 'capabilities'] as const;
 

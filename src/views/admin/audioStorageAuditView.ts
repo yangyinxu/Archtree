@@ -1,4 +1,5 @@
 import { formatStorageSize } from '../../services/s3StorageService';
+import { isAudioObjectKeyForTrack } from '../../utils/audioStorageKey';
 import { escapeHtml } from '../html';
 
 const formatDate = (value: unknown) => {
@@ -13,7 +14,16 @@ const renderItems = (items: any[], renderItem: (item: any) => string) => {
         : '<p class="empty-state">No issues found.</p>';
 };
 
-export const renderAudioStorageAuditPage = (report: any, userEmail: string) => {
+const soundtrackWorkspaceUrl = (audioTrackId: unknown) =>
+    `/content/manage?view=catalog&prefillType=audioTrack&prefillId=${encodeURIComponent(String(audioTrackId ?? ''))}#audio-track-update-card`;
+
+/** Renders the read-only audit with explicit state-valid remediation choices. */
+export const renderAudioStorageAuditPage = (
+    report: any,
+    userEmail: string,
+    message: string = '',
+    messageIsError: boolean = false
+) => {
     const orphanedObjects = Array.isArray(report.orphanedObjects) ? report.orphanedObjects : [];
     const missingObjects = Array.isArray(report.missingObjects) ? report.missingObjects : [];
     const incompleteTracks = Array.isArray(report.incompleteTracks) ? report.incompleteTracks : [];
@@ -25,6 +35,14 @@ export const renderAudioStorageAuditPage = (report: any, userEmail: string) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Audio Storage Audit - Archtree</title>
   <link rel="stylesheet" href="/assets/archtree.css" />
+  <style>
+    .audit-guide { display: grid; gap: 10px; }
+    .audit-guide p { margin: 0; }
+    .remediation { border-top: 1px solid var(--line); display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; }
+    .remediation p, .remediation form { margin: 0; }
+    .remediation-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 9px; }
+    .item-list > li { display: grid; gap: 8px; }
+  </style>
 </head>
 <body>
   <main class="page-shell">
@@ -40,6 +58,15 @@ export const renderAudioStorageAuditPage = (report: any, userEmail: string) => {
         <a class="button button--secondary" href="/admin/audio-storage/reconciliation?format=json">View JSON</a>
       </div>
     </header>
+    ${message ? `<div class="alert${messageIsError ? ' alert--error' : ''}" role="status">${escapeHtml(message)}</div>` : ''}
+
+    <section class="card audit-guide" aria-labelledby="audit-guide-heading">
+      <p class="eyebrow">Recommended workflow</p>
+      <h2 id="audit-guide-heading">Resolve one exact finding at a time</h2>
+      <p><strong>S3 only:</strong> delete the object only after the server reconfirms that no Soundtrack lifecycle record references its key.</p>
+      <p><strong>MongoDB only:</strong> S3 is already missing. Re-upload the original file if the Soundtrack should remain, or delete the record through the guarded Soundtrack lifecycle below.</p>
+      <p><strong>Needs attention:</strong> retry publication only when the stored file is ready; otherwise inspect the Soundtrack and its recorded error first.</p>
+    </section>
 
     <section class="grid">
       <div class="card"><p class="eyebrow">MongoDB</p><h2>${Number(report.summary?.databaseTrackCount ?? 0)}</h2><p>Track records</p></div>
@@ -60,12 +87,23 @@ export const renderAudioStorageAuditPage = (report: any, userEmail: string) => {
           ${object.ownerId ? `<span>Owner ID: <code>${escapeHtml(String(object.ownerId))}</code></span>` : ''}
           ${object.metadataError ? `<span class="status-error">Metadata error: ${escapeHtml(String(object.metadataError))}</span>` : ''}
         </div>
+        <div class="remediation">
+          <p><strong>Recommended:</strong> delete this exact orphan if it is not an intentionally retained backup. It has no valid Soundtrack lifecycle owner and cannot be played.</p>
+          <form method="POST" action="/admin/audio-storage/orphan-delete">
+            <input type="hidden" name="s3Key" value="${escapeHtml(String(object.key ?? ''))}" />
+            <button type="submit" data-danger data-confirm="Delete this exact orphaned S3 object? The server will recheck it before deletion.">Delete orphaned S3 object</button>
+          </form>
+        </div>
       </li>`)}
     </section>
 
     <div class="section-heading"><div><p class="eyebrow">MongoDB only</p><h2>Missing S3 objects</h2></div></div>
     <section class="card">
-      ${renderItems(missingObjects, (track) => `<li>
+      ${renderItems(missingObjects, (track) => {
+          const audioTrackId = String(track.audioTrackId ?? '');
+          const expectedS3Key = String(track.s3Key ?? '');
+          const canDeleteRecord = isAudioObjectKeyForTrack(expectedS3Key, audioTrackId);
+          return `<li>
         <strong>${escapeHtml(String(track.originalFileName || track.title || 'Unnamed track'))}</strong>
         <div class="item-meta">
           <span>Track ID: <code>${escapeHtml(String(track.audioTrackId ?? ''))}</code></span>
@@ -74,12 +112,34 @@ export const renderAudioStorageAuditPage = (report: any, userEmail: string) => {
           ${track.uploadError ? `<span class="status-error">${escapeHtml(String(track.uploadError))}</span>` : ''}
           ${track.publicationError ? `<span class="status-error">${escapeHtml(String(track.publicationError))}</span>` : ''}
         </div>
-      </li>`)}
+        <div class="remediation">
+          <p><strong>Recommended:</strong> S3 is already missing. Upload the original file again if this Soundtrack should remain; otherwise delete its MongoDB record and all catalog references through the guarded lifecycle.</p>
+          <div class="remediation-actions">
+            <a class="button button--secondary" href="${soundtrackWorkspaceUrl(audioTrackId)}">Open Soundtrack workspace</a>
+            ${canDeleteRecord ? `<form method="POST" action="/admin/audio-storage/missing-track-delete">
+              <input type="hidden" name="audioTrackId" value="${escapeHtml(audioTrackId)}" />
+              <input type="hidden" name="expectedS3Key" value="${escapeHtml(expectedS3Key)}" />
+              <button type="submit" data-danger data-confirm="Delete this MongoDB Soundtrack record and clean every catalog reference? The server will reconfirm that its S3 object is still missing.">Delete MongoDB record</button>
+            </form>` : '<span class="status-error">Stored S3 identity is invalid; inspect this Soundtrack before deletion.</span>'}
+          </div>
+        </div>
+      </li>`;
+      })}
     </section>
 
     <div class="section-heading"><div><p class="eyebrow">Needs attention</p><h2>Incomplete operations</h2></div></div>
     <section class="card">
-      ${renderItems(incompleteTracks, (track) => `<li>
+      ${renderItems(incompleteTracks, (track) => {
+          const canRetryPublication = track.objectExists
+              && track.uploadStatus === 'ready'
+              && track.publicationStatus !== 'ready'
+              && track.publicationStatus !== 'legacy';
+          const recommendation = canRetryPublication
+              ? 'The stored file is ready. Retry publication without uploading it again.'
+              : track.objectExists
+                  ? 'Inspect the recorded lifecycle error before retrying or deleting this Soundtrack.'
+                  : 'The expected file is missing. Open the Soundtrack to upload a replacement or remove the record safely.';
+          return `<li>
         <strong>${escapeHtml(String(track.originalFileName || track.title || 'Unnamed track'))}</strong>
         <div class="item-meta">
           <span>Track ID: <code>${escapeHtml(String(track.audioTrackId ?? ''))}</code></span>
@@ -91,9 +151,18 @@ export const renderAudioStorageAuditPage = (report: any, userEmail: string) => {
           ${track.uploadError ? `<span class="status-error">${escapeHtml(String(track.uploadError))}</span>` : ''}
           ${track.publicationError ? `<span class="status-error">${escapeHtml(String(track.publicationError))}</span>` : ''}
         </div>
-      </li>`)}
+        <div class="remediation">
+          <p><strong>Recommended:</strong> ${escapeHtml(recommendation)}</p>
+          <div class="remediation-actions">
+            ${canRetryPublication ? `<form method="POST" action="/admin/audio-storage/publication-retry"><input type="hidden" name="audioTrackIds" value="${escapeHtml(String(track.audioTrackId ?? ''))}" /><button type="submit">Retry publication</button></form>` : ''}
+            <a class="button button--secondary" href="${soundtrackWorkspaceUrl(track.audioTrackId)}">Open Soundtrack workspace</a>
+          </div>
+        </div>
+      </li>`;
+      })}
     </section>
   </main>
+  <script src="/assets/audio-storage-audit.js"></script>
 </body>
 </html>`;
 };

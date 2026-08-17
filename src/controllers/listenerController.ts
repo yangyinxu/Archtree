@@ -4,6 +4,7 @@ import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import {
     getListenerAlbum,
     getListenerArtist,
+    getListenerOrganization,
     getListenerAudioTrack,
     getListenerHome,
     listListenerLibrary,
@@ -16,6 +17,7 @@ import {
 } from '../models/userLibrary';
 import { boundedSearchQuery } from '../utils/search';
 import { isPlaylistFeatureEnabled } from '../services/playlistFeatureService';
+import { catalogCreditRollout } from '../config/catalogCreditRollout';
 
 const setPublicCatalogCache = (res: Response) => {
     res.setHeader('Cache-Control', 'public, max-age=60');
@@ -24,7 +26,15 @@ const setPublicCatalogCache = (res: Response) => {
 /** Exposes only rollout-safe listener feature flags used to hide unavailable UI. */
 export const capabilities = async (_req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).json({ playlists: isPlaylistFeatureEnabled() });
+    const creditRollout = catalogCreditRollout();
+    return res.status(200).json({
+        playlists: isPlaylistFeatureEnabled(),
+        catalogCredits: {
+            reads: creditRollout.readsEnabled,
+            sections: creditRollout.sectionsEnabled,
+            organizations: creditRollout.organizationSurfacesEnabled
+        }
+    });
 };
 
 /** Returns the ordered listener Home without caching viewer-specific sections. */
@@ -63,6 +73,14 @@ export const album = async (req: Request, res: Response) => {
 export const artist = async (req: Request, res: Response) => {
     const result = await getListenerArtist(String(req.params.id ?? '').trim());
     if (!result) return res.status(404).json({ message: 'Artist was not found.' });
+    setPublicCatalogCache(res);
+    return res.status(200).json(result);
+};
+
+/** Returns one public Organization and its credited releases. */
+export const organization = async (req: Request, res: Response) => {
+    const result = await getListenerOrganization(String(req.params.id ?? '').trim());
+    if (!result) return res.status(404).json({ message: 'Organization was not found.' });
     setPublicCatalogCache(res);
     return res.status(200).json(result);
 };

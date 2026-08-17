@@ -5,7 +5,7 @@ test('previews debounced searches but records only explicit submissions', async 
 
   const search = page.getByRole('main').getByRole('search', { name: 'Search results' });
   const input = search.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and soundtracks'
   });
   await expect(input).toHaveAttribute('enterkeyhint', 'search');
   await expect(search.getByRole('button', { name: 'Search' })).toHaveCount(0);

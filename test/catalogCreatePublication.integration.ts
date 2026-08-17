@@ -5,6 +5,7 @@ import { ObjectId } from 'mongodb';
 import { getDb } from '../src/infrastructure/database';
 import { Album } from '../src/models/album';
 import { Artist } from '../src/models/artist';
+import { AudioFormat, AudioTrack } from '../src/models/audioTrack';
 import { SimpleDate } from '../src/models/simpleDate';
 import {
     getPublicAlbum,
@@ -30,6 +31,7 @@ beforeEach(async () => {
         'artists',
         'audioTracks',
         'imageAssets',
+        'organizations',
         'users'
     ].map((collection) => getDb()!.collection(collection).deleteMany({})));
     const creatorId = new ObjectId();
@@ -112,6 +114,98 @@ test('uploaded Album cover remains private until the ready owner is inserted wit
     const published = await getPublicAlbum(albumId);
     assert.equal(published?._id, albumId);
     assert.equal(published?.coverArtUrl, `/content/images/${imageId}`);
+});
+
+test('Organization-only Album creation fences and publishes its initial Credit in one transaction', async () => {
+    const organizationId = new ObjectId();
+    await getDb()!.collection('organizations').insertOne({
+        _id: organizationId,
+        name: 'Archive House',
+        organizationType: 'archive',
+        lifecycleStatus: 'ready',
+        lifecycleUpdatedAt: new Date(),
+        lifecycleError: null,
+        referenceRevision: 0,
+        createdBy: creatorUserId
+    });
+    const albumId = new ObjectId();
+    const album = new Album(
+        'Institutional Release',
+        '',
+        [] as unknown as [string],
+        new SimpleDate(2026, 8, 9),
+        creatorUserId,
+        albumId
+    );
+    album.credits = [{
+        creditId: 'organization_release',
+        subjectType: 'organization',
+        subjectId: organizationId.toHexString(),
+        role: 'publisher',
+        order: 0
+    }];
+    album.attributionStatus = 'documented';
+    album.creditRevision = 1;
+
+    await album.save();
+
+    const stored = await getDb()!.collection('albums').findOne({ _id: albumId });
+    assert.equal(stored?.credits?.[0]?.subjectId, organizationId.toHexString());
+    assert.equal(
+        (await getDb()!.collection('organizations').findOne({ _id: organizationId }))
+            ?.referenceRevision,
+        1
+    );
+    assert.equal((await getPublicAlbum(albumId.toHexString()))?.displayByline, 'Archive House');
+});
+
+test('Organization-only Soundtrack creation needs no synthetic Artist', async () => {
+    const organizationId = new ObjectId();
+    await getDb()!.collection('organizations').insertOne({
+        _id: organizationId,
+        name: 'Broadcast Archive',
+        organizationType: 'broadcaster',
+        lifecycleStatus: 'ready',
+        lifecycleUpdatedAt: new Date(),
+        lifecycleError: null,
+        referenceRevision: 0,
+        createdBy: creatorUserId
+    });
+    const trackId = new ObjectId();
+    const track = new AudioTrack(
+        'Institutional Recording',
+        [] as unknown as [string],
+        [] as unknown as [string],
+        '',
+        new SimpleDate(2026, 8, 9),
+        '',
+        new AudioFormat('MP3'),
+        '',
+        creatorUserId,
+        'institutional-recording.mp3',
+        'audio/mpeg',
+        trackId
+    );
+    track.credits = [{
+        creditId: 'organization_recording',
+        subjectType: 'organization',
+        subjectId: organizationId.toHexString(),
+        role: 'presenter',
+        order: 0
+    }];
+    track.attributionStatus = 'documented';
+    track.creditRevision = 1;
+
+    await track.save();
+
+    const stored = await getDb()!.collection('audioTracks').findOne({ _id: trackId });
+    assert.deepEqual(stored?.artistIds, []);
+    assert.equal(stored?.credits?.[0]?.subjectId, organizationId.toHexString());
+    assert.equal(
+        (await getDb()!.collection('organizations').findOne({ _id: organizationId }))
+            ?.referenceRevision,
+        1
+    );
 });
 
 test('no-cover creates publish ready in one insert while pending owner states remain private', async () => {

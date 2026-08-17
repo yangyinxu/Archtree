@@ -26,6 +26,11 @@
   box-sizing: border-box;
 }
 
+/* Author display rules must never make conditionally hidden controls visible. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   min-height: 100%;
   background: var(--canvas);

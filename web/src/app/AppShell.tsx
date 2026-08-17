@@ -110,7 +110,7 @@ const TopSearch = () => {
       >
         <Icon name="search" />
       </button>
-      <label className="visually-hidden" htmlFor="shell-search">Search artists, albums, and soundtracks</label>
+      <label className="visually-hidden" htmlFor="shell-search">Search artists, organizations, albums, and soundtracks</label>
       <input
         enterKeyHint="search"
         id="shell-search"
