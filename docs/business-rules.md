@@ -1,7 +1,7 @@
 # Archtree Business Rules
 
 This document is the shared product-behavior reference for the Archtree backend
-and Finitude iOS client. Update it whenever an agreed business rule changes.
+and Finitude clients. Update it whenever an agreed business rule changes.
 
 ## Saved Content and Library
 
@@ -29,6 +29,19 @@ and Finitude iOS client. Update it whenever an agreed business rule changes.
 - The Save control remains visible while signed out and uses disabled styling.
   Tapping it shows a sign-in-required error alert; it does not open login
   automatically.
+
+## Web Listener Presentation
+
+- Finitude Web uses Spotify-aligned neutral dark surfaces with `#1ed760` as
+  its interaction accent. Filled accent controls use black foreground content,
+  while keyboard focus uses a distinct white outline.
+- Finitude Web approximates the reference typography with a local platform
+  sans-serif stack led by Helvetica Neue, Helvetica, and Arial, with explicit
+  CJK and emoji fallbacks. It does not download, bundle, or hotlink Spotify's
+  proprietary typefaces.
+- This presentation contract is Web-only. Finitude retains its own name, mark,
+  artwork, copy, components, and supported capabilities; the rule does not
+  authorize Spotify assets or an iOS theme change.
 
 ## User Playlists
 

@@ -23,21 +23,22 @@ Search coverage verifies cancellable debounced result previews without history
 writes, explicit history commits, and committed query restoration through
 browser Back and Forward.
 
-The current local uncommitted candidate, verified on 2026-08-05, passes 235/235
-server tests, 204/204 Web unit/component tests, 126/126 Mongo-backed integration
-tests, both production builds, and E2E TypeScript. The strict local
-three-engine Playwright matrix passes 191 tests with 10 documented
-capability-specific skips and no failures. Chromium passes all 67 planned
-checks, including eight `toHaveScreenshot` golden comparisons without snapshot
-updates; Firefox and WebKit each pass 62 checks with five intentional
-capability-specific skips. The latest reviewed in-app Browser design checkpoint
-had no warning or error log entries. The largest initial route is Playlist
-Detail at 147.5 KiB gzip against the 150 KiB budget; CSS is 26.7 KiB gzip
-against the 32 KiB budget, and the build ships no bundled font or image payload.
-CI repeats the browser gate through `.github/workflows/finitude-web-release.yml`;
-the platform-scoped path prevents Linux CI from silently comparing against
-macOS font rendering. A separately reviewed Linux baseline and a subsequent
-strict no-update CI pass remain required before release.
+The current local uncommitted candidate's 2026-08-19 Web presentation amendment
+passes 280/280 server tests, 208/208 Web unit/component tests, both production
+builds, and E2E TypeScript. A focused strict Chromium gate passes all 34 visual,
+responsive-shell, touch-orientation, and accessibility checks, including eight
+reviewed `toHaveScreenshot` golden comparisons without snapshot updates. The
+full local three-engine matrix completed with 199 passes and 10 documented
+capability-specific skips; one unrelated Chromium Archtree logout-header
+assertion was classified flaky, and its isolated CI rerun passed. A clean
+commit-identified CI matrix remains required before release. The largest
+initial route is Playlist Detail at 148.2 KiB gzip against the 150 KiB budget;
+CSS is 26.9 KiB gzip against the 32 KiB budget, and the build ships no bundled
+font or image payload. CI repeats the browser gate through
+`.github/workflows/finitude-web-release.yml`; the platform-scoped path prevents
+Linux CI from silently comparing against macOS font rendering. A separately
+reviewed Linux baseline and a subsequent strict no-update CI pass remain
+required before release.
 
 Passing these projects does not prove support for a branded browser release.
 Playwright WebKit is not Safari, and bundled Chromium is not a substitute for

@@ -14,8 +14,11 @@ checks, staging Web Vitals, exact-artifact promotion, and rollback rehearsal.**
 The user confirmed Choice A on 2026-08-04: match the reference's information
 density, dark hierarchy, typography rhythm, and motion quality while retaining
 Finitude branding, original components, supported features, and the current
-canonical product rules. Local implementation and design QA are complete;
-release validation and rollback work remain open.
+canonical product rules. On 2026-08-19 the user amended that choice for Web
+only: the interaction palette and legal system-font approximation now align
+with Spotify while Finitude identity and the protected-asset boundaries remain.
+Local implementation and design QA are complete; release validation and
+rollback work remain open.
 
 The 2026-08-05 continuation audit reopened any stage whose implementation had
 landed but whose documented exit gate was still missing. A stage returns to
@@ -82,6 +85,10 @@ Both choices keep the following boundaries:
 - Finitude Web remains streaming-only, and mobile Playlists remain owned by
   Library rather than becoming a fourth primary tab.
 
+The 2026-08-19 Web-only amendment selects the reference green and a
+Helvetica-led system fallback without selecting the exact-replica branding or
+asset terms in Choice B.
+
 Stage 0 must also decide:
 
 1. Whether the accent remains Finitude mint or changes to reference green.
@@ -145,8 +152,7 @@ rules.
 | Secondary text | `#b3b3b3` |
 | Subtle text | `#8f8f8f` |
 | Hairline border | `rgb(255 255 255 / 0.10)` |
-| Accent, Choice A | Existing Finitude mint family |
-| Accent, Choice B | Reference green family after Stage 0 approval |
+| Interaction accent | Spotify-aligned green rooted at `#1ed760` |
 | Focus indicator | A dedicated high-contrast token, never color-only state |
 | Base spacing | 4 px scale: 4, 8, 12, 16, 24, 32, 40, 48 |
 | Artwork radius | 4–8 px; Artist artwork remains circular |
@@ -250,9 +256,10 @@ N+1 detail requests and do not expose membership or private owner fields.
 
 **Status: Complete**
 
-Choice A was confirmed on 2026-08-04. The existing canonical rule remains
-valid, the Finitude mint accent remains the interaction accent, desktop primary
-navigation remains above the Playlist list in the left pane, and unsupported
+Choice A was confirmed on 2026-08-04 and amended for Web presentation on
+2026-08-19. The canonical rule now specifies the Spotify-aligned green accent
+and Helvetica-led legal system-font approximation; desktop primary navigation
+remains above the Playlist list in the left pane, and unsupported
 reference-product features remain absent. Search continues to use one shared
 query state, and the wide-screen Now Playing pane may read only the existing
 Finitude player and queue contract.

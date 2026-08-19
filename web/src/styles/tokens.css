@@ -11,32 +11,45 @@
   --color-surface-active: #333;
   --color-border: rgb(255 255 255 / 0.1);
   --color-border-strong: rgb(255 255 255 / 0.18);
-  --color-border-panel: #2f2f2f;
-  --color-border-control: #727272;
+  --color-border-panel: #292929;
+  --color-border-control: #7c7c7c;
   --color-text: #fff;
   --color-text-muted: #b3b3b3;
   --color-text-subtle: #8f8f8f;
-  --color-accent: #73d9ca;
-  --color-accent-bright: #a1eee2;
-  --color-accent-soft: rgb(115 217 202 / 0.14);
-  --color-accent-border: rgb(115 217 202 / 0.28);
-  --color-on-accent: #09110f;
+  --color-accent: #1ed760;
+  --color-accent-bright: #3be477;
+  --color-accent-soft: rgb(30 215 96 / 0.14);
+  --color-accent-border: rgb(30 215 96 / 0.28);
+  --color-on-accent: #000;
   --color-violet: #7268bd;
   --color-violet-soft: rgb(114 104 189 / 0.18);
   --color-warm: #e4a67f;
-  --color-danger: #ff9b98;
-  --color-danger-soft: rgb(129 47 52 / 0.2);
-  --color-danger-border: rgb(255 155 152 / 0.3);
-  --color-on-danger: #260807;
-  --color-success-soft: rgb(68 142 124 / 0.18);
-  --color-success-border: rgb(115 217 202 / 0.25);
-  --color-focus: #a1eee2;
-  --color-focus-soft: rgb(161 238 226 / 0.24);
+  --color-danger: #f3727f;
+  --color-danger-soft: rgb(237 44 63 / 0.16);
+  --color-danger-border: rgb(243 114 127 / 0.3);
+  --color-on-danger: #000;
+  --color-success-soft: rgb(30 215 96 / 0.18);
+  --color-success-border: rgb(30 215 96 / 0.25);
+  --color-focus: #fff;
+  --color-focus-soft: rgb(255 255 255 / 0.24);
   --color-backdrop: rgb(0 0 0 / 0.76);
   --color-seek-track: rgb(255 255 255 / 0.28);
   --color-player-ghost: rgb(255 255 255 / 0.14);
-  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-display: "Avenir Next", Inter, ui-sans-serif, sans-serif;
+  --font-sans:
+    "Helvetica Neue",
+    Helvetica,
+    Arial,
+    "PingFang SC",
+    "PingFang TC",
+    "Hiragino Sans",
+    "Microsoft YaHei",
+    "Microsoft JhengHei",
+    Meiryo,
+    "Apple Color Emoji",
+    "Segoe UI Emoji",
+    "Noto Color Emoji",
+    sans-serif;
+  --font-display: var(--font-sans);
   --type-caption: 0.68rem;
   --type-metadata: 0.76rem;
   --type-body: 0.9rem;

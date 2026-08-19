@@ -23,8 +23,10 @@ Before implementing a Web-specific behavior, promote the agreed rule to
 This plan intentionally treats Finitude as the source for product behavior and
 content semantics, while using established commercial music services only as
 references for desktop information density, persistent navigation, and player
-placement. It must not copy another product's branding, exact components,
-assets, or visual details.
+placement. A 2026-08-19 follow-up decision allows Spotify-aligned Web color and
+system-font tokens while Finitude continues to use its own branding,
+components, assets, copy, and supported behavior; proprietary fonts and
+third-party brand assets remain out of scope.
 
 ## Objective
 
@@ -247,9 +249,10 @@ sheet while preserving Home, Search, and Library as the three primary tabs.
 
 ### Original Finitude visual language
 
-- Start with neutral dark surfaces suitable for artwork-heavy browsing, with
-  restrained blue, purple, mint, and warm gradient accents derived from
-  Finitude's ambient background rather than recognizable competitor colors.
+- Use neutral dark surfaces suitable for artwork-heavy browsing with the
+  Web-only Spotify-aligned green interaction accent documented in
+  `../business-rules.md`. Keep Finitude identity and content instead of copying
+  third-party logos, artwork, or proprietary typography.
 - Define typography, spacing, radii, elevation, focus rings, motion, and
   artwork ratios as design tokens.
 - Use artwork-derived color only as a bounded enhancement in detail headers;

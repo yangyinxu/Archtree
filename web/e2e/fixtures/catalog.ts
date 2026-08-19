@@ -83,6 +83,7 @@ export const expandedAlbumFixture = {
 export const searchFixture = (query: string) => ({
   query,
   artists: [artistFixture],
+  organizations: [],
   albums: [albumFixture],
   audioTracks: trackFixtures
 }) satisfies ListenerSearch;

@@ -130,6 +130,11 @@ test('opens and closes the mobile expanded surface without creating another play
   expect(within(expanded).getByRole('button', { name: 'Repeat off. Turn on repeat all' }))
     .toHaveAttribute('aria-pressed', 'false');
   expect(within(expanded).getByRole('slider', { name: 'Volume' })).toHaveValue('1');
+  const expandedPlay = within(expanded).getByRole('button', { name: 'Play' });
+  expect(expandedPlay.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
+  await user.click(expandedPlay);
+  const expandedPause = await within(expanded).findByRole('button', { name: 'Pause' });
+  expect(expandedPause.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
 
   await user.click(within(expanded).getByRole('button', { name: 'Shuffle off. Turn shuffle on' }));
   expect(store.getSnapshot().shuffleEnabled).toBe(true);
@@ -251,6 +256,11 @@ test('exposes five state-driven desktop transport controls', async () => {
   expect(within(controls).getAllByRole('button')).toHaveLength(5);
   expect(within(controls).getByRole('button', { name: 'Previous soundtrack' })).toBeEnabled();
   expect(within(controls).getByRole('button', { name: 'Next soundtrack' })).toBeDisabled();
+  const play = within(controls).getByRole('button', { name: 'Play' });
+  expect(play.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
+  await user.click(play);
+  const pause = await within(controls).findByRole('button', { name: 'Pause' });
+  expect(pause.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
   const shuffle = within(controls).getByRole('button', { name: 'Shuffle off. Turn shuffle on' });
   expect(shuffle).toHaveAttribute('aria-pressed', 'false');
   await user.click(shuffle);
