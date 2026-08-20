@@ -488,18 +488,28 @@ Web content management:
 - Content Manager is organized into Overview, Catalog, Page Layout, and
   Operations views. Artist workspaces manage named Album memberships without
   copying database IDs and can create a new Album already linked to the Artist.
-- Catalog keeps the global inventory available, but an Artist, Album,
+- The Content Manager header uses the Archtree brand as its Home link and keeps
+  session exit inside an administrator account disclosure. MediaTrack
+  operations plus Audio and Image storage audits are grouped in Operations
+  instead of competing with the active workspace as header actions.
+- Catalog presents one global inventory type at a time through server-backed
+  Artist, Organization, Album, MediaTrack, Page, Carousel, and Collection
+  navigation. Linked records, creation forms, raw-ID access, and advanced
+  relationship tools remain available through native disclosures instead of
+  expanding the whole administration surface at once. An Artist, Album,
   MediaTrack, or Organization opened from Edit is promoted into a focused
-  workspace near the top of the view. Database IDs remain available through
-  explicit copy actions instead of being primary labels.
+  workspace and the inventory is removed until the administrator returns.
+  Database IDs remain available through explicit copy actions instead of being
+  primary labels.
 - Page Layout leads with the current Page hierarchy. Page placement, Carousel
   configuration, and manual-item maintenance are grouped into collapsible
   tools; Page and Carousel reorder controls support both drag-and-drop and
   Move up/Move down buttons.
-- Operations shows the retained step status for each guided Artist release,
-  links completed content back to its workspace, and only offers retry when an
-  operation needs attention. MediaTracks can be filtered together by search,
-  storage lifecycle status, and Album assignment.
+- Operations links the focused MediaTrack and storage-audit workspaces, shows
+  the retained step status for each guided Artist release, links completed
+  content back to its workspace, and only offers retry when an operation needs
+  attention. MediaTracks can be filtered together by search, storage lifecycle
+  status, and Album assignment.
 - The guided Artist release setup creates or reuses an Artist, creates and
   links an Album, and can optionally create a dynamic Album Artist Carousel
   and attach it to Home or Library in one reviewed submission.

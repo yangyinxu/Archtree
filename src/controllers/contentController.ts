@@ -160,6 +160,33 @@ type InventoryKey = keyof typeof inventoryQueryNames;
 type InventoryPaginationEntry = Omit<ManagementInventoryPage<unknown>, 'items'>;
 type InventoryPagination = Record<InventoryKey, InventoryPaginationEntry>;
 type ManagerView = 'overview' | 'catalog' | 'layout' | 'operations';
+type CatalogSection = InventoryKey;
+
+const catalogSections: CatalogSection[] = [
+    'artists',
+    'organizations',
+    'albums',
+    'audioTracks',
+    'pages',
+    'carousels',
+    'contentCollections'
+];
+
+/** Resolves one focused Catalog inventory while keeping URLs safe and deterministic. */
+const catalogSectionFromQuery = (value: unknown): CatalogSection => {
+    const normalized = String(value ?? '').trim();
+    return catalogSections.includes(normalized as CatalogSection)
+        ? normalized as CatalogSection
+        : 'artists';
+};
+
+const catalogSectionForSelection = (selectionType: string): CatalogSection | null => {
+    if (selectionType === 'artist') return 'artists';
+    if (selectionType === 'organization') return 'organizations';
+    if (selectionType === 'album') return 'albums';
+    if (selectionType === 'audioTrack') return 'audioTracks';
+    return null;
+};
 
 const managerViewFromQuery = (value: unknown): ManagerView => {
     const normalized = String(value ?? '').trim();
@@ -228,13 +255,15 @@ const loadGlobalManagementInventory = async (req: Request) => {
 const renderInventoryPagination = (
     key: InventoryKey,
     label: string,
-    pagination: InventoryPagination
+    pagination: InventoryPagination,
+    catalogSection: CatalogSection
 ) => {
     const state = pagination[key];
     if (!state.hasPrevious && !state.hasNext) return '';
     const linkFor = (page: number) => {
         const query = new URLSearchParams();
         query.set('view', 'catalog');
+        query.set('catalogType', catalogSection);
         for (const [inventoryKey, queryName] of Object.entries(inventoryQueryNames)) {
             const selectedPage = inventoryKey === key ? page : pagination[inventoryKey as InventoryKey].page;
             if (selectedPage > 1) query.set(queryName, String(selectedPage));
@@ -253,11 +282,9 @@ const renderInventoryPagination = (
 
 
 const renderSectionList = (title: string, items: any[], formatter: (item: any) => string) => {
-    const content = items.length > 0
-        ? items.map((item) => `<li>${formatter(item)}</li>`).join('')
-        : '<li>None</li>';
-
-    return `<h3>${title}</h3><ul>${content}</ul>`;
+    if (items.length === 0) return '';
+    const content = items.map((item) => `<li>${formatter(item)}</li>`).join('');
+    return `<section class="catalog-search-result-group"><h3>${escapeHtml(title)}</h3><ul>${content}</ul></section>`;
 };
 
 const contentId = (item: any) => String(item?._id ?? '');
@@ -279,9 +306,10 @@ const renderMissingReference = (id: string) => {
     return `Not loaded on this inventory page (<code>${escapeHtml(id)}</code>)`;
 };
 
-const renderNestedList = (items: string[]) => {
+/** Keeps relationship detail available without expanding every nested record by default. */
+const renderNestedList = (items: string[], summary: string, footer: string = '') => {
     return items.length > 0
-        ? `<ul class="linked-content">${items.map((item) => `<li>${item}</li>`).join('')}</ul>`
+        ? `<details class="linked-content-disclosure"><summary>${escapeHtml(summary)}</summary><ul class="linked-content">${items.map((item) => `<li>${item}</li>`).join('')}</ul>${footer}</details>`
         : '<p class="empty-linked-content">None linked</p>';
 };
 
@@ -462,11 +490,13 @@ const renderManagePage = (params: {
     releaseSetupToken?: string;
     releaseOperations?: ArtistReleaseWorkflowResult[];
     managerView?: ManagerView;
+    catalogSection?: CatalogSection;
 }) => {
     const messageBlock = params.message
         ? `<div class="alert" role="status">${escapeHtml(params.message)}</div>`
         : '';
 
+    const hasSearchQuery = Boolean(String(params.searchQuery ?? '').trim());
     const searchQuery = escapeHtml(params.searchQuery ?? '');
     const artists = params.artists ?? [];
     const albums = params.albums ?? [];
@@ -483,9 +513,6 @@ const renderManagePage = (params: {
     const catalogContentCollections = params.catalogContentCollections ?? [];
     const prefillCreditSubjectLabels = params.prefillCreditSubjectLabels ?? {};
     const inventoryPagination = params.inventoryPagination;
-    const paginationFor = (key: InventoryKey, label: string) => inventoryPagination
-        ? renderInventoryPagination(key, label, inventoryPagination)
-        : '';
     const s3StorageSummary = params.s3StorageSummary ?? null;
     const s3StorageSummaryError = params.s3StorageSummaryError ?? '';
     const s3StorageBlock = s3StorageSummary
@@ -572,7 +599,7 @@ const renderManagePage = (params: {
     const prefillOrganization = params.prefillOrganization ?? null;
     const prefillOrganizationId = contentId(prefillOrganization);
     const organizationUpdateTarget = prefillOrganizationId
-        ? `<input type="hidden" name="organizationId" value="${escapeHtml(prefillOrganizationId)}" /><p class="muted">Editing <strong>${escapeHtml(String(prefillOrganization.name ?? 'Organization'))}</strong>. <a href="/content/manage?view=catalog#organization-workspace">Choose another</a></p>`
+        ? `<input type="hidden" name="organizationId" value="${escapeHtml(prefillOrganizationId)}" /><p class="muted">Editing <strong>${escapeHtml(String(prefillOrganization.name ?? 'Organization'))}</strong>. <a href="/content/manage?view=catalog&amp;catalogType=organizations#catalog-content">Choose another</a></p>`
         : `<div class="reference-picker" data-reference-picker data-reference-type="organization">
             <label>Find Organization<input type="search" data-reference-query autocomplete="off" /></label>
             <button class="button--secondary" type="button" data-reference-search>Search</button>
@@ -590,6 +617,31 @@ const renderManagePage = (params: {
             : prefillAudioTrack
                 ? 'audioTrack'
                 : prefillOrganization ? 'organization' : 'none';
+    const activeCatalogSection = catalogSectionForSelection(selectedType)
+        ?? params.catalogSection
+        ?? 'artists';
+    const paginationFor = (key: InventoryKey, label: string) => inventoryPagination
+        ? renderInventoryPagination(key, label, inventoryPagination, activeCatalogSection)
+        : '';
+    const catalogSectionDetails: Array<{
+        key: CatalogSection;
+        label: string;
+        description: string;
+        count: number;
+    }> = [
+        { key: 'artists', label: 'Artists', description: 'People and creative groups with their linked releases.', count: catalogArtists.length },
+        { key: 'organizations', label: 'Organizations', description: 'Labels, publishers, distributors, and other institutional Credits.', count: catalogOrganizations.length },
+        { key: 'albums', label: 'Albums', description: 'Releases with MediaTrack membership and attribution.', count: catalogAlbums.length },
+        { key: 'audioTracks', label: 'MediaTracks', description: 'Playable Audio and Video catalog records.', count: catalogAudioTracks.length },
+        { key: 'pages', label: 'Pages', description: 'Public destinations and their configured presentation items.', count: catalogPages.length },
+        { key: 'carousels', label: 'Carousels', description: 'Manual, Artist-driven, and personalized horizontal collections.', count: catalogCarousels.length },
+        { key: 'contentCollections', label: 'Collections', description: 'Grid and List definitions used by public Pages.', count: catalogContentCollections.length }
+    ];
+    const activeCatalogDetails = catalogSectionDetails.find(({ key }) => key === activeCatalogSection)!;
+    const catalogSectionNav = catalogSectionDetails.map(({ key, label, count }) => {
+        const query = new URLSearchParams({ view: 'catalog', catalogType: key });
+        return `<a href="/content/manage?${escapeHtml(query.toString())}#catalog-content"${key === activeCatalogSection ? ' aria-current="page"' : ''}><span>${escapeHtml(label)}</span><span class="catalog-type-count">${count}</span></a>`;
+    }).join('');
     const selectedId = prefillArtistId || prefillAlbumId || prefillAudioTrackId || prefillOrganizationId;
     const selectedLabel = prefillArtist
         ? String(prefillArtist.name ?? 'Artist')
@@ -601,9 +653,29 @@ const renderManagePage = (params: {
     const selectedTypeLabel = selectedType === 'audioTrack'
         ? 'MediaTrack'
         : selectedType === 'none' ? '' : `${selectedType[0].toUpperCase()}${selectedType.slice(1)}`;
+    const catalogReturnUrl = `/content/manage?view=catalog&amp;catalogType=${encodeURIComponent(activeCatalogSection)}#catalog-content`;
     const selectedObjectBlock = selectedType === 'none'
         ? ''
-        : `<section class="card selected-object surface-catalog" id="selected-object" aria-labelledby="selected-object-title"><div><p class="eyebrow">Selected ${escapeHtml(selectedTypeLabel)}</p><h2 id="selected-object-title">${escapeHtml(selectedLabel)}</h2><p class="muted">Edit this object below. Inventory filters and pagination remain available when you return to the list.</p></div><div class="action-row"><button class="button button--secondary" type="button" data-copy-id="${escapeHtml(selectedId)}">Copy ID</button><a class="button button--secondary" href="/content/manage?view=catalog#catalog-content">Back to inventory</a></div></section>`;
+        : `<section class="card selected-object surface-catalog" id="selected-object" aria-labelledby="selected-object-title"><div><p class="eyebrow">Selected ${escapeHtml(selectedTypeLabel)}</p><h2 id="selected-object-title">${escapeHtml(selectedLabel)}</h2><p class="muted">Edit this object below. Return to its focused inventory when you are finished.</p></div><div class="action-row"><button class="button button--secondary" type="button" data-copy-id="${escapeHtml(selectedId)}">Copy ID</button><a class="button button--secondary" href="${catalogReturnUrl}">Back to ${escapeHtml(activeCatalogDetails.label)}</a></div></section>`;
+    const openByIdBlock = selectedType === 'none'
+        && ['artists', 'organizations', 'albums', 'audioTracks'].includes(activeCatalogSection)
+        ? `<details class="card catalog-tool-group surface-catalog" id="open-by-id"><summary><span><strong>Open by ID</strong><small>Use a canonical ID when search is not enough.</small></span></summary><div class="catalog-tool-group__body"><form method="GET" action="/content/manage"><input type="hidden" name="view" value="catalog" /><label>Content type<select name="prefillType"><option value="artist"${activeCatalogSection === 'artists' ? ' selected' : ''}>Artist</option><option value="organization"${activeCatalogSection === 'organizations' ? ' selected' : ''}>Organization</option><option value="album"${activeCatalogSection === 'albums' ? ' selected' : ''}>Album</option><option value="audioTrack"${activeCatalogSection === 'audioTracks' ? ' selected' : ''}>MediaTrack</option></select></label><label>Canonical ID<input name="prefillId" autocomplete="off" required /></label><button type="submit">Open item</button></form></div></details>`
+        : '';
+    const catalogCreationCopy: Partial<Record<CatalogSection, { title: string; description: string }>> = {
+        artists: { title: 'Create Artist', description: 'Add a person or creative group to the global catalog.' },
+        organizations: { title: 'Create Organization', description: 'Add a label, publisher, distributor, or other institution.' },
+        albums: { title: 'Create Album', description: 'Create a release now; MediaTracks and Credits can be linked afterward.' },
+        audioTracks: { title: 'Create MediaTrack', description: 'Upload one Audio or MP4 Video object with its catalog metadata.' }
+    };
+    const catalogCreation = catalogCreationCopy[activeCatalogSection];
+    const catalogSearchSections = [
+        renderSectionList('Artists', artists, (item) => renderReferencedItem(item, String(item.name ?? ''), 'artist')),
+        renderSectionList('Organizations', organizations, (item) => renderReferencedItem(item, String(item.name ?? ''), 'organization')),
+        renderSectionList('Albums', albums, (item) => renderReferencedItem(item, String(item.title ?? ''), 'album')),
+        renderSectionList('MediaTracks', audioTracks, (item) => renderReferencedItem(item, String(item.title ?? ''), 'audioTrack'))
+    ].join('');
+    const catalogSearchContent = catalogSearchSections
+        || '<p class="empty-linked-content">No matching catalog content.</p>';
     const bulkAudioUploadBlock = `<details class="advanced-tools" id="bulk-audio-upload"><summary>Bulk upload Audio MediaTracks</summary><p>Select up to 20 files. An Audio MediaTrack is created for each file using embedded metadata when available.</p><form id="bulk-audio-upload-form" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data"><select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select><select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select><select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select><select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select><select name="albumId"><option value="">No album</option>${albumOptions}</select><label><input type="checkbox" name="inheritAlbumPrimaryCredits" value="true" checked /> Inherit the selected Album's primary Artists</label><label><input type="checkbox" name="attributionUnknown" value="true" /> Attribution is not documented</label><label><input type="checkbox" name="promoteToAlbumPrimary" value="true" /> If this participant is primary, also add them to the Album</label><input type="file" name="audioFiles" accept="audio/*" multiple required /><button type="submit">Create and Upload Audio MediaTracks</button><div id="bulk-upload-status" role="status" aria-live="polite" hidden><progress id="bulk-upload-progress" max="100" value="0">0%</progress><span id="bulk-upload-progress-label">0%</span></div></form></details>`;
     const releaseOperationsBlock = renderReleaseOperations(releaseOperations);
 
@@ -620,6 +692,9 @@ const renderManagePage = (params: {
     .hierarchy-item:last-child { border-bottom: 0; padding-bottom: 0; }
     .hierarchy-item > strong { display: block; }
     .linked-content { margin: 6px 0 0 18px; padding-left: 18px; }
+    .linked-content-disclosure { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 9px; }
+    .linked-content-disclosure > summary { color: var(--brand-strong); cursor: pointer; font-size: 13px; font-weight: 750; }
+    .linked-content-disclosure[open] > summary { margin-bottom: 8px; }
     .page-item-list { display: grid; gap: 8px; margin-top: 10px; }
     .page-item-list > li { padding-left: 4px; }
     .page-item-list .item-meta { display: inline-flex; margin-left: 6px; }
@@ -638,7 +713,7 @@ const renderManagePage = (params: {
     .manager-nav { display: flex; gap: 8px; margin: 18px 0 24px; overflow-x: auto; padding-bottom: 4px; }
     .manager-nav a { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); padding: 7px 12px; font-size: 13px; font-weight: 700; text-decoration: none; }
     .manager-nav a[aria-current="page"] { background: var(--brand); color: white; }
-    .copy-id { min-height: 28px; border-color: var(--line); color: var(--muted); background: transparent; padding: 4px 8px; font-size: 12px; vertical-align: middle; }
+    .copy-id { min-height: 36px; border-color: var(--line); color: var(--muted); background: transparent; padding: 6px 9px; font-size: 12px; vertical-align: middle; }
     .copy-id:hover { color: var(--ink); background: var(--surface-strong); transform: none; box-shadow: none; }
     .selected-object { align-items: center; display: flex; justify-content: space-between; gap: 18px; border-color: #badcc9; background: var(--success-soft); }
     .selected-object h2 { margin-bottom: 6px; }
@@ -648,17 +723,70 @@ const renderManagePage = (params: {
     .workspace-context p { margin: 0; }
     .workspace-section { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 20px; }
     .danger-zone { border-color: #efc0ba; background: var(--danger-soft); }
+    .manager-account { align-self: flex-start; position: relative; }
+    .manager-account > summary { min-height: 44px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; background: var(--surface); padding: 10px 14px; font-weight: 800; }
+    .manager-account > summary:hover, .manager-account[open] > summary { background: var(--surface-strong); }
+    .manager-account > summary:focus-visible { border-color: var(--brand); outline: 3px solid rgba(23, 107, 87, 0.22); outline-offset: 2px; }
+    .manager-account__panel { position: absolute; z-index: 10; top: calc(100% + 8px); right: 0; width: min(300px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); padding: 16px; }
+    .manager-account__panel p { margin-bottom: 4px; }
+    .manager-account__panel strong { display: block; overflow-wrap: anywhere; }
+    .manager-account__panel form { margin-top: 14px; }
+    .manager-account__panel button { width: 100%; }
+    .operations-tool-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 16px; }
+    .operations-tool { display: grid; gap: 6px; min-height: 112px; align-content: start; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface-strong); padding: 16px; text-decoration: none; }
+    .operations-tool:hover { border-color: var(--brand); background: var(--brand-soft); }
+    .operations-tool strong { font-size: 1rem; }
+    .operations-tool span { color: var(--muted); font-size: 14px; line-height: 1.45; }
+    #system-operations { margin-bottom: 16px; }
+    .catalog-browser { display: grid; gap: 20px; }
+    .catalog-browser__header { align-items: end; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(320px, .9fr); }
+    .catalog-browser__header h2, .catalog-active-heading h2 { margin-bottom: 6px; }
+    .catalog-search-form { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) auto; }
+    .catalog-search-form label { min-width: 0; }
+    .catalog-type-nav { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+    .catalog-type-nav a { align-items: center; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); display: inline-flex; flex: 0 0 auto; gap: 8px; min-height: 44px; padding: 8px 12px; text-decoration: none; }
+    .catalog-type-nav a:hover { background: var(--surface-strong); }
+    .catalog-type-nav a[aria-current="page"] { border-color: var(--brand); color: white; background: var(--brand); }
+    .catalog-type-count { align-items: center; border-radius: 999px; display: inline-flex; justify-content: center; min-width: 24px; padding: 2px 7px; color: var(--muted); background: #e8ebe7; font-size: 12px; font-weight: 800; }
+    .catalog-type-nav a[aria-current="page"] .catalog-type-count { color: var(--brand-strong); background: white; }
+    .catalog-active-heading { align-items: end; display: flex; justify-content: space-between; gap: 18px; border-top: 1px solid var(--line); padding-top: 18px; }
+    .catalog-active-heading p:last-child { margin-bottom: 0; }
+    .catalog-search-results { margin-top: 16px; }
+    .catalog-search-results__grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+    .catalog-search-results h3 { margin-bottom: 6px; }
+    .catalog-search-results ul { margin: 0; padding-left: 20px; }
+    .catalog-inventory-card { margin-top: 16px; }
+    .catalog-inventory-card > section > h3 { margin-bottom: 14px; }
+    .catalog-inventory-card .content-hierarchy { gap: 10px; }
+    .catalog-inventory-card .hierarchy-item { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-strong); padding: 14px; }
+    .catalog-inventory-card .hierarchy-item:last-child { padding-bottom: 14px; }
+    .catalog-inventory-card .hierarchy-item > strong { font-size: 1rem; }
+    .catalog-tool-group { margin-top: 16px; overflow: hidden; padding: 0; }
+    .catalog-tool-group > summary { cursor: pointer; padding: 18px 20px; }
+    .catalog-tool-group > summary:hover { background: var(--surface-strong); }
+    .catalog-tool-group > summary span { display: grid; gap: 3px; }
+    .catalog-tool-group > summary strong { font-size: 1rem; }
+    .catalog-tool-group > summary small { color: var(--muted); font-weight: 500; }
+    .catalog-tool-group__body { border-top: 1px solid var(--line); padding: 18px 20px 20px; }
+    #catalog-create-tools { grid-template-columns: 1fr; }
+    #catalog-create-tools > .card { border: 0; box-shadow: none; padding: 0; }
+    body.catalog-section-artists #catalog-create-tools > :not(.create-card--artists),
+    body.catalog-section-organizations #catalog-create-tools > :not(.create-card--organizations),
+    body.catalog-section-albums #catalog-create-tools > :not(.create-card--albums),
+    body.catalog-section-audioTracks #catalog-create-tools > :not(.create-card--audioTracks) { display: none; }
+    body.catalog-section-artists #catalog-quick-linking-tools > :not(.quick-link--album-artist):not(.quick-link--track-artist),
+    body.catalog-section-albums #catalog-quick-linking-tools > :not(.quick-link--track-album):not(.quick-link--album-artist),
+    body.catalog-section-audioTracks #catalog-quick-linking-tools > :not(.quick-link--track-album):not(.quick-link--track-artist) { display: none; }
     body.manager-view-catalog:not(.manager-selection-none) .page-shell { display: flex; flex-direction: column; }
     body.manager-view-catalog:not(.manager-selection-none) .site-header { order: 0; }
     body.manager-view-catalog:not(.manager-selection-none) .manager-nav { order: 1; }
-    body.manager-view-catalog:not(.manager-selection-none) #search { order: 2; }
+    body.manager-view-catalog:not(.manager-selection-none) #catalog-content { order: 2; }
     body.manager-view-catalog:not(.manager-selection-none) #selected-object { order: 3; margin-top: 18px; }
     body.manager-view-catalog:not(.manager-selection-none) #update-delete { order: 4; }
     body.manager-view-catalog:not(.manager-selection-none) #catalog-object-workspaces { order: 5; }
     body.manager-view-catalog:not(.manager-selection-none) #create { order: 6; }
     body.manager-view-catalog:not(.manager-selection-none) #catalog-create-tools { order: 7; }
-    body.manager-view-catalog:not(.manager-selection-none) #catalog-content { order: 8; }
-    body.manager-view-catalog:not(.manager-selection-none) #catalog-inventory { order: 9; }
+    body.manager-view-catalog:not(.manager-selection-none) #catalog-inventory { order: 8; }
     body.manager-view-catalog:not(.manager-selection-none) #quick-linking { order: 10; }
     body.manager-view-catalog:not(.manager-selection-none) #catalog-quick-linking-tools { order: 11; }
     body.manager-selection-artist #album-update-card,
@@ -717,23 +845,37 @@ const renderManagePage = (params: {
     .drag-item__actions button { min-height: 32px; padding: 5px 9px; }
     .card h3:not(:first-child) { margin-top: 24px; }
     hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
+    @media (max-width: 760px) {
+      .catalog-browser__header { align-items: stretch; grid-template-columns: 1fr; }
+      .catalog-active-heading { align-items: flex-start; flex-direction: column; }
+      .operations-tool-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 680px) {
+      .manager-account__panel { position: static; margin-top: 8px; }
+    }
+    @media (max-width: 520px) {
+      .catalog-search-form { align-items: stretch; grid-template-columns: 1fr; }
+      .catalog-search-form button { width: 100%; }
+      .selected-object { align-items: flex-start; flex-direction: column; }
+    }
   </style>
 </head>
-<body class="manager-view-${managerView} manager-selection-${selectedType}">
+<body class="manager-view-${managerView} manager-selection-${selectedType} catalog-section-${activeCatalogSection}">
   <main class="page-shell">
   <header class="site-header">
     <div>
       <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
       <p class="eyebrow" style="margin-top:18px;">Catalog workspace</p>
       <h1 style="margin-bottom:8px;">Content Manager</h1>
-      <p class="muted">Signed in as <strong>${escapeHtml(params.userEmail)}</strong></p>
     </div>
-    <div class="header-actions">
-      <a class="button" href="/content/manage/audio-tracks">MediaTracks</a>
-      ${params.isAdmin ? '<a class="button button--secondary" href="/admin/audio-storage/reconciliation">Audit Audio Storage</a><a class="button button--secondary" href="/admin/image-storage/reconciliation">Audit Image Storage</a>' : ''}
-      <a class="button button--secondary" href="/">Home</a>
-      <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(params.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
-    </div>
+    <details class="manager-account" id="manager-account-menu">
+      <summary>Admin account</summary>
+      <div class="manager-account__panel">
+        <p class="eyebrow">Signed in</p>
+        <strong>${escapeHtml(params.userEmail)}</strong>
+        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(params.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
+      </div>
+    </details>
   </header>
   ${messageBlock}
   <section class="card upload-results surface-operations" id="bulk-upload-results" role="status" aria-live="polite" hidden>
@@ -747,6 +889,16 @@ const renderManagePage = (params: {
     <a href="/content/manage?view=layout"${managerView === 'layout' ? ' aria-current="page"' : ''}>Page Layout</a>
     <a href="/content/manage?view=operations"${managerView === 'operations' ? ' aria-current="page"' : ''}>Operations</a>
   </nav>
+
+  <section class="card surface-operations" id="system-operations" aria-labelledby="system-operations-title">
+    <p class="eyebrow">Administrative tools</p>
+    <h2 id="system-operations-title">System operations</h2>
+    <p class="muted">Open focused maintenance workspaces without competing with everyday catalog navigation.</p>
+    <nav class="operations-tool-grid" aria-label="System operation destinations">
+      <a class="operations-tool" href="/content/manage/audio-tracks"><strong>MediaTrack operations</strong><span>Filter the global inventory and review publication or storage status.</span></a>
+      ${params.isAdmin ? '<a class="operations-tool" href="/admin/audio-storage/reconciliation"><strong>Audio storage audit</strong><span>Review reconciliation findings and explicitly confirm any remediation.</span></a><a class="operations-tool" href="/admin/image-storage/reconciliation"><strong>Image storage audit</strong><span>Inspect catalog artwork and avatar lifecycle discrepancies.</span></a>' : ''}
+    </nav>
+  </section>
 
   <section class="card release-setup surface-overview" id="artist-release-setup">
     <p class="eyebrow">Guided workflow</p>
@@ -803,22 +955,26 @@ const renderManagePage = (params: {
     ${releaseOperationsBlock}
   </section>
 
-  <div class="card surface-catalog" id="search">
-    <h2>Unified Search</h2>
-    <form method="GET" action="/content/manage/search">
-      <input type="text" name="q" value="${searchQuery}" placeholder="Search artist, organization, album, track" required />
-      <button type="submit">Search</button>
-    </form>
-    ${renderSectionList('Artists', artists, (item) => renderReferencedItem(item, String(item.name ?? ''), 'artist'))}
-    ${renderSectionList('Organizations', organizations, (item) => renderReferencedItem(item, String(item.name ?? ''), 'organization'))}
-    ${renderSectionList('Albums', albums, (item) => renderReferencedItem(item, String(item.title ?? ''), 'album'))}
-    ${renderSectionList('MediaTracks', audioTracks, (item) => renderReferencedItem(item, String(item.title ?? ''), 'audioTrack'))}
-  </div>
+  <section class="card catalog-browser surface-catalog" id="catalog-content" aria-labelledby="catalog-content-title">
+    <div class="catalog-browser__header">
+      <div><p class="eyebrow">Global inventory</p><h2 id="catalog-content-title">Catalog</h2><p class="muted">Choose one content type, then search, review, create, or edit in context.</p></div>
+      <form class="catalog-search-form" method="GET" action="/content/manage/search" role="search">
+        <input type="hidden" name="catalogType" value="${activeCatalogSection}" />
+        <label>Search all catalog content<input type="search" name="q" value="${searchQuery}" placeholder="Artist, organization, album, or MediaTrack" required /></label>
+        <button type="submit">Search</button>
+      </form>
+    </div>
+    <nav class="catalog-type-nav" aria-label="Catalog content types">${catalogSectionNav}</nav>
+    <div class="catalog-active-heading">
+      <div><p class="eyebrow">Current view</p><h2>${escapeHtml(activeCatalogDetails.label)}</h2><p class="muted">${escapeHtml(activeCatalogDetails.description)} ${activeCatalogDetails.count} shown on this page.</p></div>
+      ${['pages', 'carousels', 'contentCollections'].includes(activeCatalogSection) ? '<a class="button button--secondary" href="/content/manage?view=layout">Manage Page Layout</a>' : ''}
+    </div>
+  </section>
+  ${hasSearchQuery ? `<section class="card catalog-search-results surface-catalog" aria-labelledby="catalog-search-results-title"><p class="eyebrow">Search results</p><h2 id="catalog-search-results-title">Matches for “${searchQuery}”</h2><div class="catalog-search-results__grid">${catalogSearchContent}</div></section>` : ''}
   ${selectedObjectBlock}
 
-  <div class="section-heading surface-catalog" id="catalog-content"><div><p class="eyebrow">Global inventory</p><h2>Catalog Content</h2></div></div>
-  <div class="card surface-catalog" id="catalog-inventory">
-    <section id="inventory-artists">
+  ${selectedType === 'none' ? `<div class="card catalog-inventory-card surface-catalog" id="catalog-inventory">
+    ${activeCatalogSection === 'artists' ? `<section id="inventory-artists">
     <h3>Artists</h3>
     <div class="content-hierarchy">
       ${catalogArtists.length > 0 ? catalogArtists.map((artist) => {
@@ -831,26 +987,28 @@ const renderManagePage = (params: {
               return renderReferencedItem(album, String(album.title ?? ''), 'album');
           });
 
-          return `<div class="hierarchy-item"><strong>${renderReferencedItem(artist, String(artist.name ?? ''), 'artist')}</strong><span>${linkedAlbumIds.length} linked album${linkedAlbumIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedAlbums)}</div>`;
+          const relationshipLabel = `${linkedAlbumIds.length} linked album${linkedAlbumIds.length === 1 ? '' : 's'}`;
+          return `<div class="hierarchy-item"><strong>${renderReferencedItem(artist, String(artist.name ?? ''), 'artist')}</strong>${renderNestedList(linkedAlbums, relationshipLabel)}</div>`;
       }).join('') : '<p class="empty-linked-content">No artists yet.</p>'}
     </div>
     ${paginationFor('artists', 'Artists')}
-    </section>
+    </section>` : ''}
 
-    <section id="inventory-organizations">
+    ${activeCatalogSection === 'organizations' ? `<section id="inventory-organizations">
       <h3>Organizations</h3>
       <div class="content-hierarchy">
         ${catalogOrganizations.length > 0 ? catalogOrganizations.map((organization) => {
             const organizationId = contentId(organization);
             const creditedAlbums = catalogAlbums.filter((album) => (Array.isArray(album.credits) ? album.credits : [])
                 .some((credit: any) => credit?.subjectType === 'organization' && String(credit.subjectId ?? '') === organizationId));
-            return `<div class="hierarchy-item"><strong>${renderReferencedItem(organization, String(organization.name ?? ''), 'organization')}</strong><span>${escapeHtml(String(organization.organizationType ?? 'other'))} · ${creditedAlbums.length} release${creditedAlbums.length === 1 ? '' : 's'} on this page</span>${renderNestedList(creditedAlbums.map((album) => renderReferencedItem(album, String(album.title ?? ''), 'album')))}</div>`;
+            const releaseLabel = `${creditedAlbums.length} release${creditedAlbums.length === 1 ? '' : 's'} on this page`;
+            return `<div class="hierarchy-item"><strong>${renderReferencedItem(organization, String(organization.name ?? ''), 'organization')}</strong><span class="item-meta">${escapeHtml(String(organization.organizationType ?? 'other'))}</span>${renderNestedList(creditedAlbums.map((album) => renderReferencedItem(album, String(album.title ?? ''), 'album')), releaseLabel)}</div>`;
         }).join('') : '<p class="empty-linked-content">No organizations yet.</p>'}
       </div>
       ${paginationFor('organizations', 'Organizations')}
-    </section>
+    </section>` : ''}
 
-    <section id="inventory-albums">
+    ${activeCatalogSection === 'albums' ? `<section id="inventory-albums">
     <h3>Albums</h3>
     <div class="content-hierarchy">
       ${catalogAlbums.length > 0 ? catalogAlbums.map((album) => {
@@ -868,26 +1026,28 @@ const renderManagePage = (params: {
           });
           const selectableTrackCount = linkedTrackIds.filter((trackId) => tracksById.has(trackId)).length;
 
-          return `<form class="hierarchy-item" data-batch-track-delete method="POST" action="/content/manage/album/delete-audio-tracks"><input type="hidden" name="albumId" value="${escapeHtml(albumId)}" /><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked MediaTrack${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}${selectableTrackCount > 0 ? '<div class="batch-track-actions"><button class="select-all-tracks button--secondary" type="button">Select all</button><button class="batch-delete-button" data-danger type="submit" disabled>Delete selected MediaTracks</button></div>' : ''}</form>`;
+          const relationshipLabel = `${linkedTrackIds.length} linked MediaTrack${linkedTrackIds.length === 1 ? '' : 's'}`;
+          const batchActions = selectableTrackCount > 0 ? '<div class="batch-track-actions"><button class="select-all-tracks button--secondary" type="button">Select all</button><button class="batch-delete-button" data-danger type="submit" disabled>Delete selected MediaTracks</button></div>' : '';
+          return `<form class="hierarchy-item" data-batch-track-delete method="POST" action="/content/manage/album/delete-audio-tracks"><input type="hidden" name="albumId" value="${escapeHtml(albumId)}" /><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong>${renderNestedList(linkedTracks, relationshipLabel, batchActions)}</form>`;
       }).join('') : '<p class="empty-linked-content">No albums yet.</p>'}
     </div>
     ${paginationFor('albums', 'Albums')}
-    </section>
+    </section>` : ''}
 
-        <section id="inventory-audioTracks">
+        ${activeCatalogSection === 'audioTracks' ? `<section id="inventory-audioTracks">
           <h3>MediaTracks</h3>
           <div class="content-hierarchy">
             ${catalogAudioTracks.length > 0 ? catalogAudioTracks.map((track) => `<div class="hierarchy-item"><strong>${renderReferencedItem(track, String(track.title ?? ''), 'audioTrack')}</strong><span>${escapeHtml(String(track.uploadStatus ?? 'legacy'))}</span></div>`).join('') : '<p class="empty-linked-content">No MediaTracks yet.</p>'}
           </div>
           ${paginationFor('audioTracks', 'MediaTracks')}
-        </section>
+        </section>` : ''}
 
-        <section id="inventory-pages">
+        ${activeCatalogSection === 'pages' ? `<section id="inventory-pages">
           ${renderPageItemsHierarchy(catalogPages, catalogCarousels, catalogContentCollections)}
           ${paginationFor('pages', 'Pages')}
-        </section>
+        </section>` : ''}
 
-        <section id="inventory-carousels">
+        ${activeCatalogSection === 'carousels' ? `<section id="inventory-carousels">
         <h3>Carousels</h3>
         <div class="content-hierarchy">
           ${catalogCarousels.length > 0 ? catalogCarousels.map((carousel) => {
@@ -915,13 +1075,14 @@ const renderManagePage = (params: {
                   : isPersonalizedCarousel
                       ? `<span class="pill">Personalized</span> <span>${carousel.personalizedConfig?.source === 'recentlyPlayed' ? 'Recently Played' : 'Recently Saved'} · Mixed content</span>`
                   : '<span class="pill pill--muted">Manual</span>';
-              return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><div class="item-meta">${dynamicSummary}<span>${items.length} item${items.length === 1 ? '' : 's'}</span></div>${renderNestedList(carouselItems)}</div>`;
+              const itemLabel = `${items.length} configured item${items.length === 1 ? '' : 's'}`;
+              return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><div class="item-meta">${dynamicSummary}</div>${renderNestedList(carouselItems, itemLabel)}</div>`;
           }).join('') : '<p class="empty-linked-content">No carousels yet.</p>'}
         </div>
         ${paginationFor('carousels', 'Carousels')}
-        </section>
+        </section>` : ''}
 
-        <section id="inventory-contentCollections">
+        ${activeCatalogSection === 'contentCollections' ? `<section id="inventory-contentCollections">
           <h3>Content Collections</h3>
           <div class="content-hierarchy">
             ${catalogContentCollections.length > 0 ? catalogContentCollections.map((collection) => {
@@ -931,8 +1092,8 @@ const renderManagePage = (params: {
             }).join('') : '<p class="empty-linked-content">No content collections yet.</p>'}
           </div>
           ${paginationFor('contentCollections', 'Content Collections')}
-        </section>
-  </div>
+        </section>` : ''}
+  </div>` : ''}
 
     <div class="section-heading surface-layout" id="composition"><div><p class="eyebrow">Presentation</p><h2>Page Layout</h2></div></div>
     <div class="layout-workspace surface-layout">
@@ -1077,66 +1238,69 @@ const renderManagePage = (params: {
 
     <div id="composition-data" class="surface-layout" hidden>${escapeHtml(compositionData)}</div>
 
-  <div class="section-heading surface-catalog" id="create"><div><p class="eyebrow">${prefillOrganization ? 'Selected object' : 'New records'}</p><h2>${prefillOrganization ? 'Organization workspace' : 'Create'}</h2></div></div>
-  <div class="grid surface-catalog" id="catalog-create-tools">
-    <div class="card create-card">
+  ${(catalogCreation && selectedType === 'none') || prefillOrganization ? `<details class="card catalog-tool-group surface-catalog" id="create"${prefillOrganization ? ' open' : ''}>
+    <summary><span><strong>${prefillOrganization ? 'Organization workspace' : escapeHtml(catalogCreation?.title ?? 'Create')}</strong><small>${prefillOrganization ? 'Update this Organization or create an institutional release.' : escapeHtml(catalogCreation?.description ?? '')}</small></span></summary>
+    <div class="catalog-tool-group__body"><div class="grid" id="catalog-create-tools">
+    <div class="card create-card create-card--artists">
       <h3>Create Artist</h3>
       <form method="POST" action="/content/manage/artist/create" enctype="multipart/form-data">
-        <input name="name" placeholder="Name" required />
-        <input name="birthDate" type="date" />
-        <input name="bio" placeholder="Bio" />
-        <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
-        <input name="albumIds" placeholder="Album IDs (comma separated)" />
+        <label>Name<input name="name" required /></label>
+        <label>Birth date<input name="birthDate" type="date" /></label>
+        <label>Biography<textarea name="bio" rows="3"></textarea></label>
+        <label>Cover art (optional)<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
+        <label>Album IDs (optional)<input name="albumIds" placeholder="Comma separated canonical IDs" /></label>
         <button type="submit">Create Artist</button>
       </form>
     </div>
 
-    <div class="card create-card">
+    <div class="card create-card create-card--albums">
       <h3>Create Album</h3>
       <form method="POST" action="/content/manage/album/create" enctype="multipart/form-data">
-        <input name="title" placeholder="Title" required />
-        <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
-        <input name="audioTrackIds" placeholder="MediaTrack IDs (comma separated)" />
-        <input name="releaseDate" type="date" />
+        <label>Title<input name="title" required /></label>
+        <label>Cover art (optional)<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
+        <label>MediaTrack IDs (optional)<input name="audioTrackIds" placeholder="Comma separated canonical IDs" /></label>
+        <label>Release date<input name="releaseDate" type="date" /></label>
         <button type="submit">Create Album</button>
       </form>
     </div>
 
-    <div class="card create-card">
+    <div class="card create-card create-card--audioTracks">
       <h3>Create and Upload MediaTrack</h3>
       <form method="POST" action="/content/manage/audioTrack/create" enctype="multipart/form-data">
-        <input name="title" placeholder="Title" required />
-        <select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select>
-        <select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select>
-        <select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select>
-        <select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select>
-        <input name="genres" placeholder="Genres (comma separated)" />
-        <select name="albumId"><option value="">No album</option>${albumOptions}</select>
+        <label>Title<input name="title" required /></label>
+        <label>Artist Credit<select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select></label>
+        <label>Artist role<select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select></label>
+        <label>Organization Credit<select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select></label>
+        <label>Organization role<select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select></label>
+        <label>Genres<input name="genres" placeholder="Comma separated" /></label>
+        <label>Album<select name="albumId"><option value="">No album</option>${albumOptions}</select></label>
         <label><input type="checkbox" name="inheritAlbumPrimaryCredits" value="true" checked /> Inherit the selected Album's primary Artists</label>
         <label><input type="checkbox" name="attributionUnknown" value="true" /> Attribution is not documented</label>
         <label><input type="checkbox" name="promoteToAlbumPrimary" value="true" /> If the selected participant is primary, also add them to the Album</label>
         <p class="drag-help">Choose an Artist, an Organization, inherited Album Artists, or explicitly mark attribution as not documented. Album promotion is off by default.</p>
-        <input name="releaseDate" type="date" />
-        <input name="duration" placeholder="Duration (e.g. 03:30)" />
-        <input name="formatType" placeholder="Format type (e.g. MP3 or MP4)" />
-        <input name="formatBitrate" placeholder="Bitrate (optional)" />
-        <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
+        <label>Release date<input name="releaseDate" type="date" /></label>
+        <label>Duration<input name="duration" placeholder="For example 03:30" /></label>
+        <label>Format type<input name="formatType" placeholder="For example MP3 or MP4" /></label>
+        <label>Bitrate (optional)<input name="formatBitrate" /></label>
+        <label>Cover art (optional)<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
         <label>Audio or MP4 Video<input type="file" name="mediaFile" accept="audio/*,video/mp4" required /></label>
         <button type="submit">Create and Upload MediaTrack</button>
       </form>
       ${bulkAudioUploadBlock}
     </div>
 
-    <div class="card object-workspace object-workspace--organization" id="organization-workspace">
-      <h3>Create Organization</h3>
-      <p class="muted">Use this for a label, publisher, distributor, archive, broadcaster, studio, or other institution. Do not create it as an Artist.</p>
-      <form method="POST" action="/content/manage/organization/create">
-        <label>Name<input name="name" required maxlength="200" /></label>
-        <label>Type<select name="organizationType">${organizationTypes.map((type) => `<option value="${type}">${type}</option>`).join('')}</select></label>
-        <label>Description<textarea name="description" rows="3"></textarea></label>
-        <button type="submit">Create Organization</button>
-      </form>
-      <details${prefillOrganization ? ' open' : ''}><summary>Update an Organization</summary>
+    <div class="card create-card create-card--organizations object-workspace object-workspace--organization" id="organization-workspace">
+      ${prefillOrganization
+        ? '<h3>Organization workspace</h3><p class="muted">Update this Organization, create an institutional release, or remove it when no content still references it.</p>'
+        : `<h3>Create Organization</h3>
+          <p class="muted">Use this for a label, publisher, distributor, archive, broadcaster, studio, or other institution. Do not create it as an Artist.</p>
+          <form method="POST" action="/content/manage/organization/create">
+            <label>Name<input name="name" required maxlength="200" /></label>
+            <label>Type<select name="organizationType">${organizationTypes.map((type) => `<option value="${type}">${type}</option>`).join('')}</select></label>
+            <label>Description<textarea name="description" rows="3"></textarea></label>
+            <button type="submit">Create Organization</button>
+          </form>`}
+      <details${prefillOrganization ? ' open' : ''}><summary>${prefillOrganization ? 'Update Organization details' : 'Update an Organization'}</summary>
         <form method="POST" action="/content/manage/organization/update"${prefillOrganization ? '' : ' data-reference-form'}>
           ${organizationUpdateTarget}
           <label>Name<input name="name" required maxlength="200" value="${escapeHtml(String(prefillOrganization?.name ?? ''))}" /></label>
@@ -1167,47 +1331,51 @@ const renderManagePage = (params: {
         </form>
       </details>
     </div>
-  </div>
+  </div></div></details>` : ''}
 
-    <div class="section-heading surface-catalog" id="quick-linking"><div><p class="eyebrow">Advanced relationships</p><h2>Quick Linking</h2></div></div>
-    <div class="grid surface-catalog" id="catalog-quick-linking-tools">
-        <div class="card">
+    ${selectedType === 'none' && ['artists', 'albums', 'audioTracks'].includes(activeCatalogSection) ? `<details class="card catalog-tool-group surface-catalog" id="quick-linking">
+      <summary><span><strong>Advanced relationship tools</strong><small>Use canonical IDs only for exceptional linking or migration work.</small></span></summary>
+      <div class="catalog-tool-group__body"><div class="grid" id="catalog-quick-linking-tools">
+        <div class="card quick-link--track-album">
             <h3>Link Track to Album</h3>
             <form method="POST" action="/content/manage/link/track-album">
-                <input name="audioTrackId" placeholder="MediaTrack ID" required />
-                <input name="albumId" placeholder="Album ID" required />
+                <label>MediaTrack ID<input name="audioTrackId" required /></label>
+                <label>Album ID<input name="albumId" required /></label>
                 <button type="submit">Link Track and Album</button>
             </form>
             <p>Sets track.albumId and ensures album.audioTrackIds contains the track.</p>
         </div>
 
-        <div class="card">
+        <div class="card quick-link--album-artist">
             <h3>Link Album to Artist</h3>
             <form method="POST" action="/content/manage/link/album-artist">
-                <input name="albumId" placeholder="Album ID" required />
-                <input name="artistId" placeholder="Artist ID" required />
+                <label>Album ID<input name="albumId" required /></label>
+                <label>Artist ID<input name="artistId" required /></label>
                 <button type="submit">Link Album and Artist</button>
             </form>
             <p>Adds albumId into artist.albumIds if missing.</p>
         </div>
 
-        <div class="card">
+        <div class="card quick-link--track-artist">
             <h3>Link Track to Artist</h3>
             <form method="POST" action="/content/manage/link/track-artist">
-                <input name="audioTrackId" placeholder="MediaTrack ID" required />
-                <input name="artistId" placeholder="Artist ID" required />
+                <label>MediaTrack ID<input name="audioTrackId" required /></label>
+                <label>Artist ID<input name="artistId" required /></label>
                 <button type="submit">Link Track and Artist</button>
             </form>
             <p>Adds artistId to track.artistIds. Tracks are the source of truth for artist relationships.</p>
         </div>
-    </div>
+      </div></div>
+    </details>` : ''}
 
-    <div class="section-heading surface-catalog" id="update-delete"><div><p class="eyebrow">Maintenance</p><h2>Update / Delete</h2></div></div>
+    ${openByIdBlock}
+
+    ${selectedType !== 'none' && selectedType !== 'organization' ? `<div class="section-heading surface-catalog" id="update-delete"><div><p class="eyebrow">Editing workspace</p><h2>Edit ${escapeHtml(selectedTypeLabel)}</h2></div></div>
   <div class="grid surface-catalog object-workspaces" id="catalog-object-workspaces">
         <div class="card object-workspace object-workspace--artist" id="artist-update-card">
       <h3>Artist workspace</h3>
       ${prefillArtist
-        ? `<div class="workspace-context"><p><strong>${escapeHtml(String(prefillArtist.name ?? 'Artist'))}</strong></p><button class="copy-id" type="button" data-copy-id="${prefillArtistId}">Copy ID</button><a href="/content/manage?view=catalog#catalog-content">Choose another Artist</a></div>`
+        ? `<div class="workspace-context"><p><strong>${escapeHtml(String(prefillArtist.name ?? 'Artist'))}</strong></p><button class="copy-id" type="button" data-copy-id="${prefillArtistId}">Copy ID</button><a href="${catalogReturnUrl}">Choose another Artist</a></div>`
         : `<p class="muted">Choose Edit from the Artist inventory, or load a known ID.</p><form method="GET" action="/content/manage#artist-update-card">
                 <input type="hidden" name="prefillType" value="artist" />
                 <input name="prefillId" value="${prefillArtistId}" placeholder="Artist ID" required />
@@ -1226,7 +1394,7 @@ const renderManagePage = (params: {
       <h3>Cover art</h3>
       <form method="POST" action="/content/manage/artist/update-cover-art" enctype="multipart/form-data">
                 <input type="hidden" name="artistId" value="${prefillArtistId}" required />
-                <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
+                <label>Replacement cover art<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
                 <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
         <button type="submit">Update Cover Art</button>
       </form>
@@ -1270,7 +1438,7 @@ const renderManagePage = (params: {
         <div class="card object-workspace object-workspace--album" id="album-update-card">
       <h3>Album</h3>
       ${prefillAlbum
-        ? `<div class="workspace-context"><p><strong>${escapeHtml(String(prefillAlbum.title ?? 'Album'))}</strong></p><button class="copy-id" type="button" data-copy-id="${prefillAlbumId}">Copy ID</button><a href="/content/manage?view=catalog#catalog-content">Choose another Album</a></div>`
+        ? `<div class="workspace-context"><p><strong>${escapeHtml(String(prefillAlbum.title ?? 'Album'))}</strong></p><button class="copy-id" type="button" data-copy-id="${prefillAlbumId}">Copy ID</button><a href="${catalogReturnUrl}">Choose another Album</a></div>`
         : `<p class="muted">Choose Edit from the Album inventory, or load a known ID.</p><form method="GET" action="/content/manage#album-update-card">
                 <input type="hidden" name="prefillType" value="album" />
                 <input name="prefillId" value="${prefillAlbumId}" placeholder="Album ID" required />
@@ -1278,11 +1446,11 @@ const renderManagePage = (params: {
             </form>`}
       ${prefillAlbum ? `<section class="workspace-section" aria-labelledby="album-details-heading"><h3 id="album-details-heading">Details and media</h3><form method="POST" action="/content/manage/album/update" enctype="multipart/form-data">
                 <input type="hidden" name="albumId" value="${prefillAlbumId}" required />
-                <input name="title" value="${escapeHtml(String(prefillAlbum?.title ?? ''))}" placeholder="New Title (optional)" />
-                <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
+                <label>Title<input name="title" value="${escapeHtml(String(prefillAlbum?.title ?? ''))}" /></label>
+                <label>Replacement cover art<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
                 <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
-                <input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="MediaTrack IDs (comma separated)" />
-                <input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAlbum?.releaseDate))}" type="date" />
+                <label>MediaTrack IDs<input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Comma separated canonical IDs" /></label>
+                <label>Release date<input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAlbum?.releaseDate))}" type="date" /></label>
         <button type="submit">Update Album</button>
       </form></section>
       <section class="workspace-section">${renderCreditEditor('album', prefillAlbumId, prefillAlbum, prefillCreditSubjectLabels)}</section>
@@ -1292,7 +1460,7 @@ const renderManagePage = (params: {
         <div class="card object-workspace object-workspace--audioTrack" id="audio-track-update-card">
       <h3>MediaTrack</h3>
       ${prefillAudioTrack
-        ? `<div class="workspace-context"><p><strong>${escapeHtml(String(prefillAudioTrack.title ?? 'MediaTrack'))}</strong></p><button class="copy-id" type="button" data-copy-id="${prefillAudioTrackId}">Copy ID</button><a href="/content/manage?view=catalog#catalog-content">Choose another MediaTrack</a></div>`
+        ? `<div class="workspace-context"><p><strong>${escapeHtml(String(prefillAudioTrack.title ?? 'MediaTrack'))}</strong></p><button class="copy-id" type="button" data-copy-id="${prefillAudioTrackId}">Copy ID</button><a href="${catalogReturnUrl}">Choose another MediaTrack</a></div>`
         : `<p class="muted">Choose Edit from the MediaTrack inventory, or load a known ID.</p><form method="GET" action="/content/manage#audio-track-update-card">
                 <input type="hidden" name="prefillType" value="audioTrack" />
                 <input name="prefillId" value="${prefillAudioTrackId}" placeholder="MediaTrack ID" required />
@@ -1300,23 +1468,23 @@ const renderManagePage = (params: {
             </form>`}
       ${prefillAudioTrack ? `<section class="workspace-section" aria-labelledby="soundtrack-details-heading"><h3 id="soundtrack-details-heading">Details and cover art</h3><form method="POST" action="/content/manage/audioTrack/update" enctype="multipart/form-data">
                 <input type="hidden" name="audioTrackId" value="${prefillAudioTrackId}" required />
-                <input name="title" value="${escapeHtml(String(prefillAudioTrack?.title ?? ''))}" placeholder="New Title (optional)" />
-                <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
+                <label>Title<input name="title" value="${escapeHtml(String(prefillAudioTrack?.title ?? ''))}" /></label>
+                <label>Replacement cover art<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
                 <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
-                <input name="artistIds" value="${escapeHtml(toCsvInput(prefillAudioTrack?.artistIds))}" placeholder="Artist IDs (comma separated)" />
-                <input name="genres" value="${escapeHtml(toCsvInput(prefillAudioTrack?.genres))}" placeholder="Genres (comma separated)" />
-                <input name="albumId" value="${escapeHtml(String(prefillAudioTrack?.albumId ?? ''))}" placeholder="Album ID" />
-                <input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAudioTrack?.releaseDate))}" type="date" />
-                <input name="duration" value="${escapeHtml(String(prefillAudioTrack?.duration ?? ''))}" placeholder="Duration (e.g. 03:30)" />
-                <input name="formatType" value="${escapeHtml(String(prefillAudioTrack?.format?.type ?? ''))}" placeholder="Format type (e.g. MP3)" />
-                <input name="formatBitrate" value="${escapeHtml(String(prefillAudioTrack?.format?.bitrate ?? ''))}" placeholder="Bitrate (e.g. 320)" />
+                <label>Artist IDs<input name="artistIds" value="${escapeHtml(toCsvInput(prefillAudioTrack?.artistIds))}" placeholder="Comma separated canonical IDs" /></label>
+                <label>Genres<input name="genres" value="${escapeHtml(toCsvInput(prefillAudioTrack?.genres))}" placeholder="Comma separated" /></label>
+                <label>Album ID<input name="albumId" value="${escapeHtml(String(prefillAudioTrack?.albumId ?? ''))}" /></label>
+                <label>Release date<input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAudioTrack?.releaseDate))}" type="date" /></label>
+                <label>Duration<input name="duration" value="${escapeHtml(String(prefillAudioTrack?.duration ?? ''))}" placeholder="For example 03:30" /></label>
+                <label>Format type<input name="formatType" value="${escapeHtml(String(prefillAudioTrack?.format?.type ?? ''))}" placeholder="For example MP3" /></label>
+                <label>Bitrate<input name="formatBitrate" value="${escapeHtml(String(prefillAudioTrack?.format?.bitrate ?? ''))}" placeholder="For example 320" /></label>
         <button type="submit">Update MediaTrack</button>
       </form></section>
       <section class="workspace-section">${renderCreditEditor('audioTrack', prefillAudioTrackId, prefillAudioTrack, prefillCreditSubjectLabels)}</section>
-      <section class="workspace-section" aria-labelledby="replace-media-heading"><h3 id="replace-media-heading">Stored media</h3><p class="muted">Current kind: <strong>${activeMediaTypeForTrack(prefillAudioTrack) === 'video' ? 'Video' : 'Audio'}</strong>. A MediaTrack has one effective media object. Replacement publishes the new object and kind before cleaning up the previous object.</p><form method="POST" action="/content/manage/audioTrack/upload" enctype="multipart/form-data"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId || selectedUploadTrackId}" required /><input type="file" name="audioFile" accept="audio/*" required /><button type="submit">Replace with Audio</button></form><form method="POST" action="/content/manage/audioTrack/video-upload" enctype="multipart/form-data"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId}" required /><input type="file" name="videoFile" accept="video/mp4" required /><button type="submit">Replace with Video</button></form></section>
+      <section class="workspace-section" aria-labelledby="replace-media-heading"><h3 id="replace-media-heading">Stored media</h3><p class="muted">Current kind: <strong>${activeMediaTypeForTrack(prefillAudioTrack) === 'video' ? 'Video' : 'Audio'}</strong>. A MediaTrack has one effective media object. Replacement publishes the new object and kind before cleaning up the previous object.</p><form method="POST" action="/content/manage/audioTrack/upload" enctype="multipart/form-data"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId || selectedUploadTrackId}" required /><label>Replacement audio<input type="file" name="audioFile" accept="audio/*" required /></label><button type="submit">Replace with Audio</button></form><form method="POST" action="/content/manage/audioTrack/video-upload" enctype="multipart/form-data"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId}" required /><label>Replacement MP4 Video<input type="file" name="videoFile" accept="video/mp4" required /></label><button type="submit">Replace with Video</button></form></section>
       <section class="card danger-zone workspace-section" aria-labelledby="delete-soundtrack-heading"><h3 id="delete-soundtrack-heading">Danger zone</h3><p>Deletion keeps the record retryable until storage cleanup completes.</p><form method="POST" action="/content/manage/audioTrack/delete"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId}" required /><button data-danger type="submit">Delete MediaTrack</button></form></section>` : '<p class="empty-linked-content">No MediaTrack selected.</p>'}
     </div>
-  </div>
+  </div>` : ''}
   </main>
   <script src="/assets/browser-session-forms.js"></script>
   <script src="/assets/content-manager.js"></script>
@@ -1506,7 +1674,8 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
             prefillCreditSubjectLabels,
             releaseSetupToken: randomUUID().replace(/-/g, '_'),
             releaseOperations,
-            managerView: req.query.view ? managerViewFromQuery(req.query.view) : prefillType ? 'catalog' : 'overview'
+            managerView: req.query.view ? managerViewFromQuery(req.query.view) : prefillType ? 'catalog' : 'overview',
+            catalogSection: catalogSectionFromQuery(req.query.catalogType)
         }));
     } catch (error) {
         return next(error);
@@ -1550,7 +1719,8 @@ export const searchContentWeb = async (req: Request, res: Response, next: NextFu
             s3StorageSummaryError: s3StorageSummaryResult.errorCode,
             releaseSetupToken: randomUUID().replace(/-/g, '_'),
             releaseOperations,
-            managerView: 'catalog'
+            managerView: 'catalog',
+            catalogSection: catalogSectionFromQuery(req.query.catalogType)
         }));
     } catch (error) {
         return next(error);

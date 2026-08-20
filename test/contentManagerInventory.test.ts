@@ -4,7 +4,8 @@ import type { NextFunction, Request, Response } from 'express';
 
 import {
     renderAudioTracksPageForWeb,
-    renderManagePageForWeb
+    renderManagePageForWeb,
+    searchContentWeb
 } from '../src/controllers/contentController';
 import { listCarousels } from '../src/controllers/pageController';
 import { listContentCollections } from '../src/controllers/contentCollectionController';
@@ -66,14 +67,19 @@ test('normalizes management inventory pages and detects limit-plus-one paginatio
     ).hasNext, false);
 });
 
-test('Content Manager loads global inventory pages instead of filtering by createdBy', async () => {
+test('Content Manager loads global inventory into focused Catalog sections', async () => {
     const originals = {
         artists: Artist.fetchAll,
         artistById: Artist.findById,
+        artistSearch: Artist.searchByName,
         organizations: Organization.fetchAll,
+        organizationById: Organization.findById,
+        organizationSearch: Organization.searchByName,
         albums: Album.fetchAll,
+        albumSearch: Album.searchByTitle,
         audioTracks: AudioTrack.fetchAll,
         audioTrackById: AudioTrack.findById,
+        audioTrackSearch: AudioTrack.searchByTitle,
         pages: Page.fetchAll,
         carousels: Carousel.fetchAll,
         contentCollections: ContentCollection.fetchAll
@@ -97,6 +103,7 @@ test('Content Manager loads global inventory pages instead of filtering by creat
     (Artist as any).findById = async (id: string) => id === 'artist-1'
         ? { _id: 'artist-1', name: 'Legacy Global Artist', albumIds: [], createdBy: 'legacy-owner' }
         : null;
+    (Artist as any).searchByName = async () => [{ _id: 'artist-2', name: 'Search Result Artist' }];
     (Organization as any).fetchAll = async (limit: number, offset: number) => {
         calls.organizations = { limit, offset };
         return [{
@@ -106,10 +113,20 @@ test('Content Manager loads global inventory pages instead of filtering by creat
             createdBy: 'legacy-owner'
         }];
     };
+    (Organization as any).findById = async (id: string) => id === 'organization-1'
+        ? {
+            _id: 'organization-1',
+            name: 'Global Publisher',
+            organizationType: 'publisher',
+            description: 'Selected institutional credit owner.'
+        }
+        : null;
+    (Organization as any).searchByName = async () => [];
     (Album as any).fetchAll = async (limit: number, offset: number) => {
         calls.albums = { limit, offset };
-        return [{ _id: 'album-1', title: 'Legacy Global Album', audioTrackIds: [], createdBy: 'legacy-owner' }];
+        return [{ _id: 'album-1', title: 'Legacy Global Album', audioTrackIds: ['track-0'], createdBy: 'legacy-owner' }];
     };
+    (Album as any).searchByTitle = async () => [];
     (AudioTrack as any).fetchAll = async (limit: number, offset: number) => {
         calls.audioTracks = { limit, offset };
         return trackRecords;
@@ -125,6 +142,7 @@ test('Content Manager loads global inventory pages instead of filtering by creat
             genres: []
         }
         : null;
+    (AudioTrack as any).searchByTitle = async () => [];
     (Page as any).fetchAll = async (limit: number, offset: number) => {
         calls.pages = { limit, offset };
         return [{ _id: 'page-1', slug: 'home', title: 'Global Home', items: [], createdBy: 'legacy-owner' }];
@@ -146,14 +164,39 @@ test('Content Manager loads global inventory pages instead of filtering by creat
     };
 
     const { capture, response } = responseCapture();
+    const albumsPage = responseCapture();
+    const mediaTracksPage = responseCapture();
+    const pagesPage = responseCapture();
+    const searchPage = responseCapture();
     const operationsPage = responseCapture();
     const selectedArtistPage = responseCapture();
+    const selectedOrganizationPage = responseCapture();
     const selectedMediaTrackPage = responseCapture();
     let nextError: unknown;
     try {
         await renderManagePageForWeb(
             adminRequest({ artistsPage: '2' }),
             response,
+            ((error?: unknown) => { nextError = error; }) as NextFunction
+        );
+        await renderManagePageForWeb(
+            adminRequest({ view: 'catalog', catalogType: 'albums', artistsPage: '2' }),
+            albumsPage.response,
+            ((error?: unknown) => { nextError = error; }) as NextFunction
+        );
+        await renderManagePageForWeb(
+            adminRequest({ view: 'catalog', catalogType: 'audioTracks', artistsPage: '2' }),
+            mediaTracksPage.response,
+            ((error?: unknown) => { nextError = error; }) as NextFunction
+        );
+        await renderManagePageForWeb(
+            adminRequest({ view: 'catalog', catalogType: 'pages', artistsPage: '2' }),
+            pagesPage.response,
+            ((error?: unknown) => { nextError = error; }) as NextFunction
+        );
+        await searchContentWeb(
+            adminRequest({ q: 'Search Result', catalogType: 'artists', artistsPage: '2' }),
+            searchPage.response,
             ((error?: unknown) => { nextError = error; }) as NextFunction
         );
         await renderManagePageForWeb(
@@ -169,6 +212,15 @@ test('Content Manager loads global inventory pages instead of filtering by creat
         await renderManagePageForWeb(
             adminRequest({
                 view: 'catalog',
+                prefillType: 'organization',
+                prefillId: 'organization-1'
+            }),
+            selectedOrganizationPage.response,
+            ((error?: unknown) => { nextError = error; }) as NextFunction
+        );
+        await renderManagePageForWeb(
+            adminRequest({
+                view: 'catalog',
                 artistsPage: '2',
                 prefillType: 'audioTrack',
                 prefillId: '000000000000000000000001'
@@ -179,10 +231,15 @@ test('Content Manager loads global inventory pages instead of filtering by creat
     } finally {
         Artist.fetchAll = originals.artists;
         Artist.findById = originals.artistById;
+        Artist.searchByName = originals.artistSearch;
         Organization.fetchAll = originals.organizations;
+        Organization.findById = originals.organizationById;
+        Organization.searchByName = originals.organizationSearch;
         Album.fetchAll = originals.albums;
+        Album.searchByTitle = originals.albumSearch;
         AudioTrack.fetchAll = originals.audioTracks;
         AudioTrack.findById = originals.audioTrackById;
+        AudioTrack.searchByTitle = originals.audioTrackSearch;
         Page.fetchAll = originals.pages;
         Carousel.fetchAll = originals.carousels;
         ContentCollection.fetchAll = originals.contentCollections;
@@ -193,6 +250,12 @@ test('Content Manager loads global inventory pages instead of filtering by creat
 
     assert.equal(nextError, undefined);
     assert.equal(capture.statusCode, 200);
+    const managerHeader = capture.html.match(/<header class="site-header">[\s\S]*?<\/header>/)?.[0] ?? '';
+    assert.match(managerHeader, /<details class="manager-account" id="manager-account-menu">/);
+    assert.match(managerHeader, /<summary>Admin account<\/summary>/);
+    assert.match(managerHeader, /admin@example\.com/);
+    assert.match(managerHeader, /action="\/auth\/logout-web"/);
+    assert.doesNotMatch(managerHeader, /MediaTracks|Audit Audio Storage|Audit Image Storage|>Home<|header-actions/);
     assert.deepEqual(calls.artists, {
         limit: managementInventoryPageSize + 1,
         offset: managementInventoryPageSize
@@ -200,37 +263,70 @@ test('Content Manager loads global inventory pages instead of filtering by creat
     for (const key of ['organizations', 'albums', 'audioTracks', 'pages', 'carousels', 'contentCollections']) {
         assert.deepEqual(calls[key], { limit: managementInventoryPageSize + 1, offset: 0 });
     }
-    assert.match(capture.html, /Catalog Content/);
+    assert.match(capture.html, /id="catalog-content"/);
+    assert.match(capture.html, /aria-label="Catalog content types"/);
+    assert.match(capture.html, /catalogType=artists/);
+    assert.match(capture.html, /catalogType=contentCollections/);
     assert.match(capture.html, /manager-view-overview/);
     assert.match(capture.html, /Set up an Artist release/);
     assert.match(capture.html, /Overview/);
     assert.match(capture.html, /Page Layout/);
     assert.match(capture.html, /Operations/);
     assert.match(capture.html, /Legacy Global Artist/);
+    assert.match(capture.html, /id="inventory-artists"/);
+    assert.doesNotMatch(capture.html, /id="inventory-albums"/);
+    assert.doesNotMatch(capture.html, /Unified Search|id="catalog-search-results-title"/);
+    assert.match(capture.html, /<details class="card catalog-tool-group surface-catalog" id="create">/);
+    assert.match(capture.html, /id="open-by-id"/);
+    assert.match(albumsPage.capture.html, /id="inventory-albums"/);
+    assert.match(albumsPage.capture.html, /Legacy Global Album/);
+    assert.match(albumsPage.capture.html, /<details class="linked-content-disclosure"><summary>1 linked MediaTrack<\/summary>/);
+    assert.doesNotMatch(albumsPage.capture.html, /id="inventory-artists"/);
+    assert.match(albumsPage.capture.html, /<strong>Create Album<\/strong>/);
+    assert.match(mediaTracksPage.capture.html, /id="inventory-audioTracks"/);
+    assert.match(mediaTracksPage.capture.html, /Legacy Global Track/);
+    assert.match(mediaTracksPage.capture.html, /Next MediaTracks/);
+    assert.match(pagesPage.capture.html, /id="inventory-pages"/);
+    assert.match(pagesPage.capture.html, /Global Home/);
+    assert.match(pagesPage.capture.html, /Manage Page Layout/);
+    assert.doesNotMatch(pagesPage.capture.html, /id="create"/);
+    assert.doesNotMatch(pagesPage.capture.html, /id="open-by-id"/);
+    assert.match(searchPage.capture.html, /Matches for “Search Result”/);
+    assert.match(searchPage.capture.html, /Search Result Artist/);
+    assert.equal((searchPage.capture.html.match(/<section class="catalog-search-result-group">/g) ?? []).length, 1);
+    assert.doesNotMatch(searchPage.capture.html, /<li>None<\/li>/);
     assert.match(capture.html, /Global Publisher/);
-    assert.match(capture.html, /Legacy Global Album/);
-    assert.match(capture.html, /Legacy Global Track/);
-    assert.match(capture.html, /Global Home/);
     assert.match(capture.html, /Legacy Global Carousel/);
     assert.match(capture.html, /Legacy Global Grid/);
     assert.match(capture.html, /Current structure/);
     assert.match(capture.html, /Page settings and placement/);
     assert.match(capture.html, /Create and configure Carousels/);
     assert.match(capture.html, /Previous Artists/);
-    assert.match(capture.html, /Next MediaTracks/);
     assert.match(capture.html, /name="mediaFile" accept="audio\/\*,video\/mp4"/);
     assert.doesNotMatch(capture.html, /My Content|My Artists|My Albums|My Carousels|My MediaTracks/);
     assert.match(operationsPage.capture.html, /manager-view-operations/);
+    assert.match(operationsPage.capture.html, /id="system-operations"/);
+    assert.match(operationsPage.capture.html, /System operations/);
+    assert.match(operationsPage.capture.html, /href="\/content\/manage\/audio-tracks"/);
+    assert.match(operationsPage.capture.html, /href="\/admin\/audio-storage\/reconciliation"/);
+    assert.match(operationsPage.capture.html, /href="\/admin\/image-storage\/reconciliation"/);
     assert.match(operationsPage.capture.html, /Recent Artist release setups/);
     assert.match(selectedArtistPage.capture.html, /manager-selection-artist/);
     assert.match(selectedArtistPage.capture.html, /id="selected-object"/);
     assert.match(selectedArtistPage.capture.html, /Legacy Global Artist/);
     assert.match(selectedArtistPage.capture.html, /data-copy-id="artist-1"/);
     assert.match(selectedArtistPage.capture.html, /id="catalog-object-workspaces"/);
+    assert.doesNotMatch(selectedArtistPage.capture.html, /id="catalog-inventory"/);
     assert.ok(
-        selectedArtistPage.capture.html.indexOf('id="selected-object"')
-            < selectedArtistPage.capture.html.indexOf('id="catalog-content"')
+        selectedArtistPage.capture.html.indexOf('id="catalog-content"')
+            < selectedArtistPage.capture.html.indexOf('id="selected-object"')
     );
+    assert.match(selectedArtistPage.capture.html, /Back to Artists/);
+    assert.match(selectedOrganizationPage.capture.html, /manager-selection-organization/);
+    assert.match(selectedOrganizationPage.capture.html, /Selected Organization/);
+    assert.match(selectedOrganizationPage.capture.html, /Update Organization details/);
+    assert.doesNotMatch(selectedOrganizationPage.capture.html, /action="\/content\/manage\/organization\/create"/);
+    assert.doesNotMatch(selectedOrganizationPage.capture.html, /id="catalog-inventory"/);
     assert.match(selectedMediaTrackPage.capture.html, /Selected Video MediaTrack/);
     assert.match(selectedMediaTrackPage.capture.html, /Current kind: <strong>Video<\/strong>/);
     assert.match(selectedMediaTrackPage.capture.html, />Replace with Audio<\/button>/);
