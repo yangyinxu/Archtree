@@ -402,8 +402,7 @@
   }
 
   .brandName,
-  .navigationLink span,
-  .sidebarHeader span {
+  .navigationLink span {
     display: none;
   }
 
@@ -413,9 +412,7 @@
   }
 
   .sidebarHeader {
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
+    display: none;
   }
 
   .navigationLink {

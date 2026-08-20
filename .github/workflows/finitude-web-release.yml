@@ -62,7 +62,7 @@ jobs:
         run: npx playwright install --with-deps chromium firefox webkit
 
       - name: Run production-bundle browser and accessibility tests
-        run: npm run test:e2e -- --update-snapshots=none
+        run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 
       - name: Stage the Elastic Beanstalk deployment artifact
         run: npm run stage:eb-artifact

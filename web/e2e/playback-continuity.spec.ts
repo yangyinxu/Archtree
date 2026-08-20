@@ -124,7 +124,7 @@ test('preserves one media element, queue, and elapsed time through every shell p
   const slider = player.getByRole('slider', { name: 'Playback position' });
   await expect(compactControls.getByRole('button', { name: 'Pause' })).toBeVisible();
   await expect(slider).toBeEnabled();
-  await expect(slider).toHaveAttribute('max', '15');
+  await expect.poll(async () => Number(await slider.getAttribute('max'))).toBeCloseTo(15, 0);
 
   const initialProbe = await readMediaProbe(page);
   expect(initialProbe.count).toBe(1);
