@@ -8,7 +8,8 @@ import {
     postAudioMissingTrackDelete,
     postAudioOrphanDelete,
     postAudioPublicationRetry,
-    postAddProduct
+    postAddProduct,
+    postVideoOrphanDelete
 } from '../controllers/adminController';
 import { requireAdmin, requireAuth } from '../middleware/authMiddleware';
 import {
@@ -23,6 +24,7 @@ router.get('/product', requireAuth, requireAdmin, publicReadRateLimit, asyncHand
 router.post('/product', requireAuth, requireAdmin, asyncHandler(postAddProduct));
 router.get('/audio-storage/reconciliation', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(getAudioStorageReconciliation));
 router.post('/audio-storage/orphan-delete', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(postAudioOrphanDelete));
+router.post('/video-storage/orphan-delete', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(postVideoOrphanDelete));
 router.post('/audio-storage/missing-track-delete', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(postAudioMissingTrackDelete));
 router.post('/audio-storage/publication-retry', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(postAudioPublicationRetry));
 router.get('/image-storage/reconciliation', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(getImageStorageReconciliation));

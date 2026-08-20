@@ -34,7 +34,7 @@ test('audit maps each discrepancy to a state-valid recommended action', () => {
     assert.match(html, /Recommended workflow/);
     assert.match(html, /action="\/admin\/audio-storage\/orphan-delete"/);
     assert.match(html, /Delete orphaned S3 object/);
-    assert.match(html, /Open Soundtrack workspace/);
+    assert.match(html, /Open MediaTrack workspace/);
     assert.match(html, /action="\/admin\/audio-storage\/missing-track-delete"/);
     assert.match(html, /Delete MongoDB record/);
     assert.match(html, /action="\/admin\/audio-storage\/publication-retry"/);

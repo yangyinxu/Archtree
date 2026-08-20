@@ -5,13 +5,17 @@ import {
     AudioStorageRemediationError,
     deleteMissingAudioTrackRecord,
     deleteOrphanedAudioStorageObject,
+    deleteOrphanedVideoStorageObject,
+    VideoStorageRemediationError,
     type MissingAudioTrackDeletionDependencies,
-    type OrphanAudioDeletionDependencies
+    type OrphanAudioDeletionDependencies,
+    type OrphanVideoDeletionDependencies
 } from '../src/services/audioStorageRemediationService';
 
 const orphanKey = 'audio/667f4e0ace50714e897961bf/6a66626781d495b9ec430e6b';
 const missingTrackId = '667f4e0ace50714e897961bf';
 const missingTrackKey = 'audio/667f4e0ace50714e897961bf/6a66626781d495b9ec430e6c';
+const orphanVideoKey = 'video/667f4e0ace50714e897961bf/6a66626781d495b9ec430e6d';
 
 const dependencies = (
     overrides: Partial<OrphanAudioDeletionDependencies> = {}
@@ -32,6 +36,51 @@ const missingDependencies = (
     trackExists: async () => true,
     deleteTrack: async () => ({ cleanupPending: false }),
     ...overrides
+});
+
+const videoDependencies = (
+    overrides: Partial<OrphanVideoDeletionDependencies> = {}
+): OrphanVideoDeletionDependencies => ({
+    reconcile: async () => ({
+        videoStorage: { orphanedObjects: [{ key: orphanVideoKey }] }
+    }) as any,
+    isReferenced: async () => false,
+    objectExists: async () => false,
+    deleteObject: async () => undefined,
+    ...overrides
+});
+
+test('video orphan remediation rechecks nested references before exact deletion', async () => {
+    const calls: string[] = [];
+    const result = await deleteOrphanedVideoStorageObject(
+        orphanVideoKey,
+        videoDependencies({
+            isReferenced: async key => { calls.push(`reference:${key}`); return false; },
+            deleteObject: async key => { calls.push(`delete:${key}`); },
+            objectExists: async key => { calls.push(`head:${key}`); return false; }
+        })
+    );
+    assert.deepEqual(result, { s3Key: orphanVideoKey, status: 'deleted' });
+    assert.deepEqual(calls, [
+        `reference:${orphanVideoKey}`,
+        `reference:${orphanVideoKey}`,
+        `delete:${orphanVideoKey}`,
+        `head:${orphanVideoKey}`
+    ]);
+});
+
+test('video orphan remediation rejects other namespaces and newly referenced keys', async () => {
+    await assert.rejects(
+        deleteOrphanedVideoStorageObject('images/private.jpg', videoDependencies()),
+        (error: any) => error instanceof VideoStorageRemediationError
+            && error.code === 'invalid_video_storage_key'
+    );
+    await assert.rejects(
+        deleteOrphanedVideoStorageObject(orphanVideoKey, videoDependencies({
+            isReferenced: async () => true
+        })),
+        (error: any) => error.code === 'video_storage_object_referenced'
+    );
 });
 
 test('deletes only the exact report-confirmed orphan and verifies absence', async () => {

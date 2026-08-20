@@ -4,8 +4,12 @@ import test from 'node:test';
 import {
     findIncompleteAudioTracks,
     findDuplicateAudioStorageKeys,
+    findDuplicateVideoStorageKeys,
+    findIncompleteVideoTracks,
     isAudioStorageCandidateKey,
-    isAudioStorageObjectKey
+    isAudioStorageObjectKey,
+    isVideoStorageCandidateKey,
+    isVideoStorageObjectKey
 } from '../src/services/audioReconciliationService';
 import { reconcileImageStorage } from '../src/services/imageReconciliationService';
 
@@ -21,6 +25,56 @@ test('audio reconciliation excludes both public-image and private-avatar namespa
     assert.equal(isAudioStorageCandidateKey('audio/catalog/track'), true);
     assert.equal(isAudioStorageCandidateKey('images/cover-id'), false);
     assert.equal(isAudioStorageCandidateKey('avatars/private-id'), false);
+});
+
+test('video reconciliation owns only video/ and reports malformed namespaced objects', () => {
+    assert.equal(isVideoStorageObjectKey(
+        'video/507f1f77bcf86cd799439011/507f1f77bcf86cd799439012'
+    ), true);
+    assert.equal(isVideoStorageObjectKey('video/catalog/demo'), false);
+    assert.equal(isVideoStorageCandidateKey('video/catalog/demo'), true);
+    assert.equal(isVideoStorageCandidateKey('audio/507f1f77bcf86cd799439011'), false);
+});
+
+test('video reconciliation reports duplicate and incomplete lifecycle evidence', () => {
+    const firstId = '507f1f77bcf86cd799439011';
+    const secondId = '507f1f77bcf86cd799439012';
+    const sharedKey = `video/${firstId}/507f1f77bcf86cd799439013`;
+    const tracks = [
+        {
+            _id: firstId,
+            title: 'First',
+            videoAsset: {
+                active: { status: 'ready', s3Key: sharedKey },
+                pending: null,
+                cleanup: { status: 'deleteFailed', s3Key: `video/${firstId}/507f1f77bcf86cd799439014` },
+                revision: 2
+            }
+        },
+        {
+            _id: secondId,
+            title: 'Second',
+            videoAsset: {
+                active: { status: 'ready', s3Key: sharedKey },
+                pending: null,
+                cleanup: null,
+                revision: 1
+            }
+        }
+    ];
+
+    assert.deepEqual(findDuplicateVideoStorageKeys(tracks), [{
+        s3Key: sharedKey,
+        audioTrackIds: [firstId, secondId]
+    }]);
+    const incomplete = findIncompleteVideoTracks(tracks, new Set([sharedKey]));
+    assert.equal(incomplete.length, 2);
+    assert.equal(incomplete[0].audioTrackId, firstId);
+    assert.deepEqual(
+        incomplete[0].references.map(reference => [reference.phase, reference.objectExists]),
+        [['active', true], ['cleanup', false]]
+    );
+    assert.equal(incomplete[1].audioTrackId, secondId);
 });
 
 test('audio reconciliation reports a shared raw key even when one track identity is invalid', () => {

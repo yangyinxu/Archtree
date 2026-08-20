@@ -14,7 +14,7 @@ const referenceConfig: Record<ValidatedContentReferenceType, { collection: strin
     artist: { collection: 'artists', label: 'Artist' },
     organization: { collection: 'organizations', label: 'Organization' },
     album: { collection: 'albums', label: 'Album' },
-    audioTrack: { collection: 'audioTracks', label: 'Audio track' }
+    audioTrack: { collection: 'audioTracks', label: 'MediaTrack' }
 };
 
 export type ContentReferenceValidation = {

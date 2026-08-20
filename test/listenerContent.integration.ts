@@ -29,6 +29,7 @@ const ids = {
     artist: new ObjectId(),
     album: new ObjectId(),
     readyOne: new ObjectId(),
+    readyOneVideo: new ObjectId(),
     readyTwo: new ObjectId(),
     pending: new ObjectId(),
     unpublished: new ObjectId(),
@@ -145,8 +146,10 @@ before(async () => {
                 albumId,
                 duration: '03:10',
                 coverArtUrl: '',
+                mediaType: 'video',
                 uploadStatus: 'ready',
-                s3Key: ids.readyOne.toString(),
+                s3Key: `video/${ids.readyOne}/${ids.readyOneVideo}`,
+                contentType: 'video/mp4',
                 uploadError: null,
                 createdBy: 'private-owner'
             },
@@ -405,24 +408,25 @@ test('listener read layer preserves composition and exposes only ready safe DTOs
     const trackResponse = await fetch(`${baseUrl}/api/listener/v1/tracks/${ids.readyOne}`);
     const track: any = await trackResponse.json();
     assert.equal(track.audioTrack.artworkUrl, '/album.jpg');
-    assert.equal(track.audioTrack.streamUrl, `/content/audioTrack/stream/${ids.readyOne}`);
+    assert.equal(track.audioTrack.mediaType, 'video');
+    assert.equal(track.audioTrack.streamUrl, `/content/mediaTrack/stream/${ids.readyOne}`);
     expectSafe(track);
 
     const pendingMetadata = await fetch(`${baseUrl}/api/listener/v1/tracks/${ids.pending}`);
     assert.equal(pendingMetadata.status, 404);
-    const pendingHead = await fetch(`${baseUrl}/content/audioTrack/stream/${ids.pending}`, { method: 'HEAD' });
+    const pendingHead = await fetch(`${baseUrl}/content/mediaTrack/stream/${ids.pending}`, { method: 'HEAD' });
     assert.equal(pendingHead.status, 404);
-    const pendingStream = await fetch(`${baseUrl}/content/audioTrack/stream/${ids.pending}`);
+    const pendingStream = await fetch(`${baseUrl}/content/mediaTrack/stream/${ids.pending}`);
     assert.equal(pendingStream.status, 404);
     const unpublishedMetadata = await fetch(`${baseUrl}/api/listener/v1/tracks/${ids.unpublished}`);
     assert.equal(unpublishedMetadata.status, 404);
     const unpublishedHead = await fetch(
-        `${baseUrl}/content/audioTrack/stream/${ids.unpublished}`,
+        `${baseUrl}/content/mediaTrack/stream/${ids.unpublished}`,
         { method: 'HEAD' }
     );
     assert.equal(unpublishedHead.status, 404);
     const unpublishedStream = await fetch(
-        `${baseUrl}/content/audioTrack/stream/${ids.unpublished}`
+        `${baseUrl}/content/mediaTrack/stream/${ids.unpublished}`
     );
     assert.equal(unpublishedStream.status, 404);
 });
@@ -442,11 +446,11 @@ test('public stream and HEAD strictly reject malformed IDs before any S3 request
             'gggggggggggggggggggggggg'
         ]) {
             const stream = await fetch(
-                `${baseUrl}/content/audioTrack/stream/${malformedId}`
+                `${baseUrl}/content/mediaTrack/stream/${malformedId}`
             );
             assert.equal(stream.status, 404);
             const head = await fetch(
-                `${baseUrl}/content/audioTrack/stream/${malformedId}`,
+                `${baseUrl}/content/mediaTrack/stream/${malformedId}`,
                 { method: 'HEAD' }
             );
             assert.equal(head.status, 404);
@@ -473,8 +477,10 @@ test('listener Library requires authentication and retains non-ready items safel
     const ready = library.items.find((item: any) => item.contentId === ids.readyOne.toString());
     const pending = library.items.find((item: any) => item.contentId === ids.pending.toString());
     assert.equal(ready.audioTrack.available, true);
-    assert.equal(ready.audioTrack.streamUrl, `/content/audioTrack/stream/${ids.readyOne}`);
+    assert.equal(ready.audioTrack.mediaType, 'video');
+    assert.equal(ready.audioTrack.streamUrl, `/content/mediaTrack/stream/${ids.readyOne}`);
     assert.equal(pending.audioTrack.available, false);
+    assert.equal(pending.audioTrack.mediaType, 'audio');
     assert.equal(pending.audioTrack.streamUrl, null);
     assert.equal(response.headers.get('cache-control'), 'private, no-store');
     expectSafe(library);
@@ -542,9 +548,21 @@ test('legacy public catalog is role-independent, allowlisted, and ready-filtered
         'duration',
         'format',
         'genres',
+        'mediaType',
         'releaseDate',
-        'title'
+        'streamUrl',
+        'title',
     ]);
+    assert.equal(tracks.audioTracks[0].mediaType, 'video');
+    assert.equal(
+        tracks.audioTracks[0].streamUrl,
+        `/content/mediaTrack/stream/${ids.readyOne}`
+    );
+    assert.equal(tracks.audioTracks[1].mediaType, 'audio');
+    assert.equal(
+        tracks.audioTracks[1].streamUrl,
+        `/content/mediaTrack/stream/${ids.readyTwo}`
+    );
 
     const firstReadyPage: any = await requestPayload('/content/audioTracks?limit=1');
     assert.equal(firstReadyPage.audioTracks[0]._id, ids.readyOne.toString());

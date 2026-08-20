@@ -65,7 +65,7 @@ test('grouped Search results have no unowned axe findings', async ({ page }) => 
   await page.goto('/finitude/search?q=Night');
   await expect(page.getByRole('heading', { name: 'Results for “Night”' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 2, name: 'Albums' })).toBeVisible();
-  await expect(page.getByRole('heading', { level: 2, name: 'Soundtracks' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: 'MediaTracks' })).toBeVisible();
   await expectNoUnownedAxeViolations(page, 'search-results');
 });
 
@@ -82,7 +82,7 @@ test.describe('signed-in surfaces', () => {
 
   test('Library has no unowned axe findings', async ({ page }) => {
     await page.goto('/finitude/library');
-    await expect(page.getByRole('list', { name: 'Saved Albums and Soundtracks' })).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Saved Albums and MediaTracks' })).toBeVisible();
     await expectNoUnownedAxeViolations(page, 'library-signed-in');
   });
 

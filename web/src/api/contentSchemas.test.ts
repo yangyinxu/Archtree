@@ -26,7 +26,8 @@ const audioTrack = {
   albumId: 'album-1',
   albumTitle: 'Still Water',
   duration: '3:48',
-  streamUrl: '/content/audioTrack/stream/track-1'
+  mediaType: 'video',
+  streamUrl: '/content/mediaTrack/stream/track-1'
 };
 
 test('accepts the discriminated listener content contract', () => {
@@ -127,8 +128,9 @@ test('sanitizes unknown fields from the legacy nested Library response', () => {
           displayCoverArtUrl: '/content/images/album-1',
           albumId: 'album-1',
           duration: '3:48',
+          mediaType: 'audio',
           available: true,
-          streamUrl: '/content/audioTrack/stream/track-1',
+          streamUrl: '/content/mediaTrack/stream/track-1',
           s3Key: 'private-storage-key',
           uploadError: 'private-lifecycle-state'
         }
@@ -168,8 +170,9 @@ test('sanitizes unknown fields from the legacy nested Library response', () => {
           coverArtUrl: '',
           albumId: 'album-1',
           duration: '3:48',
+          mediaType: 'audio',
           available: true,
-          streamUrl: '/content/audioTrack/stream/track-1'
+          streamUrl: '/content/mediaTrack/stream/track-1'
         }
       }
     ],

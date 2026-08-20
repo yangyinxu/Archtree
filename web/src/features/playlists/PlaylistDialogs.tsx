@@ -228,7 +228,7 @@ export const PlaylistDeleteDialog = ({
   return (
     <ModalDialog
       closeDisabled={mutation.isPending}
-      description={`“${playlist.name}” will disappear, but its Soundtracks, Saved Library state, and anything already playing will stay unchanged.`}
+      description={`“${playlist.name}” will disappear, but its MediaTracks, Saved Library state, and anything already playing will stay unchanged.`}
       initialFocusRef={cancelRef}
       kicker="Permanent action"
       onClose={onClose}

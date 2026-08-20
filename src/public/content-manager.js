@@ -63,7 +63,7 @@
       ? 'Artist'
       : type === 'organization'
         ? 'Organization'
-        : type === 'audioTrack' ? 'Soundtrack' : 'Album';
+        : type === 'audioTrack' ? 'MediaTrack' : 'Album';
     const query = picker.querySelector('[data-reference-query]');
     const searchButton = picker.querySelector('[data-reference-search]');
     const results = picker.querySelector('[data-reference-results]');
@@ -667,7 +667,7 @@
         } catch (error) {
           // The count summary still appears when session storage is unavailable.
         }
-        const message = `${succeeded.length} audio track${succeeded.length === 1 ? '' : 's'} uploaded and published.${failures.length > 0 ? ` ${failures.length} require attention; their Track IDs and lifecycle outcomes are listed below.` : ''}`;
+        const message = `${succeeded.length} Audio MediaTrack${succeeded.length === 1 ? '' : 's'} uploaded and published.${failures.length > 0 ? ` ${failures.length} require attention; their MediaTrack IDs and lifecycle outcomes are listed below.` : ''}`;
         window.location.assign(`/content/manage?message=${encodeURIComponent(message)}`);
         return;
       }
@@ -733,7 +733,7 @@
     });
     form.addEventListener('submit', (event) => {
       const count = selectedTracks().length;
-      if (count === 0 || !window.confirm('Delete ' + count + ' selected audio track' + (count === 1 ? '' : 's') + '? This also removes their uploaded files.')) {
+      if (count === 0 || !window.confirm('Delete ' + count + ' selected MediaTrack' + (count === 1 ? '' : 's') + '? This also removes their uploaded files.')) {
         event.preventDefault();
       }
     });

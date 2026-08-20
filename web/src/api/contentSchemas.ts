@@ -71,6 +71,7 @@ export const audioTrackSummarySchema = z
     albumId: contentIdSchema.nullable(),
     albumTitle: z.string().nullable(),
     duration: z.string().nullable(),
+    mediaType: z.enum(['audio', 'video']).default('audio'),
     streamUrl: z.string().trim().min(1),
     ...attributionFields
   })
@@ -162,6 +163,7 @@ const libraryAudioTrackPayloadSchema = z
     coverArtUrl: artworkUrlSchema.optional().default(''),
     albumId: contentIdSchema.nullish().transform((value) => value ?? null),
     duration: z.string().nullish().transform((value) => value ?? null),
+    mediaType: z.enum(['audio', 'video']).default('audio'),
     available: z.boolean(),
     streamUrl: z.string().trim().min(1).nullable()
   })

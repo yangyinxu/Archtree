@@ -5,6 +5,7 @@ import { getDb } from '../infrastructure/database';
 import { getS3 } from '../infrastructure/s3';
 import {
     isAudioStorageCandidateKey,
+    isVideoStorageCandidateKey,
     reconcileAudioStorage
 } from './audioReconciliationService';
 import {
@@ -24,7 +25,23 @@ export type MissingAudioTrackDeletionResult = {
     cleanupPending: boolean;
 };
 
+export type OrphanVideoDeletionResult = {
+    s3Key: string;
+    status: 'deleted' | 'alreadyAbsent';
+};
+
 export class AudioStorageRemediationError extends Error {
+    constructor(
+        message: string,
+        public readonly statusCode: number,
+        public readonly code: string,
+        public readonly outcomeUnknown = false
+    ) {
+        super(message);
+    }
+}
+
+export class VideoStorageRemediationError extends Error {
     constructor(
         message: string,
         public readonly statusCode: number,
@@ -49,6 +66,13 @@ export interface MissingAudioTrackDeletionDependencies {
         audioTrackId: string,
         expectedS3Key: string
     ) => Promise<{ cleanupPending: boolean }>;
+}
+
+export interface OrphanVideoDeletionDependencies {
+    reconcile: typeof reconcileAudioStorage;
+    isReferenced: (s3Key: string) => Promise<boolean>;
+    objectExists: (s3Key: string) => Promise<boolean>;
+    deleteObject: (s3Key: string) => Promise<void>;
 }
 
 const isMissingObjectError = (error: any) => {
@@ -97,6 +121,85 @@ const defaultMissingTrackDependencies: MissingAudioTrackDeletionDependencies = {
     )
 };
 
+const defaultVideoDependencies: OrphanVideoDeletionDependencies = {
+    reconcile: reconcileAudioStorage,
+    isReferenced: async s3Key => Boolean(await getDb()!.collection('audioTracks').findOne({
+        $or: [
+            { s3Key },
+            { pendingS3Key: s3Key },
+            { storageCleanupS3Key: s3Key },
+            { 'videoAsset.active.s3Key': s3Key },
+            { 'videoAsset.pending.s3Key': s3Key },
+            { 'videoAsset.cleanup.s3Key': s3Key }
+        ]
+    }, { projection: { _id: 1 } })),
+    objectExists: defaultDependencies.objectExists,
+    deleteObject: defaultDependencies.deleteObject
+};
+
+/** Deletes one exact video/ orphan after two raw-reference checks. */
+export const deleteOrphanedVideoStorageObject = async (
+    rawS3Key: unknown,
+    dependencies: Partial<OrphanVideoDeletionDependencies> = {}
+): Promise<OrphanVideoDeletionResult> => {
+    const s3Key = typeof rawS3Key === 'string' ? rawS3Key.trim() : '';
+    if (!s3Key
+        || Buffer.byteLength(s3Key, 'utf8') > 1024
+        || s3Key.includes('\0')
+        || !isVideoStorageCandidateKey(s3Key)) {
+        throw new VideoStorageRemediationError(
+            'A valid video-storage S3 key is required.',
+            400,
+            'invalid_video_storage_key'
+        );
+    }
+
+    const remediation = { ...defaultVideoDependencies, ...dependencies };
+    if (await remediation.isReferenced(s3Key)) {
+        throw new VideoStorageRemediationError(
+            'This S3 object is referenced by legacy MediaTrack video lifecycle evidence.',
+            409,
+            'video_storage_object_referenced'
+        );
+    }
+    const report = await remediation.reconcile();
+    const confirmed = Array.isArray(report.videoStorage?.orphanedObjects)
+        && report.videoStorage.orphanedObjects.some((object: any) => (
+            String(object.key ?? '') === s3Key
+        ));
+    if (!confirmed) {
+        if (!(await remediation.objectExists(s3Key))) {
+            return { s3Key, status: 'alreadyAbsent' };
+        }
+        throw new VideoStorageRemediationError(
+            'This video object is no longer confirmed as orphaned. Refresh the audit.',
+            409,
+            'video_storage_object_not_orphaned'
+        );
+    }
+    if (await remediation.isReferenced(s3Key)) {
+        throw new VideoStorageRemediationError(
+            'This video object became referenced and was not deleted.',
+            409,
+            'video_storage_object_referenced'
+        );
+    }
+    try {
+        await remediation.deleteObject(s3Key);
+        if (await remediation.objectExists(s3Key)) {
+            throw new Error('S3 still reports the object.');
+        }
+    } catch {
+        throw new VideoStorageRemediationError(
+            'Video deletion was not confirmed. Reconcile before retrying.',
+            503,
+            'video_storage_delete_unconfirmed',
+            true
+        );
+    }
+    return { s3Key, status: 'deleted' };
+};
+
 /** Deletes one exact, currently orphaned audio object without discarding database evidence. */
 export const deleteOrphanedAudioStorageObject = async (
     rawS3Key: unknown,
@@ -117,7 +220,7 @@ export const deleteOrphanedAudioStorageObject = async (
     const remediation = { ...defaultDependencies, ...dependencies };
     if (await remediation.isReferenced(s3Key)) {
         throw new AudioStorageRemediationError(
-            'This S3 object is referenced by Soundtrack lifecycle evidence and cannot be deleted as an orphan.',
+            'This S3 object is referenced by MediaTrack lifecycle evidence and cannot be deleted as an orphan.',
             409,
             'audio_storage_object_referenced'
         );
@@ -179,7 +282,7 @@ export const deleteOrphanedAudioStorageObject = async (
     return { s3Key, status: 'deleted' };
 };
 
-/** Removes one report-confirmed MongoDB-only Soundtrack through its normal lifecycle. */
+/** Removes one report-confirmed MongoDB-only MediaTrack through its normal lifecycle. */
 export const deleteMissingAudioTrackRecord = async (
     rawAudioTrackId: unknown,
     rawExpectedS3Key: unknown,
@@ -195,7 +298,7 @@ export const deleteMissingAudioTrackRecord = async (
         || ObjectId.createFromHexString(audioTrackId).toHexString() !== audioTrackId
         || !isAudioObjectKeyForTrack(expectedS3Key, audioTrackId)) {
         throw new AudioStorageRemediationError(
-            'A valid Soundtrack ID and matching audio-storage key are required.',
+            'A valid MediaTrack ID and matching media-storage key are required.',
             400,
             'invalid_missing_audio_track'
         );
@@ -213,7 +316,7 @@ export const deleteMissingAudioTrackRecord = async (
             return { audioTrackId, status: 'alreadyAbsent', cleanupPending: false };
         }
         throw new AudioStorageRemediationError(
-            'This Soundtrack is no longer confirmed as MongoDB-only. Refresh the audit before taking action.',
+            'This MediaTrack is no longer confirmed as MongoDB-only. Refresh the audit before taking action.',
             409,
             'audio_track_not_confirmed_missing'
         );
@@ -230,15 +333,15 @@ export const deleteMissingAudioTrackRecord = async (
         if (error instanceof AudioStorageLifecycleError) {
             throw new AudioStorageRemediationError(
                 error.outcomeUnknown
-                    ? 'The Soundtrack deletion outcome could not be confirmed. Reconciliation is required.'
-                    : 'The Soundtrack changed or could not be deleted safely. Its database record was retained for retry.',
+                    ? 'The MediaTrack deletion outcome could not be confirmed. Reconciliation is required.'
+                    : 'The MediaTrack changed or could not be deleted safely. Its database record was retained for retry.',
                 error.statusCode,
                 error.code,
                 error.outcomeUnknown
             );
         }
         throw new AudioStorageRemediationError(
-            'The Soundtrack could not be deleted safely. Its database record was retained for retry and reconciliation.',
+            'The MediaTrack could not be deleted safely. Its database record was retained for retry and reconciliation.',
             503,
             'missing_audio_track_delete_failed'
         );

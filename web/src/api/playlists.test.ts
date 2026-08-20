@@ -24,7 +24,8 @@ const track = {
   albumId: null,
   albumTitle: null,
   duration: '3:24',
-  streamUrl: '/content/audioTrack/stream/track-1'
+  mediaType: 'video',
+  streamUrl: '/content/mediaTrack/stream/track-1'
 } as const;
 
 const summary = {

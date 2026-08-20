@@ -72,7 +72,7 @@ export const ArtistPage = () => {
           items={audioTracks}
           onPlay={(track) => { void launchStandalonePlayback(track, session.data?.user.id); }}
           presentation="list"
-          title="Soundtracks"
+          title="MediaTracks"
         />
       )}
       {discography.length === 0 && collaborations.length === 0 && appearsOn.length === 0

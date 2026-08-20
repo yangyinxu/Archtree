@@ -8,7 +8,7 @@ import styles from './ContentCard.module.css';
 const contentTitle = (item: ContentSummary) => {
   if (item.contentType === 'artist') return item.name.trim() || 'Unknown artist';
   if (item.contentType === 'album') return item.title.trim() || 'Untitled album';
-  return item.title.trim() || 'Untitled soundtrack';
+  return item.title.trim() || 'Untitled MediaTrack';
 };
 
 const contentMetadata = (item: ContentSummary) => {
@@ -21,7 +21,7 @@ const contentMetadata = (item: ContentSummary) => {
     ].filter(Boolean).join(' · ');
   }
   return [
-    'Soundtrack',
+    'MediaTrack',
     contentByline(item) || null,
     item.albumTitle,
     item.duration

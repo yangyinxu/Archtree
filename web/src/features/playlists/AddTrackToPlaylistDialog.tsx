@@ -22,11 +22,11 @@ import playlistStyles from './Playlists.module.css';
 
 const addFailureMessage = (error: unknown) => {
   if (!(error instanceof ApiError)) return 'Finitude could not confirm that addition.';
-  if (error.code === 'playlist_item_limit_reached') return 'That Playlist already contains 500 Soundtracks.';
+  if (error.code === 'playlist_item_limit_reached') return 'That Playlist already contains 500 MediaTracks.';
   if (error.code === 'idempotency_in_progress') return 'That addition is still being confirmed. Wait a moment, then retry.';
   if (error.code === 'idempotency_key_reused') return 'That retry no longer matches this addition. Close the picker and start again.';
   if (error.code === 'account_viewer_mismatch' || error.status === 401) {
-    return 'Your signed-in account changed. Reload the page before adding this Soundtrack.';
+    return 'Your signed-in account changed. Reload the page before adding this MediaTrack.';
   }
   if (error.code === 'playlist_revision_conflict' || error.status === 409) {
     return 'That Playlist changed on another device. Its latest revision is loading.';
@@ -104,7 +104,7 @@ export const AddTrackToPlaylistDialog = ({
   return (
     <ModalDialog
       closeDisabled={mutation.isPending}
-      description={`Choose where to add “${track.title || 'Untitled soundtrack'}”. This action never starts playback.`}
+      description={`Choose where to add “${track.title || 'Untitled MediaTrack'}”. This action never starts playback.`}
       initialFocusRef={closeRef}
       kicker="Add to Playlist"
       onClose={onClose}
@@ -126,7 +126,7 @@ export const AddTrackToPlaylistDialog = ({
         </div>
       ) : playlists.data.items.length === 0 ? (
         <div className={styles.state}>
-          <span>Create a Playlist first, then return to add this Soundtrack.</span>
+          <span>Create a Playlist first, then return to add this MediaTrack.</span>
           <Link className={playlistStyles.primaryButton} onClick={onClose} to="/playlists">Create a Playlist</Link>
         </div>
       ) : (
@@ -154,17 +154,17 @@ export const AddTrackToPlaylistDialog = ({
                   />
                   <span className={styles.listCopy}>
                     <span title={playlist.name}>{playlist.name}</span>
-                    <span>Playlist · {playlist.itemCount} soundtrack{playlist.itemCount === 1 ? '' : 's'}</span>
+                    <span>Playlist · {playlist.itemCount} MediaTrack{playlist.itemCount === 1 ? '' : 's'}</span>
                   </span>
                 </span>
                 <button
                   aria-label={checkingMembership
-                    ? `Checking whether ${track.title || 'Untitled soundtrack'} is in ${playlist.name}`
+                    ? `Checking whether ${track.title || 'Untitled MediaTrack'} is in ${playlist.name}`
                     : alreadyAdded
-                    ? `${track.title || 'Untitled soundtrack'} is already in ${playlist.name}`
+                    ? `${track.title || 'Untitled MediaTrack'} is already in ${playlist.name}`
                     : playlist.itemCount >= 500
                       ? `${playlist.name} is full`
-                      : `Add ${track.title || 'Untitled soundtrack'} to ${playlist.name}`}
+                      : `Add ${track.title || 'Untitled MediaTrack'} to ${playlist.name}`}
                   className={playlistStyles.secondaryButton}
                   disabled={checkingMembership || Boolean(alreadyAdded) || playlist.itemCount >= 500 || mutation.isPending}
                   onClick={() => mutation.mutate(playlist)}

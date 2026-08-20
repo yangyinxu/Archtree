@@ -32,14 +32,15 @@ const firstTrack = {
   albumId: null,
   albumTitle: null,
   duration: '3:00',
-  streamUrl: '/content/audioTrack/stream/track-1'
+  mediaType: 'audio',
+  streamUrl: '/content/mediaTrack/stream/track-1'
 } as const;
 
 const secondTrack = {
   ...firstTrack,
   id: 'track-2',
   title: 'Dawn',
-  streamUrl: '/content/audioTrack/stream/track-2'
+  streamUrl: '/content/mediaTrack/stream/track-2'
 } as const;
 
 const detail = {
@@ -154,9 +155,9 @@ test('renders Playlist summaries as dense media rows with complete metadata', as
   renderPage('/playlists', '/playlists', <PlaylistIndexPage />, session);
 
   const summaryLink = await screen.findByRole('link', {
-    name: 'Quiet sequence, 2 soundtracks'
+    name: 'Quiet sequence, 2 MediaTracks'
   });
-  expect(within(summaryLink).getByText('Playlist · 2 soundtracks')).toBeInTheDocument();
+  expect(within(summaryLink).getByText('Playlist · 2 MediaTracks')).toBeInTheDocument();
   expect(summaryLink.querySelector('img')).toHaveAttribute('src', detail.artworkUrl);
 });
 
@@ -368,7 +369,7 @@ test('removes a member optimistically and commits the server-confirmed detail', 
   await user.click(screen.getByRole('button', { name: 'Actions for Night' }));
   await user.click(screen.getByRole('menuitem', { name: 'Remove from Playlist' }));
 
-  expect(await screen.findByRole('status')).toHaveTextContent('Soundtrack removed');
+  expect(await screen.findByRole('status')).toHaveTextContent('MediaTrack removed');
   expect(screen.queryByRole('button', { name: 'Play Night' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Play Dawn' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Actions for Dawn' })).toHaveFocus();
@@ -392,11 +393,11 @@ test('removing the last member focuses the previous row action', async () => {
   await user.click(screen.getByRole('button', { name: 'Actions for Dawn' }));
   await user.click(screen.getByRole('menuitem', { name: 'Remove from Playlist' }));
 
-  expect(await screen.findByRole('status')).toHaveTextContent('Soundtrack removed');
+  expect(await screen.findByRole('status')).toHaveTextContent('MediaTrack removed');
   expect(screen.getByRole('button', { name: 'Actions for Night' })).toHaveFocus();
 });
 
-test('removing the only member focuses the Soundtracks heading', async () => {
+test('removing the only member focuses the MediaTracks heading', async () => {
   const user = userEvent.setup();
   const single = {
     ...detail,
@@ -419,11 +420,11 @@ test('removing the only member focuses the Soundtracks heading', async () => {
   await user.click(screen.getByRole('button', { name: 'Actions for Night' }));
   await user.click(screen.getByRole('menuitem', { name: 'Remove from Playlist' }));
 
-  expect(await screen.findByRole('status')).toHaveTextContent('Soundtrack removed');
-  expect(screen.getByRole('heading', { name: 'Soundtracks' })).toHaveFocus();
+  expect(await screen.findByRole('status')).toHaveTextContent('MediaTrack removed');
+  expect(screen.getByRole('heading', { name: 'MediaTracks' })).toHaveFocus();
 });
 
-test('searches ready Soundtracks and adds the selected result to an empty Playlist', async () => {
+test('searches ready MediaTracks and adds the selected result to an empty Playlist', async () => {
   const user = userEvent.setup();
   const empty = {
     ...detail,
@@ -449,9 +450,9 @@ test('searches ready Soundtracks and adds the selected result to an empty Playli
   renderPlaylistRoutes('/playlists/playlist-1');
 
   expect(await screen.findByRole('heading', { name: 'This Playlist is empty' })).toBeInTheDocument();
-  await user.click(screen.getAllByRole('button', { name: 'Add Soundtracks' })[0]);
-  const dialog = await screen.findByRole('dialog', { name: 'Add Soundtracks' });
-  await user.type(within(dialog).getByRole('searchbox', { name: 'Search ready Soundtracks' }), 'Night');
+  await user.click(screen.getAllByRole('button', { name: 'Add MediaTracks' })[0]);
+  const dialog = await screen.findByRole('dialog', { name: 'Add MediaTracks' });
+  await user.type(within(dialog).getByRole('searchbox', { name: 'Search ready MediaTracks' }), 'Night');
   await user.click(within(dialog).getByRole('button', { name: 'Search' }));
   await user.click(await within(dialog).findByRole('button', { name: 'Add Night to Quiet sequence' }));
 
@@ -479,8 +480,8 @@ test('skips unavailable members when snapshotting the persisted Playlist order',
   renderPlaylistRoutes('/playlists/playlist-1');
 
   expect(await screen.findByRole('heading', { name: 'Quiet sequence' })).toBeInTheDocument();
-  expect(screen.getByRole('list', { name: 'Quiet sequence Soundtracks' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Unavailable Soundtrack cannot be played' })).toBeDisabled();
+  expect(screen.getByRole('list', { name: 'Quiet sequence MediaTracks' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Unavailable MediaTrack cannot be played' })).toBeDisabled();
   await user.click(screen.getByRole('button', { name: 'Play' }));
 
   expect(launch).toHaveBeenCalledWith([

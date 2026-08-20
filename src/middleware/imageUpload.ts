@@ -51,6 +51,18 @@ export const audioWithCoverArtUpload = multer({
     { name: 'coverArtFile', maxCount: 1 }
 ]);
 
+/** Accepts one Audio or Video MediaTrack plus optional cover art for manager creation. */
+export const mediaWithCoverArtUpload = (maximumMediaUploadMb: number) => multer({
+    storage: audioDiskStorage,
+    limits: {
+        fileSize: maximumMediaUploadMb * 1024 * 1024,
+        files: 2
+    }
+}).fields([
+    { name: 'mediaFile', maxCount: 1 },
+    { name: 'coverArtFile', maxCount: 1 }
+]);
+
 export const getUploadedFile = (req: Express.Request, fieldName: string) => {
     if (req.file?.fieldname === fieldName) {
         return req.file;

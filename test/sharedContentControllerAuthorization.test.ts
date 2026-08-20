@@ -18,6 +18,10 @@ import {
     uploadAudioTrackFile
 } from '../src/controllers/audioTrackController';
 import {
+    deleteSoundtrackVideoFile,
+    uploadSoundtrackVideoFile
+} from '../src/controllers/soundtrackVideoController';
+import {
     addContentCollectionItem,
     attachContentCollectionToPage,
     createContentCollection,
@@ -60,7 +64,9 @@ import {
     updateArtistMetadataWeb,
     updateAudioTrackWeb,
     updateOrganizationWeb,
-    uploadAudioTrackWeb
+    uploadAudioTrackWeb,
+    uploadSoundtrackVideoWeb,
+    deleteSoundtrackVideoWeb
 } from '../src/controllers/contentController';
 import { createPost, deletePost } from '../src/controllers/feedController';
 import {
@@ -104,6 +110,8 @@ const apiControllers: Array<[string, Controller]> = [
     ['update Soundtrack', updateAudioTrack],
     ['delete Soundtrack', deleteAudioTrack],
     ['upload Soundtrack audio', uploadAudioTrackFile],
+    ['upload Soundtrack video', uploadSoundtrackVideoFile],
+    ['delete Soundtrack video', deleteSoundtrackVideoFile],
     ['create Grid/List', createContentCollection],
     ['list management Grid/List definitions', listContentCollections],
     ['attach Grid/List', attachContentCollectionToPage],
@@ -157,6 +165,8 @@ const webControllers: Array<[string, Controller]> = [
     ['delete Soundtrack', deleteAudioTrackWeb],
     ['delete album Soundtracks', deleteAlbumAudioTracksWeb],
     ['upload Soundtrack audio', uploadAudioTrackWeb],
+    ['upload Soundtrack video', uploadSoundtrackVideoWeb],
+    ['delete Soundtrack video', deleteSoundtrackVideoWeb],
     ['bulk upload Soundtracks', bulkUploadAudioTracksWeb],
     ['link Soundtrack to Album', linkTrackToAlbumWeb],
     ['link Album to Artist', linkAlbumToArtistWeb],

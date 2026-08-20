@@ -46,7 +46,7 @@ export class CatalogRelationshipUpdateOutcomeUnknownError extends Error {
 const normalizeTrackIds = (values: readonly unknown[], allowEmpty = false) => {
     const ids = [...new Set(values.map((value) => String(value).trim().toLowerCase()))];
     if ((!allowEmpty && ids.length === 0) || ids.some((id) => !/^[0-9a-f]{24}$/.test(id))) {
-        throw new Error('One or more Soundtrack IDs are invalid.');
+        throw new Error('One or more MediaTrack IDs are invalid.');
     }
     return ids;
 };
@@ -143,7 +143,7 @@ const replaceCanonicalAlbumMembership = async (
             { session, projection: { _id: 1, lifecycleStatus: 1 } }
         ).limit(1_001).toArray();
         if (priorAlbums.length > 1_000) {
-            throw new Error('Soundtrack relink exceeds the 1000-Album safety limit.');
+            throw new Error('MediaTrack relink exceeds the 1000-Album safety limit.');
         }
         if (priorAlbums.some((album) => !isReadyAlbumLifecycle(album))) {
             throw new AlbumReferenceUnavailableError();
@@ -177,7 +177,7 @@ const replaceCanonicalAlbumMembership = async (
                 { session }
             );
             if (tracks.matchedCount !== normalizedAudioTrackIds.length) {
-                throw new Error('One or more Soundtracks changed while linking the Album.');
+                throw new Error('One or more MediaTracks changed while linking the Album.');
             }
         }
     }
@@ -487,7 +487,7 @@ export const updateReadyAudioTrackAndAlbum = async (
                 { session, projection: { publicationStatus: 1 } }
             );
             if (!existingTrack) {
-                throw new Error('The Soundtrack is not an upload-ready object.');
+                throw new Error('The MediaTrack is not an upload-ready object.');
             }
             const hasPublicationStatus = Object.prototype.hasOwnProperty.call(
                 existingTrack,
@@ -544,7 +544,7 @@ export const updateReadyAudioTrackAndAlbum = async (
                 { session }
             );
             if (updated.matchedCount !== 1) {
-                throw new Error('The Soundtrack changed while updating its Album relationship.');
+                throw new Error('The MediaTrack changed while updating its Album relationship.');
             }
         });
         return {
@@ -570,7 +570,7 @@ export const updateReadyAudioTrackAndAlbum = async (
             return { matchedCount: 1, modifiedCount: 1, publicationMode };
         }
         throw new CatalogRelationshipUpdateOutcomeUnknownError(
-            `Soundtrack ${normalizedAudioTrackId} update outcome could not be confirmed.`,
+            `MediaTrack ${normalizedAudioTrackId} update outcome could not be confirmed.`,
             { writeError: error, confirmationError }
         );
     } finally {
@@ -579,7 +579,7 @@ export const updateReadyAudioTrackAndAlbum = async (
 };
 
 /**
- * Publishes uploaded Soundtracks only in the transaction that establishes the
+ * Publishes uploaded MediaTracks only in the transaction that establishes the
  * Album's canonical relationship. Legacy published rows use the link helper.
  */
 export const publishUploadedAudioTracks = async (
@@ -609,7 +609,7 @@ export const publishUploadedAudioTracks = async (
             { session }
         );
         if (published.matchedCount !== trackObjectIds.length) {
-            throw new Error('One or more uploaded Soundtracks are unavailable for publication.');
+            throw new Error('One or more uploaded MediaTracks are unavailable for publication.');
         }
 
         await replaceCanonicalAlbumMembership(
@@ -656,7 +656,7 @@ export const publishUploadedAudioTracks = async (
     }
 };
 
-/** Links both sides only after Album and ready-Soundtrack fences commit in one transaction. */
+/** Links both sides only after Album and ready-MediaTrack fences commit in one transaction. */
 export const relinkReadyAudioTracksToAlbum = async (
     albumId: string,
     audioTrackIds: readonly string[]
@@ -698,7 +698,7 @@ export const relinkReadyAudioTracksToAlbum = async (
     return result!;
 };
 
-/** Backward-compatible name for assigning ready Soundtracks to an Album. */
+/** Backward-compatible name for assigning ready MediaTracks to an Album. */
 export const linkReadyAudioTracksToAlbum = (
     albumId: string,
     audioTrackIds: readonly string[]

@@ -9,13 +9,14 @@ import {
 
 let latestPlaybackLaunch = 0;
 
-/** Adapts the public soundtrack DTO to the player-owned queue contract. */
+/** Adapts the compatibility-named public track DTO to the MediaTrack queue contract. */
 export const queueItemFromTrack = (track: AudioTrackSummary): PlayerQueueItem => ({
   id: track.id,
   title: track.title,
   artworkUrl: track.artworkUrl,
   artistNames: track.artistNames,
   displayByline: track.displayByline,
+  mediaType: track.mediaType,
   streamUrl: track.streamUrl
 });
 
@@ -37,7 +38,7 @@ const recordAfterPlaybackStarts = (
   });
 };
 
-/** Launches one soundtrack outside an Album queue and records only that soundtrack. */
+/** Launches one MediaTrack outside an Album queue and records only that item. */
 export const launchStandalonePlayback = async (
   track: AudioTrackSummary,
   viewerId?: string | null

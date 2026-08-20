@@ -27,6 +27,16 @@ export const renderAudioStorageAuditPage = (
     const orphanedObjects = Array.isArray(report.orphanedObjects) ? report.orphanedObjects : [];
     const missingObjects = Array.isArray(report.missingObjects) ? report.missingObjects : [];
     const incompleteTracks = Array.isArray(report.incompleteTracks) ? report.incompleteTracks : [];
+    const videoStorage = report.videoStorage ?? {};
+    const orphanedVideos = Array.isArray(videoStorage.orphanedObjects)
+        ? videoStorage.orphanedObjects
+        : [];
+    const missingVideos = Array.isArray(videoStorage.missingObjects)
+        ? videoStorage.missingObjects
+        : [];
+    const incompleteVideos = Array.isArray(videoStorage.incompleteTracks)
+        ? videoStorage.incompleteTracks
+        : [];
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -63,9 +73,9 @@ export const renderAudioStorageAuditPage = (
     <section class="card audit-guide" aria-labelledby="audit-guide-heading">
       <p class="eyebrow">Recommended workflow</p>
       <h2 id="audit-guide-heading">Resolve one exact finding at a time</h2>
-      <p><strong>S3 only:</strong> delete the object only after the server reconfirms that no Soundtrack lifecycle record references its key.</p>
-      <p><strong>MongoDB only:</strong> S3 is already missing. Re-upload the original file if the Soundtrack should remain, or delete the record through the guarded Soundtrack lifecycle below.</p>
-      <p><strong>Needs attention:</strong> retry publication only when the stored file is ready; otherwise inspect the Soundtrack and its recorded error first.</p>
+      <p><strong>S3 only:</strong> delete the object only after the server reconfirms that no MediaTrack lifecycle record references its key.</p>
+      <p><strong>MongoDB only:</strong> S3 is already missing. Re-upload the original file if the MediaTrack should remain, or delete the record through the guarded MediaTrack lifecycle below.</p>
+      <p><strong>Needs attention:</strong> retry publication only when the stored file is ready; otherwise inspect the MediaTrack and its recorded error first.</p>
     </section>
 
     <section class="grid">
@@ -88,7 +98,7 @@ export const renderAudioStorageAuditPage = (
           ${object.metadataError ? `<span class="status-error">Metadata error: ${escapeHtml(String(object.metadataError))}</span>` : ''}
         </div>
         <div class="remediation">
-          <p><strong>Recommended:</strong> delete this exact orphan if it is not an intentionally retained backup. It has no valid Soundtrack lifecycle owner and cannot be played.</p>
+          <p><strong>Recommended:</strong> delete this exact orphan if it is not an intentionally retained backup. It has no valid MediaTrack lifecycle owner and cannot be played.</p>
           <form method="POST" action="/admin/audio-storage/orphan-delete">
             <input type="hidden" name="s3Key" value="${escapeHtml(String(object.key ?? ''))}" />
             <button type="submit" data-danger data-confirm="Delete this exact orphaned S3 object? The server will recheck it before deletion.">Delete orphaned S3 object</button>
@@ -113,14 +123,14 @@ export const renderAudioStorageAuditPage = (
           ${track.publicationError ? `<span class="status-error">${escapeHtml(String(track.publicationError))}</span>` : ''}
         </div>
         <div class="remediation">
-          <p><strong>Recommended:</strong> S3 is already missing. Upload the original file again if this Soundtrack should remain; otherwise delete its MongoDB record and all catalog references through the guarded lifecycle.</p>
+          <p><strong>Recommended:</strong> S3 is already missing. Upload the original file again if this MediaTrack should remain; otherwise delete its MongoDB record and all catalog references through the guarded lifecycle.</p>
           <div class="remediation-actions">
-            <a class="button button--secondary" href="${soundtrackWorkspaceUrl(audioTrackId)}">Open Soundtrack workspace</a>
+            <a class="button button--secondary" href="${soundtrackWorkspaceUrl(audioTrackId)}">Open MediaTrack workspace</a>
             ${canDeleteRecord ? `<form method="POST" action="/admin/audio-storage/missing-track-delete">
               <input type="hidden" name="audioTrackId" value="${escapeHtml(audioTrackId)}" />
               <input type="hidden" name="expectedS3Key" value="${escapeHtml(expectedS3Key)}" />
-              <button type="submit" data-danger data-confirm="Delete this MongoDB Soundtrack record and clean every catalog reference? The server will reconfirm that its S3 object is still missing.">Delete MongoDB record</button>
-            </form>` : '<span class="status-error">Stored S3 identity is invalid; inspect this Soundtrack before deletion.</span>'}
+              <button type="submit" data-danger data-confirm="Delete this MongoDB MediaTrack record and clean every catalog reference? The server will reconfirm that its S3 object is still missing.">Delete MongoDB record</button>
+            </form>` : '<span class="status-error">Stored S3 identity is invalid; inspect this MediaTrack before deletion.</span>'}
           </div>
         </div>
       </li>`;
@@ -137,8 +147,8 @@ export const renderAudioStorageAuditPage = (
           const recommendation = canRetryPublication
               ? 'The stored file is ready. Retry publication without uploading it again.'
               : track.objectExists
-                  ? 'Inspect the recorded lifecycle error before retrying or deleting this Soundtrack.'
-                  : 'The expected file is missing. Open the Soundtrack to upload a replacement or remove the record safely.';
+                  ? 'Inspect the recorded lifecycle error before retrying or deleting this MediaTrack.'
+                  : 'The expected file is missing. Open the MediaTrack to upload a replacement or remove the record safely.';
           return `<li>
         <strong>${escapeHtml(String(track.originalFileName || track.title || 'Unnamed track'))}</strong>
         <div class="item-meta">
@@ -155,11 +165,50 @@ export const renderAudioStorageAuditPage = (
           <p><strong>Recommended:</strong> ${escapeHtml(recommendation)}</p>
           <div class="remediation-actions">
             ${canRetryPublication ? `<form method="POST" action="/admin/audio-storage/publication-retry"><input type="hidden" name="audioTrackIds" value="${escapeHtml(String(track.audioTrackId ?? ''))}" /><button type="submit">Retry publication</button></form>` : ''}
-            <a class="button button--secondary" href="${soundtrackWorkspaceUrl(track.audioTrackId)}">Open Soundtrack workspace</a>
+            <a class="button button--secondary" href="${soundtrackWorkspaceUrl(track.audioTrackId)}">Open MediaTrack workspace</a>
           </div>
         </div>
       </li>`;
       })}
+    </section>
+
+    <div class="section-heading"><div><p class="eyebrow">Media namespace</p><h2>Video storage</h2></div></div>
+    <section class="grid">
+      <div class="card"><p class="eyebrow">MongoDB</p><h2>${Number(videoStorage.summary?.databaseVideoTrackCount ?? 0)}</h2><p>MediaTracks with Video evidence</p></div>
+      <div class="card"><p class="eyebrow">S3</p><h2>${Number(videoStorage.summary?.s3ObjectCount ?? 0)}</h2><p>Objects under <code>video/</code></p></div>
+      <div class="card"><p class="eyebrow">Orphaned</p><h2>${Number(videoStorage.summary?.orphanedObjectCount ?? 0)}</h2><p>Unreferenced video objects</p></div>
+      <div class="card"><p class="eyebrow">Missing</p><h2>${Number(videoStorage.summary?.missingObjectCount ?? 0)}</h2><p>Recorded keys absent from S3</p></div>
+      <div class="card"><p class="eyebrow">Incomplete</p><h2>${Number(videoStorage.summary?.incompleteTrackCount ?? 0)}</h2><p>Pending video lifecycles</p></div>
+    </section>
+
+    <section class="card" aria-labelledby="video-orphans-heading">
+      <h3 id="video-orphans-heading">Orphaned video objects</h3>
+      ${renderItems(orphanedVideos, (object) => `<li>
+        <strong>${escapeHtml(String(object.originalFileName || object.key || 'Unnamed video object'))}</strong>
+        <div class="item-meta"><span>S3 key: <code>${escapeHtml(String(object.key ?? ''))}</code></span><span>${escapeHtml(formatStorageSize(Number(object.size ?? 0)))}</span></div>
+        <form method="POST" action="/admin/video-storage/orphan-delete">
+          <input type="hidden" name="s3Key" value="${escapeHtml(String(object.key ?? ''))}" />
+          <button type="submit" data-danger data-confirm="Delete this exact orphaned video object? The server will recheck every MediaTrack reference first.">Delete orphaned video object</button>
+        </form>
+      </li>`)}
+    </section>
+
+    <section class="card" aria-labelledby="video-missing-heading">
+      <h3 id="video-missing-heading">Missing video objects</h3>
+      ${renderItems(missingVideos, (reference) => `<li>
+        <strong>MediaTrack ${escapeHtml(String(reference.audioTrackId ?? ''))}</strong>
+        <div class="item-meta"><span>Phase: ${escapeHtml(String(reference.phase ?? 'unknown'))}</span><span>Key: <code>${escapeHtml(String(reference.s3Key ?? ''))}</code></span></div>
+        <a class="button button--secondary" href="${soundtrackWorkspaceUrl(reference.audioTrackId)}">Open MediaTrack workspace</a>
+      </li>`)}
+    </section>
+
+    <section class="card" aria-labelledby="video-incomplete-heading">
+      <h3 id="video-incomplete-heading">Incomplete video operations</h3>
+      ${renderItems(incompleteVideos, (track) => `<li>
+        <strong>${escapeHtml(String(track.title || track.audioTrackId || 'Unnamed MediaTrack'))}</strong>
+        <div class="item-meta">${(Array.isArray(track.references) ? track.references : []).map((reference: any) => `<span>${escapeHtml(String(reference.phase ?? 'phase'))}: ${escapeHtml(String(reference.status ?? 'unknown'))} · ${reference.objectExists ? 'S3 present' : 'S3 missing'}</span>`).join('')}</div>
+        <a class="button button--secondary" href="${soundtrackWorkspaceUrl(track.audioTrackId)}">Open MediaTrack workspace</a>
+      </li>`)}
     </section>
   </main>
   <script src="/assets/audio-storage-audit.js"></script>

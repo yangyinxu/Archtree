@@ -76,7 +76,8 @@ const tracks = [
     albumId: albums[0].id,
     albumTitle: albums[0].title,
     duration: '3:51',
-    streamUrl: '/content/audioTrack/stream/visual-first-track'
+    mediaType: 'audio',
+    streamUrl: '/content/mediaTrack/stream/visual-first-track'
   },
   {
     contentType: 'audioTrack',
@@ -87,7 +88,8 @@ const tracks = [
     albumId: null,
     albumTitle: null,
     duration: null,
-    streamUrl: '/content/audioTrack/stream/visual-missing-metadata'
+    mediaType: 'audio',
+    streamUrl: '/content/mediaTrack/stream/visual-missing-metadata'
   },
   {
     contentType: 'audioTrack',
@@ -98,7 +100,8 @@ const tracks = [
     albumId: albums[2].id,
     albumTitle: albums[2].title,
     duration: '4:02',
-    streamUrl: '/content/audioTrack/stream/visual-emoji-track'
+    mediaType: 'audio',
+    streamUrl: '/content/mediaTrack/stream/visual-emoji-track'
   }
 ] satisfies AudioTrackSummary[];
 
@@ -132,7 +135,8 @@ export const visualAlbumFixture = {
       albumId: visualAlbumSummary.id,
       albumTitle: visualAlbumSummary.title,
       duration: '0:15',
-      streamUrl: '/content/audioTrack/stream/visual-night-window'
+      mediaType: 'audio',
+      streamUrl: '/content/mediaTrack/stream/visual-night-window'
     }
   ]
 } satisfies ListenerAlbum;
@@ -155,7 +159,7 @@ export const visualHomeFixture = {
     },
     {
       id: 'visual-list',
-      title: 'Soundtracks for focus',
+      title: 'MediaTracks for focus',
       presentation: 'list',
       items: tracks
     }

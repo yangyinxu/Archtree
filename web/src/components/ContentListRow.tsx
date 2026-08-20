@@ -7,14 +7,14 @@ import styles from './ContentListRow.module.css';
 
 const titleFor = (item: ContentSummary) => item.contentType === 'artist'
   ? item.name.trim() || 'Unknown artist'
-  : item.title.trim() || (item.contentType === 'album' ? 'Untitled album' : 'Untitled soundtrack');
+  : item.title.trim() || (item.contentType === 'album' ? 'Untitled album' : 'Untitled MediaTrack');
 
 const metadataFor = (item: ContentSummary) => {
   if (item.contentType === 'artist') return ['Artist'];
   if (item.contentType === 'album') {
     return ['Album', contentByline(item) || null, item.releaseDate?.year ?? null];
   }
-  return ['Soundtrack', contentByline(item) || null, item.albumTitle, item.duration];
+  return ['MediaTrack', contentByline(item) || null, item.albumTitle, item.duration];
 };
 
 export interface ContentListRowProps {

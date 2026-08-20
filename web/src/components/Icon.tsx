@@ -6,6 +6,7 @@ import {
   House,
   Library,
   LockKeyhole,
+  Maximize2,
   PanelRight,
   Pause,
   Play,
@@ -26,6 +27,7 @@ export type IconName =
   | 'arrow-left'
   | 'arrow-right'
   | 'brand'
+  | 'expand'
   | 'home'
   | 'library'
   | 'lock'
@@ -46,6 +48,7 @@ const icons: Record<IconName, LucideIcon> = {
   'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
   brand: Disc3,
+  expand: Maximize2,
   home: House,
   library: Library,
   lock: LockKeyhole,

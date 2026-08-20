@@ -41,7 +41,8 @@ export const trackFixtures = [
     albumId: catalogIds.album,
     albumTitle: albumFixture.title,
     duration: '0:15',
-    streamUrl: `/content/audioTrack/stream/${catalogIds.firstTrack}`
+    mediaType: 'video',
+    streamUrl: `/content/mediaTrack/stream/${catalogIds.firstTrack}`
   },
   {
     contentType: 'audioTrack',
@@ -52,7 +53,8 @@ export const trackFixtures = [
     albumId: catalogIds.album,
     albumTitle: albumFixture.title,
     duration: '0:15',
-    streamUrl: `/content/audioTrack/stream/${catalogIds.secondTrack}`
+    mediaType: 'audio',
+    streamUrl: `/content/mediaTrack/stream/${catalogIds.secondTrack}`
   }
 ] satisfies AudioTrackSummary[];
 
@@ -67,7 +69,7 @@ export const homeFixture = {
     },
     {
       id: 'e2e-focus-soundtracks',
-      title: 'Soundtracks for focus',
+      title: 'MediaTracks for focus',
       presentation: 'list',
       items: trackFixtures
     }

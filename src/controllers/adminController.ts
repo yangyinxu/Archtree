@@ -12,7 +12,9 @@ import {
 import {
     AudioStorageRemediationError,
     deleteMissingAudioTrackRecord,
-    deleteOrphanedAudioStorageObject
+    deleteOrphanedAudioStorageObject,
+    deleteOrphanedVideoStorageObject,
+    VideoStorageRemediationError
 } from '../services/audioStorageRemediationService';
 
 const isBrowserFormRequest = (req: Request) => typeof req.is === 'function'
@@ -135,7 +137,7 @@ export const postAudioPublicationRetry = async (
             return audioAuditRedirect(
                 res,
                 report.failedCount === 0
-                    ? `${report.readyCount} Soundtrack publication${report.readyCount === 1 ? '' : 's'} completed.`
+                    ? `${report.readyCount} MediaTrack publication${report.readyCount === 1 ? '' : 's'} completed.`
                     : `${report.readyCount} publication${report.readyCount === 1 ? '' : 's'} completed; ${report.failedCount} still need attention.`,
                 report.failedCount > 0
             );
@@ -175,7 +177,36 @@ export const postAudioOrphanDelete = async (
     }
 };
 
-/** Deletes one report-confirmed MongoDB-only Soundtrack through the shared deletion lifecycle. */
+/** Deletes one report-confirmed video orphan after rechecking nested lifecycle references. */
+export const postVideoOrphanDelete = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    try {
+        res.setHeader('Cache-Control', 'no-store');
+        const result = await deleteOrphanedVideoStorageObject(req.body?.s3Key);
+        const message = result.status === 'alreadyAbsent'
+            ? 'The orphaned video object was already absent.'
+            : 'The orphaned video object was deleted successfully.';
+        if (isBrowserFormRequest(req)) return audioAuditRedirect(res, message);
+        return res.status(200).json({ message, ...result });
+    } catch (error) {
+        if (error instanceof VideoStorageRemediationError) {
+            if (isBrowserFormRequest(req)) {
+                return audioAuditRedirect(res, error.message, true);
+            }
+            return res.status(error.statusCode).json({
+                message: error.message,
+                code: error.code,
+                reconciliationRequired: error.outcomeUnknown
+            });
+        }
+        return next(error);
+    }
+};
+
+/** Deletes one report-confirmed MongoDB-only MediaTrack through the shared deletion lifecycle. */
 export const postAudioMissingTrackDelete = async (
     req: Request,
     res: Response,
@@ -188,10 +219,10 @@ export const postAudioMissingTrackDelete = async (
             req.body?.expectedS3Key
         );
         const message = result.status === 'alreadyAbsent'
-            ? 'The MongoDB Soundtrack record was already absent. The action is complete.'
+            ? 'The MongoDB MediaTrack record was already absent. The action is complete.'
             : result.cleanupPending
-                ? 'The MongoDB Soundtrack record and catalog references were deleted. Cover-art cleanup still requires reconciliation.'
-                : 'The MongoDB Soundtrack record and catalog references were deleted successfully.';
+                ? 'The MongoDB MediaTrack record and catalog references were deleted. Cover-art cleanup still requires reconciliation.'
+                : 'The MongoDB MediaTrack record and catalog references were deleted successfully.';
         if (isBrowserFormRequest(req)) return audioAuditRedirect(res, message);
         return res.status(200).json({ message, ...result });
     } catch (error) {

@@ -33,7 +33,8 @@ const track = {
   albumId: album.id,
   albumTitle: album.title,
   duration: '3:24',
-  streamUrl: `/content/audioTrack/stream/64b000000000000000000002`
+  mediaType: 'audio',
+  streamUrl: `/content/mediaTrack/stream/64b000000000000000000002`
 } as const;
 
 const artist = {
@@ -171,7 +172,7 @@ test('Search renders grouped public results and keeps content actions canonical'
   expect(await screen.findByRole('heading', { name: 'Artists' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Albums' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Organizations' })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: 'Soundtracks' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'MediaTracks' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Finite Ensemble, artist' })).toHaveAttribute(
     'href',
     `/artists/${artist.id}`
@@ -201,7 +202,7 @@ test('Search retry refreshes results without adding or reordering history', asyn
 
   await user.click(await screen.findByRole('button', { name: 'Try again' }));
 
-  expect(await screen.findByText('No artists, organizations, albums, or soundtracks matched this search.'))
+  expect(await screen.findByText('No artists, organizations, albums, or MediaTracks matched this search.'))
     .toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(readSearchHistory(null)).toEqual(['Prior']);
@@ -219,7 +220,7 @@ test('Search debounces edited queries without remembering them until explicit su
   renderRoute('/search', '/search', <SearchPage />);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, organizations, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   expect(input).toHaveAttribute('enterkeyhint', 'search');
   expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
@@ -280,7 +281,7 @@ test('Search cancels an in-flight draft request when a newer draft is previewed'
   renderRoute('/search', '/search', <SearchPage />);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, organizations, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   await user.type(input, 'Night');
   await waitForSearchDebounce();
@@ -308,7 +309,7 @@ test('Search waits for IME composition to finish before previewing or recording'
   renderRoute('/search', '/search', <SearchPage />);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, organizations, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   fireEvent.compositionStart(input);
   fireEvent.change(input, { target: { value: '夜' } });
@@ -350,7 +351,7 @@ test('Search defers history until the pending account identity resolves', async 
   const view = renderRoute('/search', '/search', <SearchPage />, unresolvedSession);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, organizations, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   await user.type(input, 'Private search');
   await user.keyboard('{Enter}');
@@ -385,7 +386,7 @@ test('a pending Search submission cannot write history after the account epoch c
   const view = renderRoute('/search', '/search', <SearchPage />, unresolvedSession);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, organizations, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   await user.type(input, 'Old account query');
   await user.keyboard('{Enter}');
@@ -411,7 +412,7 @@ test('clearing an edited Search draft returns to the default state without a new
 
   expect(await screen.findByRole('heading', { name: 'Results for “Night”' })).toBeInTheDocument();
   await user.clear(screen.getByRole('searchbox', {
-    name: 'Search artists, organizations, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   }));
 
   expect(await screen.findByRole('heading', { name: 'Try a listening mood' }, {
@@ -454,6 +455,7 @@ test('Library sends type filters to the server and retains the mixed saved list'
             coverArtUrl: '',
             albumId: album.id,
             duration: track.duration,
+            mediaType: 'audio',
             available: true,
             streamUrl: track.streamUrl
           }

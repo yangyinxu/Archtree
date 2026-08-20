@@ -64,7 +64,7 @@ const defaultFindRecord = (audioTrackId: string) => getDb()!.collection('audioTr
 
 /**
  * Replays only the database publication transaction for already-uploaded
- * Soundtracks. Each item is isolated so one failed Album relationship cannot
+ * MediaTracks. Each item is isolated so one failed Album relationship cannot
  * hide the successful outcome of another item in the same request.
  */
 export const retryAudioTrackPublications = async (
@@ -104,7 +104,7 @@ export const retryAudioTrackPublications = async (
                 publicationStatusBefore: 'invalid',
                 publicationStatus: 'invalid',
                 outcome: 'invalid',
-                error: 'Soundtrack ID is invalid.'
+                error: 'MediaTrack ID is invalid.'
             });
             continue;
         }
@@ -117,7 +117,7 @@ export const retryAudioTrackPublications = async (
                 publicationStatusBefore: 'duplicate',
                 publicationStatus: 'duplicate',
                 outcome: 'duplicate',
-                error: 'Soundtrack ID is duplicated in this retry request.'
+                error: 'MediaTrack ID is duplicated in this retry request.'
             });
             continue;
         }
@@ -145,7 +145,7 @@ export const retryAudioTrackPublications = async (
                 publicationStatusBefore: 'missing',
                 publicationStatus: 'missing',
                 outcome: 'notFound',
-                error: 'Soundtrack not found.'
+                error: 'MediaTrack not found.'
             });
             continue;
         }

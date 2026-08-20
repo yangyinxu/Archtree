@@ -9,7 +9,7 @@ export class OrganizationReferencedError extends Error {
     readonly references: { albums: number; audioTracks: number };
 
     constructor(references: { albums: number; audioTracks: number }) {
-        super(`Organization is still credited by ${references.albums} Album(s) and ${references.audioTracks} Soundtrack(s). Remove or replace those Credits first.`);
+        super(`Organization is still credited by ${references.albums} Album(s) and ${references.audioTracks} MediaTrack(s). Remove or replace those Credits first.`);
         this.references = references;
     }
 }

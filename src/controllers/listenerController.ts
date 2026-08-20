@@ -85,10 +85,10 @@ export const organization = async (req: Request, res: Response) => {
     return res.status(200).json(result);
 };
 
-/** Returns public metadata for a database-confirmed ready audio track. */
+/** Returns public metadata for a database-confirmed ready MediaTrack. */
 export const audioTrack = async (req: Request, res: Response) => {
     const result = await getListenerAudioTrack(String(req.params.id ?? '').trim());
-    if (!result) return res.status(404).json({ message: 'Audio track was not found.' });
+    if (!result) return res.status(404).json({ message: 'MediaTrack was not found.' });
     setPublicCatalogCache(res);
     return res.status(200).json(result);
 };

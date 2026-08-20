@@ -9,10 +9,12 @@ import {
 import { resolvedCoverArtUrl } from '../utils/coverArt';
 import { escapeRegex } from '../utils/search';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import {
-    isAudioObjectKeyForTrack,
-    readyAudioStorageFilter
-} from '../utils/audioStorageKey';
+    activeMediaObjectKeyForTrack,
+    activeMediaTypeForTrack,
+    type MediaType
+} from '../utils/mediaStorageKey';
 import {
     isReadyArtistLifecycle,
     readyArtistLifecycleFilter
@@ -76,6 +78,7 @@ export interface ListenerAudioTrackSummary {
     albumId: string | null;
     albumTitle: string | null;
     duration: string | null;
+    mediaType: MediaType;
     streamUrl: string;
     credits?: ListenerCatalogCredit[];
     displayByline?: string;
@@ -154,6 +157,10 @@ const audioTrackProjection = {
     artistIds: 1,
     albumId: 1,
     duration: 1,
+    mediaType: 1,
+    contentType: 1,
+    s3Key: 1,
+    videoAsset: 1,
     releaseDate: 1,
     credits: 1,
     attributionStatus: 1
@@ -506,7 +513,8 @@ const toAudioTrackSummary = (
         albumId,
         albumTitle: album ? normalizeText(album.title) || null : null,
         duration: normalizeText(track?.duration) || null,
-        streamUrl: `/content/audioTrack/stream/${encodeURIComponent(String(track._id))}`,
+        mediaType: activeMediaTypeForTrack(track),
+        streamUrl: `/content/mediaTrack/stream/${encodeURIComponent(String(track._id))}`,
         ...creditProjectionForOwner(track, context)
     };
 };
@@ -963,7 +971,7 @@ export const sanitizeListenerLibraryPage = (page: any) => ({
             );
             const available = item.audioTrack.uploadStatus === 'ready'
                 && (!hasPublicationStatus || item.audioTrack.publicationStatus === 'ready')
-                && isAudioObjectKeyForTrack(item.audioTrack.s3Key, audioTrackId);
+                && Boolean(activeMediaObjectKeyForTrack(item.audioTrack));
             return [{
                 ...common,
                 contentType: 'audioTrack' as const,
@@ -976,9 +984,10 @@ export const sanitizeListenerLibraryPage = (page: any) => ({
                         ? String(item.audioTrack.albumId).toLowerCase()
                         : null,
                     duration: normalizeText(item.audioTrack.duration) || null,
+                    mediaType: activeMediaTypeForTrack(item.audioTrack),
                     available,
                     streamUrl: available
-                        ? `/content/audioTrack/stream/${encodeURIComponent(audioTrackId)}`
+                        ? `/content/mediaTrack/stream/${encodeURIComponent(audioTrackId)}`
                         : null
                 }
             }];

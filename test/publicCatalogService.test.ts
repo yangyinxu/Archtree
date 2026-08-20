@@ -19,6 +19,7 @@ const forbiddenKeys = new Set([
     'uploadUpdatedAt',
     'uploadError',
     'originalFileName',
+    'videoAsset',
     'contentType'
 ]);
 
@@ -188,8 +189,9 @@ test('public Soundtrack DTO requires a ready record with a traceable object key'
         publicationStatus: null
     }), false);
 
+    const readyId = '64b000000000000000000011';
     const ready = toPublicAudioTrack({
-        _id: '64b000000000000000000011',
+        _id: readyId,
         title: 'Ready Track',
         artistIds: ['64B000000000000000000012', 'invalid'],
         genres: ['Ambient', ''],
@@ -199,7 +201,18 @@ test('public Soundtrack DTO requires a ready record with a traceable object key'
         format: { type: 'FLAC', bitrate: 960 },
         coverArtUrl: '',
         uploadStatus: 'ready',
-        s3Key: '64b000000000000000000011',
+        s3Key: readyId,
+        videoAsset: {
+            active: {
+                status: 'ready',
+                s3Key: `video/${readyId}/64b000000000000000000015`,
+                contentType: 'video/mp4',
+                byteLength: 4096
+            },
+            pending: null,
+            cleanup: null,
+            revision: 1
+        },
         uploadError: 'must not leak',
         originalFileName: 'private-name.flac',
         createdBy: 'private-owner'
@@ -212,6 +225,8 @@ test('public Soundtrack DTO requires a ready record with a traceable object key'
     assert.equal(ready.albumId, '64b000000000000000000013');
     assert.deepEqual(ready.artistIds, ['64b000000000000000000012']);
     assert.deepEqual(ready.format, { type: 'FLAC', bitrate: 960 });
+    assert.equal(ready.mediaType, 'video');
+    assert.equal(ready.streamUrl, `/content/mediaTrack/stream/${readyId}`);
     assertNoInternalFields(ready);
 });
 

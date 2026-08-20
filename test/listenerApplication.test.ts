@@ -111,7 +111,7 @@ test('landing actions expose Finitude while reserving Content Manager for admins
   });
   assert.match(admin.headerActions, /href="\/content\/manage">Content Manager/);
   assert.match(admin.heroActions, /href="\/content\/manage">Open Content Manager/);
-  assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks">Browse audio tracks/);
+  assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks">Browse MediaTracks/);
 });
 
 test('listener routes report a clear service error when the bundle is absent', async () => {

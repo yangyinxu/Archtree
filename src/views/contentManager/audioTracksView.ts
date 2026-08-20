@@ -3,7 +3,7 @@ import type { ManagementInventoryPage } from './inventoryPagination';
 
 type AudioTrackPagination = Omit<ManagementInventoryPage<unknown>, 'items'>;
 
-/** Renders one bounded page of the administrator's global Soundtrack inventory. */
+/** Renders one bounded page of the administrator's global MediaTrack inventory. */
 export const renderAudioTracksPage = (
     userId: string,
     userEmail: string,
@@ -39,14 +39,14 @@ export const renderAudioTracksPage = (
               <div><a class="button button--secondary" href="${editUrl}">Edit track</a></div>
             </li>`;
         }).join('')
-        : '<li class="empty-state">No audio tracks yet. Create one from the Content Manager.</li>';
+        : '<li class="empty-state">No MediaTracks yet. Create one from the Content Manager.</li>';
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Audio Tracks - Archtree</title>
+  <title>MediaTracks - Archtree</title>
   <link rel="stylesheet" href="/assets/archtree.css" />
   <style>
     .track-toolbar { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(240px, 1fr) minmax(150px, .45fr) minmax(150px, .45fr); margin-bottom: 18px; }
@@ -66,7 +66,7 @@ export const renderAudioTracksPage = (
       <div>
         <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
         <p class="eyebrow" style="margin-top:18px;">Audio library</p>
-        <h1 style="margin-bottom:8px;">Audio Tracks</h1>
+        <h1 style="margin-bottom:8px;">MediaTracks</h1>
         <p class="muted">Global catalog · signed in as <strong>${escapeHtml(userEmail)}</strong> · ${tracks.length} track${tracks.length === 1 ? '' : 's'} on page ${pagination.page}</p>
       </div>
       <div class="header-actions">
@@ -93,10 +93,10 @@ export const renderAudioTracksPage = (
       <div class="track-results-summary"><span class="muted" id="track-filter-count" role="status" aria-live="polite">${tracks.length} shown</span><button class="button button--secondary" id="track-filter-reset" type="button">Clear filters</button></div>
       <ul class="item-list" id="track-list">${trackItems}</ul>
       <div class="empty-state" id="track-filter-empty" hidden>No tracks match these filters.</div>
-      ${(pagination.hasPrevious || pagination.hasNext) ? `<nav class="inventory-pagination" aria-label="Audio Track pages">
-        ${pagination.hasPrevious ? `<a class="button button--secondary" href="/content/manage/audio-tracks?page=${pagination.page - 1}">Previous Audio Tracks</a>` : ''}
+      ${(pagination.hasPrevious || pagination.hasNext) ? `<nav class="inventory-pagination" aria-label="MediaTrack pages">
+        ${pagination.hasPrevious ? `<a class="button button--secondary" href="/content/manage/audio-tracks?page=${pagination.page - 1}">Previous MediaTracks</a>` : ''}
         <span>Page ${pagination.page}</span>
-        ${pagination.hasNext ? `<a class="button button--secondary" href="/content/manage/audio-tracks?page=${pagination.page + 1}">Next Audio Tracks</a>` : ''}
+        ${pagination.hasNext ? `<a class="button button--secondary" href="/content/manage/audio-tracks?page=${pagination.page + 1}">Next MediaTracks</a>` : ''}
       </nav>` : ''}
     </section>
   </main>

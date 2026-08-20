@@ -214,7 +214,7 @@ export const validateAttribution = (
     return status;
 };
 
-/** Projects the ordered legacy Soundtrack Artist IDs from visible Artist Credits. */
+/** Projects the ordered legacy MediaTrack Artist IDs from visible Artist Credits. */
 export const legacyTrackArtistIdsFromCredits = (credits: readonly CatalogCredit[]) => [
     ...new Set(credits
         .filter((credit) => credit.subjectType === 'artist')

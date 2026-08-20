@@ -133,7 +133,7 @@ const touchCoverArtOwner = async (asset: ImageAssetRecord, session: ClientSessio
             { session }
         );
         if (touched.matchedCount !== 1) {
-            throw Object.assign(new Error('The Soundtrack is unavailable for artwork.'), {
+            throw Object.assign(new Error('The MediaTrack is unavailable for artwork.'), {
                 statusCode: 409,
                 code: 'audio_track_mutation_unavailable'
             });

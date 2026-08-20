@@ -60,6 +60,17 @@ test('listener Library projection strips ownership and audio lifecycle fields', 
                     coverArtUrl: '/track.jpg',
                     uploadStatus: 'ready',
                     s3Key: readyId,
+                    videoAsset: {
+                        active: {
+                            status: 'ready',
+                            s3Key: `video/${readyId}/64b000000000000000000009`,
+                            contentType: 'video/mp4',
+                            byteLength: 2048
+                        },
+                        pending: null,
+                        cleanup: null,
+                        revision: 1
+                    },
                     uploadError: null,
                     createdBy: 'owner-secret'
                 }
@@ -134,15 +145,19 @@ test('listener Library projection strips ownership and audio lifecycle fields', 
     assert.deepEqual(
         page.items
             .filter((item) => item.contentType === 'audioTrack')
-            .map((item: any) => [item.audioTrack.available, item.audioTrack.streamUrl]),
+            .map((item: any) => [
+                item.audioTrack.available,
+                item.audioTrack.streamUrl,
+                item.audioTrack.mediaType
+            ]),
         [
-            [true, `/content/audioTrack/stream/${readyId}`],
-            [false, null],
-            [false, null],
-            [false, null],
-            [false, null],
-            [false, null],
-            [false, null]
+            [true, `/content/mediaTrack/stream/${readyId}`, 'video'],
+            [false, null, 'audio'],
+            [false, null, 'audio'],
+            [false, null, 'audio'],
+            [false, null, 'audio'],
+            [false, null, 'audio'],
+            [false, null, 'audio']
         ]
     );
     assert.equal(page.nextCursor, 'next-page');

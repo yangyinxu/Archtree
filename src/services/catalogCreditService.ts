@@ -335,7 +335,7 @@ export const addCatalogCredit = async (
     });
 };
 
-/** Adds a Soundtrack Credit and optionally promotes the same primary Artist to its Album atomically. */
+/** Adds a MediaTrack Credit and optionally promotes the same primary Artist to its Album atomically. */
 export const addSoundtrackCredit = async (
     rawAudioTrackId: string,
     credit: unknown,
@@ -346,7 +346,7 @@ export const addSoundtrackCredit = async (
     const candidate = normalizeCatalogCredits([credit])[0];
     if (promoteToAlbumPrimary && (candidate.subjectType !== 'artist' || candidate.role !== 'primary')) {
         throw new CatalogCreditValidationError(
-            'Only a primary Artist Soundtrack Credit can be promoted to Album primary.'
+            'Only a primary Artist MediaTrack Credit can be promoted to Album primary.'
         );
     }
     return executeCatalogCreditTransaction(async (session) => {
@@ -363,7 +363,7 @@ export const addSoundtrackCredit = async (
                 }
             }
         );
-        if (!owner) throw new CatalogCreditConflictError('The Soundtrack is unavailable.');
+        if (!owner) throw new CatalogCreditConflictError('The MediaTrack is unavailable.');
         let existing = await legacyCreditsForUnmigratedOwner(
             session,
             'audioTrack',

@@ -9,15 +9,22 @@ import {
     maxAudioUploadMb,
     requireUploadSize
 } from '../../middleware/audioUpload';
-import { artistReleaseImageUpload, audioWithCoverArtUpload, imageUpload } from '../../middleware/imageUpload';
+import {
+    artistReleaseImageUpload,
+    imageUpload,
+    mediaWithCoverArtUpload
+} from '../../middleware/imageUpload';
 import {
     attachRequestAbortSignal,
     contentManagerUploadRateLimit,
     uploadConcurrencyLimit,
 } from '../../middleware/requestProtectionMiddleware';
 import { maxImageUploadMb } from '../../middleware/imageUpload';
+import { maxVideoUploadMb, videoUpload } from '../../middleware/videoUpload';
 
 const router: Router = express.Router();
+const maximumMediaUploadMb = Math.max(maxAudioUploadMb, maxVideoUploadMb);
+const createMediaTrackUpload = mediaWithCoverArtUpload(maximumMediaUploadMb);
 
 // Guard the entire manager surface before route-specific parsing, throttling, or uploads.
 router.use(requireAuthForWeb, requireAdminForWeb);
@@ -49,10 +56,12 @@ router.post('/album/update', contentManagerUploadRateLimit, uploadConcurrencyLim
 router.post('/album/delete', contentController.deleteAlbumWeb);
 router.post('/album/delete-audio-tracks', contentController.deleteAlbumAudioTracksWeb);
 
-router.post('/audioTrack/create', contentManagerUploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + maxImageUploadMb + 2), audioWithCoverArtUpload, contentController.createAudioTrackWeb);
+router.post('/audioTrack/create', contentManagerUploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maximumMediaUploadMb + maxImageUploadMb + 2), createMediaTrackUpload, contentController.createAudioTrackWeb);
 router.post('/audioTrack/update', contentManagerUploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), contentController.updateAudioTrackWeb);
 router.post('/audioTrack/delete', contentController.deleteAudioTrackWeb);
 router.post('/audioTrack/upload', contentManagerUploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + 1), audioUpload.single('audioFile'), contentController.uploadAudioTrackWeb);
+router.post('/audioTrack/video-upload', contentManagerUploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxVideoUploadMb + 1), videoUpload.single('videoFile'), contentController.uploadSoundtrackVideoWeb);
+router.post('/audioTrack/video-delete', contentController.deleteSoundtrackVideoWeb);
 router.post('/audioTrack/bulk-upload', contentManagerUploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioBatchUploadMb), audioUpload.array('audioFiles', 20), contentController.bulkUploadAudioTracksWeb);
 
 router.post('/link/track-album', contentController.linkTrackToAlbumWeb);

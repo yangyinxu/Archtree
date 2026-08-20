@@ -301,7 +301,7 @@ test('keeps signed-out Save in place without sending a mutation', async ({ api, 
   await expect(albumSave).toHaveAttribute('aria-disabled', 'false');
   await albumSave.click();
 
-  await expect(page.getByRole('alert')).toHaveText('Log in to save albums and soundtracks.');
+  await expect(page.getByRole('alert')).toHaveText('Log in to save albums and MediaTracks.');
   await expect(page).toHaveURL(new RegExp(`${albumPath}$`));
   expect(api.calls.filter((call) =>
     ['PUT', 'DELETE'].includes(call.method)

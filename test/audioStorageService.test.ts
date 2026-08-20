@@ -5,7 +5,8 @@ import {
     AudioTrackDeletionDependencies,
     deleteAudioObjectAndTrack,
     isAudioObjectKeyForTrack,
-    uploadAudioObject
+    uploadAudioObject,
+    uploadMediaObject
 } from '../src/services/audioStorageService';
 
 const trackId = '507f1f77bcf86cd799439011';
@@ -69,6 +70,38 @@ test('Soundtrack deletion retains metadata until storage and reference cleanup f
     ]);
     assert.equal(updates[0].referenceCleanupStatus, 'pending');
     assert.equal(updates[1].referenceCleanupStatus, 'complete');
+});
+
+test('Soundtrack deletion removes every recorded video key before metadata finalization', async () => {
+    const calls: string[] = [];
+    const updates: Array<Record<string, unknown>> = [];
+    const dependencies = deletionDependencies(calls, updates);
+    const activeVideoKey = `video/${trackId}/${stalePendingId}`;
+    const cleanupVideoKey = `video/${trackId}/${nextReplacementId}`;
+    dependencies.findTrack = async () => ({
+        coverArtId: 'cover-art-id',
+        s3Key: replacementKey,
+        videoAsset: {
+            active: { s3Key: activeVideoKey, status: 'ready' },
+            pending: null,
+            cleanup: { s3Key: cleanupVideoKey, status: 'deleteFailed' },
+            revision: 2
+        }
+    });
+
+    await deleteAudioObjectAndTrack(trackId, dependencies);
+
+    assert.deepEqual(calls, [
+        'update:deleting',
+        'prepare-cover-art-deletion',
+        `delete-audio-object:${replacementKey}`,
+        `delete-audio-object:${activeVideoKey}`,
+        `delete-audio-object:${cleanupVideoKey}`,
+        'cleanup-references',
+        'update:complete',
+        'delete-track',
+        'finalize-cover-art-deletion'
+    ]);
 });
 
 test('reference cleanup failure remains recorded and retryable without deleting metadata', async () => {
@@ -180,14 +213,14 @@ test('Soundtrack deletion retains lifecycle evidence when the stored S3 key is m
 
         await assert.rejects(
             deleteAudioObjectAndTrack(trackId, dependencies),
-            /storage key is missing or invalid/
+            /storage key is missing, wrong-kind, or invalid/
         );
 
         assert.deepEqual(calls, ['update:deleteFailed']);
         assert.equal(updates.at(-1)?.uploadStatus, 'deleteFailed');
         assert.equal(
             updates.at(-1)?.uploadError,
-            'Audio track storage key is missing or invalid.'
+            'MediaTrack storage key is missing, wrong-kind, or invalid.'
         );
     }
 });
@@ -269,6 +302,81 @@ const uploadFile = {
     size: 3,
     buffer: Buffer.from('new')
 } as Express.Multer.File;
+
+const videoUploadFile = {
+    fieldname: 'videoFile',
+    originalname: 'replacement.mp4',
+    encoding: '7bit',
+    mimetype: 'video/mp4',
+    size: 5,
+    buffer: Buffer.from('video')
+} as Express.Multer.File;
+
+test('cross-kind replacement keeps the new Video active while failed Audio cleanup remains retryable', async () => {
+    const videoKey = `video/${trackId}/${replacementId}`;
+    const nextAudioKey = `audio/${trackId}/${nextReplacementId}`;
+    let state: any = {
+        mediaType: 'audio',
+        s3Key: originalKey,
+        uploadStatus: 'ready'
+    };
+    let replacementKeyForCall = videoKey;
+    let failOriginalCleanup = true;
+    const deletedKeys: string[] = [];
+    const dependencies: AudioUploadDependencies = {
+        findTrack: async () => ({ ...state }),
+        createObjectKey: () => replacementKeyForCall,
+        updateTrackWhere: async (_id, expected, update) => {
+            const matches = Object.entries(expected).every(([field, value]) => (
+                value === null ? state[field] == null : state[field] === value
+            ));
+            if (!matches) return { matchedCount: 0 };
+            state = { ...state, ...update };
+            return { matchedCount: 1 };
+        },
+        putObject: async () => undefined,
+        deleteObject: async (key) => {
+            deletedKeys.push(key);
+            if (key === originalKey && failOriginalCleanup) {
+                throw new Error('simulated old Audio cleanup failure');
+            }
+        }
+    };
+
+    const videoResult = await uploadMediaObject(
+        trackId,
+        videoUploadFile,
+        'owner',
+        'video',
+        undefined,
+        dependencies
+    );
+
+    assert.equal(videoResult.cleanupPending, true);
+    assert.equal(state.mediaType, 'video');
+    assert.equal(state.s3Key, videoKey);
+    assert.equal(state.storageCleanupS3Key, originalKey);
+    assert.equal(state.storageCleanupMediaType, 'audio');
+    assert.equal(state.storageCleanupStatus, 'deleteFailed');
+
+    failOriginalCleanup = false;
+    replacementKeyForCall = nextAudioKey;
+    const audioResult = await uploadMediaObject(
+        trackId,
+        uploadFile,
+        'owner',
+        'audio',
+        undefined,
+        dependencies
+    );
+
+    assert.equal(audioResult.cleanupPending, false);
+    assert.equal(state.mediaType, 'audio');
+    assert.equal(state.s3Key, nextAudioKey);
+    assert.equal(state.storageCleanupS3Key, null);
+    assert.equal(state.storageCleanupMediaType, null);
+    assert.deepEqual(deletedKeys, [originalKey, originalKey, videoKey]);
+});
 
 test('audio upload cannot cross a deletion fence', async () => {
     for (const uploadStatus of ['deleting', 'deleteFailed']) {

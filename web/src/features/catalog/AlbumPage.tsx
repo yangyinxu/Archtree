@@ -98,7 +98,7 @@ export const AlbumPage = () => {
             <p className={styles.eyebrow}>Album</p>
             <h1>{album.title || 'Untitled album'}</h1>
             <p className={styles.metadata}>
-              {[contentByline(album), releaseLabel(album.releaseDate?.year), `${tracks.length} soundtrack${tracks.length === 1 ? '' : 's'}`]
+              {[contentByline(album), releaseLabel(album.releaseDate?.year), `${tracks.length} MediaTrack${tracks.length === 1 ? '' : 's'}`]
                 .filter(Boolean)
                 .join(' · ')}
             </p>
@@ -150,9 +150,9 @@ export const AlbumPage = () => {
         <div className={styles.sectionHeader}>
           <div>
             <p className={styles.eyebrow}>In this Album</p>
-            <h2 id="album-soundtracks-title">Soundtracks</h2>
+            <h2 id="album-soundtracks-title">MediaTracks</h2>
           </div>
-          <p>{tracks.length > 0 ? 'Select any row to begin from that soundtrack.' : 'No playable soundtracks are linked yet.'}</p>
+          <p>{tracks.length > 0 ? 'Select any row to begin from that MediaTrack.' : 'No playable MediaTracks are linked yet.'}</p>
         </div>
         {tracks.length > 0 ? (
           <ol className={styles.trackList}>
@@ -161,14 +161,14 @@ export const AlbumPage = () => {
               return (
                 <li className={styles.trackRow} key={track.id}>
                   <button
-                    aria-label={`Play ${track.title || 'Untitled soundtrack'}`}
+                    aria-label={`Play ${track.title || 'Untitled MediaTrack'}`}
                     className={styles.trackAction}
                     onClick={() => { void launchAlbumPlayback(album.id, tracks, viewerId, track.id); }}
                     type="button"
                   >
                     <span className={styles.trackNumber}>{index + 1}</span>
                     <span className={styles.trackCopy}>
-                      <span className={styles.trackTitle}>{track.title || 'Untitled soundtrack'}</span>
+                      <span className={styles.trackTitle}>{track.title || 'Untitled MediaTrack'}</span>
                       <span className={styles.trackMeta}>{contentByline(track) || album.title}</span>
                     </span>
                     <span className={styles.duration}>{track.duration || ''}</span>

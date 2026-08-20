@@ -34,7 +34,7 @@ export const cleanupAudioTrackPlaylistReferenceBatch = async (
         ? sourceAudioTrackId.toLowerCase()
         : sourceAudioTrackId;
     if (!normalizedAudioTrackId) {
-        throw new Error('Audio track ID is required for Playlist reference cleanup.');
+        throw new Error('MediaTrack ID is required for Playlist reference cleanup.');
     }
 
     const db = getDb();
@@ -103,7 +103,7 @@ export const cleanupAudioTrackPlaylistReferenceBatch = async (
 
 /**
  * Repeats idempotent bounded batches until an authoritative query proves that no
- * Playlist still references the deleting Soundtrack.
+ * Playlist still references the deleting MediaTrack.
  */
 export const cleanupAudioTrackPlaylistReferences = async (
     audioTrackId: string,

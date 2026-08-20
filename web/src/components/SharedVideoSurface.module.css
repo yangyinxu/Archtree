@@ -1,0 +1,16 @@
+.videoSurface {
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius-sm) * 0.72);
+  box-shadow: var(--shadow-expanded-artwork);
+  overflow: hidden;
+  width: 100%;
+}
+
+.videoSurface > video {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  width: 100%;
+}

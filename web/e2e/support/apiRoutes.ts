@@ -169,7 +169,9 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
       return;
     }
     if ((call.method === 'GET' || call.method === 'HEAD')
-      && call.pathname.startsWith('/content/audioTrack/stream/')) {
+      && call.pathname.startsWith('/content/mediaTrack/stream/')) {
+      // A deterministic decodable tone exercises both MediaTrack presentations;
+      // MP4 structure and MIME validation remain server-owned test concerns.
       await fulfillAudio(route, tone);
       return;
     }

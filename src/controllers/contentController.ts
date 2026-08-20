@@ -24,9 +24,15 @@ import {
     titleFromFileName
 } from '../services/audioMetadataService';
 import {
+    AudioStorageLifecycleError,
     deleteAudioObjectAndTrack,
-    uploadAudioObject
+    uploadAudioObject,
+    uploadVideoObject
 } from '../services/audioStorageService';
+import {
+    InvalidSoundtrackVideoError,
+    validateSoundtrackVideoFile
+} from '../services/videoMetadataService';
 import { validateContentReferences } from '../services/contentReferenceService';
 import {
     attachCoverArtToNewOwner,
@@ -37,6 +43,7 @@ import {
 import { getUploadedFile } from '../middleware/imageUpload';
 import { boundedSearchQuery } from '../utils/search';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
+import { activeMediaTypeForTrack } from '../utils/mediaStorageKey';
 import { renderPageItemsHierarchy } from '../views/contentManager/pageItemsView';
 import { renderReleaseOperations } from '../views/contentManager/releaseOperationsView';
 import {
@@ -372,7 +379,7 @@ const renderCreditEditor = (
 ) => {
     const placementFor = (credit: any) => {
         if (credit.subjectType === 'organization') {
-            return ownerType === 'album' ? 'Organization Releases' : 'Soundtrack attribution';
+            return ownerType === 'album' ? 'Organization Releases' : 'MediaTrack attribution';
         }
         if (ownerType === 'album' && credit.role === 'primary') return 'Artist Discography';
         if (ownerType === 'album' && credit.role === 'featured') return 'Artist Collaborations';
@@ -415,11 +422,11 @@ const renderCreditEditor = (
       </div>
       <label>Credit role<select name="role">${renderCreditRoleOptions(roles)}</select></label>
       ${ownerType === 'audioTrack' && subjectType === 'artist'
-        ? '<label><input type="checkbox" name="promoteToAlbumPrimary" value="true" /> If this is a primary Credit, also add the Artist as an Album primary Credit</label><p class="drag-help">Off by default. Featured and performer Credits always stay Soundtrack-only.</p>'
+        ? '<label><input type="checkbox" name="promoteToAlbumPrimary" value="true" /> If this is a primary Credit, also add the Artist as an Album primary Credit</label><p class="drag-help">Off by default. Featured and performer Credits always stay MediaTrack-only.</p>'
         : ''}
       <button type="submit" data-reference-submit disabled>Add Credit</button>
     </form>`;
-    return `<section class="credit-editor"><h3>Credits</h3><p class="muted">Credits control public attribution. A Soundtrack participant is not silently promoted to an Album primary Artist.</p>${creditItems}<details><summary>Add Artist Credit</summary>${addForm('artist', artistCreditRoleOptions)}</details><details><summary>Add Organization Credit</summary>${addForm('organization', organizationCreditRoleOptions)}</details><form method="POST" action="/content/manage/credits/mark-unknown" data-confirm-attribution-unknown><input type="hidden" name="ownerType" value="${ownerType}" /><input type="hidden" name="ownerId" value="${escapeHtml(ownerId)}" /><button class="button--secondary" type="submit">Mark attribution as not documented</button></form></section>`;
+    return `<section class="credit-editor"><h3>Credits</h3><p class="muted">Credits control public attribution. A MediaTrack participant is not silently promoted to an Album primary Artist.</p>${creditItems}<details><summary>Add Artist Credit</summary>${addForm('artist', artistCreditRoleOptions)}</details><details><summary>Add Organization Credit</summary>${addForm('organization', organizationCreditRoleOptions)}</details><form method="POST" action="/content/manage/credits/mark-unknown" data-confirm-attribution-unknown><input type="hidden" name="ownerType" value="${ownerType}" /><input type="hidden" name="ownerId" value="${escapeHtml(ownerId)}" /><button class="button--secondary" type="submit">Mark attribution as not documented</button></form></section>`;
 };
 
 const renderManagePage = (params: {
@@ -589,15 +596,15 @@ const renderManagePage = (params: {
         : prefillAlbum
             ? String(prefillAlbum.title ?? 'Album')
             : prefillAudioTrack
-                ? String(prefillAudioTrack.title ?? 'Soundtrack')
+                ? String(prefillAudioTrack.title ?? 'MediaTrack')
                 : prefillOrganization ? String(prefillOrganization.name ?? 'Organization') : '';
     const selectedTypeLabel = selectedType === 'audioTrack'
-        ? 'Soundtrack'
+        ? 'MediaTrack'
         : selectedType === 'none' ? '' : `${selectedType[0].toUpperCase()}${selectedType.slice(1)}`;
     const selectedObjectBlock = selectedType === 'none'
         ? ''
         : `<section class="card selected-object surface-catalog" id="selected-object" aria-labelledby="selected-object-title"><div><p class="eyebrow">Selected ${escapeHtml(selectedTypeLabel)}</p><h2 id="selected-object-title">${escapeHtml(selectedLabel)}</h2><p class="muted">Edit this object below. Inventory filters and pagination remain available when you return to the list.</p></div><div class="action-row"><button class="button button--secondary" type="button" data-copy-id="${escapeHtml(selectedId)}">Copy ID</button><a class="button button--secondary" href="/content/manage?view=catalog#catalog-content">Back to inventory</a></div></section>`;
-    const bulkAudioUploadBlock = `<details class="advanced-tools" id="bulk-audio-upload"><summary>Bulk upload Soundtracks</summary><p>Select up to 20 files. A Soundtrack is created for each file using embedded metadata when available.</p><form id="bulk-audio-upload-form" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data"><select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select><select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select><select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select><select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select><select name="albumId"><option value="">No album</option>${albumOptions}</select><label><input type="checkbox" name="inheritAlbumPrimaryCredits" value="true" checked /> Inherit the selected Album's primary Artists</label><label><input type="checkbox" name="attributionUnknown" value="true" /> Attribution is not documented</label><label><input type="checkbox" name="promoteToAlbumPrimary" value="true" /> If this participant is primary, also add them to the Album</label><input type="file" name="audioFiles" accept="audio/*" multiple required /><button type="submit">Create and Upload Audio Files</button><div id="bulk-upload-status" role="status" aria-live="polite" hidden><progress id="bulk-upload-progress" max="100" value="0">0%</progress><span id="bulk-upload-progress-label">0%</span></div></form></details>`;
+    const bulkAudioUploadBlock = `<details class="advanced-tools" id="bulk-audio-upload"><summary>Bulk upload Audio MediaTracks</summary><p>Select up to 20 files. An Audio MediaTrack is created for each file using embedded metadata when available.</p><form id="bulk-audio-upload-form" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data"><select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select><select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select><select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select><select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select><select name="albumId"><option value="">No album</option>${albumOptions}</select><label><input type="checkbox" name="inheritAlbumPrimaryCredits" value="true" checked /> Inherit the selected Album's primary Artists</label><label><input type="checkbox" name="attributionUnknown" value="true" /> Attribution is not documented</label><label><input type="checkbox" name="promoteToAlbumPrimary" value="true" /> If this participant is primary, also add them to the Album</label><input type="file" name="audioFiles" accept="audio/*" multiple required /><button type="submit">Create and Upload Audio MediaTracks</button><div id="bulk-upload-status" role="status" aria-live="polite" hidden><progress id="bulk-upload-progress" max="100" value="0">0%</progress><span id="bulk-upload-progress-label">0%</span></div></form></details>`;
     const releaseOperationsBlock = renderReleaseOperations(releaseOperations);
 
     return `<!DOCTYPE html>
@@ -722,7 +729,7 @@ const renderManagePage = (params: {
       <p class="muted">Signed in as <strong>${escapeHtml(params.userEmail)}</strong></p>
     </div>
     <div class="header-actions">
-      <a class="button" href="/content/manage/audio-tracks">Audio Tracks</a>
+      <a class="button" href="/content/manage/audio-tracks">MediaTracks</a>
       ${params.isAdmin ? '<a class="button button--secondary" href="/admin/audio-storage/reconciliation">Audit Audio Storage</a><a class="button button--secondary" href="/admin/image-storage/reconciliation">Audit Image Storage</a>' : ''}
       <a class="button button--secondary" href="/">Home</a>
       <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(params.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
@@ -805,7 +812,7 @@ const renderManagePage = (params: {
     ${renderSectionList('Artists', artists, (item) => renderReferencedItem(item, String(item.name ?? ''), 'artist'))}
     ${renderSectionList('Organizations', organizations, (item) => renderReferencedItem(item, String(item.name ?? ''), 'organization'))}
     ${renderSectionList('Albums', albums, (item) => renderReferencedItem(item, String(item.title ?? ''), 'album'))}
-    ${renderSectionList('Audio Tracks', audioTracks, (item) => renderReferencedItem(item, String(item.title ?? ''), 'audioTrack'))}
+    ${renderSectionList('MediaTracks', audioTracks, (item) => renderReferencedItem(item, String(item.title ?? ''), 'audioTrack'))}
   </div>
   ${selectedObjectBlock}
 
@@ -857,22 +864,22 @@ const renderManagePage = (params: {
               const track = tracksById.get(trackId);
               if (!track) return renderMissingReference(trackId);
 
-              return `<label class="track-selection"><input type="checkbox" name="audioTrackIds" value="${escapeHtml(trackId)}" aria-label="Select ${escapeHtml(String(track.title ?? 'audio track'))}" />${renderReferencedItem(track, String(track.title ?? ''), 'audioTrack')}</label>`;
+              return `<label class="track-selection"><input type="checkbox" name="audioTrackIds" value="${escapeHtml(trackId)}" aria-label="Select ${escapeHtml(String(track.title ?? 'MediaTrack'))}" />${renderReferencedItem(track, String(track.title ?? ''), 'audioTrack')}</label>`;
           });
           const selectableTrackCount = linkedTrackIds.filter((trackId) => tracksById.has(trackId)).length;
 
-          return `<form class="hierarchy-item" data-batch-track-delete method="POST" action="/content/manage/album/delete-audio-tracks"><input type="hidden" name="albumId" value="${escapeHtml(albumId)}" /><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked track${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}${selectableTrackCount > 0 ? '<div class="batch-track-actions"><button class="select-all-tracks button--secondary" type="button">Select all</button><button class="batch-delete-button" data-danger type="submit" disabled>Delete selected tracks</button></div>' : ''}</form>`;
+          return `<form class="hierarchy-item" data-batch-track-delete method="POST" action="/content/manage/album/delete-audio-tracks"><input type="hidden" name="albumId" value="${escapeHtml(albumId)}" /><strong>${renderReferencedItem(album, String(album.title ?? ''), 'album')}</strong><span>${linkedTrackIds.length} linked MediaTrack${linkedTrackIds.length === 1 ? '' : 's'}</span>${renderNestedList(linkedTracks)}${selectableTrackCount > 0 ? '<div class="batch-track-actions"><button class="select-all-tracks button--secondary" type="button">Select all</button><button class="batch-delete-button" data-danger type="submit" disabled>Delete selected MediaTracks</button></div>' : ''}</form>`;
       }).join('') : '<p class="empty-linked-content">No albums yet.</p>'}
     </div>
     ${paginationFor('albums', 'Albums')}
     </section>
 
         <section id="inventory-audioTracks">
-          <h3>Audio Tracks</h3>
+          <h3>MediaTracks</h3>
           <div class="content-hierarchy">
-            ${catalogAudioTracks.length > 0 ? catalogAudioTracks.map((track) => `<div class="hierarchy-item"><strong>${renderReferencedItem(track, String(track.title ?? ''), 'audioTrack')}</strong><span>${escapeHtml(String(track.uploadStatus ?? 'legacy'))}</span></div>`).join('') : '<p class="empty-linked-content">No audio tracks yet.</p>'}
+            ${catalogAudioTracks.length > 0 ? catalogAudioTracks.map((track) => `<div class="hierarchy-item"><strong>${renderReferencedItem(track, String(track.title ?? ''), 'audioTrack')}</strong><span>${escapeHtml(String(track.uploadStatus ?? 'legacy'))}</span></div>`).join('') : '<p class="empty-linked-content">No MediaTracks yet.</p>'}
           </div>
-          ${paginationFor('audioTracks', 'Audio Tracks')}
+          ${paginationFor('audioTracks', 'MediaTracks')}
         </section>
 
         <section id="inventory-pages">
@@ -904,7 +911,7 @@ const renderManagePage = (params: {
               });
 
               const dynamicSummary = isArtistCarousel
-                  ? `<span class="pill">Dynamic</span> <span>${escapeHtml(artistName)} · ${carousel.artistConfig?.contentType === 'album' ? 'Albums' : 'Audio tracks'}</span>`
+                  ? `<span class="pill">Dynamic</span> <span>${escapeHtml(artistName)} · ${carousel.artistConfig?.contentType === 'album' ? 'Albums' : 'MediaTracks'}</span>`
                   : isPersonalizedCarousel
                       ? `<span class="pill">Personalized</span> <span>${carousel.personalizedConfig?.source === 'recentlyPlayed' ? 'Recently Played' : 'Recently Saved'} · Mixed content</span>`
                   : '<span class="pill pill--muted">Manual</span>';
@@ -982,7 +989,7 @@ const renderManagePage = (params: {
                 <select class="carousel-mode" name="mode" required><option value="manual">Manual carousel</option><option value="artist">Artist carousel</option><option value="personalized">Personalized carousel</option></select>
                 <div class="artist-carousel-config stack" hidden>
                     <select name="artistId"><option value="" disabled selected>Select artist</option>${artistOptions}</select>
-                    <select name="artistContentType"><option value="album">Albums</option><option value="audioTrack">Audio tracks</option></select>
+                    <select name="artistContentType"><option value="album">Albums</option><option value="audioTrack">MediaTracks</option></select>
                     <select name="artistScope"><option value="discography">Discography / primary</option><option value="collaborations">Collaborations / featured</option><option value="appearsOn">Appears On / performer</option><option value="allRelated">All related credits</option></select>
                     <select name="artistSort"><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select>
                     <input name="artistLimit" type="number" min="1" max="100" value="20" />
@@ -991,7 +998,7 @@ const renderManagePage = (params: {
                 <div class="personalized-carousel-config stack" hidden>
                     <select name="personalizedSource"><option value="recentlySaved">Recently Saved</option><option value="recentlyPlayed">Recently Played</option></select>
                     <input name="personalizedLimit" type="number" min="1" max="20" value="20" />
-                    <p class="drag-help">Albums and audio tracks are mixed automatically for the signed-in viewer.</p>
+                    <p class="drag-help">Albums and MediaTracks are mixed automatically for the signed-in viewer.</p>
                 </div>
                 <button type="submit">Create Carousel</button>
             </form>
@@ -1001,7 +1008,7 @@ const renderManagePage = (params: {
                 <select class="artist-carousel-selector" name="carouselId" required><option value="" disabled selected>Select artist carousel</option>${artistCarouselOptions}</select>
                 <input name="name" placeholder="Carousel name" required />
                 <select name="artistId" required><option value="" disabled selected>Select artist</option>${artistOptions}</select>
-                <select name="artistContentType" required><option value="album">Albums</option><option value="audioTrack">Audio tracks</option></select>
+                <select name="artistContentType" required><option value="album">Albums</option><option value="audioTrack">MediaTracks</option></select>
                 <select name="artistScope" required><option value="discography">Discography / primary</option><option value="collaborations">Collaborations / featured</option><option value="appearsOn">Appears On / performer</option><option value="allRelated">All related credits</option></select>
                 <select name="artistSort" required><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select>
                 <input name="artistLimit" type="number" min="1" max="100" value="20" required />
@@ -1027,7 +1034,7 @@ const renderManagePage = (params: {
             <h3>Add Item to Carousel</h3>
             <form method="POST" action="/content/manage/composition/carousel/add-item">
                 <select name="carouselId" required><option value="" disabled selected>Select manual carousel</option>${manualCarouselOptions}</select>
-                <select name="contentType" required><option value="" disabled selected>Select content type</option><option value="post">Post</option><option value="album">Album</option><option value="audioTrack">Audio Track</option></select>
+                <select name="contentType" required><option value="" disabled selected>Select content type</option><option value="post">Post</option><option value="album">Album</option><option value="audioTrack">MediaTrack</option></select>
                 <input name="contentId" placeholder="Content ID" required />
                 <button type="submit">Add Carousel Item</button>
             </form>
@@ -1089,14 +1096,14 @@ const renderManagePage = (params: {
       <form method="POST" action="/content/manage/album/create" enctype="multipart/form-data">
         <input name="title" placeholder="Title" required />
         <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
-        <input name="audioTrackIds" placeholder="Audio Track IDs (comma separated)" />
+        <input name="audioTrackIds" placeholder="MediaTrack IDs (comma separated)" />
         <input name="releaseDate" type="date" />
         <button type="submit">Create Album</button>
       </form>
     </div>
 
     <div class="card create-card">
-      <h3>Create and Upload Audio Track</h3>
+      <h3>Create and Upload MediaTrack</h3>
       <form method="POST" action="/content/manage/audioTrack/create" enctype="multipart/form-data">
         <input name="title" placeholder="Title" required />
         <select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select>
@@ -1111,11 +1118,11 @@ const renderManagePage = (params: {
         <p class="drag-help">Choose an Artist, an Organization, inherited Album Artists, or explicitly mark attribution as not documented. Album promotion is off by default.</p>
         <input name="releaseDate" type="date" />
         <input name="duration" placeholder="Duration (e.g. 03:30)" />
-        <input name="formatType" placeholder="Format type (e.g. MP3)" />
-        <input name="formatBitrate" placeholder="Bitrate (e.g. 320)" />
+        <input name="formatType" placeholder="Format type (e.g. MP3 or MP4)" />
+        <input name="formatBitrate" placeholder="Bitrate (optional)" />
         <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
-        <input type="file" name="audioFile" accept="audio/*" required />
-        <button type="submit">Create and Upload Audio Track</button>
+        <label>Audio or MP4 Video<input type="file" name="mediaFile" accept="audio/*,video/mp4" required /></label>
+        <button type="submit">Create and Upload MediaTrack</button>
       </form>
       ${bulkAudioUploadBlock}
     </div>
@@ -1148,7 +1155,7 @@ const renderManagePage = (params: {
           <button type="submit">Create Organization Release</button>
         </form>` : '<p class="muted">Choose Edit from the Organization inventory to create a release without copying IDs.</p>'}
       <details><summary>Delete an unused Organization</summary>
-        <p class="muted">Deletion is blocked while any Album or Soundtrack still credits the Organization.</p>
+        <p class="muted">Deletion is blocked while any Album or MediaTrack still credits the Organization.</p>
         <form method="POST" action="/content/manage/organization/delete" data-reference-form>
           <div class="reference-picker" data-reference-picker data-reference-type="organization">
             <label>Find Organization<input type="search" data-reference-query autocomplete="off" /></label>
@@ -1167,7 +1174,7 @@ const renderManagePage = (params: {
         <div class="card">
             <h3>Link Track to Album</h3>
             <form method="POST" action="/content/manage/link/track-album">
-                <input name="audioTrackId" placeholder="Audio Track ID" required />
+                <input name="audioTrackId" placeholder="MediaTrack ID" required />
                 <input name="albumId" placeholder="Album ID" required />
                 <button type="submit">Link Track and Album</button>
             </form>
@@ -1187,7 +1194,7 @@ const renderManagePage = (params: {
         <div class="card">
             <h3>Link Track to Artist</h3>
             <form method="POST" action="/content/manage/link/track-artist">
-                <input name="audioTrackId" placeholder="Audio Track ID" required />
+                <input name="audioTrackId" placeholder="MediaTrack ID" required />
                 <input name="artistId" placeholder="Artist ID" required />
                 <button type="submit">Link Track and Artist</button>
             </form>
@@ -1226,7 +1233,7 @@ const renderManagePage = (params: {
       <hr />
       <section id="artist-albums">
         <h3>Albums</h3>
-        <p class="muted">Add or remove memberships here. Removing a membership does not delete the Album or its Soundtracks.</p>
+        <p class="muted">Add or remove memberships here. Removing a membership does not delete the Album or its MediaTracks.</p>
         ${Array.isArray(prefillArtist.albumIds) && prefillArtist.albumIds.length > 0
             ? `<ul class="linked-content artist-album-memberships">${prefillArtist.albumIds.map((albumId: unknown) => {
                 const canonicalId = String(albumId);
@@ -1274,7 +1281,7 @@ const renderManagePage = (params: {
                 <input name="title" value="${escapeHtml(String(prefillAlbum?.title ?? ''))}" placeholder="New Title (optional)" />
                 <input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" />
                 <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
-                <input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Audio Track IDs (comma separated)" />
+                <input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="MediaTrack IDs (comma separated)" />
                 <input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAlbum?.releaseDate))}" type="date" />
         <button type="submit">Update Album</button>
       </form></section>
@@ -1283,12 +1290,12 @@ const renderManagePage = (params: {
     </div>
 
         <div class="card object-workspace object-workspace--audioTrack" id="audio-track-update-card">
-      <h3>Soundtrack</h3>
+      <h3>MediaTrack</h3>
       ${prefillAudioTrack
-        ? `<div class="workspace-context"><p><strong>${escapeHtml(String(prefillAudioTrack.title ?? 'Soundtrack'))}</strong></p><button class="copy-id" type="button" data-copy-id="${prefillAudioTrackId}">Copy ID</button><a href="/content/manage?view=catalog#catalog-content">Choose another Soundtrack</a></div>`
-        : `<p class="muted">Choose Edit from the Soundtrack inventory, or load a known ID.</p><form method="GET" action="/content/manage#audio-track-update-card">
+        ? `<div class="workspace-context"><p><strong>${escapeHtml(String(prefillAudioTrack.title ?? 'MediaTrack'))}</strong></p><button class="copy-id" type="button" data-copy-id="${prefillAudioTrackId}">Copy ID</button><a href="/content/manage?view=catalog#catalog-content">Choose another MediaTrack</a></div>`
+        : `<p class="muted">Choose Edit from the MediaTrack inventory, or load a known ID.</p><form method="GET" action="/content/manage#audio-track-update-card">
                 <input type="hidden" name="prefillType" value="audioTrack" />
-                <input name="prefillId" value="${prefillAudioTrackId}" placeholder="Audio Track ID" required />
+                <input name="prefillId" value="${prefillAudioTrackId}" placeholder="MediaTrack ID" required />
                 <button type="submit">Load Current</button>
             </form>`}
       ${prefillAudioTrack ? `<section class="workspace-section" aria-labelledby="soundtrack-details-heading"><h3 id="soundtrack-details-heading">Details and cover art</h3><form method="POST" action="/content/manage/audioTrack/update" enctype="multipart/form-data">
@@ -1303,11 +1310,11 @@ const renderManagePage = (params: {
                 <input name="duration" value="${escapeHtml(String(prefillAudioTrack?.duration ?? ''))}" placeholder="Duration (e.g. 03:30)" />
                 <input name="formatType" value="${escapeHtml(String(prefillAudioTrack?.format?.type ?? ''))}" placeholder="Format type (e.g. MP3)" />
                 <input name="formatBitrate" value="${escapeHtml(String(prefillAudioTrack?.format?.bitrate ?? ''))}" placeholder="Bitrate (e.g. 320)" />
-        <button type="submit">Update Audio Track</button>
+        <button type="submit">Update MediaTrack</button>
       </form></section>
       <section class="workspace-section">${renderCreditEditor('audioTrack', prefillAudioTrackId, prefillAudioTrack, prefillCreditSubjectLabels)}</section>
-      <section class="workspace-section" aria-labelledby="replace-audio-heading"><h3 id="replace-audio-heading">Stored audio</h3><p class="muted">Replacing audio publishes the new object before cleaning up the previous one.</p><form method="POST" action="/content/manage/audioTrack/upload" enctype="multipart/form-data"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId || selectedUploadTrackId}" required /><input type="file" name="audioFile" accept="audio/*" required /><button type="submit">Replace Audio File</button></form></section>
-      <section class="card danger-zone workspace-section" aria-labelledby="delete-soundtrack-heading"><h3 id="delete-soundtrack-heading">Danger zone</h3><p>Deletion keeps the record retryable until storage cleanup completes.</p><form method="POST" action="/content/manage/audioTrack/delete"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId}" required /><button data-danger type="submit">Delete Audio Track</button></form></section>` : '<p class="empty-linked-content">No Soundtrack selected.</p>'}
+      <section class="workspace-section" aria-labelledby="replace-media-heading"><h3 id="replace-media-heading">Stored media</h3><p class="muted">Current kind: <strong>${activeMediaTypeForTrack(prefillAudioTrack) === 'video' ? 'Video' : 'Audio'}</strong>. A MediaTrack has one effective media object. Replacement publishes the new object and kind before cleaning up the previous object.</p><form method="POST" action="/content/manage/audioTrack/upload" enctype="multipart/form-data"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId || selectedUploadTrackId}" required /><input type="file" name="audioFile" accept="audio/*" required /><button type="submit">Replace with Audio</button></form><form method="POST" action="/content/manage/audioTrack/video-upload" enctype="multipart/form-data"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId}" required /><input type="file" name="videoFile" accept="video/mp4" required /><button type="submit">Replace with Video</button></form></section>
+      <section class="card danger-zone workspace-section" aria-labelledby="delete-soundtrack-heading"><h3 id="delete-soundtrack-heading">Danger zone</h3><p>Deletion keeps the record retryable until storage cleanup completes.</p><form method="POST" action="/content/manage/audioTrack/delete"><input type="hidden" name="audioTrackId" value="${prefillAudioTrackId}" required /><button data-danger type="submit">Delete MediaTrack</button></form></section>` : '<p class="empty-linked-content">No MediaTrack selected.</p>'}
     </div>
   </div>
   </main>
@@ -1455,7 +1462,7 @@ export const renderManagePageForWeb = async (req: Request, res: Response, next: 
                         prefillAudioTrack = track;
                         prefillAudioTrackId = prefillId;
                     } else if (!message) {
-                        message = 'Unable to load audio track for this ID.';
+                        message = 'Unable to load MediaTrack for this ID.';
                     }
                 }
 
@@ -1686,7 +1693,7 @@ export const updateOrganizationWeb = async (req: Request, res: Response, next: N
     }
 };
 
-/** Deletes only an Organization that no Album or Soundtrack still credits. */
+/** Deletes only an Organization that no Album or MediaTrack still credits. */
 export const deleteOrganizationWeb = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authReq = req as AuthenticatedRequest;
@@ -2439,10 +2446,18 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         }
         if (rejectNonAdminManagerRequest(authReq, res)) return;
 
-        const uploadFile = getUploadedFile(req, 'audioFile');
+        const uploadFile = getUploadedFile(req, 'mediaFile');
         if (!uploadFile) {
-            return redirectWithMessage(res, 'An audio file is required to create an audio track.');
+            return redirectWithMessage(res, 'An Audio or MP4 Video file is required to create a MediaTrack.');
         }
+        const declaredContentType = String(uploadFile.mimetype ?? '').trim().toLowerCase();
+        const mediaType = declaredContentType === 'video/mp4' ? 'video' : 'audio';
+        if (mediaType === 'audio' && !declaredContentType.startsWith('audio/')) {
+            return redirectWithMessage(res, 'MediaTrack files must be Audio or MP4 Video.');
+        }
+        const videoMetadata = mediaType === 'video'
+            ? await validateSoundtrackVideoFile(uploadFile)
+            : null;
 
         const artistId = String(req.body.artistId ?? '').trim();
         if (artistId) {
@@ -2472,7 +2487,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             album = await Album.findById(albumId);
         }
 
-        const formatType = String(req.body.formatType ?? 'MP3');
+        const formatType = String(req.body.formatType ?? (mediaType === 'video' ? 'MP4' : 'MP3'));
         const bitrateRaw = String(req.body.formatBitrate ?? '').trim();
         const bitrate = bitrateRaw ? Number(bitrateRaw) : undefined;
         const audioTrackObjectId = new ObjectId();
@@ -2508,7 +2523,8 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             parseCsv(String(req.body.genres ?? '')),
             albumId,
             parseDateInput(String(req.body.releaseDate ?? '')),
-            String(req.body.duration ?? ''),
+            String(req.body.duration ?? '')
+                || formatDuration(videoMetadata?.durationSeconds),
             new AudioFormat(formatType, Number.isNaN(bitrate as number) ? undefined : bitrate),
             String(req.body.coverArtUrl ?? ''),
             authReq.auth.userId,
@@ -2521,12 +2537,19 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         track.creditRevision = 1;
 
         await track.save();
-        const upload = await uploadAudioObject(
-            audioTrackId,
-            uploadFile,
-            getContentProvenanceId(track) || authReq.auth.userId,
-            getRequestAbortSignal(req)
-        );
+        const upload = mediaType === 'video'
+            ? await uploadVideoObject(
+                audioTrackId,
+                uploadFile,
+                getContentProvenanceId(track) || authReq.auth.userId,
+                getRequestAbortSignal(req)
+            )
+            : await uploadAudioObject(
+                audioTrackId,
+                uploadFile,
+                getContentProvenanceId(track) || authReq.auth.userId,
+                getRequestAbortSignal(req)
+            );
         const coverArtFile = getUploadedFile(req, 'coverArtFile');
         if (coverArtFile) {
             const coverArt = await uploadCoverArt(
@@ -2548,7 +2571,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             if (!albumId || !artistId || artistRole !== 'primary') {
                 return redirectWithMessage(
                     res,
-                    'Soundtrack published, but Album promotion requires a linked Album and Primary Artist role.'
+                    'MediaTrack published, but Album promotion requires a linked Album and Primary Artist role.'
                 );
             }
             try {
@@ -2570,8 +2593,8 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
                 return redirectWithMessage(
                     res,
                     (promotionError as any)?.outcomeUnknown
-                        ? 'Soundtrack published, but Album promotion could not be confirmed. Run reconciliation before retrying from the Credit editor.'
-                        : 'Soundtrack published with its Soundtrack Credit, but Album promotion did not complete. It remains safely Soundtrack-only and can be promoted from the Credit editor.'
+                        ? 'MediaTrack published, but Album promotion could not be confirmed. Run reconciliation before retrying from the Credit editor.'
+                        : 'MediaTrack published with its MediaTrack Credit, but Album promotion did not complete. It remains safely MediaTrack-only and can be promoted from the Credit editor.'
                 );
             }
         }
@@ -2579,8 +2602,8 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         return redirectWithMessage(
             res,
             upload.cleanupPending
-                ? 'Audio track and file created successfully. Previous object cleanup will need to be retried.'
-                : 'Audio track and file created successfully.'
+                ? `${mediaType === 'video' ? 'Video' : 'Audio'} MediaTrack created successfully. Previous object cleanup will need to be retried.`
+                : `${mediaType === 'video' ? 'Video' : 'Audio'} MediaTrack created successfully.`
         );
     } catch (error) {
         return next(error);
@@ -2598,11 +2621,11 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
         if (!ObjectId.isValid(audioTrackId)
             || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
-            return redirectWithMessage(res, 'Audio track ID is not valid.');
+            return redirectWithMessage(res, 'MediaTrack ID is not valid.');
         }
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
-            return redirectWithMessage(res, 'Audio track not found.');
+            return redirectWithMessage(res, 'MediaTrack not found.');
         }
 
         const updatePayload: Record<string, unknown> = {};
@@ -2692,8 +2715,8 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(
                 res,
                 cleanup.cleanupPending
-                    ? 'Audio track was not updated because its cover-art lifecycle evidence requires reconciliation.'
-                    : 'Audio track was not updated because its cover art changed concurrently.'
+                    ? 'MediaTrack was not updated because its cover-art lifecycle evidence requires reconciliation.'
+                    : 'MediaTrack was not updated because its cover art changed concurrently.'
             );
         }
         if (requestedArtistIds) {
@@ -2714,8 +2737,8 @@ export const updateAudioTrackWeb = async (req: Request, res: Response, next: Nex
         return redirectWithMessage(
             res,
             cleanup.cleanupPending
-                ? 'Audio track updated successfully. Previous cover-art cleanup will need to be retried.'
-                : 'Audio track updated successfully.'
+                ? 'MediaTrack updated successfully. Previous cover-art cleanup will need to be retried.'
+                : 'MediaTrack updated successfully.'
         );
     } catch (error) {
         return next(error);
@@ -2733,11 +2756,11 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
         if (!ObjectId.isValid(audioTrackId)
             || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
-            return redirectWithMessage(res, 'Audio track ID is not valid.');
+            return redirectWithMessage(res, 'MediaTrack ID is not valid.');
         }
         const track = await AudioTrack.findById(audioTrackId);
         if (!track) {
-            return redirectWithMessage(res, 'Audio track not found.');
+            return redirectWithMessage(res, 'MediaTrack not found.');
         }
 
         try {
@@ -2745,8 +2768,8 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(
                 res,
                 deletion.cleanupPending
-                    ? 'Audio track deleted successfully. Cover-art cleanup will need to be retried.'
-                    : 'Audio track deleted successfully.'
+                    ? 'MediaTrack deleted successfully. Cover-art cleanup will need to be retried.'
+                    : 'MediaTrack deleted successfully.'
             );
         } catch (s3Error) {
             console.log('Audio track deletion failed for audioTrackId:', audioTrackId, s3Error);
@@ -2754,8 +2777,8 @@ export const deleteAudioTrackWeb = async (req: Request, res: Response, next: Nex
             return redirectWithMessage(
                 res,
                 outcomeUnknown
-                    ? 'Audio track deletion outcome could not be confirmed. Reconciliation is required.'
-                    : 'Audio track deletion could not complete. Track metadata was retained for retry and reconciliation.'
+                    ? 'MediaTrack deletion outcome could not be confirmed. Reconciliation is required.'
+                    : 'MediaTrack deletion could not complete. Track metadata was retained for retry and reconciliation.'
             );
         }
     } catch (error) {
@@ -2778,11 +2801,11 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
                 : req.body.audioTrackIds ? [String(req.body.audioTrackIds)] : []
         );
         if (!albumId || selectedTrackIds.length === 0) {
-            return redirectWithMessage(res, 'Select at least one audio track to delete.');
+            return redirectWithMessage(res, 'Select at least one MediaTrack to delete.');
         }
         const maximumBatchDeletes = 100;
         if (selectedTrackIds.length > maximumBatchDeletes) {
-            return redirectWithMessage(res, `Delete no more than ${maximumBatchDeletes} audio tracks at once.`);
+            return redirectWithMessage(res, `Delete no more than ${maximumBatchDeletes} MediaTracks at once.`);
         }
 
         const albumValidation = await validateContentReferences('album', [albumId]);
@@ -2825,17 +2848,17 @@ export const deleteAlbumAudioTracksWeb = async (req: Request, res: Response, nex
         if (failedTrackIds.length > 0) {
             return redirectWithMessage(
                 res,
-                `${deletedTrackIds.length} audio track(s) deleted. ${failedTrackIds.length} could not be deleted.${outcomeUnknownTrackIds.length > 0 ? ` ${outcomeUnknownTrackIds.length} deletion outcome(s) require reconciliation.` : ' Failed tracks remain recorded for retry and reconciliation.'}${cleanupPendingTrackIds.length > 0 ? ` ${cleanupPendingTrackIds.length} deleted track(s) still require cover-art lifecycle cleanup.` : ''}`
+                `${deletedTrackIds.length} MediaTrack(s) deleted. ${failedTrackIds.length} could not be deleted.${outcomeUnknownTrackIds.length > 0 ? ` ${outcomeUnknownTrackIds.length} deletion outcome(s) require reconciliation.` : ' Failed MediaTracks remain recorded for retry and reconciliation.'}${cleanupPendingTrackIds.length > 0 ? ` ${cleanupPendingTrackIds.length} deleted MediaTrack(s) still require cover-art lifecycle cleanup.` : ''}`
             );
         }
         if (cleanupPendingTrackIds.length > 0) {
             return redirectWithMessage(
                 res,
-                `${deletedTrackIds.length} audio track(s) deleted. ${cleanupPendingTrackIds.length} still require cover-art lifecycle cleanup.`
+                `${deletedTrackIds.length} MediaTrack(s) deleted. ${cleanupPendingTrackIds.length} still require cover-art lifecycle cleanup.`
             );
         }
 
-        return redirectWithMessage(res, `${deletedTrackIds.length} audio track(s) deleted successfully.`);
+        return redirectWithMessage(res, `${deletedTrackIds.length} MediaTrack(s) deleted successfully.`);
     } catch (error) {
         return next(error);
     }
@@ -2876,11 +2899,11 @@ export const uploadAudioTrackWeb = async (
         const audioTrackId = String(req.body.audioTrackId ?? '').trim();
         if (!ObjectId.isValid(audioTrackId)
             || String(new ObjectId(audioTrackId)) !== audioTrackId.toLowerCase()) {
-            return redirectWithMessage(res, 'Audio track ID is not valid.');
+            return redirectWithMessage(res, 'MediaTrack ID is not valid.');
         }
         const track = await dependencies.findTrack(audioTrackId);
         if (!track) {
-            return redirectWithMessage(res, 'Audio track not found.');
+            return redirectWithMessage(res, 'MediaTrack not found.');
         }
 
         const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
@@ -2931,6 +2954,82 @@ export const uploadAudioTrackWeb = async (
                         : String((error as Error).message || 'Audio upload failed.')
             );
         }
+        return next(error);
+    }
+};
+
+/** Replaces the one active MediaTrack object with a validated MP4. */
+export const uploadSoundtrackVideoWeb = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
+        const audioTrackId = String(req.body.audioTrackId ?? '').trim().toLowerCase();
+        if (!/^[0-9a-f]{24}$/.test(audioTrackId)) {
+            return redirectWithMessage(res, 'MediaTrack ID is not valid.');
+        }
+        const track: any = await AudioTrack.findById(audioTrackId);
+        if (!track) return redirectWithMessage(res, 'MediaTrack not found.');
+        const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
+        if (!uploadFile) return redirectWithMessage(res, 'Missing MP4 video file.');
+        await validateSoundtrackVideoFile(uploadFile);
+        const result = await uploadVideoObject(
+            audioTrackId,
+            uploadFile,
+            getContentProvenanceId(track) || authReq.auth.userId,
+            getRequestAbortSignal(req)
+        );
+        return redirectWithMessage(
+            res,
+            result.cleanupPending
+                ? 'MediaTrack is now Video. Previous media cleanup remains recorded for reconciliation.'
+                : 'MediaTrack was replaced with Video successfully.'
+        );
+    } catch (error) {
+        if (error instanceof InvalidSoundtrackVideoError) {
+            return redirectWithMessage(res, String(error.message));
+        }
+        if (error instanceof AudioStorageLifecycleError) {
+            return redirectWithMessage(
+                res,
+                error.statusCode < 500
+                    ? error.message
+                    : error.outcomeUnknown
+                        ? 'Video replacement outcome could not be confirmed. Reconciliation is required.'
+                        : 'Video replacement failed. Lifecycle evidence was retained for retry and reconciliation.'
+            );
+        }
+        return next(error);
+    }
+};
+
+/** Retains a compatibility handler while enforcing the one-required-media rule. */
+export const deleteSoundtrackVideoWeb = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) {
+            return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        }
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
+        const audioTrackId = String(req.body.audioTrackId ?? '').trim().toLowerCase();
+        if (!/^[0-9a-f]{24}$/.test(audioTrackId)) {
+            return redirectWithMessage(res, 'MediaTrack ID is not valid.');
+        }
+        return redirectWithMessage(
+            res,
+            'A MediaTrack must keep one media object. Replace Video with Audio, or delete the MediaTrack.'
+        );
+    } catch (error) {
         return next(error);
     }
 };
@@ -3155,7 +3254,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                 } catch (promotionError) {
                     promotionMessage = (promotionError as any)?.outcomeUnknown
                         ? ' Album promotion could not be confirmed; run reconciliation before retrying.'
-                        : ' Album promotion did not complete; published Soundtracks remain safely Soundtrack-only and can be promoted from the Credit editor.';
+                        : ' Album promotion did not complete; published MediaTracks remain safely MediaTrack-only and can be promoted from the Credit editor.';
                 }
             }
         }
@@ -3166,7 +3265,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
             .filter((outcome) => outcome.audioTrackId)
             .map((outcome) => `${outcome.audioTrackId}: upload=${outcome.uploadStatus}, publication=${outcome.publicationStatus}`)
             .join('; ');
-        const message = `${uploadedTrackIds.length} audio track${uploadedTrackIds.length === 1 ? '' : 's'} uploaded; ${publication.readyCount} published.${uploadFailureCount > 0 ? ` ${uploadFailureCount} file${uploadFailureCount === 1 ? '' : 's'} failed upload validation or storage.` : ''}${publicationFailureCount > 0 ? ` ${publicationFailureCount} publication${publicationFailureCount === 1 ? '' : 's'} failed and can be retried without another upload.` : ''}${cleanupPendingCount > 0 ? ` ${cleanupPendingCount} upload${cleanupPendingCount === 1 ? '' : 's'} require storage reconciliation or cleanup.` : ''}${promotionMessage}${itemSummary ? ` ${itemSummary}` : ''}`;
+        const message = `${uploadedTrackIds.length} Audio MediaTrack${uploadedTrackIds.length === 1 ? '' : 's'} uploaded; ${publication.readyCount} published.${uploadFailureCount > 0 ? ` ${uploadFailureCount} file${uploadFailureCount === 1 ? '' : 's'} failed upload validation or storage.` : ''}${publicationFailureCount > 0 ? ` ${publicationFailureCount} publication${publicationFailureCount === 1 ? '' : 's'} failed and can be retried without another upload.` : ''}${cleanupPendingCount > 0 ? ` ${cleanupPendingCount} upload${cleanupPendingCount === 1 ? '' : 's'} require storage reconciliation or cleanup.` : ''}${promotionMessage}${itemSummary ? ` ${itemSummary}` : ''}`;
         if (req.get('X-Requested-With') === 'XMLHttpRequest') {
             return res.status(uploadedTrackIds.length > 0 ? 200 : 422).json({
                 message,
@@ -3277,7 +3376,7 @@ export const removeArtistAlbumWeb = async (req: Request, res: Response, next: Ne
         if (!artistValidation.valid) return redirectWithMessage(res, artistValidation.message!);
         if (!albumValidation.valid) return redirectWithMessage(res, albumValidation.message!);
         await removeAlbumPrimaryArtistCredit(albumId, artistId);
-        const message = 'Album primary Artist Credit removed. The Album and its Soundtracks were not deleted.';
+        const message = 'Album primary Artist Credit removed. The Album and its MediaTracks were not deleted.';
         return res.redirect(`/content/manage?view=catalog&prefillType=artist&prefillId=${encodeURIComponent(artistId)}&message=${encodeURIComponent(message)}#artist-albums`);
     } catch (error) {
         return next(error);
@@ -3316,7 +3415,7 @@ export const linkTrackToArtistWeb = async (req: Request, res: Response, next: Ne
             order: 0
         });
 
-        return redirectWithMessage(res, 'Soundtrack Artist Credit linked successfully.');
+        return redirectWithMessage(res, 'MediaTrack Artist Credit linked successfully.');
     } catch (error) {
         return next(error);
     }

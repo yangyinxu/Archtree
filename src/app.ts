@@ -22,6 +22,7 @@ import { getHealth } from './controllers/healthController';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
 import { maxAvatarUploadMb, maxImageUploadMb } from './middleware/imageUpload';
+import { maxVideoUploadMb } from './middleware/videoUpload';
 import { applySecurityHeaders } from './middleware/securityHeadersMiddleware';
 import {
   requireStrictSameOriginBrowserMutation,
@@ -169,7 +170,7 @@ export const renderLandingActions = (
       : '';
     const adminHeroActions = auth.role === 'admin'
       ? `<a class="button" href="/content/manage">Open Content Manager</a>
-        <a class="button button--secondary" href="/content/manage/audio-tracks">Browse audio tracks</a>`
+        <a class="button button--secondary" href="/content/manage/audio-tracks">Browse MediaTracks</a>`
       : '';
     return {
       headerActions: `<div class="header-actions">
@@ -287,6 +288,8 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
         ? `Avatar is too large. The maximum size is ${maxAvatarUploadMb} MB.`
         : error?.field === 'coverArtFile'
           ? `Cover art is too large. The maximum size is ${maxImageUploadMb} MB.`
+          : error?.field === 'videoFile'
+            ? `Video is too large. The maximum size is ${maxVideoUploadMb} MB.`
           : `Audio file is too large. The maximum size per file is ${maxAudioUploadMb} MB.`
       : isTooManyFiles
         ? 'Too many files were included in this upload.'

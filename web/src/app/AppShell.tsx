@@ -18,6 +18,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { SearchQueryProvider, useSearchQuery } from '../features/search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
 import { RouteAnnouncer } from './RouteAnnouncer';
+import { playerStore, usePlayer } from '../player';
 import styles from './AppShell.module.css';
 
 const destinations: Array<{ label: string; path: string; icon: IconName }> = [
@@ -36,6 +37,7 @@ const NowPlayingAside = lazy(() => import('../components/NowPlayingAside').then(
 const PlayerBar = lazy(() => import('../components/PlayerBar').then((module) => ({
   default: module.PlayerBar
 })));
+const VideoTheater = lazy(() => import('../components/VideoTheater'));
 
 /** Activates the shell skip link without changing the routed URL. */
 const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -110,7 +112,7 @@ const TopSearch = () => {
       >
         <Icon name="search" />
       </button>
-      <label className="visually-hidden" htmlFor="shell-search">Search artists, organizations, albums, and soundtracks</label>
+      <label className="visually-hidden" htmlFor="shell-search">Search artists, organizations, albums, and MediaTracks</label>
       <input
         enterKeyHint="search"
         id="shell-search"
@@ -153,6 +155,9 @@ const AppShellContent = () => {
   const [nowPlayingOpen, setNowPlayingOpen] = useState(true);
   const [widePanelResizersEnabled, setWidePanelResizersEnabled] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
+  const player = usePlayer(playerStore);
+  const videoPlaying = player.currentItem?.mediaType === 'video';
+  const effectiveNowPlayingOpen = videoPlaying || nowPlayingOpen;
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') {
@@ -170,7 +175,8 @@ const AppShellContent = () => {
   return (
     <div
       className={styles.shell}
-      data-now-playing-open={nowPlayingOpen}
+      data-now-playing-open={effectiveNowPlayingOpen}
+      data-video-playing={videoPlaying || undefined}
       ref={shellRef}
     >
       <a className={styles.skipLink} href="#main-content" onClick={skipToMainContent}>Skip to main content</a>
@@ -210,24 +216,36 @@ const AppShellContent = () => {
         )}
       </aside>
 
-      {widePanelResizersEnabled && (
+      {widePanelResizersEnabled && !videoPlaying && (
         <Suspense fallback={null}>
           <ShellPanelResizers nowPlayingOpen={nowPlayingOpen} shellRef={shellRef} />
         </Suspense>
       )}
 
       <div className={styles.workspace}>
-        <main className={styles.main} id="main-content" tabIndex={-1}>
+        <main
+          aria-hidden={videoPlaying || undefined}
+          className={styles.main}
+          data-obscured={videoPlaying || undefined}
+          id="main-content"
+          inert={videoPlaying ? true : undefined}
+          tabIndex={-1}
+        >
           <Outlet />
         </main>
+        {videoPlaying && (
+          <Suspense fallback={<div className={styles.videoLoading} aria-hidden="true" />}>
+            <VideoTheater />
+          </Suspense>
+        )}
       </div>
 
       <aside
-        aria-hidden={!nowPlayingOpen || undefined}
+        aria-hidden={!effectiveNowPlayingOpen || undefined}
         aria-label="Now Playing details"
         className={styles.nowPlayingSlot}
         id="now-playing-aside"
-        inert={!nowPlayingOpen ? true : undefined}
+        inert={!effectiveNowPlayingOpen ? true : undefined}
       >
         <Suspense fallback={<div className={styles.asideLoading} aria-hidden="true" />}>
           <NowPlayingAside />
@@ -237,8 +255,10 @@ const AppShellContent = () => {
       <div className={styles.playerSlot}>
         <Suspense fallback={<div className={styles.playerLoading} aria-hidden="true" />}>
           <PlayerBar
-            nowPlayingOpen={nowPlayingOpen}
-            onToggleNowPlaying={() => setNowPlayingOpen((open) => !open)}
+            nowPlayingOpen={effectiveNowPlayingOpen}
+            onToggleNowPlaying={videoPlaying
+              ? undefined
+              : () => setNowPlayingOpen((open) => !open)}
           />
         </Suspense>
       </div>

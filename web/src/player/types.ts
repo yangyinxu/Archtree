@@ -7,6 +7,7 @@ export interface PlayerQueueItem {
   artworkUrl: string;
   artistNames: readonly string[];
   displayByline?: string;
+  mediaType: 'audio' | 'video';
   streamUrl: string;
 }
 
@@ -47,6 +48,8 @@ export interface PlayerSnapshot {
   currentItem: PlayerQueueItem | null;
   /** Item natural completion will make current, including Shuffle and Repeat semantics. */
   upNextItem: PlayerQueueItem | null;
+  /** Remaining items in actual playback order for queue presentation. */
+  upNextItems: readonly PlayerQueueItem[];
   status: PlayerStatus;
   isBuffering: boolean;
   currentTime: number;
@@ -64,7 +67,7 @@ export interface PlayerLaunchOptions {
   autoplay?: boolean;
 }
 
-/** Minimal audio boundary implemented by HTMLAudioElement and deterministic test fakes. */
+/** Minimal media boundary implemented by HTMLVideoElement and deterministic test fakes. */
 export interface PlayerAudio {
   src: string;
   readonly currentSrc?: string;
@@ -77,6 +80,8 @@ export interface PlayerAudio {
   readonly error: { code: number } | null;
   readonly playbackRate: number;
   preload?: string;
+  poster?: string;
+  playsInline?: boolean;
   play(): Promise<void>;
   pause(): void;
   load(): void;
@@ -159,5 +164,7 @@ export interface PlayerStore {
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
   toggleMute(): void;
+  /** Attaches the one shared video element to a presentation-owned surface. */
+  attachMediaElement(container: HTMLElement): () => void;
   destroy(): void;
 }

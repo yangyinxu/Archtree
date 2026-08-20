@@ -4,10 +4,12 @@ import { getDb } from '../infrastructure/database';
 import { resolvedCoverArtUrl } from '../utils/coverArt';
 import { escapeRegex } from '../utils/search';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import {
-    isAudioObjectKeyForTrack,
-    readyAudioStorageFilter
-} from '../utils/audioStorageKey';
+    activeMediaObjectKeyForTrack,
+    activeMediaTypeForTrack,
+    type MediaType
+} from '../utils/mediaStorageKey';
 import {
     isReadyArtistLifecycle,
     readyArtistLifecycleFilter
@@ -77,6 +79,8 @@ export interface PublicAudioTrack {
     releaseDate: PublicSimpleDate | null;
     duration: string | null;
     format: { type: string; bitrate?: number } | null;
+    mediaType: MediaType;
+    streamUrl: string;
     credits?: PublicCatalogCredit[];
     displayByline?: string;
     attributionStatus?: AttributionStatus;
@@ -133,6 +137,9 @@ const audioTrackProjection = {
     format: 1,
     uploadStatus: 1,
     s3Key: 1,
+    mediaType: 1,
+    contentType: 1,
+    videoAsset: 1,
     credits: 1,
     attributionStatus: 1
 };
@@ -266,7 +273,7 @@ export const isReadyPublicAudioTrack = (track: any) =>
     track?.uploadStatus === 'ready'
     && (!Object.prototype.hasOwnProperty.call(track ?? {}, 'publicationStatus')
         || track?.publicationStatus === 'ready')
-    && isAudioObjectKeyForTrack(track?.s3Key, String(track?._id ?? ''));
+    && Boolean(activeMediaObjectKeyForTrack(track));
 
 /** Projects one Artist without provenance, storage, or unrelated database fields. */
 export const toPublicArtist = (
@@ -282,7 +289,7 @@ export const toPublicArtist = (
     birthDate: publicDate(artist?.birthDate)
 });
 
-/** Projects one Album while omitting references to unavailable Soundtracks. */
+/** Projects one Album while omitting references to unavailable MediaTracks. */
 export const toPublicAlbum = (
     album: any,
     readyAudioTrackIds: readonly string[] = [],
@@ -296,7 +303,7 @@ export const toPublicAlbum = (
     ...publicCreditFields(album, subjectNames)
 });
 
-/** Projects one ready Soundtrack to the legacy Web/iOS-compatible public DTO. */
+/** Projects one ready MediaTrack to the legacy Web/iOS-compatible public DTO. */
 export const toPublicAudioTrack = (
     track: any,
     album?: any,
@@ -319,6 +326,8 @@ export const toPublicAudioTrack = (
         releaseDate: publicDate(track?.releaseDate),
         duration: normalizedText(track?.duration) || null,
         format: publicFormat(track?.format),
+        mediaType: activeMediaTypeForTrack(track),
+        streamUrl: `/content/mediaTrack/stream/${encodeURIComponent(String(track._id))}`,
         ...publicCreditFields(track, subjectNames)
     };
 };
@@ -459,7 +468,7 @@ const loadReadyAlbumTrackIds = async (
     }));
 };
 
-/** Adds only ready, database-confirmed Soundtrack references to public Albums. */
+/** Adds only ready, database-confirmed MediaTrack references to public Albums. */
 export const projectPublicAlbums = async (
     albums: any[],
     dependencies: PublicAlbumProjectionDependencies = {}
@@ -476,7 +485,7 @@ export const projectPublicAlbums = async (
     ));
 };
 
-/** Filters and projects Soundtracks, deriving Album artwork without exposing IDs for assets. */
+/** Filters and projects MediaTracks, deriving Album artwork without exposing IDs for assets. */
 export const projectPublicAudioTracks = async (tracks: any[]) => {
     const readyTracks = tracks.filter(isReadyPublicAudioTrack);
     const albumIds = uniqueObjectIdStrings(readyTracks.map((track) => track?.albumId));

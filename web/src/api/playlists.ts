@@ -56,13 +56,13 @@ export const playlistItemSchema = z.object({
   audioTrack: audioTrackSummarySchema.nullable()
 }).strict().superRefine((item, context) => {
   if (item.availability === 'ready' && !item.audioTrack) {
-    context.addIssue({ code: 'custom', message: 'A ready Playlist item requires a Soundtrack.' });
+    context.addIssue({ code: 'custom', message: 'A ready Playlist item requires a MediaTrack.' });
   }
   if (item.availability === 'unavailable' && item.audioTrack) {
-    context.addIssue({ code: 'custom', message: 'An unavailable Playlist item cannot expose a Soundtrack.' });
+    context.addIssue({ code: 'custom', message: 'An unavailable Playlist item cannot expose a MediaTrack.' });
   }
   if (item.audioTrack && item.audioTrack.id !== item.audioTrackId) {
-    context.addIssue({ code: 'custom', message: 'Playlist item identity does not match its Soundtrack.' });
+    context.addIssue({ code: 'custom', message: 'Playlist item identity does not match its MediaTrack.' });
   }
 });
 
@@ -96,7 +96,7 @@ export const playlistMembershipPageSchema = z.object({
   items: z.array(playlistMembershipSchema).min(1).max(50)
 }).strict().superRefine((page, context) => {
   if (new Set(page.items.map((item) => item.audioTrackId)).size !== page.items.length) {
-    context.addIssue({ code: 'custom', message: 'Soundtrack membership rows must be unique.' });
+    context.addIssue({ code: 'custom', message: 'MediaTrack membership rows must be unique.' });
   }
 });
 
@@ -261,7 +261,7 @@ export const getPlaylistMemberships = (
   const ids = [...new Set(audioTrackIds.map((audioTrackId) => playlistIdSchema.parse(audioTrackId)))]
     .sort();
   if (ids.length < 1 || ids.length > 50) {
-    throw new Error('Playlist membership lookup requires between 1 and 50 Soundtrack IDs.');
+    throw new Error('Playlist membership lookup requires between 1 and 50 MediaTrack IDs.');
   }
   const parameters = new URLSearchParams({ audioTrackIds: ids.join(',') });
   return apiRequest(

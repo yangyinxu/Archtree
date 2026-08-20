@@ -15,7 +15,11 @@ over the desktop player cannot move the application shell while the main content
 remains independently scrollable. Player coverage includes persisted
 Shuffle/Repeat state, hover-only seek preview, release-time pointer seeking,
 keyboard seeking, 24 px seek hit targets, and axe scans of the expanded mobile
-player and shortcut-help layers. Responsive-shell coverage verifies the exact
+player and shortcut-help layers. Video coverage must additionally verify one
+shared media element, automatic Audio browse and Video theater presentations,
+Audio-to-Video and Video-to-Audio queue transitions, a full right-side Video
+queue, recoverable failure without a fabricated fallback, no media-mode switch,
+and no duplicate activity write. Responsive-shell coverage verifies the exact
 1008, 1007, 800, 799, 768, and 767 px panel boundaries, the 72 px compact
 Library rail, delayed Now Playing dismissal, the narrow Album hero, and player
 identity while the real Now Playing control closes and restores the pane.
@@ -23,17 +27,19 @@ Search coverage verifies cancellable debounced result previews without history
 writes, explicit history commits, and committed query restoration through
 browser Back and Forward.
 
-The current local uncommitted candidate's 2026-08-19 Web presentation amendment
-passes 280/280 server tests, 208/208 Web unit/component tests, both production
-builds, and E2E TypeScript. A focused strict Chromium gate passes all 34 visual,
-responsive-shell, touch-orientation, and accessibility checks, including eight
-reviewed `toHaveScreenshot` golden comparisons without snapshot updates. The
-full local three-engine matrix completed with 199 passes and 10 documented
-capability-specific skips; one unrelated Chromium Archtree logout-header
-assertion was classified flaky, and its isolated CI rerun passed. A clean
+The current local uncommitted candidate's 2026-08-19 MediaTrack amendment passes
+304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
+tests, both production builds, and E2E TypeScript. The focused Audio/Video
+continuity, responsive-shell, and accessibility Chromium gate passes 24/24;
+the reviewed visual suite then passes 10/10 in strict no-update mode. Firefox
+and WebKit complete with 130 passes and 10 documented Chromium-owned skips.
+The full Chromium run completes all 70 cases with 69 stable passes and the
+pre-existing Archtree logout-header timing assertion passing its automatic
+retry; because CI deliberately fails on flaky tests, that command remains
+non-zero even though the same assertion passes an isolated CI rerun. A clean
 commit-identified CI matrix remains required before release. The largest
-initial route is Playlist Detail at 148.2 KiB gzip against the 150 KiB budget;
-CSS is 26.9 KiB gzip against the 32 KiB budget, and the build ships no bundled
+initial route is Playlist Detail at 148.4 KiB gzip against the 150 KiB budget;
+CSS is 28.3 KiB gzip against the 32 KiB budget, and the build ships no bundled
 font or image payload. CI repeats the browser gate through
 `.github/workflows/finitude-web-release.yml`; the platform-scoped path prevents
 Linux CI from silently comparing against macOS font rendering. A separately
@@ -47,7 +53,9 @@ media-store suite is a separate release gate.
 
 ## Media Range load evidence
 
-`npm run test:media-load` provides a bounded workload for ready audio tracks,
+`npm run test:media-load` provides a bounded workload for ready Audio and Video
+MediaTracks through the same canonical
+stream route,
 fixed-width public WebP artwork, overlapping seek cancellation, and
 media-health recovery. Artwork checks cycle through every supported width and
 verify content type, length, ETag, and mandatory cache revalidation. The command
@@ -112,10 +120,18 @@ player control still works.
   text is not searched or submitted before the candidate is committed.
 - Confirm focus is visible, follows route changes sensibly, remains trapped in
   modal dialogs, and returns to the invoking control when a dialog closes.
-- Start Album playback, select an individual Soundtrack, use Previous/Next,
+- Start Album playback, select an individual MediaTrack, use Previous/Next,
   cycle Shuffle and Repeat Off/All/One, and confirm Previous restarts the
-  current soundtrack at or after three seconds but otherwise follows actual
+  current MediaTrack at or after three seconds but otherwise follows actual
   playback history.
+- Start an Audio MediaTrack and confirm the current browse route remains
+  visible. Start a Video MediaTrack and confirm the same player automatically
+  moves into the central theater, the right panel shows the full playback
+  order beginning with Up Next, and no Audio/Video or cover-only switch is
+  present. Advance Video → Audio → Video and confirm elapsed time, queue,
+  Shuffle, and Repeat remain owned by one player while the presentation follows
+  each item. A simulated Video failure must remain recoverable without
+  fabricating an Audio fallback.
 - Hover the seek track without changing playback, commit pointer seeking only
   on release, seek by keyboard, change volume, mute, open keyboard help, and
   recover from a stream failure without a gesture-only dependency.
@@ -124,7 +140,7 @@ player control still works.
 - Confirm signed-out New Playlist remains visible, announces the sign-in
   requirement, and does not open Login automatically.
 - With a signed-in listener, create and rename a Playlist, add multiple
-  Soundtracks, reject a duplicate without moving it, use Move Up/Down, start
+  MediaTracks, reject a duplicate without moving it, use Move Up/Down, start
   playback from the middle, remove one member, and delete the Playlist. Confirm
   the active queue remains unchanged after the source Playlist is edited or
   deleted.
@@ -167,7 +183,7 @@ background parity.
   playback defect in the manual matrix.
 - Full-stack E2E passes against an isolated Mongo database and a
   production-equivalent media store.
-- Playlist owner isolation, account deletion, Soundtrack-reference cleanup,
+- Playlist owner isolation, account deletion, MediaTrack-reference cleanup,
   idempotency replay, stale-revision recovery, and maximum-size behavior pass
   against a transactional Mongo replica set.
 - Current and previous branded-browser results are attached to the release.
