@@ -1,6 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 
-import { createTestTone } from '../fixtures/audio';
+import { createTestTone, createTestVideo } from '../fixtures/audio';
 import {
   catalogIds,
   expandedAlbumFixture,
@@ -58,44 +58,48 @@ const parseRange = (header: string, size: number) => {
   return { start, end: Math.min(requestedEnd, size - 1) };
 };
 
-const fulfillAudio = async (route: Route, tone: Buffer) => {
+const fulfillMedia = async (
+  route: Route,
+  media: Buffer,
+  contentType: 'audio/wav' | 'video/webm'
+) => {
   const request = route.request();
   const headers: Record<string, string> = {
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-store, no-transform',
-    'Content-Type': 'audio/wav'
+    'Content-Type': contentType
   };
 
   if (request.method() === 'HEAD') {
-    headers['Content-Length'] = String(tone.length);
+    headers['Content-Length'] = String(media.length);
     await route.fulfill({ status: 200, headers });
     return;
   }
 
   const rangeHeader = request.headers().range;
   if (!rangeHeader) {
-    headers['Content-Length'] = String(tone.length);
-    await route.fulfill({ status: 200, headers, body: tone });
+    headers['Content-Length'] = String(media.length);
+    await route.fulfill({ status: 200, headers, body: media });
     return;
   }
 
-  const range = parseRange(rangeHeader, tone.length);
+  const range = parseRange(rangeHeader, media.length);
   if (!range) {
     await route.fulfill({
       status: 416,
-      headers: { ...headers, 'Content-Range': `bytes */${tone.length}` },
+      headers: { ...headers, 'Content-Range': `bytes */${media.length}` },
       body: ''
     });
     return;
   }
 
-  const body = tone.subarray(range.start, range.end + 1);
+  const body = media.subarray(range.start, range.end + 1);
   await route.fulfill({
     status: 206,
     headers: {
       ...headers,
       'Content-Length': String(body.length),
-      'Content-Range': `bytes ${range.start}-${range.end}/${tone.length}`
+      'Content-Range': `bytes ${range.start}-${range.end}/${media.length}`
     },
     body
   });
@@ -111,6 +115,7 @@ const isApplicationRequest = (pathname: string) => [
 export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture> => {
   const fixture: BrowserApiFixture = { calls: [], unhandled: [] };
   const tone = createTestTone();
+  const video = createTestVideo();
 
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -170,9 +175,9 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
     }
     if ((call.method === 'GET' || call.method === 'HEAD')
       && call.pathname.startsWith('/content/mediaTrack/stream/')) {
-      // A deterministic decodable tone exercises both MediaTrack presentations;
-      // MP4 structure and MIME validation remain server-owned test concerns.
-      await fulfillAudio(route, tone);
+      // Exercise the browser element selected by each MediaTrack's canonical type.
+      const isVideo = call.pathname === `/content/mediaTrack/stream/${catalogIds.firstTrack}`;
+      await fulfillMedia(route, isVideo ? video : tone, isVideo ? 'video/webm' : 'audio/wav');
       return;
     }
 

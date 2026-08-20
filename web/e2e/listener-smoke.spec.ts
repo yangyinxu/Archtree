@@ -83,7 +83,10 @@ test('logs out from Archtree without visiting Finitude', async ({ page }) => {
     document.body.append(form);
   });
 
-  await page.getByRole('button', { name: 'Log out' }).click();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    page.getByRole('button', { name: 'Log out' }).click()
+  ]);
 
   await expect(page).toHaveURL(/\/$/);
   expect(requestHeaders['x-finitude-account-viewer']).toBe('listener-1');
@@ -162,7 +165,7 @@ test('previews seek position and commits pointer or keyboard changes at the expe
   await controls.getByRole('button', { name: 'Pause' }).click();
   await expect(controls.getByRole('button', { name: 'Play' })).toBeVisible();
   await expect(slider).toBeEnabled();
-  await expect(slider).toHaveAttribute('max', '15');
+  await expect.poll(async () => Number(await slider.getAttribute('max'))).toBeCloseTo(15, 0);
 
   // WebKit may deliver one final timeupdate after pause; establish a settled
   // baseline so that this test measures pointer-preview behavior, not media timing.

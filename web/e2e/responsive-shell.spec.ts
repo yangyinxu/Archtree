@@ -69,9 +69,10 @@ test('prioritizes the compact left rail before dismissing Now Playing', async ({
   await installPrivateListenerRoutes(page);
   await page.goto('/finitude');
   await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
+  const libraryHeading = page.getByText('Your Library', { exact: true }).locator('..');
 
   await page.setViewportSize({ width: 1_008, height: 900 });
-  await expect(page.getByText('Your Library', { exact: true })).toBeVisible();
+  await expect(libraryHeading).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Now Playing details' })).toBeVisible();
   await waitForExpandedShell(page);
   const expanded = await readShellBoxes(page);
@@ -84,7 +85,7 @@ test('prioritizes the compact left rail before dismissing Now Playing', async ({
   expectNear(expanded.right.right, 1_000);
 
   await page.setViewportSize({ width: 1_007, height: 900 });
-  await expect(page.getByText('Your Library', { exact: true })).toBeHidden();
+  await expect(libraryHeading).toBeHidden();
   const compactPlaylist = page.getByRole('complementary', { name: 'Finitude Library' })
     .getByRole('link', {
       name: `${privatePlaylistSummary.name}, ${privatePlaylistSummary.itemCount} MediaTracks`
