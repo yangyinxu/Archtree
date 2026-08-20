@@ -1,5 +1,11 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import {
+    legacyAlbumArtistIdsFromCredits,
+    legacyTrackArtistIdsFromCredits,
+    normalizeCatalogCredits,
+    validateAttribution
+} from '../models/catalogCredit';
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
@@ -34,6 +40,7 @@ export const reconcileContentReferences = async () => {
         albums,
         tracks,
         artists,
+        organizations,
         carousels,
         contentCollections,
         pages,
@@ -41,18 +48,31 @@ export const reconcileContentReferences = async () => {
         activities,
         users,
         playlists,
-        accountMutations
+        accountMutations,
+        workflowOperations
     ] = await Promise.all([
-        db.collection('albums').find().project({ _id: 1, lifecycleStatus: 1 })
+        db.collection('albums').find().project({
+            _id: 1,
+            lifecycleStatus: 1,
+            credits: 1,
+            attributionStatus: 1,
+            creditRevision: 1
+        })
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
         db.collection('audioTracks').find().project({
             albumId: 1,
             uploadStatus: 1,
             publicationStatus: 1,
             referenceCleanupStatus: 1,
-            referenceCleanupUpdatedAt: 1
+            referenceCleanupUpdatedAt: 1,
+            credits: 1,
+            attributionStatus: 1,
+            creditRevision: 1,
+            artistIds: 1
         }).sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
-        db.collection('artists').find().project({ _id: 1 })
+        db.collection('artists').find().project({ _id: 1, albumIds: 1, lifecycleStatus: 1 })
+            .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
+        db.collection('organizations').find().project({ _id: 1, lifecycleStatus: 1 })
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
         db.collection('carousels').find().project({ mode: 1 })
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
@@ -76,12 +96,24 @@ export const reconcileContentReferences = async () => {
             'response.playlistId': 1,
             'response.kind': 1,
             'response.statusCode': 1
-        }).sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray()
+        }).sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
+        db.collection('contentWorkflowOperations').find().project({
+            adminUserId: 1,
+            status: 1,
+            steps: 1,
+            artistId: 1,
+            albumId: 1,
+            carouselId: 1,
+            pageSlug: 1,
+            leaseUntil: 1,
+            updatedAt: 1
+        }).sort({ updatedAt: -1, _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray()
     ]);
     const sourceCollectionsTruncated = [
         albums,
         tracks,
         artists,
+        organizations,
         carousels,
         contentCollections,
         pages,
@@ -89,11 +121,13 @@ export const reconcileContentReferences = async () => {
         activities,
         users,
         playlists,
-        accountMutations
+        accountMutations,
+        workflowOperations
     ].some((items) => items.length > limit);
     const scannedTracks = tracks.slice(0, limit);
     const scannedAlbums = albums.slice(0, limit);
     const scannedArtists = artists.slice(0, limit);
+    const scannedOrganizations = organizations.slice(0, limit);
     const scannedCarousels = carousels.slice(0, limit);
     const scannedContentCollections = contentCollections.slice(0, limit);
     const scannedPages = pages.slice(0, limit);
@@ -101,9 +135,17 @@ export const reconcileContentReferences = async () => {
     const scannedActivities = activities.slice(0, limit);
     const scannedPlaylists = playlists.slice(0, limit);
     const scannedAccountMutations = accountMutations.slice(0, limit);
+    const scannedWorkflowOperations = workflowOperations.slice(0, limit);
     const albumSet = new Set(scannedAlbums.map((item) => String(item._id)));
     const trackSet = new Set(scannedTracks.map((item) => String(item._id)));
     const artistSet = new Set(scannedArtists.map((item) => String(item._id)));
+    const organizationSet = new Set(scannedOrganizations.map((item) => String(item._id)));
+    const readyCreditArtistSet = new Set(scannedArtists
+        .filter((item) => item.lifecycleStatus === undefined || item.lifecycleStatus === 'ready')
+        .map((item) => String(item._id)));
+    const readyCreditOrganizationSet = new Set(scannedOrganizations
+        .filter((item) => item.lifecycleStatus === undefined || item.lifecycleStatus === 'ready')
+        .map((item) => String(item._id)));
     const carouselSet = new Set(scannedCarousels.map((item) => String(item._id)));
     const contentCollectionsById = new Map(scannedContentCollections.map((item) => [
         String(item._id),
@@ -622,7 +664,7 @@ export const reconcileContentReferences = async () => {
             }
             const canonicalMembers = referencesFor(albumTrackReferences, albumId)
                 .map(canonicalObjectId)
-                .filter((id): id is string => Boolean(id));
+                .filter((id: string | undefined): id is string => Boolean(id));
             const album = albumsById.get(albumId);
             const isTrueLegacyFallback = album?.lifecycleStatus === undefined
                 && canonicalMembers.length === 0;
@@ -913,6 +955,177 @@ export const reconcileContentReferences = async () => {
         }
     }
 
+    const artistsByLegacyAlbumId = new Map<string, string[]>();
+    for (const artist of scannedArtists) {
+        const artistId = canonicalObjectId(artist._id);
+        if (!artistId) continue;
+        for (const albumIdValue of Array.isArray(artist.albumIds) ? artist.albumIds : []) {
+            const albumId = canonicalObjectId(albumIdValue);
+            if (!albumId) continue;
+            const members = artistsByLegacyAlbumId.get(albumId) ?? [];
+            if (!members.includes(artistId)) members.push(artistId);
+            artistsByLegacyAlbumId.set(albumId, members);
+        }
+    }
+    const catalogCreditFindings: Array<{
+        ownerType: 'album' | 'audioTrack';
+        ownerId: string;
+        reason: string;
+        creditId?: string;
+        subjectId?: string;
+    }> = [];
+    const auditCreditOwner = (ownerType: 'album' | 'audioTrack', owner: any) => {
+        const ownerId = canonicalObjectId(owner._id) ?? String(owner._id);
+        const hasCreditState = Object.prototype.hasOwnProperty.call(owner, 'credits')
+            || Object.prototype.hasOwnProperty.call(owner, 'attributionStatus')
+            || Object.prototype.hasOwnProperty.call(owner, 'creditRevision');
+        if (!hasCreditState) return;
+        const rawCredits = Array.isArray(owner.credits) ? owner.credits : owner.credits;
+        if (Array.isArray(rawCredits) && rawCredits.some((credit: any, index: number) =>
+            credit?.order !== index)) {
+            appendFinding(catalogCreditFindings, { ownerType, ownerId, reason: 'invalidOrder' });
+        }
+        let credits: ReturnType<typeof normalizeCatalogCredits>;
+        try {
+            credits = normalizeCatalogCredits(rawCredits);
+            validateAttribution(owner.attributionStatus, credits);
+        } catch {
+            appendFinding(catalogCreditFindings, { ownerType, ownerId, reason: 'invalidCreditState' });
+            return;
+        }
+        for (const credit of credits) {
+            const readySubjects = credit.subjectType === 'artist'
+                ? readyCreditArtistSet
+                : readyCreditOrganizationSet;
+            const knownSubjects = credit.subjectType === 'artist' ? artistSet : organizationSet;
+            if (!knownSubjects.has(credit.subjectId)) {
+                appendFinding(catalogCreditFindings, {
+                    ownerType,
+                    ownerId,
+                    reason: 'missingSubject',
+                    creditId: credit.creditId,
+                    subjectId: credit.subjectId
+                });
+            } else if (!readySubjects.has(credit.subjectId)) {
+                appendFinding(catalogCreditFindings, {
+                    ownerType,
+                    ownerId,
+                    reason: 'unavailableSubject',
+                    creditId: credit.creditId,
+                    subjectId: credit.subjectId
+                });
+            }
+        }
+        if (ownerType === 'audioTrack') {
+            const expected = legacyTrackArtistIdsFromCredits(credits);
+            const actual = (Array.isArray(owner.artistIds) ? owner.artistIds : [])
+                .map(canonicalObjectId)
+                .filter((id: string | undefined): id is string => Boolean(id));
+            if (expected.length !== actual.length
+                || expected.some((id, index) => id !== actual[index])) {
+                appendFinding(catalogCreditFindings, {
+                    ownerType,
+                    ownerId,
+                    reason: 'legacyProjectionMismatch'
+                });
+            }
+        } else {
+            const expected = [...legacyAlbumArtistIdsFromCredits(credits)].sort();
+            const actual = [...(artistsByLegacyAlbumId.get(ownerId) ?? [])].sort();
+            if (expected.length !== actual.length
+                || expected.some((id, index) => id !== actual[index])) {
+                appendFinding(catalogCreditFindings, {
+                    ownerType,
+                    ownerId,
+                    reason: 'legacyProjectionMismatch'
+                });
+            }
+        }
+    };
+    scannedAlbums.forEach((album) => auditCreditOwner('album', album));
+    scannedTracks.forEach((track) => auditCreditOwner('audioTrack', track));
+
+    const workflowTargetIds = (field: 'artistId' | 'albumId' | 'carouselId') => [
+        ...new Set(scannedWorkflowOperations
+            .map((operation) => canonicalObjectId(operation[field]))
+            .filter((id): id is string => Boolean(id)))
+    ];
+    const [workflowArtists, workflowAlbums, workflowCarousels] = await Promise.all([
+        workflowTargetIds('artistId').length > 0
+            ? db.collection('artists').find({
+                _id: { $in: workflowTargetIds('artistId').map((id) => new ObjectId(id)) }
+            }).project({ _id: 1 }).maxTimeMS(10_000).toArray()
+            : [],
+        workflowTargetIds('albumId').length > 0
+            ? db.collection('albums').find({
+                _id: { $in: workflowTargetIds('albumId').map((id) => new ObjectId(id)) }
+            }).project({ _id: 1 }).maxTimeMS(10_000).toArray()
+            : [],
+        workflowTargetIds('carouselId').length > 0
+            ? db.collection('carousels').find({
+                _id: { $in: workflowTargetIds('carouselId').map((id) => new ObjectId(id)) }
+            }).project({ _id: 1 }).maxTimeMS(10_000).toArray()
+            : []
+    ]);
+    const workflowArtistSet = new Set(workflowArtists.map((item) => String(item._id)));
+    const workflowAlbumSet = new Set(workflowAlbums.map((item) => String(item._id)));
+    const workflowCarouselSet = new Set(workflowCarousels.map((item) => String(item._id)));
+    const workflowPageItemsBySlug = new Map(scannedPages.map((page) => [
+        String(page.slug),
+        referencesFor(pageItemReferences, page._id)
+    ] as const));
+    const artistReleaseWorkflowFindings: Array<{
+        operationId: string;
+        reason: string;
+        targetId?: string;
+    }> = [];
+    for (const operation of scannedWorkflowOperations) {
+        const id = String(operation._id);
+        const status = String(operation.status ?? '');
+        if (status !== 'complete') {
+            appendFinding(artistReleaseWorkflowFindings, {
+                operationId: id,
+                reason: status === 'inProgress'
+                    && operation.leaseUntil instanceof Date
+                    && operation.leaseUntil.getTime() < Date.now()
+                    ? 'expiredLease'
+                    : 'incomplete'
+            });
+        }
+        const stepStates = Object.values(operation.steps ?? {}).map((step: any) => step?.status);
+        if (status === 'complete'
+            && stepStates.some((stepStatus) => stepStatus !== 'complete' && stepStatus !== 'skipped')) {
+            appendFinding(artistReleaseWorkflowFindings, {
+                operationId: id,
+                reason: 'invalidCompletedStepState'
+            });
+        }
+        for (const [field, set, reason] of [
+            ['artistId', workflowArtistSet, 'missingArtist'],
+            ['albumId', workflowAlbumSet, 'missingAlbum'],
+            ['carouselId', workflowCarouselSet, 'missingCarousel']
+        ] as const) {
+            const targetId = canonicalObjectId(operation[field]);
+            if (targetId && !set.has(targetId)) {
+                appendFinding(artistReleaseWorkflowFindings, { operationId: id, reason, targetId });
+            }
+        }
+        const pageSlug = String(operation.pageSlug ?? '');
+        const carouselId = canonicalObjectId(operation.carouselId);
+        if (status === 'complete' && pageSlug && carouselId) {
+            const pageItems = workflowPageItemsBySlug.get(pageSlug);
+            if (!pageItems?.some((item: any) =>
+                item?.itemType === 'carousel' && canonicalObjectId(item.carouselId) === carouselId
+            )) {
+                appendFinding(artistReleaseWorkflowFindings, {
+                    operationId: id,
+                    reason: 'pagePlacementMismatch',
+                    targetId: carouselId
+                });
+            }
+        }
+    }
+
     return {
         generatedAt: new Date(),
         readOnly: true,
@@ -940,6 +1153,8 @@ export const reconcileContentReferences = async () => {
         missingPlaylistOwners,
         stalledAudioTrackReferenceCleanup,
         invalidAccountMutationOwners,
-        invalidAccountMutationTargets
+        invalidAccountMutationTargets,
+        catalogCreditFindings,
+        artistReleaseWorkflowFindings
     };
 };

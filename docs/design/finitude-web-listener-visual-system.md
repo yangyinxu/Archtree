@@ -3,9 +3,10 @@
 ## Direction
 
 Finitude Web uses a dense, media-first dark interface informed by the supplied
-Web listener reference while retaining Finitude branding, the mint interaction
-accent, original components, and the product behavior in
-`../business-rules.md`.
+Web listener reference. Its neutral surfaces, interaction green, and
+typographic rhythm align with [Spotify's public design guidance](https://developer.spotify.com/documentation/design)
+while Finitude retains its own identity, original components, and product
+behavior in `../business-rules.md`.
 
 The reference governs information density, panel hierarchy, spacing rhythm,
 typographic proportions, media treatment, and motion quality. It does not add
@@ -46,11 +47,12 @@ friends, device handoff, lyrics, Smart Shuffle, or editable queue behavior.
 | Subtle text | `#8f8f8f` |
 | Hairline border | `rgb(255 255 255 / 0.10)` |
 | Strong border | `rgb(255 255 255 / 0.18)` |
-| Finitude accent | Mint family rooted at `#73d9ca` |
-| Focus | Bright mint with a non-color outline |
+| Interaction accent | Spotify green rooted at `#1ed760`; hover `#3be477` |
+| Accent foreground | `#000000` |
+| Focus | `#ffffff` outline, distinct from the green selected state |
 
-The accent communicates active, selected, saved, and focus states. It does not
-replace readable text or become the only indication of status.
+The accent communicates active, selected, and saved states. Focus uses the
+separate white outline and no status relies on color alone.
 
 ### Geometry
 
@@ -82,8 +84,13 @@ minimum, and preserve the 416 px central-pane minimum.
 
 ### Typography
 
-- Use a deterministic system stack with Latin, Chinese, Japanese, and emoji
-  fallbacks. Do not load a proprietary third-party font or an external font CDN.
+- Use the public Spotify fallback direction—Helvetica Neue, Helvetica, and
+  Arial—followed by deterministic Chinese, Japanese, and emoji system
+  fallbacks. Body and display roles share this stack so hierarchy comes from
+  scale and weight rather than an unrelated Avenir face.
+- Do not bundle or hotlink Spotify Mix, Circular, or another proprietary
+  third-party font. The Web listener is a legal system-font approximation, not
+  a copy of Spotify's proprietary typography files.
 - Roles are display, page title, section title, card title, body, metadata,
   caption, and control label.
 - Time and duration use tabular numerals.
@@ -156,6 +163,8 @@ The normal transition tokens are 120 ms for direct hover/control feedback and
   hover/focus, and do not lift the entire card or move its text.
 - Rows highlight across their complete surface, including trailing controls,
   without creating overlapping actions.
+- Primary play and pause glyphs are filled transport icons on the same solid
+  circular control surface, so state changes do not introduce a hollow glyph.
 - Carousel remains horizontal, Grid remains a grid, and List remains a
   single-column list at every breakpoint.
 - Menus and dialogs use raised dark surfaces, compact spacing, visible focus,

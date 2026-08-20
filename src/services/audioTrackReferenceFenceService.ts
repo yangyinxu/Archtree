@@ -8,7 +8,7 @@ export class AudioTrackReferenceUnavailableError extends Error {
     readonly code = 'audio_track_reference_unavailable';
 
     constructor() {
-        super('One or more ready Soundtracks are unavailable for new references.');
+        super('One or more ready MediaTracks are unavailable for new references.');
     }
 }
 
@@ -43,7 +43,7 @@ export const touchReadyAudioTrackReferences = async (
     return ids;
 };
 
-/** Commits ready-Soundtrack touches and the resulting reference mutation atomically. */
+/** Commits ready-MediaTrack touches and the resulting reference mutation atomically. */
 export const withReadyAudioTrackReferences = async <T>(
     audioTrackIds: readonly unknown[],
     mutation: (session: ClientSession, normalizedAudioTrackIds: string[]) => Promise<T>

@@ -1,4 +1,4 @@
-/** Allows only the legacy root key or a versioned key bound to one Soundtrack identity. */
+/** Allows only the legacy root key or a versioned key bound to one MediaTrack identity. */
 export const isAudioObjectKeyForTrack = (value: unknown, audioTrackId: string) => {
     if (typeof value !== 'string') return false;
     const normalizedTrackId = audioTrackId.toLowerCase();
@@ -8,7 +8,7 @@ export const isAudioObjectKeyForTrack = (value: unknown, audioTrackId: string) =
     return Boolean(match && match[1].toLowerCase() === normalizedTrackId);
 };
 
-/** Restricts MongoDB queries to a ready object bound to the row's `_id`. */
+/** Restricts MongoDB queries to one ready media object bound to the row and recorded kind. */
 export const readyAudioObjectFilter = {
     uploadStatus: 'ready',
     $expr: {
@@ -22,17 +22,48 @@ export const readyAudioObjectFilter = {
                         onNull: ''
                     }
                 },
-                trackId: { $toString: '$_id' }
+                trackId: { $toString: '$_id' },
+                mediaType: { $ifNull: ['$mediaType', 'audio'] }
             },
             in: {
                 $or: [
-                    { $eq: ['$$storageKey', '$$trackId'] },
                     {
                         $and: [
+                            { $eq: ['$$mediaType', 'audio'] },
+                            { $eq: ['$$storageKey', '$$trackId'] }
+                        ]
+                    },
+                    {
+                        $and: [
+                            { $eq: ['$$mediaType', 'audio'] },
                             {
                                 $regexMatch: {
                                     input: '$$storageKey',
                                     regex: /^audio\/[0-9a-f]{24}\/[0-9a-f]{24}$/i
+                                }
+                            },
+                            {
+                                $eq: [
+                                    {
+                                        $toLower: {
+                                            $arrayElemAt: [
+                                                { $split: ['$$storageKey', '/'] },
+                                                1
+                                            ]
+                                        }
+                                    },
+                                    '$$trackId'
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        $and: [
+                            { $eq: ['$$mediaType', 'video'] },
+                            {
+                                $regexMatch: {
+                                    input: '$$storageKey',
+                                    regex: /^video\/[0-9a-f]{24}\/[0-9a-f]{24}$/i
                                 }
                             },
                             {
@@ -64,7 +95,7 @@ export const publishedAudioTrackFilter = {
     ]
 } as const;
 
-/** Restricts public/reference queries to published, identity-bound ready audio. */
+/** Restricts public/reference queries to a published, identity-bound ready MediaTrack. */
 export const readyAudioStorageFilter = {
     ...readyAudioObjectFilter,
     ...publishedAudioTrackFilter

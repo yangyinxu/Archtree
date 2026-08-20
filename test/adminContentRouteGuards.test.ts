@@ -60,6 +60,46 @@ test('Content Manager applies its Web admin guards before every route handler', 
     );
 });
 
+test('Content Manager keeps metadata and relationships outside upload capacity', () => {
+    for (const path of [
+        '/artist/update-metadata',
+        '/artist/albums/add',
+        '/artist/albums/remove',
+        '/workflows/artist-release/retry',
+        '/organization/create',
+        '/organization/update',
+        '/organization/delete',
+        '/credits/add',
+        '/credits/remove',
+        '/credits/update-role',
+        '/credits/reorder',
+        '/credits/mark-unknown'
+    ]) {
+        assert.equal(
+            handlerNames(contentManagerRoutes, 'post', path).includes('contentManagerUploadRateLimit'),
+            false,
+            `${path} must not consume upload capacity`
+        );
+        assert.equal(
+            handlerNames(contentManagerRoutes, 'post', path).includes('uploadConcurrencyLimit'),
+            false,
+            `${path} must not occupy an upload slot`
+        );
+    }
+    assert.deepEqual(
+        handlerNames(contentManagerRoutes, 'post', '/artist/update-cover-art').slice(0, 2),
+        ['contentManagerUploadRateLimit', 'uploadConcurrencyLimit']
+    );
+    assert.deepEqual(
+        handlerNames(contentManagerRoutes, 'post', '/artist/albums/create').slice(0, 2),
+        ['contentManagerUploadRateLimit', 'uploadConcurrencyLimit']
+    );
+    assert.deepEqual(
+        handlerNames(contentManagerRoutes, 'post', '/workflows/artist-release').slice(0, 2),
+        ['contentManagerUploadRateLimit', 'uploadConcurrencyLimit']
+    );
+});
+
 test('catalog and audio mutations authorize admins before upload middleware', () => {
     for (const [method, path] of [
         ['post', '/album'],
@@ -133,6 +173,8 @@ test('feed reads stay public while post mutations require admins', () => {
     assert.equal(handlerNames(feedRoutes, 'get', '/posts').includes('requireAdmin'), false);
 });
 
-test('audio publication recovery is an explicitly guarded admin mutation', () => {
+test('audio storage remediation mutations are explicitly guarded for administrators', () => {
+    assertAdminRoute(adminRoutes, 'post', '/audio-storage/orphan-delete');
+    assertAdminRoute(adminRoutes, 'post', '/audio-storage/missing-track-delete');
     assertAdminRoute(adminRoutes, 'post', '/audio-storage/publication-retry');
 });

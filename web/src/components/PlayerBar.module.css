@@ -311,6 +311,11 @@
   width: min(72vw, 22rem);
 }
 
+.expandedVideo {
+  justify-self: center;
+  max-width: 30rem;
+}
+
 .expandedIdentity {
   min-width: 0;
 }
@@ -717,16 +722,20 @@
     max-width: 48rem;
   }
 
-  .expandedArtwork {
-    grid-row: 1 / -1;
-    width: min(32vh, 14rem);
-  }
-
+  .expandedModeSwitch,
   .expandedIdentity,
   .expandedTimeline,
   .expandedTransport,
-  .expandedVolume {
+  .expandedVolume,
+  .expandedError {
     grid-column: 2;
+  }
+
+  .expandedArtwork,
+  .expandedVideo {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    width: min(32vh, 14rem);
   }
 }
 

@@ -21,7 +21,7 @@ export const ARTWORK_VARIANT_WIDTHS = Object.freeze([
 export const HELP = `Finitude media Range load check
 
 Required:
-  MEDIA_LOAD_TRACK_IDS          Comma-separated ready audio-track ObjectIds.
+  MEDIA_LOAD_TRACK_IDS          Comma-separated ready Audio MediaTrack ObjectIds.
 
 Target safety:
   MEDIA_LOAD_BASE_URL           Defaults to http://127.0.0.1:8081.
@@ -29,6 +29,7 @@ Target safety:
   MEDIA_LOAD_ALLOWED_HOSTS      Exact comma-separated hostname allowlist for remote targets.
 
 Optional:
+  MEDIA_LOAD_VIDEO_TRACK_IDS    Comma-separated ready Video MediaTrack ObjectIds.
   MEDIA_LOAD_ARTWORK_IDS        Comma-separated public artwork ObjectIds.
   MEDIA_LOAD_CLIENTS            Concurrent listeners, default 4, maximum 32.
   MEDIA_LOAD_SEEK_CYCLES        Open-ended seek requests per listener, default 4.
@@ -152,6 +153,12 @@ export const loadConfiguration = (env = process.env) => {
         'MEDIA_LOAD_ARTWORK_IDS_REQUIRED',
         'MEDIA_LOAD_ARTWORK_IDS_INVALID'
     );
+    const videoTrackIds = parseObjectIds(
+        env.MEDIA_LOAD_VIDEO_TRACK_IDS,
+        false,
+        'MEDIA_LOAD_VIDEO_TRACK_IDS_REQUIRED',
+        'MEDIA_LOAD_VIDEO_TRACK_IDS_INVALID'
+    );
     const clients = parseBoundedInteger(
         env.MEDIA_LOAD_CLIENTS,
         4,
@@ -200,6 +207,8 @@ export const loadConfiguration = (env = process.env) => {
     ) + 1;
     const plannedMediaRequests = trackIds.length
         + clients * (3 + seekCycles)
+        + videoTrackIds.length
+        + (videoTrackIds.length > 0 ? clients * (3 + seekCycles) : 0)
         + artworkWorkload.length;
     const plannedRequestCeiling = plannedMediaRequests
         + 1
@@ -212,6 +221,7 @@ export const loadConfiguration = (env = process.env) => {
     return Object.freeze({
         origin,
         trackIds: Object.freeze(trackIds),
+        videoTrackIds: Object.freeze(videoTrackIds),
         artworkIds: Object.freeze(artworkIds),
         artworkWorkload: Object.freeze(artworkWorkload),
         clients,
@@ -341,6 +351,11 @@ const operationNames = [
     'rangeOpen',
     'rangeSuffix',
     'rangeInvalid',
+    'videoHead',
+    'videoRangeStart',
+    'videoRangeOpen',
+    'videoRangeSuffix',
+    'videoRangeInvalid',
     'artwork',
     'health'
 ];
@@ -374,6 +389,13 @@ export const createAggregateStats = (plannedRequestCeiling) => ({
         status5xx: 0,
         validationFailures: 0
     },
+    video: {
+        attempted: 0,
+        aborted: 0,
+        status429: 0,
+        status5xx: 0,
+        validationFailures: 0
+    },
     artwork: {
         attempted: 0,
         status429: 0,
@@ -388,6 +410,8 @@ export const createAggregateStats = (plannedRequestCeiling) => ({
         finalActiveRequests: null,
         playbackRejectedDelta: null,
         playbackServerErrorDelta: null,
+        videoRejectedDelta: null,
+        videoServerErrorDelta: null,
         recoveredWithinTwoSeconds: false
     },
     validationFailures: {}
@@ -408,11 +432,13 @@ export const createRequestBudget = (limit = MAX_TOTAL_REQUESTS) => {
 
 const groupForOperation = (operation) => operation === 'artwork'
     ? 'artwork'
-    : operation === 'health' ? 'health' : 'playback';
+    : operation === 'health'
+        ? 'health'
+        : operation.startsWith('video') ? 'video' : 'playback';
 
 const recordValidation = (stats, group, code) => {
     stats.validationFailures[code] = (stats.validationFailures[code] ?? 0) + 1;
-    if (group === 'playback' || group === 'artwork') {
+    if (group === 'playback' || group === 'video' || group === 'artwork') {
         stats[group].validationFailures += 1;
     }
 };
@@ -423,7 +449,7 @@ const recordStatus = (stats, group, status) => {
     else if (status >= 400 && status < 500) stats.responses.status4xx += 1;
     else if (status >= 500 && status < 600) stats.responses.status5xx += 1;
     else stats.responses.other += 1;
-    if (group === 'playback' || group === 'artwork') {
+    if (group === 'playback' || group === 'video' || group === 'artwork') {
         if (status === 429) stats[group].status429 += 1;
         if (status >= 500 && status < 600) stats[group].status5xx += 1;
     }
@@ -436,7 +462,9 @@ const startRequest = async (runtime, operation, pathname, init = {}) => {
     stats.requests.attempted += 1;
     stats.operations[operation].attempted += 1;
     const group = groupForOperation(operation);
-    if (group === 'playback' || group === 'artwork') stats[group].attempted += 1;
+    if (group === 'playback' || group === 'video' || group === 'artwork') {
+        stats[group].attempted += 1;
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
@@ -497,81 +525,113 @@ const applyValidation = (stats, group, errors) => {
     return errors.length === 0;
 };
 
-const headTrack = async (runtime, trackId) => {
+const mediaOperation = (mediaKind, operation) => mediaKind === 'video'
+    ? `video${operation[0].toUpperCase()}${operation.slice(1)}`
+    : operation;
+
+const mediaPath = (trackId) =>
+    `/content/mediaTrack/stream/${encodeURIComponent(trackId)}`;
+
+const headTrack = async (runtime, trackId, mediaKind = 'audio') => {
+    const operation = mediaOperation(mediaKind, 'head');
     const request = await startRequest(
         runtime,
-        'head',
-        `/content/audioTrack/stream/${encodeURIComponent(trackId)}`,
+        operation,
+        mediaPath(trackId, mediaKind),
         { method: 'HEAD' }
     );
     if (!request) return null;
     const result = validateHeadContract(request.response.status, request.response.headers);
-    applyValidation(runtime.stats, 'playback', result.errors);
+    applyValidation(runtime.stats, mediaKind === 'video' ? 'video' : 'playback', result.errors.map(
+        (error) => mediaKind === 'video' ? `VIDEO_${error}` : error
+    ));
     await completeResponse(runtime, request);
     return result.metadata;
 };
 
-const boundedRange = async (runtime, trackId, metadata, operation, start, end, rangeValue) => {
+const boundedRange = async (
+    runtime,
+    trackId,
+    metadata,
+    operation,
+    start,
+    end,
+    rangeValue,
+    mediaKind = 'audio'
+) => {
+    const effectiveOperation = mediaOperation(mediaKind, operation);
+    const group = mediaKind === 'video' ? 'video' : 'playback';
     const request = await startRequest(
         runtime,
-        operation,
-        `/content/audioTrack/stream/${encodeURIComponent(trackId)}`,
+        effectiveOperation,
+        mediaPath(trackId, mediaKind),
         { headers: { Range: rangeValue } }
     );
     if (!request) return;
-    applyValidation(runtime.stats, 'playback', validatePartialContract({
+    applyValidation(runtime.stats, group, validatePartialContract({
         status: request.response.status,
         headers: request.response.headers,
         fileSize: metadata.size,
         start,
         end,
         etag: metadata.etag,
-        operation: operation === 'rangeStart' ? 'RANGE_START' : 'RANGE_SUFFIX'
+        operation: `${mediaKind === 'video' ? 'VIDEO_' : ''}${
+            operation === 'rangeStart' ? 'RANGE_START' : 'RANGE_SUFFIX'
+        }`
     }));
     await completeResponse(runtime, request);
 };
 
-const invalidRange = async (runtime, trackId, metadata) => {
+const invalidRange = async (runtime, trackId, metadata, mediaKind = 'audio') => {
+    const group = mediaKind === 'video' ? 'video' : 'playback';
     const request = await startRequest(
         runtime,
-        'rangeInvalid',
-        `/content/audioTrack/stream/${encodeURIComponent(trackId)}`,
+        mediaOperation(mediaKind, 'rangeInvalid'),
+        mediaPath(trackId, mediaKind),
         { headers: { Range: `bytes=${metadata.size}-` } }
     );
     if (!request) return;
     applyValidation(
         runtime.stats,
-        'playback',
+        group,
         validateInvalidRangeContract(
             request.response.status,
             request.response.headers,
             metadata.size
-        )
+        ).map((error) => mediaKind === 'video' ? `VIDEO_${error}` : error)
     );
     await completeResponse(runtime, request);
 };
 
-const beginOpenRange = async (runtime, trackId, metadata, start) => {
+const beginOpenRange = async (
+    runtime,
+    trackId,
+    metadata,
+    start,
+    mediaKind = 'audio'
+) => {
+    const group = mediaKind === 'video' ? 'video' : 'playback';
+    const operation = mediaOperation(mediaKind, 'rangeOpen');
     const request = await startRequest(
         runtime,
-        'rangeOpen',
-        `/content/audioTrack/stream/${encodeURIComponent(trackId)}`,
+        operation,
+        mediaPath(trackId, mediaKind),
         { headers: { Range: `bytes=${start}-` } }
     );
     if (!request) return null;
-    const valid = applyValidation(runtime.stats, 'playback', validatePartialContract({
+    const valid = applyValidation(runtime.stats, group, validatePartialContract({
         status: request.response.status,
         headers: request.response.headers,
         fileSize: metadata.size,
         start,
         end: metadata.size - 1,
         etag: metadata.etag,
-        operation: 'RANGE_OPEN'
+        operation: mediaKind === 'video' ? 'VIDEO_RANGE_OPEN' : 'RANGE_OPEN'
     }));
     if (!request.response.body) {
         request.clearTimeout();
         runtime.stats.requests.completed += 1;
-        runtime.stats.operations.rangeOpen.completed += 1;
+        runtime.stats.operations[operation].completed += 1;
         return null;
     }
     const reader = request.response.body.getReader();
@@ -581,13 +641,13 @@ const beginOpenRange = async (runtime, trackId, metadata, start) => {
         if (first.done) {
             request.clearTimeout();
             runtime.stats.requests.completed += 1;
-            runtime.stats.operations.rangeOpen.completed += 1;
+            runtime.stats.operations[operation].completed += 1;
             return null;
         }
     } catch {
         request.clearTimeout();
         runtime.stats.requests.networkErrors += 1;
-        recordValidation(runtime.stats, 'playback', 'RANGE_OPEN_BODY_FAILED');
+        recordValidation(runtime.stats, group, `${mediaKind === 'video' ? 'VIDEO_' : ''}RANGE_OPEN_BODY_FAILED`);
         return null;
     }
     if (!valid) {
@@ -595,8 +655,8 @@ const beginOpenRange = async (runtime, trackId, metadata, start) => {
         await reader.cancel().catch(() => undefined);
         request.clearTimeout();
         runtime.stats.requests.aborted += 1;
-        runtime.stats.operations.rangeOpen.aborted += 1;
-        runtime.stats.playback.aborted += 1;
+        runtime.stats.operations[operation].aborted += 1;
+        runtime.stats[group].aborted += 1;
         return null;
     }
     return { ...request, reader };
@@ -608,11 +668,11 @@ const abortOpenRange = async (runtime, request) => {
     await request.reader.cancel().catch(() => undefined);
     request.clearTimeout();
     runtime.stats.requests.aborted += 1;
-    runtime.stats.operations.rangeOpen.aborted += 1;
-    runtime.stats.playback.aborted += 1;
+    runtime.stats.operations[request.operation].aborted += 1;
+    runtime.stats[request.group].aborted += 1;
 };
 
-const runListener = async (runtime, trackId, metadata) => {
+const runListener = async (runtime, trackId, metadata, mediaKind = 'audio') => {
     const firstEnd = Math.min(metadata.size - 1, RANGE_SAMPLE_BYTES - 1);
     await boundedRange(
         runtime,
@@ -621,13 +681,14 @@ const runListener = async (runtime, trackId, metadata) => {
         'rangeStart',
         0,
         firstEnd,
-        `bytes=0-${firstEnd}`
+        `bytes=0-${firstEnd}`,
+        mediaKind
     );
 
     let previous = null;
     try {
         for (const start of buildSeekStarts(metadata.size, runtime.config.seekCycles)) {
-            const current = await beginOpenRange(runtime, trackId, metadata, start);
+            const current = await beginOpenRange(runtime, trackId, metadata, start, mediaKind);
             await abortOpenRange(runtime, previous);
             previous = current;
             if (runtime.config.seekDelayMs > 0) {
@@ -646,9 +707,10 @@ const runListener = async (runtime, trackId, metadata) => {
         'rangeSuffix',
         metadata.size - suffixLength,
         metadata.size - 1,
-        `bytes=-${suffixLength}`
+        `bytes=-${suffixLength}`,
+        mediaKind
     );
-    await invalidRange(runtime, trackId, metadata);
+    await invalidRange(runtime, trackId, metadata, mediaKind);
 };
 
 const loadArtwork = async (runtime, artworkId, requestIndex) => {
@@ -689,17 +751,32 @@ const metricNumber = (value) => Number.isFinite(Number(value)) && Number(value) 
 const parseHealthSnapshot = (body) => {
     const media = body?.mediaDelivery;
     const playback = media?.byResource?.playback;
+    const video = media?.byResource?.video;
     const activeRequests = metricNumber(media?.activeRequests);
     const playbackActive = metricNumber(playback?.activeRequests);
     const playbackRejected = metricNumber(playback?.rejectedRequests);
     const playbackServerErrors = metricNumber(playback?.responseOutcomes?.serverError);
-    if ([activeRequests, playbackActive, playbackRejected, playbackServerErrors]
+    const videoActive = metricNumber(video?.activeRequests);
+    const videoRejected = metricNumber(video?.rejectedRequests);
+    const videoServerErrors = metricNumber(video?.responseOutcomes?.serverError);
+    if ([
+        activeRequests,
+        playbackActive,
+        playbackRejected,
+        playbackServerErrors,
+        videoActive,
+        videoRejected,
+        videoServerErrors
+    ]
         .some((value) => value === null)) return null;
     return {
         activeRequests,
         playbackActive,
         playbackRejected,
-        playbackServerErrors
+        playbackServerErrors,
+        videoActive,
+        videoRejected,
+        videoServerErrors
     };
 };
 
@@ -757,7 +834,8 @@ const waitForHealthRecovery = async (runtime, baseline) => {
         lastSnapshot = await readHealth(runtime);
         if (lastSnapshot
             && lastSnapshot.activeRequests <= baseline.activeRequests
-            && lastSnapshot.playbackActive <= baseline.playbackActive) {
+            && lastSnapshot.playbackActive <= baseline.playbackActive
+            && lastSnapshot.videoActive <= baseline.videoActive) {
             return { recovered: true, snapshot: lastSnapshot };
         }
         if (Date.now() >= deadline) break;
@@ -786,6 +864,7 @@ export const runMediaRangeLoad = async (env = process.env, fetchImpl = globalThi
             configuration: {
                 clients: config.clients,
                 tracks: config.trackIds.length,
+                videoTracks: config.videoTrackIds.length,
                 artwork: config.artworkIds.length,
                 artworkRequests: config.artworkWorkload.length,
                 seekCycles: config.seekCycles
@@ -796,12 +875,22 @@ export const runMediaRangeLoad = async (env = process.env, fetchImpl = globalThi
     stats.health.baselineActiveRequests = baseline.activeRequests;
 
     const metadataByTrack = new Map();
-    await runBounded(config.trackIds, Math.min(4, config.clients), async (trackId) => {
-        const metadata = await headTrack(runtime, trackId);
-        if (metadata) metadataByTrack.set(trackId, metadata);
-    });
+    const metadataByVideoTrack = new Map();
+    await Promise.all([
+        runBounded(config.trackIds, Math.min(4, config.clients), async (trackId) => {
+            const metadata = await headTrack(runtime, trackId);
+            if (metadata) metadataByTrack.set(trackId, metadata);
+        }),
+        runBounded(config.videoTrackIds, Math.min(4, config.clients), async (trackId) => {
+            const metadata = await headTrack(runtime, trackId, 'video');
+            if (metadata) metadataByVideoTrack.set(trackId, metadata);
+        })
+    ]);
 
     const runnableTracks = config.trackIds.filter((trackId) => metadataByTrack.has(trackId));
+    const runnableVideoTracks = config.videoTrackIds.filter((trackId) => (
+        metadataByVideoTrack.has(trackId)
+    ));
     const monitor = startHealthPolling(runtime);
     await Promise.all([
         runnableTracks.length === 0
@@ -809,6 +898,17 @@ export const runMediaRangeLoad = async (env = process.env, fetchImpl = globalThi
             : Promise.all(Array.from({ length: config.clients }, (_, index) => {
                 const trackId = runnableTracks[index % runnableTracks.length];
                 return runListener(runtime, trackId, metadataByTrack.get(trackId));
+            })),
+        runnableVideoTracks.length === 0
+            ? Promise.resolve()
+            : Promise.all(Array.from({ length: config.clients }, (_, index) => {
+                const trackId = runnableVideoTracks[index % runnableVideoTracks.length];
+                return runListener(
+                    runtime,
+                    trackId,
+                    metadataByVideoTrack.get(trackId),
+                    'video'
+                );
             })),
         runBounded(
             config.artworkWorkload,
@@ -828,20 +928,33 @@ export const runMediaRangeLoad = async (env = process.env, fetchImpl = globalThi
     stats.health.playbackServerErrorDelta = finalSnapshot
         ? Math.max(0, finalSnapshot.playbackServerErrors - baseline.playbackServerErrors)
         : null;
+    stats.health.videoRejectedDelta = finalSnapshot
+        ? Math.max(0, finalSnapshot.videoRejected - baseline.videoRejected)
+        : null;
+    stats.health.videoServerErrorDelta = finalSnapshot
+        ? Math.max(0, finalSnapshot.videoServerErrors - baseline.videoServerErrors)
+        : null;
     if (!recovery.recovered) recordValidation(stats, 'health', 'HEALTH_ACTIVE_NOT_RECOVERED');
     if (runnableTracks.length !== config.trackIds.length) {
         recordValidation(stats, 'playback', 'TRACK_PREFLIGHT_FAILED');
+    }
+    if (runnableVideoTracks.length !== config.videoTrackIds.length) {
+        recordValidation(stats, 'video', 'VIDEO_TRACK_PREFLIGHT_FAILED');
     }
 
     const ok = Object.keys(stats.validationFailures).length === 0
         && stats.requests.networkErrors === 0
         && stats.playback.status429 === 0
         && stats.playback.status5xx === 0
+        && stats.video.status429 === 0
+        && stats.video.status5xx === 0
         && stats.artwork.status429 === 0
         && stats.artwork.status5xx === 0
         && stats.health.non200 === 0
         && stats.health.playbackRejectedDelta === 0
         && stats.health.playbackServerErrorDelta === 0
+        && stats.health.videoRejectedDelta === 0
+        && stats.health.videoServerErrorDelta === 0
         && stats.health.recoveredWithinTwoSeconds;
 
     return {
@@ -850,6 +963,7 @@ export const runMediaRangeLoad = async (env = process.env, fetchImpl = globalThi
         configuration: {
             clients: config.clients,
             tracks: config.trackIds.length,
+            videoTracks: config.videoTrackIds.length,
             artwork: config.artworkIds.length,
             artworkRequests: config.artworkWorkload.length,
             seekCycles: config.seekCycles

@@ -111,7 +111,7 @@ test('landing actions expose Finitude while reserving Content Manager for admins
   });
   assert.match(admin.headerActions, /href="\/content\/manage">Content Manager/);
   assert.match(admin.heroActions, /href="\/content\/manage">Open Content Manager/);
-  assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks">Browse audio tracks/);
+  assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks">Browse MediaTracks/);
 });
 
 test('listener routes report a clear service error when the bundle is absent', async () => {
@@ -139,13 +139,20 @@ test('listener routes report a clear service error when the bundle is absent', a
     const listenerCapabilities = await fetch(`${baseUrl}/api/listener/v1/capabilities`);
     assert.equal(listenerCapabilities.status, 200);
     assert.equal(listenerCapabilities.headers.get('cache-control'), 'no-store');
-    assert.deepEqual(await listenerCapabilities.json(), { playlists: true });
+    assert.deepEqual(await listenerCapabilities.json(), {
+        playlists: true,
+        catalogCredits: { reads: true, sections: true, organizations: true }
+    });
 
     const loginPage = await fetch(`${baseUrl}/auth/login-web`, { redirect: 'manual' });
-    assert.equal(loginPage.status, 303);
-    assert.equal(loginPage.headers.get('location'), '/finitude/login?returnTo=%2F');
+    assert.equal(loginPage.status, 200);
+    assert.equal(loginPage.headers.get('location'), null);
     assertSecurityHeaders(loginPage, { inlineStyles: true });
     assert.equal(loginPage.headers.getSetCookie().length, 0);
+    const loginHtml = await loginPage.text();
+    assert.match(loginHtml, /<h1>Log in to Archtree<\/h1>/);
+    assert.match(loginHtml, /data-browser-session-login/);
+    assert.doesNotMatch(loginHtml, /\/finitude\/login/);
 
     const contentManagerRedirect = await fetch(`${baseUrl}/content/manage`, {
       redirect: 'manual'

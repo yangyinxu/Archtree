@@ -13,7 +13,7 @@ const AddTrackToPlaylistDialog = lazy(() => import('./AddTrackToPlaylistDialog')
   default: module.AddTrackToPlaylistDialog
 })));
 
-/** Adds a ready Soundtrack without nesting the action inside its playback target. */
+/** Adds a ready MediaTrack without nesting the action inside its playback target. */
 export const AddTrackToPlaylistButton = ({
   track,
   viewerId,
@@ -44,7 +44,7 @@ export const AddTrackToPlaylistButton = ({
       <button
         aria-expanded={visibleOpen}
         aria-haspopup="dialog"
-        aria-label={`Add ${track.title || 'Untitled soundtrack'} to Playlist`}
+        aria-label={`Add ${track.title || 'Untitled MediaTrack'} to Playlist`}
         className={styles.trigger}
         disabled={accountPending}
         onClick={() => setOpen(true)}
@@ -66,7 +66,7 @@ export const AddTrackToPlaylistButton = ({
       {visibleOpen && viewerId && (
         <Suspense fallback={(
           <ModalDialog
-            description={`Choose where to add “${track.title || 'Untitled soundtrack'}”. This action never starts playback.`}
+            description={`Choose where to add “${track.title || 'Untitled MediaTrack'}”. This action never starts playback.`}
             initialFocusRef={loadingCloseRef}
             kicker="Add to Playlist"
             onClose={() => setOpen(false)}

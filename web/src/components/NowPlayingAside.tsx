@@ -11,21 +11,21 @@ interface NowPlayingAsideProps {
   store?: PlayerStore;
 }
 
-const artistLabel = (artistNames: readonly string[]) =>
-  artistNames.join(', ') || 'Finitude soundtrack';
+const artistLabel = (item: { displayByline?: string; artistNames: readonly string[] }) =>
+  item.displayByline || item.artistNames.join(', ') || 'Finitude MediaTrack';
 
-/** Presents read-only playback context without owning audio, queue, or activity writes. */
+/** Presents read-only playback context without owning media, queue, or activity writes. */
 export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) => {
   const player = usePlayer(store);
   const current = player.currentItem;
 
   if (!current) {
     return (
-      <section aria-label="Current soundtrack" className={`${styles.aside} ${styles.empty}`}>
+      <section aria-label="Current MediaTrack" className={`${styles.aside} ${styles.empty}`}>
         <p className={styles.eyebrow}>Now playing</p>
         <div className={styles.emptyCopy}>
           <h2>Nothing playing</h2>
-          <p>Choose a soundtrack to see its details here.</p>
+          <p>Choose a MediaTrack to see its details here.</p>
         </div>
       </section>
     );
@@ -34,8 +34,63 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
   const upNext = player.upNextItem;
   const repeatsCurrent = upNext?.id === current.id;
 
+  if (current.mediaType === 'video') {
+    return (
+      <section aria-label="Video playback queue" className={`${styles.aside} ${styles.queueAside}`}>
+        <header className={styles.header}>
+          <p className={styles.eyebrow}>Now playing</p>
+          <h2 title={current.title}>{current.title}</h2>
+        </header>
+
+        <div className={styles.queueCurrent} aria-current="true">
+          <Artwork
+            alt=""
+            className={styles.queueArtwork}
+            kind="audioTrack"
+            sizes="3.5rem"
+            src={current.artworkUrl}
+          />
+          <div>
+            <p className={styles.upNextTitle} title={current.title}>{current.title}</p>
+            <p className={styles.upNextArtist}>{artistLabel(current)}</p>
+          </div>
+        </div>
+
+        <section aria-labelledby="video-queue-heading" className={styles.queueSection}>
+          <div className={styles.upNextHeader}>
+            <h3 id="video-queue-heading">Up next</h3>
+            <span>{player.shuffleEnabled ? 'Shuffled order' : 'Playback order'}</span>
+          </div>
+          {player.upNextItems.length > 0 ? (
+            <ol className={styles.queueList}>
+              {player.upNextItems.map((item, index) => (
+                <li className={styles.queueItem} key={`${item.id}-${index}`}>
+                  <span className={styles.queueNumber}>{index + 1}</span>
+                  <Artwork
+                    alt=""
+                    className={styles.queueArtwork}
+                    kind="audioTrack"
+                    sizes="3.5rem"
+                    src={item.artworkUrl}
+                  />
+                  <div>
+                    <p className={styles.upNextTitle} title={item.title}>{item.title}</p>
+                    <p className={styles.upNextArtist}>{artistLabel(item)}</p>
+                  </div>
+                  <span className={styles.queueKind}>{item.mediaType === 'video' ? 'Video' : 'Audio'}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className={styles.queueEmpty}>This is the end of the queue.</p>
+          )}
+        </section>
+      </section>
+    );
+  }
+
   return (
-    <section aria-label="Current soundtrack" className={styles.aside}>
+    <section aria-label="Current MediaTrack" className={styles.aside}>
       <header className={styles.header}>
         <p className={styles.eyebrow}>Now playing</p>
         <h2 title={current.title}>{current.title}</h2>
@@ -53,7 +108,7 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
 
       <div className={styles.currentCopy}>
         <p className={styles.currentTitle} title={current.title}>{current.title}</p>
-        <p className={styles.currentArtist}>{artistLabel(current.artistNames)}</p>
+        <p className={styles.currentArtist}>{artistLabel(current)}</p>
       </div>
 
       {upNext && (
@@ -72,7 +127,7 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
             />
             <div>
               <p className={styles.upNextTitle} title={upNext.title}>{upNext.title}</p>
-              <p className={styles.upNextArtist}>{artistLabel(upNext.artistNames)}</p>
+              <p className={styles.upNextArtist}>{artistLabel(upNext)}</p>
             </div>
           </div>
         </section>

@@ -29,8 +29,8 @@ interface VisualViewport {
   sideWidth?: number;
 }
 
-interface VisualAudioWindow extends Window {
-  __finitudeVisualAudio?: HTMLAudioElement;
+interface VisualMediaWindow extends Window {
+  __finitudeVisualMedia?: HTMLVideoElement;
 }
 
 const visualViewports: VisualViewport[] = [
@@ -82,21 +82,20 @@ const installVisualHome = async (page: Page) => {
 };
 
 /** Keeps the real test stream observable and slow enough for stable active-player goldens. */
-const installVisualAudioProbe = async (page: Page) => {
+const installVisualMediaProbe = async (page: Page) => {
   await page.addInitScript(() => {
-    const nativeAudio = window.Audio;
-    const instrumentedAudio = new Proxy(nativeAudio, {
-      construct(target, argumentsList) {
-        const audio = Reflect.construct(target, argumentsList) as HTMLAudioElement;
-        (window as VisualAudioWindow).__finitudeVisualAudio = audio;
-        return audio;
+    const nativeCreateElement = Document.prototype.createElement;
+    Document.prototype.createElement = function createElement(
+      this: Document,
+      tagName: string,
+      options?: ElementCreationOptions
+    ) {
+      const element = nativeCreateElement.call(this, tagName, options);
+      if (tagName.toLowerCase() === 'video') {
+        (window as VisualMediaWindow).__finitudeVisualMedia = element as HTMLVideoElement;
       }
-    });
-    Object.defineProperty(window, 'Audio', {
-      configurable: true,
-      value: instrumentedAudio,
-      writable: true
-    });
+      return element;
+    } as typeof Document.prototype.createElement;
   });
 };
 
@@ -106,14 +105,14 @@ const pinActivePlayback = async (
   currentTime = 2
 ) => {
   const snapshot = await page.evaluate((time) => {
-    const audio = (window as VisualAudioWindow).__finitudeVisualAudio;
-    if (!audio) throw new Error('The visual candidate did not create its real Audio object.');
-    audio.currentTime = time;
-    audio.playbackRate = 0.0625;
-    audio.dispatchEvent(new Event('timeupdate'));
+    const media = (window as VisualMediaWindow).__finitudeVisualMedia;
+    if (!media) throw new Error('The visual candidate did not create its shared media element.');
+    media.currentTime = time;
+    media.playbackRate = 0.0625;
+    media.dispatchEvent(new Event('timeupdate'));
     return {
-      paused: audio.paused,
-      sourcePath: audio.src ? new URL(audio.src).pathname : ''
+      paused: media.paused,
+      sourcePath: media.src ? new URL(media.src).pathname : ''
     };
   }, currentTime);
 
@@ -141,7 +140,7 @@ const expectActiveVisualPlayer = async (
     await page.getByRole('button', { name: 'Show Now Playing view' }).click();
   }
   await expect(aside).toBeVisible();
-  await expect(aside.getByRole('region', { name: 'Current soundtrack' })).toContainText(currentTitle);
+  await expect(aside.getByRole('region', { name: 'Current MediaTrack' })).toContainText(currentTitle);
   if (upNextTitle) {
     await expect(aside.getByRole('region', { name: 'Up next' })).toContainText(upNextTitle);
   }
@@ -173,7 +172,7 @@ for (const viewport of visualViewports) {
     await expect(page.locator('[data-presentation="grid"]')).toHaveCount(1);
     await expect(page.locator('[data-presentation="list"]')).toHaveCount(1);
     await expect(page.getByText('月明かりの記憶—風景を越えて響く長いタイトル').first()).toBeAttached();
-    await expect(page.getByRole('button', { name: 'Play Untitled soundtrack' })).toBeAttached();
+    await expect(page.getByRole('button', { name: 'Play Untitled MediaTrack' })).toBeAttached();
     await expectNoHorizontalOverflow(page);
 
     const left = page.getByRole('complementary', { name: 'Finitude Library' });
@@ -228,7 +227,7 @@ test.describe('source-viewport Chromium goldens', () => {
 
   test('captures active Home at 1728 by 889 CSS pixels', async ({ browserName, page }) => {
     test.skip(browserName !== 'chromium', 'Chromium owns the source-viewport golden.');
-    await installVisualAudioProbe(page);
+    await installVisualMediaProbe(page);
     await page.setViewportSize({ width: 1_728, height: 889 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await installVisualHome(page);
@@ -271,7 +270,7 @@ test.describe('source-viewport Chromium goldens', () => {
 
   test('captures active Album at 857 by 888 CSS pixels', async ({ browserName, page }) => {
     test.skip(browserName !== 'chromium', 'Chromium owns the source-viewport golden.');
-    await installVisualAudioProbe(page);
+    await installVisualMediaProbe(page);
     await page.setViewportSize({ width: 857, height: 888 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await installVisualHome(page);

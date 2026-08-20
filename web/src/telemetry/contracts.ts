@@ -6,6 +6,7 @@ export const listenerRouteNames = [
   'playlist',
   'album',
   'artist',
+  'organization',
   'account',
   'auth',
   'not_found',
@@ -49,6 +50,7 @@ export type ListenerTelemetryEvent =
         | 'listener_library'
         | 'listener_album'
         | 'listener_artist'
+        | 'listener_organization'
         | 'listener_track'
         | 'save_status'
         | 'save'
@@ -72,7 +74,7 @@ export type ListenerTelemetryEvent =
       category: 'playback_error';
       route: ListenerRouteName;
       stage: 'audio_create' | 'source_set' | 'play_call' | 'media_element';
-      code: 'autoplayBlocked' | 'network' | 'decode' | 'streamUnavailable' | 'unknown';
+      code: 'autoplayBlocked' | 'network' | 'decode' | 'streamUnavailable' | 'videoUnavailable' | 'unknown';
     };
 
 export interface ListenerTelemetryBatch {

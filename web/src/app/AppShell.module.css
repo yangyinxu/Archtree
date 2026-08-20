@@ -309,6 +309,19 @@
   grid-row: 2;
 }
 
+.main[data-obscured="true"] {
+  display: none;
+}
+
+.videoLoading {
+  background: #080808;
+  flex: 1;
+}
+
+.shell[data-video-playing="true"] {
+  --now-playing-column: clamp(19rem, 23vw, 24rem);
+}
+
 .main {
   container-type: inline-size;
   flex: 1;

@@ -11,7 +11,10 @@ import {
     MongoReplicaSetHarness,
     startMongoReplicaSet
 } from './support/mongoReplicaSet';
-import { deleteAudioObjectAndTrack } from '../src/services/audioStorageService';
+import {
+    deleteAudioObjectAndTrack,
+    uploadMediaObject
+} from '../src/services/audioStorageService';
 import { withReadyAudioTrackReferences } from '../src/services/audioTrackReferenceFenceService';
 import { cleanupDeletedContentReferences } from '../src/services/contentReferenceService';
 
@@ -105,6 +108,71 @@ test('ready Soundtrack queries require an object key bound to the row identity',
         new Set(ready.map((track) => String(track._id))),
         new Set([legacyId.toHexString(), versionedId.toHexString()])
     );
+});
+
+test('cross-kind MediaTrack replacement keeps one active object and cleans the previous kind', async () => {
+    const trackId = new ObjectId();
+    const audioKey = trackId.toHexString();
+    const videoKey = `video/${trackId.toHexString()}/${new ObjectId().toHexString()}`;
+    const replacementAudioKey = `audio/${trackId.toHexString()}/${new ObjectId().toHexString()}`;
+    const storedObjects = new Set<string>([audioKey]);
+    await getDb()!.collection('audioTracks').insertOne({
+        _id: trackId,
+        title: 'Cross-kind lifecycle',
+        mediaType: 'audio',
+        uploadStatus: 'ready',
+        publicationStatus: 'ready',
+        s3Key: audioKey
+    });
+    const videoFile = {
+        fieldname: 'videoFile',
+        originalname: 'performance.mp4',
+        encoding: '7bit',
+        mimetype: 'video/mp4',
+        size: 2048,
+        buffer: Buffer.from('video')
+    } as Express.Multer.File;
+    const audioFile = {
+        fieldname: 'audioFile',
+        originalname: 'replacement.mp3',
+        encoding: '7bit',
+        mimetype: 'audio/mpeg',
+        size: 1024,
+        buffer: Buffer.from('audio')
+    } as Express.Multer.File;
+    const storage = (key: string) => ({
+        createObjectKey: () => key,
+        putObject: async (s3Key: string) => { storedObjects.add(s3Key); },
+        deleteObject: async (s3Key: string) => { storedObjects.delete(s3Key); }
+    });
+
+    await uploadMediaObject(
+        trackId.toHexString(),
+        videoFile,
+        'owner',
+        'video',
+        undefined,
+        storage(videoKey)
+    );
+    assert.deepEqual([...storedObjects], [videoKey]);
+    const video = await getDb()!.collection('audioTracks').findOne({ _id: trackId });
+    assert.equal(video!.mediaType, 'video');
+    assert.equal(video!.s3Key, videoKey);
+    assert.equal(video!.storageCleanupS3Key, null);
+
+    await uploadMediaObject(
+        trackId.toHexString(),
+        audioFile,
+        'owner',
+        'audio',
+        undefined,
+        storage(replacementAudioKey)
+    );
+    assert.deepEqual([...storedObjects], [replacementAudioKey]);
+    const replaced = await getDb()!.collection('audioTracks').findOne({ _id: trackId });
+    assert.equal(replaced!.mediaType, 'audio');
+    assert.equal(replaced!.s3Key, replacementAudioKey);
+    assert.equal(replaced!.storageCleanupS3Key, null);
 });
 
 test('a committed external Soundtrack reference is observed by concurrent deletion', async () => {

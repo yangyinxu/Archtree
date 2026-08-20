@@ -27,6 +27,7 @@ import {
     requireSecureAuthTransport
 } from '../middleware/requestProtectionMiddleware';
 import {
+    attachOptionalAuth,
     requireAuth,
     requireCurrentAccountViewer,
     requireAuthWhenPresented,
@@ -143,7 +144,7 @@ router.get('/signup-web', renderSignupPage);
 
 router.post('/signup-web', requireSameOriginBrowserFormMutation, authRateLimit, authAccountRateLimit, authConcurrencyLimit, signupWebValidation, asyncHandler(signupFromWeb));
 
-router.get('/login-web', renderLoginPage);
+router.get('/login-web', attachOptionalAuth, renderLoginPage);
 
 router.post('/login-web', requireSameOriginBrowserFormMutation, authRateLimit, authAccountRateLimit, authConcurrencyLimit, asyncHandler(loginFromWeb));
 

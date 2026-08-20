@@ -8,6 +8,9 @@ import {
     requireUploadSize
 } from '../../middleware/audioUpload';
 import { audioWithCoverArtUpload, imageUpload, maxImageUploadMb } from '../../middleware/imageUpload';
+import { maxVideoUploadMb, videoUpload } from '../../middleware/videoUpload';
+import * as soundtrackVideoController from '../../controllers/soundtrackVideoController';
+import * as mediaTrackController from '../../controllers/mediaTrackController';
 import { limitMediaConcurrencyFor } from '../../middleware/mediaDeliveryMiddleware';
 import { asyncHandler, attachRequestAbortSignal, publicReadRateLimit, uploadConcurrencyLimit, uploadRateLimit } from '../../middleware/requestProtectionMiddleware';
 
@@ -17,12 +20,18 @@ router.post('/audioTrack', requireAuth, requireAdmin, uploadRateLimit, uploadCon
 router.put('/audioTrack/:audioTrackId', requireAuth, requireAdmin, uploadRateLimit, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), asyncHandler(audioTrackController.updateAudioTrack));
 router.get('/audioTrack/:audioTrackId', limitMediaConcurrencyFor('playback'), audioTrackController.getAudioTrackById);
 router.post('/audioTrack/:audioTrackId/upload', requireAuth, requireAdmin, uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxAudioUploadMb + 1), audioUpload.single('audioFile'), asyncHandler(audioTrackController.uploadAudioTrackFile));
+router.post('/audioTrack/:audioTrackId/video', requireAuth, requireAdmin, uploadRateLimit, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxVideoUploadMb + 1), videoUpload.single('videoFile'), asyncHandler(soundtrackVideoController.uploadSoundtrackVideoFile));
+router.delete('/audioTrack/:audioTrackId/video', requireAuth, requireAdmin, asyncHandler(soundtrackVideoController.deleteSoundtrackVideoFile));
 router.delete('/audioTrack/:audioTrackId', requireAuth, requireAdmin, asyncHandler(audioTrackController.deleteAudioTrack));
 router.get('/audioTrack/aws/:audioTrackId', limitMediaConcurrencyFor('playback'), audioTrackController.getAudioFile);
+router.head('/mediaTrack/stream/:mediaTrackId', limitMediaConcurrencyFor('playback'), mediaTrackController.headMediaTrack);
+router.get('/mediaTrack/stream/:mediaTrackId', limitMediaConcurrencyFor('playback'), mediaTrackController.streamMediaTrack);
 router.head('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrencyFor('download'), audioTrackController.headAudioTrackDownload);
 router.get('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrencyFor('download'), audioTrackController.downloadAudioTrack);
 router.head('/audioTrack/stream/:audioTrackId', limitMediaConcurrencyFor('playback'), audioTrackController.headAudioTrackStream);
 router.get('/audioTrack/stream/:audioTrackId', limitMediaConcurrencyFor('playback'), audioTrackController.streamAudioTrack);
+router.head('/audioTrack/video/:audioTrackId', limitMediaConcurrencyFor('video'), soundtrackVideoController.headSoundtrackVideo);
+router.get('/audioTrack/video/:audioTrackId', limitMediaConcurrencyFor('video'), soundtrackVideoController.streamSoundtrackVideo);
 router.get('/audioTracks', publicReadRateLimit, asyncHandler(audioTrackController.getAudioTracks));
 
 export default router;

@@ -5,7 +5,7 @@ test('highlights the complete Search bar when its input receives focus', async (
 
   const searchBar = page.getByRole('search', { name: 'Search results' });
   const input = searchBar.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
 
   await input.focus();

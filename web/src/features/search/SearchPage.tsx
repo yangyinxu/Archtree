@@ -17,7 +17,7 @@ import { useSearchQuery } from './SearchQueryProvider';
 import { useSearchHistoryRecorder } from './useSearchHistoryRecorder';
 import styles from '../../styles/Pages.module.css';
 
-const suggestions = ['Ambient', 'Piano', 'Soundtracks', 'Evening', 'Acoustic'];
+const suggestions = ['Ambient', 'Piano', 'MediaTracks', 'Evening', 'Acoustic'];
 
 /** Provides grouped, cancellable public Search with account-scoped local history. */
 export const SearchPage = () => {
@@ -67,6 +67,7 @@ export const SearchPage = () => {
 
   const hasResults = Boolean(results.data && (
     results.data.artists.length
+    || results.data.organizations.length
     || results.data.albums.length
     || results.data.audioTracks.length
   ));
@@ -75,11 +76,11 @@ export const SearchPage = () => {
     <div className={styles.page}>
       <p className={styles.eyebrow}>Find your next listen</p>
       <h1 className={styles.pageTitle}>Search</h1>
-      <p className={styles.lede}>Artists, albums, and soundtracks meet in one clear result view.</p>
+      <p className={styles.lede}>Artists, organizations, albums, and MediaTracks meet in one clear result view.</p>
 
       <form className={styles.searchForm} role="search" aria-label="Search results" onSubmit={submit}>
         <Icon name="search" />
-        <label className="visually-hidden" htmlFor="page-search">Search artists, albums, and soundtracks</label>
+        <label className="visually-hidden" htmlFor="page-search">Search artists, organizations, albums, and MediaTracks</label>
         <input
           enterKeyHint="search"
           id="page-search"
@@ -105,7 +106,7 @@ export const SearchPage = () => {
             </div>
           ) : !hasResults ? (
             <div className={styles.compactState}>
-              <p>No artists, albums, or soundtracks matched this search.</p>
+              <p>No artists, organizations, albums, or MediaTracks matched this search.</p>
             </div>
           ) : (
             <div className={styles.resultGroups}>
@@ -115,6 +116,25 @@ export const SearchPage = () => {
                   <ul className={styles.resultGrid}>
                     {results.data.artists.map((artist) => (
                       <li key={artist.id}><ContentCard item={artist} /></li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {results.data.organizations.length > 0 && (
+                <section aria-labelledby="organization-results-title">
+                  <h3 className={styles.resultHeading} id="organization-results-title">Organizations</h3>
+                  <ul className={styles.resultGrid}>
+                    {results.data.organizations.map((organization) => (
+                      <li key={organization.id}>
+                        <Link
+                          aria-label={`${organization.name}, organization`}
+                          className={styles.organizationResult}
+                          to={`/organizations/${encodeURIComponent(organization.id)}`}
+                        >
+                          <strong>{organization.name || 'Unknown organization'}</strong>
+                          <span>{organization.organizationType || 'Organization'}</span>
+                        </Link>
+                      </li>
                     ))}
                   </ul>
                 </section>
@@ -135,7 +155,7 @@ export const SearchPage = () => {
                       viewerId={viewerId}
                     />
                   )}
-                  title="Soundtracks"
+                  title="MediaTracks"
                 />
               )}
             </div>

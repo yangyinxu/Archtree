@@ -102,18 +102,18 @@ test('reserves per-client and global capacity for active playback', () => {
 
     assert.equal(artwork.admitted, true);
     assert.equal(avatar.admitted, true);
-    assert.equal(video.admitted, false);
-    assert.equal(video.response.statusCode, 429);
-    assert.equal(video.response.headers.get('retry-after'), '2');
-    assert.deepEqual(video.response.body, {
+    assert.equal(video.admitted, true);
+    assert.equal(playback.admitted, false);
+    assert.equal(playback.response.statusCode, 429);
+    assert.equal(playback.response.headers.get('retry-after'), '2');
+    assert.deepEqual(playback.response.body, {
         message: 'Too many concurrent media requests.'
     });
-    assert.equal(playback.admitted, true);
 
     const active = controller.getMetrics();
     assert.equal(active.activeRequests, 3);
-    assert.equal(active.byResource.playback.activeRequests, 1);
-    assert.equal(active.byResource.video.rejectionReasons.playbackReserved, 1);
+    assert.equal(active.byResource.video.activeRequests, 1);
+    assert.equal(active.byResource.playback.rejectionReasons.perIp, 1);
     assert.deepEqual(active.limits, {
         global: 4,
         perIp: 3,
@@ -124,14 +124,14 @@ test('reserves per-client and global capacity for active playback', () => {
 
     artwork.response.finish(200);
     avatar.response.finish(304);
-    playback.response.finish(206);
+    video.response.finish(206);
     // A later close event must not release or count the same request twice.
-    playback.response.emit('close');
+    video.response.emit('close');
 
     const finished = controller.getMetrics();
     assert.equal(finished.activeRequests, 0);
     assert.equal(finished.responseOutcomes.success, 3);
-    assert.equal(finished.byResource.playback.responseOutcomes.success, 1);
+    assert.equal(finished.byResource.video.responseOutcomes.success, 1);
 });
 
 test('the shared non-playback ceiling cannot consume the global playback reserve', () => {
@@ -145,22 +145,22 @@ test('the shared non-playback ceiling cannot consume the global playback reserve
     });
 
     const artwork = requestMedia(controller, 'artwork', '198.51.100.1');
-    const video = requestMedia(controller, 'video', '198.51.100.2');
-    const download = requestMedia(controller, 'download', '198.51.100.3');
-    const playback = requestMedia(controller, 'playback', '198.51.100.3');
+    const download = requestMedia(controller, 'download', '198.51.100.2');
+    const avatar = requestMedia(controller, 'avatar', '198.51.100.3');
+    const video = requestMedia(controller, 'video', '198.51.100.3');
 
     assert.equal(artwork.admitted, true);
+    assert.equal(download.admitted, true);
+    assert.equal(avatar.admitted, false);
     assert.equal(video.admitted, true);
-    assert.equal(download.admitted, false);
-    assert.equal(playback.admitted, true);
     assert.equal(
-        controller.getMetrics().byResource.download.rejectionReasons.playbackReserved,
+        controller.getMetrics().byResource.avatar.rejectionReasons.playbackReserved,
         1
     );
 
     artwork.response.finish();
+    download.response.finish();
     video.response.finish();
-    playback.response.finish();
 });
 
 test('reports total and per-client rejection reasons independently', () => {

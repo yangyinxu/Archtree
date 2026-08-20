@@ -4,6 +4,7 @@ import { normalizeAudioTrackText } from './audioTrack';
 import { withDerivedCoverArtUrl, withDisplayCoverArtUrl } from '../utils/coverArt';
 import { readyArtistLifecycleFilter } from '../services/artistReferenceFenceService';
 import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
+import { resolvePublicCatalogBylines } from '../services/publicCatalogService';
 import { withReadyCatalogItemReferences } from '../services/catalogItemReferenceFenceService';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { touchActiveAccount } from '../services/accountReferenceFenceService';
@@ -243,6 +244,7 @@ export class UserLibrary {
                 .maxTimeMS(3_000)
                 .toArray()
             : [];
+        const creditBylines = await resolvePublicCatalogBylines([...albums, ...tracks]);
         const artistNamesById = new Map(
             artists.map((artist: any) => [String(artist._id), String(artist.name ?? '')])
         );
@@ -260,7 +262,7 @@ export class UserLibrary {
             };
             if (save.contentType === 'album') {
                 const album = albumsById.get(String(save.contentId));
-                const creator = artists
+                const legacyCreator = artists
                     .filter((artist: any) =>
                         (Array.isArray(artist.albumIds) ? artist.albumIds : [])
                             .map(String)
@@ -271,20 +273,20 @@ export class UserLibrary {
                     .join(', ');
                 return album ? {
                     ...common,
-                    creator: creator || null,
+                    creator: creditBylines.get(String(album._id)) || legacyCreator || null,
                     album: withDerivedCoverArtUrl(album)
                 } : null;
             }
             const track = tracksById.get(String(save.contentId));
             if (!track) return null;
-            const creator = (Array.isArray(track.artistIds) ? track.artistIds : [])
+            const legacyCreator = (Array.isArray(track.artistIds) ? track.artistIds : [])
                 .map((id: unknown) => artistNamesById.get(String(id))?.trim() ?? '')
                 .filter(Boolean)
                 .join(', ');
             const linkedAlbum = albumsById.get(String(track.albumId ?? ''));
             return {
                 ...common,
-                creator: creator || null,
+                creator: creditBylines.get(String(track._id)) || legacyCreator || null,
                 audioTrack: withDisplayCoverArtUrl(
                     {
                         ...normalizeAudioTrackText(track),

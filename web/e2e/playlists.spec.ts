@@ -119,7 +119,7 @@ test('creates, renames, composes, reorders, plays, removes, and deletes one Play
       if (!playlist.items.some((item) => item.audioTrackId === audioTrackId)) {
         const track = trackFixtures.find((candidate) => candidate.id === audioTrackId);
         if (!track) {
-          await json(route, 404, { code: 'audio_track_not_found', message: 'Soundtrack not found.' });
+          await json(route, 404, { code: 'audio_track_not_found', message: 'MediaTrack not found.' });
           return;
         }
         itemSequence += 1;
@@ -176,9 +176,9 @@ test('creates, renames, composes, reorders, plays, removes, and deletes one Play
   await page.getByRole('button', { name: 'Save name' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Quiet order' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Add Soundtracks' }).first().click();
-  const addDialog = page.getByRole('dialog', { name: 'Add Soundtracks' });
-  await addDialog.getByRole('searchbox', { name: 'Search ready Soundtracks' }).fill('Light');
+  await page.getByRole('button', { name: 'Add MediaTracks' }).first().click();
+  const addDialog = page.getByRole('dialog', { name: 'Add MediaTracks' });
+  await addDialog.getByRole('searchbox', { name: 'Search ready MediaTracks' }).fill('Light');
   await addDialog.getByRole('button', { name: 'Search' }).click();
   await addDialog.getByRole('button', { name: 'Add First Light to Quiet order' }).click();
   await expect(addDialog.getByText('First Light added.')).toBeVisible();

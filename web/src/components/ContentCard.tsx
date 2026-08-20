@@ -1,14 +1,14 @@
 import { Link } from 'react-router';
 import { Play } from 'lucide-react';
 
-import type { AudioTrackSummary, ContentSummary } from '../api/contentSchemas';
+import { contentByline, type AudioTrackSummary, type ContentSummary } from '../api/contentSchemas';
 import { Artwork } from './Artwork';
 import styles from './ContentCard.module.css';
 
 const contentTitle = (item: ContentSummary) => {
   if (item.contentType === 'artist') return item.name.trim() || 'Unknown artist';
   if (item.contentType === 'album') return item.title.trim() || 'Untitled album';
-  return item.title.trim() || 'Untitled soundtrack';
+  return item.title.trim() || 'Untitled MediaTrack';
 };
 
 const contentMetadata = (item: ContentSummary) => {
@@ -16,13 +16,13 @@ const contentMetadata = (item: ContentSummary) => {
   if (item.contentType === 'album') {
     return [
       'Album',
-      item.artistNames.join(', ') || null,
+      contentByline(item) || null,
       item.releaseDate?.year ? String(item.releaseDate.year) : null
     ].filter(Boolean).join(' · ');
   }
   return [
-    'Soundtrack',
-    item.artistNames.join(', ') || null,
+    'MediaTrack',
+    contentByline(item) || null,
     item.albumTitle,
     item.duration
   ].filter(Boolean).join(' · ');
@@ -68,7 +68,7 @@ export const ContentCard = ({
       {item.contentType === 'audioTrack' ? (
         onPlay ? (
           <button
-            aria-label={`Play ${title}${item.artistNames.length ? ` by ${item.artistNames.join(', ')}` : ''}`}
+            aria-label={`Play ${title}${contentByline(item) ? ` by ${contentByline(item)}` : ''}`}
             className={styles.action}
             onClick={() => onPlay(item)}
             type="button"

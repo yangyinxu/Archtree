@@ -198,7 +198,7 @@ export const listPlaylists = playlistHandler(async (req, res) => {
     return res.status(200).json(page);
 });
 
-/** Returns owner-only Playlist IDs for a bounded, strictly validated Soundtrack set. */
+/** Returns owner-only Playlist IDs for a bounded, strictly validated MediaTrack set. */
 export const getPlaylistMemberships = playlistHandler(async (req, res) => {
     if (Object.keys(req.query).length !== 1
         || !Object.prototype.hasOwnProperty.call(req.query, 'audioTrackIds')) {
@@ -210,14 +210,14 @@ export const getPlaylistMemberships = playlistHandler(async (req, res) => {
     const rawAudioTrackIds = req.query.audioTrackIds;
     if (typeof rawAudioTrackIds !== 'string' || !rawAudioTrackIds.trim()) {
         throw invalidRequest(
-            'audioTrackIds must be a comma-separated list of Soundtrack IDs.',
+            'audioTrackIds must be a comma-separated list of MediaTrack IDs.',
             'invalid_audio_track_ids'
         );
     }
     const values = rawAudioTrackIds.split(',').map((value) => value.trim());
     if (values.length > MAX_PLAYLIST_MEMBERSHIP_TRACK_IDS) {
         throw invalidRequest(
-            `At most ${MAX_PLAYLIST_MEMBERSHIP_TRACK_IDS} Soundtrack IDs may be requested.`,
+            `At most ${MAX_PLAYLIST_MEMBERSHIP_TRACK_IDS} MediaTrack IDs may be requested.`,
             'invalid_audio_track_ids'
         );
     }
@@ -225,7 +225,7 @@ export const getPlaylistMemberships = playlistHandler(async (req, res) => {
     if (audioTrackIds.some((value) => value === null)
         || new Set(audioTrackIds).size !== audioTrackIds.length) {
         throw invalidRequest(
-            'audioTrackIds must contain unique valid Soundtrack IDs.',
+            'audioTrackIds must contain unique valid MediaTrack IDs.',
             'invalid_audio_track_ids'
         );
     }
@@ -302,7 +302,7 @@ export const addPlaylistItem = playlistHandler(async (req, res) => {
         throw new PlaylistError(
             404,
             'audio_track_not_found',
-            'A ready Soundtrack was not found.'
+            'A ready MediaTrack was not found.'
         );
     }
     let position: number | undefined;

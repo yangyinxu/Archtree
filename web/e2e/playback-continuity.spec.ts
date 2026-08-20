@@ -3,98 +3,114 @@ import type { Page } from '@playwright/test';
 import { catalogIds } from './fixtures/catalog';
 import { expect, test } from './support/test';
 
-interface AudioProbeWindow extends Window {
-  __finitudeE2EAudioElements?: HTMLAudioElement[];
+interface MediaProbeWindow extends Window {
+  __finitudeE2EMediaElements?: HTMLVideoElement[];
 }
 
-interface AudioProbeSnapshot {
+interface MediaProbeSnapshot {
+  ariaHidden: string | null;
   count: number;
+  controls: boolean;
   currentTime: number;
   identity: string;
+  isConnected: boolean;
   paused: boolean;
   sourcePath: string;
+  tabIndex: number;
 }
 
-/** Counts the actual detached Audio objects created by the production store. */
-const installAudioProbe = async (page: Page) => {
+/** Counts the one shared video element used for both audio and video sources. */
+const installMediaProbe = async (page: Page) => {
   await page.addInitScript(() => {
-    const nativeAudio = window.Audio;
-    const audioElements: HTMLAudioElement[] = [];
-    const instrumentedAudio = new Proxy(nativeAudio, {
-      construct(target, argumentsList) {
-        const audio = Reflect.construct(target, argumentsList) as HTMLAudioElement;
-        audio.dataset.e2eAudioIdentity = `finitude-audio-${audioElements.length + 1}`;
-        audioElements.push(audio);
-        return audio;
+    const nativeCreateElement = Document.prototype.createElement;
+    const mediaElements: HTMLVideoElement[] = [];
+    Document.prototype.createElement = function createElement(
+      this: Document,
+      tagName: string,
+      options?: ElementCreationOptions
+    ) {
+      const element = nativeCreateElement.call(this, tagName, options);
+      if (tagName.toLowerCase() === 'video') {
+        const media = element as HTMLVideoElement;
+        media.dataset.e2eMediaIdentity = `finitude-media-${mediaElements.length + 1}`;
+        Object.defineProperty(media, 'requestFullscreen', {
+          configurable: true,
+          value: async () => undefined
+        });
+        mediaElements.push(media);
       }
-    });
-    Object.defineProperty(window, 'Audio', {
-      configurable: true,
-      value: instrumentedAudio,
-      writable: true
-    });
-    Object.defineProperty(window, '__finitudeE2EAudioElements', {
+      return element;
+    } as typeof Document.prototype.createElement;
+    Object.defineProperty(window, '__finitudeE2EMediaElements', {
       configurable: false,
-      value: audioElements
+      value: mediaElements
     });
   });
 };
 
-const readAudioProbe = (page: Page) => page.evaluate<AudioProbeSnapshot>(() => {
-  const audioElements = (window as AudioProbeWindow).__finitudeE2EAudioElements ?? [];
-  const audio = audioElements[0];
+const readMediaProbe = (page: Page) => page.evaluate<MediaProbeSnapshot>(() => {
+  const mediaElements = (window as MediaProbeWindow).__finitudeE2EMediaElements ?? [];
+  const media = mediaElements[0];
   return {
-    count: audioElements.length,
-    currentTime: audio?.currentTime ?? -1,
-    identity: audio?.dataset.e2eAudioIdentity ?? '',
-    paused: audio?.paused ?? true,
-    sourcePath: audio?.src ? new URL(audio.src).pathname : ''
+    ariaHidden: media?.getAttribute('aria-hidden') ?? null,
+    count: mediaElements.length,
+    controls: media?.controls ?? false,
+    currentTime: media?.currentTime ?? -1,
+    identity: media?.dataset.e2eMediaIdentity ?? '',
+    isConnected: media?.isConnected ?? false,
+    paused: media?.paused ?? true,
+    sourcePath: media?.src ? new URL(media.src).pathname : '',
+    tabIndex: media?.tabIndex ?? -1
   };
 });
 
-const expectStableAudio = async (
+const expectStableMedia = async (
   page: Page,
   identity: string,
-  expectedTime: number
+  expectedTime: number,
+  sourcePath: string
 ) => {
-  const snapshot = await readAudioProbe(page);
+  const snapshot = await readMediaProbe(page);
   expect(snapshot.count).toBe(1);
   expect(snapshot.identity).toBe(identity);
+  expect(snapshot.isConnected).toBe(true);
   expect(snapshot.paused).toBe(true);
-  expect(snapshot.sourcePath).toBe(`/content/audioTrack/stream/${catalogIds.firstTrack}`);
+  expect(snapshot.sourcePath).toBe(sourcePath);
   expect(snapshot.currentTime).toBeCloseTo(expectedTime, 2);
 };
 
-/** Verifies that an actively advancing stream never swaps or restarts its Audio object. */
-const expectActiveAudio = async (
+/** Verifies that an active stream never swaps or restarts its shared media element. */
+const expectActiveMedia = async (
   page: Page,
   identity: string,
-  minimumTime: number
+  minimumTime: number,
+  sourcePath: string
 ) => {
-  const snapshot = await readAudioProbe(page);
+  const snapshot = await readMediaProbe(page);
   expect(snapshot.count).toBe(1);
   expect(snapshot.identity).toBe(identity);
-  expect(snapshot.sourcePath).toBe(`/content/audioTrack/stream/${catalogIds.firstTrack}`);
+  expect(snapshot.isConnected).toBe(true);
+  expect(snapshot.sourcePath).toBe(sourcePath);
   expect(snapshot.paused).toBe(false);
   expect(snapshot.currentTime).toBeGreaterThanOrEqual(minimumTime - 0.1);
   return snapshot.currentTime;
 };
 
-const setAudioSentinel = async (page: Page, currentTime: number) => {
+const setMediaSentinel = async (page: Page, currentTime: number) => {
   await page.evaluate((time) => {
-    const audio = (window as AudioProbeWindow).__finitudeE2EAudioElements?.[0];
-    if (!audio) throw new Error('The shared player did not create an Audio object.');
-    audio.currentTime = time;
-    audio.dispatchEvent(new Event('timeupdate'));
+    const media = (window as MediaProbeWindow).__finitudeE2EMediaElements?.[0];
+    if (!media) throw new Error('The shared player did not create its media element.');
+    media.currentTime = time;
+    media.dispatchEvent(new Event('timeupdate'));
   }, currentTime);
 };
 
-test('preserves one real Audio object, queue, and elapsed time through every shell presentation', async ({ page }) => {
+test('preserves one media element, queue, and elapsed time through every shell presentation', async ({ page }) => {
   const activeSentinelTime = 1.25;
-  // Match the player's 0.1-second range step so Chromium does not normalize
-  // the visible slider value independently of the underlying Audio sentinel.
   const sentinelTime = 4.3;
-  await installAudioProbe(page);
+  const videoPath = `/content/mediaTrack/stream/${catalogIds.firstTrack}`;
+  const audioPath = `/content/mediaTrack/stream/${catalogIds.secondTrack}`;
+  await installMediaProbe(page);
   await page.setViewportSize({ width: 1_280, height: 800 });
   await page.goto(`/finitude/albums/${catalogIds.album}`);
   await expect(page.getByRole('heading', { level: 1, name: 'Quiet Hours' })).toBeVisible();
@@ -110,51 +126,109 @@ test('preserves one real Audio object, queue, and elapsed time through every she
   await expect(slider).toBeEnabled();
   await expect(slider).toHaveAttribute('max', '15');
 
-  const initialProbe = await readAudioProbe(page);
+  const initialProbe = await readMediaProbe(page);
   expect(initialProbe.count).toBe(1);
-  expect(initialProbe.identity).toBe('finitude-audio-1');
-  expect(initialProbe.sourcePath).toBe(`/content/audioTrack/stream/${catalogIds.firstTrack}`);
-  await expect.poll(async () => (await readAudioProbe(page)).paused).toBe(false);
-  await setAudioSentinel(page, activeSentinelTime);
-  await expect.poll(async () => (await readAudioProbe(page)).currentTime)
+  expect(initialProbe.identity).toBe('finitude-media-1');
+  expect(initialProbe.sourcePath).toBe(videoPath);
+  await expect.poll(async () => (await readMediaProbe(page)).paused).toBe(false);
+  await setMediaSentinel(page, activeSentinelTime);
+  await expect.poll(async () => (await readMediaProbe(page)).currentTime)
     .toBeGreaterThanOrEqual(activeSentinelTime);
-  let activeTime = await expectActiveAudio(page, initialProbe.identity, activeSentinelTime);
+  let activeTime = await expectActiveMedia(
+    page,
+    initialProbe.identity,
+    activeSentinelTime,
+    videoPath
+  );
   await expect(player).toContainText('First Light');
-  await expect(page.getByRole('region', { name: 'Up next' })).toContainText('Night Window');
-
+  const theater = page.getByRole('region', { name: 'First Light' });
+  await expect(theater).toBeVisible();
+  await expect(theater.getByRole('img', { name: 'First Light video' })).toBeVisible();
+  await expect(page.getByRole('main')).toBeHidden();
   const aside = page.getByRole('complementary', { name: 'Now Playing details' });
-  await page.getByRole('button', { name: 'Hide Now Playing view' }).click();
-  await expect(aside).toBeHidden();
-  activeTime = await expectActiveAudio(page, initialProbe.identity, activeTime);
-  await page.getByRole('button', { name: 'Show Now Playing view' }).click();
-  await expect(aside).toBeVisible();
-  activeTime = await expectActiveAudio(page, initialProbe.identity, activeTime);
+  await expect(aside.getByRole('region', { name: 'Video playback queue' })).toContainText('Night Window');
+  await expect(page.getByRole('group', { name: 'Playback media' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Now Playing view/ })).toHaveCount(0);
+
+  await theater.getByRole('button', { name: 'Enter video fullscreen' }).click();
+  await expect.poll(async () => (await readMediaProbe(page)).controls).toBe(true);
+  expect(await readMediaProbe(page)).toMatchObject({
+    ariaHidden: null,
+    controls: true,
+    identity: initialProbe.identity,
+    sourcePath: videoPath,
+    tabIndex: 0
+  });
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event('fullscreenchange'));
+  });
+  await expect.poll(async () => (await readMediaProbe(page)).controls).toBe(false);
+  expect(await readMediaProbe(page)).toMatchObject({
+    ariaHidden: 'true',
+    controls: false,
+    identity: initialProbe.identity,
+    sourcePath: videoPath,
+    tabIndex: -1
+  });
 
   await page.getByRole('link', { name: 'Search' }).click();
   await expect(page).toHaveURL(/\/finitude\/search$/);
-  activeTime = await expectActiveAudio(page, initialProbe.identity, activeTime);
+  activeTime = await expectActiveMedia(page, initialProbe.identity, activeTime, videoPath);
+  await expect(page.getByRole('main')).toBeHidden();
   await expect(player).toContainText('First Light');
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/finitude/albums/${catalogIds.album}$`));
-  activeTime = await expectActiveAudio(page, initialProbe.identity, activeTime);
+  activeTime = await expectActiveMedia(page, initialProbe.identity, activeTime, videoPath);
 
   await compactControls.getByRole('button', { name: 'Pause' }).click();
   await expect(compactControls.getByRole('button', { name: 'Play' })).toBeVisible();
-  await setAudioSentinel(page, sentinelTime);
+  await setMediaSentinel(page, sentinelTime);
   await expect.poll(async () => Number(await slider.inputValue())).toBeCloseTo(sentinelTime, 2);
-  await expectStableAudio(page, initialProbe.identity, sentinelTime);
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
+
+  await compactControls.getByRole('button', { name: 'Next MediaTrack' }).click();
+  await expect(player).toContainText('Night Window');
+  await expect.poll(async () => (await readMediaProbe(page)).sourcePath)
+    .toBe(audioPath);
+  await expect(page.getByRole('main')).toBeVisible();
+  await expect(theater).toHaveCount(0);
+  await expect(aside.getByRole('region', { name: 'Current MediaTrack' })).toContainText('Night Window');
+  expect((await readMediaProbe(page))).toMatchObject({
+    count: 1,
+    identity: initialProbe.identity,
+    isConnected: true,
+    sourcePath: audioPath
+  });
+
+  await compactControls.getByRole('button', { name: 'Previous MediaTrack' }).click();
+  await expect(player).toContainText('First Light');
+  await expect.poll(async () => (await readMediaProbe(page)).sourcePath)
+    .toBe(videoPath);
+  await expect(page.getByRole('region', { name: 'First Light' })).toBeVisible();
+  await expect(page.getByRole('main')).toBeHidden();
+  await expect.poll(async () => (await readMediaProbe(page)).paused).toBe(false);
+  expect((await readMediaProbe(page))).toMatchObject({
+    count: 1,
+    identity: initialProbe.identity,
+    sourcePath: videoPath
+  });
+
+  await compactControls.getByRole('button', { name: 'Pause' }).click();
+  await setMediaSentinel(page, sentinelTime);
+  await expect.poll(async () => Number(await slider.inputValue())).toBeCloseTo(sentinelTime, 2);
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
 
   await page.goForward();
   await expect(page).toHaveURL(/\/finitude\/search$/);
-  await expectStableAudio(page, initialProbe.identity, sentinelTime);
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/finitude/albums/${catalogIds.album}$`));
-  await expectStableAudio(page, initialProbe.identity, sentinelTime);
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
 
   await page.setViewportSize({ width: 799, height: 800 });
   await expect(page.getByRole('complementary', { name: 'Finitude Library' })).toBeVisible();
   await expect(aside).toBeHidden();
-  await expectStableAudio(page, initialProbe.identity, sentinelTime);
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
 
   await page.setViewportSize({ width: 767, height: 844 });
   const compactOpen = page.getByRole('button', { name: 'Open Now Playing: First Light' });
@@ -165,19 +239,20 @@ test('preserves one real Audio object, queue, and elapsed time through every she
   await expect.poll(async () => Number(await expanded
     .getByRole('slider', { name: 'Playback position' })
     .inputValue())).toBeCloseTo(sentinelTime, 2);
-  await expectStableAudio(page, initialProbe.identity, sentinelTime);
+  await expect(expanded.getByRole('img', { name: 'First Light video' })).toBeVisible();
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
   await page.keyboard.press('Escape');
   await expect(expanded).toBeHidden();
   await expect(compactOpen).toBeFocused();
-  await expectStableAudio(page, initialProbe.identity, sentinelTime);
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
 
   await page.setViewportSize({ width: 844, height: 390 });
   await expect(page.getByRole('complementary', { name: 'Finitude Library' })).toBeVisible();
   await expect(aside).toBeVisible();
-  await expectStableAudio(page, initialProbe.identity, sentinelTime);
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
 
   await page.setViewportSize({ width: 1_280, height: 800 });
-  await expect(page.getByRole('region', { name: 'Up next' })).toContainText('Night Window');
-  await expect(compactControls.getByRole('button', { name: 'Next soundtrack' })).toBeEnabled();
-  await expectStableAudio(page, initialProbe.identity, sentinelTime);
+  await expect(aside.getByRole('region', { name: 'Video playback queue' })).toContainText('Night Window');
+  await expect(compactControls.getByRole('button', { name: 'Next MediaTrack' })).toBeEnabled();
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
 });

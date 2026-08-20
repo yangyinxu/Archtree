@@ -67,7 +67,7 @@ export const PlaylistIndexPage = () => {
         <div className={styles.state}>
           <ListMusic aria-hidden="true" />
           <h2>Make room for a new sequence</h2>
-          <p>Create your first Playlist, then add ready Soundtracks in the order you want to hear them.</p>
+          <p>Create your first Playlist, then add ready MediaTracks in the order you want to hear them.</p>
           <NewPlaylistButton className={styles.primaryButton} viewerId={viewerId} />
         </div>
       ) : (

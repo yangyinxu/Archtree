@@ -16,7 +16,8 @@ const track: AudioTrackSummary = {
   albumId: null,
   albumTitle: null,
   duration: '3:24',
-  streamUrl: '/content/audioTrack/stream/track-1'
+  mediaType: 'audio',
+  streamUrl: '/content/mediaTrack/stream/track-1'
 };
 
 const existingTrack: AudioTrackSummary = {
@@ -24,7 +25,7 @@ const existingTrack: AudioTrackSummary = {
   id: 'track-existing',
   title: 'Existing soundtrack',
   artworkUrl: '/playlist-cover.jpg',
-  streamUrl: '/content/audioTrack/stream/track-existing'
+  streamUrl: '/content/mediaTrack/stream/track-existing'
 };
 
 const summary = {

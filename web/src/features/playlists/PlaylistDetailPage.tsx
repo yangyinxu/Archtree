@@ -191,7 +191,7 @@ export const PlaylistDetailPage = () => {
       mutationKeysRef.current.delete(variables.signature);
       commitPlaylistDetail(queryClient, viewerId, detail, context.guard);
       void revalidatePlaylistLists(queryClient, viewerId, context.guard);
-      setFeedback({ kind: 'success', message: 'Soundtrack removed from this Playlist.' });
+      setFeedback({ kind: 'success', message: 'MediaTrack removed from this Playlist.' });
     }
   });
 
@@ -285,7 +285,7 @@ export const PlaylistDetailPage = () => {
     if (index < 0 || destination < 0 || destination >= playlist.items.length) return;
     const order = playlist.items.map((item) => item.itemId);
     [order[index], order[destination]] = [order[destination], order[index]];
-    const title = playlist.items[index].audioTrack?.title || 'Unavailable Soundtrack';
+    const title = playlist.items[index].audioTrack?.title || 'Unavailable MediaTrack';
     const signature = `order:${playlist.revision}:${order.join(',')}`;
     const idempotencyKey = mutationKeysRef.current.get(signature) ?? createPlaylistIdempotencyKey();
     mutationKeysRef.current.set(signature, idempotencyKey);
@@ -359,7 +359,7 @@ export const PlaylistDetailPage = () => {
           <p className={styles.eyebrow}>Private Playlist</p>
           <h1 title={playlist.name}>{playlist.name}</h1>
           <p className={styles.detailMetadata}>
-            {playlist.itemCount} soundtrack{playlist.itemCount === 1 ? '' : 's'}
+            {playlist.itemCount} MediaTrack{playlist.itemCount === 1 ? '' : 's'}
             {knownDuration !== null && knownDuration > 0 ? ` · ${durationLabel(knownDuration)}` : ''}
             {readyTracks.length !== playlist.itemCount ? ` · ${playlist.itemCount - readyTracks.length} unavailable` : ''}
           </p>
@@ -369,13 +369,13 @@ export const PlaylistDetailPage = () => {
               className={styles.playButton}
               disabled={readyTracks.length === 0}
               onClick={() => { void launchPlaylistPlayback(readyTracks, viewerId); }}
-              title={readyTracks.length === 0 ? 'No ready Soundtracks to play' : `Play ${playlist.name}`}
+              title={readyTracks.length === 0 ? 'No ready MediaTracks to play' : `Play ${playlist.name}`}
               type="button"
             >
               <Play aria-hidden="true" fill="currentColor" focusable="false" />
             </button>
             <button className={styles.secondaryButton} disabled={mutationPending} onClick={() => setDialog('add')} ref={addTriggerRef} type="button">
-              <Plus aria-hidden="true" /> Add Soundtracks
+              <Plus aria-hidden="true" /> Add MediaTracks
             </button>
             <button className={styles.secondaryButton} disabled={mutationPending} onClick={() => setDialog('rename')} ref={renameTriggerRef} type="button">Rename</button>
             <ActionMenu
@@ -404,16 +404,16 @@ export const PlaylistDetailPage = () => {
         <div className={styles.sectionHeading}>
           <div>
             <p className={styles.eyebrow}>In this Playlist</p>
-            <h2 id="playlist-soundtracks-title" ref={memberHeadingRef} tabIndex={-1}>Soundtracks</h2>
+            <h2 id="playlist-soundtracks-title" ref={memberHeadingRef} tabIndex={-1}>MediaTracks</h2>
           </div>
-          <p>{playlist.items.length > 0 ? 'Use each row menu to remove or move it.' : 'Build this Playlist one Soundtrack at a time.'}</p>
+          <p>{playlist.items.length > 0 ? 'Use each row menu to remove or move it.' : 'Build this Playlist one MediaTrack at a time.'}</p>
         </div>
         {playlist.items.length === 0 ? (
           <div className={styles.emptyState}>
             <ListMusic aria-hidden="true" />
             <h3>This Playlist is empty</h3>
-            <p>Search the ready catalog and add the first Soundtrack.</p>
-            <button className={styles.primaryButton} onClick={() => setDialog('add')} type="button">Add Soundtracks</button>
+            <p>Search the ready catalog and add the first MediaTrack.</p>
+            <button className={styles.primaryButton} onClick={() => setDialog('add')} type="button">Add MediaTracks</button>
           </div>
         ) : (
           <>
@@ -423,10 +423,10 @@ export const PlaylistDetailPage = () => {
               <span>Duration</span>
               <span />
             </div>
-            <ol aria-label={`${playlist.name} Soundtracks`} className={styles.memberList}>
+            <ol aria-label={`${playlist.name} MediaTracks`} className={styles.memberList}>
             {playlist.items.map((item, index) => {
               const track = item.audioTrack;
-              const title = track?.title || 'Unavailable Soundtrack';
+              const title = track?.title || 'Unavailable MediaTrack';
               return (
                 <li className={`${styles.memberRow} ${!track ? styles.unavailableRow : ''}`} key={item.itemId}>
                   <button
@@ -443,7 +443,7 @@ export const PlaylistDetailPage = () => {
                     <span className={styles.memberCopy}>
                       <span title={title}>{title}</span>
                       <span>{track
-                        ? [track.artistNames.join(', '), track.albumTitle].filter(Boolean).join(' · ') || 'Soundtrack'
+                        ? [track.artistNames.join(', '), track.albumTitle].filter(Boolean).join(' · ') || 'MediaTrack'
                         : 'This member is no longer ready in the catalog.'}</span>
                     </span>
                     <span className={styles.memberDuration}>{track?.duration || '—'}</span>

@@ -4,7 +4,8 @@
 
 **final result: passed**
 
-The current local candidate has no open P0, P1, or P2 visual finding. This
+The current local candidate, including the 2026-08-19 Web palette, typography,
+and filled-pause amendment, has no open P0, P1, or P2 visual finding. This
 verdict covers the implemented interface, Carousel navigation, wide-panel
 resizing, and local browser evidence. It does not claim that the separate
 staging, Web Vitals, device-lab, or rollback gates have run.
@@ -33,19 +34,19 @@ staging, Web Vitals, device-lab, or rollback gates have run.
 - Snapshot paths are platform-scoped. The reviewed `darwin` baselines are not
   silently reused on Linux, where the system-font fallback and antialiasing can
   differ; the first Linux CI baseline requires separate design review.
-- Final interactive review used the production build at
-  `http://127.0.0.1:4174/finitude` in the in-app browser.
+- The 2026-08-19 amendment was reviewed from deterministic production-build
+  Playwright captures at 320, 390, 844, 857, 1280, 1440, 1728, and 1920 CSS px.
 
 ## Required fidelity surfaces
 
 | Surface | Result |
 | --- | --- |
-| Typography | Passed. The deterministic system/Avenir-compatible fallback reproduces the reference hierarchy, mixed-script density, weight contrast, truncation, and tabular time without a proprietary third-party font. |
+| Typography | Passed. Body and display roles now share a Helvetica Neue/Helvetica/Arial-led system stack with explicit CJK and emoji fallbacks. Mixed-script density, truncation, and tabular time remain intact without a proprietary font payload. |
 | Shell geometry | Passed. The default 1728 px state uses 8 px outer and panel gutters, 303 px side tracks, and the remaining 1090 px main track. Each side track can grow to 420 px while preserving an 856 px main track. |
 | Spacing and density | Passed. Overflowing Home rows use 24 px column gaps, a deliberate partial-card cue, and a 48 px section rhythm. |
-| Color hierarchy | Passed. Canvas, panel, raised, hover, primary-text, and secondary-text roles remain visibly distinct; focused and selected states retain the Finitude mint accent. |
+| Color hierarchy | Passed. Canvas, panel, raised, hover, primary-text, and secondary-text roles remain distinct; selected states use Spotify green `#1ed760` with black foregrounds, while focus remains a separate white outline. |
 | Artwork and crop | Passed. Square artwork is crisp and consistently cropped, Artist art remains circular, and missing-artwork behavior is covered. |
-| Icons and controls | Passed. Controls use one icon family, stable targets, real actions, accessible names, disabled states, and visible focus. |
+| Icons and controls | Passed. Controls use one icon family, stable targets, real actions, accessible names, disabled states, and visible focus. Play and Pause now both use filled glyphs on the same circular surface. |
 | Motion | Passed. The expanded player was sampled at start, midpoint, and end with no measurable layout shift; reduced motion removes presentation animation without removing controls or focus return. |
 | Responsive behavior | Passed. The left pane compacts before the right pane disappears; mobile activates only below 768 px. No target viewport has horizontal page overflow. |
 | Playback continuity | Passed. One real Audio object, source, queue, and elapsed time survive pane toggles, route history, responsive transitions, and mobile expansion. |
@@ -102,27 +103,27 @@ restored the same pane without replacing playback.
 
 ## Verification evidence
 
-- `npm run test:e2e:chromium --workspace @archtree/finitude-web -- e2e/visual-regression.spec.ts --update-snapshots=none`:
-  10 passed with no snapshot update.
+- Focused strict Chromium gate for visual regression, responsive shell, touch
+  orientation, and accessibility: 34 passed with no snapshot update.
 - `CI=1 npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none`:
-  191 passed, 10 documented capability-specific skips, 0 failed across
-  Chromium, Firefox, and WebKit.
-- `npm test`: 222 server tests and 204 Web tests passed.
-- `npm run test:integration`: 126 Mongo-backed integration tests passed on the
-  current integrated source tree.
+  199 passed and 10 documented capability-specific skips across Chromium,
+  Firefox, and WebKit. One unrelated Chromium Archtree logout-header assertion
+  was classified flaky; its isolated CI rerun passed.
+- `npm test`: 280 server tests and 208 Web tests passed.
 - `npm run build`: server and Web production builds passed; the largest
-  initial listener route is 147.5 KiB gzip against the 150 KiB budget.
-- Static listener assets: 26.7 KiB gzip CSS, 0 bundled font payload, and
+  initial listener route is 148.2 KiB gzip against the 150 KiB budget.
+- Static listener assets: 26.9 KiB gzip CSS, 0 bundled font payload, and
   0 bundled image payload.
 - `npm run typecheck:e2e --workspace @archtree/finitude-web`: passed.
-- Final in-app Browser review: active Home and compact Album states passed;
-  exact breakpoint order passed at 1008, 1007, 800, 799, 768, and 767 px;
-  no warning or error log entries.
+- Reviewed Playwright evidence: active Home and compact Album states passed;
+  the filled Pause glyph is visible in both; exact breakpoint order passed at
+  1008, 1007, 800, 799, 768, and 767 px.
 
 ## Intentional product deviations
 
-- Finitude keeps its own name, mark, mint accent, copy, account model, catalog,
-  Playlists, and supported controls.
+- Finitude keeps its own name, mark, copy, account model, catalog, Playlists,
+  and supported controls while the Web interaction accent aligns with Spotify
+  green.
 - Protected reference artwork, branding, proprietary typography, promotions,
   provider/follow surfaces, social activity, lyrics, editable queue, download,
   and device controls are absent.

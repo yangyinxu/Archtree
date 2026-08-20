@@ -15,6 +15,7 @@ const ResetPasswordPage = lazy(() => import('../features/account/ResetPasswordPa
 const VerifyEmailPage = lazy(() => import('../features/account/VerifyEmailPage').then(({ VerifyEmailPage }) => ({ default: VerifyEmailPage })));
 const AlbumPage = lazy(() => import('../features/catalog/AlbumPage').then(({ AlbumPage }) => ({ default: AlbumPage })));
 const ArtistPage = lazy(() => import('../features/catalog/ArtistPage').then(({ ArtistPage }) => ({ default: ArtistPage })));
+const OrganizationPage = lazy(() => import('../features/catalog/OrganizationPage').then(({ OrganizationPage }) => ({ default: OrganizationPage })));
 const HomePage = lazy(() => import('../features/home/HomePage').then(({ HomePage }) => ({ default: HomePage })));
 const LibraryPage = lazy(() => import('../features/library/LibraryPage').then(({ LibraryPage }) => ({ default: LibraryPage })));
 const PlaylistDetailPage = lazy(() => import('../features/playlists/PlaylistDetailPage').then(({ PlaylistDetailPage }) => ({ default: PlaylistDetailPage })));
@@ -52,6 +53,7 @@ export const appRoutes: RouteObject[] = [
       { path: 'playlists/:playlistId', element: loadRoute(<PlaylistFeatureGate><PlaylistDetailPage /></PlaylistFeatureGate>), errorElement: <RouteErrorPage /> },
       { path: 'albums/:albumId', element: loadRoute(<AlbumPage />), errorElement: <RouteErrorPage /> },
       { path: 'artists/:artistId', element: loadRoute(<ArtistPage />), errorElement: <RouteErrorPage /> },
+      { path: 'organizations/:organizationId', element: loadRoute(<OrganizationPage />), errorElement: <RouteErrorPage /> },
       { path: 'login', element: loadRoute(<LoginPage />), errorElement: <RouteErrorPage /> },
       { path: 'register', element: loadRoute(<RegisterPage />), errorElement: <RouteErrorPage /> },
       { path: 'verify-email', element: loadRoute(<VerifyEmailPage />), errorElement: <RouteErrorPage /> },

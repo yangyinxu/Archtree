@@ -4,6 +4,7 @@ import {
     ARTWORK_VARIANT_WIDTHS,
     buildArtworkWorkload,
     buildArtworkVariantPath,
+    loadConfiguration,
     validateArtworkContract
 } from '../scripts/media-range-load.mjs';
 
@@ -22,6 +23,24 @@ test('artwork workload cycles through every supported display width', () => {
         buildArtworkVariantPath('0123456789abcdef01234567', ARTWORK_VARIANT_WIDTHS.length),
         '/content/images/0123456789abcdef01234567/v1/96.webp'
     );
+});
+
+test('media workload admits bounded Video MediaTrack IDs without exposing them', () => {
+    const config = loadConfiguration({
+        MEDIA_LOAD_BASE_URL: 'http://127.0.0.1:8081',
+        MEDIA_LOAD_TRACK_IDS: '0123456789abcdef01234567',
+        MEDIA_LOAD_VIDEO_TRACK_IDS: 'fedcba987654321001234567',
+        MEDIA_LOAD_CLIENTS: '2',
+        MEDIA_LOAD_SEEK_CYCLES: '2',
+        MEDIA_LOAD_HEALTH_POLLS: '1'
+    });
+
+    assert.deepEqual([...config.videoTrackIds], ['fedcba987654321001234567']);
+    assert.equal(config.plannedRequestCeiling <= 1_000, true);
+    assert.equal(JSON.stringify({
+        videoTracks: config.videoTrackIds.length,
+        plannedRequestCeiling: config.plannedRequestCeiling
+    }).includes('fedcba987654321001234567'), false);
 });
 
 test('artwork response contract requires versioned revalidated WebP metadata', () => {

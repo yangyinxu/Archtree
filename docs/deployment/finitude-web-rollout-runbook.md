@@ -85,6 +85,11 @@ Before promotion, verify all of the following:
   and direct Playlist API calls reject traffic without removing stored data.
 - A release owner, rollback owner, observation window, and stop conditions are
   recorded before deployment starts.
+- Before publishing the first production Video MediaTrack, a supported iOS
+  build must decode `mediaType`, use the canonical MediaTrack stream, and
+  present Video through its shared player. Until then, keep Video MediaTracks
+  local or staging-only; the legacy Audio stream intentionally does not
+  masquerade a Video object as Audio.
 
 Stop if the candidate or previous version cannot be identified exactly. Also
 stop the first base-path migration if rollback would leave `/finitude` deep
@@ -119,8 +124,11 @@ Run these checks against the staging origin:
 5. A known public, currently attached artwork ID returns WebP from
    `/content/images/:imageId/v1/320.webp`, with an ETag, positive
    `Content-Length`, and `public, no-cache` revalidation.
-6. A ready track returns 206 for a small `Range` request, the expected
-   `Content-Range`, and the same ETag used by its preflight response.
+6. Ready Audio and Video MediaTracks return 206 from
+   `/content/mediaTrack/stream/:mediaTrackId` for a small `Range` request, the
+   expected `Content-Range`, and the same ETag used by each preflight response.
+   Starting Audio retains the browse layout; starting Video opens the central
+   theater and right-side queue without a media-mode switch.
 7. Home, Search, Album, Artist, Library, Account, compact player, and expanded
    player complete their core smoke flows without a console or telemetry leak.
 8. With one listener account, create, rename, add, reorder, play from the
@@ -161,7 +169,8 @@ approved maintenance/traffic procedure. During and after deployment, watch:
 - Elastic Beanstalk environment health and process restarts;
 - HTTPS bootstrap/renewal unit state, port 443, and the port 80 redirect;
 - `/health` media admission, rejection, and 5xx outcomes by resource;
-- listener page/API/playback error telemetry;
+- listener page/API/playback error telemetry, split only by bounded audio/video
+  failure class;
 - authentication success and refresh failures;
 - Web Vitals p75 once the agreed traffic sample is large enough.
 
@@ -194,7 +203,7 @@ release also affects authentication, playback, or shared infrastructure.
 3. Redeploy that exact archive through the normal Elastic Beanstalk version
    mechanism and wait for environment health to stabilize.
 4. Repeat `/health`, landing/listener deep links, login/refresh, attached
-   artwork, and audio Range smoke checks using that archive's own route
+   artwork, and MediaTrack Range smoke checks using that archive's own route
    contract. A pre-migration archive may serve `/listen` rather than
    `/finitude`; testing it only through the newer path would be a false
    rollback failure. Separately verify the prepared compatibility redirect so

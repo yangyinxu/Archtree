@@ -49,12 +49,23 @@ const ensureIndexes = async (db: mongoDb.Db) => {
       options: { expireAfterSeconds: 0 }
     },
     { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
+    { collection: 'contentWorkflowOperations', keys: { adminUserId: 1, updatedAt: -1 } },
+    {
+      collection: 'contentWorkflowOperations',
+      keys: { expiresAt: 1 },
+      options: { expireAfterSeconds: 0 }
+    },
     { collection: 'carousels', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'contentCollections', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'artists', keys: { createdBy: 1 } },
+    { collection: 'organizations', keys: { name: 1, _id: 1 } },
+    { collection: 'organizations', keys: { organizationType: 1, name: 1 } },
+    { collection: 'organizations', keys: { createdBy: 1 } },
     { collection: 'albums', keys: { createdBy: 1 } },
+    { collection: 'albums', keys: { 'credits.subjectType': 1, 'credits.subjectId': 1, 'credits.role': 1 } },
     { collection: 'audioTracks', keys: { createdBy: 1 } },
     { collection: 'audioTracks', keys: { artistIds: 1 } },
+    { collection: 'audioTracks', keys: { 'credits.subjectType': 1, 'credits.subjectId': 1, 'credits.role': 1 } },
     { collection: 'audioTracks', keys: { uploadStatus: 1, uploadUpdatedAt: -1 } },
     { collection: 'audioTracks', keys: { publicationStatus: 1, uploadStatus: 1 } },
     { collection: 'imageAssets', keys: { ownerType: 1, ownerId: 1, _id: 1 } },

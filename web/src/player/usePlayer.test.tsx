@@ -43,6 +43,7 @@ const item: PlayerQueueItem = {
   title: 'Shared State',
   artworkUrl: '',
   artistNames: ['Finitude'],
+  mediaType: 'audio',
   streamUrl: '/audio/shared-state.mp3'
 };
 

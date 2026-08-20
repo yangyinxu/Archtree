@@ -466,7 +466,7 @@ export class Playlist {
         );
     }
 
-    /** Resolves memberships for a bounded Soundtrack set without exposing Playlist metadata. */
+    /** Resolves memberships for a bounded MediaTrack set without exposing Playlist metadata. */
     static async findMemberships(
         ownerUserId: string,
         audioTrackIds: string[]
@@ -680,7 +680,7 @@ export class Playlist {
                     throw new PlaylistError(
                         409,
                         'playlist_item_limit_reached',
-                        `A Playlist can have at most ${MAX_PLAYLIST_ITEMS} Soundtracks.`
+                        `A Playlist can have at most ${MAX_PLAYLIST_ITEMS} MediaTracks.`
                     );
                 }
                 const insertAt = position === undefined ? currentItems.length : position;
@@ -704,7 +704,7 @@ export class Playlist {
                     throw new PlaylistError(
                         404,
                         'audio_track_not_found',
-                        'A ready Soundtrack was not found.'
+                        'A ready MediaTrack was not found.'
                     );
                 }
 

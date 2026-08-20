@@ -335,6 +335,7 @@ test('cover CAS plus Artist references obey the deletion fence and the JSON comb
 test('failed Artist reference cleanup retains evidence and a retry completes deletion', async () => {
     const artistId = new ObjectId();
     const trackId = new ObjectId();
+    const albumId = new ObjectId();
     const carouselId = new ObjectId();
     await Promise.all([
         getDb()!.collection('artists').insertOne({
@@ -346,7 +347,29 @@ test('failed Artist reference cleanup retains evidence and a retry completes del
         }),
         getDb()!.collection('audioTracks').insertOne({
             _id: trackId,
-            artistIds: [artistId.toHexString()]
+            artistIds: [artistId.toHexString()],
+            credits: [{
+                creditId: 'artist_cleanup_track_credit',
+                subjectType: 'artist',
+                subjectId: artistId.toHexString(),
+                role: 'performer',
+                order: 0
+            }],
+            attributionStatus: 'documented',
+            creditRevision: 1
+        }),
+        getDb()!.collection('albums').insertOne({
+            _id: albumId,
+            title: 'Cleanup Album',
+            credits: [{
+                creditId: 'artist_cleanup_album_credit',
+                subjectType: 'artist',
+                subjectId: artistId.toHexString(),
+                role: 'primary',
+                order: 0
+            }],
+            attributionStatus: 'documented',
+            creditRevision: 1
         }),
         getDb()!.collection('carousels').insertOne({
             _id: carouselId,
@@ -380,6 +403,12 @@ test('failed Artist reference cleanup retains evidence and a retry completes del
         (await getDb()!.collection('audioTracks').findOne({ _id: trackId }))!.artistIds,
         []
     );
+    const cleanedTrack = await getDb()!.collection('audioTracks').findOne({ _id: trackId });
+    const cleanedAlbum = await getDb()!.collection('albums').findOne({ _id: albumId });
+    assert.deepEqual(cleanedTrack!.credits, []);
+    assert.equal(cleanedTrack!.attributionStatus, 'unknown');
+    assert.deepEqual(cleanedAlbum!.credits, []);
+    assert.equal(cleanedAlbum!.attributionStatus, 'unknown');
     const carousel = await getDb()!.collection('carousels').findOne({ _id: carouselId });
     assert.equal(carousel!.mode, 'manual');
     assert.equal(carousel!.artistConfig, undefined);

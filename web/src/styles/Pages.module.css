@@ -308,6 +308,23 @@
   padding: 0;
 }
 
+.organizationResult {
+  background: var(--color-surface-low);
+  border: 1px solid var(--color-border);
+  border-radius: 0.55rem;
+  color: var(--color-text);
+  display: grid;
+  gap: 0.35rem;
+  min-height: 6rem;
+  padding: 1rem;
+  text-decoration: none;
+}
+
+.organizationResult span {
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+}
+
 .compactState {
   background: var(--color-surface-low);
   border: 1px solid transparent;

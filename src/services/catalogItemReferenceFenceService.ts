@@ -9,7 +9,7 @@ type CatalogItemReference = {
     contentId?: unknown;
 };
 
-/** Normalizes and fences mixed Album/Soundtrack item arrays inside an existing transaction. */
+/** Normalizes and fences mixed Album/MediaTrack item arrays inside an existing transaction. */
 export const touchReadyCatalogItemReferences = async (
     items: readonly CatalogItemReference[],
     session: ClientSession

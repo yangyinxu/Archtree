@@ -87,7 +87,7 @@ test('prioritizes the compact left rail before dismissing Now Playing', async ({
   await expect(page.getByText('Your Library', { exact: true })).toBeHidden();
   const compactPlaylist = page.getByRole('complementary', { name: 'Finitude Library' })
     .getByRole('link', {
-      name: `${privatePlaylistSummary.name}, ${privatePlaylistSummary.itemCount} soundtracks`
+      name: `${privatePlaylistSummary.name}, ${privatePlaylistSummary.itemCount} MediaTracks`
     });
   await expect(compactPlaylist).toBeVisible();
   const compact = await readShellBoxes(page);

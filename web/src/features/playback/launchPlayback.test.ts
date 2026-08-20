@@ -14,7 +14,8 @@ const tracks: AudioTrackSummary[] = [
     albumId: null,
     albumTitle: null,
     duration: '3:00',
-    streamUrl: '/content/audioTrack/stream/track-1'
+    mediaType: 'audio',
+    streamUrl: '/content/mediaTrack/stream/track-1'
   },
   {
     contentType: 'audioTrack',
@@ -25,7 +26,8 @@ const tracks: AudioTrackSummary[] = [
     albumId: null,
     albumTitle: null,
     duration: '4:00',
-    streamUrl: '/content/audioTrack/stream/track-2'
+    mediaType: 'audio',
+    streamUrl: '/content/mediaTrack/stream/track-2'
   }
 ];
 
@@ -40,7 +42,8 @@ test('Playlist launch snapshots the ready queue and records only the explicit st
       title: 'Dawn',
       artworkUrl: '',
       artistNames: ['Finite Ensemble'],
-      streamUrl: '/content/audioTrack/stream/track-2'
+      mediaType: 'audio',
+      streamUrl: '/content/mediaTrack/stream/track-2'
     }
   });
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -85,7 +88,8 @@ test('a superseded Playlist launch cannot borrow the newer queue state for activ
       title: 'Dawn',
       artworkUrl: '',
       artistNames: ['Finite Ensemble'],
-      streamUrl: '/content/audioTrack/stream/track-2'
+      mediaType: 'audio',
+      streamUrl: '/content/mediaTrack/stream/track-2'
     }
   });
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

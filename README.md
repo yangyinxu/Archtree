@@ -20,7 +20,7 @@ rather than repeat the code and must stay synchronized with behavior.
 - TypeScript (runtime via tsx)
 - React + Vite
 - MongoDB
-- AWS S3 (audio object storage)
+- AWS S3 (one Audio or Video object per MediaTrack)
 
 ## Scripts
 
@@ -39,8 +39,9 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run test:integration`: run transactional authentication, account,
   Playlist, storage, and content-reference lifecycle tests against a disposable
   single-node MongoDB replica set
-- `npm run test:media-load`: run the bounded audio Range, seek/abort, artwork,
-  and health-recovery workload against an explicitly authorized environment
+- `npm run test:media-load`: run the bounded audio/video Range, seek/abort,
+  artwork, and health-recovery workload against an explicitly authorized
+  environment
 - `npm run stage:eb-artifact`: validate and stage the exact allowlisted Elastic
   Beanstalk runtime tree in `elastic-beanstalk-artifact`
 
@@ -87,22 +88,32 @@ Required variables:
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in
   production and enabled in non-production environments.
+- Catalog Credit rollout switches are documented in
+  [`docs/deployment/catalog-credit-rollout-runbook.md`](docs/deployment/catalog-credit-rollout-runbook.md):
+  `CATALOG_CREDIT_WRITES_ENABLED`, `CATALOG_CREDIT_READS_ENABLED`,
+  `CATALOG_CREDIT_SECTIONS_ENABLED`, and
+  `CATALOG_ORGANIZATION_SURFACES_ENABLED` default to `true` for the additive
+  release. `CATALOG_CREDIT_REJECT_LEGACY_WRITES` defaults to `false` until the
+  documented adoption and seven-day drift gate passes.
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 operations
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region
-- `S3_BUCKET_NAME`: target S3 bucket for audio uploads
+- `S3_BUCKET_NAME`: target S3 bucket for MediaTrack Audio and Video uploads
 - `S3_CONNECTION_TIMEOUT_MS`: maximum S3 connection setup time (defaults to 5000)
 - `S3_REQUEST_TIMEOUT_MS`: maximum S3 socket inactivity time (defaults to 60000)
 - `S3_SUMMARY_WAIT_TIMEOUT_MS`: maximum content-manager wait for an S3 summary refresh (defaults to 2000)
 - `MAX_AUDIO_BATCH_UPLOAD_MB`: maximum aggregate multipart request size for bulk audio uploads (defaults to 1024)
 - `MAX_AUDIO_BATCH_FILES`: maximum files accepted in one bulk upload (defaults to 5)
+- `MAX_VIDEO_UPLOAD_MB`: maximum focused MediaTrack MP4 upload size in MiB
+  (defaults to 512 and is hard-capped at 1024)
 - `MAX_IMAGE_UPLOAD_MB`: maximum cover-art upload size in MiB (defaults to 10
   and is hard-capped at 25 so public derivative work remains byte-bounded)
-- `MAX_VIDEO_STREAM_CHUNK_MB`: largest video byte range returned per request (defaults to 4)
+- `MAX_VIDEO_STREAM_CHUNK_MB`: largest byte range on the deprecated GridFS
+  `/video` route (defaults to 4); it does not apply to MediaTrack S3 video
 - `MAX_MEDIA_REQUESTS_PER_IP`: concurrent public media requests allowed per client IP (defaults to 8)
 - `MAX_MEDIA_REQUESTS_GLOBAL`: concurrent public media requests allowed per server process (defaults to 40)
 - `MEDIA_PLAYBACK_RESERVED_PER_IP`: slots within the per-client media limit
-  reserved from artwork, avatar, video, and download traffic for playback
+  reserved from artwork, avatar, and download traffic for audio/video playback
   (defaults to 25% of the configured limit, currently 2)
 - `MEDIA_PLAYBACK_RESERVED_GLOBAL`: slots within the process media limit
   reserved from non-playback traffic (defaults to 40% of the configured limit,
@@ -183,6 +194,22 @@ emitted stylesheet payload at 32 KiB gzip, emitted fonts at 128 KiB, bundled
 images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
 continues to load through listener DTOs rather than being bundled into the app.
 
+To test MediaTrack replacement locally, sign in as an administrator at
+`http://localhost:8080/content/manage`, create or select a MediaTrack, and use
+the rendered **Replace with Audio** or **Replace with Video** form. Video input
+must be a progressive MP4 with H.264/AVC video and AAC audio. The upload URLs
+are multipart `POST` endpoints and are not pages to open directly in the
+address bar. If Express is intentionally running on a port other than 8080,
+either test the built single-origin `/finitude` bundle on that port or update
+the Vite development proxy target to the same origin.
+
+Finitude uses its custom shared controls in the page and temporarily exposes
+browser-native controls on the same Video element in fullscreen, so playback
+position remains adjustable without creating another player.
+The same media element stays connected in an app-owned hidden parking host for
+Audio and moves into the visible theater for Video. This prevents presentation
+teardown from cancelling natural or explicit mixed-kind queue advancement.
+
 Install the version-matched browser runtimes once before running the local
 browser gate:
 
@@ -201,12 +228,12 @@ rendering.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, and authenticated Library
-responses without exposing storage lifecycle fields. Public audio streaming is
-limited to database-confirmed `ready` tracks and preserves HTTP Range seeking.
+responses without exposing storage lifecycle fields. Public media streaming is
+limited to database-confirmed `ready` MediaTracks and preserves HTTP Range seeking.
 Legacy native-client reads under `/content` and `/feed` also remain available
-without authentication. Their Artist, Album, Soundtrack, Page, Carousel,
+without authentication. Their Artist, Album, MediaTrack, Page, Carousel,
 Grid/List, and Feed Post responses use explicit public projections rather than
-raw MongoDB documents. Soundtrack list, search, Album relationship, personalized
+raw MongoDB documents. MediaTrack list, search, Album relationship, personalized
 section, and expanded-page queries require a published (or legacy) Track with
 `uploadStatus: ready` and an S3 key bound to that Track ID before applying item
 limits or pagination. Public responses do
@@ -214,16 +241,30 @@ not expose `createdBy`, `updatedBy`, `coverArtId`, object keys, upload errors,
 original filenames, or lifecycle timestamps. Feed Posts retain only their
 existing opaque author reference; it cannot be used to read private account or
 avatar data.
+Every playable MediaTrack exposes exactly one `mediaType` (`audio` or `video`)
+and one `streamUrl`. Both kinds use `HEAD`/`GET
+/content/mediaTrack/stream/:mediaTrackId`, including full `200`, exact
+single-range `206`, and invalid-range `416` behavior; clients never receive an
+S3 URL or object key. Content Manager replaces the current object in place and
+retains the old object as cleanup evidence until S3 deletion is confirmed.
+Legacy `audioTrack` names and Audio-only stream aliases remain compatibility
+details during client migration; a Video MediaTrack is never served through
+the legacy Audio stream alias.
+The root `/video` GridFS route is isolated legacy compatibility only: it is not
+returned by catalog DTOs and must not receive new MediaTrack media. Remove it
+only after production files and consumers have been inventoried and either
+mapped to an owned MediaTrack lifecycle or confirmed unused.
 Finitude Web is streaming-only and exposes no Download action, Download filter,
 offline state, or browser-local media lifecycle; native-client downloads remain
 a separate product capability.
 Public artwork resolution similarly permits only ready Artist, Album, and
-Soundtrack image assets that their current owner still references; account
+MediaTrack image assets that their current owner still references; account
 avatars remain private behind `/auth/avatar`. Finitude Web derives responsive
 96, 192, 320, 480, 640, 960, and 1280 px square WebP responses from
 `/content/images/:imageId/v1/:width.webp`. They are versioned, revalidated,
 CPU-concurrency bounded responses and never create extra S3 objects; the
 original image route remains the fallback and native-client contract.
+
 The Archtree landing page links both signed-out and signed-in visitors to
 `/finitude` while preserving its existing content-management and authentication
 actions. Content-management actions are rendered only for administrators.
@@ -235,14 +276,16 @@ fields for identity, credentials, content/search text, URLs, or raw errors.
 `GET /health` is `no-store` and exposes process-local, identity-free media
 admission and stream outcomes split across playback, download, artwork,
 avatar, and video. The shared 40/8 process/client ceiling reserves 16/2 slots
-from non-playback traffic so artwork-heavy pages cannot consume all playback
-capacity.
+from non-playback traffic so artwork-heavy pages cannot consume all audio or
+video playback capacity.
 
 ### Verify media Range behavior under bounded load
 
 The media load command targets `http://127.0.0.1:8081` by default and requires
-one or more database-confirmed ready audio-track ObjectIds. It checks `HEAD`,
-full and partial responses, open-ended and suffix ranges, invalid ranges,
+one or more database-confirmed ready Audio MediaTrack ObjectIds. Optional
+`MEDIA_LOAD_VIDEO_TRACK_IDS` adds ready Video MediaTracks for mixed playback
+load. Both lists use the canonical MediaTrack stream endpoint. It checks `HEAD`,
+bounded, open-ended, and suffix ranges, invalid ranges,
 overlapping seek cancellation, concurrent fixed-width WebP artwork (including
 its type, validator, size, and revalidation contract), and `/health`
 recovery.
@@ -257,7 +300,8 @@ explicit opt-in and an exact hostname allowlist:
 MEDIA_LOAD_BASE_URL=https://staging.example.com \
 MEDIA_LOAD_ALLOWED_HOSTS=staging.example.com \
 ALLOW_REMOTE_MEDIA_LOAD=1 \
-MEDIA_LOAD_TRACK_IDS=<ready-audio-track-object-id> \
+MEDIA_LOAD_TRACK_IDS=<ready-audio-media-track-object-id> \
+MEDIA_LOAD_VIDEO_TRACK_IDS=<ready-video-media-track-object-id> \
 MEDIA_LOAD_ARTWORK_IDS=<public-artwork-object-id> \
 MEDIA_LOAD_CLIENTS=12 \
 MEDIA_LOAD_ARTWORK_CONCURRENCY=4 \
@@ -340,6 +384,18 @@ Web auth endpoints:
 - `POST /auth/login-web`
 - `POST /auth/logout-web`
 
+`GET /auth/login-web` renders the Archtree-branded login surface. Its script
+holds the shared origin-wide Web Lock while calling `POST /auth/browser/login`;
+an HTML-only `POST /auth/login-web` fails closed with `409` and never installs
+credentials or redirects to Finitude. An already-authenticated GET redirects
+to its allowlisted `returnTo` destination.
+
+Archtree logout forms use the same Web Lock to call
+`POST /auth/browser/logout`, clear the departing account's local search
+history, and return to `/`. The HTML-only `POST /auth/logout-web` remains
+revoke-only and redirects to `/?sessionTransition=logout` for Archtree-side
+completion; neither path redirects through Finitude.
+
 Listener browser-session endpoints (HttpOnly cookies; credentials are never
 returned to JavaScript):
 
@@ -405,7 +461,7 @@ Account roles:
 
 Shared-content authorization:
 
-- Artist, Album, Soundtrack, audio upload, Page, Carousel, Grid/List,
+- Artist, Album, MediaTrack, media upload, Page, Carousel, Grid/List,
   relationship, and Feed Post mutations require authentication and the exact
   database-backed `admin` role.
 - Authentication and admin authorization run before JSON/form parsing for
@@ -426,14 +482,54 @@ Web content management:
 - `GET /content/manage/audio-tracks`
 - `GET /content/manage/search`
 - Administrator inventory is global rather than `createdBy`-scoped. Artist,
-  Album, Soundtrack, Page, Carousel, and Grid/List sections use stable bounded
+  Album, MediaTrack, Page, Carousel, and Grid/List sections use stable bounded
   pagination; internal provenance remains available for audit.
-- Create/update/delete forms for artists, albums, and audio tracks
-- Single and bulk audio-track creation record filenames and a pending upload state before sending files to S3
-- Every newly uploaded track requires at least one existing artist. `audioTrack.artistIds` is the canonical artist-to-track relationship.
-- Artist responses no longer expose the legacy `audioTrackIds` field. Clients should find an artist's tracks by querying audio tracks whose `artistIds` contains the artist ID.
+- Create/update/delete forms for Artists, Albums, and MediaTracks
+- Content Manager is organized into Overview, Catalog, Page Layout, and
+  Operations views. Artist workspaces manage named Album memberships without
+  copying database IDs and can create a new Album already linked to the Artist.
+- Catalog keeps the global inventory available, but an Artist, Album,
+  MediaTrack, or Organization opened from Edit is promoted into a focused
+  workspace near the top of the view. Database IDs remain available through
+  explicit copy actions instead of being primary labels.
+- Page Layout leads with the current Page hierarchy. Page placement, Carousel
+  configuration, and manual-item maintenance are grouped into collapsible
+  tools; Page and Carousel reorder controls support both drag-and-drop and
+  Move up/Move down buttons.
+- Operations shows the retained step status for each guided Artist release,
+  links completed content back to its workspace, and only offers retry when an
+  operation needs attention. MediaTracks can be filtered together by search,
+  storage lifecycle status, and Album assignment.
+- The guided Artist release setup creates or reuses an Artist, creates and
+  links an Album, and can optionally create a dynamic Album Artist Carousel
+  and attach it to Home or Library in one reviewed submission.
+- Guided setup uses a retained, administrator-scoped operation record. Reusing
+  the same setup token is idempotent; partial failures keep completed IDs and
+  expose a retry action that resumes from the first incomplete step.
+- Artist metadata and Artist–Album relationship actions use non-upload routes.
+  Only file-capable endpoints consume the shared upload rate/concurrency
+  capacity. A browser upload `429` renders a recovery page with the
+  `Retry-After` time instead of a raw JSON document.
+- Album and MediaTrack attribution is managed as ordered role-bearing Credits
+  for Artist and Organization subjects. Compatibility `artistIds`, `albumIds`,
+  and flattened bylines are projected by the server during client migration.
+- The Content Manager Credit editor supports named subject search, role
+  changes, ordering, removal, Organization-only attribution, and an explicit
+  `Attribution not documented` state. Dynamic Artist Carousels can target
+  Discography, Collaborations, Appears On, or all related Credits.
+- Single and bulk Content Manager Audio MediaTrack creation records original filenames
+  and a pending upload state before sending files to S3. They accept Artist Credits,
+  Organization Credits, inherited Album primary Artists, or an explicitly
+  undocumented attribution state.
+- The legacy `/content/audioTrack` creation endpoint continues to require an
+  existing Artist during the compatibility window and can be disabled with
+  the Catalog Credit legacy-write cutover switch.
+- Artist responses no longer expose the legacy `audioTrackIds` field. Clients
+  find an Artist's MediaTracks by querying the compatibility `audioTracks`
+  resource whose `artistIds` contains the Artist ID.
 - Content Manager reference fields validate IDs against the expected shared content type before saving.
-- Artist, album, and audio-track create/update forms accept optional JPG, PNG, or WebP cover art through the `coverArtFile` multipart field.
+- Artist, Album, and MediaTrack create/update forms accept optional JPG, PNG,
+  or WebP cover art through the `coverArtFile` multipart field.
 - Cover art is stored in the private S3 bucket and referenced by `coverArtId`. API responses derive `coverArtUrl` as `/content/images/:imageId`.
 - New Artist/Album cover art reaches ready storage before the owner is inserted;
   the ready owner and exact `coverArtId` are then published in one insert, so a
@@ -446,24 +542,26 @@ Web content management:
   the uploader removes the exact newly written key. A lost staging or
   finalization response proceeds only after an exact pending/ready lifecycle
   readback; otherwise it preserves the evidence and requires reconciliation.
-  Deleting an Artist, Album, or Soundtrack retries every current or detached
+  Deleting an Artist, Album, or MediaTrack retries every current or detached
   asset recorded for that owner before removing the owner; a storage failure
   keeps the owner and lifecycle evidence retryable.
-- Existing tracks support replacing their uploaded audio file
+- Existing MediaTracks support replacing the one active object with either an
+  Audio file or a supported Video file.
 - S3 bucket storage usage and an estimated monthly storage-only charge (requires the S3 `ListBucket` permission)
 
 Artist carousels:
 
 - Manual carousels keep an explicitly managed item list.
 - Manual carousels can be renamed without changing their items.
-- Artist carousels dynamically resolve either albums or audio tracks for one existing artist.
-- Album carousels use the artist's `albumIds`; audio-track carousels query `AudioTrack.artistIds`.
+- Artist carousels dynamically resolve either Albums or MediaTracks for one existing Artist.
+- Album carousels use the Artist's `albumIds`; MediaTrack carousels query the
+  compatibility `AudioTrack.artistIds` field.
 - Dynamic results support newest-release or title sorting and a configurable limit from 1 to 100.
 - Artist carousel items cannot be manually added, reordered, or moved between carousels.
 
 Personalized Library:
 
-- Authenticated users can save and unsave albums or audio tracks through
+- Authenticated users can save and unsave Albums or MediaTracks through
   `/content/me/saves/:contentType/:contentId`.
 - Both `/content/me/library` and `/api/listener/v1/library` return private,
   allowlisted DTOs rather than catalog storage/lifecycle records. Existing
@@ -473,21 +571,21 @@ Personalized Library:
 - `POST /content/me/saves/status` resolves saved state for up to 100 visible
   items, and `POST /content/me/recently-played` records explicit playback
   actions.
-- Personalized carousels mix albums and audio tracks from either Recently Saved
+- Personalized carousels mix Albums and MediaTracks from either Recently Saved
   or Recently Played and resolve for the viewer requesting an expanded page.
 - Each recent history is capped at 20 mixed-content entries; the full saved
   relationship is retained separately.
-- Expanded page responses include allowlisted resolved Album, Soundtrack, and
+- Expanded page responses include allowlisted resolved Album, MediaTrack, and
   Feed Post documents in an additive `included` payload. Referenced Posts are
   hydrated independently of the default Feed page, so older configured items
   remain discoverable.
-- Included audio tracks expose `displayCoverArtUrl`, resolving track-specific
+- Included MediaTracks expose `displayCoverArtUrl`, resolving MediaTrack-specific
   cover art first and linked album cover art second. Linked albums used for
   this resolution are also included without transferring image ownership.
-- Album cards read `Album.title`, while audio-track cards read
+- Album cards read `Album.title`, while MediaTrack cards read the compatibility
   `AudioTrack.title`; correct album text does not verify the encoding of a
   legacy track title.
-- Audio-track titles and original filenames are normalized when read, created,
+- MediaTrack titles and original filenames are normalized when read, created,
   or updated. Expanded Home and Library responses must apply the same
   normalization even though they resolve included tracks directly from the
   database.
@@ -506,21 +604,21 @@ User Playlists:
   `GET`, `PATCH`, or `DELETE /content/me/playlists/:playlistId` reads, renames,
   or deletes an owner-scoped Playlist.
 - Playlist summary and detail DTOs include a non-persisted `artworkUrl`. Read
-  projection scans persisted member order and selects the first Soundtrack
+  projection scans persisted member order and selects the first MediaTrack
   that is published, has `uploadStatus: ready`, an identity-bound `s3Key`, and usable track-specific or
   inherited Album artwork. Missing, pending, deleting, unsafe, or artwork-free
   candidates are skipped; `artworkUrl: ""` instructs clients to render the
   Finitude placeholder. List projection is bounded to 100 Playlists and 500
-  member candidates each, using page-wide Soundtrack and Album reads rather
+  member candidates each, using page-wide MediaTrack and Album reads rather
   than one catalog query per Playlist. Only single-slash same-origin paths and
   credential-free HTTPS artwork URLs are returned.
-- `POST /content/me/playlists/:playlistId/items` adds one ready Soundtrack,
+- `POST /content/me/playlists/:playlistId/items` adds one ready MediaTrack,
   optionally at a zero-based `position`;
   `DELETE /content/me/playlists/:playlistId/items/:itemId` removes one exact
   membership; and `PUT /content/me/playlists/:playlistId/items/order` accepts
   the complete current `itemIds` permutation.
 - `GET /content/me/playlists/memberships?audioTrackIds=id1,id2` returns only
-  the current owner's Playlist IDs containing up to 50 requested Soundtracks,
+  the current owner's Playlist IDs containing up to 50 requested MediaTracks,
   so Add controls can show existing membership without exposing names or
   another account's data.
 - Every mutation requires `Idempotency-Key`, replayable for 24 hours. A replay
@@ -534,11 +632,11 @@ User Playlists:
   newly switched account's private data. Bearer-authenticated native requests
   remain bound to their access-token identity.
 - Names contain 1–100 trimmed Unicode characters. Each account may own at most
-  100 Playlists, each containing at most 500 unique Soundtracks. Playlist order
+  100 Playlists, each containing at most 500 unique MediaTracks. Playlist order
   is explicit; unavailable members remain represented but only ready members
   are projected into playback.
 - Playlist writes own no S3 objects. Deleting a Playlist does not unsave or
-  delete its Soundtracks, and deleting a Soundtrack or listener account cleans
+  delete its MediaTracks, and deleting a MediaTrack or listener account cleans
   Playlist references through the database lifecycle before final removal.
 
 Session behavior:
@@ -581,26 +679,36 @@ Session behavior:
 - Protected web pages redirect to login if unauthenticated. Content Manager
   additionally requires the current database role to be `admin`.
 
-## Audio Upload and Delete Lifecycle
+## MediaTrack Audio and Video Lifecycle
 
 Upload:
 
-- API creation: `POST /content/audioTrack` as multipart form data with required `audioFile`
-- API: `POST /content/audioTrack/:audioTrackId/upload`
+- Legacy API Audio creation: `POST /content/audioTrack` as multipart form data
+  with required `audioFile`. Content Manager creates either kind directly from
+  one required `mediaFile` field and optional cover art.
+- Replace with Audio: `POST /content/audioTrack/:audioTrackId/upload`
+- Replace with Video: `POST /content/audioTrack/:audioTrackId/video` with
+  multipart field `videoFile`
 - Form field for file: `audioFile`
 - Large audio uploads are spooled to bounded temporary files and streamed to S3; they are not retained in the Node.js heap.
 - Upload requests require `Content-Length`, are concurrency/rate limited, and temporary files are removed on completion or disconnect.
-- Playback: `GET /content/audioTrack/stream/:audioTrackId` supports bounded single-range responses and cancels the upstream S3 request when the client disconnects.
+- Canonical playback: `HEAD`/`GET
+  /content/mediaTrack/stream/:mediaTrackId` supports bounded single-range
+  responses for either kind and cancels the upstream S3 request when the client
+  disconnects.
+- The legacy `/content/audioTrack/stream/:audioTrackId` alias serves Audio
+  MediaTracks only. The prototype `/content/audioTrack/video/:audioTrackId`
+  route remains a temporary Video-only compatibility alias.
 - Legacy audio download routes redirect to the streaming endpoint and no longer buffer whole objects in server memory.
 - Authorization required; admin enforced before multipart parsing or upload work
-- New tracks are saved with `uploadStatus: pending` and
+- New MediaTracks are saved with `uploadStatus: pending` and
   `publicationStatus: pending` before S3 upload. Storage may become ready first;
   public/reference readiness is committed only when publication and the
   Album's canonical `audioTrackIds` relationship succeed in one transaction
   (or a no-Album publication condition succeeds). Legacy rows without the new
   publication field remain readable.
-- Assigning or clearing a Soundtrack Album relationship transactionally removes
-  that Soundtrack from every prior Album `audioTrackIds` list, updates
+- Assigning or clearing a MediaTrack Album relationship transactionally removes
+  that MediaTrack from every prior Album `audioTrackIds` list, updates
   `audioTrack.albumId`, and adds it to the requested Album when present. An
   empty canonical list uses reverse-link fallback only for a truly legacy Album
   whose `lifecycleStatus` field is absent; lifecycle Albums treat even an empty
@@ -614,28 +722,62 @@ Upload:
   per-item lifecycle outcomes after navigation. A publication failure does not
   require re-uploading the successful storage object.
 
+One active media object:
+
+- Only parsed MP4 containing H.264/AVC video and AAC audio is accepted. Uploads
+  require `Content-Length`, use the shared bounded disk spool, and default to
+  `MAX_VIDEO_UPLOAD_MB=512`.
+- A MediaTrack has exactly one externally playable object and records its
+  `mediaType` as `audio` or `video`. It never exposes both representations.
+- Replacement reserves and uploads a kind-bound pending key, atomically makes
+  that object active, retains the former key and kind as cleanup evidence, and
+  only then deletes the former S3 object. A failed replacement leaves the
+  current object playable.
+- Deleting only the Video is rejected because a MediaTrack may not have zero
+  active objects. Replace it with Audio, or delete the entire MediaTrack.
+- Rows from the superseded optional-video prototype are migration evidence;
+  their objects stay traceable until the unified lifecycle safely promotes one
+  object and confirms cleanup of the other.
+
 Delete:
 
 - API: `DELETE /content/audioTrack/:audioTrackId`
 - Web: content manager delete action
-- Track metadata is retained until the matching S3 object has been deleted.
+- MediaTrack metadata is retained until every matching active, pending,
+  cleanup, and legacy migration object has been deleted.
 - Failed deletions remain marked as `deleteFailed` for reconciliation.
 
 Reconciliation:
 
 - Admin-only report: `GET /admin/audio-storage/reconciliation`
+- Admin-only exact-orphan deletion: `POST /admin/audio-storage/orphan-delete`
+  with `{"s3Key":"audio/..."}` or the audit-page form. It re-runs
+  reconciliation, rejects any raw MediaTrack lifecycle reference, deletes only
+  the exact confirmed orphan, and verifies that S3 no longer reports it.
+- The same report includes a `videoStorage` section for `video/` objects,
+  missing lifecycle keys, incomplete operations, invalid keys, and duplicates.
+  `POST /admin/video-storage/orphan-delete` rechecks all nested active, pending,
+  and cleanup references before deleting one exact report-confirmed orphan.
+- Admin-only MongoDB-only MediaTrack deletion:
+  `POST /admin/audio-storage/missing-track-delete` with `audioTrackId` and
+  `expectedS3Key`. It re-runs reconciliation, rejects stale storage identity,
+  and uses the normal MediaTrack deletion lifecycle so catalog references are
+  cleaned and partial failures retain retryable database evidence.
 - Admin-only publication retry: `POST /admin/audio-storage/publication-retry`
   with `{"audioTrackIds":["..."]}` (1–100 items). It reuses existing
   database-confirmed ready objects, isolates every item, and returns stable
   outcomes for ready, non-ready, missing, malformed, and duplicate IDs without
   stopping the rest of the batch.
-- Browser requests receive a readable audit page; append `?format=json` for the structured report.
+- Browser requests receive a readable audit page with lifecycle-specific
+  recommendations and individually confirmed actions; append `?format=json`
+  for the structured report.
 - Compares every `audioTracks` record against the objects in `S3_BUCKET_NAME`.
 - Reports orphaned S3 objects, database tracks with missing objects, and
   pending/failed storage or publication lifecycle records. Incomplete rows
   include `publicationStatus`, `publicationUpdatedAt`, and bounded
   `publicationError` evidence.
-- The report is read-only; it never deletes S3 objects automatically.
+- Generating the report is read-only; it never deletes S3 objects
+  automatically. Remediation requires a separate explicit administrator POST.
 - Admin-only image report: `GET /admin/image-storage/reconciliation`
 - The image report audits the `images/` namespace against `imageAssets`, including orphaned, detached, missing, pending, and failed image records.
 - Admin-only content-reference report: `GET /admin/content-references/reconciliation`
@@ -643,10 +785,10 @@ Reconciliation:
   Page-to-Carousel and Page-to-Grid/List references (including presentation
   mismatches), manual carousel and Grid/List items, artist-album links,
   album-track links, and track-album links, plus both directions of
-  Album/Soundtrack mismatch (a stale canonical membership or a published
+  Album/MediaTrack mismatch (a stale canonical membership or a published
   reverse Track link missing from a lifecycle Album's canonical order);
   dangling Playlist items and missing owners; invalid Playlist mutation receipt
-  ownership/targets; and stalled Soundtrack reference cleanup without mutating
+  ownership/targets; and stalled MediaTrack reference cleanup without mutating
   data. Page target deletion and detachment are atomic, and each reconciliation
   source scan and embedded finding remains bounded by the two limits above.
 
@@ -660,3 +802,13 @@ Reconciliation:
   - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 512 MB)
   - Cover-art limit via `MAX_IMAGE_UPLOAD_MB` (defaults to 10 MB; maximum 25 MB)
   - Content Manager bulk uploads send files sequentially, keeping each request below the proxy limit and avoiding buffering the entire selection in memory at once.
+- Catalog Credit migration is dry-run-first and bounded:
+  `npm run migrate:catalog-credits -- --limit=100`. Continue with the returned
+  `--after-album` and `--after-track` checkpoints. Apply only after reviewing
+  findings: `npm run migrate:catalog-credits -- --apply --confirm=APPLY_CATALOG_CREDITS --limit=100`.
+  `--mark-unattributed-unknown` is an explicit policy choice and is never the
+  default. The command reports bounded samples and never logs credentials.
+- `429 Upload temporarily limited`: genuine image/audio upload endpoints share
+  a per-client upload budget of 20 requests per hour and expose `Retry-After`,
+  `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset`. Metadata and
+  Artist–Album membership changes do not consume that budget.

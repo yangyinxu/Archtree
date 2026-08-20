@@ -13,6 +13,9 @@ import { getUploadedFile } from '../middleware/imageUpload';
 import { getPublicArtist, listPublicArtists } from '../services/publicCatalogService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
 import { deleteArtistAndReferences } from '../services/artistLifecycleService';
+import { replaceArtistAlbums } from '../services/artistAlbumLinkService';
+import { getListenerArtist } from '../services/listenerContentService';
+import { catalogCreditRollout } from '../config/catalogCreditRollout';
 
 type UploadedCoverArt = { imageId: string; coverArtUrl: string };
 
@@ -72,13 +75,20 @@ export const postArtist = async (req: Request, res: Response, next: NextFunction
     if (authReq.auth.role !== 'admin') {
         return res.status(403).json({ message: 'Administrator access is required.' });
     }
+    if (catalogCreditRollout().rejectLegacyWrites && req.body.albumIds !== undefined) {
+        return res.status(409).json({
+            message: 'Direct albumIds writes are retired. Use Album primary Credits.'
+        });
+    }
 
     const name: string = req.body.name;
     // Convert the birthDate to a SimpleDate object with SimpleDate.fromJson()
     const birthDate: SimpleDate = SimpleDate.fromJson(req.body.birthDate);
     const bio: string = req.body.bio;
     const coverArtUrl: string = req.body.coverArtUrl;
-    const albumIds: [string] = req.body.albumIds;
+    const albumIds = Array.isArray(req.body.albumIds)
+        ? req.body.albumIds.map(String)
+        : [];
 
     // Create a new artist
     const artistObjectId = new ObjectId();
@@ -87,7 +97,7 @@ export const postArtist = async (req: Request, res: Response, next: NextFunction
         birthDate,
         bio,
         coverArtUrl,
-        albumIds,
+        albumIds as [string],
         authReq.auth.userId,
         artistObjectId
     );
@@ -108,6 +118,7 @@ export const postArtist = async (req: Request, res: Response, next: NextFunction
             );
         }
         await publishNewArtist(artist, coverArt);
+        if (albumIds.length > 0) await replaceArtistAlbums(artistId, albumIds);
         return res.status(201).json({
             message: `Artist ${name} Added Successfully`,
             artist
@@ -139,6 +150,11 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     if (authReq.auth.role !== 'admin') {
         return res.status(403).json({ message: 'Administrator access is required.' });
     }
+    if (catalogCreditRollout().rejectLegacyWrites && req.body.albumIds !== undefined) {
+        return res.status(409).json({
+            message: 'Direct albumIds writes are retired. Use Album primary Credits.'
+        });
+    }
 
     const artistId = req.params.artistId;
     const artist = await Artist.findReadyById(artistId);
@@ -154,7 +170,9 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
     if (req.body.name !== undefined) updatePayload.name = req.body.name;
     if (req.body.bio !== undefined) updatePayload.bio = req.body.bio;
     if (req.body.coverArtUrl !== undefined) updatePayload.coverArtUrl = req.body.coverArtUrl;
-    if (req.body.albumIds !== undefined) updatePayload.albumIds = req.body.albumIds;
+    const requestedAlbumIds = req.body.albumIds !== undefined
+        ? (Array.isArray(req.body.albumIds) ? req.body.albumIds.map(String) : [])
+        : undefined;
     if (req.body.birthDate !== undefined) updatePayload.birthDate = SimpleDate.fromJson(req.body.birthDate);
 
     if (coverArtFile) {
@@ -190,6 +208,7 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
             cleanupPending: cleanup.cleanupPending
         });
     }
+    if (requestedAlbumIds) await replaceArtistAlbums(artistId, requestedAlbumIds);
     return res.status(200).json({
         message: 'Artist updated successfully.',
         cleanupPending: cleanup.cleanupPending
@@ -227,8 +246,18 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
 // get an artist via the model and return it
 export const getArtistById = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const artist = await getPublicArtist(req.params.artistId);
-        return res.status(artist ? 200 : 404).json({ artist });
+        const [artist, creditDetail] = await Promise.all([
+            getPublicArtist(req.params.artistId),
+            getListenerArtist(req.params.artistId)
+        ]);
+        const detailedArtist = artist && creditDetail ? {
+            ...artist,
+            discographyIds: creditDetail.discography.map((album) => album.id),
+            collaborationIds: creditDetail.collaborations.map((album) => album.id),
+            appearsOnIds: creditDetail.appearsOn.map((album) => album.id),
+            creditAlbumIds: creditDetail.creditAlbums.map((album) => album.id)
+        } : artist;
+        return res.status(detailedArtist ? 200 : 404).json({ artist: detailedArtist });
     } catch (error) {
         return next(error);
     }

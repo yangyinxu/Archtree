@@ -6,6 +6,7 @@ import {
   House,
   Library,
   LockKeyhole,
+  Maximize2,
   PanelRight,
   Pause,
   Play,
@@ -26,6 +27,7 @@ export type IconName =
   | 'arrow-left'
   | 'arrow-right'
   | 'brand'
+  | 'expand'
   | 'home'
   | 'library'
   | 'lock'
@@ -46,6 +48,7 @@ const icons: Record<IconName, LucideIcon> = {
   'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
   brand: Disc3,
+  expand: Maximize2,
   home: House,
   library: Library,
   lock: LockKeyhole,
@@ -65,13 +68,13 @@ const icons: Record<IconName, LucideIcon> = {
 /** Centralizes the mature Lucide icon set used by shell controls. */
 export const Icon = ({ name, ...props }: { name: IconName } & LucideProps) => {
   const Component = icons[name];
-  const filledTransport = ['play', 'previous', 'next'].includes(name);
+  const filledTransport = ['play', 'pause', 'previous', 'next'].includes(name);
   return (
     <Component
       aria-hidden="true"
       fill={filledTransport ? 'currentColor' : 'none'}
       focusable="false"
-      strokeWidth={name === 'pause' ? 2.8 : 1.9}
+      strokeWidth={1.9}
       {...props}
     />
   );

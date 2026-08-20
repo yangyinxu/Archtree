@@ -45,6 +45,7 @@ const librarySummary = (item: LibraryItem): ContentSummary => item.contentType =
       albumId: item.audioTrack.albumId,
       albumTitle: null,
       duration: item.audioTrack.duration,
+      mediaType: item.audioTrack.mediaType,
       streamUrl: item.audioTrack.streamUrl ?? ''
     };
 
@@ -140,7 +141,7 @@ export const LibraryPage = () => {
         <div className={styles.state}>
           <span className={styles.stateIcon}><Icon name="lock" /></span>
           <h2>Log in to open your Library</h2>
-          <p>Your saved Albums and Soundtracks belong only to your Finitude account.</p>
+          <p>Your saved Albums and MediaTracks belong only to your Finitude account.</p>
           <Link className={styles.loginLink} state={{ from: '/library' }} to="/login">Log in</Link>
         </div>
       </div>
@@ -154,7 +155,7 @@ export const LibraryPage = () => {
         <div>
           <p className={styles.eyebrow}>Saved for you</p>
           <h1 className={styles.title}>Your Library</h1>
-          <p className={styles.lede}>Every Album and Soundtrack you save, without a twenty-item cap.</p>
+          <p className={styles.lede}>Every Album and MediaTrack you save, without a twenty-item cap.</p>
         </div>
         <label className={styles.sortControl}>
           <span>Sort</span>
@@ -179,12 +180,12 @@ export const LibraryPage = () => {
       ) : items.length === 0 ? (
         <div className={styles.state}>
           <h2>{selectedTypes.length > 0 ? 'Nothing matches these filters' : 'Your Library is ready for its first save'}</h2>
-          <p>{selectedTypes.length > 0 ? 'Choose another content filter.' : 'Save an Album or Soundtrack and it will appear here.'}</p>
+          <p>{selectedTypes.length > 0 ? 'Choose another content filter.' : 'Save an Album or MediaTrack and it will appear here.'}</p>
           {selectedTypes.length === 0 && <Link className={styles.loginLink} to="/search">Explore music</Link>}
         </div>
       ) : (
         <>
-          <ul className={styles.list} aria-label="Saved Albums and Soundtracks">
+          <ul className={styles.list} aria-label="Saved Albums and MediaTracks">
             {items.map((item) => {
               const summary = librarySummary(item);
               const playable = item.contentType !== 'audioTrack' || item.audioTrack.available;

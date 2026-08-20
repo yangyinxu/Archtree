@@ -33,6 +33,9 @@
 - Divide every plan into explicit implementation stages.
 - Mark every stage with one current status: `Not started`, `In progress`,
   `Blocked`, or `Complete`, and update that status as work progresses.
+- After the planned work and its required verification are complete, delete
+  that plan's dedicated Markdown file before handing off the change. Do not
+  retain completed plan files under `docs/plans/`.
 - Treat plans as sequencing material, not as substitutes for canonical
   business rules, API contracts, or other stable documentation.
 

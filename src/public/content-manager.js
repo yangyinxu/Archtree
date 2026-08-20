@@ -12,6 +12,213 @@
   const uploadResultsKey = 'archtree.bulkUploadResults';
   const uploadResultsPanel = document.getElementById('bulk-upload-results');
 
+  // Safety controls initialize before optional workspace enhancements so a
+  // broken enhancement cannot silently remove destructive confirmations.
+  document.querySelectorAll('button[data-danger]').forEach((button) => {
+    const form = button.closest('form');
+    if (!form || form.matches('[data-batch-track-delete]')) return;
+    form.addEventListener('submit', (event) => {
+      const action = button.textContent.trim() || 'Delete this item';
+      if (!window.confirm(action + '? This action cannot be undone.')) {
+        event.preventDefault();
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-confirm-attribution-unknown]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      if (!window.confirm('Mark attribution as not documented? This removes every current Credit from this item.')) {
+        event.preventDefault();
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-copy-id]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const value = button.dataset.copyId || '';
+      if (!value) return;
+      const originalLabel = button.textContent;
+      try {
+        await navigator.clipboard.writeText(value);
+        button.textContent = 'Copied';
+      } catch (error) {
+        const fallback = document.createElement('textarea');
+        fallback.value = value;
+        fallback.setAttribute('readonly', '');
+        fallback.style.position = 'fixed';
+        fallback.style.opacity = '0';
+        document.body.append(fallback);
+        fallback.select();
+        document.execCommand('copy');
+        fallback.remove();
+        button.textContent = 'Copied';
+      }
+      window.setTimeout(() => { button.textContent = originalLabel; }, 1600);
+    });
+  });
+
+  document.querySelectorAll('[data-reference-picker]').forEach((picker) => {
+    const type = picker.dataset.referenceType;
+    const typeLabel = type === 'artist'
+      ? 'Artist'
+      : type === 'organization'
+        ? 'Organization'
+        : type === 'audioTrack' ? 'MediaTrack' : 'Album';
+    const query = picker.querySelector('[data-reference-query]');
+    const searchButton = picker.querySelector('[data-reference-search]');
+    const results = picker.querySelector('[data-reference-results]');
+    const status = picker.querySelector('[data-reference-status]');
+    const form = picker.closest('form');
+    const submitButton = form ? form.querySelector('[data-reference-submit]') : null;
+    if (!query || !searchButton || !results || !status) return;
+
+    const setReady = (ready) => {
+      results.disabled = !ready;
+      if (submitButton) submitButton.disabled = !ready || !results.value;
+    };
+    results.addEventListener('change', () => setReady(results.options.length > 1));
+    query.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        searchButton.click();
+      }
+    });
+    searchButton.addEventListener('click', async () => {
+      const searchQuery = query.value.trim();
+      if (!searchQuery) {
+        status.textContent = 'Enter a title to search.';
+        query.focus();
+        return;
+      }
+      searchButton.disabled = true;
+      status.textContent = 'Searching…';
+      results.replaceChildren(new Option('Searching…', ''));
+      setReady(false);
+      try {
+        const response = await fetch(`/content/manage/reference-search?type=${encodeURIComponent(type)}&q=${encodeURIComponent(searchQuery)}`, {
+          headers: { Accept: 'application/json' }
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || 'Search failed.');
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        results.replaceChildren(new Option(
+          items.length > 0 ? `Select a ${typeLabel}` : `No matching ${typeLabel}s`,
+          ''
+        ));
+        items.forEach((item) => results.append(new Option(item.label, item.id)));
+        setReady(items.length > 0);
+        status.textContent = items.length > 0
+          ? `${items.length} result${items.length === 1 ? '' : 's'} found.`
+          : `No matching ${typeLabel}s found.`;
+        if (items.length > 0) results.focus();
+      } catch (error) {
+        results.replaceChildren(new Option('Search unavailable', ''));
+        status.textContent = error.message || 'Search failed.';
+        setReady(false);
+      } finally {
+        searchButton.disabled = false;
+      }
+    });
+  });
+
+  const releaseSetupForm = document.querySelector('[data-release-setup]');
+  if (releaseSetupForm) {
+    const artistMode = releaseSetupForm.querySelector('[data-artist-mode]');
+    const existingArtist = releaseSetupForm.querySelector('[data-existing-artist]');
+    const newArtist = releaseSetupForm.querySelector('[data-new-artist]');
+    const createCarousel = releaseSetupForm.querySelector('[data-create-carousel]');
+    const carouselConfig = releaseSetupForm.querySelector('[data-carousel-config]');
+    const review = releaseSetupForm.querySelector('[data-release-review]');
+    const submitButton = releaseSetupForm.querySelector('button[type="submit"]');
+    const draftKey = 'archtree.artistReleaseDraft';
+    let isSubmittingRelease = false;
+    if (new URLSearchParams(window.location.search).get('workflowComplete') === '1') {
+      sessionStorage.removeItem(draftKey);
+    }
+
+    const fieldsIn = (container) => [...container.querySelectorAll('input, select, textarea')];
+    const updateMode = () => {
+      const isNew = artistMode.value === 'new';
+      existingArtist.hidden = isNew;
+      newArtist.hidden = !isNew;
+      fieldsIn(existingArtist).forEach((field) => { field.disabled = isNew; });
+      fieldsIn(newArtist).forEach((field) => { field.disabled = !isNew; });
+      const artistName = newArtist.querySelector('input[name="artistName"]');
+      if (artistName) artistName.required = isNew;
+      const existingId = existingArtist.querySelector('select[name="existingArtistId"]');
+      if (existingId) existingId.required = !isNew;
+    };
+    const updateCarousel = () => {
+      carouselConfig.hidden = !createCarousel.checked;
+      fieldsIn(carouselConfig).forEach((field) => { field.disabled = !createCarousel.checked; });
+    };
+    const selectedText = (select) => select && select.value
+      ? select.options[select.selectedIndex]?.textContent || select.value
+      : 'not selected';
+    const updateReview = () => {
+      const isNew = artistMode.value === 'new';
+      const artist = isNew
+        ? releaseSetupForm.elements.artistName.value.trim() || 'new Artist (name required)'
+        : selectedText(releaseSetupForm.elements.existingArtistId);
+      const album = releaseSetupForm.elements.albumTitle.value.trim() || 'Album title required';
+      const presentation = createCarousel.checked
+        ? `dynamic Album carousel${releaseSetupForm.elements.pageSlug.value ? ` on ${releaseSetupForm.elements.pageSlug.value}` : ''}`
+        : 'no Carousel or Page change';
+      review.textContent = `Artist: ${artist}. Album: ${album}. Presentation: ${presentation}.`;
+    };
+    const saveDraft = () => {
+      const draft = {};
+      [...releaseSetupForm.elements].forEach((field) => {
+        if (!field.name || field.type === 'file' || field.name === 'idempotencyToken') return;
+        draft[field.name] = field.type === 'checkbox' ? field.checked : field.value;
+      });
+      try { sessionStorage.setItem(draftKey, JSON.stringify(draft)); } catch (error) {
+        // Draft persistence is a progressive enhancement.
+      }
+    };
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
+      if (draft) {
+        Object.entries(draft).forEach(([name, value]) => {
+          const field = releaseSetupForm.elements[name];
+          if (!field) return;
+          if (field.type === 'checkbox') field.checked = Boolean(value);
+          else field.value = String(value);
+        });
+      }
+    } catch (error) {
+      // A malformed or unavailable session store does not block setup.
+    }
+    artistMode.addEventListener('change', updateMode);
+    createCarousel.addEventListener('change', updateCarousel);
+    releaseSetupForm.addEventListener('input', () => {
+      updateMode();
+      updateCarousel();
+      updateReview();
+      saveDraft();
+    });
+    releaseSetupForm.addEventListener('change', () => {
+      updateReview();
+      saveDraft();
+    });
+    releaseSetupForm.addEventListener('submit', () => {
+      isSubmittingRelease = true;
+      submitButton.disabled = true;
+      submitButton.textContent = 'Creating Artist, Album, and presentation…';
+    });
+    window.addEventListener('beforeunload', (event) => {
+      const hasSelectedFile = [...releaseSetupForm.querySelectorAll('input[type="file"]')]
+        .some((input) => input.files && input.files.length > 0);
+      if (!isSubmittingRelease && hasSelectedFile) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    });
+    updateMode();
+    updateCarousel();
+    updateReview();
+  }
+
   const renderUploadResults = (results) => {
     if (!uploadResultsPanel || !results) return;
 
@@ -101,6 +308,7 @@
       form.querySelector('input[name="name"]').value = carousel.name;
       form.querySelector('select[name="artistId"]').value = carousel.artistConfig.artistId;
       form.querySelector('select[name="artistContentType"]').value = carousel.artistConfig.contentType;
+      form.querySelector('select[name="artistScope"]').value = carousel.artistConfig.scope || 'discography';
       form.querySelector('select[name="artistSort"]').value = carousel.artistConfig.sort;
       form.querySelector('input[name="artistLimit"]').value = String(carousel.artistConfig.limit);
     });
@@ -148,6 +356,33 @@
     const saveButton = form.querySelector('.save-reorder');
     let draggedItem = null;
 
+    // Each reorder endpoint persists one item move, so keep a pending edit scoped to that item.
+    const updateMoveButtons = () => {
+      const activeOriginalIndex = fromInput.value;
+      [...list.children].forEach((element, index) => {
+        const locked = Boolean(activeOriginalIndex)
+          && element.dataset.originalIndex !== activeOriginalIndex;
+        const buttons = element.querySelectorAll('.drag-item__actions button');
+        if (buttons[0]) buttons[0].disabled = locked || index === 0;
+        if (buttons[1]) buttons[1].disabled = locked || index === list.children.length - 1;
+        element.draggable = !locked;
+      });
+    };
+
+    const selectMove = (element, targetIndex) => {
+      const currentIndex = [...list.children].indexOf(element);
+      if (targetIndex < 0 || targetIndex >= list.children.length || targetIndex === currentIndex) return;
+      const reference = targetIndex > currentIndex
+        ? list.children[targetIndex].nextSibling
+        : list.children[targetIndex];
+      list.insertBefore(element, reference);
+      fromInput.value = element.dataset.originalIndex || '';
+      toInput.value = String([...list.children].indexOf(element));
+      saveButton.disabled = fromInput.value === toInput.value;
+      updateMoveButtons();
+      element.querySelector('.drag-item__label')?.focus();
+    };
+
     const renderItems = () => {
       list.replaceChildren();
       fromInput.value = '';
@@ -164,16 +399,37 @@
         element.className = 'drag-item';
         element.draggable = true;
         element.dataset.originalIndex = String(index);
-        element.textContent = kind === 'page'
+        const label = document.createElement('span');
+        label.className = 'drag-item__label';
+        label.tabIndex = -1;
+        label.textContent = kind === 'page'
           ? labelForPageItem(item)
           : labelForCarouselItem(item);
+        const actions = document.createElement('span');
+        actions.className = 'drag-item__actions';
+        const moveUp = document.createElement('button');
+        moveUp.className = 'button--secondary';
+        moveUp.type = 'button';
+        moveUp.textContent = 'Move up';
+        moveUp.disabled = index === 0;
+        moveUp.addEventListener('click', () => selectMove(element, [...list.children].indexOf(element) - 1));
+        const moveDown = document.createElement('button');
+        moveDown.className = 'button--secondary';
+        moveDown.type = 'button';
+        moveDown.textContent = 'Move down';
+        moveDown.disabled = index === items.length - 1;
+        moveDown.addEventListener('click', () => selectMove(element, [...list.children].indexOf(element) + 1));
+        actions.append(moveUp, moveDown);
+        element.append(label, actions);
         list.append(element);
       });
     };
 
     selector.addEventListener('change', renderItems);
     list.addEventListener('dragstart', (event) => {
-      draggedItem = event.target.closest('.drag-item');
+      const candidate = event.target.closest('.drag-item');
+      if (fromInput.value && candidate?.dataset.originalIndex !== fromInput.value) return;
+      draggedItem = candidate;
       if (draggedItem) draggedItem.classList.add('dragging');
     });
     list.addEventListener('dragend', () => {
@@ -199,6 +455,7 @@
       fromInput.value = draggedItem.dataset.originalIndex || '';
       toInput.value = String([...list.children].indexOf(draggedItem));
       saveButton.disabled = fromInput.value === toInput.value;
+      updateMoveButtons();
       target.classList.remove('drag-over');
     });
   });
@@ -271,13 +528,32 @@
       progressLabel.textContent = message;
     };
 
-    const uploadFile = (file, artistId, albumId, fileIndex, fileCount, onProgress) => {
+    const uploadFile = (
+      file,
+      artistId,
+      albumId,
+      artistRole,
+      organizationId,
+      organizationRole,
+      inheritAlbumPrimaryCredits,
+      attributionUnknown,
+      promoteToAlbumPrimary,
+      fileIndex,
+      fileCount,
+      onProgress
+    ) => {
       return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
         const formData = new FormData();
         formData.append('audioFiles', file);
-        formData.append('artistId', artistId);
+        if (artistId) formData.append('artistId', artistId);
         if (albumId) formData.append('albumId', albumId);
+        formData.append('artistRole', artistRole);
+        if (organizationId) formData.append('organizationId', organizationId);
+        formData.append('organizationRole', organizationRole);
+        if (inheritAlbumPrimaryCredits) formData.append('inheritAlbumPrimaryCredits', 'true');
+        if (attributionUnknown) formData.append('attributionUnknown', 'true');
+        if (promoteToAlbumPrimary) formData.append('promoteToAlbumPrimary', 'true');
 
         request.open('POST', bulkUploadForm.action);
         request.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
@@ -316,8 +592,22 @@
       showStatus('Starting upload…', 0);
       const artistId = bulkUploadForm.querySelector('select[name="artistId"]').value;
       const albumId = bulkUploadForm.querySelector('select[name="albumId"]').value;
-      if (!artistId) {
-        showStatus('Select an artist before uploading.', 0);
+      const artistRole = bulkUploadForm.querySelector('select[name="artistRole"]').value;
+      const organizationId = bulkUploadForm.querySelector('select[name="organizationId"]').value;
+      const organizationRole = bulkUploadForm.querySelector('select[name="organizationRole"]').value;
+      const inheritAlbumPrimaryCredits = bulkUploadForm
+        .querySelector('input[name="inheritAlbumPrimaryCredits"]').checked;
+      const attributionUnknown = bulkUploadForm
+        .querySelector('input[name="attributionUnknown"]').checked;
+      const promoteToAlbumPrimary = bulkUploadForm
+        .querySelector('input[name="promoteToAlbumPrimary"]').checked;
+      if (!artistId && !organizationId && !(albumId && inheritAlbumPrimaryCredits) && !attributionUnknown) {
+        showStatus('Choose an Artist, Organization, inherited Album Artist, or undocumented attribution.', 0);
+        button.disabled = false;
+        return;
+      }
+      if (attributionUnknown && (artistId || organizationId || (albumId && inheritAlbumPrimaryCredits))) {
+        showStatus('Undocumented attribution cannot be combined with selected or inherited Credits.', 0);
         button.disabled = false;
         return;
       }
@@ -327,10 +617,23 @@
 
       for (let index = 0; index < files.length; index += 1) {
         try {
-          const response = await uploadFile(files[index], artistId, albumId, index, files.length, (fileProgress) => {
+          const response = await uploadFile(
+            files[index],
+            artistId,
+            albumId,
+            artistRole,
+            organizationId,
+            organizationRole,
+            inheritAlbumPrimaryCredits,
+            attributionUnknown,
+            promoteToAlbumPrimary,
+            index,
+            files.length,
+            (fileProgress) => {
             const percentage = Math.round(((index + fileProgress) / files.length) * 100);
             showStatus(`Uploading ${index + 1} of ${files.length}… ${percentage}%`, percentage);
-          });
+            }
+          );
           const itemOutcomes = Array.isArray(response.outcomes) ? response.outcomes : [];
           outcomes.push(...itemOutcomes);
           const publicationFailed = itemOutcomes.some((outcome) =>
@@ -364,7 +667,7 @@
         } catch (error) {
           // The count summary still appears when session storage is unavailable.
         }
-        const message = `${succeeded.length} audio track${succeeded.length === 1 ? '' : 's'} uploaded and published.${failures.length > 0 ? ` ${failures.length} require attention; their Track IDs and lifecycle outcomes are listed below.` : ''}`;
+        const message = `${succeeded.length} Audio MediaTrack${succeeded.length === 1 ? '' : 's'} uploaded and published.${failures.length > 0 ? ` ${failures.length} require attention; their MediaTrack IDs and lifecycle outcomes are listed below.` : ''}`;
         window.location.assign(`/content/manage?message=${encodeURIComponent(message)}`);
         return;
       }
@@ -396,6 +699,7 @@
 
   document.querySelectorAll('form input, form select, form textarea').forEach((field, index) => {
     if (field.type === 'hidden' || field.type === 'submit' || field.type === 'button') return;
+    if (field.labels && field.labels.length > 0) return;
 
     const labelText = field.dataset.label || field.getAttribute('placeholder') || labels[field.name];
     if (!labelText) return;
@@ -413,6 +717,7 @@
     const button = form.querySelector('.batch-delete-button');
     const selectAllButton = form.querySelector('.select-all-tracks');
     const trackCheckboxes = [...form.querySelectorAll('input[name="audioTrackIds"]')];
+    if (!button || !selectAllButton || trackCheckboxes.length === 0) return;
     const selectedTracks = () => form.querySelectorAll('input[name="audioTrackIds"]:checked');
     const updateBatchControls = () => {
       button.disabled = selectedTracks().length === 0;
@@ -428,19 +733,10 @@
     });
     form.addEventListener('submit', (event) => {
       const count = selectedTracks().length;
-      if (count === 0 || !window.confirm('Delete ' + count + ' selected audio track' + (count === 1 ? '' : 's') + '? This also removes their uploaded files.')) {
+      if (count === 0 || !window.confirm('Delete ' + count + ' selected MediaTrack' + (count === 1 ? '' : 's') + '? This also removes their uploaded files.')) {
         event.preventDefault();
       }
     });
   });
 
-  document.querySelectorAll('button[data-danger]').forEach((button) => {
-    const form = button.closest('form');
-    if (!form || form.matches('[data-batch-track-delete]')) return;
-    form.addEventListener('submit', (event) => {
-      if (!window.confirm('Delete this item? This action cannot be undone.')) {
-        event.preventDefault();
-      }
-    });
-  });
 })();

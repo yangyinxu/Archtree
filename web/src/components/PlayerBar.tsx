@@ -9,6 +9,7 @@ import {
 
 import { Artwork } from './Artwork';
 import { Icon } from './Icon';
+import { SharedVideoSurface } from './SharedVideoSurface';
 import { SeekSlider, formatPlaybackTime } from './SeekSlider';
 import {
   playerStore,
@@ -151,7 +152,7 @@ const TransportControls = ({
         <Icon name="shuffle" />
       </button>
       <button
-        aria-label="Previous soundtrack"
+        aria-label="Previous MediaTrack"
         className={styles.secondaryControl}
         data-player-control
         disabled={!player.canPrevious}
@@ -175,7 +176,7 @@ const TransportControls = ({
         <Icon name={playbackActive ? 'pause' : 'play'} />
       </button>
       <button
-        aria-label="Next soundtrack"
+        aria-label="Next MediaTrack"
         className={styles.secondaryControl}
         data-player-control
         disabled={!player.canNext}
@@ -421,7 +422,7 @@ export const PlayerBar = ({
       <span className={styles.copy}>
         <span className={styles.title}>{current?.title || 'Nothing playing'}</span>
         <span className={styles.meta}>
-          {current?.artistNames.join(', ') || (current ? 'Finitude soundtrack' : 'Choose something that fits the moment')}
+          {current?.displayByline || current?.artistNames.join(', ') || (current ? 'Finitude MediaTrack' : 'Choose something that fits the moment')}
         </span>
         {player.error && <span className={styles.error} role="alert">{player.error.message}</span>}
       </span>
@@ -569,19 +570,27 @@ export const PlayerBar = ({
           </div>
 
           <div className={styles.expandedBody}>
-            <Artwork
-              alt={`${current.title} cover`}
-              className={styles.expandedArtwork}
-              kind="audioTrack"
-              loading="eager"
-              sizes="(max-width: 767px) and (orientation: landscape) and (max-height: 500px) min(32vh, 14rem), min(72vw, 22rem)"
-              src={current.artworkUrl}
-            />
+            {current.mediaType === 'video' ? (
+              <SharedVideoSurface
+                className={styles.expandedVideo}
+                store={store}
+                title={current.title}
+              />
+            ) : (
+              <Artwork
+                alt={`${current.title} cover`}
+                className={styles.expandedArtwork}
+                kind="audioTrack"
+                loading="eager"
+                sizes="(max-width: 767px) and (orientation: landscape) and (max-height: 500px) min(32vh, 14rem), min(72vw, 22rem)"
+                src={current.artworkUrl}
+              />
+            )}
 
             <div className={styles.expandedIdentity}>
               <p className={styles.expandedTitle}>{current.title}</p>
               <p className={styles.expandedArtist}>
-                {current.artistNames.join(', ') || 'Finitude soundtrack'}
+                {current.displayByline || current.artistNames.join(', ') || 'Finitude MediaTrack'}
               </p>
             </div>
 

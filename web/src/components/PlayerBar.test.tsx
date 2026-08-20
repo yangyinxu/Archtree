@@ -52,6 +52,7 @@ const tracks: PlayerQueueItem[] = [
     title: 'Still Water',
     artworkUrl: '/content/images/0123456789abcdef01234567',
     artistNames: ['Aster Vale'],
+    mediaType: 'audio',
     streamUrl: '/audio/still-water.mp3'
   },
   {
@@ -59,6 +60,7 @@ const tracks: PlayerQueueItem[] = [
     title: 'Open Field',
     artworkUrl: '/art/open-field.jpg',
     artistNames: ['June North'],
+    mediaType: 'audio',
     streamUrl: '/audio/open-field.mp3'
   }
 ];
@@ -130,6 +132,11 @@ test('opens and closes the mobile expanded surface without creating another play
   expect(within(expanded).getByRole('button', { name: 'Repeat off. Turn on repeat all' }))
     .toHaveAttribute('aria-pressed', 'false');
   expect(within(expanded).getByRole('slider', { name: 'Volume' })).toHaveValue('1');
+  const expandedPlay = within(expanded).getByRole('button', { name: 'Play' });
+  expect(expandedPlay.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
+  await user.click(expandedPlay);
+  const expandedPause = await within(expanded).findByRole('button', { name: 'Pause' });
+  expect(expandedPause.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
 
   await user.click(within(expanded).getByRole('button', { name: 'Shuffle off. Turn shuffle on' }));
   expect(store.getSnapshot().shuffleEnabled).toBe(true);
@@ -142,6 +149,29 @@ test('opens and closes the mobile expanded surface without creating another play
   expect(screen.queryByRole('dialog', { name: 'Still Water' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Open Now Playing: Still Water' })).toHaveAttribute('aria-expanded', 'false');
   expect(store.getSnapshot().currentItem?.id).toBe('track-1');
+  expect(audioFactory).toHaveBeenCalledTimes(1);
+});
+
+test('mobile expanded player hosts the same video-capable transport', async () => {
+  setMobileViewport(true);
+  const user = userEvent.setup();
+  const audio = new PlayerBarAudio();
+  const audioFactory = vi.fn(() => audio);
+  const store = createPlayerStore({ audioFactory, mediaSession: null });
+  stores.push(store);
+  await store.launchStandalone({
+    ...tracks[0],
+    mediaType: 'video',
+    streamUrl: '/video/still-water.mp4'
+  }, { autoplay: false });
+  render(<PlayerBar store={store} />);
+
+  await user.click(screen.getByRole('button', { name: 'Open Now Playing: Still Water' }));
+  const expanded = screen.getByRole('dialog', { name: 'Still Water' });
+
+  expect(within(expanded).getByRole('img', { name: 'Still Water video' })).toBeInTheDocument();
+  expect(within(expanded).queryByRole('group', { name: 'Playback media' })).not.toBeInTheDocument();
+  expect(audio.src).toBe('/video/still-water.mp4');
   expect(audioFactory).toHaveBeenCalledTimes(1);
 });
 
@@ -249,8 +279,13 @@ test('exposes five state-driven desktop transport controls', async () => {
   expect(screen.queryByRole('button', { name: /Open Now Playing/ })).not.toBeInTheDocument();
   const controls = screen.getByRole('group', { name: 'Playback controls' });
   expect(within(controls).getAllByRole('button')).toHaveLength(5);
-  expect(within(controls).getByRole('button', { name: 'Previous soundtrack' })).toBeEnabled();
-  expect(within(controls).getByRole('button', { name: 'Next soundtrack' })).toBeDisabled();
+  expect(within(controls).getByRole('button', { name: 'Previous MediaTrack' })).toBeEnabled();
+  expect(within(controls).getByRole('button', { name: 'Next MediaTrack' })).toBeDisabled();
+  const play = within(controls).getByRole('button', { name: 'Play' });
+  expect(play.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
+  await user.click(play);
+  const pause = await within(controls).findByRole('button', { name: 'Pause' });
+  expect(pause.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
   const shuffle = within(controls).getByRole('button', { name: 'Shuffle off. Turn shuffle on' });
   expect(shuffle).toHaveAttribute('aria-pressed', 'false');
   await user.click(shuffle);

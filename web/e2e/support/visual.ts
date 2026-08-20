@@ -79,7 +79,7 @@ export const expectSignedInVisualShellReady = async (
   await expect(library.locator(`a[aria-label^="${playlistName},"]`)).toBeAttached();
 
   const nowPlaying = page.locator(
-    'aside[aria-label="Now Playing details"] section[aria-label="Current soundtrack"]'
+    'aside[aria-label="Now Playing details"] section[aria-label="Current MediaTrack"]'
   );
   await expect(nowPlaying).toBeAttached();
   await expect(nowPlaying).toContainText('Nothing playing');

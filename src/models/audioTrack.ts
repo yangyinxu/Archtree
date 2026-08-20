@@ -2,6 +2,14 @@ import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from './simpleDate';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import {
+    AttributionStatus,
+    CatalogCredit,
+    legacyTrackArtistIdsFromCredits,
+    normalizeCatalogCredits,
+    validateAttribution
+} from './catalogCredit';
+import { touchReadyOrganizationReferences } from '../services/organizationReferenceFenceService';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
 import { escapeRegex } from '../utils/search';
 import { withReadyArtistReferences } from '../services/artistReferenceFenceService';
@@ -9,19 +17,25 @@ import { touchReadyAlbumReferences } from '../services/albumReferenceFenceServic
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { touchActiveAccount } from '../services/accountReferenceFenceService';
 import { updateReadyAudioTrackAndAlbum } from '../services/albumTrackLinkService';
+import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
+import type { SoundtrackVideoAsset } from './soundtrackVideoAsset';
+import {
+    activeMediaObjectKeyForTrack,
+    type MediaType
+} from '../utils/mediaStorageKey';
 
 const collectionId = 'audioTracks';
 export type AudioUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
 export type AudioPublicationStatus = 'pending' | 'ready' | 'failed';
 export type AudioReferenceCleanupStatus = 'pending' | 'complete' | 'failed';
 
-/** Signals that a Soundtrack has crossed its deletion fence and can no longer be edited. */
+/** Signals that a MediaTrack has crossed its deletion fence and can no longer be edited. */
 export class AudioTrackMutationUnavailableError extends Error {
     readonly statusCode = 409;
     readonly code = 'audio_track_mutation_unavailable';
 
     constructor() {
-        super('The Soundtrack is being deleted or requires deletion reconciliation.');
+        super('The MediaTrack is being deleted or requires deletion reconciliation.');
     }
 }
 
@@ -31,7 +45,7 @@ export class AudioTrackAlbumRelinkRequiredError extends Error {
     readonly code = 'audio_track_album_relink_required';
 
     constructor() {
-        super('Soundtrack Album changes must use the canonical relink service.');
+        super('MediaTrack Album changes must use the canonical relink service.');
     }
 }
 
@@ -68,6 +82,8 @@ export class AudioTrack {
     createdBy: string;
     originalFileName?: string;
     contentType?: string;
+    /** Active media kind; missing on legacy rows means Audio unless migration evidence says otherwise. */
+    mediaType?: MediaType;
     s3Key?: string;
     uploadStatus: AudioUploadStatus;
     uploadUpdatedAt: Date;
@@ -76,15 +92,22 @@ export class AudioTrack {
     publicationUpdatedAt: Date;
     publicationError?: string | null;
     pendingS3Key?: string | null;
+    pendingMediaType?: MediaType | null;
     pendingUploadStatus?: 'pending' | 'failed' | null;
     pendingUploadUpdatedAt?: Date;
     pendingUploadError?: string | null;
     storageCleanupS3Key?: string | null;
+    storageCleanupMediaType?: MediaType | null;
     storageCleanupStatus?: 'pending' | 'deleteFailed' | null;
     storageCleanupUpdatedAt?: Date;
     storageCleanupError?: string | null;
+    /** Read-only migration evidence from the superseded optional-video prototype. */
+    videoAsset?: SoundtrackVideoAsset | null;
     playlistReferenceRevision: number;
     contentReferenceRevision: number;
+    credits?: CatalogCredit[];
+    attributionStatus?: AttributionStatus;
+    creditRevision?: number;
     referenceCleanupStatus?: AudioReferenceCleanupStatus;
     referenceCleanupUpdatedAt?: Date;
     referenceCleanupError?: string | null;
@@ -115,6 +138,7 @@ export class AudioTrack {
         this.createdBy = createdBy;
         this.originalFileName = originalFileName ? normalizeUtf8Text(originalFileName) : originalFileName;
         this.contentType = contentType;
+        this.mediaType = 'audio';
         this.s3Key = id?.toHexString();
         this.uploadStatus = 'pending';
         this.uploadUpdatedAt = new Date();
@@ -128,9 +152,22 @@ export class AudioTrack {
 
     // save an audio track to the mongodb database
     save() {
+        if (this.credits !== undefined || this.attributionStatus !== undefined) {
+            requireCatalogCreditWrites();
+            this.credits = normalizeCatalogCredits(this.credits ?? []);
+            this.attributionStatus = validateAttribution(this.attributionStatus, this.credits);
+            this.artistIds = legacyTrackArtistIdsFromCredits(this.credits) as [string];
+            this.creditRevision = Number.isInteger(this.creditRevision) ? this.creditRevision : 1;
+        }
         const db = getDb();
         return withReadyArtistReferences(this.artistIds, async (session, artistIds) => {
             this.artistIds = artistIds as [string];
+            await touchReadyOrganizationReferences(
+                (this.credits ?? [])
+                    .filter((credit) => credit.subjectType === 'organization')
+                    .map((credit) => credit.subjectId),
+                session
+            );
             const albumIds = await touchReadyAlbumReferences(
                 this.albumId ? [this.albumId] : [],
                 session
@@ -158,7 +195,7 @@ export class AudioTrack {
             .then(normalizeAudioTrackText);
     }
 
-    /** Resolves only a published, identity-bound ready Soundtrack for public media delivery. */
+    /** Resolves only a published, identity-bound ready MediaTrack for public media delivery. */
     static findReadyPublicById(audioTrackId: string) {
         const normalizedAudioTrackId = String(audioTrackId ?? '').trim().toLowerCase();
         if (!/^[0-9a-f]{24}$/.test(normalizedAudioTrackId)) return Promise.resolve(null);
@@ -167,10 +204,13 @@ export class AudioTrack {
             .collection(collectionId)
             .find({ _id: audioTrackObjectId, ...readyAudioStorageFilter })
             .next()
-            .then(normalizeAudioTrackText);
+            .then((track) => {
+                if (!track || !activeMediaObjectKeyForTrack(track)) return null;
+                return normalizeAudioTrackText(track);
+            });
     }
 
-    /** Returns a stable global Soundtrack page, including admin-visible lifecycle states. */
+    /** Returns a stable global MediaTrack page, including admin-visible lifecycle states. */
     static fetchAll(limit: number = 50, offset: number = 0) {
         const db = getDb();
 

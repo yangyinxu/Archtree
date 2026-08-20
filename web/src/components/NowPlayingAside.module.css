@@ -145,6 +145,88 @@
   white-space: nowrap;
 }
 
+.queueAside {
+  gap: 0.8rem;
+}
+
+.queueAside .header .eyebrow {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.queueCurrent,
+.queueItem {
+  align-items: center;
+  display: grid;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.queueCurrent {
+  background: color-mix(in srgb, var(--color-accent) 13%, var(--color-surface-raised));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 34%, var(--color-border));
+  border-radius: var(--radius-sm);
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  padding: 0.7rem;
+}
+
+.queueCurrent > div,
+.queueItem > div {
+  min-width: 0;
+}
+
+.queueSection {
+  min-height: 0;
+}
+
+.queueList {
+  display: grid;
+  gap: 0.2rem;
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+}
+
+.queueItem {
+  border-radius: var(--radius-sm);
+  grid-template-columns: 1.2rem 3.5rem minmax(0, 1fr) auto;
+  padding: 0.45rem 0.35rem;
+}
+
+.queueItem:hover {
+  background: var(--color-surface-raised);
+}
+
+.queueArtwork {
+  border-radius: calc(var(--radius-sm) * 0.65);
+  width: 3.5rem;
+}
+
+.queueNumber,
+.queueKind,
+.queueEmpty {
+  color: var(--color-text-subtle);
+  font-size: 0.66rem;
+}
+
+.queueNumber {
+  text-align: center;
+}
+
+.queueKind {
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.25rem 0.4rem;
+}
+
+.queueEmpty {
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+  margin-top: 0.55rem;
+  padding: 1rem;
+  text-align: center;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .aside {
     animation: asideEnter var(--motion-medium) var(--ease-standard);

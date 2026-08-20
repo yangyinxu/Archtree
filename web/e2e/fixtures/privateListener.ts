@@ -80,6 +80,7 @@ export const privateLibraryPage = {
         coverArtUrl: trackFixtures[0].artworkUrl,
         albumId: trackFixtures[0].albumId,
         duration: trackFixtures[0].duration,
+        mediaType: trackFixtures[0].mediaType,
         available: true,
         streamUrl: trackFixtures[0].streamUrl
       }

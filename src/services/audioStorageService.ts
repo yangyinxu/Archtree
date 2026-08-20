@@ -7,6 +7,14 @@ import { AudioTrack } from '../models/audioTrack';
 import { cleanupDeletedContentReferences } from './contentReferenceService';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { isAudioObjectKeyForTrack } from '../utils/audioStorageKey';
+import { readyVideoObjectKey, videoObjectKeysForTrack } from '../utils/videoStorageKey';
+import {
+    activeMediaTypeForTrack,
+    isMediaObjectKeyForTrack,
+    persistedMediaType,
+    topLevelMediaLifecycleKeys,
+    type MediaType
+} from '../utils/mediaStorageKey';
 import {
     finalizeCoverArtDeletion,
     finalizeOwnerCoverArtDeletions,
@@ -64,13 +72,21 @@ const encodeMetadataValue = (value: string) => {
 
 export { isAudioObjectKeyForTrack } from '../utils/audioStorageKey';
 
-/** Rejects stored keys that are not cryptographically namespaced to the track identity. */
-const validatedAudioObjectKey = (value: unknown, audioTrackId: string) => {
-    if (!isAudioObjectKeyForTrack(value, audioTrackId)) {
-        throw new Error('Audio track storage key is missing or invalid.');
+/** Rejects stored keys that are not namespaced to the MediaTrack identity and kind. */
+const validatedMediaObjectKey = (
+    value: unknown,
+    audioTrackId: string,
+    mediaType: MediaType
+) => {
+    if (!isMediaObjectKeyForTrack(value, audioTrackId, mediaType)) {
+        throw new Error('MediaTrack storage key is missing, wrong-kind, or invalid.');
     }
     return value as string;
 };
+
+const validatedAudioObjectKey = (value: unknown, audioTrackId: string) => (
+    validatedMediaObjectKey(value, audioTrackId, 'audio')
+);
 
 /** Provides deterministic boundaries for versioned upload and cleanup tests. */
 export interface AudioUploadDependencies {
@@ -84,10 +100,11 @@ export interface AudioUploadDependencies {
         s3Key: string,
         uploadFile: Express.Multer.File,
         ownerId: string,
-        abortSignal?: AbortSignal
+        abortSignal?: AbortSignal,
+        mediaType?: MediaType
     ) => Promise<void>;
     deleteObject: (s3Key: string) => Promise<void>;
-    createObjectKey: (audioTrackId: string) => string;
+    createObjectKey: (audioTrackId: string, mediaType?: MediaType) => string;
 }
 
 const defaultAudioUploadDependencies: AudioUploadDependencies = {
@@ -98,7 +115,7 @@ const defaultAudioUploadDependencies: AudioUploadDependencies = {
             { $set: update }
         );
     },
-    putObject: async (s3Key, uploadFile, ownerId, abortSignal) => {
+    putObject: async (s3Key, uploadFile, ownerId, abortSignal, mediaType = 'audio') => {
         const originalFileName = normalizeUtf8Text(uploadFile.originalname);
         const body = uploadFile.path ? createReadStream(uploadFile.path) : uploadFile.buffer;
         await getS3().send(new PutObjectCommand({
@@ -106,7 +123,7 @@ const defaultAudioUploadDependencies: AudioUploadDependencies = {
             Key: s3Key,
             Body: body,
             ContentLength: uploadFile.size,
-            ContentType: uploadFile.mimetype || 'audio/mpeg',
+            ContentType: mediaType === 'video' ? 'video/mp4' : uploadFile.mimetype || 'audio/mpeg',
             Metadata: {
                 trackid: s3Key.split('/')[1] ?? s3Key,
                 ownerid: ownerId,
@@ -120,7 +137,9 @@ const defaultAudioUploadDependencies: AudioUploadDependencies = {
             Key: s3Key
         }));
     },
-    createObjectKey: audioTrackId => `audio/${audioTrackId.toLowerCase()}/${new ObjectId().toHexString()}`
+    createObjectKey: (audioTrackId, mediaType = 'audio') => (
+        `${mediaType}/${audioTrackId.toLowerCase()}/${new ObjectId().toHexString()}`
+    )
 };
 
 /** Isolates deletion lifecycle boundaries so partial failures and retries are deterministic. */
@@ -191,29 +210,161 @@ const defaultAudioTrackDeletionDependencies: AudioTrackDeletionDependencies = {
     }
 };
 
-export const uploadAudioObject = async (
+export const uploadMediaObject = async (
     audioTrackId: string,
     uploadFile: Express.Multer.File,
     ownerId: string,
+    mediaType: MediaType,
     abortSignal?: AbortSignal,
     dependencies: Partial<AudioUploadDependencies> = {}
 ) => {
     const upload = { ...defaultAudioUploadDependencies, ...dependencies };
+    const declaredContentType = String(uploadFile?.mimetype ?? '').trim().toLowerCase();
+    if (!Number.isSafeInteger(uploadFile?.size) || uploadFile.size <= 0) {
+        throw new AudioStorageLifecycleError(
+            'The media file is empty or its size is invalid.',
+            400,
+            'invalid_media_upload',
+            false
+        );
+    }
+    if ((mediaType === 'audio' && !declaredContentType.startsWith('audio/'))
+        || (mediaType === 'video' && declaredContentType !== 'video/mp4')) {
+        throw new AudioStorageLifecycleError(
+            `The uploaded file is not a supported ${mediaType} object.`,
+            400,
+            'invalid_media_upload',
+            false
+        );
+    }
     let track = await upload.findTrack(audioTrackId);
-    if (!track) throw new Error(`Audio track ${audioTrackId} no longer exists.`);
+    if (!track) throw new Error(`MediaTrack ${audioTrackId} no longer exists.`);
     if (track.uploadStatus === 'deleting' || track.uploadStatus === 'deleteFailed') {
         throw storageMutationConflict(
-            `Audio track ${audioTrackId} cannot be uploaded while deletion is pending.`
+            `MediaTrack ${audioTrackId} cannot be uploaded while deletion is pending.`
         );
     }
     if (track.pendingS3Key && track.pendingUploadStatus === 'pending') {
         throw storageMutationConflict(
-            `Audio track ${audioTrackId} already has an upload in progress.`
+            `MediaTrack ${audioTrackId} already has an upload in progress.`
         );
     }
 
+    let currentMediaType = activeMediaTypeForTrack(track);
+    if (track.mediaType == null && currentMediaType === 'video') {
+        const legacyVideoKey = readyVideoObjectKey(track);
+        const legacyAsset = track.videoAsset;
+        if (!legacyVideoKey
+            || legacyAsset?.pending != null
+            || legacyAsset?.cleanup != null
+            || track.pendingS3Key
+            || track.storageCleanupS3Key) {
+            throw storageMutationConflict(
+                `MediaTrack ${audioTrackId} has ambiguous legacy video lifecycle evidence that must be reconciled before replacement.`,
+                true
+            );
+        }
+        const legacyAudioKey = validatedAudioObjectKey(track.s3Key, audioTrackId);
+        const revision = Number(legacyAsset.revision);
+        if (!Number.isSafeInteger(revision) || revision < 0) {
+            throw storageMutationConflict(
+                `MediaTrack ${audioTrackId} has an invalid legacy video revision.`,
+                true
+            );
+        }
+        const migratedVideoAsset = {
+            ...legacyAsset,
+            active: null,
+            revision: revision + 1
+        };
+        const migration = await upload.updateTrackWhere(
+            audioTrackId,
+            {
+                s3Key: legacyAudioKey,
+                uploadStatus: track.uploadStatus,
+                pendingS3Key: null,
+                storageCleanupS3Key: null,
+                'videoAsset.revision': revision,
+                $or: [{ mediaType: null }, { mediaType: { $exists: false } }]
+            },
+            {
+                s3Key: legacyVideoKey,
+                mediaType: 'video',
+                contentType: 'video/mp4',
+                originalFileName: legacyAsset.active.originalFileName,
+                storageCleanupS3Key: legacyAudioKey,
+                storageCleanupMediaType: 'audio',
+                storageCleanupStatus: 'pending',
+                storageCleanupUpdatedAt: new Date(),
+                storageCleanupError: null,
+                videoAsset: migratedVideoAsset
+            }
+        );
+        let migrated = migration.matchedCount === 1;
+        if (!migrated) {
+            const current = await upload.findTrack(audioTrackId);
+            migrated = current?.mediaType === 'video'
+                && current?.s3Key === legacyVideoKey
+                && current?.storageCleanupS3Key === legacyAudioKey;
+        }
+        if (!migrated) {
+            throw storageMutationConflict(
+                `MediaTrack ${audioTrackId} changed while legacy video was being migrated.`,
+                true
+            );
+        }
+        try {
+            await upload.deleteObject(legacyAudioKey);
+            const cleared = await upload.updateTrackWhere(
+                audioTrackId,
+                {
+                    s3Key: legacyVideoKey,
+                    mediaType: 'video',
+                    storageCleanupS3Key: legacyAudioKey,
+                    storageCleanupMediaType: 'audio'
+                },
+                {
+                    storageCleanupS3Key: null,
+                    storageCleanupMediaType: null,
+                    storageCleanupStatus: null,
+                    storageCleanupUpdatedAt: new Date(),
+                    storageCleanupError: null
+                }
+            );
+            if (cleared.matchedCount !== 1) {
+                throw new Error('Legacy Audio cleanup outcome could not be recorded.');
+            }
+        } catch (cleanupError) {
+            await upload.updateTrackWhere(
+                audioTrackId,
+                {
+                    s3Key: legacyVideoKey,
+                    mediaType: 'video',
+                    storageCleanupS3Key: legacyAudioKey
+                },
+                {
+                    storageCleanupStatus: 'deleteFailed',
+                    storageCleanupUpdatedAt: new Date(),
+                    storageCleanupError: errorMessage(cleanupError)
+                }
+            ).catch(() => undefined);
+            throw storageMutationConflict(
+                `MediaTrack ${audioTrackId} migrated to Video, but its previous Audio cleanup must finish before replacement.`,
+                true
+            );
+        }
+        track = await upload.findTrack(audioTrackId);
+        if (!track) throw new Error(`MediaTrack ${audioTrackId} no longer exists.`);
+        currentMediaType = 'video';
+    }
+
     if (track.pendingS3Key) {
-        const stalePendingKey = validatedAudioObjectKey(track.pendingS3Key, audioTrackId);
+        const pendingMediaType = persistedMediaType(track.pendingMediaType ?? currentMediaType);
+        const stalePendingKey = validatedMediaObjectKey(
+            track.pendingS3Key,
+            audioTrackId,
+            pendingMediaType
+        );
         try {
             await upload.deleteObject(stalePendingKey);
         } catch (cleanupError) {
@@ -233,7 +384,7 @@ export const uploadAudioObject = async (
                 }
             ).catch(() => undefined);
             throw storageMutationConflict(
-                `Audio track ${audioTrackId} has a failed pending object that must be cleaned up first.`,
+                `MediaTrack ${audioTrackId} has a failed pending object that must be cleaned up first.`,
                 true
             );
         }
@@ -248,6 +399,7 @@ export const uploadAudioObject = async (
             },
             {
                 pendingS3Key: null,
+                pendingMediaType: null,
                 pendingUploadStatus: null,
                 pendingUploadUpdatedAt: new Date(),
                 pendingUploadError: null
@@ -255,22 +407,25 @@ export const uploadAudioObject = async (
         );
         if (clearedPending.matchedCount !== 1) {
             throw storageMutationConflict(
-                `Audio track ${audioTrackId} changed while pending-object cleanup was finalizing.`,
+                `MediaTrack ${audioTrackId} changed while pending-object cleanup was finalizing.`,
                 true
             );
         }
         track = {
             ...track,
             pendingS3Key: null,
+            pendingMediaType: null,
             pendingUploadStatus: null,
             pendingUploadError: null
         };
     }
 
     if (track.storageCleanupS3Key) {
-        const staleCleanupKey = validatedAudioObjectKey(
+        const cleanupMediaType = persistedMediaType(track.storageCleanupMediaType ?? 'audio');
+        const staleCleanupKey = validatedMediaObjectKey(
             track.storageCleanupS3Key,
-            audioTrackId
+            audioTrackId,
+            cleanupMediaType
         );
         try {
             await upload.deleteObject(staleCleanupKey);
@@ -291,7 +446,7 @@ export const uploadAudioObject = async (
                 }
             ).catch(() => undefined);
             throw storageMutationConflict(
-                `Audio track ${audioTrackId} has a previous object that must be cleaned up first.`,
+                `MediaTrack ${audioTrackId} has a previous object that must be cleaned up first.`,
                 true
             );
         }
@@ -306,6 +461,7 @@ export const uploadAudioObject = async (
             },
             {
                 storageCleanupS3Key: null,
+                storageCleanupMediaType: null,
                 storageCleanupStatus: null,
                 storageCleanupUpdatedAt: new Date(),
                 storageCleanupError: null
@@ -313,24 +469,27 @@ export const uploadAudioObject = async (
         );
         if (clearedCleanup.matchedCount !== 1) {
             throw storageMutationConflict(
-                `Audio track ${audioTrackId} changed while previous-object cleanup was finalizing.`,
+                `MediaTrack ${audioTrackId} changed while previous-object cleanup was finalizing.`,
                 true
             );
         }
         track = {
             ...track,
             storageCleanupS3Key: null,
+            storageCleanupMediaType: null,
             storageCleanupStatus: null,
             storageCleanupError: null
         };
     }
 
     const originalFileName = normalizeUtf8Text(uploadFile.originalname);
-    const contentType = uploadFile.mimetype || 'audio/mpeg';
-    const replacementS3Key = upload.createObjectKey(audioTrackId);
-    validatedAudioObjectKey(replacementS3Key, audioTrackId);
+    const contentType = mediaType === 'video'
+        ? 'video/mp4'
+        : uploadFile.mimetype || 'audio/mpeg';
+    const replacementS3Key = upload.createObjectKey(audioTrackId, mediaType);
+    validatedMediaObjectKey(replacementS3Key, audioTrackId, mediaType);
     const previousS3Key = track.s3Key
-        ? validatedAudioObjectKey(track.s3Key, audioTrackId)
+        ? validatedMediaObjectKey(track.s3Key, audioTrackId, currentMediaType)
         : undefined;
     const reservation = await upload.updateTrackWhere(
         audioTrackId,
@@ -342,6 +501,7 @@ export const uploadAudioObject = async (
         },
         {
             pendingS3Key: replacementS3Key,
+            pendingMediaType: mediaType,
             pendingUploadStatus: 'pending',
             pendingUploadUpdatedAt: new Date(),
             pendingUploadError: null
@@ -349,12 +509,12 @@ export const uploadAudioObject = async (
     );
     if (reservation.matchedCount !== 1) {
         throw storageMutationConflict(
-            `Audio track ${audioTrackId} already has a storage mutation in progress.`
+            `MediaTrack ${audioTrackId} already has a storage mutation in progress.`
         );
     }
 
     try {
-        await upload.putObject(replacementS3Key, uploadFile, ownerId, abortSignal);
+        await upload.putObject(replacementS3Key, uploadFile, ownerId, abortSignal, mediaType);
     } catch (error) {
         let cleanupFailed = false;
         try {
@@ -369,6 +529,7 @@ export const uploadAudioObject = async (
                 { pendingS3Key: replacementS3Key },
                 {
                     pendingS3Key: cleanupFailed ? replacementS3Key : null,
+                    pendingMediaType: cleanupFailed ? mediaType : null,
                     pendingUploadStatus: 'failed',
                     pendingUploadUpdatedAt: new Date(),
                     pendingUploadError: errorMessage(error),
@@ -381,7 +542,7 @@ export const uploadAudioObject = async (
             );
         } catch (statusError) {
             statusUpdateFailed = true;
-            console.log(`Unable to mark audio track ${audioTrackId} replacement as failed:`, statusError);
+            console.log(`Unable to mark MediaTrack ${audioTrackId} replacement as failed:`, statusError);
         }
         throw uploadLifecycleFailure(error, cleanupFailed || statusUpdateFailed);
     }
@@ -394,16 +555,21 @@ export const uploadAudioObject = async (
             {
                 originalFileName,
                 contentType,
+                mediaType,
                 s3Key: replacementS3Key,
                 uploadStatus: 'ready',
                 uploadUpdatedAt: new Date(),
                 uploadError: null,
                 pendingS3Key: null,
+                pendingMediaType: null,
                 pendingUploadStatus: null,
                 pendingUploadUpdatedAt: new Date(),
                 pendingUploadError: null,
                 storageCleanupS3Key: previousS3Key && previousS3Key !== replacementS3Key
                     ? previousS3Key
+                    : null,
+                storageCleanupMediaType: previousS3Key && previousS3Key !== replacementS3Key
+                    ? currentMediaType
                     : null,
                 storageCleanupStatus: previousS3Key && previousS3Key !== replacementS3Key
                     ? 'pending'
@@ -416,17 +582,19 @@ export const uploadAudioObject = async (
         if (!attached) {
             const current = await upload.findTrack(audioTrackId);
             attached = current?.uploadStatus === 'ready'
-                && current?.s3Key === replacementS3Key;
+                && current?.s3Key === replacementS3Key
+                && current?.mediaType === mediaType;
         }
         if (!attached) {
-            throw new Error(`Audio track ${audioTrackId} replacement could not be finalized.`);
+            throw new Error(`MediaTrack ${audioTrackId} replacement could not be finalized.`);
         }
     } catch (error) {
         if (!attached) {
             try {
                 const current = await upload.findTrack(audioTrackId);
                 attached = current?.uploadStatus === 'ready'
-                    && current?.s3Key === replacementS3Key;
+                    && current?.s3Key === replacementS3Key
+                    && current?.mediaType === mediaType;
             } catch (confirmationError) {
                 // An indeterminate database result must retain the pending key for reconciliation.
                 throw uploadLifecycleFailure(
@@ -450,6 +618,7 @@ export const uploadAudioObject = async (
                     { pendingS3Key: replacementS3Key },
                     {
                         pendingS3Key: cleanupFailed ? replacementS3Key : null,
+                        pendingMediaType: cleanupFailed ? mediaType : null,
                         pendingUploadStatus: 'failed',
                         pendingUploadUpdatedAt: new Date(),
                         pendingUploadError: errorMessage(error),
@@ -468,7 +637,7 @@ export const uploadAudioObject = async (
     }
 
     if (!previousS3Key || previousS3Key === replacementS3Key) {
-        return { cleanupPending: false, s3Key: replacementS3Key };
+        return { cleanupPending: false, s3Key: replacementS3Key, mediaType };
     }
 
     try {
@@ -483,6 +652,7 @@ export const uploadAudioObject = async (
             },
             {
                 storageCleanupS3Key: null,
+                storageCleanupMediaType: null,
                 storageCleanupStatus: null,
                 storageCleanupUpdatedAt: new Date(),
                 storageCleanupError: null
@@ -490,7 +660,8 @@ export const uploadAudioObject = async (
         );
         return {
             cleanupPending: cleanupUpdate.matchedCount !== 1,
-            s3Key: replacementS3Key
+            s3Key: replacementS3Key,
+            mediaType
         };
     } catch (cleanupError) {
         await upload.updateTrackWhere(
@@ -510,43 +681,91 @@ export const uploadAudioObject = async (
         return {
             cleanupPending: true,
             cleanupError,
-            s3Key: replacementS3Key
+            s3Key: replacementS3Key,
+            mediaType
         };
     }
 };
 
+/** Preserves the legacy audio upload API while storing it as the one active media kind. */
+export const uploadAudioObject = async (
+    audioTrackId: string,
+    uploadFile: Express.Multer.File,
+    ownerId: string,
+    abortSignal?: AbortSignal,
+    dependencies: Partial<AudioUploadDependencies> = {}
+) => uploadMediaObject(
+    audioTrackId,
+    uploadFile,
+    ownerId,
+    'audio',
+    abortSignal,
+    dependencies
+);
+
+/** Replaces the one active media object with a validated MP4 video. */
+export const uploadVideoObject = async (
+    audioTrackId: string,
+    uploadFile: Express.Multer.File,
+    ownerId: string,
+    abortSignal?: AbortSignal,
+    dependencies: Partial<AudioUploadDependencies> = {}
+) => uploadMediaObject(
+    audioTrackId,
+    uploadFile,
+    ownerId,
+    'video',
+    abortSignal,
+    dependencies
+);
+
+/** Deletes a MediaTrack only after fencing its complete storage and reference lifecycle. */
 export const deleteAudioObjectAndTrack = async (
     audioTrackId: string,
-    dependencies: Partial<AudioTrackDeletionDependencies> = {}
+    dependencies: Partial<AudioTrackDeletionDependencies> = {},
+    expectedS3Key?: string
 ) => {
     const deletion = { ...defaultAudioTrackDeletionDependencies, ...dependencies };
     const usesLegacyCoverHooks = dependencies.prepareTrackCoverArtDeletion !== undefined
         || dependencies.finalizeTrackCoverArtDeletion !== undefined;
     const track = await deletion.findTrack(audioTrackId);
     if (!track) {
-        throw new Error(`Audio track ${audioTrackId} no longer exists.`);
+        throw new Error(`MediaTrack ${audioTrackId} no longer exists.`);
+    }
+    if (expectedS3Key !== undefined && track.s3Key !== expectedS3Key) {
+        throw storageMutationConflict(
+            `MediaTrack ${audioTrackId} storage changed before deletion could begin.`
+        );
     }
     if (track.pendingUploadStatus === 'pending' && track.pendingS3Key) {
-        throw storageMutationConflict(`Audio track ${audioTrackId} has an upload in progress.`);
+        throw storageMutationConflict(`MediaTrack ${audioTrackId} has an upload in progress.`);
+    }
+    if (track.videoAsset?.pending?.status === 'uploading') {
+        throw storageMutationConflict(`MediaTrack ${audioTrackId} has a legacy video upload in progress.`);
     }
     const storageIdentity = {
         s3Key: track.s3Key,
+        mediaType: track.mediaType ?? null,
         pendingS3Key: track.pendingS3Key ?? null,
+        pendingMediaType: track.pendingMediaType ?? null,
         pendingUploadStatus: track.pendingUploadStatus ?? null,
-        storageCleanupS3Key: track.storageCleanupS3Key ?? null
+        storageCleanupS3Key: track.storageCleanupS3Key ?? null,
+        storageCleanupMediaType: track.storageCleanupMediaType ?? null,
+        videoAsset: track.videoAsset ?? null
     };
-    let audioObjectKeys: string[];
+    let mediaObjectKeys: string[];
+    let videoObjectKeys: string[];
     try {
-        audioObjectKeys = [...new Set([
-            track.s3Key,
-            track.pendingS3Key,
-            track.storageCleanupS3Key
-        ].filter((value): value is string => Boolean(value)).map((value) => {
-            return validatedAudioObjectKey(value, audioTrackId);
-        }))];
-        if (audioObjectKeys.length === 0) {
-            throw new Error('Audio track storage key is missing or invalid.');
+        mediaObjectKeys = [...new Set(
+            topLevelMediaLifecycleKeys(track, audioTrackId).map(({ key }) => key)
+        )];
+        if (mediaObjectKeys.length === 0) {
+            throw new Error('MediaTrack storage key is missing, wrong-kind, or invalid.');
         }
+        videoObjectKeys = videoObjectKeysForTrack(
+            track.videoAsset,
+            audioTrackId
+        );
     } catch (error) {
         await deletion.updateTrackWhere(audioTrackId, {
             ...storageIdentity,
@@ -579,7 +798,7 @@ export const deleteAudioObjectAndTrack = async (
     );
     if (deletingUpdate.matchedCount !== 1) {
         throw storageMutationConflict(
-            `Audio track ${audioTrackId} changed before deletion could be fenced.`
+            `MediaTrack ${audioTrackId} changed before deletion could be fenced.`
         );
     }
 
@@ -604,7 +823,10 @@ export const deleteAudioObjectAndTrack = async (
             );
             coverArtPrepared = preparedCoverArtIds.length > 0;
         }
-        for (const s3Key of audioObjectKeys) {
+        for (const s3Key of mediaObjectKeys) {
+            await deletion.deleteAudioObject(s3Key);
+        }
+        for (const s3Key of videoObjectKeys.filter((key) => !mediaObjectKeys.includes(key))) {
             await deletion.deleteAudioObject(s3Key);
         }
     } catch (error) {
@@ -634,7 +856,7 @@ export const deleteAudioObjectAndTrack = async (
             referenceCleanupError: null
         });
         if (cleanupUpdate.matchedCount !== 1) {
-            throw new Error(`Audio track ${audioTrackId} no longer exists.`);
+            throw new Error(`MediaTrack ${audioTrackId} no longer exists.`);
         }
         referenceCleanupCompleted = true;
 
@@ -646,7 +868,7 @@ export const deleteAudioObjectAndTrack = async (
                 referenceCleanupStatus: 'complete'
             });
             if (deletedTrack.deletedCount === 1) deleteError = undefined;
-            else deleteError = new Error(`Audio track ${audioTrackId} could not be finalized.`);
+            else deleteError = new Error(`MediaTrack ${audioTrackId} could not be finalized.`);
         } catch (error) {
             deleteError = error;
         }
@@ -656,7 +878,7 @@ export const deleteAudioObjectAndTrack = async (
                 currentTrack = await deletion.findTrack(audioTrackId);
             } catch (confirmationError) {
                 throw Object.assign(
-                    new Error(`Audio track ${audioTrackId} deletion outcome could not be confirmed.`),
+                    new Error(`MediaTrack ${audioTrackId} deletion outcome could not be confirmed.`),
                     {
                         code: 'audio_deletion_outcome_unknown',
                         cause: { deleteError, confirmationError }
@@ -691,7 +913,7 @@ export const deleteAudioObjectAndTrack = async (
         }
         return { cleanupPending: false };
     } catch (cleanupError) {
-        // The Soundtrack is gone, but its exact lifecycle record remains auditable.
+        // The MediaTrack is gone, but its exact lifecycle record remains auditable.
         return { cleanupPending: true, cleanupError };
     }
 };

@@ -43,4 +43,16 @@ describe('listener visual tokens', () => {
       tokens.getPropertyValue(`--space-${index + 1}`).trim()
     ))).toEqual(['0.25rem', '0.5rem', '0.75rem', '1rem', '1.5rem', '2rem', '2.5rem', '3rem']);
   });
+
+  test('uses the approved Web accent and system typography fallback', () => {
+    const tokens = getComputedStyle(document.documentElement);
+
+    expect(tokens.getPropertyValue('--color-accent').trim()).toBe('#1ed760');
+    expect(tokens.getPropertyValue('--color-accent-bright').trim()).toBe('#3be477');
+    expect(tokens.getPropertyValue('--color-on-accent').trim()).toBe('#000');
+    expect(tokens.getPropertyValue('--color-focus').trim()).toBe('#fff');
+    expect(tokens.getPropertyValue('--font-sans')).toContain('"Helvetica Neue"');
+    expect(tokens.getPropertyValue('--font-sans')).toContain('"PingFang SC"');
+    expect(tokens.getPropertyValue('--font-display').trim()).toBe('var(--font-sans)');
+  });
 });

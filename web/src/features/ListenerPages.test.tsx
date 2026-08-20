@@ -9,6 +9,7 @@ import { advanceAccountEpoch } from '../api/accountEpoch';
 import { listenerCapabilitiesQueryKey } from '../api/listenerCapabilities';
 import { playerStore } from '../player';
 import { AlbumPage } from './catalog/AlbumPage';
+import { OrganizationPage } from './catalog/OrganizationPage';
 import { LibraryPage } from './library/LibraryPage';
 import { SearchQueryProvider } from './search/SearchQueryProvider';
 import { SearchPage } from './search/SearchPage';
@@ -32,7 +33,8 @@ const track = {
   albumId: album.id,
   albumTitle: album.title,
   duration: '3:24',
-  streamUrl: `/content/audioTrack/stream/64b000000000000000000002`
+  mediaType: 'audio',
+  streamUrl: `/content/mediaTrack/stream/64b000000000000000000002`
 } as const;
 
 const artist = {
@@ -41,6 +43,14 @@ const artist = {
   name: 'Finite Ensemble',
   bio: '',
   artworkUrl: ''
+} as const;
+
+const organization = {
+  contentType: 'organization',
+  id: '64b000000000000000000004',
+  name: 'Finite Records',
+  organizationType: 'label',
+  description: 'Independent releases.'
 } as const;
 
 const listenerSession = {
@@ -127,10 +137,33 @@ test('Album Play and explicit soundtrack selection share the ordered Album queue
   expect(launch).toHaveBeenCalledTimes(2);
 });
 
+test('Organization page renders its public metadata and credited releases', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    organization: {
+      id: organization.id,
+      name: organization.name,
+      organizationType: organization.organizationType,
+      description: organization.description
+    },
+    releases: [album]
+  })));
+  renderRoute(
+    `/organizations/${organization.id}`,
+    '/organizations/:organizationId',
+    <OrganizationPage />
+  );
+
+  expect(await screen.findByRole('heading', { name: 'Finite Records' })).toBeInTheDocument();
+  expect(screen.getByText('Independent releases.')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Releases' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Night Geometry, album' })).toBeInTheDocument();
+});
+
 test('Search renders grouped public results and keeps content actions canonical', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
     query: 'Night',
     artists: [artist],
+    organizations: [organization],
     albums: [album],
     audioTracks: [track]
   })));
@@ -138,10 +171,15 @@ test('Search renders grouped public results and keeps content actions canonical'
 
   expect(await screen.findByRole('heading', { name: 'Artists' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Albums' })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: 'Soundtracks' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Organizations' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'MediaTracks' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Finite Ensemble, artist' })).toHaveAttribute(
     'href',
     `/artists/${artist.id}`
+  );
+  expect(screen.getByRole('link', { name: 'Finite Records, organization' })).toHaveAttribute(
+    'href',
+    `/organizations/${organization.id}`
   );
   expect(screen.getByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
@@ -164,7 +202,7 @@ test('Search retry refreshes results without adding or reordering history', asyn
 
   await user.click(await screen.findByRole('button', { name: 'Try again' }));
 
-  expect(await screen.findByText('No artists, albums, or soundtracks matched this search.'))
+  expect(await screen.findByText('No artists, organizations, albums, or MediaTracks matched this search.'))
     .toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(readSearchHistory(null)).toEqual(['Prior']);
@@ -182,7 +220,7 @@ test('Search debounces edited queries without remembering them until explicit su
   renderRoute('/search', '/search', <SearchPage />);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   expect(input).toHaveAttribute('enterkeyhint', 'search');
   expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
@@ -243,7 +281,7 @@ test('Search cancels an in-flight draft request when a newer draft is previewed'
   renderRoute('/search', '/search', <SearchPage />);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   await user.type(input, 'Night');
   await waitForSearchDebounce();
@@ -271,7 +309,7 @@ test('Search waits for IME composition to finish before previewing or recording'
   renderRoute('/search', '/search', <SearchPage />);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   fireEvent.compositionStart(input);
   fireEvent.change(input, { target: { value: '夜' } });
@@ -313,7 +351,7 @@ test('Search defers history until the pending account identity resolves', async 
   const view = renderRoute('/search', '/search', <SearchPage />, unresolvedSession);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   await user.type(input, 'Private search');
   await user.keyboard('{Enter}');
@@ -348,7 +386,7 @@ test('a pending Search submission cannot write history after the account epoch c
   const view = renderRoute('/search', '/search', <SearchPage />, unresolvedSession);
 
   const input = screen.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   });
   await user.type(input, 'Old account query');
   await user.keyboard('{Enter}');
@@ -374,7 +412,7 @@ test('clearing an edited Search draft returns to the default state without a new
 
   expect(await screen.findByRole('heading', { name: 'Results for “Night”' })).toBeInTheDocument();
   await user.clear(screen.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   }));
 
   expect(await screen.findByRole('heading', { name: 'Try a listening mood' }, {
@@ -417,6 +455,7 @@ test('Library sends type filters to the server and retains the mixed saved list'
             coverArtUrl: '',
             albumId: album.id,
             duration: track.duration,
+            mediaType: 'audio',
             available: true,
             streamUrl: track.streamUrl
           }

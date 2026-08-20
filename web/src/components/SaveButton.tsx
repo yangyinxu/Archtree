@@ -72,7 +72,7 @@ export const SaveButton = ({
         className={`${styles.button} ${signedOut ? styles.signedOut : ''}`}
         onClick={() => {
           if (signedOut) {
-            setMessage('Log in to save albums and soundtracks.');
+            setMessage('Log in to save albums and MediaTracks.');
             return;
           }
           if (saved === null || mutation.isPending) return;

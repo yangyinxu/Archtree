@@ -33,7 +33,8 @@ const audioTrack: AudioTrackSummary = {
   albumId: 'album-1',
   albumTitle: 'Still Water',
   duration: '3:48',
-  streamUrl: '/content/audioTrack/stream/track-1'
+  mediaType: 'audio',
+  streamUrl: '/content/mediaTrack/stream/track-1'
 };
 
 interface CarouselGeometryOptions {

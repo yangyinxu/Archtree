@@ -19,7 +19,7 @@ export const PlaylistSummaryList = ({
     {playlists.map((playlist) => (
       <li className={compact ? styles.sidebarListItem : styles.summaryListItem} key={playlist.id}>
         <NavLink
-          aria-label={`${playlist.name}, ${playlist.itemCount} soundtrack${playlist.itemCount === 1 ? '' : 's'}`}
+          aria-label={`${playlist.name}, ${playlist.itemCount} MediaTrack${playlist.itemCount === 1 ? '' : 's'}`}
           className={({ isActive }) => `${compact ? styles.sidebarPlaylistLink : styles.summaryLink} ${isActive ? styles.activePlaylist : ''}`}
           title={playlist.name}
           to={`/playlists/${encodeURIComponent(playlist.id)}`}
@@ -34,7 +34,7 @@ export const PlaylistSummaryList = ({
           <span className={styles.summaryCopy}>
             <span className={styles.summaryName}>{playlist.name}</span>
             <span className={styles.summaryMetadata}>
-              Playlist · {playlist.itemCount} soundtrack{playlist.itemCount === 1 ? '' : 's'}
+              Playlist · {playlist.itemCount} MediaTrack{playlist.itemCount === 1 ? '' : 's'}
             </span>
           </span>
         </NavLink>

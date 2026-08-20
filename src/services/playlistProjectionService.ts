@@ -16,6 +16,7 @@ import type { ListenerAudioTrackSummary } from './listenerContentService';
 import { resolvedCoverArtUrl } from '../utils/coverArt';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { activeMediaTypeForTrack } from '../utils/mediaStorageKey';
 import { readyArtistLifecycleFilter } from './artistReferenceFenceService';
 import { readyAlbumLifecycleFilter } from './albumReferenceFenceService';
 
@@ -40,7 +41,11 @@ const audioTrackProjection = {
     coverArtUrl: 1,
     artistIds: 1,
     albumId: 1,
-    duration: 1
+    duration: 1,
+    mediaType: 1,
+    contentType: 1,
+    s3Key: 1,
+    videoAsset: 1
 };
 const albumProjection = {
     _id: 1,
@@ -264,7 +269,8 @@ export const toPlaylistDetail = async (playlist: PlaylistDocument): Promise<Play
                 albumId,
                 albumTitle: album ? normalizedText(album.title) || null : null,
                 duration: normalizedText(track.duration) || null,
-                streamUrl: `/content/audioTrack/stream/${encodeURIComponent(item.audioTrackId)}`
+                mediaType: activeMediaTypeForTrack(track),
+                streamUrl: `/content/mediaTrack/stream/${encodeURIComponent(item.audioTrackId)}`
             }
         };
     });

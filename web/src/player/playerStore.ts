@@ -23,9 +23,9 @@ const PREVIOUS_RESTART_SECONDS = 3;
 
 const errorMessages: Record<PlayerErrorCode, string> = {
   autoplayBlocked: 'Playback is ready. Select play to continue.',
-  network: 'The audio could not be loaded. Check your connection and try again.',
-  decode: 'This audio could not be decoded. Try another track.',
-  streamUnavailable: 'This audio stream is unavailable. Try again later.',
+  network: 'This MediaTrack could not be loaded. Check your connection and try again.',
+  decode: 'This MediaTrack could not be decoded. Try another one.',
+  streamUnavailable: 'This MediaTrack stream is unavailable. Try again later.',
   unknown: 'Playback failed. Try again.'
 };
 
@@ -89,6 +89,7 @@ const initialSnapshot = (
   currentIndex: -1,
   currentItem: null,
   upNextItem: null,
+  upNextItems: Object.freeze([]) as readonly PlayerQueueItem[],
   status: 'idle',
   isBuffering: false,
   currentTime: 0,
@@ -117,14 +118,19 @@ const defaultMetadataFactory = (metadata: {
 };
 
 const defaultAudioFactory = (): PlayerAudio => {
-  if (typeof Audio === 'undefined') {
-    throw new Error('HTML audio is unavailable in this environment.');
+  if (typeof document === 'undefined') {
+    throw new Error('HTML media is unavailable in this environment.');
   }
-  return new Audio() as unknown as PlayerAudio;
+  const media = document.createElement('video');
+  media.playsInline = true;
+  media.controls = false;
+  media.tabIndex = -1;
+  media.setAttribute('aria-hidden', 'true');
+  return media as unknown as PlayerAudio;
 };
 
 /**
- * Owns the single audio element, immutable queue snapshot, and all transport commands.
+ * Owns the single media element, immutable queue snapshot, and all transport commands.
  * Routing and activity writes deliberately remain outside this runtime boundary.
  */
 export const createPlayerStore = (
@@ -161,6 +167,8 @@ export const createPlayerStore = (
   let playOrderPosition = -1;
   let actualHistory: number[] = [];
   let actualHistoryPosition = -1;
+  const mediaSurfaceHosts: HTMLElement[] = [];
+  let mediaParkingHost: HTMLElement | null = null;
   let destroyed = false;
 
   const readRandom = () => {
@@ -230,6 +238,34 @@ export const createPlayerStore = (
     listeners.forEach((listener) => listener());
   };
 
+  /** Keeps Audio connected offscreen so a Video-surface teardown cannot cancel its next source. */
+  const ensureMediaParkingHost = () => {
+    if (mediaParkingHost?.isConnected) return mediaParkingHost;
+    if (typeof document === 'undefined' || !document.body) return null;
+
+    const host = document.createElement('div');
+    host.hidden = true;
+    host.setAttribute('aria-hidden', 'true');
+    host.dataset.finitudeMediaParking = 'true';
+    document.body.appendChild(host);
+    mediaParkingHost = host;
+    return host;
+  };
+
+  /** Moves the same connected DOM media node between its parking and Video hosts. */
+  const syncMediaSurface = () => {
+    if (!audio || typeof Node === 'undefined' || !(audio instanceof Node)) return;
+    const node = audio as unknown as Node;
+    const videoHost = snapshot.currentItem?.mediaType === 'video'
+      ? [...mediaSurfaceHosts].reverse().find((candidate) => candidate.isConnected) ?? null
+      : null;
+    const host = videoHost ?? ensureMediaParkingHost();
+    if (host) {
+      if (node.parentNode !== host) host.appendChild(node);
+      return;
+    }
+  };
+
   const syncMediaSession = () => {
     if (!mediaSession) return;
 
@@ -239,7 +275,7 @@ export const createPlayerStore = (
         mediaSession.metadata = snapshot.currentItem
           ? metadataFactory({
               title: snapshot.currentItem.title,
-              artist: snapshot.currentItem.artistNames.join(', '),
+              artist: snapshot.currentItem.displayByline || snapshot.currentItem.artistNames.join(', '),
               artwork: mediaSessionArtworkSources(snapshot.currentItem.artworkUrl)
             })
           : null;
@@ -282,22 +318,27 @@ export const createPlayerStore = (
     const candidate = { ...snapshot, ...patch };
     const validIndex = candidate.currentIndex >= 0
       && candidate.currentIndex < candidate.queue.length;
-    const automaticNextIndex = !validIndex
-      ? -1
+    const upcomingIndices = !validIndex
+      ? []
       : candidate.repeatMode === 'one'
-        ? candidate.currentIndex
-        : playOrderPosition >= 0 && playOrderPosition < playOrder.length - 1
-          ? playOrder[playOrderPosition + 1]
-          : candidate.repeatMode === 'all' && playOrder.length > 0
-            ? playOrder[0]
-            : -1;
+        ? [candidate.currentIndex]
+        : playOrderPosition >= 0
+          ? [
+              ...playOrder.slice(playOrderPosition + 1),
+              ...(candidate.repeatMode === 'all'
+                ? playOrder.slice(0, playOrderPosition + 1)
+                : [])
+            ]
+          : [];
+    const upNextItems = Object.freeze(upcomingIndices
+      .filter((index) => index >= 0 && index < candidate.queue.length)
+      .map((index) => candidate.queue[index]));
     const next: PlayerSnapshot = Object.freeze({
       ...candidate,
       currentIndex: validIndex ? candidate.currentIndex : -1,
       currentItem: validIndex ? candidate.queue[candidate.currentIndex] : null,
-      upNextItem: automaticNextIndex >= 0 && automaticNextIndex < candidate.queue.length
-        ? candidate.queue[automaticNextIndex]
-        : null,
+      upNextItem: upNextItems[0] ?? null,
+      upNextItems,
       canPrevious: validIndex && (
         candidate.currentTime >= PREVIOUS_RESTART_SECONDS
         || playOrderPosition > 0
@@ -316,6 +357,7 @@ export const createPlayerStore = (
 
     snapshot = next;
     syncMediaSession();
+    syncMediaSurface();
     notify();
   };
 
@@ -405,10 +447,12 @@ export const createPlayerStore = (
     try {
       candidate = audioFactory();
       candidate.preload = 'metadata';
+      candidate.playsInline = true;
       candidate.volume = snapshot.volume;
       candidate.muted = snapshot.muted;
       bindAudio(candidate);
       audio = candidate;
+      syncMediaSurface();
       return audio;
     } catch {
       if (candidate) {
@@ -505,6 +549,7 @@ export const createPlayerStore = (
 
     try {
       target.pause();
+      target.poster = item.artworkUrl;
       target.src = item.streamUrl;
       target.currentTime = 0;
       target.load();
@@ -808,6 +853,19 @@ export const createPlayerStore = (
       updateSnapshot({ muted });
     },
     toggleMute: () => store.setMuted(!snapshot.muted),
+    attachMediaElement: (container) => {
+      if (destroyed) return () => undefined;
+      if (!mediaSurfaceHosts.includes(container)) mediaSurfaceHosts.push(container);
+      syncMediaSurface();
+      let attached = true;
+      return () => {
+        if (!attached) return;
+        attached = false;
+        const index = mediaSurfaceHosts.indexOf(container);
+        if (index >= 0) mediaSurfaceHosts.splice(index, 1);
+        syncMediaSurface();
+      };
+    },
     destroy: () => {
       if (destroyed) return;
       destroyed = true;
@@ -827,12 +885,17 @@ export const createPlayerStore = (
         });
         try {
           audio.pause();
+          if (typeof Node !== 'undefined' && audio instanceof Node) {
+            audio.parentNode?.removeChild(audio);
+          }
           audio.removeAttribute?.('src');
           audio.load();
         } catch {
           // Teardown is best-effort and the detached element is never reused.
         }
       }
+      mediaParkingHost?.remove();
+      mediaParkingHost = null;
 
       if (mediaSession) {
         registeredMediaActions.forEach((action) => {
@@ -853,6 +916,7 @@ export const createPlayerStore = (
 
       listeners.clear();
       boundAudioListeners.clear();
+      mediaSurfaceHosts.splice(0);
       audio = null;
     }
   };
@@ -889,7 +953,7 @@ export const createPlayerStore = (
   return store;
 };
 
-/** Shared browser runtime; its audio element is created lazily on first launch. */
+/** Shared browser runtime; its one video-capable media element is created lazily. */
 export const playerStore = createPlayerStore({
   onPlaybackError: (event) => {
     enqueueListenerTelemetry({

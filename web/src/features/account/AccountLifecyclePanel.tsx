@@ -42,7 +42,7 @@ interface ConfirmationCopy {
 const confirmationCopy: Record<LifecycleAction, ConfirmationCopy> = {
   clearHistory: {
     title: 'Clear listening history?',
-    description: 'This removes your Recently Played activity. Your saved albums and soundtracks stay in Library.',
+    description: 'This removes your Recently Played activity. Your saved albums and MediaTracks stay in Library.',
     confirmLabel: 'Clear history',
     pendingLabel: 'Clearing…',
     fallbackError: 'Finitude could not clear your listening history. Please try again.'

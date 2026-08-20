@@ -93,7 +93,7 @@ export const createMediaAdmissionController = (
                 total: 0,
                 nonPlayback: 0
             };
-            const isPlayback = resourceClass === 'playback';
+            const isPlayback = resourceClass === 'playback' || resourceClass === 'video';
             const nonPlaybackGlobalLimit = limits.global - limits.playbackReservedGlobal;
             const nonPlaybackClientLimit = limits.perIp - limits.playbackReservedPerIp;
 

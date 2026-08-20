@@ -37,6 +37,16 @@ import {
     publishUploadedAudioTracks
 } from '../services/albumTrackLinkService';
 import { retryAudioTrackPublications } from '../services/audioPublicationRecoveryService';
+import {
+    creditsForLegacyArtistIds,
+    mergeLegacyArtistIdsIntoCredits
+} from '../models/catalogCredit';
+import { replaceCatalogCredits } from '../services/catalogCreditService';
+import { catalogCreditRollout } from '../config/catalogCreditRollout';
+import {
+    activeMediaObjectKeyForTrack,
+    activeMediaTypeForTrack
+} from '../utils/mediaStorageKey';
 
 const s3ErrorStatus = (error: any) => {
     const status = Number(error?.$metadata?.httpStatusCode ?? 0);
@@ -55,8 +65,11 @@ const resolveReadyAudioAsset = async (
     const track: any = await AudioTrack.findReadyPublicById(normalizedAudioTrackId);
     if (!track) return { status: 'notFound' as const };
 
-    const s3Key = String(track.s3Key ?? '').trim();
-    if (!isAudioObjectKeyForTrack(s3Key, normalizedAudioTrackId)) {
+    if (activeMediaTypeForTrack(track) !== 'audio') {
+        return { status: 'notReady' as const };
+    }
+    const s3Key = activeMediaObjectKeyForTrack(track);
+    if (!s3Key || !isAudioObjectKeyForTrack(s3Key, normalizedAudioTrackId)) {
         return { status: 'notReady' as const };
     }
     const params = {
@@ -117,6 +130,11 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     if (authReq.auth.role !== 'admin') {
         return res.status(403).json({ message: 'Administrator access is required.' });
     }
+    if (catalogCreditRollout().rejectLegacyWrites) {
+        return res.status(409).json({
+            message: 'Direct artistIds writes are retired. Use the Content Manager Credit workflow.'
+        });
+    }
 
     const uploadFile = getUploadedFile(req, 'audioFile');
     if (!uploadFile) {
@@ -168,6 +186,14 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
         uploadFile.mimetype || 'audio/mpeg',
         audioTrackObjectId
     );
+    track.credits = creditsForLegacyArtistIds(
+        'audioTrack',
+        audioTrackId,
+        artistIds,
+        'legacyUnspecified'
+    );
+    track.attributionStatus = 'documented';
+    track.creditRevision = 1;
 
     try {
         await track.save();
@@ -195,7 +221,7 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
         await publishUploadedAudioTracks(albumId, [audioTrackId]);
 
         return res.status(201).json({
-            message: `Audio Track ${title} Added Successfully`,
+            message: `Audio MediaTrack ${title} added successfully.`,
             audioTrackId,
             uploadStatus: 'ready',
             publicationStatus: 'ready',
@@ -204,7 +230,7 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     } catch (error) {
         console.log(error);
         return res.status(500).json({
-            message: 'Failed to create and upload audio track. The upload attempt remains recorded for reconciliation.',
+            message: 'Failed to create and upload the Audio MediaTrack. The upload attempt remains recorded for reconciliation.',
             audioTrackId
         });
     }
@@ -218,15 +244,21 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     if (authReq.auth.role !== 'admin') {
         return res.status(403).json({ message: 'Administrator access is required.' });
     }
+    if (catalogCreditRollout().rejectLegacyWrites && req.body.artistIds !== undefined) {
+        return res.status(409).json({
+            message: 'Direct artistIds writes are retired. Use MediaTrack Credits.'
+        });
+    }
 
     const audioTrackId: string = req.params.audioTrackId;
     const audioTrack = await AudioTrack.findById(audioTrackId);
     if (!audioTrack) {
-        return res.status(404).json({ message: 'Audio track not found.' });
+        return res.status(404).json({ message: 'MediaTrack not found.' });
     }
 
     const updatePayload: Record<string, unknown> = {};
     let requestedAlbumId: string | undefined;
+    let requestedArtistIds: string[] | undefined;
     const coverArtFile = getUploadedFile(req, 'coverArtFile');
     let replacementCoverArtId: string | undefined;
     const removeCoverArt = !coverArtFile
@@ -241,7 +273,7 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
         if (!validation.valid) {
             return res.status(400).json({ message: validation.message });
         }
-        updatePayload.artistIds = validation.ids;
+        requestedArtistIds = validation.ids;
     }
     if (req.body.genres !== undefined) updatePayload.genres = req.body.genres;
     if (req.body.albumId !== undefined) {
@@ -310,12 +342,27 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
     }
     if (!cleanup.updateApplied) {
         return res.status((cleanup as any).outcomeUnknown ? 503 : 409).json({
-            message: 'Audio track was not updated because its cover art changed concurrently or its lifecycle evidence is invalid.',
+            message: 'MediaTrack was not updated because its cover art changed concurrently or its lifecycle evidence is invalid.',
             cleanupPending: cleanup.cleanupPending
         });
     }
+    if (requestedArtistIds) {
+        const credits = mergeLegacyArtistIdsIntoCredits(
+            'audioTrack',
+            audioTrackId,
+            audioTrack.credits,
+            requestedArtistIds
+        );
+        await replaceCatalogCredits(
+            'audioTrack',
+            audioTrackId,
+            credits,
+            credits.length > 0 ? 'documented' : 'unknown',
+            Number.isInteger(audioTrack.creditRevision) ? audioTrack.creditRevision : 0
+        );
+    }
     return res.status(200).json({
-        message: 'Audio track updated successfully.',
+        message: 'MediaTrack updated successfully.',
         cleanupPending: cleanup.cleanupPending
     });
 };
@@ -347,7 +394,7 @@ export const headAudioTrackStream = async (req: Request, res: Response, next: Ne
         if (context.aborted || error?.name === 'AbortError') return;
         const statusCode = s3ErrorStatus(error);
         if (statusCode >= 500) {
-            console.error('Error checking audio track:', error);
+            console.error('Error checking Audio MediaTrack:', error);
         }
         return res.status(statusCode).end();
     } finally {
@@ -407,9 +454,9 @@ export const streamAudioTrack = async (req: Request, res: Response, next: NextFu
         await pipeMediaStream(req, res, stream, context);
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
-        console.error('Error streaming audio track:', error);
+        console.error('Error streaming Audio MediaTrack:', error);
         if (!res.headersSent) {
-            return res.status(s3ErrorStatus(error)).json({ message: 'Unable to stream audio track.' });
+            return res.status(s3ErrorStatus(error)).json({ message: 'Unable to stream Audio MediaTrack.' });
         } else {
             res.destroy(error instanceof Error ? error : undefined);
         }
@@ -438,7 +485,7 @@ export const headAudioTrackDownload = async (
         if (context.aborted || error?.name === 'AbortError') return;
         const statusCode = s3ErrorStatus(error);
         if (statusCode >= 500) {
-            console.error('Error checking downloadable audio track:', error);
+            console.error('Error checking downloadable Audio MediaTrack:', error);
         }
         return res.status(statusCode).end();
     } finally {
@@ -459,10 +506,10 @@ export const downloadAudioTrack = async (
             context.signal
         );
         if (asset.status === 'notFound') {
-            return res.status(404).json({ message: 'Audio track not found.' });
+            return res.status(404).json({ message: 'MediaTrack not found.' });
         }
         if (asset.status === 'notReady') {
-            return res.status(409).json({ message: 'Audio track is not ready for download.' });
+            return res.status(409).json({ message: 'Audio MediaTrack is not ready for download.' });
         }
 
         const fileSize = asset.metadata.ContentLength!;
@@ -512,10 +559,10 @@ export const downloadAudioTrack = async (
         await pipeMediaStream(req, res, stream, context);
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
-        console.error('Error downloading audio track:', error);
+        console.error('Error downloading Audio MediaTrack:', error);
         if (!res.headersSent) {
             return res.status(s3ErrorStatus(error)).json({
-                message: 'Unable to download audio track.'
+                message: 'Unable to download Audio MediaTrack.'
             });
         }
         res.destroy(error instanceof Error ? error : undefined);
@@ -551,13 +598,13 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
         const audioTrack = await AudioTrack.findById(audioTrackId);
 
         if (!audioTrack) {
-            return res.status(404).json({ message: 'Audio track not found.' });
+            return res.status(404).json({ message: 'MediaTrack not found.' });
         }
 
         try {
             const deletion = await deleteAudioObjectAndTrack(audioTrackId);
             return res.status(200).json({
-                message: 'Audio track deleted successfully.',
+                message: 'MediaTrack deleted successfully.',
                 cleanupPending: deletion.cleanupPending
             });
         } catch (s3Error) {
@@ -568,15 +615,15 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
                 message: conflict
                     ? String((s3Error as Error).message)
                     : outcomeUnknown
-                        ? 'Audio track deletion outcome could not be confirmed. Reconciliation is required.'
-                        : 'Audio track deletion could not complete. Track metadata was retained for retry and reconciliation.',
+                        ? 'MediaTrack deletion outcome could not be confirmed. Reconciliation is required.'
+                        : 'MediaTrack deletion could not complete. Track metadata was retained for retry and reconciliation.',
                 cleanupPending: true
             });
         }
 
     } catch (error: any) {
         console.log(error);
-        return res.status(500).json({ message: 'Failed to delete audio track.' });
+        return res.status(500).json({ message: 'Failed to delete MediaTrack.' });
     }
 };
 
@@ -625,7 +672,7 @@ export const uploadAudioTrackFile = async (
         const audioTrack = await dependencies.findTrack(audioTrackId);
 
         if (!audioTrack) {
-            return res.status(404).json({ message: 'Audio track not found.' });
+            return res.status(404).json({ message: 'MediaTrack not found.' });
         }
 
         const uploadFile = (req as Request & { file?: Express.Multer.File }).file;

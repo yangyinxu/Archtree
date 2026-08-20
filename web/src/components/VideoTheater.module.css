@@ -1,0 +1,137 @@
+.theater {
+  background:
+    radial-gradient(circle at 50% 32%, rgb(255 255 255 / 6%), transparent 48%),
+    #080808;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+}
+
+.stage {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 0;
+  position: relative;
+}
+
+.video {
+  border: 0;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1.4rem 4rem rgb(0 0 0 / 48%);
+  max-height: 100%;
+  max-width: 100%;
+  width: min(100%, calc((100dvh - var(--topbar-height) - var(--player-height) - 9rem) * 16 / 9));
+}
+
+.footer {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  min-width: 0;
+  padding-top: 1rem;
+}
+
+.identity {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.identity > div {
+  min-width: 0;
+}
+
+.identity h1 {
+  font-size: clamp(1rem, 1.55vw, 1.35rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity p {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  margin-top: 0.18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 720;
+  letter-spacing: 0.05em;
+  padding: 0.3rem 0.5rem;
+  text-transform: uppercase;
+}
+
+.fullscreen {
+  align-items: center;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  color: var(--color-text);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 2.75rem;
+  justify-content: center;
+  width: 2.75rem;
+}
+
+.fullscreen svg {
+  height: 1.15rem;
+  width: 1.15rem;
+}
+
+.error {
+  align-items: center;
+  background: rgb(0 0 0 / 78%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 0.35rem;
+  inset: 50% auto auto 50%;
+  max-width: min(24rem, calc(100% - 2rem));
+  padding: 1rem 1.25rem;
+  position: absolute;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.error span {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 767px) {
+  .theater {
+    padding: 0.6rem;
+  }
+
+  .video {
+    width: 100%;
+  }
+
+  .footer {
+    padding: 0.75rem 0.25rem 0.15rem;
+  }
+}
+
+@media (max-height: 620px) and (orientation: landscape) {
+  .theater {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .footer {
+    display: none;
+  }
+}

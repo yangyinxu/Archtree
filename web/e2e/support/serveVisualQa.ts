@@ -285,7 +285,7 @@ const routeApplicationRequest = async (
     return true;
   }
   if ((request.method === 'GET' || request.method === 'HEAD')
-    && pathname.startsWith('/content/audioTrack/stream/')) {
+    && pathname.startsWith('/content/mediaTrack/stream/')) {
     sendAudio(request, response);
     return true;
   }

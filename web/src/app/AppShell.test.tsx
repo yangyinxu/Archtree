@@ -272,7 +272,7 @@ test('keeps the search field synchronized with URL-driven suggestions', async ()
 
   await user.click(screen.getByRole('link', { name: 'Ambient' }));
   expect(screen.getByRole('searchbox', {
-    name: 'Search artists, albums, and soundtracks'
+    name: 'Search artists, organizations, albums, and MediaTracks'
   })).toHaveValue('Ambient');
   expect(screen.getByRole('heading', { name: 'Results for “Ambient”' })).toBeInTheDocument();
   expect(readSearchHistory(null)).toEqual(['Ambient']);

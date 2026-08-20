@@ -30,6 +30,10 @@ export const ArtistPage = () => {
   }
 
   const { artist, albums, audioTracks } = artistQuery.data;
+  const discography = artistQuery.data.discography ?? albums;
+  const collaborations = artistQuery.data.collaborations ?? [];
+  const appearsOn = artistQuery.data.appearsOn ?? [];
+  const creditAlbums = artistQuery.data.creditAlbums ?? [];
 
   return (
     <div className={styles.page}>
@@ -50,8 +54,17 @@ export const ArtistPage = () => {
         </div>
       </header>
 
-      {albums.length > 0 && (
-        <PageSection id={`${artist.id}-albums`} items={albums} presentation="grid" title="Albums" />
+      {discography.length > 0 && (
+        <PageSection id={`${artist.id}-albums`} items={discography} presentation="grid" title="Discography" />
+      )}
+      {collaborations.length > 0 && (
+        <PageSection id={`${artist.id}-collaborations`} items={collaborations} presentation="grid" title="Collaborations" />
+      )}
+      {appearsOn.length > 0 && (
+        <PageSection id={`${artist.id}-appears-on`} items={appearsOn} presentation="grid" title="Appears On" />
+      )}
+      {creditAlbums.length > 0 && (
+        <PageSection id={`${artist.id}-credits`} items={creditAlbums} presentation="grid" title="Credits" />
       )}
       {audioTracks.length > 0 && (
         <PageSection
@@ -59,10 +72,11 @@ export const ArtistPage = () => {
           items={audioTracks}
           onPlay={(track) => { void launchStandalonePlayback(track, session.data?.user.id); }}
           presentation="list"
-          title="Soundtracks"
+          title="MediaTracks"
         />
       )}
-      {albums.length === 0 && audioTracks.length === 0 && (
+      {discography.length === 0 && collaborations.length === 0 && appearsOn.length === 0
+        && creditAlbums.length === 0 && audioTracks.length === 0 && (
         <div className={styles.empty}>No public releases are available for this Artist yet.</div>
       )}
     </div>

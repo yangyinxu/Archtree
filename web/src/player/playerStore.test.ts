@@ -126,6 +126,7 @@ const tracks: PlayerQueueItem[] = [
     title: 'Still Water',
     artworkUrl: '/art/still-water.jpg',
     artistNames: ['Aster Vale'],
+    mediaType: 'audio',
     streamUrl: '/audio/still-water.mp3'
   },
   {
@@ -133,6 +134,7 @@ const tracks: PlayerQueueItem[] = [
     title: 'Open Field',
     artworkUrl: '/art/open-field.jpg',
     artistNames: ['Aster Vale', 'June North'],
+    mediaType: 'audio',
     streamUrl: '/audio/open-field.mp3'
   },
   {
@@ -140,8 +142,15 @@ const tracks: PlayerQueueItem[] = [
     title: 'Night Window',
     artworkUrl: '',
     artistNames: ['June North'],
+    mediaType: 'audio',
     streamUrl: '/audio/night-window.mp3'
   }
+];
+
+const videoTracks: PlayerQueueItem[] = [
+  { ...tracks[0], mediaType: 'video', streamUrl: '/video/still-water.mp4' },
+  tracks[1],
+  { ...tracks[2], mediaType: 'video', streamUrl: '/video/night-window.mp4' }
 ];
 
 test('owns one lazy audio instance and copies an album queue before launch', async () => {
@@ -187,6 +196,153 @@ test('owns one lazy audio instance and copies an album queue before launch', asy
     canNext: false
   });
   expect(store.getSnapshot().queue).toHaveLength(1);
+});
+
+test('a Video MediaTrack loads its one stream without a presentation-mode choice', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+
+  await store.launchQueue(videoTracks, 0, { autoplay: false });
+
+  expect(audio.src).toBe('/video/still-water.mp4');
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1', mediaType: 'video' },
+    status: 'paused'
+  });
+});
+
+test('queue advancement automatically changes between Video and Audio sources', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  await store.launchQueue(videoTracks, 0, { autoplay: false });
+  expect(audio.src).toBe('/video/still-water.mp4');
+  await store.next();
+  expect(audio.src).toBe('/audio/open-field.mp3');
+  expect(store.getSnapshot().currentItem?.mediaType).toBe('audio');
+  await store.next();
+  expect(audio.src).toBe('/video/night-window.mp4');
+  expect(store.getSnapshot().currentItem?.mediaType).toBe('video');
+});
+
+test('Video failure keeps the queue and reports an error without fabricating Audio fallback', async () => {
+  const audio = new FakeAudio();
+  const onPlaybackError = vi.fn();
+  const store = createPlayerStore({
+    audioFactory: () => audio,
+    mediaSession: null,
+    onPlaybackError
+  });
+  await store.launchQueue(videoTracks, 0);
+
+  audio.error = { code: 3 };
+  audio.emit('error');
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-1' },
+    status: 'error',
+    error: { code: 'decode', recoverable: true }
+  });
+  expect(audio.src).toBe('/video/still-water.mp4');
+  expect(onPlaybackError).toHaveBeenCalledWith({
+    stage: 'media_element',
+    code: 'decode'
+  });
+  expect(store.getSnapshot().queue).toHaveLength(3);
+});
+
+test('moves one shared DOM media element between Video hosts and its Audio parking host', async () => {
+  const media = document.createElement('video') as HTMLVideoElement & PlayerAudio;
+  let paused = true;
+  Object.defineProperties(media, {
+    duration: { configurable: true, get: () => 120 },
+    paused: { configurable: true, get: () => paused },
+    ended: { configurable: true, get: () => false },
+    error: { configurable: true, get: () => null },
+    playbackRate: { configurable: true, get: () => 1 }
+  });
+  media.play = vi.fn(async () => { paused = false; });
+  media.pause = vi.fn(() => { paused = true; });
+  media.load = vi.fn();
+  const store = createPlayerStore({ audioFactory: () => media, mediaSession: null });
+  const desktopHost = document.createElement('div');
+  const mobileHost = document.createElement('div');
+  document.body.append(desktopHost, mobileHost);
+  const detachDesktop = store.attachMediaElement(desktopHost);
+
+  await store.launchStandalone(videoTracks[0], { autoplay: false });
+  expect(media.parentNode).toBe(desktopHost);
+
+  const detachMobile = store.attachMediaElement(mobileHost);
+  expect(media.parentNode).toBe(mobileHost);
+  detachMobile();
+  expect(media.parentNode).toBe(desktopHost);
+
+  await store.launchStandalone(tracks[0], { autoplay: false });
+  const parkingHost = media.parentElement;
+  expect(parkingHost).not.toBeNull();
+  expect(parkingHost?.hidden).toBe(true);
+  expect(parkingHost?.dataset.finitudeMediaParking).toBe('true');
+  expect(media.isConnected).toBe(true);
+  detachDesktop();
+  store.destroy();
+  expect(parkingHost?.isConnected).toBe(false);
+  desktopHost.remove();
+  mobileHost.remove();
+});
+
+test('keeps Video-to-Audio manual and natural advancement connected', async () => {
+  const media = document.createElement('video') as HTMLVideoElement & PlayerAudio;
+  let paused = true;
+  Object.defineProperties(media, {
+    duration: { configurable: true, get: () => 15 },
+    paused: { configurable: true, get: () => paused },
+    ended: { configurable: true, get: () => false },
+    error: { configurable: true, get: () => null },
+    playbackRate: { configurable: true, get: () => 1 }
+  });
+  media.play = vi.fn(async () => {
+    if (!media.isConnected) throw new DOMException('Media was disconnected.', 'AbortError');
+    paused = false;
+    media.dispatchEvent(new Event('play'));
+    media.dispatchEvent(new Event('playing'));
+  });
+  media.pause = vi.fn(() => {
+    paused = true;
+    media.dispatchEvent(new Event('pause'));
+  });
+  media.load = vi.fn(() => {
+    media.dispatchEvent(new Event('loadstart'));
+  });
+
+  const store = createPlayerStore({ audioFactory: () => media, mediaSession: null });
+  const videoHost = document.createElement('div');
+  document.body.appendChild(videoHost);
+  const detachVideo = store.attachMediaElement(videoHost);
+
+  await store.launchQueue(videoTracks, 0);
+  expect(media.parentNode).toBe(videoHost);
+  await expect(store.next()).resolves.toBe(true);
+  expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-2', mediaType: 'audio' },
+    status: 'playing',
+    error: null
+  });
+  expect(media.isConnected).toBe(true);
+  expect(media.parentElement?.hidden).toBe(true);
+
+  await expect(store.previous()).resolves.toBe(true);
+  expect(media.parentNode).toBe(videoHost);
+  media.dispatchEvent(new Event('ended'));
+  await vi.waitFor(() => expect(store.getSnapshot()).toMatchObject({
+    currentItem: { id: 'track-2', mediaType: 'audio' },
+    status: 'playing',
+    error: null
+  }));
+  expect(media.isConnected).toBe(true);
+  expect(media.parentElement?.hidden).toBe(true);
+
+  detachVideo();
+  store.destroy();
+  videoHost.remove();
 });
 
 test('moves within queue boundaries and advances automatically on ended', async () => {

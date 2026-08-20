@@ -201,8 +201,9 @@ const renderLoginHtml = (params: {
       ${successMessage}
       ${userId}
       ${token}
-      <form method="POST" action="/auth/login-web">
+      <form method="POST" action="/auth/login-web" data-browser-session-login>
         <input type="hidden" name="returnTo" value="${returnTo}" />
+        <div class="alert alert--error" role="alert" tabindex="-1" data-login-error hidden></div>
         <label for="login-identifier">Email or username</label>
         <input id="login-identifier" type="text" name="identifier" value="${identifier}" autocomplete="username" required />
         <label for="login-password">Password</label>
@@ -212,6 +213,7 @@ const renderLoginHtml = (params: {
     </section>
     <p class="auth-footer">Need an account? <a href="/auth/signup-web">Create one</a></p>
   </main>
+  <script src="/assets/browser-session-forms.js"></script>
 </body>
 </html>`;
 };
@@ -362,7 +364,10 @@ export const renderSignupPage = (req: Request, res: Response) => {
 
 export const renderLoginPage = (req: Request, res: Response) => {
   const returnTo = safeWebReturnTo(req.query.returnTo);
-  res.redirect(303, `/finitude/login?returnTo=${encodeURIComponent(returnTo)}`);
+  setBrowserSessionPrivacyHeaders(res);
+  const auth = (req as Request & { auth?: { userId: string } }).auth;
+  if (auth) return res.redirect(303, returnTo);
+  return res.status(200).send(renderLoginHtml({ returnTo }));
 };
 
 export const signupFromWeb = async (req: Request, res: Response, next: NextFunction) => {
@@ -428,10 +433,15 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
 export const loginFromWeb = async (req: Request, res: Response) => {
   const returnTo = safeWebReturnTo(req.body.returnTo);
-  // Legacy HTML forms cannot prove ownership of the origin-wide Web Lock, so
-  // they never install cookies. The listener SPA owns the coordinated login.
-  recordSecurityEvent('browser_form_login_redirected');
-  res.redirect(303, `/finitude/login?returnTo=${encodeURIComponent(returnTo)}`);
+  const identifier = normalizeIdentifier(req.body.identifier ?? req.body.email ?? req.body.username);
+  // A non-scripted HTML submission cannot prove ownership of the origin-wide
+  // Web Lock. Keep it on Archtree and fail closed without inspecting credentials.
+  recordSecurityEvent('browser_form_login_uncoordinated');
+  return res.status(409).send(renderLoginHtml({
+    identifier,
+    returnTo,
+    errorMessage: 'This browser could not safely coordinate login. Enable JavaScript and try again.'
+  }));
 };
 
 /** Establishes an HttpOnly listener session without exposing either credential. */
@@ -700,5 +710,5 @@ export const logoutFromWeb = async (req: Request, res: Response) => {
   }
   // The uncoordinated legacy form is revoke-only: a delayed response must
   // never clear cookies installed by a newer account transition.
-  return res.redirect(303, '/finitude?sessionTransition=logout');
+  return res.redirect(303, '/?sessionTransition=logout');
 };
