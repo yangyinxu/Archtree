@@ -230,7 +230,7 @@ test('Search debounces edited queries without remembering them until explicit su
   await waitForSearchDebounce();
 
   expect(await screen.findByRole('heading', { name: 'Results for “Night”' })).toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   expect(fetchMock).toHaveBeenLastCalledWith(
     '/api/listener/v1/search?q=Night',
     expect.objectContaining({ signal: expect.any(AbortSignal) })
@@ -241,7 +241,7 @@ test('Search debounces edited queries without remembering them until explicit su
   await waitForSearchDebounce();
 
   expect(await screen.findByRole('heading', { name: 'Results for “Nigh”' })).toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   expect(readSearchHistory(null)).toEqual([]);
 
   fireEvent.keyDown(input, { key: 'Enter', keyCode: 229, isComposing: true });
@@ -292,8 +292,8 @@ test('Search cancels an in-flight draft request when a newer draft is previewed'
   await waitForSearchDebounce();
 
   expect(await screen.findByRole('heading', { name: 'Results for “Dawn”' })).toBeInTheDocument();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   expect(firstSignal?.aborted).toBe(true);
-  expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(readSearchHistory(null)).toEqual([]);
 });
 
@@ -324,7 +324,7 @@ test('Search waits for IME composition to finish before previewing or recording'
   expect(await screen.findByRole('heading', { name: 'Results for “夜”' }, {
     timeout: 1_000
   })).toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   expect(readSearchHistory(null)).toEqual([]);
 
   await user.click(input);
@@ -411,6 +411,7 @@ test('clearing an edited Search draft returns to the default state without a new
   renderRoute('/search?q=Night', '/search', <SearchPage />);
 
   expect(await screen.findByRole('heading', { name: 'Results for “Night”' })).toBeInTheDocument();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   await user.clear(screen.getByRole('searchbox', {
     name: 'Search artists, organizations, albums, and MediaTracks'
   }));
