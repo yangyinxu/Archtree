@@ -52,6 +52,18 @@ const waitForExpandedShell = async (page: Page) => {
   }).toBe(true);
 };
 
+/** Waits for viewport-driven panel constraints before measuring their final geometry. */
+const waitForShellWidths = async (
+  page: Page,
+  expected: readonly [left: number, main: number, right: number]
+) => {
+  await expect.poll(async () => {
+    const boxes = await readShellBoxes(page);
+    const actual = [boxes.left.width, boxes.main.width, boxes.right.width];
+    return actual.every((width, index) => Math.abs(width - expected[index]!) <= 1);
+  }).toBe(true);
+};
+
 /** Drags a vertical separator by a physical horizontal distance. */
 const dragSeparator = async (page: Page, label: string, deltaX: number) => {
   const handle = page.getByRole('separator', { name: label });
@@ -177,6 +189,7 @@ test('resizes both wide panels, preserves the main pane, and restores preference
     .toHaveAttribute('aria-valuenow', '420');
 
   await page.setViewportSize({ width: 1_280, height: 900 });
+  await waitForShellWidths(page, [416, 416, 416]);
   const constrained = await readShellBoxes(page);
   expectNear(constrained.left.width, 416);
   expectNear(constrained.main.width, 416);
