@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 import { catalogIds } from './fixtures/catalog';
+import { installDeterministicAudio } from './support/deterministicAudio';
 import { expect, test } from './support/test';
 import { expectNoHorizontalOverflow } from './support/visual';
 
@@ -12,6 +13,7 @@ const expectMinimumTouchTarget = async (target: Locator) => {
 };
 
 const startMobilePlayback = async (page: Page) => {
+  await installDeterministicAudio(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/finitude/albums/${catalogIds.album}`);
   await expect(page.getByRole('heading', { level: 1, name: 'Quiet Hours' })).toBeVisible();

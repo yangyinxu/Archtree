@@ -1,5 +1,6 @@
 import { catalogIds } from './fixtures/catalog';
 import { privatePlaylistSummary } from './fixtures/privateListener';
+import { installDeterministicAudio } from './support/deterministicAudio';
 import { expect, test } from './support/test';
 import { installPrivateListenerRoutes } from './support/privateRoutes';
 
@@ -90,6 +91,7 @@ test('supports menu arrow keys, dialog focus wrapping, Escape, and trigger focus
 });
 
 test('does not intercept playback shortcuts while typing and restores help focus', async ({ page }) => {
+  await installDeterministicAudio(page);
   await page.setViewportSize({ width: 1_280, height: 800 });
   await page.goto(`/finitude/albums/${catalogIds.album}`);
   await page.getByRole('main')
