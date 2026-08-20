@@ -73,7 +73,7 @@ test('renders responsive navigation and exactly one persistent player surface', 
   expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main-content');
   expect(container.querySelectorAll('nav[aria-label="Primary"]')).toHaveLength(2);
   expect(screen.getAllByRole('link', { name: 'Library' })).toHaveLength(1);
-  expect(screen.getAllByRole('region', { name: 'Now playing' })).toHaveLength(1);
+  expect(await screen.findAllByRole('region', { name: 'Now playing' })).toHaveLength(1);
 });
 
 test('moves keyboard focus to main content from the skip link', async () => {
@@ -90,7 +90,7 @@ test('toggles the read-only Now Playing pane without remounting the player', asy
   renderRoute('/');
 
   const aside = await screen.findByRole('complementary', { name: 'Now Playing details' });
-  const player = screen.getByRole('region', { name: 'Now playing' });
+  const player = await screen.findByRole('region', { name: 'Now playing' });
   const hideButton = screen.getByRole('button', { name: 'Hide Now Playing view' });
 
   expect(aside).not.toHaveAttribute('hidden');
@@ -392,7 +392,7 @@ test('cancels the pending preview timer when global Search is submitted', async 
     search: '?q=Edge',
     state: null
   });
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   expect(readSearchHistory(null)).toEqual(['Edge']);
 });
 
@@ -438,7 +438,7 @@ test('waits for global Search IME composition before previewing or recording', a
     await new Promise((resolve) => window.setTimeout(resolve, 350));
   });
   expect(screen.getByRole('heading', { name: 'Results for “夜”' })).toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   expect(readSearchHistory(null)).toEqual([]);
 
   await user.click(input);
