@@ -331,7 +331,7 @@ Elastic Beanstalk performs a clean dependency install on each instance.
 The separate `.github/workflows/finitude-web-release.yml` gate follows the
 Playwright CI installation flow and runs unit/component tests, the Mongo-backed
 lifecycle integration suite, both production builds, and all three browser/axe
-projects on pull requests and pushes to `develop` or `main`. Browser traces,
+projects on pull requests and pushes to `main`. Browser traces,
 screenshots, videos, JUnit output, and the HTML report are retained as workflow
 artifacts. A missing or failed integration environment blocks artifact staging.
 
