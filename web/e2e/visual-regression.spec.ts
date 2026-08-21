@@ -174,6 +174,7 @@ for (const viewport of visualViewports) {
     await expect(page.getByText('月明かりの記憶—風景を越えて響く長いタイトル').first()).toBeAttached();
     await expect(page.getByRole('button', { name: 'Play Untitled MediaTrack' })).toBeAttached();
     await expectNoHorizontalOverflow(page);
+    await expect(page.getByText('Your Library', { exact: true })).toHaveCount(0);
 
     const left = page.getByRole('complementary', { name: 'Finitude Library' });
     const right = page.getByRole('complementary', { name: 'Now Playing details' });
@@ -204,7 +205,6 @@ for (const viewport of visualViewports) {
           viewport.sideWidth!
         );
       } else {
-        await expect(page.getByText('Your Library', { exact: true })).toBeHidden();
         near(await right.evaluate((element) => element.getBoundingClientRect().width), 280);
         near(
           await page.getByRole('main').evaluate((element) => element.getBoundingClientRect().width),

@@ -235,23 +235,6 @@
   padding: 0.75rem 0.55rem 0.55rem;
 }
 
-.sidebarHeader {
-  align-items: center;
-  color: var(--color-text);
-  display: flex;
-  font-size: 0.98rem;
-  font-weight: 730;
-  gap: 0.75rem;
-  min-height: 2.6rem;
-  padding: 0 0.75rem 0.45rem;
-}
-
-.sidebarHeader svg {
-  flex: 0 0 auto;
-  height: 1.25rem;
-  width: 1.25rem;
-}
-
 .navigation {
   border-bottom: 1px solid var(--color-border);
   display: grid;
@@ -409,10 +392,6 @@
   .sidebar {
     padding-left: 0.45rem;
     padding-right: 0.45rem;
-  }
-
-  .sidebarHeader {
-    display: none;
   }
 
   .navigationLink {

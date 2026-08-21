@@ -204,10 +204,6 @@ const AppShellContent = () => {
       </header>
 
       <aside className={styles.sidebar} aria-label="Finitude Library" id="library-sidebar">
-        <div className={styles.sidebarHeader}>
-          <Icon name="library" />
-          <span>Your Library</span>
-        </div>
         <PrimaryNavigation />
         {capabilities.data?.playlists && (
           <Suspense fallback={<div className={styles.sidebarLoading} aria-hidden="true" />}>

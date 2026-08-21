@@ -76,6 +76,9 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   Playlist list in the left sidebar below primary navigation. The reference
   layout informs hierarchy without copying another product's branding or exact
   components.
+- The desktop Web sidebar begins with primary navigation and does not render a
+  separate `Your Library` heading. The Library destination and the Library
+  page's own title remain available.
 - On tablet and mobile Web, Playlists are available as a Library-owned
   destination rather than as an additional primary-navigation tab. Playlists
   remain separate from the Saved/Downloaded Album and MediaTrack union and its
