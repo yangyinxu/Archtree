@@ -189,6 +189,23 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   Played activity, profile/avatar, account, device-local downloads, and
   Playlists. These owner-scoped actions do not mutate the shared catalog.
 
+## Native Home Startup and Recovery
+
+- Finitude iOS and Android initiate a public Home load whenever Home is first
+  presented after an install, update, or ordinary relaunch. Retained device or
+  account storage must not suppress that load.
+- The expanded Home response is the required native composition response.
+  Ready content included in that response remains renderable when an auxiliary
+  public catalog or Feed request used only for compatibility enrichment fails.
+- Before Home has usable content, a failed or cancelled load presents a
+  recoverable unavailable state rather than an empty success. Initial loading,
+  unavailable, and empty states expose an explicit retry or refresh action.
+- A refresh requested while an older Home load is still active must result in
+  a fresh attempt. A cancelled or stale load cannot clear the loading state or
+  overwrite the result of that newer attempt.
+- A later refresh failure preserves already rendered Home content and reports
+  the refresh failure without replacing that content with an empty page.
+
 ## Finitude Localization
 
 - Finitude Web starts in explicit `en-US` when no valid app-language preference
