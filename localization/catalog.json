@@ -1324,6 +1324,13 @@
       ],
       "variables": {}
     },
+    "avatar.removed_cleanup": {
+      "description": "Avatar removal success with pending private-storage cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "avatar.updated": {
       "description": "Avatar update success status.",
       "delivery": [

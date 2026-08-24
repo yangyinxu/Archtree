@@ -184,6 +184,7 @@
   "avatar.preserved.delete": "当前照片仍会保留。",
   "avatar.preserved.upload": "当前照片未更改；请重新选择照片以再次开始。",
   "avatar.removed": "个人照片已移除。",
+  "avatar.removed_cleanup": "个人照片已移除；Archtree 会继续完成其私有存储清理。",
   "avatar.updated": "个人照片已更新。",
   "avatar.updated_cleanup": "个人照片已更新；Archtree 会继续清理之前的照片。",
   "avatar.uploading": "正在上传照片…",

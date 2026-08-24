@@ -184,6 +184,7 @@
   "avatar.preserved.delete": "Your current photo remains in place.",
   "avatar.preserved.upload": "Your current photo has not changed. Select a photo again to restart.",
   "avatar.removed": "Profile photo removed.",
+  "avatar.removed_cleanup": "Profile photo removed. Archtree will continue finalizing its private storage cleanup.",
   "avatar.updated": "Profile photo updated.",
   "avatar.updated_cleanup": "Profile photo updated. Archtree will continue cleaning up the previous photo.",
   "avatar.uploading": "Uploading photo…",

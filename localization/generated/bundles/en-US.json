@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-dcbtvVCMtKXAo1EWCIpd_fHe3HpTIKaPvu33ajZYDJ0",
+  "revision": "sha256-HoIL0ufDWyKbtH73tTgNcWfVs2JaJb8w1oI6BknM0xs",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.back_login": "Back to Log in",
@@ -188,6 +188,7 @@
     "avatar.preserved.delete": "Your current photo remains in place.",
     "avatar.preserved.upload": "Your current photo has not changed. Select a photo again to restart.",
     "avatar.removed": "Profile photo removed.",
+    "avatar.removed_cleanup": "Profile photo removed. Archtree will continue finalizing its private storage cleanup.",
     "avatar.updated": "Profile photo updated.",
     "avatar.updated_cleanup": "Profile photo updated. Archtree will continue cleaning up the previous photo.",
     "avatar.uploading": "Uploading photo…",
