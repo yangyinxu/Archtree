@@ -31,8 +31,8 @@ export const renderAudioTracksPage = (
             return `<li data-track-item data-search="${escapeHtml(`${title} ${id} ${albumId} ${originalFileName}`.toLowerCase())}" data-status="${escapeHtml(uploadStatus)}" data-album="${albumId ? 'assigned' : 'unassigned'}">
               <div class="track-title-row"><strong>${escapeHtml(title)}</strong><span><span class="pill ${status.className}">${status.label}</span> ${albumId ? '<span class="pill">In album</span>' : '<span class="pill pill--muted">Unassigned</span>'}</span></div>
               <div class="item-meta">
-                <button class="copy-id" type="button" data-copy-id="${escapeHtml(id)}">Copy track ID</button>
-                ${albumId ? `<button class="copy-id" type="button" data-copy-id="${escapeHtml(albumId)}">Copy album ID</button>` : '<span>No album assigned</span>'}
+                <button class="copy-id" type="button" data-copy-id="${escapeHtml(id)}"><i class="ph ph-copy" aria-hidden="true"></i>Copy track ID</button>
+                ${albumId ? `<button class="copy-id" type="button" data-copy-id="${escapeHtml(albumId)}"><i class="ph ph-copy" aria-hidden="true"></i>Copy album ID</button>` : '<span>No album assigned</span>'}
                 ${originalFileName ? `<span>File: ${escapeHtml(originalFileName)}</span>` : ''}
                 ${uploadError ? `<span class="status-error">Storage error: ${escapeHtml(uploadError)}</span>` : ''}
               </div>
@@ -60,22 +60,22 @@ export const renderAudioTracksPage = (
     @media (max-width: 600px) { .track-toolbar { align-items: stretch; grid-template-columns: 1fr; } }
   </style>
 </head>
-<body>
+<body class="inventory-page">
   <main class="page-shell">
-    <header class="site-header">
-      <div>
-        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
+    <header class="site-header operations-header">
+      <div class="operations-header__identity">
+        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span><span>Archtree</span></a>
         <p class="eyebrow" style="margin-top:18px;">Audio library</p>
         <h1 style="margin-bottom:8px;">MediaTracks</h1>
-        <p class="muted">Global catalog · signed in as <strong>${escapeHtml(userEmail)}</strong> · ${tracks.length} track${tracks.length === 1 ? '' : 's'} on page ${pagination.page}</p>
+        <p class="muted operations-meta"><span>Global catalog</span><span>Signed in as <strong>${escapeHtml(userEmail)}</strong></span><span>${tracks.length} track${tracks.length === 1 ? '' : 's'} on page ${pagination.page}</span></p>
       </div>
       <div class="header-actions">
-        <a class="button" href="/content/manage#create">Create and upload</a>
-        <a class="button button--secondary" href="/content/manage">Content Manager</a>
-        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
+        <a class="button" href="/content/manage#create"><i class="ph ph-upload-simple" aria-hidden="true"></i>Create and upload</a>
+        <a class="button button--secondary" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Content Manager</a>
+        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(userId)}" /><button class="button--secondary" type="submit"><i class="ph ph-sign-out" aria-hidden="true"></i>Log out</button></form>
       </div>
     </header>
-    <section class="card card--raised">
+    <section class="card card--raised card--workspace">
       <div class="track-toolbar">
         <div>
           <label for="track-filter">Filter tracks</label>

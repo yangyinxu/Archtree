@@ -31,6 +31,10 @@ const report = {
 test('audit maps each discrepancy to a state-valid recommended action', () => {
     const html = renderAudioStorageAuditPage(report, 'admin@example.com');
 
+    assert.match(html, /<body class="audit-page">/);
+    assert.match(html, /class="site-header operations-header"/);
+    assert.match(html, /ph ph-tree-structure/);
+    assert.match(html, /class="grid audit-metrics"/);
     assert.match(html, /Recommended workflow/);
     assert.match(html, /action="\/admin\/audio-storage\/orphan-delete"/);
     assert.match(html, /Delete orphaned S3 object/);

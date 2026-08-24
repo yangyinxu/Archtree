@@ -430,7 +430,7 @@ const renderCreditEditor = (
                 : artistCreditRoleOptions;
             const roleSelect = roleOptions.map(([value, roleLabel]) => `<option value="${value}"${credit.role === value ? ' selected' : ''}>${roleLabel}</option>`).join('');
             const hidden = `<input type="hidden" name="ownerType" value="${ownerType}" /><input type="hidden" name="ownerId" value="${escapeHtml(ownerId)}" /><input type="hidden" name="creditId" value="${escapeHtml(String(credit.creditId ?? ''))}" />`;
-            return `<li><span><strong>${escapeHtml(label)}</strong> · position ${index + 1}<small class="placement-preview">Public placement: ${escapeHtml(placementFor(credit))}</small></span><form method="POST" action="/content/manage/credits/update-role">${hidden}<label>Role<select name="role">${roleSelect}</select></label><button class="button--secondary" type="submit">Update Role</button></form><form method="POST" action="/content/manage/credits/reorder">${hidden}<button class="button--secondary" name="direction" value="up" type="submit"${index === 0 ? ' disabled' : ''}>Move Up</button><button class="button--secondary" name="direction" value="down" type="submit"${index === credits.length - 1 ? ' disabled' : ''}>Move Down</button></form><form method="POST" action="/content/manage/credits/remove">${hidden}<button class="button--secondary" type="submit">Remove Credit</button></form></li>`;
+            return `<li><span><strong>${escapeHtml(label)}</strong>, position ${index + 1}<small class="placement-preview">Public placement: ${escapeHtml(placementFor(credit))}</small></span><form method="POST" action="/content/manage/credits/update-role">${hidden}<label>Role<select name="role">${roleSelect}</select></label><button class="button--secondary" type="submit">Update Role</button></form><form method="POST" action="/content/manage/credits/reorder">${hidden}<button class="button--secondary" name="direction" value="up" type="submit"${index === 0 ? ' disabled' : ''}>Move Up</button><button class="button--secondary" name="direction" value="down" type="submit"${index === credits.length - 1 ? ' disabled' : ''}>Move Down</button></form><form method="POST" action="/content/manage/credits/remove">${hidden}<button class="button--secondary" type="submit">Remove Credit</button></form></li>`;
         }).join('')}</ol>`
         : `<p class="empty-linked-content">${owner?.attributionStatus === 'unknown'
             ? 'Attribution is explicitly not documented.'
@@ -525,8 +525,8 @@ const renderManagePage = (params: {
     const carouselOptions = catalogCarousels.map((carousel) => {
         const id = contentId(carousel);
         const dynamicLabel = carousel.mode === 'artist'
-            ? ' · Artist'
-            : carousel.mode === 'personalized' ? ' · Personalized' : '';
+            ? ', Artist'
+            : carousel.mode === 'personalized' ? ', Personalized' : '';
         return `<option value="${escapeHtml(id)}">${escapeHtml(String(carousel.name ?? 'Untitled carousel'))}${dynamicLabel}</option>`;
     }).join('');
     const manualCarouselOptions = catalogCarousels
@@ -554,7 +554,7 @@ const renderManagePage = (params: {
     const organizationOptions = catalogOrganizations.map((organization) => {
         const id = contentId(organization);
         const type = String(organization.organizationType ?? 'organization');
-        return `<option value="${escapeHtml(id)}">${escapeHtml(String(organization.name ?? 'Untitled organization'))} · ${escapeHtml(type)}</option>`;
+        return `<option value="${escapeHtml(id)}">${escapeHtml(String(organization.name ?? 'Untitled organization'))}, ${escapeHtml(type)}</option>`;
     }).join('');
     const albumOptions = catalogAlbums.map((album) => {
         const id = contentId(album);
@@ -859,21 +859,22 @@ const renderManagePage = (params: {
       .selected-object { align-items: flex-start; flex-direction: column; }
     }
   </style>
+  <link rel="stylesheet" href="/assets/content-manager.css" />
 </head>
-<body class="manager-view-${managerView} manager-selection-${selectedType} catalog-section-${activeCatalogSection}">
+<body class="manager-page manager-view-${managerView} manager-selection-${selectedType} catalog-section-${activeCatalogSection}">
   <main class="page-shell">
   <header class="site-header">
     <div>
-      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span><span>Archtree</span></a>
       <p class="eyebrow" style="margin-top:18px;">Catalog workspace</p>
       <h1 style="margin-bottom:8px;">Content Manager</h1>
     </div>
     <details class="manager-account" id="manager-account-menu">
-      <summary>Admin account</summary>
+      <summary><i class="ph ph-user-circle" aria-hidden="true"></i>Admin account</summary>
       <div class="manager-account__panel">
         <p class="eyebrow">Signed in</p>
         <strong>${escapeHtml(params.userEmail)}</strong>
-        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(params.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
+        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(params.userId)}" /><button class="button--secondary" type="submit"><i class="ph ph-sign-out" aria-hidden="true"></i>Log out</button></form>
       </div>
     </details>
   </header>
@@ -884,10 +885,10 @@ const renderManagePage = (params: {
   </section>
   ${s3StorageBlock}
   <nav class="manager-nav" aria-label="Content Manager sections">
-    <a href="/content/manage?view=overview"${managerView === 'overview' ? ' aria-current="page"' : ''}>Overview</a>
-    <a href="/content/manage?view=catalog"${managerView === 'catalog' ? ' aria-current="page"' : ''}>Catalog</a>
-    <a href="/content/manage?view=layout"${managerView === 'layout' ? ' aria-current="page"' : ''}>Page Layout</a>
-    <a href="/content/manage?view=operations"${managerView === 'operations' ? ' aria-current="page"' : ''}>Operations</a>
+    <a href="/content/manage?view=overview"${managerView === 'overview' ? ' aria-current="page"' : ''}><i class="ph ph-house-simple" aria-hidden="true"></i>Overview</a>
+    <a href="/content/manage?view=catalog"${managerView === 'catalog' ? ' aria-current="page"' : ''}><i class="ph ph-stack" aria-hidden="true"></i>Catalog</a>
+    <a href="/content/manage?view=layout"${managerView === 'layout' ? ' aria-current="page"' : ''}><i class="ph ph-files" aria-hidden="true"></i>Page Layout</a>
+    <a href="/content/manage?view=operations"${managerView === 'operations' ? ' aria-current="page"' : ''}><i class="ph ph-gear-six" aria-hidden="true"></i>Operations</a>
   </nav>
 
   <section class="card surface-operations" id="system-operations" aria-labelledby="system-operations-title">
@@ -895,8 +896,8 @@ const renderManagePage = (params: {
     <h2 id="system-operations-title">System operations</h2>
     <p class="muted">Open focused maintenance workspaces without competing with everyday catalog navigation.</p>
     <nav class="operations-tool-grid" aria-label="System operation destinations">
-      <a class="operations-tool" href="/content/manage/audio-tracks"><strong>MediaTrack operations</strong><span>Filter the global inventory and review publication or storage status.</span></a>
-      ${params.isAdmin ? '<a class="operations-tool" href="/admin/audio-storage/reconciliation"><strong>Audio storage audit</strong><span>Review reconciliation findings and explicitly confirm any remediation.</span></a><a class="operations-tool" href="/admin/image-storage/reconciliation"><strong>Image storage audit</strong><span>Inspect catalog artwork and avatar lifecycle discrepancies.</span></a>' : ''}
+      <a class="operations-tool" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i><strong>MediaTrack operations</strong><span>Filter the global inventory and review publication or storage status.</span></a>
+      ${params.isAdmin ? '<a class="operations-tool" href="/admin/audio-storage/reconciliation"><i class="ph ph-database" aria-hidden="true"></i><strong>Audio storage audit</strong><span>Review reconciliation findings and explicitly confirm any remediation.</span></a><a class="operations-tool" href="/admin/image-storage/reconciliation"><i class="ph ph-image" aria-hidden="true"></i><strong>Image storage audit</strong><span>Inspect catalog artwork and avatar lifecycle discrepancies.</span></a>' : ''}
     </nav>
   </section>
 
@@ -935,7 +936,7 @@ const renderManagePage = (params: {
         <label><input type="checkbox" name="createCarousel" value="true" data-create-carousel /> Create a dynamic Album Artist Carousel</label>
         <div class="stack" data-carousel-config hidden>
           <label>Carousel name<input name="carouselName" placeholder="Defaults from the Artist" /></label>
-          <label>Sort<select name="carouselSort"><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select></label>
+          <label>Sort<select name="carouselSort"><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A-Z</option></select></label>
           <label>Item limit<input name="carouselLimit" type="number" min="1" max="100" value="20" /></label>
           <label>Page placement<select name="pageSlug"><option value="">Do not attach to a Page</option><option value="home">Home</option><option value="library">Library</option></select></label>
           <label>Position (optional, 0-based)<input name="pagePosition" type="number" min="0" /></label>
@@ -1071,9 +1072,9 @@ const renderManagePage = (params: {
               });
 
               const dynamicSummary = isArtistCarousel
-                  ? `<span class="pill">Dynamic</span> <span>${escapeHtml(artistName)} · ${carousel.artistConfig?.contentType === 'album' ? 'Albums' : 'MediaTracks'}</span>`
+                  ? `<span class="pill">Dynamic</span> <span>${escapeHtml(artistName)}, ${carousel.artistConfig?.contentType === 'album' ? 'Albums' : 'MediaTracks'}</span>`
                   : isPersonalizedCarousel
-                      ? `<span class="pill">Personalized</span> <span>${carousel.personalizedConfig?.source === 'recentlyPlayed' ? 'Recently Played' : 'Recently Saved'} · Mixed content</span>`
+                      ? `<span class="pill">Personalized</span> <span>${carousel.personalizedConfig?.source === 'recentlyPlayed' ? 'Recently Played' : 'Recently Saved'}, mixed content</span>`
                   : '<span class="pill pill--muted">Manual</span>';
               const itemLabel = `${items.length} configured item${items.length === 1 ? '' : 's'}`;
               return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><div class="item-meta">${dynamicSummary}</div>${renderNestedList(carouselItems, itemLabel)}</div>`;
@@ -1088,7 +1089,7 @@ const renderManagePage = (params: {
             ${catalogContentCollections.length > 0 ? catalogContentCollections.map((collection) => {
                 const presentation = String(collection.presentation ?? 'collection');
                 const mode = collection.mode === 'dynamic' ? 'Dynamic' : 'Manual';
-                return `<div class="hierarchy-item"><strong>${renderReferencedItem(collection, String(collection.name ?? 'Untitled collection'))}</strong><span>${escapeHtml(presentation)} · ${mode}</span></div>`;
+                return `<div class="hierarchy-item"><strong>${renderReferencedItem(collection, String(collection.name ?? 'Untitled collection'))}</strong><span>${escapeHtml(presentation)}, ${mode}</span></div>`;
             }).join('') : '<p class="empty-linked-content">No content collections yet.</p>'}
           </div>
           ${paginationFor('contentCollections', 'Content Collections')}
@@ -1152,7 +1153,7 @@ const renderManagePage = (params: {
                     <select name="artistId"><option value="" disabled selected>Select artist</option>${artistOptions}</select>
                     <select name="artistContentType"><option value="album">Albums</option><option value="audioTrack">MediaTracks</option></select>
                     <select name="artistScope"><option value="discography">Discography / primary</option><option value="collaborations">Collaborations / featured</option><option value="appearsOn">Appears On / performer</option><option value="allRelated">All related credits</option></select>
-                    <select name="artistSort"><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select>
+                    <select name="artistSort"><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A-Z</option></select>
                     <input name="artistLimit" type="number" min="1" max="100" value="20" />
                     <p class="drag-help">Items are generated automatically from the selected artist and cannot be manually reordered.</p>
                 </div>
@@ -1171,7 +1172,7 @@ const renderManagePage = (params: {
                 <select name="artistId" required><option value="" disabled selected>Select artist</option>${artistOptions}</select>
                 <select name="artistContentType" required><option value="album">Albums</option><option value="audioTrack">MediaTracks</option></select>
                 <select name="artistScope" required><option value="discography">Discography / primary</option><option value="collaborations">Collaborations / featured</option><option value="appearsOn">Appears On / performer</option><option value="allRelated">All related credits</option></select>
-                <select name="artistSort" required><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A–Z</option></select>
+                <select name="artistSort" required><option value="releaseDateDesc">Newest releases first</option><option value="titleAsc">Title A-Z</option></select>
                 <input name="artistLimit" type="number" min="1" max="100" value="20" required />
                 <button type="submit">Update Artist Carousel</button>
             </form>

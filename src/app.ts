@@ -166,20 +166,20 @@ export interface LandingActions {
 export const renderLandingActions = (
   auth?: Pick<AuthContext, 'userId' | 'email' | 'role'>
 ): LandingActions => {
-  const listenerButton = '<a class="button button--listener" href="/finitude">Open Finitude</a>';
+  const listenerButton = '<a class="button button--listener" href="/finitude"><i class="ph ph-music-notes" aria-hidden="true"></i>Open Finitude</a>';
   if (auth) {
     const contentManagerHeaderAction = auth.role === 'admin'
-      ? '<a class="button" href="/content/manage">Content Manager</a>'
+      ? '<a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Content Manager</a>'
       : '';
     const adminHeroActions = auth.role === 'admin'
-      ? `<a class="button" href="/content/manage">Open Content Manager</a>
-        <a class="button button--secondary" href="/content/manage/audio-tracks">Browse MediaTracks</a>`
+      ? `<a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Open Content Manager</a>
+        <a class="button button--secondary" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i>Browse MediaTracks</a>`
       : '';
     return {
       headerActions: `<div class="header-actions">
         <span class="muted">${escapeHtml(auth.email)}</span>
         ${contentManagerHeaderAction}
-        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(auth.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
+        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(auth.userId)}" /><button class="button--secondary" type="submit"><i class="ph ph-sign-out" aria-hidden="true"></i>Log out</button></form>
       </div>`,
       heroActions: `<div class="action-row">
         ${listenerButton}
@@ -190,13 +190,13 @@ export const renderLandingActions = (
 
   return {
     headerActions: `<div class="header-actions">
-      <a class="button button--secondary" href="/auth/login-web">Log in</a>
-      <a class="button" href="/auth/signup-web">Create account</a>
+      <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
+      <a class="button" href="/auth/signup-web"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
     </div>`,
     heroActions: `<div class="action-row">
       ${listenerButton}
-      <a class="button" href="/auth/signup-web">Create account</a>
-      <a class="button button--secondary" href="/auth/login-web">Log in</a>
+      <a class="button" href="/auth/signup-web"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
+      <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
     </div>`
   };
 };

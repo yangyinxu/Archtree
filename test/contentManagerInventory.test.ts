@@ -250,9 +250,12 @@ test('Content Manager loads global inventory into focused Catalog sections', asy
 
     assert.equal(nextError, undefined);
     assert.equal(capture.statusCode, 200);
+    assert.match(capture.html, /href="\/assets\/content-manager\.css"/);
+    assert.match(capture.html, /<body class="manager-page manager-view-overview/);
     const managerHeader = capture.html.match(/<header class="site-header">[\s\S]*?<\/header>/)?.[0] ?? '';
     assert.match(managerHeader, /<details class="manager-account" id="manager-account-menu">/);
-    assert.match(managerHeader, /<summary>Admin account<\/summary>/);
+    assert.match(managerHeader, /<summary><i class="ph ph-user-circle"[^>]*><\/i>Admin account<\/summary>/);
+    assert.match(managerHeader, /ph ph-tree-structure/);
     assert.match(managerHeader, /admin@example\.com/);
     assert.match(managerHeader, /action="\/auth\/logout-web"/);
     assert.doesNotMatch(managerHeader, /MediaTracks|Audit Audio Storage|Audit Image Storage|>Home<|header-actions/);
@@ -270,6 +273,8 @@ test('Content Manager loads global inventory into focused Catalog sections', asy
     assert.match(capture.html, /manager-view-overview/);
     assert.match(capture.html, /Set up an Artist release/);
     assert.match(capture.html, /Overview/);
+    assert.match(capture.html, /ph ph-house-simple/);
+    assert.match(capture.html, /ph ph-gear-six/);
     assert.match(capture.html, /Page Layout/);
     assert.match(capture.html, /Operations/);
     assert.match(capture.html, /Legacy Global Artist/);
@@ -364,6 +369,10 @@ test('MediaTrack inventory uses the global page and global administrator copy', 
         offset: managementInventoryPageSize
     });
     assert.match(capture.html, /<h1[^>]*>MediaTracks<\/h1>/);
+    assert.match(capture.html, /<body class="inventory-page">/);
+    assert.match(capture.html, /class="site-header operations-header"/);
+    assert.match(capture.html, /ph ph-tree-structure/);
+    assert.match(capture.html, /ph ph-upload-simple/);
     assert.match(capture.html, /Global catalog/);
     assert.match(capture.html, /Cross-owner Track/);
     assert.match(capture.html, /id="track-status-filter"/);

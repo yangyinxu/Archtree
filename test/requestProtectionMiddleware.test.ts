@@ -52,6 +52,8 @@ test('Content Manager upload throttling returns a browser recovery surface with 
     assert.equal(rejected.capture.status, 429);
     assert.equal(rejected.capture.type, 'html');
     assert.match(String(rejected.capture.body), /Upload temporarily limited/);
+    assert.match(String(rejected.capture.body), /<body class="notice-page">/);
+    assert.match(String(rejected.capture.body), /ph ph-clock-countdown/);
     assert.match(String(rejected.capture.body), /No catalog changes were made/);
     assert.equal(Number(rejected.capture.headers['Retry-After']) > 0, true);
     assert.equal(rejected.capture.headers['RateLimit-Limit'], 20);

@@ -54,18 +54,18 @@ export const renderAudioStorageAuditPage = (
     .item-list > li { display: grid; gap: 8px; }
   </style>
 </head>
-<body>
+<body class="audit-page">
   <main class="page-shell">
-    <header class="site-header">
-      <div>
-        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">A</span><span>Archtree</span></a>
+    <header class="site-header operations-header">
+      <div class="operations-header__identity">
+        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span><span>Archtree</span></a>
         <p class="eyebrow" style="margin-top:18px;">Administrator tools</p>
         <h1 style="margin-bottom:8px;">Audio Storage Audit</h1>
-        <p class="muted">Signed in as <strong>${escapeHtml(userEmail)}</strong> · Generated ${escapeHtml(formatDate(report.generatedAt))}</p>
+        <p class="muted operations-meta"><span>Signed in as <strong>${escapeHtml(userEmail)}</strong></span><span>Generated ${escapeHtml(formatDate(report.generatedAt))}</span></p>
       </div>
       <div class="header-actions">
-        <a class="button" href="/content/manage">Content Manager</a>
-        <a class="button button--secondary" href="/admin/audio-storage/reconciliation?format=json">View JSON</a>
+        <a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Content Manager</a>
+        <a class="button button--secondary" href="/admin/audio-storage/reconciliation?format=json"><i class="ph ph-brackets-curly" aria-hidden="true"></i>View JSON</a>
       </div>
     </header>
     ${message ? `<div class="alert${messageIsError ? ' alert--error' : ''}" role="status">${escapeHtml(message)}</div>` : ''}
@@ -78,12 +78,12 @@ export const renderAudioStorageAuditPage = (
       <p><strong>Needs attention:</strong> retry publication only when the stored file is ready; otherwise inspect the MediaTrack and its recorded error first.</p>
     </section>
 
-    <section class="grid">
-      <div class="card"><p class="eyebrow">MongoDB</p><h2>${Number(report.summary?.databaseTrackCount ?? 0)}</h2><p>Track records</p></div>
-      <div class="card"><p class="eyebrow">S3</p><h2>${Number(report.summary?.s3ObjectCount ?? 0)}</h2><p>Objects in ${escapeHtml(String(report.bucket ?? ''))}</p></div>
-      <div class="card"><p class="eyebrow">Orphaned</p><h2>${Number(report.summary?.orphanedObjectCount ?? 0)}</h2><p>S3 objects without tracks</p></div>
-      <div class="card"><p class="eyebrow">Missing</p><h2>${Number(report.summary?.missingObjectCount ?? 0)}</h2><p>Tracks without S3 objects</p></div>
-      <div class="card"><p class="eyebrow">Incomplete</p><h2>${Number(report.summary?.incompleteTrackCount ?? 0)}</h2><p>Pending or failed operations</p></div>
+    <section class="grid audit-metrics" aria-label="Audio storage summary">
+      <div class="card"><i class="ph ph-database" aria-hidden="true"></i><p class="eyebrow">MongoDB</p><h2>${Number(report.summary?.databaseTrackCount ?? 0)}</h2><p>Track records</p></div>
+      <div class="card"><i class="ph ph-cloud" aria-hidden="true"></i><p class="eyebrow">S3</p><h2>${Number(report.summary?.s3ObjectCount ?? 0)}</h2><p>Objects in ${escapeHtml(String(report.bucket ?? ''))}</p></div>
+      <div class="card"><i class="ph ph-link-break" aria-hidden="true"></i><p class="eyebrow">Orphaned</p><h2>${Number(report.summary?.orphanedObjectCount ?? 0)}</h2><p>S3 objects without tracks</p></div>
+      <div class="card"><i class="ph ph-file-x" aria-hidden="true"></i><p class="eyebrow">Missing</p><h2>${Number(report.summary?.missingObjectCount ?? 0)}</h2><p>Tracks without S3 objects</p></div>
+      <div class="card"><i class="ph ph-warning" aria-hidden="true"></i><p class="eyebrow">Incomplete</p><h2>${Number(report.summary?.incompleteTrackCount ?? 0)}</h2><p>Pending or failed operations</p></div>
     </section>
 
     <div class="section-heading"><div><p class="eyebrow">S3 only</p><h2>Orphaned objects</h2></div></div>
@@ -173,12 +173,12 @@ export const renderAudioStorageAuditPage = (
     </section>
 
     <div class="section-heading"><div><p class="eyebrow">Media namespace</p><h2>Video storage</h2></div></div>
-    <section class="grid">
-      <div class="card"><p class="eyebrow">MongoDB</p><h2>${Number(videoStorage.summary?.databaseVideoTrackCount ?? 0)}</h2><p>MediaTracks with Video evidence</p></div>
-      <div class="card"><p class="eyebrow">S3</p><h2>${Number(videoStorage.summary?.s3ObjectCount ?? 0)}</h2><p>Objects under <code>video/</code></p></div>
-      <div class="card"><p class="eyebrow">Orphaned</p><h2>${Number(videoStorage.summary?.orphanedObjectCount ?? 0)}</h2><p>Unreferenced video objects</p></div>
-      <div class="card"><p class="eyebrow">Missing</p><h2>${Number(videoStorage.summary?.missingObjectCount ?? 0)}</h2><p>Recorded keys absent from S3</p></div>
-      <div class="card"><p class="eyebrow">Incomplete</p><h2>${Number(videoStorage.summary?.incompleteTrackCount ?? 0)}</h2><p>Pending video lifecycles</p></div>
+    <section class="grid audit-metrics" aria-label="Video storage summary">
+      <div class="card"><i class="ph ph-database" aria-hidden="true"></i><p class="eyebrow">MongoDB</p><h2>${Number(videoStorage.summary?.databaseVideoTrackCount ?? 0)}</h2><p>MediaTracks with Video evidence</p></div>
+      <div class="card"><i class="ph ph-cloud" aria-hidden="true"></i><p class="eyebrow">S3</p><h2>${Number(videoStorage.summary?.s3ObjectCount ?? 0)}</h2><p>Objects under <code>video/</code></p></div>
+      <div class="card"><i class="ph ph-link-break" aria-hidden="true"></i><p class="eyebrow">Orphaned</p><h2>${Number(videoStorage.summary?.orphanedObjectCount ?? 0)}</h2><p>Unreferenced video objects</p></div>
+      <div class="card"><i class="ph ph-file-x" aria-hidden="true"></i><p class="eyebrow">Missing</p><h2>${Number(videoStorage.summary?.missingObjectCount ?? 0)}</h2><p>Recorded keys absent from S3</p></div>
+      <div class="card"><i class="ph ph-warning" aria-hidden="true"></i><p class="eyebrow">Incomplete</p><h2>${Number(videoStorage.summary?.incompleteTrackCount ?? 0)}</h2><p>Pending video lifecycles</p></div>
     </section>
 
     <section class="card" aria-labelledby="video-orphans-heading">
@@ -206,7 +206,7 @@ export const renderAudioStorageAuditPage = (
       <h3 id="video-incomplete-heading">Incomplete video operations</h3>
       ${renderItems(incompleteVideos, (track) => `<li>
         <strong>${escapeHtml(String(track.title || track.audioTrackId || 'Unnamed MediaTrack'))}</strong>
-        <div class="item-meta">${(Array.isArray(track.references) ? track.references : []).map((reference: any) => `<span>${escapeHtml(String(reference.phase ?? 'phase'))}: ${escapeHtml(String(reference.status ?? 'unknown'))} · ${reference.objectExists ? 'S3 present' : 'S3 missing'}</span>`).join('')}</div>
+        <div class="item-meta">${(Array.isArray(track.references) ? track.references : []).map((reference: any) => `<span>${escapeHtml(String(reference.phase ?? 'phase'))}: ${escapeHtml(String(reference.status ?? 'unknown'))}, ${reference.objectExists ? 'S3 present' : 'S3 missing'}</span>`).join('')}</div>
         <a class="button button--secondary" href="${soundtrackWorkspaceUrl(track.audioTrackId)}">Open MediaTrack workspace</a>
       </li>`)}
     </section>

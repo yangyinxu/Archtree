@@ -128,37 +128,46 @@ const renderSignupHtml = (params: {
   const successMessage = params.successMessage ? `<div class="alert" role="status">${escapeHtml(params.successMessage)}</div>` : '';
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="auth-document">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Archtree Sign Up</title>
   <link rel="stylesheet" href="/assets/archtree.css" />
 </head>
-<body>
-  <main class="page-shell page-shell--narrow auth-card">
-    <a class="brand" href="/">
-      <span class="brand-mark" aria-hidden="true">A</span>
-      <span>Archtree</span>
-    </a>
-    <section class="card card--raised">
-      <p class="eyebrow">New workspace</p>
-      <h1>Create your account</h1>
-      <p class="muted">Start organizing your music catalog and publishing structure.</p>
-      ${errorMessage}
-      ${successMessage}
-      <form method="POST" action="/auth/signup-web">
-        <label for="signup-email">Email</label>
-        <input id="signup-email" type="email" name="email" value="${email}" autocomplete="email" required />
-        <label for="signup-username">Username</label>
-        <input id="signup-username" type="text" name="username" value="${username}" autocomplete="username" required />
-        <label for="signup-password">Password</label>
-        <input id="signup-password" type="password" name="password" minlength="12" autocomplete="new-password" required />
-        <span class="muted">Use at least 12 characters.</span>
-        <button type="submit">Create account</button>
-      </form>
+<body class="auth-page auth-page--signup">
+  <main class="auth-layout">
+    <section class="auth-intro" aria-label="Archtree catalog workspace">
+      <img class="auth-intro__image" src="/assets/archtree-catalog-workspace.webp" width="1120" height="1400" alt="" />
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span>
+        <span>Archtree</span>
+      </a>
+      <div class="auth-intro__copy">
+        <h2>Build a catalog that stays connected.</h2>
+        <p>Organize every artist, release, file, credit, and placement in one publishing workspace.</p>
+      </div>
     </section>
-    <p class="auth-footer">Already have an account? <a href="/auth/login-web">Log in</a></p>
+    <section class="auth-form-panel">
+      <div class="auth-form-panel__inner">
+        <p class="eyebrow">New workspace</p>
+        <h1>Create your account</h1>
+        <p class="muted">Start organizing your music catalog and publishing structure.</p>
+        ${errorMessage}
+        ${successMessage}
+        <form method="POST" action="/auth/signup-web">
+          <label for="signup-email"><i class="ph ph-envelope-simple" aria-hidden="true"></i>Email</label>
+          <input id="signup-email" type="email" name="email" value="${email}" autocomplete="email" required />
+          <label for="signup-username"><i class="ph ph-user" aria-hidden="true"></i>Username</label>
+          <input id="signup-username" type="text" name="username" value="${username}" autocomplete="username" required />
+          <label for="signup-password"><i class="ph ph-lock-key" aria-hidden="true"></i>Password</label>
+          <input id="signup-password" type="password" name="password" minlength="12" autocomplete="new-password" required />
+          <span class="muted">Use at least 12 characters.</span>
+          <button type="submit"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</button>
+        </form>
+        <p class="auth-footer">Already have an account? <a href="/auth/login-web">Log in</a></p>
+      </div>
+    </section>
   </main>
 </body>
 </html>`;
@@ -180,38 +189,47 @@ const renderLoginHtml = (params: {
   const returnTo = escapeHtml(params.returnTo ?? '/');
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="auth-document">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Archtree Login</title>
   <link rel="stylesheet" href="/assets/archtree.css" />
 </head>
-<body>
-  <main class="page-shell page-shell--narrow auth-card">
-    <a class="brand" href="/">
-      <span class="brand-mark" aria-hidden="true">A</span>
-      <span>Archtree</span>
-    </a>
-    <section class="card card--raised">
-      <p class="eyebrow">Welcome back</p>
-      <h1>Log in to Archtree</h1>
-      <p class="muted">Continue managing your catalog and listening experience.</p>
-      ${errorMessage}
-      ${successMessage}
-      ${userId}
-      ${token}
-      <form method="POST" action="/auth/login-web" data-browser-session-login>
-        <input type="hidden" name="returnTo" value="${returnTo}" />
-        <div class="alert alert--error" role="alert" tabindex="-1" data-login-error hidden></div>
-        <label for="login-identifier">Email or username</label>
-        <input id="login-identifier" type="text" name="identifier" value="${identifier}" autocomplete="username" required />
-        <label for="login-password">Password</label>
-        <input id="login-password" type="password" name="password" autocomplete="current-password" required />
-        <button type="submit">Log in</button>
-      </form>
+<body class="auth-page auth-page--login">
+  <main class="auth-layout">
+    <section class="auth-intro" aria-label="Archtree catalog workspace">
+      <img class="auth-intro__image" src="/assets/archtree-catalog-workspace.webp" width="1120" height="1400" alt="" />
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span>
+        <span>Archtree</span>
+      </a>
+      <div class="auth-intro__copy">
+        <h2>Return to every release in progress.</h2>
+        <p>Your catalog, media lifecycle, and page structure are ready where you left them.</p>
+      </div>
     </section>
-    <p class="auth-footer">Need an account? <a href="/auth/signup-web">Create one</a></p>
+    <section class="auth-form-panel">
+      <div class="auth-form-panel__inner">
+        <p class="eyebrow">Welcome back</p>
+        <h1>Log in to Archtree</h1>
+        <p class="muted">Continue managing your catalog and listening experience.</p>
+        ${errorMessage}
+        ${successMessage}
+        ${userId}
+        ${token}
+        <form method="POST" action="/auth/login-web" data-browser-session-login>
+          <input type="hidden" name="returnTo" value="${returnTo}" />
+          <div class="alert alert--error" role="alert" tabindex="-1" data-login-error hidden></div>
+          <label for="login-identifier"><i class="ph ph-user" aria-hidden="true"></i>Email or username</label>
+          <input id="login-identifier" type="text" name="identifier" value="${identifier}" autocomplete="username" required />
+          <label for="login-password"><i class="ph ph-lock-key" aria-hidden="true"></i>Password</label>
+          <input id="login-password" type="password" name="password" autocomplete="current-password" required />
+          <button type="submit"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</button>
+        </form>
+        <p class="auth-footer">Need an account? <a href="/auth/signup-web">Create one</a></p>
+      </div>
+    </section>
   </main>
   <script src="/assets/browser-session-forms.js"></script>
 </body>
