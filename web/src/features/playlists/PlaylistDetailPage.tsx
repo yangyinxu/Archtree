@@ -19,9 +19,7 @@ import {
 } from '../../api/playlists';
 import { browserSessionQuery } from '../../api/session';
 import { focusMainContent } from '../../app/focusMainContent';
-import { ActionMenu } from '../../components/ActionMenu';
 import { Artwork } from '../../components/Artwork';
-import { ModalDialog } from '../../components/ModalDialog';
 import { launchPlaylistPlayback } from '../playback/launchPlayback';
 import {
   commitPlaylistDetail,
@@ -29,9 +27,16 @@ import {
   revalidatePlaylistLists
 } from './playlistCache';
 import styles from './Playlists.module.css';
+import {
+  useLocalization,
+  type LocalizationContextValue
+} from '../../localization/LocalizationProvider';
 
 const AddSoundtracksDialog = lazy(() => import('./AddSoundtracksDialog').then((module) => ({
   default: module.AddSoundtracksDialog
+})));
+const ActionMenu = lazy(() => import('../../components/ActionMenu').then((module) => ({
+  default: module.ActionMenu
 })));
 const PlaylistDeleteDialog = lazy(() => import('./PlaylistDialogs').then((module) => ({
   default: module.PlaylistDeleteDialog
@@ -39,31 +44,6 @@ const PlaylistDeleteDialog = lazy(() => import('./PlaylistDialogs').then((module
 const PlaylistNameDialog = lazy(() => import('./PlaylistDialogs').then((module) => ({
   default: module.PlaylistNameDialog
 })));
-
-const PlaylistDialogLoading = ({
-  onClose,
-  returnFocusRef
-}: {
-  onClose: () => void;
-  returnFocusRef: RefObject<HTMLElement | null>;
-}) => {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  return (
-    <ModalDialog
-      description="Finitude is opening this private Playlist action."
-      initialFocusRef={closeRef}
-      kicker="Your Library"
-      onClose={onClose}
-      returnFocusRef={returnFocusRef}
-      title="Opening Playlist action"
-    >
-      <p aria-busy="true" className={styles.pickerState}>Loading…</p>
-      <div className={styles.dialogActions}>
-        <button className={styles.secondaryButton} onClick={onClose} ref={closeRef} type="button">Close</button>
-      </div>
-    </ModalDialog>
-  );
-};
 
 const durationSeconds = (duration: string | null) => {
   if (!duration) return null;
@@ -74,31 +54,24 @@ const durationSeconds = (duration: string | null) => {
   return parts.reduce((total, part) => total * 60 + part, 0);
 };
 
-const durationLabel = (seconds: number) => {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) return `${hours} hr ${minutes} min`;
-  return `${Math.max(1, minutes)} min`;
-};
-
-const memberMutationMessage = (error: unknown) => {
-  if (!(error instanceof ApiError)) return 'Finitude could not confirm that Playlist change.';
+const memberMutationMessage = (error: unknown, t: LocalizationContextValue['t']) => {
+  if (!(error instanceof ApiError)) return t('playlist.error.change_unconfirmed');
   if (error.code === 'idempotency_in_progress') {
-    return 'That Playlist change is still being confirmed. Wait a moment, then retry the same action.';
+    return t('playlist.error.member_pending');
   }
   if (error.code === 'idempotency_key_reused') {
-    return 'That retry no longer matches this change. Reload the Playlist and start the action again.';
+    return t('playlist.error.member_retry_mismatch');
   }
   if (error.code === 'account_viewer_mismatch' || error.status === 401) {
-    return 'Your signed-in account changed. Reload the page before editing this Playlist.';
+    return t('playlist.error.member_account_changed');
   }
   if (error.code === 'playlist_revision_conflict' || error.status === 409) {
-    return 'This Playlist changed on another device. Finitude loaded the newest version; review it before trying again.';
+    return t('playlist.error.member_revision');
   }
   if (error.code === 'playlist_item_not_found' || error.status === 404) {
-    return 'That Playlist item is no longer available. Finitude is refreshing the list.';
+    return t('playlist.error.member_missing');
   }
-  return error.message;
+  return t('playlist.error.change_unconfirmed');
 };
 
 interface ReorderVariables {
@@ -118,6 +91,7 @@ interface RemoveVariables {
 
 /** Provides ordered composition and ready-only playback over one persistent player. */
 export const PlaylistDetailPage = () => {
+  const { t } = useLocalization();
   const { playlistId = '' } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -147,7 +121,7 @@ export const PlaylistDetailPage = () => {
   ) => {
     if (!guard || !isAccountOperationCurrent(guard, viewerId)) return;
     if (previous) queryClient.setQueryData(detailKey, previous);
-    setFeedback({ kind: 'error', message: memberMutationMessage(error) });
+    setFeedback({ kind: 'error', message: memberMutationMessage(error, t) });
     if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
       void queryClient.invalidateQueries({ queryKey: detailKey, exact: true });
       void revalidatePlaylistLists(queryClient, viewerId, guard);
@@ -191,7 +165,7 @@ export const PlaylistDetailPage = () => {
       mutationKeysRef.current.delete(variables.signature);
       commitPlaylistDetail(queryClient, viewerId, detail, context.guard);
       void revalidatePlaylistLists(queryClient, viewerId, context.guard);
-      setFeedback({ kind: 'success', message: 'MediaTrack removed from this Playlist.' });
+      setFeedback({ kind: 'success', message: t('playlist.detail.removed') });
     }
   });
 
@@ -226,7 +200,7 @@ export const PlaylistDetailPage = () => {
     },
     onError: (error, _variables, context) => {
       if (!context?.guard || !isAccountOperationCurrent(context.guard, viewerId)) return;
-      setMovementAnnouncement('Move was not saved.');
+      setMovementAnnouncement(t('playlist.detail.move_failed'));
       reconcileMutationError(error, context.guard, context.previous);
     },
     onSuccess: (detail, variables, context) => {
@@ -285,7 +259,7 @@ export const PlaylistDetailPage = () => {
     if (index < 0 || destination < 0 || destination >= playlist.items.length) return;
     const order = playlist.items.map((item) => item.itemId);
     [order[index], order[destination]] = [order[destination], order[index]];
-    const title = playlist.items[index].audioTrack?.title || 'Unavailable MediaTrack';
+    const title = playlist.items[index].audioTrack?.title || t('playlist.detail.unavailable_title');
     const signature = `order:${playlist.revision}:${order.join(',')}`;
     const idempotencyKey = mutationKeysRef.current.get(signature) ?? createPlaylistIdempotencyKey();
     mutationKeysRef.current.set(signature, idempotencyKey);
@@ -294,18 +268,22 @@ export const PlaylistDetailPage = () => {
       revision: playlist.revision,
       idempotencyKey,
       signature,
-      announcement: `${title} moved to position ${destination + 1} of ${order.length}.`
+      announcement: t('playlist.detail.moved', {
+        title,
+        position: destination + 1,
+        count: order.length
+      })
     });
   };
 
   if (session.isPending) {
-    return <div className={styles.page}><div aria-busy="true" className={styles.state}>Checking your account…</div></div>;
+    return <div className={styles.page}><div aria-busy="true" className={styles.state}>{t('playlist.index.checking_account')}</div></div>;
   }
   if (session.isError) {
     return (
       <div className={styles.page}><div className={styles.state} role="alert">
-        <h1>Your account is out of reach</h1>
-        <button className={styles.secondaryButton} onClick={() => session.refetch()} type="button">Try again</button>
+        <h1>{t('playlist.index.account_error_title')}</h1>
+        <button className={styles.secondaryButton} onClick={() => session.refetch()} type="button">{t('common.action.try_again')}</button>
       </div></div>
     );
   }
@@ -313,41 +291,50 @@ export const PlaylistDetailPage = () => {
     return (
       <div className={styles.page}><div className={styles.state}>
         <ListMusic aria-hidden="true" />
-        <h1>Log in to open this Playlist</h1>
-        <p>Private Playlist addresses never reveal another listener's music.</p>
-        <Link className={styles.primaryButton} state={{ from: `/playlists/${playlistId}` }} to="/login">Log in</Link>
+        <h1>{t('playlist.detail.signed_out_title')}</h1>
+        <p>{t('playlist.detail.signed_out_copy')}</p>
+        <Link className={styles.primaryButton} state={{ from: `/playlists/${playlistId}` }} to="/login">{t('common.action.log_in')}</Link>
       </div></div>
     );
   }
   if (playlistQuery.isPending) {
-    return <div className={styles.page}><div aria-busy="true" className={styles.state}>Opening Playlist…</div></div>;
+    return <div className={styles.page}><div aria-busy="true" className={styles.state}>{t('playlist.detail.opening')}</div></div>;
   }
   if (playlistQuery.isError) {
     const notFound = playlistQuery.error instanceof ApiError && playlistQuery.error.status === 404;
     return (
       <div className={styles.page}><div className={styles.state} role={notFound ? undefined : 'alert'}>
         <ListMusic aria-hidden="true" />
-        <h1>{notFound ? 'Playlist not found' : 'This Playlist could not be loaded'}</h1>
+        <h1>{notFound ? t('playlist.detail.not_found_title') : t('playlist.detail.load_error_title')}</h1>
         <p>{notFound
-          ? 'It may have been deleted, or it belongs to another listener.'
-          : 'Finitude could not reach your private Playlist.'}</p>
+          ? t('playlist.detail.not_found_copy')
+          : t('playlist.detail.load_error_copy')}</p>
         {notFound
-          ? <Link className={styles.secondaryButton} to="/playlists">Back to Playlists</Link>
-          : <button className={styles.secondaryButton} onClick={() => playlistQuery.refetch()} type="button">Try again</button>}
+          ? <Link className={styles.secondaryButton} to="/playlists">{t('playlist.action.back_playlists')}</Link>
+          : <button className={styles.secondaryButton} onClick={() => playlistQuery.refetch()} type="button">{t('common.action.try_again')}</button>}
       </div></div>
     );
   }
   if (!playlist) {
-    return <div className={styles.page}><div aria-busy="true" className={styles.state}>Opening Playlist…</div></div>;
+    return <div className={styles.page}><div aria-busy="true" className={styles.state}>{t('playlist.detail.opening')}</div></div>;
   }
 
   const summary = playlistSummaryFromDetail(playlist);
+  const duration = knownDuration !== null && knownDuration > 0
+    ? (() => {
+        const hours = Math.floor(knownDuration / 3600);
+        const minutes = Math.floor((knownDuration % 3600) / 60);
+        return hours > 0
+          ? t('playlist.duration.hours', { hours, minutes })
+          : t('playlist.duration.minutes', { minutes: Math.max(1, minutes) });
+      })()
+    : '';
 
   return (
     <div className={styles.page}>
       <header className={styles.detailHeader}>
         <Artwork
-          alt={`${playlist.name} Playlist artwork`}
+          alt={t('playlist.artwork_alt', { name: playlist.name })}
           className={styles.playlistArtwork}
           fetchPriority="high"
           kind="audioTrack"
@@ -356,39 +343,47 @@ export const PlaylistDetailPage = () => {
           src={playlist.artworkUrl}
         />
         <div className={styles.detailCopy}>
-          <p className={styles.eyebrow}>Private Playlist</p>
+          <p className={styles.eyebrow}>{t('playlist.detail.private')}</p>
           <h1 title={playlist.name}>{playlist.name}</h1>
           <p className={styles.detailMetadata}>
-            {playlist.itemCount} MediaTrack{playlist.itemCount === 1 ? '' : 's'}
-            {knownDuration !== null && knownDuration > 0 ? ` · ${durationLabel(knownDuration)}` : ''}
-            {readyTracks.length !== playlist.itemCount ? ` · ${playlist.itemCount - readyTracks.length} unavailable` : ''}
+            {t('playlist.item_count', { count: playlist.itemCount })}
+            {duration ? ` · ${duration}` : ''}
+            {readyTracks.length !== playlist.itemCount
+              ? ` · ${t('playlist.detail.unavailable_count', {
+                  count: playlist.itemCount - readyTracks.length
+                })}`
+              : ''}
           </p>
           <div className={styles.detailActions}>
             <button
-              aria-label="Play"
+              aria-label={t('common.action.play')}
               className={styles.playButton}
               disabled={readyTracks.length === 0}
               onClick={() => { void launchPlaylistPlayback(readyTracks, viewerId); }}
-              title={readyTracks.length === 0 ? 'No ready MediaTracks to play' : `Play ${playlist.name}`}
+              title={readyTracks.length === 0
+                ? t('playlist.detail.play_unavailable')
+                : t('playlist.detail.play_label', { name: playlist.name })}
               type="button"
             >
               <Play aria-hidden="true" fill="currentColor" focusable="false" />
             </button>
             <button className={styles.secondaryButton} disabled={mutationPending} onClick={() => setDialog('add')} ref={addTriggerRef} type="button">
-              <Plus aria-hidden="true" /> Add MediaTracks
+              <Plus aria-hidden="true" /> {t('playlist.action.add_tracks')}
             </button>
-            <button className={styles.secondaryButton} disabled={mutationPending} onClick={() => setDialog('rename')} ref={renameTriggerRef} type="button">Rename</button>
-            <ActionMenu
-              items={[{
-                label: 'Delete Playlist',
-                destructive: true,
-                disabled: mutationPending,
-                restoreFocus: false,
-                onSelect: () => setDialog('delete')
-              }]}
-              label={`More actions for ${playlist.name}`}
-              triggerRef={moreTriggerRef}
-            />
+            <button className={styles.secondaryButton} disabled={mutationPending} onClick={() => setDialog('rename')} ref={renameTriggerRef} type="button">{t('playlist.action.rename')}</button>
+            <Suspense fallback={null}>
+              <ActionMenu
+                items={[{
+                  label: t('playlist.action.delete'),
+                  destructive: true,
+                  disabled: mutationPending,
+                  restoreFocus: false,
+                  onSelect: () => setDialog('delete')
+                }]}
+                label={t('playlist.actions.more_for', { name: playlist.name })}
+                triggerRef={moreTriggerRef}
+              />
+            </Suspense>
           </div>
         </div>
       </header>
@@ -403,34 +398,38 @@ export const PlaylistDetailPage = () => {
       <section aria-labelledby="playlist-soundtracks-title" className={styles.memberSection}>
         <div className={styles.sectionHeading}>
           <div>
-            <p className={styles.eyebrow}>In this Playlist</p>
-            <h2 id="playlist-soundtracks-title" ref={memberHeadingRef} tabIndex={-1}>MediaTracks</h2>
+            <p className={styles.eyebrow}>{t('playlist.detail.in_playlist')}</p>
+            <h2 id="playlist-soundtracks-title" ref={memberHeadingRef} tabIndex={-1}>{t('common.label.mediatracks')}</h2>
           </div>
-          <p>{playlist.items.length > 0 ? 'Use each row menu to remove or move it.' : 'Build this Playlist one MediaTrack at a time.'}</p>
+          <p>{playlist.items.length > 0
+            ? t('playlist.detail.items_copy')
+            : t('playlist.detail.empty_copy')}</p>
         </div>
         {playlist.items.length === 0 ? (
           <div className={styles.emptyState}>
             <ListMusic aria-hidden="true" />
-            <h3>This Playlist is empty</h3>
-            <p>Search the ready catalog and add the first MediaTrack.</p>
-            <button className={styles.primaryButton} onClick={() => setDialog('add')} type="button">Add MediaTracks</button>
+            <h3>{t('playlist.detail.empty_title')}</h3>
+            <p>{t('playlist.detail.empty_copy')}</p>
+            <button className={styles.primaryButton} onClick={() => setDialog('add')} type="button">{t('playlist.action.add_tracks')}</button>
           </div>
         ) : (
           <>
             <div aria-hidden="true" className={styles.memberTableHeader}>
               <span>#</span>
-              <span className={styles.memberTitleHeading}>Title</span>
-              <span>Duration</span>
+              <span className={styles.memberTitleHeading}>{t('playlist.detail.table.title')}</span>
+              <span>{t('playlist.detail.table.duration')}</span>
               <span />
             </div>
-            <ol aria-label={`${playlist.name} MediaTracks`} className={styles.memberList}>
+            <ol aria-label={t('playlist.detail.members_label', { name: playlist.name })} className={styles.memberList}>
             {playlist.items.map((item, index) => {
               const track = item.audioTrack;
-              const title = track?.title || 'Unavailable MediaTrack';
+              const title = track?.title || t('playlist.detail.unavailable_title');
               return (
                 <li className={`${styles.memberRow} ${!track ? styles.unavailableRow : ''}`} key={item.itemId}>
                   <button
-                    aria-label={track ? `Play ${title}` : `${title} cannot be played`}
+                    aria-label={track
+                      ? t('content.play.label', { title })
+                      : t('playlist.detail.cannot_play', { title })}
                     className={styles.memberPrimary}
                     disabled={!track}
                     onClick={() => {
@@ -443,39 +442,41 @@ export const PlaylistDetailPage = () => {
                     <span className={styles.memberCopy}>
                       <span title={title}>{title}</span>
                       <span>{track
-                        ? [track.artistNames.join(', '), track.albumTitle].filter(Boolean).join(' · ') || 'MediaTrack'
-                        : 'This member is no longer ready in the catalog.'}</span>
+                        ? [track.artistNames.join(', '), track.albumTitle].filter(Boolean).join(' · ') || t('common.label.mediatrack')
+                        : t('playlist.detail.unavailable_copy')}</span>
                     </span>
                     <span className={styles.memberDuration}>{track?.duration || '—'}</span>
                   </button>
                   <span className={styles.memberMenu}>
-                    <ActionMenu
-                      items={[
-                        { label: 'Move Up', disabled: mutationPending || index === 0, onSelect: () => moveItem(item.itemId, -1) },
-                        { label: 'Move Down', disabled: mutationPending || index === playlist.items.length - 1, onSelect: () => moveItem(item.itemId, 1) },
-                        {
-                          label: 'Remove from Playlist',
-                          destructive: true,
-                          disabled: mutationPending,
-                          restoreFocus: false,
-                          onSelect: () => {
-                            focusAfterMemberRemoval(item.itemId);
-                            const signature = `remove:${playlist.revision}:${item.itemId}`;
-                            const idempotencyKey = mutationKeysRef.current.get(signature)
-                              ?? createPlaylistIdempotencyKey();
-                            mutationKeysRef.current.set(signature, idempotencyKey);
-                            removeMutation.mutate({
-                              itemId: item.itemId,
-                              revision: playlist.revision,
-                              idempotencyKey,
-                              signature
-                            });
+                    <Suspense fallback={null}>
+                      <ActionMenu
+                        items={[
+                          { label: t('playlist.action.move_up'), disabled: mutationPending || index === 0, onSelect: () => moveItem(item.itemId, -1) },
+                          { label: t('playlist.action.move_down'), disabled: mutationPending || index === playlist.items.length - 1, onSelect: () => moveItem(item.itemId, 1) },
+                          {
+                            label: t('playlist.action.remove'),
+                            destructive: true,
+                            disabled: mutationPending,
+                            restoreFocus: false,
+                            onSelect: () => {
+                              focusAfterMemberRemoval(item.itemId);
+                              const signature = `remove:${playlist.revision}:${item.itemId}`;
+                              const idempotencyKey = mutationKeysRef.current.get(signature)
+                                ?? createPlaylistIdempotencyKey();
+                              mutationKeysRef.current.set(signature, idempotencyKey);
+                              removeMutation.mutate({
+                                itemId: item.itemId,
+                                revision: playlist.revision,
+                                idempotencyKey,
+                                signature
+                              });
+                            }
                           }
-                        }
-                      ]}
-                      label={`Actions for ${title}`}
-                      triggerRef={memberActionRef(item.itemId)}
-                    />
+                        ]}
+                        label={t('playlist.actions.for', { name: title })}
+                        triggerRef={memberActionRef(item.itemId)}
+                      />
+                    </Suspense>
                   </span>
                 </li>
               );
@@ -486,7 +487,7 @@ export const PlaylistDetailPage = () => {
       </section>
 
       {visibleDialog === 'rename' && (
-        <Suspense fallback={<PlaylistDialogLoading onClose={() => setDialog(null)} returnFocusRef={renameTriggerRef} />}>
+        <Suspense fallback={null}>
           <PlaylistNameDialog
             key={viewerId}
             mode="rename"
@@ -499,7 +500,7 @@ export const PlaylistDetailPage = () => {
         </Suspense>
       )}
       {visibleDialog === 'add' && (
-        <Suspense fallback={<PlaylistDialogLoading onClose={() => setDialog(null)} returnFocusRef={addTriggerRef} />}>
+        <Suspense fallback={null}>
           <AddSoundtracksDialog
             key={viewerId}
             onClose={() => setDialog(null)}
@@ -510,7 +511,7 @@ export const PlaylistDetailPage = () => {
         </Suspense>
       )}
       {visibleDialog === 'delete' && (
-        <Suspense fallback={<PlaylistDialogLoading onClose={() => setDialog(null)} returnFocusRef={moreTriggerRef} />}>
+        <Suspense fallback={null}>
           <PlaylistDeleteDialog
             key={viewerId}
             onClose={() => setDialog(null)}

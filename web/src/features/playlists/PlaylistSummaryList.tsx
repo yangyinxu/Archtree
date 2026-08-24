@@ -4,6 +4,7 @@ import type { PlaylistSummary } from '../../api/playlists';
 import { Artwork } from '../../components/Artwork';
 import { PlaylistSummaryActions } from './PlaylistControls';
 import styles from './Playlists.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
 
 /** Shares owner summary rows while allowing the sidebar to use a compact presentation. */
 export const PlaylistSummaryList = ({
@@ -14,12 +15,17 @@ export const PlaylistSummaryList = ({
   playlists: PlaylistSummary[];
   viewerId: string;
   compact?: boolean;
-}) => (
-  <ul className={compact ? styles.sidebarList : styles.summaryList} aria-label="Your Playlists">
+}) => {
+  const { t } = useLocalization();
+  return (
+  <ul className={compact ? styles.sidebarList : styles.summaryList} aria-label={t('playlist.sidebar.heading')}>
     {playlists.map((playlist) => (
       <li className={compact ? styles.sidebarListItem : styles.summaryListItem} key={playlist.id}>
         <NavLink
-          aria-label={`${playlist.name}, ${playlist.itemCount} MediaTrack${playlist.itemCount === 1 ? '' : 's'}`}
+          aria-label={t('playlist.summary.label', {
+            name: playlist.name,
+            count: playlist.itemCount
+          })}
           className={({ isActive }) => `${compact ? styles.sidebarPlaylistLink : styles.summaryLink} ${isActive ? styles.activePlaylist : ''}`}
           title={playlist.name}
           to={`/playlists/${encodeURIComponent(playlist.id)}`}
@@ -34,7 +40,7 @@ export const PlaylistSummaryList = ({
           <span className={styles.summaryCopy}>
             <span className={styles.summaryName}>{playlist.name}</span>
             <span className={styles.summaryMetadata}>
-              Playlist · {playlist.itemCount} MediaTrack{playlist.itemCount === 1 ? '' : 's'}
+              {t('common.label.playlist')} · {t('playlist.item_count', { count: playlist.itemCount })}
             </span>
           </span>
         </NavLink>
@@ -42,4 +48,5 @@ export const PlaylistSummaryList = ({
       </li>
     ))}
   </ul>
-);
+  );
+};

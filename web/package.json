@@ -4,10 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build && node scripts/check-initial-js-budget.mjs && node scripts/check-static-asset-budget.mjs",
+    "dev": "npm run localization:check && vite",
+    "build": "npm run localization:check && tsc -p tsconfig.json && vite build && node scripts/check-initial-js-budget.mjs && node scripts/check-static-asset-budget.mjs",
+    "localization:check": "node ../scripts/build-localizations.mjs --check",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "npm run localization:check && vitest run",
     "test:e2e": "playwright test",
     "test:e2e:chromium": "playwright test --project=chromium",
     "test:watch": "vitest",
@@ -16,6 +17,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.85.5",
+    "intl-messageformat": "^11.2.14",
     "lucide-react": "^0.468.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",

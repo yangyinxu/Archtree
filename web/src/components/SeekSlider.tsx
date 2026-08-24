@@ -7,6 +7,7 @@ import {
 } from 'react';
 
 import styles from './SeekSlider.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(Math.max(value, minimum), maximum);
@@ -31,6 +32,7 @@ interface SeekSliderProps {
 
 /** Previews pointer seeking locally and commits only the listener's final position. */
 export const SeekSlider = ({ currentTime, duration, itemKey, onSeek }: SeekSliderProps) => {
+  const { t } = useLocalization();
   const [previewTime, setPreviewTime] = useState<number | null>(null);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const isScrubbing = useRef(false);
@@ -107,7 +109,7 @@ export const SeekSlider = ({ currentTime, duration, itemKey, onSeek }: SeekSlide
   return (
     <span className={styles.seek} style={seekStyle}>
       <input
-        aria-label="Playback position"
+        aria-label={t('seek.position_label')}
         aria-valuetext={formatPlaybackTime(visibleTime)}
         className={styles.input}
         data-scrubbing={isScrubbing.current || undefined}

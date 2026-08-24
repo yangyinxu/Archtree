@@ -12,12 +12,14 @@ import { Icon } from './Icon';
 import { SharedVideoSurface } from './SharedVideoSurface';
 import { SeekSlider, formatPlaybackTime } from './SeekSlider';
 import {
+  localizedPlayerError,
   playerStore,
   usePlayer,
   type PlayerSnapshot,
   type PlayerStore
 } from '../player';
 import styles from './PlayerBar.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 const MOBILE_PLAYER_QUERY = '(max-width: 767px)';
 const VERTICAL_GESTURE_THRESHOLD = 48;
@@ -107,57 +109,51 @@ interface TransportControlsProps {
   surface?: 'compact' | 'expanded';
 }
 
-const repeatControlLabel = (repeatMode: PlayerSnapshot['repeatMode']) => {
-  switch (repeatMode) {
-    case 'all':
-      return 'Repeat all enabled. Turn on repeat one';
-    case 'one':
-      return 'Repeat one enabled. Turn repeat off';
-    default:
-      return 'Repeat off. Turn on repeat all';
-  }
-};
-
 /** Keeps visible transport actions synchronized across compact and expanded surfaces. */
 const TransportControls = ({
   player,
   store,
   surface = 'compact'
 }: TransportControlsProps) => {
+  const { t } = useLocalization();
   const current = player.currentItem;
   const playbackActive = player.status === 'playing' || player.status === 'loading';
   const playLabel = player.status === 'error'
-    ? 'Retry playback'
-    : playbackActive ? 'Pause' : 'Play';
+    ? t('player.action.retry')
+    : playbackActive ? t('player.action.pause') : t('common.action.play');
   const expanded = surface === 'expanded';
-  const repeatLabel = repeatControlLabel(player.repeatMode);
+  const repeatLabel = player.repeatMode === 'all'
+    ? t('player.repeat.all')
+    : player.repeatMode === 'one'
+      ? t('player.repeat.one')
+      : t('player.repeat.off');
 
   return (
     <div
       className={expanded ? styles.expandedTransport : styles.transportButtons}
       role="group"
-      aria-label={expanded ? 'Expanded playback controls' : 'Playback controls'}
+      aria-label={expanded ? t('player.controls.expanded_label') : t('player.controls.label')}
     >
       <button
-        aria-label={player.shuffleEnabled ? 'Shuffle enabled. Turn shuffle off' : 'Shuffle off. Turn shuffle on'}
+        aria-label={player.shuffleEnabled ? t('player.shuffle.disable') : t('player.shuffle.enable')}
         aria-pressed={player.shuffleEnabled}
         className={`${styles.secondaryControl} ${styles.modeControl}`}
         data-active={player.shuffleEnabled || undefined}
         data-player-control
         disabled={!current || (player.queue.length < 2 && !player.shuffleEnabled)}
         onClick={() => store.toggleShuffle()}
-        title={player.shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}
+        title={player.shuffleEnabled ? t('player.shuffle.on') : t('player.shuffle.off')}
         type="button"
       >
         <Icon name="shuffle" />
       </button>
       <button
-        aria-label="Previous MediaTrack"
+        aria-label={t('player.action.previous_track')}
         className={styles.secondaryControl}
         data-player-control
         disabled={!player.canPrevious}
         onClick={() => { void store.previous(); }}
-        title="Previous"
+        title={t('player.action.previous')}
         type="button"
       >
         <Icon name="previous" />
@@ -176,12 +172,12 @@ const TransportControls = ({
         <Icon name={playbackActive ? 'pause' : 'play'} />
       </button>
       <button
-        aria-label="Next MediaTrack"
+        aria-label={t('player.action.next_track')}
         className={styles.secondaryControl}
         data-player-control
         disabled={!player.canNext}
         onClick={() => { void store.next(); }}
-        title="Next"
+        title={t('player.action.next')}
         type="button"
       >
         <Icon name="next" />
@@ -210,6 +206,7 @@ export const PlayerBar = ({
   store = playerStore
 }: PlayerBarProps) => {
   const player = usePlayer(store);
+  const { t } = useLocalization();
   const current = player.currentItem;
   const playing = player.status === 'playing';
   const playbackActive = playing || player.status === 'loading';
@@ -420,11 +417,13 @@ export const PlayerBar = ({
         />
       )}
       <span className={styles.copy}>
-        <span className={styles.title}>{current?.title || 'Nothing playing'}</span>
+        <span className={styles.title}>{current?.title || t('player.identity.nothing')}</span>
         <span className={styles.meta}>
-          {current?.displayByline || current?.artistNames.join(', ') || (current ? 'Finitude MediaTrack' : 'Choose something that fits the moment')}
+          {current?.displayByline || current?.artistNames.join(', ') || (current
+            ? t('now_playing.fallback_byline')
+            : t('player.identity.choose'))}
         </span>
-        {player.error && <span className={styles.error} role="alert">{player.error.message}</span>}
+        {player.error && <span className={styles.error} role="alert">{localizedPlayerError(player.error.code, t)}</span>}
       </span>
     </>
   );
@@ -434,7 +433,7 @@ export const PlayerBar = ({
       <section
         aria-hidden={helpOpen || (mobile && expanded) || undefined}
         className={styles.player}
-        aria-label="Now playing"
+        aria-label={t('player.region.label')}
         inert={helpOpen || (mobile && expanded) ? true : undefined}
         onPointerCancel={cancelCompactGesture}
         onPointerDown={startCompactGesture}
@@ -445,7 +444,9 @@ export const PlayerBar = ({
           <button
             aria-expanded={expanded}
             aria-haspopup="dialog"
-            aria-label={current ? `Open Now Playing: ${current.title}` : 'Nothing playing'}
+            aria-label={current
+              ? t('player.action.open_now_playing', { title: current.title })
+              : t('player.identity.nothing')}
             className={`${styles.identity} ${styles.mobileIdentityButton}`}
             disabled={!current}
             onClick={() => {
@@ -480,10 +481,10 @@ export const PlayerBar = ({
 
         <div className={styles.volume}>
           <button
-            aria-label="Keyboard shortcuts"
+            aria-label={t('player.help.label')}
             className={styles.helpButton}
             onClick={openHelp}
-            title="Keyboard shortcuts (?)"
+            title={t('player.help.title')}
             type="button"
           >
             <span aria-hidden="true">?</span>
@@ -492,18 +493,22 @@ export const PlayerBar = ({
             <button
               aria-controls="now-playing-aside"
               aria-expanded={nowPlayingOpen}
-              aria-label={nowPlayingOpen ? 'Hide Now Playing view' : 'Show Now Playing view'}
+              aria-label={nowPlayingOpen
+                ? t('player.action.hide_now_playing')
+                : t('player.action.show_now_playing')}
               className={`${styles.secondaryControl} ${styles.nowPlayingToggle}`}
               data-active={nowPlayingOpen || undefined}
               onClick={onToggleNowPlaying}
-              title={nowPlayingOpen ? 'Hide Now Playing view' : 'Show Now Playing view'}
+              title={nowPlayingOpen
+                ? t('player.action.hide_now_playing')
+                : t('player.action.show_now_playing')}
               type="button"
             >
               <Icon name="panel-right" />
             </button>
           )}
           <button
-            aria-label={player.muted ? 'Unmute' : 'Mute'}
+            aria-label={player.muted ? t('player.action.unmute') : t('player.action.mute')}
             className={styles.volumeButton}
             disabled={!current}
             onClick={() => store.toggleMute()}
@@ -512,7 +517,7 @@ export const PlayerBar = ({
             <Icon name={player.muted ? 'volume-off' : 'volume'} />
           </button>
           <input
-            aria-label="Volume"
+            aria-label={t('player.volume.label')}
             className={styles.volumeSlider}
             disabled={!current}
             max="1"
@@ -546,7 +551,7 @@ export const PlayerBar = ({
         >
           <div className={styles.expandedHeader}>
             <button
-              aria-label="Close expanded player"
+              aria-label={t('player.action.close_expanded')}
               className={styles.expandedHeaderButton}
               onClick={() => closeExpanded()}
               ref={expandedCloseButton}
@@ -555,14 +560,14 @@ export const PlayerBar = ({
               <Icon className={styles.collapseIcon} name="arrow-left" />
             </button>
             <div>
-              <p className={styles.expandedEyebrow}>Now Playing</p>
+              <p className={styles.expandedEyebrow}>{t('now_playing.eyebrow')}</p>
               <h2 id="expanded-player-heading">{current.title}</h2>
             </div>
             <button
-              aria-label="Keyboard shortcuts"
+              aria-label={t('player.help.label')}
               className={styles.expandedHeaderButton}
               onClick={openHelp}
-              title="Keyboard shortcuts (?)"
+              title={t('player.help.title')}
               type="button"
             >
               <span aria-hidden="true">?</span>
@@ -578,7 +583,7 @@ export const PlayerBar = ({
               />
             ) : (
               <Artwork
-                alt={`${current.title} cover`}
+                alt={t('content.album.cover_alt', { title: current.title })}
                 className={styles.expandedArtwork}
                 kind="audioTrack"
                 loading="eager"
@@ -590,7 +595,7 @@ export const PlayerBar = ({
             <div className={styles.expandedIdentity}>
               <p className={styles.expandedTitle}>{current.title}</p>
               <p className={styles.expandedArtist}>
-                {current.displayByline || current.artistNames.join(', ') || 'Finitude MediaTrack'}
+                {current.displayByline || current.artistNames.join(', ') || t('now_playing.fallback_byline')}
               </p>
             </div>
 
@@ -611,14 +616,14 @@ export const PlayerBar = ({
 
             <div className={styles.expandedVolume}>
               <button
-                aria-label={player.muted ? 'Unmute' : 'Mute'}
+                aria-label={player.muted ? t('player.action.unmute') : t('player.action.mute')}
                 onClick={() => store.toggleMute()}
                 type="button"
               >
                 <Icon name={player.muted ? 'volume-off' : 'volume'} />
               </button>
               <input
-                aria-label="Volume"
+                aria-label={t('player.volume.label')}
                 className={styles.volumeSlider}
                 max="1"
                 min="0"
@@ -629,7 +634,7 @@ export const PlayerBar = ({
               />
             </div>
 
-            {player.error && <p className={styles.expandedError} role="alert">{player.error.message}</p>}
+            {player.error && <p className={styles.expandedError} role="alert">{localizedPlayerError(player.error.code, t)}</p>}
           </div>
         </section>
       )}
@@ -647,19 +652,19 @@ export const PlayerBar = ({
           >
             <div className={styles.helpHeader}>
               <div>
-                <p className={styles.expandedEyebrow}>Player help</p>
-                <h2 id="player-shortcuts-heading">Keyboard shortcuts</h2>
+                <p className={styles.expandedEyebrow}>{t('player.help.eyebrow')}</p>
+                <h2 id="player-shortcuts-heading">{t('player.help.label')}</h2>
               </div>
-              <button aria-label="Close keyboard shortcuts" onClick={closeHelp} ref={helpCloseButton} type="button">
-                <span className={styles.helpCloseLabel}>Close</span>
+              <button aria-label={t('player.help.close')} onClick={closeHelp} ref={helpCloseButton} type="button">
+                <span className={styles.helpCloseLabel}>{t('common.action.close')}</span>
               </button>
             </div>
-            <p className={styles.helpIntro}>Shortcuts work anywhere except while typing in a field.</p>
+            <p className={styles.helpIntro}>{t('player.help.intro')}</p>
             <dl className={styles.shortcutList}>
-              <div><dt><kbd>Space</kbd></dt><dd>Play or pause</dd></div>
-              <div><dt><kbd>←</kbd></dt><dd>Back 10 seconds</dd></div>
-              <div><dt><kbd>→</kbd></dt><dd>Forward 10 seconds</dd></div>
-              <div><dt><kbd>Esc</kbd></dt><dd>Close an open player panel</dd></div>
+              <div><dt><kbd>Space</kbd></dt><dd>{t('player.help.play_pause')}</dd></div>
+              <div><dt><kbd>←</kbd></dt><dd>{t('player.help.back')}</dd></div>
+              <div><dt><kbd>→</kbd></dt><dd>{t('player.help.forward')}</dd></div>
+              <div><dt><kbd>Esc</kbd></dt><dd>{t('player.help.escape')}</dd></div>
             </dl>
           </section>
         </div>

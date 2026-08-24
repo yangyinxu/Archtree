@@ -11,6 +11,7 @@ import {
   loginBrowserSession
 } from '../../api/session';
 import { Icon } from '../../components/Icon';
+import { useLocalization } from '../../localization/LocalizationProvider';
 import styles from './AccountSurfaces.module.css';
 import { AuthFormFeedback, noticeFromRouteState } from './AuthFormSupport';
 
@@ -33,6 +34,7 @@ const safeDestination = (state: unknown, query: string) => {
 
 /** Submits credentials only to the same-origin cookie session contract. */
 export const LoginPage = () => {
+  const { t } = useLocalization();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -75,9 +77,9 @@ export const LoginPage = () => {
         <section className={styles.panel}>
           <div>
             <span className={styles.panelIcon}><Icon name="account" /></span>
-            <h1 className={styles.panelTitle}>You are already listening as {session.data.user.displayName || session.data.user.email}</h1>
+            <h1 className={styles.panelTitle}>{t('auth.login.already_listening', { name: session.data.user.displayName || session.data.user.email })}</h1>
             <div className={styles.actions}>
-              <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => navigate('/')}>Return Home</button>
+              <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => navigate('/')}>{t('account.common.return_home')}</button>
             </div>
           </div>
         </section>
@@ -85,11 +87,7 @@ export const LoginPage = () => {
     );
   }
 
-  const errorMessage = login.error instanceof ApiError
-    ? login.error.message
-    : login.isError
-      ? 'Finitude could not log you in. Please try again.'
-      : '';
+  const errorMessage = login.isError ? t('auth.login.error') : '';
   const verificationRequired = login.error instanceof ApiError && login.error.status === 403;
   const routeNotice = noticeFromRouteState(location.state);
 
@@ -97,9 +95,9 @@ export const LoginPage = () => {
     <div className={styles.page}>
       <div className={styles.authLayout}>
         <div>
-          <p className={styles.eyebrow}>Welcome back</p>
-          <h1 className={styles.pageTitle}>Pick up where the music left you.</h1>
-          <p className={styles.lede}>Log in to see your saved Library and personalized listening.</p>
+          <p className={styles.eyebrow}>{t('auth.login.eyebrow')}</p>
+          <h1 className={styles.pageTitle}>{t('auth.login.title')}</h1>
+          <p className={styles.lede}>{t('auth.login.lede')}</p>
         </div>
 
         <form
@@ -114,7 +112,7 @@ export const LoginPage = () => {
             });
           }}
         >
-          <h2 className={styles.formTitle}>Log in with password</h2>
+          <h2 className={styles.formTitle}>{t('auth.login.form_title')}</h2>
           <AuthFormFeedback error={errorMessage} status={login.isError ? '' : routeNotice} focusKey={login.submittedAt} />
           {verificationRequired && (
             <p className={styles.assistiveAction}>
@@ -127,28 +125,28 @@ export const LoginPage = () => {
                 }}
                 to="/verify-email"
               >
-                Verify your email or request a new code
+                {t('auth.login.verify_prompt')}
               </Link>
             </p>
           )}
           <div className={styles.field}>
-            <label htmlFor="login-identifier">Email or username</label>
+            <label htmlFor="login-identifier">{t('account.field.email_or_username')}</label>
             <input autoComplete="username" id="login-identifier" maxLength={254} name="identifier" required type="text" />
           </div>
           <div className={styles.field}>
-            <label htmlFor="login-password">Password</label>
+            <label htmlFor="login-password">{t('account.field.password')}</label>
             <input autoComplete="current-password" id="login-password" name="password" required type="password" />
           </div>
           <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={login.isPending} type="submit">
-            {login.isPending ? 'Logging in…' : 'Log in'}
+            {login.isPending ? t('auth.login.logging_in') : t('common.action.log_in')}
           </button>
           <div className={styles.authLinkRow}>
-            <Link className={styles.inlineLink} to="/forgot-password">Forgot password?</Link>
+            <Link className={styles.inlineLink} to="/forgot-password">{t('auth.login.forgot_password')}</Link>
             {capabilities.data?.emailRegistration && (
-              <Link className={styles.inlineLink} to="/register">Create account</Link>
+              <Link className={styles.inlineLink} to="/register">{t('auth.login.create_account')}</Link>
             )}
           </div>
-          <p className={styles.privacy}>Your credentials establish private HttpOnly cookies. Finitude never exposes session tokens to this page.</p>
+          <p className={styles.privacy}>{t('auth.login.privacy')}</p>
         </form>
       </div>
     </div>

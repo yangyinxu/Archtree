@@ -21,6 +21,8 @@ import {
 } from '../../api/accountEpoch';
 import { ApiError } from '../../api/client';
 import { browserSessionQueryKey } from '../../api/session';
+import { useLocalization } from '../../localization/LocalizationProvider';
+import type { MessageKey } from '../../localization/contract';
 import { clearSearchHistory } from '../search/searchHistory';
 import styles from './AccountLifecyclePanel.module.css';
 
@@ -32,34 +34,34 @@ interface AccountLifecyclePanelProps {
 }
 
 interface ConfirmationCopy {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  pendingLabel: string;
-  fallbackError: string;
+  title: MessageKey;
+  description: MessageKey;
+  confirmLabel: MessageKey;
+  pendingLabel: MessageKey;
+  fallbackError: MessageKey;
 }
 
 const confirmationCopy: Record<LifecycleAction, ConfirmationCopy> = {
   clearHistory: {
-    title: 'Clear listening history?',
-    description: 'This removes your Recently Played activity. Your saved albums and MediaTracks stay in Library.',
-    confirmLabel: 'Clear history',
-    pendingLabel: 'Clearing…',
-    fallbackError: 'Finitude could not clear your listening history. Please try again.'
+    title: 'account.lifecycle.clear.title',
+    description: 'account.lifecycle.clear.description',
+    confirmLabel: 'account.lifecycle.clear.confirm',
+    pendingLabel: 'account.lifecycle.clear.pending',
+    fallbackError: 'account.lifecycle.clear.error'
   },
   signOutEverywhere: {
-    title: 'Sign out everywhere?',
-    description: 'Every Finitude session, including this browser, will be signed out. Public audio that is already playing will keep playing.',
-    confirmLabel: 'Sign out everywhere',
-    pendingLabel: 'Signing out…',
-    fallbackError: 'Finitude could not sign out every device. Please try again.'
+    title: 'account.lifecycle.signout.title',
+    description: 'account.lifecycle.signout.description',
+    confirmLabel: 'account.lifecycle.signout.confirm',
+    pendingLabel: 'account.lifecycle.signout.pending',
+    fallbackError: 'account.lifecycle.signout.error'
   },
   deleteAccount: {
-    title: 'Permanently delete your account?',
-    description: 'This permanently removes your Library, listening activity, sign-in methods, and sessions. This action cannot be undone.',
-    confirmLabel: 'Delete account permanently',
-    pendingLabel: 'Deleting…',
-    fallbackError: 'Finitude could not delete your account. Please try again.'
+    title: 'account.lifecycle.delete.title',
+    description: 'account.lifecycle.delete.description',
+    confirmLabel: 'account.lifecycle.delete.confirm',
+    pendingLabel: 'account.lifecycle.delete.pending',
+    fallbackError: 'account.lifecycle.delete.error'
   }
 };
 
@@ -105,15 +107,16 @@ const ConfirmationDialog = ({
   onCancel,
   onConfirm
 }: ConfirmationDialogProps) => {
+  const { t } = useLocalization();
   const cancelButton = useRef<HTMLButtonElement>(null);
   const copy = confirmationCopy[action];
   const avatarBlocked = action === 'deleteAccount' && isAvatarDeletionRequired(error);
   const errorMessage = avatarBlocked
-    ? 'Remove your profile photo first, then return here to delete your account.'
-    : error instanceof ApiError
-      ? error.message
+    ? t('account.lifecycle.avatar_blocked')
+    : action === 'deleteAccount' && error instanceof ApiError && error.status === 409
+      ? t('account.lifecycle.delete.creator_blocked')
       : error
-        ? copy.fallbackError
+        ? t(copy.fallbackError)
         : null;
 
   useEffect(() => {
@@ -138,9 +141,9 @@ const ConfirmationDialog = ({
         role="dialog"
         tabIndex={-1}
       >
-        <p className={styles.dialogEyebrow}>Please confirm</p>
-        <h3 className={styles.dialogTitle} id="account-lifecycle-confirmation-title">{copy.title}</h3>
-        <p className={styles.dialogCopy} id="account-lifecycle-confirmation-description">{copy.description}</p>
+        <p className={styles.dialogEyebrow}>{t('account.lifecycle.confirm_eyebrow')}</p>
+        <h3 className={styles.dialogTitle} id="account-lifecycle-confirmation-title">{t(copy.title)}</h3>
+        <p className={styles.dialogCopy} id="account-lifecycle-confirmation-description">{t(copy.description)}</p>
         {errorMessage && <p className={styles.error} role="alert">{errorMessage}</p>}
         <div className={styles.dialogActions}>
           <button
@@ -150,16 +153,16 @@ const ConfirmationDialog = ({
             ref={cancelButton}
             type="button"
           >
-            Cancel
+            {t('account.lifecycle.cancel')}
           </button>
           <button
-            aria-label={action === 'signOutEverywhere' ? 'Confirm sign out everywhere' : undefined}
+            aria-label={action === 'signOutEverywhere' ? t('account.lifecycle.signout_aria') : undefined}
             className={styles.confirmButton}
             disabled={pending}
             onClick={onConfirm}
             type="button"
           >
-            {pending ? copy.pendingLabel : copy.confirmLabel}
+            {pending ? t(copy.pendingLabel) : t(copy.confirmLabel)}
           </button>
         </div>
       </section>
@@ -169,6 +172,7 @@ const ConfirmationDialog = ({
 
 /** Presents recoverable account lifecycle controls without owning or stopping playback. */
 export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) => {
+  const { t } = useLocalization();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [confirmation, setConfirmation] = useState<LifecycleAction | null>(null);
@@ -208,7 +212,7 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
     onSuccess: (_result, actedViewerId, guard) => {
       if (actedViewerId !== activeViewer.current || !isAccountOperationCurrent(guard)) return;
       closeConfirmation();
-      setNotice('Listening history cleared. Your saved Library was not changed.');
+      setNotice(t('account.lifecycle.clear.success'));
       void queryClient.invalidateQueries({ queryKey: ['listener', 'home', actedViewerId] });
       void queryClient.invalidateQueries({ queryKey: ['listener', 'library', actedViewerId] });
     }
@@ -218,7 +222,7 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
     onSuccess: (guard, actedViewerId) => finishSessionExit(
       actedViewerId,
       guard,
-      'You have been signed out everywhere.'
+      t('account.lifecycle.signout.success')
     )
   });
   const deleteAccount = useMutation({
@@ -226,7 +230,7 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
     onSuccess: (guard, actedViewerId) => finishSessionExit(
       actedViewerId,
       guard,
-      'Your account has been deleted.'
+      t('account.lifecycle.delete.success')
     )
   });
 
@@ -267,8 +271,8 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
   return (
     <section aria-labelledby="account-lifecycle-heading" className={styles.panel}>
       <div className={styles.headingBlock}>
-        <p className={styles.eyebrow}>Privacy and account</p>
-        <h2 className={styles.heading} id="account-lifecycle-heading">Your Finitude data</h2>
+        <p className={styles.eyebrow}>{t('account.lifecycle.eyebrow')}</p>
+        <h2 className={styles.heading} id="account-lifecycle-heading">{t('account.lifecycle.heading')}</h2>
       </div>
 
       {visibleNotice && <p className={styles.status} role="status">{visibleNotice}</p>}
@@ -276,31 +280,31 @@ export const AccountLifecyclePanel = ({ viewerId }: AccountLifecyclePanelProps) 
       <div className={styles.actionList}>
         <div className={styles.actionRow}>
           <div>
-            <h3>Listening history</h3>
-            <p>Remove Recently Played activity without removing anything from your saved Library.</p>
+            <h3>{t('account.lifecycle.history.title')}</h3>
+            <p>{t('account.lifecycle.history.copy')}</p>
           </div>
           <button className={styles.secondaryButton} onClick={(event) => openConfirmation('clearHistory', event)} type="button">
-            Clear listening history
+            {t('account.lifecycle.history.action')}
           </button>
         </div>
 
         <div className={styles.actionRow}>
           <div>
-            <h3>All signed-in devices</h3>
-            <p>End every active session and clear this browser's private account data.</p>
+            <h3>{t('account.lifecycle.devices.title')}</h3>
+            <p>{t('account.lifecycle.devices.copy')}</p>
           </div>
           <button className={styles.secondaryButton} onClick={(event) => openConfirmation('signOutEverywhere', event)} type="button">
-            Sign out everywhere
+            {t('account.lifecycle.signout.confirm')}
           </button>
         </div>
 
         <div className={`${styles.actionRow} ${styles.dangerRow}`}>
           <div>
-            <h3>Delete account</h3>
-            <p>Permanently remove your listener account and its saved and authentication data.</p>
+            <h3>{t('account.lifecycle.delete_row.title')}</h3>
+            <p>{t('account.lifecycle.delete_row.copy')}</p>
           </div>
           <button className={styles.dangerButton} onClick={(event) => openConfirmation('deleteAccount', event)} type="button">
-            Delete account
+            {t('account.lifecycle.delete_row.action')}
           </button>
         </div>
       </div>

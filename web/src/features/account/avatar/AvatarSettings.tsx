@@ -12,6 +12,10 @@ import { getBrowserSession } from '../../../api/session';
 import { browserSessionQueryKey } from '../../../api/session';
 import type { BrowserSession, BrowserSessionUser } from '../../../api/schemas';
 import { Avatar } from '../../../components/Avatar';
+import {
+  useLocalization,
+  type LocalizationContextValue
+} from '../../../localization/LocalizationProvider';
 import { AvatarCropDialog } from './AvatarCropDialog';
 import { useModalFocus } from './useModalFocus';
 import styles from './AvatarSettings.module.css';
@@ -38,29 +42,33 @@ interface UploadInput extends MutationInput {
   jpeg: Blob;
 }
 
-const failureMessage = (error: unknown, operation: 'upload' | 'delete') => {
+const failureMessage = (
+  error: unknown,
+  operation: 'upload' | 'delete',
+  t: LocalizationContextValue['t']
+) => {
   const preserved = operation === 'upload'
-    ? 'Your current photo has not changed. Select a photo again to restart.'
-    : 'Your current photo remains in place.';
+    ? t('avatar.preserved.upload')
+    : t('avatar.preserved.delete');
   if (!(error instanceof ApiError)) {
-    return `Finitude could not confirm the profile photo change. ${preserved}`;
+    return t('avatar.error.unconfirmed', { preserved });
   }
   if (error.status === 409) {
-    return `The photo changed elsewhere, so Finitude reloaded the latest profile. ${preserved}`;
+    return t('avatar.error.conflict', { preserved });
   }
   if (error.status === 413) {
-    return `The selected photo exceeds the 5 MB upload limit. ${preserved}`;
+    return t('avatar.error.too_large', { preserved });
   }
   if (error.status === 400) {
-    return `The selected photo was rejected. Choose a different JPG, PNG, or WebP photo. ${preserved}`;
+    return t('avatar.error.rejected', { preserved });
   }
   if (error.status === 401 || error.status === 403) {
-    return `Your session expired before the change was confirmed. ${preserved}`;
+    return t('avatar.error.session', { preserved });
   }
   if (error.status === 429) {
-    return `Too many photo requests were sent. Wait a moment before starting again. ${preserved}`;
+    return t('avatar.error.rate', { preserved });
   }
-  return `Archtree could not confirm the profile photo change. ${preserved}`;
+  return t('avatar.error.server', { preserved });
 };
 
 /** Updates only the still-active viewer's authoritative session projection. */
@@ -94,6 +102,7 @@ const AvatarDeleteDialog = ({
   returnFocusRef: RefObject<HTMLButtonElement | null>;
   fallbackFocusRef: RefObject<HTMLButtonElement | null>;
 }) => {
+  const { t } = useLocalization();
   const dialogRef = useRef<HTMLElement>(null);
   const keepButtonRef = useRef<HTMLButtonElement>(null);
   useModalFocus(dialogRef, keepButtonRef, returnFocusRef, fallbackFocusRef);
@@ -116,13 +125,13 @@ const AvatarDeleteDialog = ({
         role="dialog"
         tabIndex={-1}
       >
-        <p className={styles.kicker}>Profile photo</p>
-        <h2 id="remove-avatar-title">Remove your photo?</h2>
-        <p className={styles.instructions}>Your initials will be shown instead. The photo is cleared only after Archtree confirms deletion.</p>
+        <p className={styles.kicker}>{t('avatar.delete.kicker')}</p>
+        <h2 id="remove-avatar-title">{t('avatar.delete.title')}</h2>
+        <p className={styles.instructions}>{t('avatar.delete.description')}</p>
         <div className={styles.dialogActions}>
-          <button className={styles.secondaryButton} disabled={isDeleting} onClick={onCancel} ref={keepButtonRef} type="button">Keep photo</button>
+          <button className={styles.secondaryButton} disabled={isDeleting} onClick={onCancel} ref={keepButtonRef} type="button">{t('avatar.delete.keep')}</button>
           <button className={styles.dangerButton} disabled={isDeleting} onClick={onConfirm} type="button">
-            {isDeleting ? 'Removing…' : 'Remove photo'}
+            {isDeleting ? t('avatar.delete.removing') : t('avatar.delete.remove')}
           </button>
         </div>
       </section>
@@ -132,6 +141,7 @@ const AvatarDeleteDialog = ({
 
 /** Presents the complete select, crop, preview, confirm, and delete avatar lifecycle. */
 export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) => {
+  const { t } = useLocalization();
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const settingsRef = useRef<HTMLElement>(null);
@@ -183,15 +193,15 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
         setFeedback({
           kind: 'success',
           message: result.cleanupPending
-            ? 'Profile photo updated. Archtree will continue cleaning up the previous photo.'
-            : 'Profile photo updated.'
+            ? t('avatar.updated_cleanup')
+            : t('avatar.updated')
         });
       }
     },
     onError: async (error, variables) => {
       await reconcileConflict(error, variables.viewerId);
       if (activeViewerRef.current === variables.viewerId) {
-        setFeedback({ kind: 'error', message: failureMessage(error, 'upload') });
+        setFeedback({ kind: 'error', message: failureMessage(error, 'upload', t) });
       }
     }
   });
@@ -202,14 +212,14 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
       commitResult(variables.viewerId, result);
       if (activeViewerRef.current === variables.viewerId) {
         setIsConfirmingDelete(false);
-        setFeedback({ kind: 'success', message: 'Profile photo removed.' });
+        setFeedback({ kind: 'success', message: t('avatar.removed') });
       }
     },
     onError: async (error, variables) => {
       await reconcileConflict(error, variables.viewerId);
       if (activeViewerRef.current === variables.viewerId) {
         setIsConfirmingDelete(false);
-        setFeedback({ kind: 'error', message: failureMessage(error, 'delete') });
+        setFeedback({ kind: 'error', message: failureMessage(error, 'delete', t) });
       }
     }
   });
@@ -234,11 +244,11 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
     if (!file) return;
     setFeedback(null);
     if (!acceptedAvatarTypes.has(file.type)) {
-      setFeedback({ kind: 'error', message: 'Choose a JPG, PNG, or WebP photo.' });
+      setFeedback({ kind: 'error', message: t('avatar.choose_type') });
       return;
     }
     if (file.size > maximumAvatarBytes) {
-      setFeedback({ kind: 'error', message: 'Choose a photo smaller than 5 MB.' });
+      setFeedback({ kind: 'error', message: t('avatar.choose_size') });
       return;
     }
     discardCandidate();
@@ -261,7 +271,7 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
     <section aria-labelledby="profile-photo-title" className={styles.settings} ref={settingsRef} tabIndex={-1}>
       <button
         aria-busy={upload.isPending}
-        aria-label="Edit profile photo"
+        aria-label={t('avatar.edit_label')}
         className={styles.avatarButton}
         disabled={busy}
         onClick={() => inputRef.current?.click()}
@@ -281,7 +291,7 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
       </button>
       <input
         accept="image/jpeg,image/png,image/webp"
-        aria-label="Choose profile photo"
+        aria-label={t('avatar.choose_label')}
         disabled={busy}
         hidden
         onChange={chooseFile}
@@ -289,19 +299,19 @@ export const AvatarSettings = ({ user, onAvatarChange }: AvatarSettingsProps) =>
         type="file"
       />
       <div className={styles.settingsCopy}>
-        <h2 id="profile-photo-title">Profile photo</h2>
-        <p>Select your avatar to choose a photo. It stays private to your account, and the crop is uploaded only after you confirm the circular preview.</p>
+        <h2 id="profile-photo-title">{t('avatar.heading')}</h2>
+        <p>{t('avatar.description')}</p>
       </div>
       {user.avatar && (
         <div className={styles.settingsActions}>
           <button className={styles.textDangerButton} disabled={busy} onClick={() => setIsConfirmingDelete(true)} ref={removeButtonRef} type="button">
-            Remove photo
+            {t('avatar.delete.remove')}
           </button>
         </div>
       )}
       <div aria-live="polite" className={styles.feedback}>
         {accountStateIsCurrent && upload.isPending ? (
-          <p className={styles.progress} role="status">Uploading photo…</p>
+          <p className={styles.progress} role="status">{t('avatar.uploading')}</p>
         ) : accountStateIsCurrent && feedback && (
           <p className={feedback.kind === 'error' ? styles.error : styles.success} role={feedback.kind === 'error' ? 'alert' : 'status'}>
             {feedback.message}

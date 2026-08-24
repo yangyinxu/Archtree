@@ -1,15 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 
 import type { PlaylistSummary } from '../../api/playlists';
 import { focusMainContent } from '../../app/focusMainContent';
 import { ActionMenu } from '../../components/ActionMenu';
-import {
-  PlaylistDeleteDialog,
-  PlaylistNameDialog
-} from './PlaylistDialogs';
-import { SignedOutPlaylistDialog } from './SignedOutPlaylistDialog';
+import { useLocalization } from '../../localization/LocalizationProvider';
+
+const PlaylistDeleteDialog = lazy(() => import('./PlaylistDialogs').then((module) => ({
+  default: module.PlaylistDeleteDialog
+})));
+const PlaylistNameDialog = lazy(() => import('./PlaylistDialogs').then((module) => ({
+  default: module.PlaylistNameDialog
+})));
+const SignedOutPlaylistDialog = lazy(() => import('./SignedOutPlaylistDialog').then((module) => ({
+  default: module.SignedOutPlaylistDialog
+})));
 
 export interface NewPlaylistButtonProps {
   viewerId?: string;
@@ -27,6 +33,7 @@ export const NewPlaylistButton = ({
   className,
   onCreated
 }: NewPlaylistButtonProps) => {
+  const { t } = useLocalization();
   const navigate = useNavigate();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [dialog, setDialog] = useState<'create' | 'signed-out' | null>(null);
@@ -41,7 +48,7 @@ export const NewPlaylistButton = ({
   return (
     <>
       <button
-        aria-label="New Playlist"
+        aria-label={t('playlist.action.new')}
         className={className}
         disabled={accountPending}
         onClick={() => setDialog(viewerId ? 'create' : 'signed-out')}
@@ -49,31 +56,35 @@ export const NewPlaylistButton = ({
         type="button"
       >
         <Plus aria-hidden="true" focusable="false" />
-        <span>New Playlist</span>
+        <span>{t('playlist.action.new')}</span>
       </button>
       {visibleDialog === 'create' && viewerId && (
-        <PlaylistNameDialog
-          key={viewerId}
-          mode="create"
-          onClose={() => setDialog(null)}
-          onConfirmed={(playlistId) => {
-            setDialog(null);
-            onCreated?.(playlistId);
-            if (!onCreated) {
-              navigate(`/playlists/${encodeURIComponent(playlistId)}`);
-              focusMainContent();
-            }
-          }}
-          returnFocusRef={triggerRef}
-          viewerId={viewerId}
-        />
+        <Suspense fallback={null}>
+          <PlaylistNameDialog
+            key={viewerId}
+            mode="create"
+            onClose={() => setDialog(null)}
+            onConfirmed={(playlistId) => {
+              setDialog(null);
+              onCreated?.(playlistId);
+              if (!onCreated) {
+                navigate(`/playlists/${encodeURIComponent(playlistId)}`);
+                focusMainContent();
+              }
+            }}
+            returnFocusRef={triggerRef}
+            viewerId={viewerId}
+          />
+        </Suspense>
       )}
       {visibleDialog === 'signed-out' && (
-        <SignedOutPlaylistDialog
-          accountUnavailable={accountUnavailable}
-          onClose={() => setDialog(null)}
-          returnFocusRef={triggerRef}
-        />
+        <Suspense fallback={null}>
+          <SignedOutPlaylistDialog
+            accountUnavailable={accountUnavailable}
+            onClose={() => setDialog(null)}
+            returnFocusRef={triggerRef}
+          />
+        </Suspense>
       )}
     </>
   );
@@ -89,6 +100,7 @@ export const PlaylistSummaryActions = ({
   viewerId: string;
   onDeleted?: () => void;
 }) => {
+  const { t } = useLocalization();
   const navigate = useNavigate();
   const location = useLocation();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -105,39 +117,43 @@ export const PlaylistSummaryActions = ({
     <>
       <ActionMenu
         items={[
-          { label: 'Rename', restoreFocus: false, onSelect: () => setDialog('rename') },
-          { label: 'Delete', destructive: true, restoreFocus: false, onSelect: () => setDialog('delete') }
+          { label: t('playlist.action.rename'), restoreFocus: false, onSelect: () => setDialog('rename') },
+          { label: t('playlist.action.delete'), destructive: true, restoreFocus: false, onSelect: () => setDialog('delete') }
         ]}
-        label={`Actions for ${playlist.name}`}
+        label={t('playlist.actions.for', { name: playlist.name })}
         triggerRef={triggerRef}
       />
       {visibleDialog === 'rename' && (
-        <PlaylistNameDialog
-          key={viewerId}
-          mode="rename"
-          onClose={() => setDialog(null)}
-          onConfirmed={() => setDialog(null)}
-          playlist={playlist}
-          returnFocusRef={triggerRef}
-          viewerId={viewerId}
-        />
+        <Suspense fallback={null}>
+          <PlaylistNameDialog
+            key={viewerId}
+            mode="rename"
+            onClose={() => setDialog(null)}
+            onConfirmed={() => setDialog(null)}
+            playlist={playlist}
+            returnFocusRef={triggerRef}
+            viewerId={viewerId}
+          />
+        </Suspense>
       )}
       {visibleDialog === 'delete' && (
-        <PlaylistDeleteDialog
-          key={viewerId}
-          onClose={() => setDialog(null)}
-          onDeleted={() => {
-            setDialog(null);
-            onDeleted?.();
-            if (location.pathname === `/playlists/${encodeURIComponent(playlist.id)}`) {
-              navigate('/playlists', { replace: true });
-            }
-            focusMainContent();
-          }}
-          playlist={playlist}
-          returnFocusRef={triggerRef}
-          viewerId={viewerId}
-        />
+        <Suspense fallback={null}>
+          <PlaylistDeleteDialog
+            key={viewerId}
+            onClose={() => setDialog(null)}
+            onDeleted={() => {
+              setDialog(null);
+              onDeleted?.();
+              if (location.pathname === `/playlists/${encodeURIComponent(playlist.id)}`) {
+                navigate('/playlists', { replace: true });
+              }
+              focusMainContent();
+            }}
+            playlist={playlist}
+            returnFocusRef={triggerRef}
+            viewerId={viewerId}
+          />
+        </Suspense>
       )}
     </>
   );

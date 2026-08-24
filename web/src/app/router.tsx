@@ -4,6 +4,7 @@ import { createBrowserRouter, type RouteObject } from 'react-router';
 import { AppShell } from './AppShell';
 import { NotFoundPage, RouteErrorPage } from './RouteErrorPage';
 import styles from '../styles/Pages.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 const AccountPage = lazy(() => import('../features/account/AccountPage').then(({ AccountPage }) => ({ default: AccountPage })));
 const AccountSessionsPage = lazy(() => import('../features/account/AccountSessionsPage').then(({ AccountSessionsPage }) => ({ default: AccountSessionsPage })));
@@ -24,16 +25,19 @@ const PlaylistIndexPage = lazy(() => import('../features/playlists/PlaylistIndex
 const SearchPage = lazy(() => import('../features/search/SearchPage').then(({ SearchPage }) => ({ default: SearchPage })));
 
 /** Provides an announced route placeholder while a page-specific bundle loads. */
-const RouteLoadingPage = () => (
-  <div className={styles.page}>
-    <section className={styles.panel} role="status">
-      <div>
-        <p className={styles.eyebrow}>Finitude</p>
-        <p className={styles.panelTitle}>Opening your listening room…</p>
-      </div>
-    </section>
-  </div>
-);
+const RouteLoadingPage = () => {
+  const { t } = useLocalization();
+  return (
+    <div className={styles.page}>
+      <section className={styles.panel} role="status">
+        <div>
+          <p className={styles.eyebrow}>Finitude</p>
+          <p className={styles.panelTitle}>{t('route.loading')}</p>
+        </div>
+      </section>
+    </div>
+  );
+};
 
 /** Keeps each page behind the same accessible suspense boundary. */
 const loadRoute = (page: ReactNode) => (

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { playerStore, usePlayer, type PlayerStore } from '../player';
+import { localizedPlayerError, playerStore, usePlayer, type PlayerStore } from '../player';
 import { Icon } from './Icon';
 import { SharedVideoSurface } from './SharedVideoSurface';
 import styles from './VideoTheater.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 interface VideoTheaterProps {
   store?: PlayerStore;
@@ -15,6 +16,7 @@ export const VideoTheater = ({ store = playerStore }: VideoTheaterProps) => {
   const current = player.currentItem;
   const theater = useRef<HTMLElement>(null);
   const [nativeControls, setNativeControls] = useState(false);
+  const { t } = useLocalization();
 
   useEffect(() => {
     const syncFullscreenState = () => {
@@ -66,25 +68,25 @@ export const VideoTheater = ({ store = playerStore }: VideoTheaterProps) => {
         />
         {player.error && (
           <div className={styles.error} role="alert">
-            <strong>Video could not play</strong>
-            <span>{player.error.message}</span>
+            <strong>{t('video.error.title')}</strong>
+            <span>{localizedPlayerError(player.error.code, t)}</span>
           </div>
         )}
       </div>
 
       <footer className={styles.footer}>
         <div className={styles.identity}>
-          <span className={styles.badge}>Video</span>
+          <span className={styles.badge}>{t('common.label.video')}</span>
           <div>
             <h1 id="video-theater-title" title={current.title}>{current.title}</h1>
-            <p>{current.displayByline || current.artistNames.join(', ') || 'Finitude MediaTrack'}</p>
+            <p>{current.displayByline || current.artistNames.join(', ') || t('now_playing.fallback_byline')}</p>
           </div>
         </div>
         <button
-          aria-label="Enter video fullscreen"
+          aria-label={t('video.fullscreen.action')}
           className={styles.fullscreen}
           onClick={() => { void enterFullscreen(); }}
-          title="Fullscreen"
+          title={t('video.fullscreen.title')}
           type="button"
         >
           <Icon name="expand" />

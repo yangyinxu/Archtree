@@ -151,7 +151,7 @@ test('requires explicit avatar removal before account deletion', async () => {
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-test('preserves the safe creator-owned conflict returned by account deletion', async () => {
+test('localizes the creator-owned conflict returned by account deletion', async () => {
   const user = userEvent.setup();
   const message = 'Creator-owned content must be transferred or deleted before this account can be removed.';
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ message }, 409)));
@@ -160,7 +160,9 @@ test('preserves the safe creator-owned conflict returned by account deletion', a
   await user.click(screen.getByRole('button', { name: 'Delete account' }));
   await user.click(screen.getByRole('button', { name: 'Delete account permanently' }));
 
-  expect(await screen.findByRole('alert')).toHaveTextContent(message);
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Catalog content still refers to this account. Transfer or delete that content before deleting the account.'
+  );
 });
 
 test('deletes the account before clearing cookies and local account state', async () => {

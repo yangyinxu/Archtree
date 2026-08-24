@@ -135,7 +135,7 @@ test('signed-out Playlist index keeps Create visible and explains sign-in withou
   expect(screen.getByRole('heading', { name: 'Log in to open your Playlists' })).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'New Playlist' }));
 
-  expect(screen.getByRole('dialog', { name: 'Log in to create a Playlist' })).toBeInTheDocument();
+  expect(await screen.findByRole('dialog', { name: 'Log in to create a Playlist' })).toBeInTheDocument();
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
@@ -202,8 +202,8 @@ test('creates a trimmed Playlist and navigates to its stable detail route', asyn
 
   expect(await screen.findByRole('heading', { name: 'Make room for a new sequence' })).toBeInTheDocument();
   await user.click(screen.getAllByRole('button', { name: 'New Playlist' })[0]);
-  const input = screen.getByRole('textbox', { name: 'Name' });
-  expect(input).toHaveFocus();
+  const input = await screen.findByRole('textbox', { name: 'Name' });
+  await waitFor(() => expect(input).toHaveFocus());
   await user.type(input, '  Road notes  ');
   await user.click(screen.getByRole('button', { name: 'Create Playlist' }));
 
@@ -301,7 +301,7 @@ test('409 reorder rolls back the optimistic order and announces recovery', async
   );
 
   expect(await screen.findByRole('heading', { name: 'Quiet sequence' })).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Actions for Dawn' }));
+  await user.click(await screen.findByRole('button', { name: 'Actions for Dawn' }));
   await user.click(screen.getByRole('menuitem', { name: 'Move Up' }));
 
   expect(await screen.findByRole('alert')).toHaveTextContent('changed on another device');

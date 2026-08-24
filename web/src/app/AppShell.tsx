@@ -18,16 +18,21 @@ import { Icon, type IconName } from '../components/Icon';
 import { SearchQueryProvider, useSearchQuery } from '../features/search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
 import { RouteAnnouncer } from './RouteAnnouncer';
+import { useLocalization } from '../localization/LocalizationProvider';
+import type { MessageKey } from '../localization/contract';
 import { playerStore, usePlayer } from '../player';
 import styles from './AppShell.module.css';
 
-const destinations: Array<{ label: string; path: string; icon: IconName }> = [
-  { label: 'Home', path: '/', icon: 'home' },
-  { label: 'Search', path: '/search', icon: 'search' },
-  { label: 'Library', path: '/library', icon: 'library' }
+const destinations: Array<{ labelKey: MessageKey; path: string; icon: IconName }> = [
+  { labelKey: 'shell.nav.home', path: '/', icon: 'home' },
+  { labelKey: 'shell.nav.search', path: '/search', icon: 'search' },
+  { labelKey: 'shell.nav.library', path: '/library', icon: 'library' }
 ];
 
 const PlaylistSidebar = lazy(() => import('../features/playlists/PlaylistSidebar'));
+const LanguageSelector = lazy(() => import('../localization/LanguageSelector').then((module) => ({
+  default: module.LanguageSelector
+})));
 const ShellPanelResizers = lazy(() => import('./ShellPanelResizers').then((module) => ({
   default: module.ShellPanelResizers
 })));
@@ -47,22 +52,27 @@ const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
 
 const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => {
   const location = useLocation();
+  const { t } = useLocalization();
   return (
-    <nav className={mobile ? styles.mobileNavigation : styles.navigation} aria-label="Primary">
+    <nav
+      className={mobile ? styles.mobileNavigation : styles.navigation}
+      aria-label={t('shell.nav.primary_label')}
+    >
       {destinations.map((destination) => {
+        const label = t(destination.labelKey);
         const libraryOwnsRoute = destination.path === '/library'
           && (location.pathname === '/playlists' || location.pathname.startsWith('/playlists/'));
         return (
           <NavLink
             aria-current={libraryOwnsRoute ? 'page' : undefined}
-            aria-label={destination.label}
+            aria-label={label}
             className={({ isActive }) => `${styles.navigationLink} ${isActive || libraryOwnsRoute ? styles.active : ''}`}
             end={destination.path === '/'}
             key={destination.path}
             to={destination.path}
           >
             <Icon name={destination.icon} />
-            <span>{destination.label}</span>
+            <span>{label}</span>
           </NavLink>
         );
       })}
@@ -81,6 +91,7 @@ const TopSearch = () => {
     startComposition,
     updateDraft
   } = useSearchQuery();
+  const { t } = useLocalization();
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -103,16 +114,16 @@ const TopSearch = () => {
   };
 
   return (
-    <form className={styles.search} role="search" aria-label="Global search" onSubmit={submit}>
+    <form className={styles.search} role="search" aria-label={t('shell.search.global_label')} onSubmit={submit}>
       <button
         className={styles.searchSubmit}
         onClick={expandCompactSearch}
         type="submit"
-        aria-label="Submit search"
+        aria-label={t('shell.search.submit_label')}
       >
         <Icon name="search" />
       </button>
-      <label className="visually-hidden" htmlFor="shell-search">Search artists, organizations, albums, and MediaTracks</label>
+      <label className="visually-hidden" htmlFor="shell-search">{t('shell.search.field_label')}</label>
       <input
         enterKeyHint="search"
         id="shell-search"
@@ -121,7 +132,7 @@ const TopSearch = () => {
         onCompositionEnd={(event) => finishComposition(event.currentTarget.value)}
         onCompositionStart={startComposition}
         onKeyDown={preventCompositionSubmit}
-        placeholder="Search music"
+        placeholder={t('shell.search.placeholder')}
         ref={input}
         type="search"
         value={draftQuery}
@@ -133,7 +144,10 @@ const TopSearch = () => {
 const AccountEntry = () => {
   const session = useQuery(browserSessionQuery());
   const user = session.data?.user;
-  const label = user?.displayName.trim() || user?.email || (session.isPending ? 'Checking account' : 'Log in');
+  const { t } = useLocalization();
+  const label = user?.displayName.trim()
+    || user?.email
+    || (session.isPending ? t('shell.account.checking') : t('shell.account.log_in'));
 
   return (
     <Link className={styles.account} to={user ? '/account' : '/login'} aria-label={label}>
@@ -156,6 +170,7 @@ const AppShellContent = () => {
   const [widePanelResizersEnabled, setWidePanelResizersEnabled] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const player = usePlayer(playerStore);
+  const { t } = useLocalization();
   const videoPlaying = player.currentItem?.mediaType === 'video';
   const effectiveNowPlayingOpen = videoPlaying || nowPlayingOpen;
 
@@ -179,37 +194,45 @@ const AppShellContent = () => {
       data-video-playing={videoPlaying || undefined}
       ref={shellRef}
     >
-      <a className={styles.skipLink} href="#main-content" onClick={skipToMainContent}>Skip to main content</a>
+      <a className={styles.skipLink} href="#main-content" onClick={skipToMainContent}>
+        {t('shell.skip_to_main')}
+      </a>
       <RouteAnnouncer />
 
       <header className={styles.topbar}>
-        <Link className={styles.brand} to="/" aria-label="Finitude home">
+        <Link className={styles.brand} to="/" aria-label={t('shell.brand.home_label')}>
           <span className={styles.brandMark} aria-hidden="true"><Icon name="brand" /></span>
           <span className={styles.brandName}>Finitude</span>
         </Link>
 
         <div className={styles.topbarCenter}>
-          <div className={styles.historyControls} aria-label="Page history">
-            <button type="button" onClick={() => navigate(-1)} aria-label="Go back" title="Go back">
+          <div className={styles.historyControls} aria-label={t('shell.history.label')}>
+            <button type="button" onClick={() => navigate(-1)} aria-label={t('shell.history.back')} title={t('shell.history.back')}>
               <Icon name="arrow-left" />
             </button>
-            <button type="button" onClick={() => navigate(1)} aria-label="Go forward" title="Go forward">
+            <button type="button" onClick={() => navigate(1)} aria-label={t('shell.history.forward')} title={t('shell.history.forward')}>
               <Icon name="arrow-right" />
             </button>
           </div>
           <TopSearch />
         </div>
 
+        <Suspense fallback={null}>
+          <LanguageSelector placement="mobile" />
+        </Suspense>
         <AccountEntry />
       </header>
 
-      <aside className={styles.sidebar} aria-label="Finitude Library" id="library-sidebar">
+      <aside className={styles.sidebar} aria-label={t('shell.sidebar.label')} id="library-sidebar">
         <PrimaryNavigation />
         {capabilities.data?.playlists && (
           <Suspense fallback={<div className={styles.sidebarLoading} aria-hidden="true" />}>
             <PlaylistSidebar />
           </Suspense>
         )}
+        <Suspense fallback={null}>
+          <LanguageSelector />
+        </Suspense>
       </aside>
 
       {widePanelResizersEnabled && !videoPlaying && (
@@ -238,7 +261,7 @@ const AppShellContent = () => {
 
       <aside
         aria-hidden={!effectiveNowPlayingOpen || undefined}
-        aria-label="Now Playing details"
+        aria-label={t('shell.now_playing.details_label')}
         className={styles.nowPlayingSlot}
         id="now-playing-aside"
         inert={!effectiveNowPlayingOpen ? true : undefined}

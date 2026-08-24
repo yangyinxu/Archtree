@@ -7,16 +7,19 @@
     "web"
   ],
   "scripts": {
-    "build": "npm run build:server && npm run build:web",
+    "build": "npm run localization:check && npm run build:server && npm run build:web",
     "build:server": "tsc --noEmit",
     "build:web": "npm run build --workspace @archtree/finitude-web",
-    "test": "npm run test:server && npm run test:web",
+    "test": "npm run localization:check && npm run test:server && npm run test:web",
     "test:server": "tsx --test test/**/*.test.ts",
     "test:web": "npm run test --workspace @archtree/finitude-web",
     "test:e2e": "npm run test:e2e --workspace @archtree/finitude-web",
     "test:e2e:chromium": "npm run test:e2e:chromium --workspace @archtree/finitude-web",
     "test:integration": "tsx --test --test-concurrency=1 test/**/*.integration.ts",
     "test:media-load": "node scripts/media-range-load.mjs",
+    "localization:check": "node scripts/build-localizations.mjs --check",
+    "localization:generate": "node scripts/build-localizations.mjs",
+    "localization:sync-native": "node scripts/sync-native-localizations.mjs",
     "migrate:catalog-credits": "tsx scripts/migrate-catalog-credits.ts",
     "stage:eb-artifact": "node scripts/stage-eb-artifact.mjs",
     "start": "NODE_ENV=production tsx src/app.ts",
@@ -45,6 +48,7 @@
     "tsx": "^4.23.1"
   },
   "devDependencies": {
+    "@formatjs/icu-messageformat-parser": "^3.5.17",
     "@types/bcryptjs": "^2.4.2",
     "@types/express": "^4.17.17",
     "@types/jsonwebtoken": "^9.0.1",

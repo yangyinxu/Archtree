@@ -6,6 +6,7 @@ import {
   type RefObject
 } from 'react';
 import { X } from 'lucide-react';
+import { useLocalization } from '../../../localization/LocalizationProvider';
 
 import {
   avatarEditorSide,
@@ -37,6 +38,7 @@ export const AvatarCropDialog = ({
   returnFocusRef,
   fallbackFocusRef
 }: AvatarCropDialogProps) => {
+  const { t } = useLocalization();
   const dialogRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -65,20 +67,20 @@ export const AvatarCropDialog = ({
     image.onload = () => {
       if (!image.naturalWidth || !image.naturalHeight
         || image.naturalWidth * image.naturalHeight > 16_000_000) {
-        setError('Choose a photo with fewer than 16 million pixels.');
+        setError(t('avatar.crop.pixel_error'));
         return;
       }
       imageRef.current = image;
       setImageSize({ width: image.naturalWidth, height: image.naturalHeight });
     };
-    image.onerror = () => setError('The selected photo could not be opened. Choose a JPG, PNG, or WebP photo.');
+    image.onerror = () => setError(t('avatar.crop.open_error'));
     image.src = sourceUrl;
     return () => {
       image.onload = null;
       image.onerror = null;
       imageRef.current = null;
     };
-  }, [sourceUrl]);
+  }, [sourceUrl, t]);
 
   useEffect(() => {
     if (imageRef.current && canvasRef.current && imageSize) {
@@ -148,9 +150,9 @@ export const AvatarCropDialog = ({
       const blob = await renderAvatarCrop(imageRef.current, transform);
       if (!mountedRef.current) return;
       setPreview({ blob, url: URL.createObjectURL(blob) });
-    } catch (caught) {
+    } catch {
       if (mountedRef.current) {
-        setError(caught instanceof Error ? caught.message : 'The crop could not be prepared.');
+        setError(t('avatar.crop.prepare_error'));
       }
     } finally {
       if (mountedRef.current) setIsPreparing(false);
@@ -178,29 +180,29 @@ export const AvatarCropDialog = ({
       >
         <div className={styles.dialogHeader}>
           <div>
-            <p className={styles.kicker}>{preview ? 'Final preview' : 'Square crop'}</p>
-            <h2 id="avatar-editor-title">{preview ? 'Use this profile photo?' : 'Position your photo'}</h2>
+            <p className={styles.kicker}>{preview ? t('avatar.crop.preview_kicker') : t('avatar.crop.editor_kicker')}</p>
+            <h2 id="avatar-editor-title">{preview ? t('avatar.crop.preview_title') : t('avatar.crop.editor_title')}</h2>
           </div>
-          <button aria-label="Cancel profile photo" className={styles.iconButton} disabled={isPreparing} onClick={onCancel} ref={closeButtonRef} type="button">
+          <button aria-label={t('avatar.crop.cancel_label')} className={styles.iconButton} disabled={isPreparing} onClick={onCancel} ref={closeButtonRef} type="button">
             <X aria-hidden="true" focusable="false" />
           </button>
         </div>
 
         {preview ? (
           <div className={styles.previewStage}>
-            <img alt="Circular preview of the selected profile photo" className={styles.circularPreview} src={preview.url} />
+            <img alt={t('avatar.crop.preview_alt')} className={styles.circularPreview} src={preview.url} />
             <p id="avatar-editor-instructions" className={styles.instructions}>
-              This circular preview is what other account surfaces will show.
+              {t('avatar.crop.preview_description')}
             </p>
             <div className={styles.dialogActions}>
-              <button className={styles.secondaryButton} onClick={goBack} type="button">Back to crop</button>
-              <button className={styles.primaryButton} onClick={() => onUsePhoto(preview.blob)} type="button">Use photo</button>
+              <button className={styles.secondaryButton} onClick={goBack} type="button">{t('avatar.crop.back')}</button>
+              <button className={styles.primaryButton} onClick={() => onUsePhoto(preview.blob)} type="button">{t('avatar.crop.use')}</button>
             </div>
           </div>
         ) : (
           <div className={styles.editorStage}>
             <canvas
-              aria-label="Square profile photo crop. Drag to reposition."
+              aria-label={t('avatar.crop.canvas_label')}
               className={styles.cropCanvas}
               height={avatarEditorSide}
               onPointerCancel={endDrag}
@@ -212,11 +214,11 @@ export const AvatarCropDialog = ({
               width={avatarEditorSide}
             />
             <p id="avatar-editor-instructions" className={styles.instructions}>
-              Drag the image, then use the controls for precise position and scale.
+              {t('avatar.crop.editor_description')}
             </p>
             <div className={styles.cropControls}>
               <label>
-                <span>Zoom</span>
+                <span>{t('avatar.crop.zoom')}</span>
                 <input
                   disabled={!imageSize}
                   max="4"
@@ -228,7 +230,7 @@ export const AvatarCropDialog = ({
                 />
               </label>
               <label>
-                <span>Horizontal position</span>
+                <span>{t('avatar.crop.horizontal')}</span>
                 <input
                   disabled={!imageSize || limits.x === 0}
                   max={limits.x}
@@ -240,7 +242,7 @@ export const AvatarCropDialog = ({
                 />
               </label>
               <label>
-                <span>Vertical position</span>
+                <span>{t('avatar.crop.vertical')}</span>
                 <input
                   disabled={!imageSize || limits.y === 0}
                   max={limits.y}
@@ -254,9 +256,9 @@ export const AvatarCropDialog = ({
             </div>
             {error && <p className={styles.error} role="alert">{error}</p>}
             <div className={styles.dialogActions}>
-              <button className={styles.secondaryButton} disabled={isPreparing} onClick={onCancel} type="button">Cancel</button>
+              <button className={styles.secondaryButton} disabled={isPreparing} onClick={onCancel} type="button">{t('common.action.cancel')}</button>
               <button className={styles.primaryButton} disabled={!imageSize || isPreparing} onClick={preparePreview} type="button">
-                {isPreparing ? 'Preparing…' : 'Preview crop'}
+                {isPreparing ? t('avatar.crop.preparing') : t('avatar.crop.preview_action')}
               </button>
             </div>
           </div>

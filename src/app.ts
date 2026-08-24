@@ -8,6 +8,7 @@ import authRoutes from './routes/authRoutes';
 import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import listenerRoutes from './routes/listenerRoutes';
+import { createLocalizationRouter } from './routes/localizationRoutes';
 import videoRoutes from './routes/videoRoutes';
 import {
   attachOptionalAuth,
@@ -36,6 +37,8 @@ import {
 export interface CreateAppOptions {
   /** Overrides the production listener bundle location for isolated route tests. */
   listenerDistPath?: string;
+  /** Overrides generated localization artifacts for isolated route tests. */
+  localizationDistPath?: string;
   /** Retains explicit runtime context for existing isolated application callers. */
   environment?: string;
 }
@@ -218,7 +221,10 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match, X-Finitude-Account-Viewer'
     );
-    res.setHeader('Access-Control-Expose-Headers', 'ETag, X-Finitude-Account-Viewer');
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Language, ETag, X-Finitude-Account-Viewer'
+    );
     next();
   });
 
@@ -247,6 +253,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/content', contentRoutes);
   app.use('/feed', feedRoutes);
   app.use('/video', videoRoutes);
+  app.use('/api/localizations/v1', createLocalizationRouter(options.localizationDistPath));
   app.use('/api/listener/v1', listenerRoutes);
 
   const listenerDistPath = options.listenerDistPath

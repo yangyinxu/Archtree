@@ -1,9 +1,11 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   CircleUserRound,
   Disc3,
   House,
+  Globe2,
   Library,
   LockKeyhole,
   Maximize2,
@@ -27,8 +29,10 @@ export type IconName =
   | 'arrow-left'
   | 'arrow-right'
   | 'brand'
+  | 'check'
   | 'expand'
   | 'home'
+  | 'language'
   | 'library'
   | 'lock'
   | 'pause'
@@ -48,8 +52,10 @@ const icons: Record<IconName, LucideIcon> = {
   'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
   brand: Disc3,
+  check: Check,
   expand: Maximize2,
   home: House,
+  language: Globe2,
   library: Library,
   lock: LockKeyhole,
   pause: Pause,

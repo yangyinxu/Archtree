@@ -4,12 +4,14 @@ import { isRouteErrorResponse, Link, useLocation, useRouteError } from 'react-ro
 import { enqueueListenerTelemetry } from '../telemetry/client';
 import { classifyListenerRoute, statusBucket } from '../telemetry/routeClassifier';
 import styles from '../styles/Pages.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 /** Bounds route failures without exposing internal exception details. */
 export const RouteErrorPage = () => {
   const error = useRouteError();
   const location = useLocation();
   const notFound = isRouteErrorResponse(error) && error.status === 404;
+  const { t } = useLocalization();
   useEffect(() => {
     const lazyChunk = error instanceof Error && (
       error.name === 'ChunkLoadError' || /dynamically imported module|loading chunk/i.test(error.message)
@@ -25,10 +27,14 @@ export const RouteErrorPage = () => {
     <div className={styles.page}>
       <section className={styles.panel}>
         <div>
-          <p className={styles.eyebrow}>{notFound ? '404' : 'Listening continues'}</p>
-          <h1 className={styles.panelTitle}>{notFound ? 'That page drifted out of range' : 'Finitude hit an unexpected note'}</h1>
-          <p className={styles.panelCopy}>Return Home and keep exploring from there.</p>
-          <div className={styles.actions}><Link className={styles.primaryLink} to="/">Go Home</Link></div>
+          <p className={styles.eyebrow}>{notFound ? '404' : t('route.error.eyebrow')}</p>
+          <h1 className={styles.panelTitle}>
+            {notFound ? t('route.not_found.title') : t('route.error.title')}
+          </h1>
+          <p className={styles.panelCopy}>{t('route.error.copy')}</p>
+          <div className={styles.actions}>
+            <Link className={styles.primaryLink} to="/">{t('common.action.go_home')}</Link>
+          </div>
         </div>
       </section>
     </div>
@@ -36,6 +42,7 @@ export const RouteErrorPage = () => {
 };
 
 export const NotFoundPage = () => {
+  const { t } = useLocalization();
   useEffect(() => {
     enqueueListenerTelemetry({
       category: 'route_error',
@@ -49,9 +56,11 @@ export const NotFoundPage = () => {
       <section className={styles.panel}>
         <div>
           <p className={styles.eyebrow}>404</p>
-          <h1 className={styles.panelTitle}>That page drifted out of range</h1>
-          <p className={styles.panelCopy}>The address may have changed, but the listening room is still here.</p>
-          <div className={styles.actions}><Link className={styles.primaryLink} to="/">Go Home</Link></div>
+          <h1 className={styles.panelTitle}>{t('route.not_found.title')}</h1>
+          <p className={styles.panelCopy}>{t('route.not_found.copy')}</p>
+          <div className={styles.actions}>
+            <Link className={styles.primaryLink} to="/">{t('common.action.go_home')}</Link>
+          </div>
         </div>
       </section>
     </div>

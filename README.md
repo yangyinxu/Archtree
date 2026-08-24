@@ -4,8 +4,10 @@ Archtree is an Express + TypeScript service for authentication, content
 management, and media upload/streaming. It also hosts the React-based Finitude
 Web listener under `/finitude`.
 
-Product behavior shared by the backend and iOS client is documented in
-[`docs/business-rules.md`](docs/business-rules.md).
+Product behavior shared by the backend and Finitude clients is documented in
+[`docs/business-rules.md`](docs/business-rules.md). The shared Finitude Web,
+iOS, and Android localization format, fallback, caching, and delivery contract
+is documented in [`docs/localization.md`](docs/localization.md).
 
 ## Code Documentation
 
@@ -42,6 +44,10 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run test:media-load`: run the bounded audio/video Range, seek/abort,
   artwork, and health-recovery workload against an explicitly authorized
   environment
+- `npm run localization:check`: validate canonical locale files, ICU variable
+  contracts, and checked-in generated runtime output without modifying files
+- `npm run localization:generate`: validate locale sources and atomically
+  regenerate the public manifest and runtime bundles
 - `npm run stage:eb-artifact`: validate and stage the exact allowlisted Elastic
   Beanstalk runtime tree in `elastic-beanstalk-artifact`
 
@@ -373,6 +379,27 @@ not require an unrelated application release.
 Important:
 - Build phase should not run `npm start`.
 - Runtime process startup should happen in the deployment service configuration.
+
+## Public Localization API
+
+Finitude clients discover and conditionally refresh reviewed runtime bundles
+through two unauthenticated, read-only endpoints:
+
+- `GET /api/localizations/v1/manifest`
+- `GET /api/localizations/v1/bundles/{locale}`
+
+Only canonical, manifest-allowlisted BCP 47 locale tags are served. Responses
+support strong `ETag` revalidation; bundles also return `Content-Language`.
+Run `npm run localization:generate` after editing `localization/catalog.json`
+or the canonical files under `localization/locales/`, then commit the resulting
+manifest and bundles. The complete contract and publishing checks are in
+[`docs/localization.md`](docs/localization.md).
+
+When the sibling native repositories are present, run
+`npm run localization:sync-native` to regenerate those artifacts and copy the
+same manifest plus packaged `en-US.json` into Finitude iOS and Android. Use
+`-- --ios-root <path> --android-root <path>` when the repositories are not in
+their conventional sibling directories.
 
 ## Browser Auth and Content Management
 

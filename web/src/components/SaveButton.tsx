@@ -9,6 +9,7 @@ import {
 import type { LibraryTarget } from '../api/contentSchemas';
 import { captureAccountOperation, isAccountOperationCurrent } from '../api/accountEpoch';
 import styles from './SaveButton.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 export interface SaveButtonProps {
   target: LibraryTarget;
@@ -26,6 +27,7 @@ export const SaveButton = ({
   onSavedChange,
   compact = false
 }: SaveButtonProps) => {
+  const { t } = useLocalization();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState('');
   const ownerKey = `${viewerId ?? 'signed-out'}:${target.contentType}:${target.contentId}`;
@@ -38,7 +40,7 @@ export const SaveButton = ({
     onMutate: () => captureAccountOperation(viewerId ?? ''),
     onSuccess: (result, _variables, guard) => {
       if (!isAccountOperationCurrent(guard, viewerId ?? '')) return;
-      setMessage(result.saved ? 'Saved to your Library.' : 'Removed from your Library.');
+      setMessage(result.saved ? t('save.status.saved') : t('save.status.removed'));
       onSavedChange?.(result.saved);
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['listener', 'home'] }),
@@ -48,7 +50,7 @@ export const SaveButton = ({
     },
     onError: (_error, _variables, guard) => {
       if (isAccountOperationCurrent(guard, viewerId ?? '')) {
-        setMessage('Finitude could not update your Library. Try again.');
+        setMessage(t('save.error.update'));
       }
     }
   });
@@ -60,7 +62,7 @@ export const SaveButton = ({
   }, [ownerKey]);
 
   const signedOut = !viewerId;
-  const label = saved ? 'Remove from Library' : 'Save to Library';
+  const label = saved ? t('save.action.remove') : t('save.action.save');
   // A signed-out activation is available because its outcome is the explanatory alert.
   const actionUnavailable = saved === null || mutation.isPending;
 
@@ -72,7 +74,7 @@ export const SaveButton = ({
         className={`${styles.button} ${signedOut ? styles.signedOut : ''}`}
         onClick={() => {
           if (signedOut) {
-            setMessage('Log in to save albums and MediaTracks.');
+            setMessage(t('save.status.signed_out'));
             return;
           }
           if (saved === null || mutation.isPending) return;
@@ -82,7 +84,7 @@ export const SaveButton = ({
         type="button"
       >
         {saved ? <BookmarkCheck aria-hidden="true" /> : <Bookmark aria-hidden="true" />}
-        {!compact && <span>{mutation.isPending ? 'Updating…' : label}</span>}
+        {!compact && <span>{mutation.isPending ? t('save.status.updating') : label}</span>}
       </button>
       {visibleMessage && <span className={styles.message} role={mutation.isError || signedOut ? 'alert' : 'status'}>{visibleMessage}</span>}
     </span>

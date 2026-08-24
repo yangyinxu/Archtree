@@ -9,17 +9,13 @@ import {
 
 import { Icon } from '../components/Icon';
 import styles from './PanelResizeHandle.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 const KEYBOARD_STEP = 8;
 const KEYBOARD_LARGE_STEP = 32;
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(Math.max(value, minimum), maximum);
-
-const formatPanelWidth = (value: number) => {
-  const pixels = Math.round(value);
-  return `${pixels} ${pixels === 1 ? 'pixel' : 'pixels'} wide`;
-};
 
 export type PanelResizeSide = 'left' | 'right';
 
@@ -64,6 +60,7 @@ export const PanelResizeHandle = ({
   onCommit,
   onDragStart
 }: PanelResizeHandleProps) => {
+  const { t } = useLocalization();
   const minimum = Number.isFinite(min) ? min : 0;
   const maximum = Number.isFinite(max) ? Math.max(max, minimum) : minimum;
   const safeValue = clamp(Number.isFinite(value) ? value : minimum, minimum, maximum);
@@ -227,7 +224,7 @@ export const PanelResizeHandle = ({
       aria-valuemax={maximum}
       aria-valuemin={minimum}
       aria-valuenow={visibleValue}
-      aria-valuetext={formatPanelWidth(visibleValue)}
+      aria-valuetext={t('panel_resize.width', { pixels: Math.round(visibleValue) })}
       className={styles.handle}
       data-dragging={dragging || undefined}
       data-side={side}

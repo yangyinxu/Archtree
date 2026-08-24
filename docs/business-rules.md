@@ -189,6 +189,58 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   Played activity, profile/avatar, account, device-local downloads, and
   Playlists. These owner-scoped actions do not mutate the shared catalog.
 
+## Finitude Localization
+
+- Finitude Web starts in explicit `en-US` when no valid app-language preference
+  has been stored and offers only explicit published-language choices. It does
+  not present browser UI or content-language detection as a reliable automatic
+  choice; a legacy Browser default preference migrates to `en-US`. iOS and
+  Android continue to default to System and follow the operating system's
+  ordered preferred languages. A listener may choose any explicitly supported
+  language. The preference survives relaunch, logout, and account changes.
+- Supported language identifiers use canonical BCP 47 tags. System is the
+  native presentation label for its automatic preference state, not a language
+  identifier; the retired Web Browser default label is retained only in older
+  client translation contracts.
+- Every client release includes a complete `en-US` runtime bundle as the final
+  fallback: Web packages a same-origin static JSON asset and native clients
+  package `en-US.json` as an app resource. It can render the app without a
+  session, remote localization request, writable cache, or prior launch. A raw
+  localization key, missing-variable marker, or blank translation is never
+  listener-facing fallback copy.
+- Startup uses the valid last-known-good bundle for the resolved language, or
+  packaged `en-US` when no such bundle exists. Every client checks for a newer
+  published translation in the background on cold launch and does not block
+  startup on that remote request.
+- A downloaded translation becomes active only after its entire schema,
+  locale, messages, and variables validate. Malformed, incomplete, stale,
+  cancelled, or failed responses preserve the current readable bundle. A
+  response for an older language choice cannot overwrite a newer choice.
+- Changing to an uncached explicit language succeeds only after that bundle is
+  downloaded and validated. A failed change preserves the prior preference and
+  visible language and offers retry.
+- Published locale bundles share one complete semantic-key set and the same
+  named-variable contract for each key. Translatable sentences, plurals, and
+  accessibility copy are complete messages rather than concatenated fragments.
+- Runtime translation bundles localize Finitude interface copy. They do not
+  automatically translate catalog metadata, creator or listener content, or
+  replace platform-packaged text that the operating system needs before the
+  app's localization runtime is available.
+- Canonical locale JSON is the only manually maintained translation source.
+  Each client build derives its platform-packaged iOS or Android text from the
+  same reviewed catalog revision. Runtime copy may update remotely, while a
+  change to operating-system-owned copy becomes visible with the next app
+  release that includes regenerated native resources.
+- Finitude Web keeps a globe language shortcut at the bottom-left of the
+  desktop sidebar, matching the persistent placement pattern used by Spotify.
+  Compact layouts expose the same control as a top-bar icon. Both open the same
+  accessible selector for published languages. Native selectors continue to
+  show System.
+- Every published-language option shows its native name as the primary label
+  and a stable English name as secondary context. Both names are maintained
+  once in canonical locale metadata and published in the shared manifest so
+  Web, iOS, and Android present the same reviewed language identity.
+
 ## Personalized Carousels
 
 - Personalized carousels have one of two sources:

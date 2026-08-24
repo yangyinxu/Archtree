@@ -8,6 +8,7 @@ import { ModalDialog } from '../../components/ModalDialog';
 import { SignedOutPlaylistDialog } from './SignedOutPlaylistDialog';
 import styles from './AddTrackToPlaylistButton.module.css';
 import playlistStyles from './Playlists.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
 
 const AddTrackToPlaylistDialog = lazy(() => import('./AddTrackToPlaylistDialog').then((module) => ({
   default: module.AddTrackToPlaylistDialog
@@ -25,6 +26,7 @@ export const AddTrackToPlaylistButton = ({
   accountPending?: boolean;
   accountUnavailable?: boolean;
 }) => {
+  const { t } = useLocalization();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const loadingCloseRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -44,12 +46,14 @@ export const AddTrackToPlaylistButton = ({
       <button
         aria-expanded={visibleOpen}
         aria-haspopup="dialog"
-        aria-label={`Add ${track.title || 'Untitled MediaTrack'} to Playlist`}
+        aria-label={t('playlist.add_one.button_label', {
+          title: track.title || t('content.title.untitled_track')
+        })}
         className={styles.trigger}
         disabled={accountPending}
         onClick={() => setOpen(true)}
         ref={triggerRef}
-        title="Add to Playlist"
+        title={t('playlist.add_one.button_title')}
         type="button"
       >
         <ListPlus aria-hidden="true" focusable="false" />
@@ -57,25 +61,27 @@ export const AddTrackToPlaylistButton = ({
       {visibleOpen && !viewerId && (
         <SignedOutPlaylistDialog
           accountUnavailable={accountUnavailable}
-          description="Playlists are private to your Finitude account. Opening this action never starts playback."
+          description={t('playlist.add_one.signed_out_description')}
           onClose={() => setOpen(false)}
           returnFocusRef={triggerRef}
-          title="Log in to add to a Playlist"
+          title={t('playlist.add_one.signed_out_title')}
         />
       )}
       {visibleOpen && viewerId && (
         <Suspense fallback={(
           <ModalDialog
-            description={`Choose where to add “${track.title || 'Untitled MediaTrack'}”. This action never starts playback.`}
+            description={t('playlist.add_one.choose_description', {
+              title: track.title || t('content.title.untitled_track')
+            })}
             initialFocusRef={loadingCloseRef}
-            kicker="Add to Playlist"
+            kicker={t('playlist.add_one.button_title')}
             onClose={() => setOpen(false)}
             returnFocusRef={triggerRef}
-            title="Opening your Playlists"
+            title={t('playlist.add_one.opening_title')}
           >
-            <p aria-busy="true" className={styles.state}>Loading your Playlists…</p>
+            <p aria-busy="true" className={styles.state}>{t('playlist.add_one.loading')}</p>
             <div className={playlistStyles.dialogActions}>
-              <button className={playlistStyles.secondaryButton} onClick={() => setOpen(false)} ref={loadingCloseRef} type="button">Close</button>
+              <button className={playlistStyles.secondaryButton} onClick={() => setOpen(false)} ref={loadingCloseRef} type="button">{t('common.action.close')}</button>
             </div>
           </ModalDialog>
         )}>

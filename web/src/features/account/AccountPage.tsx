@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router';
 
-import { ApiError } from '../../api/client';
 import { isAccountOperationCurrent } from '../../api/accountEpoch';
 import {
   browserSessionQuery,
@@ -9,21 +8,24 @@ import {
   logoutBrowserSession
 } from '../../api/session';
 import { Icon } from '../../components/Icon';
+import { useLocalization } from '../../localization/LocalizationProvider';
+import type { MessageKey } from '../../localization/contract';
 import { clearSearchHistory } from '../search/searchHistory';
 import { AccountLifecyclePanel } from './AccountLifecyclePanel';
 import { AvatarSettings } from './avatar';
 import styles from './AccountSurfaces.module.css';
 
 /** Converts safe method identifiers into familiar account labels. */
-const methodLabel = (method: string) => ({
-  password: 'Password',
-  apple: 'Apple',
-  google: 'Google',
-  passkey: 'Passkey'
-}[method] ?? method);
+const methodLabelKeys: Record<string, MessageKey> = {
+  password: 'account.method.password',
+  apple: 'account.method.apple',
+  google: 'account.method.google',
+  passkey: 'account.method.passkey'
+};
 
 /** Presents authoritative identity and clears account-scoped query state on logout. */
 export const AccountPage = () => {
+  const { t } = useLocalization();
   const session = useQuery(browserSessionQuery());
   const hasPassword = session.data?.user.authenticationMethods?.includes('password') ?? true;
   const queryClient = useQueryClient();
@@ -45,74 +47,74 @@ export const AccountPage = () => {
 
   return (
     <div className={styles.page}>
-      <p className={styles.eyebrow}>Listening identity</p>
-      <h1 className={styles.pageTitle}>Account</h1>
+      <p className={styles.eyebrow}>{t('account.page.eyebrow')}</p>
+      <h1 className={styles.pageTitle}>{t('account.page.title')}</h1>
 
       <section className={styles.panel} aria-live="polite">
         {session.isPending ? (
-          <div><h2 className={styles.panelTitle}>Checking your account…</h2></div>
+          <div><h2 className={styles.panelTitle}>{t('account.common.checking')}</h2></div>
         ) : session.isError ? (
           <div>
-            <h2 className={styles.panelTitle}>Your account is temporarily unavailable</h2>
-            <p className={styles.panelCopy}>Finitude could not safely confirm whether you are logged in.</p>
+            <h2 className={styles.panelTitle}>{t('account.page.unavailable_title')}</h2>
+            <p className={styles.panelCopy}>{t('account.page.unavailable_copy')}</p>
             <div className={styles.actions}>
-              <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={() => session.refetch()} type="button">Try again</button>
+              <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={() => session.refetch()} type="button">{t('common.action.try_again')}</button>
             </div>
           </div>
         ) : !session.data ? (
           <div>
             <span className={styles.panelIcon}><Icon name="account" /></span>
-            <h2 className={styles.panelTitle}>You are not logged in</h2>
-            <div className={styles.actions}><Link className={styles.primaryLink} to="/login">Log in</Link></div>
+            <h2 className={styles.panelTitle}>{t('account.page.signed_out_title')}</h2>
+            <div className={styles.actions}><Link className={styles.primaryLink} to="/login">{t('common.action.log_in')}</Link></div>
           </div>
         ) : (
           <div className={styles.accountContent}>
             <AvatarSettings user={session.data.user} />
             <div className={styles.identityRow}>
               <div>
-                <p className={styles.identityTitle}>{session.data.user.displayName || 'Finitude listener'}</p>
+                <p className={styles.identityTitle}>{session.data.user.displayName || t('account.page.listener_fallback')}</p>
                 <p className={styles.identityMeta}>{session.data.user.email}</p>
               </div>
             </div>
             <dl className={styles.accountDetails}>
               <div className={styles.accountDetail}>
-                <dt>Name</dt>
-                <dd>{session.data.user.displayName || 'Not set'}</dd>
+                <dt>{t('account.field.name')}</dt>
+                <dd>{session.data.user.displayName || t('account.page.not_set')}</dd>
               </div>
               <div className={styles.accountDetail}>
-                <dt>Email</dt>
+                <dt>{t('account.field.email')}</dt>
                 <dd>{session.data.user.email}</dd>
               </div>
               <div className={styles.accountDetail}>
-                <dt>Status</dt>
-                <dd>{session.data.user.emailVerified ? 'Email verified' : 'Verification required'}</dd>
+                <dt>{t('account.page.status')}</dt>
+                <dd>{session.data.user.emailVerified ? t('account.page.email_verified') : t('account.page.verification_required')}</dd>
               </div>
               <div className={styles.accountDetail}>
-                <dt>Sign-in methods</dt>
+                <dt>{t('account.page.sign_in_methods')}</dt>
                 <dd>{(session.data.user.authenticationMethods?.length
                   ? session.data.user.authenticationMethods
-                  : ['password']).map(methodLabel).join(', ')}</dd>
+                  : ['password']).map((method) => methodLabelKeys[method] ? t(methodLabelKeys[method]) : method).join(', ')}</dd>
               </div>
             </dl>
             {!session.data.user.emailVerified && (
-              <Link className={styles.inlineLink} state={{ email: session.data.user.email }} to="/verify-email">Verify email</Link>
+              <Link className={styles.inlineLink} state={{ email: session.data.user.email }} to="/verify-email">{t('account.page.verify_email')}</Link>
             )}
-            <nav aria-label="Account settings" className={styles.settingsList}>
+            <nav aria-label={t('account.page.settings_label')} className={styles.settingsList}>
               <Link className={styles.settingsLink} to="/account/sessions">
-                <span>Signed-in devices</span><span aria-hidden="true">›</span>
+                <span>{t('account.page.signed_in_devices')}</span><span aria-hidden="true">›</span>
               </Link>
               <Link className={styles.settingsLink} to="/account/password">
-                <span>{hasPassword ? 'Change password' : 'Set a password'}</span><span aria-hidden="true">›</span>
+                <span>{hasPassword ? t('account.page.change_password') : t('account.page.set_password')}</span><span aria-hidden="true">›</span>
               </Link>
             </nav>
             {logout.isError && (
               <p className={styles.error} role="alert">
-                {logout.error instanceof ApiError ? logout.error.message : 'Finitude could not log out. Please try again.'}
+                {t('account.page.logout_error')}
               </p>
             )}
             <div className={styles.actions}>
               <button className={`${styles.button} ${styles.buttonSecondary}`} disabled={logout.isPending} type="button" onClick={() => logout.mutate()}>
-                {logout.isPending ? 'Logging out…' : 'Log out'}
+                {logout.isPending ? t('account.page.logging_out') : t('account.page.log_out')}
               </button>
             </div>
           </div>

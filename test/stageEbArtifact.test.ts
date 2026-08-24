@@ -22,6 +22,7 @@ const createSourceFixture = async () => {
   await writeFixtureFile(root, 'package-lock.json', '{"name":"fixture","lockfileVersion":3}\n');
   await writeFixtureFile(root, 'tsconfig.json', '{}\n');
   await writeFixtureFile(root, 'src/app.ts', 'export const app = true;\n');
+  await writeFixtureFile(root, 'localization/generated/manifest.json', '{"schemaVersion":1}\n');
   await writeFixtureFile(root, 'web/package.json', '{"name":"fixture-web"}\n');
   await writeFixtureFile(
     root,
@@ -82,6 +83,7 @@ test('stages only the Elastic Beanstalk allowlist with bounded release metadata'
     '.ebextensions',
     '.platform',
     'RELEASE.json',
+    'localization',
     'package-lock.json',
     'package.json',
     'src',

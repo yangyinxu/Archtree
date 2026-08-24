@@ -3,14 +3,15 @@ import { Link } from 'react-router';
 
 import { ModalDialog } from '../../components/ModalDialog';
 import styles from './Playlists.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
 
 /** Explains the private-account requirement without forcing login navigation. */
 export const SignedOutPlaylistDialog = ({
   onClose,
   returnFocusRef,
   accountUnavailable = false,
-  title = 'Log in to create a Playlist',
-  description = 'Playlists are private to your Finitude account. You can keep browsing without signing in.'
+  title,
+  description
 }: {
   onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -19,20 +20,23 @@ export const SignedOutPlaylistDialog = ({
   description?: string;
 }) => {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const { t } = useLocalization();
   return (
     <ModalDialog
       description={accountUnavailable
-        ? 'Finitude could not safely confirm your account. Try again after the account status returns.'
-        : description}
+        ? t('playlist.signed_out.account_error_copy')
+        : description ?? t('playlist.signed_out.description')}
       initialFocusRef={closeRef}
-      kicker="Sign-in required"
+      kicker={t('playlist.signed_out.kicker')}
       onClose={onClose}
       returnFocusRef={returnFocusRef}
-      title={accountUnavailable ? 'Account status unavailable' : title}
+      title={accountUnavailable
+        ? t('playlist.signed_out.account_error_title')
+        : title ?? t('playlist.signed_out.title')}
     >
       <div className={styles.dialogActions}>
-        <button className={styles.secondaryButton} onClick={onClose} ref={closeRef} type="button">Close</button>
-        {!accountUnavailable && <Link className={styles.primaryButton} onClick={onClose} state={{ from: '/playlists' }} to="/login">Log in</Link>}
+        <button className={styles.secondaryButton} onClick={onClose} ref={closeRef} type="button">{t('common.action.close')}</button>
+        {!accountUnavailable && <Link className={styles.primaryButton} onClick={onClose} state={{ from: '/playlists' }} to="/login">{t('common.action.log_in')}</Link>}
       </div>
     </ModalDialog>
   );

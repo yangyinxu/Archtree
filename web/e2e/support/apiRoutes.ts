@@ -134,6 +134,11 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
       await route.continue();
       return;
     }
+    if (call.method === 'GET' && call.pathname.startsWith('/api/localizations/v1/')) {
+      // Exercise the real public, cacheable localization delivery contract.
+      await route.continue();
+      return;
+    }
     fixture.calls.push(call);
 
     if (call.method === 'GET' && call.pathname === '/auth/browser/session') {
