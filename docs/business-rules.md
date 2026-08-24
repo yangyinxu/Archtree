@@ -324,8 +324,8 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - A Video playback failure retains the queue and exposes a recoverable playback
   error. It does not fabricate an Audio fallback because no second media object
   exists.
-- Finitude Web remains streaming-only. The first iOS adoption also streams
-  Video. An existing device-local Audio download does not imply a Video
+- Finitude Web remains streaming-only. The first iOS and Android adoptions also
+  stream Video. An existing device-local Audio download does not imply a Video
   download, Video offline availability, or another representation on the same
   MediaTrack.
 - When a Video MediaTrack becomes current on iOS, Finitude automatically opens
@@ -335,9 +335,17 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - The iOS Video surface renders the same shared playback state and
   transport used by its compact player, expanded player, queue, system media
   controls, and media routes. It must not create a second player or queue.
-- iOS download actions remain Audio-only in the first Video release. An Album
-  containing any Video MediaTrack is playable online but is not offered as a
-  complete Album download.
+- When a Video MediaTrack becomes current on Android, Finitude automatically
+  opens the expanded shared-player surface and renders the Video contain-fit.
+  The listener may collapse it back to the compact player; Video has no
+  cover-only or audio-only mode switch.
+- Android's inline and fullscreen Video surfaces attach to the same app-owned
+  Media3 player and MediaSession used by the compact player, expanded player,
+  queue, elapsed clock, transport controls, and system controls. Entering or
+  exiting fullscreen must not replace or restart playback.
+- Native download actions remain Audio-only in the first Video release. An
+  Album containing any Video MediaTrack is playable online but is not offered
+  as a complete Album download.
 
 ## Web Listener
 
