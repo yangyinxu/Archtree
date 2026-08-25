@@ -143,6 +143,13 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   The browser uploads those files sequentially as one file per request, so
   every file keeps an independent lifecycle outcome and the selected batch is
   never buffered or submitted as one aggregate media request.
+- Audio MediaTrack creation persists a valid positive whole-number Track
+  Number from embedded file metadata, including single and bulk uploads. Every
+  Album membership write derives the complete
+  persisted `Album.audioTrackIds` order from those numbers; administrators
+  cannot manually order Album MediaTracks. Missing or invalid numbers follow
+  numbered tracks, and duplicate or missing-number ties use canonical
+  MediaTrack ID order so request order cannot change the result.
 - The guided Artist release workflow may create or reuse an Artist, create and
   link an Album through a primary Credit, and optionally create or reuse a
   dynamic Artist Album Carousel and attach it to a Page. A dynamic Artist

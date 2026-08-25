@@ -7,7 +7,6 @@ import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { ContentCollection } from '../models/contentCollection';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
-import { parseBuffer, parseFile } from 'music-metadata';
 import { ObjectId } from 'mongodb';
 import { randomUUID } from 'node:crypto';
 import { normalizeUtf8Text } from '../utils/textEncoding';
@@ -19,8 +18,10 @@ import {
     S3StorageSummary
 } from '../services/s3StorageService';
 import {
+    embeddedTrackNumber,
     formatDuration,
     inferAudioFormat,
+    readAudioMetadata,
     titleFromFileName
 } from '../services/audioMetadataService';
 import {
@@ -1277,7 +1278,8 @@ const renderManagePage = (params: {
       <form method="POST" action="/content/manage/album/create" enctype="multipart/form-data">
         <label>Title<input name="title" required /></label>
         <label>Cover art (optional)<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
-        <label>MediaTrack IDs (optional)<input name="audioTrackIds" placeholder="Comma separated canonical IDs" /></label>
+        <label>MediaTrack membership IDs (optional)<input name="audioTrackIds" placeholder="Comma separated canonical IDs" /></label>
+        <p class="drag-help">Album order is derived from each file's embedded Track Number and cannot be arranged manually.</p>
         <label>Release date<input name="releaseDate" type="date" /></label>
         <button type="submit">Create Album</button>
       </form>
@@ -1468,7 +1470,8 @@ const renderManagePage = (params: {
                 <label>Title<input name="title" value="${escapeHtml(String(prefillAlbum?.title ?? ''))}" /></label>
                 <label>Replacement cover art<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
                 <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
-                <label>MediaTrack IDs<input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Comma separated canonical IDs" /></label>
+                <label>MediaTrack membership IDs<input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Comma separated canonical IDs" /></label>
+                <p class="drag-help">Membership can be changed here; order always comes from each file's embedded Track Number.</p>
                 <label>Release date<input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAlbum?.releaseDate))}" type="date" /></label>
         <button type="submit">Update Album</button>
       </form></section>
@@ -2647,6 +2650,14 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         const videoMetadata = mediaType === 'video'
             ? await validateSoundtrackVideoFile(uploadFile)
             : null;
+        let audioMetadata: any = null;
+        if (mediaType === 'audio') {
+            try {
+                audioMetadata = await readAudioMetadata(uploadFile);
+            } catch (metadataError) {
+                console.log(`Unable to read audio metadata for ${uploadFile.originalname}:`, metadataError);
+            }
+        }
 
         const artistId = String(req.body.artistId ?? '').trim();
         if (artistId) {
@@ -2721,6 +2732,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             uploadFile.mimetype || 'audio/mpeg',
             audioTrackObjectId
         );
+        track.trackNumber = embeddedTrackNumber(audioMetadata?.common?.track?.no);
         track.credits = credits;
         track.attributionStatus = attributionUnknown ? 'unknown' : 'documented';
         track.creditRevision = 1;
@@ -3319,18 +3331,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
 
             let metadata: any = null;
             try {
-                metadata = uploadFile.path
-                    ? await parseFile(uploadFile.path, {
-                        duration: true,
-                        skipCovers: true
-                    })
-                    : await parseBuffer(Uint8Array.from(uploadFile.buffer), {
-                        mimeType: uploadFile.mimetype || undefined,
-                        size: uploadFile.size
-                    }, {
-                        duration: true,
-                        skipCovers: true
-                    });
+                metadata = await readAudioMetadata(uploadFile);
             } catch (metadataError) {
                 console.log(`Unable to read audio metadata for ${originalFileName}:`, metadataError);
             }
@@ -3370,6 +3371,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                 uploadFile.mimetype || 'audio/mpeg',
                 audioTrackObjectId
             );
+            track.trackNumber = embeddedTrackNumber(metadata?.common?.track?.no);
             track.credits = credits;
             track.attributionStatus = attributionUnknown ? 'unknown' : 'documented';
             track.creditRevision = 1;

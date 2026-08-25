@@ -76,6 +76,8 @@ export class AudioTrack {
     albumId: string;
     releaseDate: SimpleDate;
     duration: string;
+    /** Embedded Audio track position that canonically orders Album membership. */
+    trackNumber?: number;
     format: AudioFormat;
     coverArtUrl: string;
     coverArtId?: string;

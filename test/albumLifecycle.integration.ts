@@ -733,7 +733,7 @@ test('Soundtrack relink and clear replace every prior canonical Album membership
     );
 });
 
-test('Album update replaces ordered membership and both Track directions in one transaction', async () => {
+test('Album update replaces membership but derives order from embedded Track Numbers', async () => {
     const albumId = new ObjectId();
     const otherAlbumId = new ObjectId();
     const retainedTrackId = new ObjectId();
@@ -764,6 +764,7 @@ test('Album update replaces ordered membership and both Track directions in one 
             {
                 _id: retainedTrackId,
                 albumId: albumId.toHexString(),
+                trackNumber: 1,
                 uploadStatus: 'ready',
                 s3Key: retainedTrackId.toHexString()
             },
@@ -776,6 +777,7 @@ test('Album update replaces ordered membership and both Track directions in one 
             {
                 _id: addedTrackId,
                 albumId: otherAlbumId.toHexString(),
+                trackNumber: 2,
                 uploadStatus: 'ready',
                 s3Key: addedTrackId.toHexString()
             }
@@ -800,8 +802,8 @@ test('Album update replaces ordered membership and both Track directions in one 
     ]);
     assert.equal(album!.title, 'After Replace');
     assert.deepEqual(album!.audioTrackIds, [
-        addedTrackId.toHexString(),
-        retainedTrackId.toHexString()
+        retainedTrackId.toHexString(),
+        addedTrackId.toHexString()
     ]);
     assert.deepEqual(otherAlbum!.audioTrackIds, []);
     assert.equal(retainedTrack!.albumId, albumId.toHexString());
@@ -874,7 +876,7 @@ test('Album replacement removes dangling and non-ready members without weakening
     );
 });
 
-test('combined Album cover CAS and ordered Track replacement commit or reject as one unit', async () => {
+test('combined Album cover CAS and Track Number membership replacement commit as one unit', async () => {
     const albumId = new ObjectId();
     const retainedTrackId = new ObjectId();
     const addedTrackId = new ObjectId();
@@ -895,6 +897,7 @@ test('combined Album cover CAS and ordered Track replacement commit or reject as
             {
                 _id: retainedTrackId,
                 albumId: albumId.toHexString(),
+                trackNumber: 1,
                 uploadStatus: 'ready',
                 s3Key: retainedTrackId.toHexString(),
                 publicationStatus: 'ready'
@@ -902,6 +905,7 @@ test('combined Album cover CAS and ordered Track replacement commit or reject as
             {
                 _id: addedTrackId,
                 albumId: '',
+                trackNumber: 2,
                 uploadStatus: 'ready',
                 s3Key: addedTrackId.toHexString(),
                 publicationStatus: 'ready'
@@ -958,8 +962,8 @@ test('combined Album cover CAS and ordered Track replacement commit or reject as
     assert.equal(album!.title, 'After Atomic Cover');
     assert.equal(album!.coverArtId, newCoverArtId);
     assert.deepEqual(album!.audioTrackIds, [
-        addedTrackId.toHexString(),
-        retainedTrackId.toHexString()
+        retainedTrackId.toHexString(),
+        addedTrackId.toHexString()
     ]);
     assert.equal(
         (await getDb()!.collection('audioTracks').findOne({ _id: addedTrackId }))!.albumId,
@@ -1067,6 +1071,7 @@ test('JSON rejects combined cover/list failures and Web commits combined ready o
             {
                 _id: firstWebTrackId,
                 albumId: '',
+                trackNumber: 1,
                 uploadStatus: 'ready',
                 s3Key: firstWebTrackId.toHexString(),
                 publicationStatus: 'ready'
@@ -1074,6 +1079,7 @@ test('JSON rejects combined cover/list failures and Web commits combined ready o
             {
                 _id: secondWebTrackId,
                 albumId: '',
+                trackNumber: 2,
                 uploadStatus: 'ready',
                 s3Key: secondWebTrackId.toHexString(),
                 publicationStatus: 'ready'
@@ -1104,8 +1110,8 @@ test('JSON rejects combined cover/list failures and Web commits combined ready o
     const updatedWebAlbum = await getDb()!.collection('albums').findOne({ _id: webAlbumId });
     assert.equal(updatedWebAlbum!.title, 'Web After');
     assert.deepEqual(updatedWebAlbum!.audioTrackIds, [
-        secondWebTrackId.toHexString(),
-        firstWebTrackId.toHexString()
+        firstWebTrackId.toHexString(),
+        secondWebTrackId.toHexString()
     ]);
     assert.equal(
         (await getDb()!.collection('audioTracks').findOne({ _id: firstWebTrackId }))!.albumId,
@@ -1608,6 +1614,66 @@ test('uploaded Soundtracks become public only with their canonical Album link', 
             .publicationStatus,
         'ready'
     );
+});
+
+test('uploaded Soundtracks use embedded Track Numbers for their canonical Album order', async () => {
+    const albumId = new ObjectId();
+    const trackOneId = new ObjectId();
+    const trackTwoFirstId = new ObjectId();
+    const trackTwoSecondId = new ObjectId();
+    const trackThreeId = new ObjectId();
+    const unnumberedTrackId = new ObjectId();
+    const uploadOrder = [
+        trackThreeId,
+        unnumberedTrackId,
+        trackTwoFirstId,
+        trackOneId,
+        trackTwoSecondId
+    ];
+    const trackNumbers = new Map([
+        [trackOneId.toHexString(), 1],
+        [trackTwoFirstId.toHexString(), 2],
+        [trackTwoSecondId.toHexString(), 2],
+        [trackThreeId.toHexString(), 3]
+    ]);
+    await Promise.all([
+        getDb()!.collection('albums').insertOne({
+            _id: albumId,
+            title: 'Numbered Publication Album',
+            audioTrackIds: [],
+            lifecycleStatus: 'ready',
+            referenceRevision: 0
+        }),
+        getDb()!.collection('audioTracks').insertMany(uploadOrder.map((trackId) => ({
+            _id: trackId,
+            title: `Track ${trackId.toHexString()}`,
+            albumId: albumId.toHexString(),
+            uploadStatus: 'ready',
+            s3Key: trackId.toHexString(),
+            publicationStatus: 'pending',
+            publicationUpdatedAt: new Date(),
+            ...(trackNumbers.has(trackId.toHexString())
+                ? { trackNumber: trackNumbers.get(trackId.toHexString()) }
+                : {})
+        })))
+    ]);
+
+    for (const trackId of uploadOrder) {
+        await publishUploadedAudioTracks(albumId.toHexString(), [trackId.toHexString()]);
+    }
+
+    const expectedOrder = [
+        trackOneId,
+        trackTwoFirstId,
+        trackTwoSecondId,
+        trackThreeId,
+        unnumberedTrackId
+    ].map((trackId) => trackId.toHexString());
+    assert.deepEqual(
+        (await getDb()!.collection('albums').findOne({ _id: albumId }))!.audioTrackIds,
+        expectedOrder
+    );
+    assert.deepEqual((await getPublicAlbum(albumId.toHexString()))!.audioTrackIds, expectedOrder);
 });
 
 test('a stale Carousel rewrite cannot resurrect a deleted Album reference', async () => {
