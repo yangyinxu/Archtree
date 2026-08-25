@@ -63,7 +63,13 @@
   production build and E2E typecheck, and 148/148 Mongo integration tests. Its
   complete local browser matrix has 202 passes, 10 expected skips, and only the
   seven already identified Darwin Chromium pixel-baseline differences; no
-  snapshot was updated.
+  Darwin snapshot was updated.
+- PR #57's exact-head Linux gate passed every non-visual check and the same 202
+  browser tests, then exposed seven stale Linux Chromium baselines. Retained CI
+  expected/actual/diff evidence confirms the intended Library heading removal,
+  carousel copy inset, and language control across the reviewed desktop,
+  mobile, landscape, and active-playback views. Only those seven release-owned
+  Linux baselines are being replaced from the reviewed CI actual images.
 
 - Stage only the confirmed integrated candidate and inspect the staged diff.
 - The staged candidate contains 247 reviewed files, excludes the user-owned
