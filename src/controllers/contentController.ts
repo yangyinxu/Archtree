@@ -41,6 +41,7 @@ import {
     validateCoverArtFile
 } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
+import { maxAudioBatchFiles } from '../middleware/audioUpload';
 import { boundedSearchQuery } from '../utils/search';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
 import { activeMediaTypeForTrack } from '../utils/mediaStorageKey';
@@ -676,7 +677,24 @@ const renderManagePage = (params: {
     ].join('');
     const catalogSearchContent = catalogSearchSections
         || '<p class="empty-linked-content">No matching catalog content.</p>';
-    const bulkAudioUploadBlock = `<details class="advanced-tools" id="bulk-audio-upload"><summary>Bulk upload Audio MediaTracks</summary><p>Select up to 20 files. An Audio MediaTrack is created for each file using embedded metadata when available.</p><form id="bulk-audio-upload-form" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data"><select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select><select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select><select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select><select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select><select name="albumId"><option value="">No album</option>${albumOptions}</select><label><input type="checkbox" name="inheritAlbumPrimaryCredits" value="true" checked /> Inherit the selected Album's primary Artists</label><label><input type="checkbox" name="attributionUnknown" value="true" /> Attribution is not documented</label><label><input type="checkbox" name="promoteToAlbumPrimary" value="true" /> If this participant is primary, also add them to the Album</label><input type="file" name="audioFiles" accept="audio/*" multiple required /><button type="submit">Create and Upload Audio MediaTracks</button><div id="bulk-upload-status" role="status" aria-live="polite" hidden><progress id="bulk-upload-progress" max="100" value="0">0%</progress><span id="bulk-upload-progress-label">0%</span></div></form></details>`;
+    const bulkAudioUploadBlock = `<details class="advanced-tools" id="bulk-audio-upload">
+      <summary>Bulk upload Audio MediaTracks</summary>
+      <p id="bulk-audio-file-limit">Select up to ${maxAudioBatchFiles} files. Files are uploaded one at a time so each request remains within the 1 GiB request boundary.</p>
+      <form id="bulk-audio-upload-form" data-max-files="${maxAudioBatchFiles}" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data">
+        <select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select>
+        <select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select>
+        <select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select>
+        <select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select>
+        <select name="albumId"><option value="">No album</option>${albumOptions}</select>
+        <label><input type="checkbox" name="inheritAlbumPrimaryCredits" value="true" checked /> Inherit the selected Album's primary Artists</label>
+        <label><input type="checkbox" name="attributionUnknown" value="true" /> Attribution is not documented</label>
+        <label><input type="checkbox" name="promoteToAlbumPrimary" value="true" aria-describedby="bulk-album-promotion-help" /> If the selected Primary Artist is not already on the Album, also add them</label>
+        <small id="bulk-album-promotion-help">Available only when an Album and Primary Artist are selected.</small>
+        <input type="file" name="audioFiles" accept="audio/*" multiple required aria-describedby="bulk-audio-file-limit" />
+        <button type="submit">Create and Upload Audio MediaTracks</button>
+        <div id="bulk-upload-status" role="status" aria-live="polite" hidden><progress id="bulk-upload-progress" max="100" value="0">0%</progress><span id="bulk-upload-progress-label">0%</span></div>
+      </form>
+    </details>`;
     const releaseOperationsBlock = renderReleaseOperations(releaseOperations);
 
     return `<!DOCTYPE html>

@@ -109,7 +109,6 @@ Required variables:
 - `S3_REQUEST_TIMEOUT_MS`: maximum S3 socket inactivity time (defaults to 60000)
 - `S3_SUMMARY_WAIT_TIMEOUT_MS`: maximum content-manager wait for an S3 summary refresh (defaults to 2000)
 - `MAX_AUDIO_BATCH_UPLOAD_MB`: maximum aggregate multipart request size for bulk audio uploads (defaults to 1024)
-- `MAX_AUDIO_BATCH_FILES`: maximum files accepted in one bulk upload (defaults to 5)
 - `MAX_VIDEO_UPLOAD_MB`: maximum focused MediaTrack MP4 upload size in MiB
   (defaults to 512 and is hard-capped at 1024)
 - `MAX_IMAGE_UPLOAD_MB`: maximum cover-art upload size in MiB (defaults to 10
@@ -544,9 +543,9 @@ Web content management:
   the same setup token is idempotent; partial failures keep completed IDs and
   expose a retry action that resumes from the first incomplete step.
 - Artist metadata and Artist–Album relationship actions use non-upload routes.
-  Only file-capable endpoints consume the shared upload rate/concurrency
-  capacity. A browser upload `429` renders a recovery page with the
-  `Retry-After` time instead of a raw JSON document.
+  Only file-capable endpoints consume shared upload concurrency capacity.
+  Authenticated administrator shared-catalog uploads have no hourly
+  request-count quota; concurrency responses still include `Retry-After`.
 - Album and MediaTrack attribution is managed as ordered role-bearing Credits
   for Artist and Organization subjects. Compatibility `artistIds`, `albumIds`,
   and flattened bylines are projected by the server during client migration.
@@ -728,7 +727,7 @@ Upload:
   multipart field `videoFile`
 - Form field for file: `audioFile`
 - Large audio uploads are spooled to bounded temporary files and streamed to S3; they are not retained in the Node.js heap.
-- Upload requests require `Content-Length`, are concurrency/rate limited, and temporary files are removed on completion or disconnect.
+- Upload requests require `Content-Length` and are concurrency limited; account-owned avatar mutations are additionally rate limited, and temporary files are removed on completion or disconnect.
 - Canonical playback: `HEAD`/`GET
   /content/mediaTrack/stream/:mediaTrackId` supports bounded single-range
   responses for either kind and cancels the upstream S3 request when the client
@@ -838,14 +837,25 @@ Reconciliation:
   - Nginx proxy limit via `.platform/nginx/conf.d/upload_size.conf` (`client_max_body_size`, currently 1 GB total per request)
   - App multer per-file limit via `MAX_AUDIO_UPLOAD_MB` (defaults to 512 MB)
   - Cover-art limit via `MAX_IMAGE_UPLOAD_MB` (defaults to 10 MB; maximum 25 MB)
-  - Content Manager bulk uploads send files sequentially, keeping each request below the proxy limit and avoiding buffering the entire selection in memory at once.
+  - Content Manager accepts up to 100 files per bulk selection and uploads
+    them sequentially, one file per request. The 1 GiB proxy limit therefore
+    applies to each request rather than the combined selected batch and remains
+    above the default 512 MiB per-file limit.
 - Catalog Credit migration is dry-run-first and bounded:
   `npm run migrate:catalog-credits -- --limit=100`. Continue with the returned
   `--after-album` and `--after-track` checkpoints. Apply only after reviewing
   findings: `npm run migrate:catalog-credits -- --apply --confirm=APPLY_CATALOG_CREDITS --limit=100`.
   `--mark-unattributed-unknown` is an explicit policy choice and is never the
   default. The command reports bounded samples and never logs credentials.
-- `429 Upload temporarily limited`: genuine image/audio upload endpoints share
-  a per-client upload budget of 20 requests per hour and expose `Retry-After`,
-  `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset`. Metadata and
-  Artist–Album membership changes do not consume that budget.
+- `429 Too many concurrent requests`: administrator shared-catalog uploads do
+  not have an hourly request-count quota, but uploads retain a one-per-client
+  concurrency boundary and expose `Retry-After`; wait for the active upload to
+  finish before retrying. Account-owned avatar mutations retain a per-client
+  budget of 20 requests per hour with `RateLimit-Limit`,
+  `RateLimit-Remaining`, and `RateLimit-Reset`. Bulk Audio uploads stop before
+  sending the remaining selected files after a server-wide failure and identify
+  those files as not attempted.
+- If a bulk upload reports a gateway or unconfirmed response, check MediaTrack
+  Operations and the Audio Storage Audit before retrying so a delayed success is
+  not duplicated. Album promotion is available only when the batch has both a
+  selected Album and an explicitly selected Primary Artist.

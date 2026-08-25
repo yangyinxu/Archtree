@@ -521,11 +521,84 @@
     const progress = document.getElementById('bulk-upload-progress');
     const progressLabel = document.getElementById('bulk-upload-progress-label');
     const button = bulkUploadForm.querySelector('button[type="submit"]');
+    const audioFilesInput = bulkUploadForm.querySelector('input[name="audioFiles"]');
+    const maximumBulkAudioFiles = Number(bulkUploadForm.dataset.maxFiles);
+    const artistSelector = bulkUploadForm.querySelector('select[name="artistId"]');
+    const artistRoleSelector = bulkUploadForm.querySelector('select[name="artistRole"]');
+    const organizationSelector = bulkUploadForm.querySelector('select[name="organizationId"]');
+    const organizationRoleSelector = bulkUploadForm.querySelector('select[name="organizationRole"]');
+    const albumSelector = bulkUploadForm.querySelector('select[name="albumId"]');
+    const inheritAlbumPrimaryCreditsInput = bulkUploadForm
+      .querySelector('input[name="inheritAlbumPrimaryCredits"]');
+    const attributionUnknownInput = bulkUploadForm.querySelector('input[name="attributionUnknown"]');
+    const promoteToAlbumPrimaryInput = bulkUploadForm.querySelector('input[name="promoteToAlbumPrimary"]');
 
     const showStatus = (message, percentage) => {
       status.hidden = false;
       if (typeof percentage === 'number') progress.value = percentage;
       progressLabel.textContent = message;
+    };
+
+    // Album promotion is valid only for an explicitly selected Primary Artist.
+    const syncAlbumPromotionAvailability = () => {
+      const canPromote = Boolean(
+        artistSelector.value
+        && albumSelector.value
+        && artistRoleSelector.value === 'primary'
+      );
+      if (!canPromote) promoteToAlbumPrimaryInput.checked = false;
+      promoteToAlbumPrimaryInput.disabled = !canPromote;
+    };
+    artistSelector.addEventListener('change', syncAlbumPromotionAvailability);
+    artistRoleSelector.addEventListener('change', syncAlbumPromotionAvailability);
+    albumSelector.addEventListener('change', syncAlbumPromotionAvailability);
+    syncAlbumPromotionAvailability();
+
+    const formatRetryDelay = (seconds) => {
+      if (!Number.isFinite(seconds) || seconds <= 0) return '';
+      if (seconds < 60) return `${Math.ceil(seconds)} second${seconds <= 1 ? '' : 's'}`;
+      const minutes = Math.ceil(seconds / 60);
+      return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+    };
+
+    // Converts JSON middleware responses and non-JSON proxy failures into safe recovery guidance.
+    const uploadRequestError = (request, response, fileIndex, fileCount) => {
+      const statusCode = Number(request.status) || 0;
+      const responseRetryAfter = Number(response && response.retryAfterSeconds);
+      const headerRetryAfter = Number(request.getResponseHeader('Retry-After'));
+      const retryAfterSeconds = Number.isFinite(responseRetryAfter) && responseRetryAfter > 0
+        ? responseRetryAfter
+        : Number.isFinite(headerRetryAfter) && headerRetryAfter > 0
+          ? headerRetryAfter
+          : 0;
+      const responseMessage = typeof response?.message === 'string' ? response.message.trim() : '';
+      let message = responseMessage;
+
+      if (statusCode === 429) {
+        const delay = formatRetryDelay(retryAfterSeconds);
+        message = `Upload temporarily limited.${delay ? ` Try again in about ${delay}.` : ' Try again later.'} No catalog changes were made for the rejected files.`;
+      } else if (statusCode === 413 && !message) {
+        message = `Upload ${fileIndex + 1} of ${fileCount} exceeds the server request-size limit.`;
+      } else if ([502, 503, 504].includes(statusCode) && !message) {
+        message = `The upload gateway returned HTTP ${statusCode} before confirming a lifecycle result. Check MediaTrack Operations and Audio Storage Audit before retrying.`;
+      } else if (!message) {
+        const statusLabel = statusCode > 0
+          ? ` (HTTP ${statusCode}${request.statusText ? ` ${request.statusText}` : ''})`
+          : '';
+        message = `Upload ${fileIndex + 1} of ${fileCount} failed${statusLabel}.`;
+      }
+
+      const error = new Error(message);
+      error.status = statusCode;
+      error.retryAfterSeconds = retryAfterSeconds;
+      error.outcomes = Array.isArray(response?.outcomes) ? response.outcomes : [];
+      error.stopBatch = statusCode === 400
+        || statusCode === 401
+        || statusCode === 403
+        || statusCode === 411
+        || statusCode === 429
+        || statusCode >= 500;
+      return error;
     };
 
     const uploadFile = (
@@ -570,14 +643,33 @@
             // Proxy and other non-JSON responses use the HTTP status message.
           }
 
-          if (request.status >= 200 && request.status < 300) {
+          const hasLifecycleOutcomes = Array.isArray(response.outcomes) && response.outcomes.length > 0;
+          if (((request.status >= 200 && request.status < 300) || request.status === 422)
+            && hasLifecycleOutcomes) {
             resolve(response);
             return;
           }
-          reject(new Error(response.message || `Upload ${fileIndex + 1} of ${fileCount} failed.`));
+          if (request.status >= 200 && request.status < 300) {
+            const redirectedToLogin = /\/auth\/login-web(?:[?#]|$)/.test(request.responseURL || '');
+            const error = new Error(redirectedToLogin
+              ? 'The administrator session expired before upload. Reload Content Manager and sign in before retrying.'
+              : 'The server returned success without per-item lifecycle results. Check MediaTrack Operations and Audio Storage Audit before retrying.');
+            error.status = request.status;
+            error.outcomes = [];
+            error.stopBatch = true;
+            reject(error);
+            return;
+          }
+          reject(uploadRequestError(request, response, fileIndex, fileCount));
         });
         request.addEventListener('error', () => {
-          reject(new Error(`Upload ${fileIndex + 1} of ${fileCount} failed before reaching the server.`));
+          const error = new Error(
+            `Upload ${fileIndex + 1} of ${fileCount} ended without server confirmation. Check MediaTrack Operations and Audio Storage Audit before retrying.`
+          );
+          error.status = 0;
+          error.outcomes = [];
+          error.stopBatch = true;
+          reject(error);
         });
         request.send(formData);
       });
@@ -585,22 +677,32 @@
 
     bulkUploadForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const files = bulkUploadForm.querySelector('input[name="audioFiles"]').files;
+      const files = audioFilesInput.files;
       if (!files || files.length === 0) return;
+      if (!Number.isSafeInteger(maximumBulkAudioFiles) || maximumBulkAudioFiles < 1) {
+        showStatus('The bulk upload limit is unavailable. Reload Content Manager before retrying.', 0);
+        return;
+      }
+      if (files.length > maximumBulkAudioFiles) {
+        showStatus(`Select no more than ${maximumBulkAudioFiles} files per batch.`, 0);
+        return;
+      }
 
       button.disabled = true;
       showStatus('Starting upload…', 0);
-      const artistId = bulkUploadForm.querySelector('select[name="artistId"]').value;
-      const albumId = bulkUploadForm.querySelector('select[name="albumId"]').value;
-      const artistRole = bulkUploadForm.querySelector('select[name="artistRole"]').value;
-      const organizationId = bulkUploadForm.querySelector('select[name="organizationId"]').value;
-      const organizationRole = bulkUploadForm.querySelector('select[name="organizationRole"]').value;
-      const inheritAlbumPrimaryCredits = bulkUploadForm
-        .querySelector('input[name="inheritAlbumPrimaryCredits"]').checked;
-      const attributionUnknown = bulkUploadForm
-        .querySelector('input[name="attributionUnknown"]').checked;
-      const promoteToAlbumPrimary = bulkUploadForm
-        .querySelector('input[name="promoteToAlbumPrimary"]').checked;
+      const artistId = artistSelector.value;
+      const albumId = albumSelector.value;
+      const artistRole = artistRoleSelector.value;
+      const organizationId = organizationSelector.value;
+      const organizationRole = organizationRoleSelector.value;
+      const inheritAlbumPrimaryCredits = inheritAlbumPrimaryCreditsInput.checked;
+      const attributionUnknown = attributionUnknownInput.checked;
+      const promoteToAlbumPrimary = promoteToAlbumPrimaryInput.checked;
+      if (promoteToAlbumPrimary && (!artistId || !albumId || artistRole !== 'primary')) {
+        showStatus('Album promotion requires a selected Album and Primary Artist.', 0);
+        button.disabled = false;
+        return;
+      }
       if (!artistId && !organizationId && !(albumId && inheritAlbumPrimaryCredits) && !attributionUnknown) {
         showStatus('Choose an Artist, Organization, inherited Album Artist, or undocumented attribution.', 0);
         button.disabled = false;
@@ -616,6 +718,7 @@
       const outcomes = [];
 
       for (let index = 0; index < files.length; index += 1) {
+        let stopBatch = false;
         try {
           const response = await uploadFile(
             files[index],
@@ -651,13 +754,25 @@
             succeeded.push(files[index].name);
           }
         } catch (error) {
+          const errorOutcomes = Array.isArray(error.outcomes) ? error.outcomes : [];
+          outcomes.push(...errorOutcomes);
           failures.push({
             name: files[index].name,
             error: error.message
           });
+          stopBatch = Boolean(error.stopBatch);
+          if (stopBatch) {
+            for (let remainingIndex = index + 1; remainingIndex < files.length; remainingIndex += 1) {
+              failures.push({
+                name: files[remainingIndex].name,
+                error: `Not attempted because the batch stopped after: ${error.message}`
+              });
+            }
+          }
         }
 
         showStatus(`Processed ${index + 1} of ${files.length} files…`, Math.round(((index + 1) / files.length) * 100));
+        if (stopBatch) break;
       }
 
       const results = { succeeded, failed: failures, outcomes };

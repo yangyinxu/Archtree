@@ -16,6 +16,7 @@ import { Carousel } from '../src/models/carousel';
 import { ContentCollection } from '../src/models/contentCollection';
 import { Page } from '../src/models/page';
 import { Organization } from '../src/models/organization';
+import { maxAudioBatchFiles } from '../src/middleware/audioUpload';
 import {
     managementInventoryOffset,
     managementInventoryPageSize,
@@ -308,6 +309,9 @@ test('Content Manager loads global inventory into focused Catalog sections', asy
     assert.match(capture.html, /Create and configure Carousels/);
     assert.match(capture.html, /Previous Artists/);
     assert.match(capture.html, /name="mediaFile" accept="audio\/\*,video\/mp4"/);
+    assert.match(capture.html, new RegExp(`Select up to ${maxAudioBatchFiles} files`));
+    assert.match(capture.html, new RegExp(`data-max-files="${maxAudioBatchFiles}"`));
+    assert.match(capture.html, /Files are uploaded one at a time/);
     assert.doesNotMatch(capture.html, /My Content|My Artists|My Albums|My Carousels|My MediaTracks/);
     assert.match(operationsPage.capture.html, /manager-view-operations/);
     assert.match(operationsPage.capture.html, /id="system-operations"/);

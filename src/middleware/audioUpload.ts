@@ -15,10 +15,8 @@ const configuredMaxBatchUploadMb = Number(process.env.MAX_AUDIO_BATCH_UPLOAD_MB 
 export const maxAudioBatchUploadMb = Number.isFinite(configuredMaxBatchUploadMb) && configuredMaxBatchUploadMb > 0
     ? configuredMaxBatchUploadMb
     : 1024;
-const configuredMaxBatchFiles = Number(process.env.MAX_AUDIO_BATCH_FILES ?? 5);
-export const maxAudioBatchFiles = Number.isFinite(configuredMaxBatchFiles) && configuredMaxBatchFiles > 0
-    ? Math.min(20, Math.floor(configuredMaxBatchFiles))
-    : 5;
+/** Caps one administrator bulk Audio selection while the browser sends files sequentially. */
+export const maxAudioBatchFiles = 100;
 const temporaryPaths = new WeakMap<Request, string[]>();
 
 export const audioDiskStorage = multer.diskStorage({
