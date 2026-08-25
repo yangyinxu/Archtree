@@ -55,7 +55,9 @@ const attachAuthContext = async (req: Request, replacementToken?: string) => {
         return null;
     }
 
-    const decodedToken = jwt.verify(token, getJwtSecret()) as JwtPayload;
+    const decodedToken = jwt.verify(token, getJwtSecret(), {
+        algorithms: ['HS256']
+    }) as JwtPayload;
     if (!decodedToken?.userId || !decodedToken?.email) {
         return null;
     }

@@ -318,6 +318,7 @@ const browserAccessSessionIdentity = (req: Request) => {
   if (!accessToken) return null;
   try {
     const claims = jwt.verify(accessToken, getJwtSecret(), {
+      algorithms: ['HS256'],
       ignoreExpiration: true
     }) as Partial<AccessTokenPayload>;
     if (
@@ -548,7 +549,9 @@ export const browserRefresh = async (req: Request, res: Response) => {
   // Commit the rotated pair before the profile read so a transient read failure does
   // not strand the browser with the refresh token that was just consumed.
   setBrowserSessionCookies(res, tokens);
-  const claims = jwt.verify(tokens.accessToken, getJwtSecret()) as AccessTokenPayload;
+  const claims = jwt.verify(tokens.accessToken, getJwtSecret(), {
+    algorithms: ['HS256']
+  }) as AccessTokenPayload;
   res.setHeader('X-Finitude-Account-Viewer', claims.userId);
   const payload = await loadBrowserSessionPayload(claims.userId);
   recordSecurityEvent('browser_json_refresh_succeeded', { sessionId: tokens.sessionId });
