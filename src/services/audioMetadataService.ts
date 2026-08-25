@@ -1,7 +1,32 @@
+import { parseBuffer, parseFile } from 'music-metadata';
+
 export const titleFromFileName = (fileName: string) => {
     return fileName
         .replace(/\.[^.]+$/, '')
         .trim();
+};
+
+/** Reads bounded upload metadata without loading temporary-file uploads into memory. */
+export const readAudioMetadata = (uploadFile: Express.Multer.File) => {
+    return uploadFile.path
+        ? parseFile(uploadFile.path, { duration: true, skipCovers: true })
+        : parseBuffer(Uint8Array.from(uploadFile.buffer), {
+            mimeType: uploadFile.mimetype || undefined,
+            size: uploadFile.size
+        }, {
+            duration: true,
+            skipCovers: true
+        });
+};
+
+/** Accepts only bounded positive whole-number track positions from embedded metadata. */
+export const embeddedTrackNumber = (value: unknown) => {
+    return typeof value === 'number'
+        && Number.isSafeInteger(value)
+        && value > 0
+        && value <= 9_999
+        ? value
+        : undefined;
 };
 
 export const formatDuration = (durationInSeconds: unknown) => {

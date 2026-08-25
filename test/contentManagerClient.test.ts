@@ -19,6 +19,42 @@ test('bulk Soundtrack uploads preserve every Credit intent field in each request
     assert.match(contentManagerClient, /formData\.append\('promoteToAlbumPrimary', 'true'\)/);
 });
 
+test('bulk uploads preserve lifecycle outcomes and stop after server-wide failures', () => {
+    assert.match(contentManagerClient, /request\.getResponseHeader\('Retry-After'\)/);
+    assert.match(contentManagerClient, /statusCode === 429/);
+    assert.match(contentManagerClient, /request\.status === 422/);
+    assert.match(contentManagerClient, /outcomes\.push\(\.\.\.errorOutcomes\)/);
+    assert.match(contentManagerClient, /Not attempted because the batch stopped after/);
+    assert.match(contentManagerClient, /if \(stopBatch\) break/);
+});
+
+test('bulk uploads enforce the rendered file-selection limit before the first request', () => {
+    assert.match(
+        contentManagerClient,
+        /const maximumBulkAudioFiles = Number\(bulkUploadForm\.dataset\.maxFiles\)/
+    );
+    assert.match(contentManagerClient, /files\.length > maximumBulkAudioFiles/);
+    assert.match(contentManagerClient, /formData\.append\('audioFiles', file\)/);
+    const validationIndex = contentManagerClient.indexOf(
+        'Select no more than ${maximumBulkAudioFiles} files per batch.'
+    );
+    const uploadIndex = contentManagerClient.indexOf('const response = await uploadFile(');
+    assert.ok(validationIndex >= 0);
+    assert.ok(uploadIndex >= 0);
+    assert.ok(validationIndex < uploadIndex);
+});
+
+test('bulk Album promotion is rejected before upload without a selected Primary Artist', () => {
+    const validationIndex = contentManagerClient.indexOf(
+        'Album promotion requires a selected Album and Primary Artist.'
+    );
+    const uploadIndex = contentManagerClient.indexOf('const response = await uploadFile(');
+    assert.ok(validationIndex >= 0);
+    assert.ok(uploadIndex >= 0);
+    assert.ok(validationIndex < uploadIndex);
+    assert.match(contentManagerClient, /promoteToAlbumPrimaryInput\.disabled = !canPromote/);
+});
+
 test('clearing Credits for unknown attribution requires explicit confirmation', () => {
     assert.match(contentManagerClient, /\[data-confirm-attribution-unknown\]/);
     assert.match(contentManagerClient, /This removes every current Credit/);

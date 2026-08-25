@@ -60,7 +60,7 @@ test('Content Manager applies its Web admin guards before every route handler', 
     );
 });
 
-test('Content Manager keeps metadata and relationships outside upload capacity', () => {
+test('Content Manager skips hourly quotas while retaining upload concurrency boundaries', () => {
     for (const path of [
         '/artist/update-metadata',
         '/artist/albums/add',
@@ -76,48 +76,65 @@ test('Content Manager keeps metadata and relationships outside upload capacity',
         '/credits/mark-unknown'
     ]) {
         assert.equal(
-            handlerNames(contentManagerRoutes, 'post', path).includes('contentManagerUploadRateLimit'),
-            false,
-            `${path} must not consume upload capacity`
-        );
-        assert.equal(
             handlerNames(contentManagerRoutes, 'post', path).includes('uploadConcurrencyLimit'),
             false,
             `${path} must not occupy an upload slot`
         );
     }
-    assert.deepEqual(
-        handlerNames(contentManagerRoutes, 'post', '/artist/update-cover-art').slice(0, 2),
-        ['contentManagerUploadRateLimit', 'uploadConcurrencyLimit']
-    );
-    assert.deepEqual(
-        handlerNames(contentManagerRoutes, 'post', '/artist/albums/create').slice(0, 2),
-        ['contentManagerUploadRateLimit', 'uploadConcurrencyLimit']
-    );
-    assert.deepEqual(
-        handlerNames(contentManagerRoutes, 'post', '/workflows/artist-release').slice(0, 2),
-        ['contentManagerUploadRateLimit', 'uploadConcurrencyLimit']
-    );
+
+    for (const path of [
+        '/workflows/artist-release',
+        '/artist/create',
+        '/artist/update',
+        '/artist/update-cover-art',
+        '/album/create',
+        '/album/update',
+        '/audioTrack/create',
+        '/audioTrack/update',
+        '/audioTrack/upload',
+        '/audioTrack/video-upload',
+        '/audioTrack/bulk-upload',
+        '/artist/albums/create'
+    ]) {
+        const names = handlerNames(contentManagerRoutes, 'post', path);
+        assert.deepEqual(names.slice(0, 1), ['uploadConcurrencyLimit']);
+        assert.equal(names.includes('contentManagerUploadRateLimit'), false);
+        assert.equal(names.includes('uploadRateLimit'), false);
+    }
 });
 
-test('catalog and audio mutations authorize admins before upload middleware', () => {
-    for (const [method, path] of [
+test('catalog and audio uploads authorize admins, skip hourly quotas, and retain concurrency guards', () => {
+    const catalogUploadRoutes = [
         ['post', '/album'],
         ['put', '/album/:albumId'],
-        ['delete', '/album/:albumId'],
         ['post', '/artist'],
-        ['put', '/artist/:artistId'],
-        ['delete', '/artist/:artistId']
-    ]) {
-        assertAdminRoute(catalogRoutes, method, path);
-    }
-    for (const [method, path] of [
+        ['put', '/artist/:artistId']
+    ];
+    const audioUploadRoutes = [
         ['post', '/audioTrack'],
         ['put', '/audioTrack/:audioTrackId'],
         ['post', '/audioTrack/:audioTrackId/upload'],
-        ['delete', '/audioTrack/:audioTrackId']
-    ]) {
+        ['post', '/audioTrack/:audioTrackId/video']
+    ];
+
+    for (const [method, path] of catalogUploadRoutes) {
+        assertAdminRoute(catalogRoutes, method, path);
+        const names = handlerNames(catalogRoutes, method, path);
+        assert.equal(names[2], 'uploadConcurrencyLimit');
+        assert.equal(names.includes('uploadRateLimit'), false);
+    }
+    for (const [method, path] of audioUploadRoutes) {
         assertAdminRoute(audioRoutes, method, path);
+        const names = handlerNames(audioRoutes, method, path);
+        assert.equal(names[2], 'uploadConcurrencyLimit');
+        assert.equal(names.includes('uploadRateLimit'), false);
+    }
+    for (const [router, method, path] of [
+        [catalogRoutes, 'delete', '/album/:albumId'],
+        [catalogRoutes, 'delete', '/artist/:artistId'],
+        [audioRoutes, 'delete', '/audioTrack/:audioTrackId']
+    ] as const) {
+        assertAdminRoute(router, method, path);
     }
 
     assert.equal(handlerNames(catalogRoutes, 'get', '/albums').includes('requireAdmin'), false);

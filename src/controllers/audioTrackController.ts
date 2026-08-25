@@ -34,6 +34,10 @@ import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware
 import { listPublicAudioTracks } from '../services/publicCatalogService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
 import {
+    embeddedTrackNumber,
+    readAudioMetadata
+} from '../services/audioMetadataService';
+import {
     publishUploadedAudioTracks
 } from '../services/albumTrackLinkService';
 import { retryAudioTrackPublications } from '../services/audioPublicationRecoveryService';
@@ -171,6 +175,12 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     const audioTrackObjectId = new ObjectId();
     const audioTrackId = audioTrackObjectId.toHexString();
     const originalFileName = normalizeUtf8Text(uploadFile.originalname);
+    let audioMetadata: any = null;
+    try {
+        audioMetadata = await readAudioMetadata(uploadFile);
+    } catch (metadataError) {
+        console.log(`Unable to read audio metadata for ${originalFileName}:`, metadataError);
+    }
 
     const track = new AudioTrack(
         normalizeUtf8Text(title),
@@ -186,6 +196,7 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
         uploadFile.mimetype || 'audio/mpeg',
         audioTrackObjectId
     );
+    track.trackNumber = embeddedTrackNumber(audioMetadata?.common?.track?.no);
     track.credits = creditsForLegacyArtistIds(
         'audioTrack',
         audioTrackId,

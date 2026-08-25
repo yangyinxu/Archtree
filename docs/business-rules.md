@@ -134,9 +134,22 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   removes only that Credit and its compatibility membership; it does not
   delete the Album, its MediaTracks, saves, downloads, or Carousel definitions.
 - Content Manager metadata and relationship mutations do not consume image or
-  audio upload rate/concurrency capacity when no file bytes are accepted by
-  that endpoint. Actual uploads remain bounded before multipart decoding and
-  storage work.
+  audio upload concurrency capacity when no file bytes are accepted by that
+  endpoint. Authenticated administrator uploads to the shared catalog have no
+  hourly request-count quota. Per-request and per-file size limits, batch file
+  count limits, and upload concurrency bounds still apply before multipart
+  decoding and storage work.
+- One Content Manager bulk Audio selection may contain at most 100 files.
+  The browser uploads those files sequentially as one file per request, so
+  every file keeps an independent lifecycle outcome and the selected batch is
+  never buffered or submitted as one aggregate media request.
+- Audio MediaTrack creation persists a valid positive whole-number Track
+  Number from embedded file metadata, including single and bulk uploads. Every
+  Album membership write derives the complete
+  persisted `Album.audioTrackIds` order from those numbers; administrators
+  cannot manually order Album MediaTracks. Missing or invalid numbers follow
+  numbered tracks, and duplicate or missing-number ties use canonical
+  MediaTrack ID order so request order cannot change the result.
 - The guided Artist release workflow may create or reuse an Artist, create and
   link an Album through a primary Credit, and optionally create or reuse a
   dynamic Artist Album Carousel and attach it to a Page. A dynamic Artist

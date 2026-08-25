@@ -15,6 +15,7 @@ import {
     readyAudioObjectFilter,
     readyAudioStorageFilter
 } from '../utils/audioStorageKey';
+import { embeddedTrackNumber } from './audioMetadataService';
 
 type AlbumPublicationMode = 'published' | 'staged';
 
@@ -65,6 +66,39 @@ const canonicalStoredTrackIds = (values: unknown) => normalizeTrackIds(
         : [],
     true
 );
+
+/** Returns the one deterministic Album order derived from embedded Track Numbers. */
+export const sortTrackIdsByEmbeddedTrackNumber = (
+    audioTrackIds: readonly string[],
+    trackNumbers: ReadonlyMap<string, unknown>
+) => {
+    return [...new Set(audioTrackIds)].sort((leftId, rightId) => {
+        const leftTrackNumber = embeddedTrackNumber(trackNumbers.get(leftId));
+        const rightTrackNumber = embeddedTrackNumber(trackNumbers.get(rightId));
+        if (leftTrackNumber === undefined && rightTrackNumber === undefined) {
+            return leftId.localeCompare(rightId);
+        }
+        if (leftTrackNumber === undefined) return 1;
+        if (rightTrackNumber === undefined) return -1;
+        return leftTrackNumber - rightTrackNumber || leftId.localeCompare(rightId);
+    });
+};
+
+/** Loads persisted Track Numbers inside the relationship transaction before ordering. */
+const orderedTrackIds = async (session: ClientSession, audioTrackIds: readonly string[]) => {
+    if (audioTrackIds.length === 0) return [];
+    const tracks = await getDb()!.collection('audioTracks').find(
+        {
+            _id: { $in: audioTrackIds.map((id) => ObjectId.createFromHexString(id)) }
+        },
+        { session, projection: { _id: 1, trackNumber: 1 } }
+    ).limit(audioTrackIds.length + 1).toArray();
+    const trackNumbers = new Map(tracks.map((track) => [
+        String(track._id),
+        track.trackNumber
+    ]));
+    return sortTrackIdsByEmbeddedTrackNumber(audioTrackIds, trackNumbers);
+};
 
 const hasExactCanonicalTrackOrder = (values: unknown, expected: readonly string[]) =>
     Array.isArray(values)
@@ -124,7 +158,7 @@ const replaceCanonicalAlbumMembership = async (
     normalizedAudioTrackIds: readonly string[],
     normalizedAlbumId: string,
     options: {
-        exactTargetOrder?: readonly string[];
+        exactTargetMembership?: readonly string[];
         targetAlbumUpdate?: Record<string, unknown>;
         targetAlbumExpectedFilter?: Record<string, unknown>;
         targetExists?: boolean;
@@ -191,10 +225,10 @@ const replaceCanonicalAlbumMembership = async (
             { session, projection: { audioTrackIds: 1 } }
         );
         if (!targetAlbum) throw new AlbumReferenceUnavailableError();
-        const exactTargetOrder = options.exactTargetOrder
-            ? normalizeTrackIds(options.exactTargetOrder, true)
+        const exactTargetMembership = options.exactTargetMembership
+            ? normalizeTrackIds(options.exactTargetMembership, true)
             : undefined;
-        const targetAudioTrackIds = exactTargetOrder ?? (() => {
+        const appendedAudioTrackIds = (() => {
             const existing = canonicalStoredTrackIds(targetAlbum.audioTrackIds);
             const seen = new Set(existing);
             for (const audioTrackId of normalizedAudioTrackIds) {
@@ -204,6 +238,10 @@ const replaceCanonicalAlbumMembership = async (
             }
             return existing;
         })();
+        const targetAudioTrackIds = await orderedTrackIds(
+            session,
+            exactTargetMembership ?? appendedAudioTrackIds
+        );
         const albumConditions: Record<string, unknown>[] = [readyAlbumLifecycleFilter];
         if (options.targetAlbumExpectedFilter) {
             albumConditions.push(options.targetAlbumExpectedFilter);
@@ -296,18 +334,19 @@ export const assignReadyAudioTracksToNewAlbum = async (
 ) => {
     const normalizedAlbumId = normalizeAlbumId(albumId, false);
     const normalizedAudioTrackIds = normalizeTrackIds(audioTrackIds, true);
+    const orderedAudioTrackIds = await orderedTrackIds(session, normalizedAudioTrackIds);
     await replaceCanonicalAlbumMembership(
         session,
-        normalizedAudioTrackIds,
+        orderedAudioTrackIds,
         normalizedAlbumId,
         { targetExists: false }
     );
-    return normalizedAudioTrackIds;
+    return orderedAudioTrackIds;
 };
 
 /**
- * Replaces an Album's ordered list, metadata/CAS, and both relationship sides
- * in one transaction. Removed dangling/non-ready rows do not block cleanup.
+ * Replaces Album membership, derives its Track Number order, and updates both
+ * relationship sides in one transaction. Dangling removed rows do not block cleanup.
  */
 export const replaceReadyAlbumAudioTracks = async (
     albumId: string,
@@ -317,6 +356,7 @@ export const replaceReadyAlbumAudioTracks = async (
 ) => {
     const normalizedAlbumId = normalizeAlbumId(albumId, false);
     const desiredAudioTrackIds = normalizeTrackIds(audioTrackIds, true);
+    let canonicalAudioTrackIds = desiredAudioTrackIds;
     try {
         return await withReadyAlbumReferences(
             [normalizedAlbumId],
@@ -333,13 +373,14 @@ export const replaceReadyAlbumAudioTracks = async (
                 // Desired and retained rows must be published/ready. Removed
                 // dangling rows are conditionally cleared without a readiness fence.
                 await touchReadyAudioTrackReferences(desiredAudioTrackIds, session);
+                canonicalAudioTrackIds = await orderedTrackIds(session, desiredAudioTrackIds);
                 await getDb()!.collection('audioTracks').updateMany(
                     {
                         albumId: { $in: storageReferenceValues([readyAlbumId]) },
-                        ...(desiredAudioTrackIds.length > 0
+                        ...(canonicalAudioTrackIds.length > 0
                             ? {
                                 _id: {
-                                    $nin: desiredAudioTrackIds.map(
+                                    $nin: canonicalAudioTrackIds.map(
                                         (id) => ObjectId.createFromHexString(id)
                                     )
                                 }
@@ -352,10 +393,10 @@ export const replaceReadyAlbumAudioTracks = async (
 
                 await replaceCanonicalAlbumMembership(
                     session,
-                    desiredAudioTrackIds,
+                    canonicalAudioTrackIds,
                     readyAlbumId,
                     {
-                        exactTargetOrder: desiredAudioTrackIds,
+                        exactTargetMembership: canonicalAudioTrackIds,
                         targetAlbumUpdate: albumUpdate,
                         targetAlbumExpectedFilter: options.requireExpectedCoverArtMatch
                             ? expectedCoverArtReference(options.expectedCoverArtId)
@@ -372,7 +413,7 @@ export const replaceReadyAlbumAudioTracks = async (
         try {
             confirmed = await confirmReadyAlbumTrackReplacement(
                 normalizedAlbumId,
-                desiredAudioTrackIds,
+                canonicalAudioTrackIds,
                 albumUpdate
             );
         } catch (errorDuringConfirmation) {

@@ -7,7 +7,6 @@ import { Carousel } from '../models/carousel';
 import { Page } from '../models/page';
 import { ContentCollection } from '../models/contentCollection';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
-import { parseBuffer, parseFile } from 'music-metadata';
 import { ObjectId } from 'mongodb';
 import { randomUUID } from 'node:crypto';
 import { normalizeUtf8Text } from '../utils/textEncoding';
@@ -19,8 +18,10 @@ import {
     S3StorageSummary
 } from '../services/s3StorageService';
 import {
+    embeddedTrackNumber,
     formatDuration,
     inferAudioFormat,
+    readAudioMetadata,
     titleFromFileName
 } from '../services/audioMetadataService';
 import {
@@ -41,6 +42,7 @@ import {
     validateCoverArtFile
 } from '../services/imageStorageService';
 import { getUploadedFile } from '../middleware/imageUpload';
+import { maxAudioBatchFiles } from '../middleware/audioUpload';
 import { boundedSearchQuery } from '../utils/search';
 import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware';
 import { activeMediaTypeForTrack } from '../utils/mediaStorageKey';
@@ -676,7 +678,24 @@ const renderManagePage = (params: {
     ].join('');
     const catalogSearchContent = catalogSearchSections
         || '<p class="empty-linked-content">No matching catalog content.</p>';
-    const bulkAudioUploadBlock = `<details class="advanced-tools" id="bulk-audio-upload"><summary>Bulk upload Audio MediaTracks</summary><p>Select up to 20 files. An Audio MediaTrack is created for each file using embedded metadata when available.</p><form id="bulk-audio-upload-form" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data"><select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select><select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select><select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select><select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select><select name="albumId"><option value="">No album</option>${albumOptions}</select><label><input type="checkbox" name="inheritAlbumPrimaryCredits" value="true" checked /> Inherit the selected Album's primary Artists</label><label><input type="checkbox" name="attributionUnknown" value="true" /> Attribution is not documented</label><label><input type="checkbox" name="promoteToAlbumPrimary" value="true" /> If this participant is primary, also add them to the Album</label><input type="file" name="audioFiles" accept="audio/*" multiple required /><button type="submit">Create and Upload Audio MediaTracks</button><div id="bulk-upload-status" role="status" aria-live="polite" hidden><progress id="bulk-upload-progress" max="100" value="0">0%</progress><span id="bulk-upload-progress-label">0%</span></div></form></details>`;
+    const bulkAudioUploadBlock = `<details class="advanced-tools" id="bulk-audio-upload">
+      <summary>Bulk upload Audio MediaTracks</summary>
+      <p id="bulk-audio-file-limit">Select up to ${maxAudioBatchFiles} files. Files are uploaded one at a time so each request remains within the 1 GiB request boundary.</p>
+      <form id="bulk-audio-upload-form" data-max-files="${maxAudioBatchFiles}" method="POST" action="/content/manage/audioTrack/bulk-upload" enctype="multipart/form-data">
+        <select name="artistId"><option value="">No Artist Credit</option>${artistOptions}</select>
+        <select name="artistRole">${renderCreditRoleOptions(soundtrackParticipantRoleOptions)}</select>
+        <select name="organizationId"><option value="">No Organization Credit</option>${organizationOptions}</select>
+        <select name="organizationRole">${renderCreditRoleOptions(organizationCreditRoleOptions)}</select>
+        <select name="albumId"><option value="">No album</option>${albumOptions}</select>
+        <label><input type="checkbox" name="inheritAlbumPrimaryCredits" value="true" checked /> Inherit the selected Album's primary Artists</label>
+        <label><input type="checkbox" name="attributionUnknown" value="true" /> Attribution is not documented</label>
+        <label><input type="checkbox" name="promoteToAlbumPrimary" value="true" aria-describedby="bulk-album-promotion-help" /> If the selected Primary Artist is not already on the Album, also add them</label>
+        <small id="bulk-album-promotion-help">Available only when an Album and Primary Artist are selected.</small>
+        <input type="file" name="audioFiles" accept="audio/*" multiple required aria-describedby="bulk-audio-file-limit" />
+        <button type="submit">Create and Upload Audio MediaTracks</button>
+        <div id="bulk-upload-status" role="status" aria-live="polite" hidden><progress id="bulk-upload-progress" max="100" value="0">0%</progress><span id="bulk-upload-progress-label">0%</span></div>
+      </form>
+    </details>`;
     const releaseOperationsBlock = renderReleaseOperations(releaseOperations);
 
     return `<!DOCTYPE html>
@@ -1259,7 +1278,8 @@ const renderManagePage = (params: {
       <form method="POST" action="/content/manage/album/create" enctype="multipart/form-data">
         <label>Title<input name="title" required /></label>
         <label>Cover art (optional)<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
-        <label>MediaTrack IDs (optional)<input name="audioTrackIds" placeholder="Comma separated canonical IDs" /></label>
+        <label>MediaTrack membership IDs (optional)<input name="audioTrackIds" placeholder="Comma separated canonical IDs" /></label>
+        <p class="drag-help">Album order is derived from each file's embedded Track Number and cannot be arranged manually.</p>
         <label>Release date<input name="releaseDate" type="date" /></label>
         <button type="submit">Create Album</button>
       </form>
@@ -1450,7 +1470,8 @@ const renderManagePage = (params: {
                 <label>Title<input name="title" value="${escapeHtml(String(prefillAlbum?.title ?? ''))}" /></label>
                 <label>Replacement cover art<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
                 <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
-                <label>MediaTrack IDs<input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Comma separated canonical IDs" /></label>
+                <label>MediaTrack membership IDs<input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Comma separated canonical IDs" /></label>
+                <p class="drag-help">Membership can be changed here; order always comes from each file's embedded Track Number.</p>
                 <label>Release date<input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAlbum?.releaseDate))}" type="date" /></label>
         <button type="submit">Update Album</button>
       </form></section>
@@ -2629,6 +2650,14 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
         const videoMetadata = mediaType === 'video'
             ? await validateSoundtrackVideoFile(uploadFile)
             : null;
+        let audioMetadata: any = null;
+        if (mediaType === 'audio') {
+            try {
+                audioMetadata = await readAudioMetadata(uploadFile);
+            } catch (metadataError) {
+                console.log(`Unable to read audio metadata for ${uploadFile.originalname}:`, metadataError);
+            }
+        }
 
         const artistId = String(req.body.artistId ?? '').trim();
         if (artistId) {
@@ -2703,6 +2732,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             uploadFile.mimetype || 'audio/mpeg',
             audioTrackObjectId
         );
+        track.trackNumber = embeddedTrackNumber(audioMetadata?.common?.track?.no);
         track.credits = credits;
         track.attributionStatus = attributionUnknown ? 'unknown' : 'documented';
         track.creditRevision = 1;
@@ -3301,18 +3331,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
 
             let metadata: any = null;
             try {
-                metadata = uploadFile.path
-                    ? await parseFile(uploadFile.path, {
-                        duration: true,
-                        skipCovers: true
-                    })
-                    : await parseBuffer(Uint8Array.from(uploadFile.buffer), {
-                        mimeType: uploadFile.mimetype || undefined,
-                        size: uploadFile.size
-                    }, {
-                        duration: true,
-                        skipCovers: true
-                    });
+                metadata = await readAudioMetadata(uploadFile);
             } catch (metadataError) {
                 console.log(`Unable to read audio metadata for ${originalFileName}:`, metadataError);
             }
@@ -3352,6 +3371,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                 uploadFile.mimetype || 'audio/mpeg',
                 audioTrackObjectId
             );
+            track.trackNumber = embeddedTrackNumber(metadata?.common?.track?.no);
             track.credits = credits;
             track.attributionStatus = attributionUnknown ? 'unknown' : 'documented';
             track.creditRevision = 1;
