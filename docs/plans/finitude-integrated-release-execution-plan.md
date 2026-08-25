@@ -43,6 +43,34 @@
 
 **Status: In progress**
 
+- The 2026-08-24 clean `origin/develop` preflight passed `npm test`,
+  `npm run build`, 148/148 Mongo integration tests, and E2E TypeScript, but the
+  strict three-engine browser gate failed its account-isolation bookkeeping in
+  Chromium, Firefox, and WebKit. The public localization-manifest request was
+  incorrectly included in the test's private-request ledger; trace evidence
+  shows every actual post-switch private request used the replacement viewer.
+- Release remediation is authorized and in progress: narrow the E2E private
+  request ledger, update necessary security dependencies, rerun the exact
+  release gates, then publish and monitor the candidate through the merged
+  `main` SHA. Darwin visual baselines also drift under the current local
+  Chromium and must not be updated without review; Linux CI remains the
+  release-owned pixel evidence.
+- The repaired account-isolation scenario passes Chromium, Firefox, and WebKit.
+  JWT verification now allowlists HS256, necessary direct and transitive
+  dependencies are on patched versions, and both production-only and complete
+  dependency audits report zero known vulnerabilities.
+- The remediated tree passes 312/312 server tests, 224/224 Web tests, the
+  production build and E2E typecheck, and 148/148 Mongo integration tests. Its
+  complete local browser matrix has 202 passes, 10 expected skips, and only the
+  seven already identified Darwin Chromium pixel-baseline differences; no
+  Darwin snapshot was updated.
+- PR #57's exact-head Linux gate passed every non-visual check and the same 202
+  browser tests, then exposed seven stale Linux Chromium baselines. Retained CI
+  expected/actual/diff evidence confirms the intended Library heading removal,
+  carousel copy inset, and language control across the reviewed desktop,
+  mobile, landscape, and active-playback views. Only those seven release-owned
+  Linux baselines are being replaced from the reviewed CI actual images.
+
 - Stage only the confirmed integrated candidate and inspect the staged diff.
 - The staged candidate contains 247 reviewed files, excludes the user-owned
   `AGENTS.md`, and passes the cached whitespace, dependency, generated-output,

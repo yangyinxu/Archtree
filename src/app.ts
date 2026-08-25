@@ -8,6 +8,7 @@ import authRoutes from './routes/authRoutes';
 import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import listenerRoutes from './routes/listenerRoutes';
+import { createLocalizationRouter } from './routes/localizationRoutes';
 import videoRoutes from './routes/videoRoutes';
 import {
   attachOptionalAuth,
@@ -36,6 +37,8 @@ import {
 export interface CreateAppOptions {
   /** Overrides the production listener bundle location for isolated route tests. */
   listenerDistPath?: string;
+  /** Overrides generated localization artifacts for isolated route tests. */
+  localizationDistPath?: string;
   /** Retains explicit runtime context for existing isolated application callers. */
   environment?: string;
 }
@@ -163,20 +166,20 @@ export interface LandingActions {
 export const renderLandingActions = (
   auth?: Pick<AuthContext, 'userId' | 'email' | 'role'>
 ): LandingActions => {
-  const listenerButton = '<a class="button button--listener" href="/finitude">Open Finitude</a>';
+  const listenerButton = '<a class="button button--listener" href="/finitude"><i class="ph ph-music-notes" aria-hidden="true"></i>Open Finitude</a>';
   if (auth) {
     const contentManagerHeaderAction = auth.role === 'admin'
-      ? '<a class="button" href="/content/manage">Content Manager</a>'
+      ? '<a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Content Manager</a>'
       : '';
     const adminHeroActions = auth.role === 'admin'
-      ? `<a class="button" href="/content/manage">Open Content Manager</a>
-        <a class="button button--secondary" href="/content/manage/audio-tracks">Browse MediaTracks</a>`
+      ? `<a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Open Content Manager</a>
+        <a class="button button--secondary" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i>Browse MediaTracks</a>`
       : '';
     return {
       headerActions: `<div class="header-actions">
         <span class="muted">${escapeHtml(auth.email)}</span>
         ${contentManagerHeaderAction}
-        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(auth.userId)}" /><button class="button--secondary" type="submit">Log out</button></form>
+        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(auth.userId)}" /><button class="button--secondary" type="submit"><i class="ph ph-sign-out" aria-hidden="true"></i>Log out</button></form>
       </div>`,
       heroActions: `<div class="action-row">
         ${listenerButton}
@@ -187,13 +190,13 @@ export const renderLandingActions = (
 
   return {
     headerActions: `<div class="header-actions">
-      <a class="button button--secondary" href="/auth/login-web">Log in</a>
-      <a class="button" href="/auth/signup-web">Create account</a>
+      <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
+      <a class="button" href="/auth/signup-web"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
     </div>`,
     heroActions: `<div class="action-row">
       ${listenerButton}
-      <a class="button" href="/auth/signup-web">Create account</a>
-      <a class="button button--secondary" href="/auth/login-web">Log in</a>
+      <a class="button" href="/auth/signup-web"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
+      <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
     </div>`
   };
 };
@@ -218,7 +221,10 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match, X-Finitude-Account-Viewer'
     );
-    res.setHeader('Access-Control-Expose-Headers', 'ETag, X-Finitude-Account-Viewer');
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Language, ETag, X-Finitude-Account-Viewer'
+    );
     next();
   });
 
@@ -247,6 +253,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/content', contentRoutes);
   app.use('/feed', feedRoutes);
   app.use('/video', videoRoutes);
+  app.use('/api/localizations/v1', createLocalizationRouter(options.localizationDistPath));
   app.use('/api/listener/v1', listenerRoutes);
 
   const listenerDistPath = options.listenerDistPath

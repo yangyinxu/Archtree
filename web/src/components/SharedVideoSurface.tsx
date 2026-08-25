@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import type { PlayerStore } from '../player';
 import styles from './SharedVideoSurface.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 interface SharedVideoSurfaceProps {
   className?: string;
@@ -18,6 +19,7 @@ export const SharedVideoSurface = ({
   title
 }: SharedVideoSurfaceProps) => {
   const host = useRef<HTMLDivElement>(null);
+  const { t } = useLocalization();
 
   useEffect(() => {
     if (!host.current) return undefined;
@@ -32,7 +34,7 @@ export const SharedVideoSurface = ({
     media.tabIndex = nativeControls ? 0 : -1;
     if (nativeControls) {
       media.removeAttribute('aria-hidden');
-      media.setAttribute('aria-label', `${title} fullscreen video player`);
+      media.setAttribute('aria-label', t('video.fullscreen.player_label', { title }));
     } else {
       media.setAttribute('aria-hidden', 'true');
       media.removeAttribute('aria-label');
@@ -44,11 +46,11 @@ export const SharedVideoSurface = ({
       media.setAttribute('aria-hidden', 'true');
       media.removeAttribute('aria-label');
     };
-  }, [nativeControls, title]);
+  }, [nativeControls, t, title]);
 
   return (
     <div
-      aria-label={nativeControls ? undefined : `${title} video`}
+      aria-label={nativeControls ? undefined : t('video.surface.label', { title })}
       className={`${styles.videoSurface} ${className}`}
       ref={host}
       role={nativeControls ? undefined : 'img'}

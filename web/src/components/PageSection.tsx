@@ -13,6 +13,7 @@ import { ContentCard } from './ContentCard';
 import { ContentListRow } from './ContentListRow';
 import { Icon } from './Icon';
 import styles from './PageSection.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 const carouselEdgeTolerance = 1;
 const carouselControlRevealMs = 1_400;
@@ -82,6 +83,7 @@ export const PageSection = ({
   onPlay,
   renderTrackTrailing
 }: PageSectionProps) => {
+  const { t } = useLocalization();
   const headingId = `listener-section-${id}`;
   const carouselHelpId = `${headingId}-help`;
   const carouselId = `${headingId}-carousel`;
@@ -224,7 +226,9 @@ export const PageSection = ({
   const collection = (
     <ul
       aria-describedby={presentation === 'carousel' ? carouselHelpId : undefined}
-      aria-label={presentation === 'carousel' ? `${title} carousel` : undefined}
+      aria-label={presentation === 'carousel'
+        ? t('page_section.carousel.label', { title })
+        : undefined}
       className={styles[presentation]}
       data-presentation={presentation}
       id={presentation === 'carousel' ? carouselId : undefined}
@@ -253,12 +257,12 @@ export const PageSection = ({
     <section className={styles.section} aria-labelledby={headingId}>
       <h2 className={styles.title} id={headingId}>{title}</h2>
       {items.length === 0 ? (
-        <p className={styles.empty}>No music is available in this section yet.</p>
+        <p className={styles.empty}>{t('page_section.empty')}</p>
       ) : (
         <>
           {presentation === 'carousel' && (
             <p className={styles.visuallyHidden} id={carouselHelpId}>
-              Use the previous and next controls, Page Up and Page Down, or Home and End to explore this carousel.
+              {t('page_section.carousel.help')}
             </p>
           )}
           {presentation === 'carousel' ? (
@@ -268,18 +272,18 @@ export const PageSection = ({
               {collection}
               {(carouselScrollState.canScrollBack || carouselScrollState.canScrollForward) && (
                 <div
-                  aria-label={`${title} carousel controls`}
+                  aria-label={t('page_section.carousel.controls_label', { title })}
                   className={styles.carouselControls}
                   role="group"
                 >
                   {carouselScrollState.canScrollBack && (
                     <button
                       aria-controls={carouselId}
-                      aria-label={`Show previous items in ${title}`}
+                      aria-label={t('page_section.carousel.previous', { title })}
                       className={`${styles.carouselControl} ${styles.carouselControlPrevious}`}
                       onClick={() => scrollCarousel('back')}
                       ref={previousControlRef}
-                      title={`Show previous items in ${title}`}
+                      title={t('page_section.carousel.previous', { title })}
                       type="button"
                     >
                       <Icon name="arrow-left" />
@@ -288,11 +292,11 @@ export const PageSection = ({
                   {carouselScrollState.canScrollForward && (
                     <button
                       aria-controls={carouselId}
-                      aria-label={`Show next items in ${title}`}
+                      aria-label={t('page_section.carousel.next', { title })}
                       className={`${styles.carouselControl} ${styles.carouselControlNext}`}
                       onClick={() => scrollCarousel('forward')}
                       ref={nextControlRef}
-                      title={`Show next items in ${title}`}
+                      title={t('page_section.carousel.next', { title })}
                       type="button"
                     >
                       <Icon name="arrow-right" />

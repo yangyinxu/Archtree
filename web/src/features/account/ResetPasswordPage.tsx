@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { resetBrowserPassword } from '../../api/account';
 import type { BrowserSession } from '../../api/schemas';
 import { browserSessionQueryKey } from '../../api/session';
+import { useLocalization } from '../../localization/LocalizationProvider';
 import styles from './AccountSurfaces.module.css';
 import { clearSearchHistory } from '../search/searchHistory';
 import {
@@ -16,6 +17,7 @@ import {
 
 /** Completes recovery and discards cached identity when the reset account is current. */
 export const ResetPasswordPage = () => {
+  const { t } = useLocalization();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -31,17 +33,19 @@ export const ResetPasswordPage = () => {
       }
       navigate('/login', {
         replace: true,
-        state: { notice: 'Password reset. Log in again with your new password.' }
+        state: { notice: t('auth.reset.success') }
       });
     }
   });
-  const error = localError || (reset.isError ? verificationActionError(reset.error) : '');
+  const error = localError || (reset.isError
+    ? verificationActionError(reset.error, t('account.common.code_error'))
+    : '');
 
   return (
     <AuthPageFrame
-      eyebrow="Reset password"
-      title="Choose a new key to your Library."
-      description="Use the six-digit recovery code and a new password. Completing this step signs the account out on every device."
+      eyebrow={t('auth.reset.eyebrow')}
+      title={t('auth.reset.title')}
+      description={t('auth.reset.description')}
     >
       <form
         aria-busy={reset.isPending}
@@ -53,7 +57,7 @@ export const ResetPasswordPage = () => {
           const form = new FormData(event.currentTarget);
           const password = String(form.get('password') ?? '');
           if (password !== String(form.get('confirmPassword') ?? '')) {
-            setLocalError('The passwords do not match.');
+            setLocalError(t('account.common.password_mismatch'));
             return;
           }
           reset.mutate({
@@ -63,29 +67,29 @@ export const ResetPasswordPage = () => {
           });
         }}
       >
-        <h2 className={styles.formTitle}>Set a new password</h2>
+        <h2 className={styles.formTitle}>{t('auth.reset.form_title')}</h2>
         <AuthFormFeedback error={error} focusKey={reset.submittedAt} />
         <div className={styles.field}>
-          <label htmlFor="reset-email">Email</label>
+          <label htmlFor="reset-email">{t('account.field.email')}</label>
           <input autoComplete="email" defaultValue={emailFromRouteState(location.state)} id="reset-email" maxLength={254} name="email" required type="email" />
         </div>
         <div className={styles.field}>
-          <label htmlFor="reset-code">Reset code</label>
+          <label htmlFor="reset-code">{t('account.field.reset_code')}</label>
           <input autoComplete="one-time-code" id="reset-code" inputMode="numeric" maxLength={6} minLength={6} name="code" pattern="[0-9]{6}" required type="text" />
         </div>
         <div className={styles.field}>
-          <label htmlFor="reset-password">New password</label>
+          <label htmlFor="reset-password">{t('account.field.new_password')}</label>
           <input aria-describedby="reset-password-hint" autoComplete="new-password" id="reset-password" maxLength={256} minLength={12} name="password" required type="password" />
-          <p className={styles.fieldHint} id="reset-password-hint">Use 12–256 characters and avoid common passwords.</p>
+          <p className={styles.fieldHint} id="reset-password-hint">{t('account.common.password_hint')}</p>
         </div>
         <div className={styles.field}>
-          <label htmlFor="reset-confirm-password">Confirm new password</label>
+          <label htmlFor="reset-confirm-password">{t('account.field.confirm_new_password')}</label>
           <input autoComplete="new-password" id="reset-confirm-password" maxLength={256} minLength={12} name="confirmPassword" required type="password" />
         </div>
         <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={reset.isPending} type="submit">
-          {reset.isPending ? 'Resetting password…' : 'Reset password'}
+          {reset.isPending ? t('auth.reset.resetting') : t('auth.reset.action')}
         </button>
-        <p className={styles.authFooter}><Link className={styles.inlineLink} to="/forgot-password">Request another code</Link></p>
+        <p className={styles.authFooter}><Link className={styles.inlineLink} to="/forgot-password">{t('auth.reset.request_another')}</Link></p>
       </form>
     </AuthPageFrame>
   );

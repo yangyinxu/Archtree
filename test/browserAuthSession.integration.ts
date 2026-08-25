@@ -266,6 +266,19 @@ test('browser login, one-time refresh, session read, and logout keep tokens out 
     const initialRefresh = cookieValue(loginJar, 'refresh_token');
     assert.ok(initialAccess);
     assert.ok(initialRefresh);
+    assert.equal(jwt.decode(initialAccess, { complete: true })?.header.alg, 'HS256');
+    assert.ok(process.env.JWT_SECRET);
+    const unsupportedAlgorithmAccess = jwt.sign({
+        userId: loginBody.user.id,
+        email: loginBody.user.email,
+        role: 'user',
+        sessionId: (jwt.decode(initialAccess) as jwt.JwtPayload).sessionId,
+        tokenType: 'access'
+    }, process.env.JWT_SECRET, { algorithm: 'HS384', expiresIn: 60 });
+    const unsupportedAlgorithmSession = await fetch(`${baseUrl}/auth/browser/session`, {
+        headers: { Cookie: `session_token=${unsupportedAlgorithmAccess}` }
+    });
+    assert.equal(unsupportedAlgorithmSession.status, 401);
     assert.doesNotMatch(loginText, new RegExp(`${initialAccess}|${initialRefresh}`));
 
     const authenticatedLoginPage = await fetch(

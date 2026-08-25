@@ -4,29 +4,31 @@ import { Link, useNavigate } from 'react-router';
 
 import { requestBrowserPasswordReset } from '../../api/account';
 import styles from './AccountSurfaces.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
 import {
   AuthFormFeedback,
   AuthPageFrame,
   privateAccountActionError
 } from './AuthFormSupport';
 
-const acceptedRecoveryMessage = 'If this address can reset a password, a recovery email has been sent.';
-
 /** Starts password recovery without disclosing whether an email has an account. */
 export const ForgotPasswordPage = () => {
+  const { t } = useLocalization();
   const navigate = useNavigate();
   const [submittedEmail, setSubmittedEmail] = useState('');
   const forgot = useMutation({
     mutationFn: requestBrowserPasswordReset,
     onSuccess: (_data, variables) => setSubmittedEmail(variables.email)
   });
-  const error = forgot.isError ? privateAccountActionError(forgot.error) : '';
+  const error = forgot.isError
+    ? privateAccountActionError(forgot.error, t('account.common.request_error'))
+    : '';
 
   return (
     <AuthPageFrame
-      eyebrow="Password recovery"
-      title="Find your way back to the music."
-      description="Enter your email and we’ll send a six-digit reset code when that address can use password recovery."
+      eyebrow={t('auth.recovery.eyebrow')}
+      title={t('auth.recovery.title')}
+      description={t('auth.recovery.description')}
     >
       <form
         aria-busy={forgot.isPending}
@@ -38,14 +40,14 @@ export const ForgotPasswordPage = () => {
           forgot.mutate({ email: String(form.get('email') ?? '') });
         }}
       >
-        <h2 className={styles.formTitle}>Reset your password</h2>
-        <AuthFormFeedback error={error} status={forgot.isSuccess ? acceptedRecoveryMessage : ''} focusKey={forgot.submittedAt} />
+        <h2 className={styles.formTitle}>{t('auth.recovery.form_title')}</h2>
+        <AuthFormFeedback error={error} status={forgot.isSuccess ? t('auth.recovery.accepted') : ''} focusKey={forgot.submittedAt} />
         <div className={styles.field}>
-          <label htmlFor="forgot-email">Email</label>
+          <label htmlFor="forgot-email">{t('account.field.email')}</label>
           <input autoComplete="email" id="forgot-email" maxLength={254} name="email" required type="email" />
         </div>
         <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={forgot.isPending} type="submit">
-          {forgot.isPending ? 'Sending reset code…' : 'Send reset code'}
+          {forgot.isPending ? t('auth.recovery.sending') : t('auth.recovery.send')}
         </button>
         {forgot.isSuccess && (
           <button
@@ -53,10 +55,10 @@ export const ForgotPasswordPage = () => {
             onClick={() => navigate('/reset-password', { state: { email: submittedEmail } })}
             type="button"
           >
-            Enter reset code
+            {t('auth.recovery.enter')}
           </button>
         )}
-        <p className={styles.authFooter}><Link className={styles.inlineLink} to="/login">Back to Log in</Link></p>
+        <p className={styles.authFooter}><Link className={styles.inlineLink} to="/login">{t('account.common.back_login')}</Link></p>
       </form>
     </AuthPageFrame>
   );

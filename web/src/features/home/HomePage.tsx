@@ -11,31 +11,34 @@ import { launchStandalonePlayback } from '../playback/launchPlayback';
 import { useSearchQuery } from '../search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../search/useSearchHistoryRecorder';
 import styles from '../../styles/Pages.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
+import type { MessageKey } from '../../localization/contract';
 
-const moods = [
-  { title: 'Quiet focus', meta: 'Space between every note', query: 'ambient' },
-  { title: 'After dark', meta: 'Low light, deep color', query: 'night' },
-  { title: 'Slow mornings', meta: 'A softer way to begin', query: 'morning' }
+const moods: Array<{ titleKey: MessageKey; metaKey: MessageKey; query: string }> = [
+  { titleKey: 'home.moods.quiet_focus.title', metaKey: 'home.moods.quiet_focus.meta', query: 'ambient' },
+  { titleKey: 'home.moods.after_dark.title', metaKey: 'home.moods.after_dark.meta', query: 'night' },
+  { titleKey: 'home.moods.slow_mornings.title', metaKey: 'home.moods.slow_mornings.meta', query: 'morning' }
 ];
 
 const MoodFallback = () => {
   const { cancelPendingPreview } = useSearchQuery();
   const { recordSubmittedQuery } = useSearchHistoryRecorder();
+  const { t } = useLocalization();
 
   return (
     <section className={styles.section} aria-labelledby="moods-title">
       <div className={styles.sectionHeader}>
         <div>
-          <p className={styles.eyebrow}>Listening moods</p>
-          <h2 className={styles.sectionTitle} id="moods-title">Begin with a feeling</h2>
+          <p className={styles.eyebrow}>{t('home.moods.eyebrow')}</p>
+          <h2 className={styles.sectionTitle} id="moods-title">{t('home.moods.title')}</h2>
         </div>
-        <p className={styles.sectionHint}>Explore the public catalog</p>
+        <p className={styles.sectionHint}>{t('home.moods.hint')}</p>
       </div>
       <div className={styles.cardGrid}>
         {moods.map((mood) => (
           <Link
             className={styles.moodCard}
-            key={mood.title}
+            key={mood.query}
             onClick={() => {
               cancelPendingPreview();
               recordSubmittedQuery(mood.query);
@@ -43,8 +46,8 @@ const MoodFallback = () => {
             state={null}
             to={`/search?q=${encodeURIComponent(mood.query)}`}
           >
-            <p className={styles.cardTitle}>{mood.title}</p>
-            <p className={styles.cardMeta}>{mood.meta}</p>
+            <p className={styles.cardTitle}>{t(mood.titleKey)}</p>
+            <p className={styles.cardMeta}>{t(mood.metaKey)}</p>
           </Link>
         ))}
       </div>
@@ -54,6 +57,7 @@ const MoodFallback = () => {
 
 /** Renders the configured listener Home while retaining a useful public fallback. */
 export const HomePage = () => {
+  const { t } = useLocalization();
   const session = useQuery(browserSessionQuery());
   const resolving = useQuery(browserSessionResolvingQuery());
   const viewerId = session.data?.user.id;
@@ -61,7 +65,7 @@ export const HomePage = () => {
     ...listenerHomeQuery(viewerId),
     enabled: session.isSuccess && !resolving.data
   });
-  const homeTitle = home.data?.title.trim() || 'Made for your moment';
+  const homeTitle = home.data?.title.trim() || t('home.default_title');
   const hasConfiguredSections = home.isSuccess && home.data.sections.length > 0;
 
   return (
@@ -72,24 +76,24 @@ export const HomePage = () => {
       </header>
 
       {resolving.data || session.isPending || home.isPending ? (
-        <section className={styles.panel} aria-busy="true" aria-label="Loading Home">
+        <section className={styles.panel} aria-busy="true" aria-label={t('home.loading.label')}>
           <div>
-            <p className={styles.eyebrow}>Curating your room</p>
-            <h2 className={styles.panelTitle}>Gathering music…</h2>
+            <p className={styles.eyebrow}>{t('home.loading.eyebrow')}</p>
+            <h2 className={styles.panelTitle}>{t('home.loading.title')}</h2>
           </div>
         </section>
       ) : session.isError || home.isError ? (
         <section className={styles.panel} aria-live="polite">
           <div>
-            <h2 className={styles.panelTitle}>Home is taking a quiet moment</h2>
-            <p className={styles.panelCopy}>The catalog could not be loaded, but Search is still available.</p>
+            <h2 className={styles.panelTitle}>{t('home.error.title')}</h2>
+            <p className={styles.panelCopy}>{t('home.error.copy')}</p>
             <div className={`${styles.actions} ${styles.panelActions}`}>
-              <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={() => home.refetch()} type="button">Try again</button>
+              <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={() => home.refetch()} type="button">{t('common.action.try_again')}</button>
             </div>
           </div>
         </section>
       ) : home.data.sections.length > 0 ? (
-        <div className={`${styles.sectionStack} ${styles.sectionStackReady}`} aria-label={home.data.title || 'Home collections'}>
+        <div className={`${styles.sectionStack} ${styles.sectionStackReady}`} aria-label={home.data.title || t('home.collections.label')}>
           {home.data.sections.map((section) => (
             <PageSection
               {...section}

@@ -40,6 +40,22 @@ test('traverses real carousel overflow with controls and boundary keys', async (
   await expect.poll(() => carousel.evaluate((element) => element.scrollWidth - element.clientWidth))
     .toBeGreaterThan(0);
 
+  const firstCard = carousel.getByRole('listitem').first();
+  const firstCardAction = firstCard.getByRole('link');
+  const firstCardTitle = firstCard.getByText('Quiet Hours 1', { exact: true });
+  const copyInsets = await Promise.all([
+    firstCardAction.boundingBox(),
+    firstCardTitle.boundingBox()
+  ]);
+  expect(copyInsets[0]).not.toBeNull();
+  expect(copyInsets[1]).not.toBeNull();
+  const leftInset = copyInsets[1]!.x - copyInsets[0]!.x;
+  const rightInset = copyInsets[0]!.x + copyInsets[0]!.width - copyInsets[1]!.x - copyInsets[1]!.width;
+  expect(leftInset).toBeGreaterThanOrEqual(4);
+  expect(leftInset).toBeLessThanOrEqual(6);
+  expect(rightInset).toBeGreaterThanOrEqual(4);
+  expect(rightInset).toBeLessThanOrEqual(6);
+
   const frame = carousel.locator('..');
   const next = page.getByRole('button', { name: `Show next items in ${sectionTitle}` });
   await expect(next).toHaveAttribute('aria-controls', 'listener-section-overflow-navigation-carousel-carousel');

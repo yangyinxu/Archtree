@@ -9,9 +9,11 @@ import { browserSessionQuery, browserSessionQueryKey } from '../../api/session';
 import { NewPlaylistButton } from './PlaylistControls';
 import { PlaylistSummaryList } from './PlaylistSummaryList';
 import styles from './Playlists.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
 
 /** Renders the complete owner-scoped Playlist index at every responsive size. */
 export const PlaylistIndexPage = () => {
+  const { t } = useLocalization();
   const queryClient = useQueryClient();
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id ?? '';
@@ -27,9 +29,9 @@ export const PlaylistIndexPage = () => {
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>Your Library</p>
-          <h1>Playlists</h1>
-          <p className={styles.lede}>Private, ordered listening lists that follow your account.</p>
+          <p className={styles.eyebrow}>{t('library.title')}</p>
+          <h1>{t('playlist.index.title')}</h1>
+          <p className={styles.lede}>{t('playlist.index.lede')}</p>
         </div>
         <NewPlaylistButton
           accountPending={session.isPending}
@@ -40,34 +42,34 @@ export const PlaylistIndexPage = () => {
       </header>
 
       {session.isPending ? (
-        <div aria-busy="true" className={styles.state}>Checking your account…</div>
+        <div aria-busy="true" className={styles.state}>{t('playlist.index.checking_account')}</div>
       ) : session.isError ? (
         <div className={styles.state} role="alert">
           <ListMusic aria-hidden="true" />
-          <h2>Your Playlists are out of reach</h2>
-          <p>Finitude could not safely confirm your account.</p>
-          <button className={styles.secondaryButton} onClick={() => session.refetch()} type="button">Try again</button>
+          <h2>{t('playlist.index.account_error_title')}</h2>
+          <p>{t('playlist.index.account_error_copy')}</p>
+          <button className={styles.secondaryButton} onClick={() => session.refetch()} type="button">{t('common.action.try_again')}</button>
         </div>
       ) : !session.data ? (
         <div className={styles.state}>
           <ListMusic aria-hidden="true" />
-          <h2>Log in to open your Playlists</h2>
-          <p>Only you can see and change the Playlists in your Finitude account.</p>
-          <Link className={styles.primaryButton} state={{ from: '/playlists' }} to="/login">Log in</Link>
+          <h2>{t('playlist.index.signed_out_title')}</h2>
+          <p>{t('playlist.index.signed_out_copy')}</p>
+          <Link className={styles.primaryButton} state={{ from: '/playlists' }} to="/login">{t('common.action.log_in')}</Link>
         </div>
       ) : playlists.isPending ? (
-        <div aria-busy="true" className={styles.state}>Loading your Playlists…</div>
+        <div aria-busy="true" className={styles.state}>{t('playlist.index.loading')}</div>
       ) : playlists.isError ? (
         <div className={styles.state} role="alert">
-          <h2>Your Playlists could not be loaded</h2>
-          <p>{playlists.error instanceof ApiError ? playlists.error.message : 'Try again in a moment.'}</p>
-          <button className={styles.secondaryButton} onClick={() => playlists.refetch()} type="button">Try again</button>
+          <h2>{t('playlist.index.load_error')}</h2>
+          <p>{t('playlist.error.try_moment')}</p>
+          <button className={styles.secondaryButton} onClick={() => playlists.refetch()} type="button">{t('common.action.try_again')}</button>
         </div>
       ) : playlists.data.items.length === 0 ? (
         <div className={styles.state}>
           <ListMusic aria-hidden="true" />
-          <h2>Make room for a new sequence</h2>
-          <p>Create your first Playlist, then add ready MediaTracks in the order you want to hear them.</p>
+          <h2>{t('playlist.index.empty_title')}</h2>
+          <p>{t('playlist.index.empty_copy')}</p>
           <NewPlaylistButton className={styles.primaryButton} viewerId={viewerId} />
         </div>
       ) : (

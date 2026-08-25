@@ -5,27 +5,28 @@ import {
   type PlayerStore
 } from '../player';
 import styles from './NowPlayingAside.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 interface NowPlayingAsideProps {
   /** Tests and alternate shells may inject the same store boundary used by PlayerBar. */
   store?: PlayerStore;
 }
 
-const artistLabel = (item: { displayByline?: string; artistNames: readonly string[] }) =>
-  item.displayByline || item.artistNames.join(', ') || 'Finitude MediaTrack';
-
 /** Presents read-only playback context without owning media, queue, or activity writes. */
 export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) => {
   const player = usePlayer(store);
+  const { t } = useLocalization();
   const current = player.currentItem;
+  const artistLabel = (item: { displayByline?: string; artistNames: readonly string[] }) =>
+    item.displayByline || item.artistNames.join(', ') || t('now_playing.fallback_byline');
 
   if (!current) {
     return (
-      <section aria-label="Current MediaTrack" className={`${styles.aside} ${styles.empty}`}>
-        <p className={styles.eyebrow}>Now playing</p>
+      <section aria-label={t('now_playing.current_label')} className={`${styles.aside} ${styles.empty}`}>
+        <p className={styles.eyebrow}>{t('now_playing.eyebrow')}</p>
         <div className={styles.emptyCopy}>
-          <h2>Nothing playing</h2>
-          <p>Choose a MediaTrack to see its details here.</p>
+          <h2>{t('now_playing.empty.title')}</h2>
+          <p>{t('now_playing.empty.copy')}</p>
         </div>
       </section>
     );
@@ -36,9 +37,9 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
 
   if (current.mediaType === 'video') {
     return (
-      <section aria-label="Video playback queue" className={`${styles.aside} ${styles.queueAside}`}>
+      <section aria-label={t('now_playing.video_queue_label')} className={`${styles.aside} ${styles.queueAside}`}>
         <header className={styles.header}>
-          <p className={styles.eyebrow}>Now playing</p>
+          <p className={styles.eyebrow}>{t('now_playing.eyebrow')}</p>
           <h2 title={current.title}>{current.title}</h2>
         </header>
 
@@ -58,8 +59,10 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
 
         <section aria-labelledby="video-queue-heading" className={styles.queueSection}>
           <div className={styles.upNextHeader}>
-            <h3 id="video-queue-heading">Up next</h3>
-            <span>{player.shuffleEnabled ? 'Shuffled order' : 'Playback order'}</span>
+            <h3 id="video-queue-heading">{t('now_playing.up_next')}</h3>
+            <span>{player.shuffleEnabled
+              ? t('now_playing.order.shuffled')
+              : t('now_playing.order.playback')}</span>
           </div>
           {player.upNextItems.length > 0 ? (
             <ol className={styles.queueList}>
@@ -77,12 +80,14 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
                     <p className={styles.upNextTitle} title={item.title}>{item.title}</p>
                     <p className={styles.upNextArtist}>{artistLabel(item)}</p>
                   </div>
-                  <span className={styles.queueKind}>{item.mediaType === 'video' ? 'Video' : 'Audio'}</span>
+                  <span className={styles.queueKind}>{item.mediaType === 'video'
+                    ? t('common.label.video')
+                    : t('common.label.audio')}</span>
                 </li>
               ))}
             </ol>
           ) : (
-            <p className={styles.queueEmpty}>This is the end of the queue.</p>
+            <p className={styles.queueEmpty}>{t('now_playing.queue_end')}</p>
           )}
         </section>
       </section>
@@ -90,14 +95,14 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
   }
 
   return (
-    <section aria-label="Current MediaTrack" className={styles.aside}>
+    <section aria-label={t('now_playing.current_label')} className={styles.aside}>
       <header className={styles.header}>
-        <p className={styles.eyebrow}>Now playing</p>
+        <p className={styles.eyebrow}>{t('now_playing.eyebrow')}</p>
         <h2 title={current.title}>{current.title}</h2>
       </header>
 
       <Artwork
-        alt={`${current.title} cover`}
+        alt={t('content.album.cover_alt', { title: current.title })}
         className={styles.currentArtwork}
         fetchPriority="high"
         kind="audioTrack"
@@ -114,8 +119,12 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
       {upNext && (
         <section aria-labelledby="up-next-heading" className={styles.upNextCard}>
           <div className={styles.upNextHeader}>
-            <h3 id="up-next-heading">{repeatsCurrent ? 'Repeats next' : 'Up next'}</h3>
-            <span>{player.shuffleEnabled ? 'Shuffled order' : 'Playback order'}</span>
+            <h3 id="up-next-heading">{repeatsCurrent
+              ? t('now_playing.repeats_next')
+              : t('now_playing.up_next')}</h3>
+            <span>{player.shuffleEnabled
+              ? t('now_playing.order.shuffled')
+              : t('now_playing.order.playback')}</span>
           </div>
           <div className={styles.upNextItem}>
             <Artwork

@@ -4,29 +4,8 @@ import { Play } from 'lucide-react';
 import { contentByline, type AudioTrackSummary, type ContentSummary } from '../api/contentSchemas';
 import { Artwork } from './Artwork';
 import styles from './ContentCard.module.css';
+import { useLocalization } from '../localization/LocalizationProvider';
 
-const contentTitle = (item: ContentSummary) => {
-  if (item.contentType === 'artist') return item.name.trim() || 'Unknown artist';
-  if (item.contentType === 'album') return item.title.trim() || 'Untitled album';
-  return item.title.trim() || 'Untitled MediaTrack';
-};
-
-const contentMetadata = (item: ContentSummary) => {
-  if (item.contentType === 'artist') return 'Artist';
-  if (item.contentType === 'album') {
-    return [
-      'Album',
-      contentByline(item) || null,
-      item.releaseDate?.year ? String(item.releaseDate.year) : null
-    ].filter(Boolean).join(' · ');
-  }
-  return [
-    'MediaTrack',
-    contentByline(item) || null,
-    item.albumTitle,
-    item.duration
-  ].filter(Boolean).join(' · ');
-};
 
 export interface ContentCardProps {
   item: ContentSummary;
@@ -43,8 +22,26 @@ export const ContentCard = ({
   onPlay,
   artworkSizes = defaultContentCardArtworkSizes
 }: ContentCardProps) => {
-  const title = contentTitle(item);
-  const metadata = contentMetadata(item);
+  const { locale, t } = useLocalization();
+  const title = item.contentType === 'artist'
+    ? item.name.trim() || t('content.title.unknown_artist')
+    : item.title.trim() || (item.contentType === 'album'
+      ? t('content.title.untitled_album')
+      : t('content.title.untitled_track'));
+  const type = item.contentType === 'artist'
+    ? t('common.label.artist')
+    : item.contentType === 'album'
+      ? t('common.label.album')
+      : t('common.label.mediatrack');
+  const byline = item.contentType === 'artist' ? '' : contentByline(item);
+  const metadata = [
+    type,
+    byline || null,
+    item.contentType === 'album'
+      ? item.releaseDate?.year ? String(item.releaseDate.year) : null
+      : item.contentType === 'audioTrack' ? item.albumTitle : null,
+    item.contentType === 'audioTrack' ? item.duration : null
+  ].filter(Boolean).join(' · ');
   const showPlayReveal = item.contentType === 'audioTrack' && Boolean(onPlay);
   const body = (
     <>
@@ -68,7 +65,9 @@ export const ContentCard = ({
       {item.contentType === 'audioTrack' ? (
         onPlay ? (
           <button
-            aria-label={`Play ${title}${contentByline(item) ? ` by ${contentByline(item)}` : ''}`}
+            aria-label={contentByline(item)
+              ? t('content.play.byline_label', { title, byline: contentByline(item) })
+              : t('content.play.label', { title })}
             className={styles.action}
             onClick={() => onPlay(item)}
             type="button"
@@ -80,7 +79,7 @@ export const ContentCard = ({
         )
       ) : (
         <Link
-          aria-label={`${title}, ${item.contentType === 'artist' ? 'artist' : 'album'}`}
+          aria-label={t('content.link.label', { title, type: type.toLocaleLowerCase(locale) })}
           className={styles.action}
           to={`/${item.contentType === 'artist' ? 'artists' : 'albums'}/${encodeURIComponent(item.id)}`}
         >

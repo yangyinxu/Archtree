@@ -76,6 +76,9 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   Playlist list in the left sidebar below primary navigation. The reference
   layout informs hierarchy without copying another product's branding or exact
   components.
+- The desktop Web sidebar begins with primary navigation and does not render a
+  separate `Your Library` heading. The Library destination and the Library
+  page's own title remain available.
 - On tablet and mobile Web, Playlists are available as a Library-owned
   destination rather than as an additional primary-navigation tab. Playlists
   remain separate from the Saved/Downloaded Album and MediaTrack union and its
@@ -186,6 +189,75 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   Played activity, profile/avatar, account, device-local downloads, and
   Playlists. These owner-scoped actions do not mutate the shared catalog.
 
+## Native Home Startup and Recovery
+
+- Finitude iOS and Android initiate a public Home load whenever Home is first
+  presented after an install, update, or ordinary relaunch. Retained device or
+  account storage must not suppress that load.
+- The expanded Home response is the required native composition response.
+  Ready content included in that response remains renderable when an auxiliary
+  public catalog or Feed request used only for compatibility enrichment fails.
+- Before Home has usable content, a failed or cancelled load presents a
+  recoverable unavailable state rather than an empty success. Initial loading,
+  unavailable, and empty states expose an explicit retry or refresh action.
+- A refresh requested while an older Home load is still active must result in
+  a fresh attempt. A cancelled or stale load cannot clear the loading state or
+  overwrite the result of that newer attempt.
+- A later refresh failure preserves already rendered Home content and reports
+  the refresh failure without replacing that content with an empty page.
+
+## Finitude Localization
+
+- Finitude Web starts in explicit `en-US` when no valid app-language preference
+  has been stored and offers only explicit published-language choices. It does
+  not present browser UI or content-language detection as a reliable automatic
+  choice; a legacy Browser default preference migrates to `en-US`. iOS and
+  Android continue to default to System and follow the operating system's
+  ordered preferred languages. A listener may choose any explicitly supported
+  language. The preference survives relaunch, logout, and account changes.
+- Supported language identifiers use canonical BCP 47 tags. System is the
+  native presentation label for its automatic preference state, not a language
+  identifier; the retired Web Browser default label is retained only in older
+  client translation contracts.
+- Every client release includes a complete `en-US` runtime bundle as the final
+  fallback: Web packages a same-origin static JSON asset and native clients
+  package `en-US.json` as an app resource. It can render the app without a
+  session, remote localization request, writable cache, or prior launch. A raw
+  localization key, missing-variable marker, or blank translation is never
+  listener-facing fallback copy.
+- Startup uses the valid last-known-good bundle for the resolved language, or
+  packaged `en-US` when no such bundle exists. Every client checks for a newer
+  published translation in the background on cold launch and does not block
+  startup on that remote request.
+- A downloaded translation becomes active only after its entire schema,
+  locale, messages, and variables validate. Malformed, incomplete, stale,
+  cancelled, or failed responses preserve the current readable bundle. A
+  response for an older language choice cannot overwrite a newer choice.
+- Changing to an uncached explicit language succeeds only after that bundle is
+  downloaded and validated. A failed change preserves the prior preference and
+  visible language and offers retry.
+- Published locale bundles share one complete semantic-key set and the same
+  named-variable contract for each key. Translatable sentences, plurals, and
+  accessibility copy are complete messages rather than concatenated fragments.
+- Runtime translation bundles localize Finitude interface copy. They do not
+  automatically translate catalog metadata, creator or listener content, or
+  replace platform-packaged text that the operating system needs before the
+  app's localization runtime is available.
+- Canonical locale JSON is the only manually maintained translation source.
+  Each client build derives its platform-packaged iOS or Android text from the
+  same reviewed catalog revision. Runtime copy may update remotely, while a
+  change to operating-system-owned copy becomes visible with the next app
+  release that includes regenerated native resources.
+- Finitude Web keeps a globe language shortcut at the bottom-left of the
+  desktop sidebar, matching the persistent placement pattern used by Spotify.
+  Compact layouts expose the same control as a top-bar icon. Both open the same
+  accessible selector for published languages. Native selectors continue to
+  show System.
+- Every published-language option shows its native name as the primary label
+  and a stable English name as secondary context. Both names are maintained
+  once in canonical locale metadata and published in the shared manifest so
+  Web, iOS, and Android present the same reviewed language identity.
+
 ## Personalized Carousels
 
 - Personalized carousels have one of two sources:
@@ -269,8 +341,8 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - A Video playback failure retains the queue and exposes a recoverable playback
   error. It does not fabricate an Audio fallback because no second media object
   exists.
-- Finitude Web remains streaming-only. The first iOS adoption also streams
-  Video. An existing device-local Audio download does not imply a Video
+- Finitude Web remains streaming-only. The first iOS and Android adoptions also
+  stream Video. An existing device-local Audio download does not imply a Video
   download, Video offline availability, or another representation on the same
   MediaTrack.
 - When a Video MediaTrack becomes current on iOS, Finitude automatically opens
@@ -280,9 +352,17 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - The iOS Video surface renders the same shared playback state and
   transport used by its compact player, expanded player, queue, system media
   controls, and media routes. It must not create a second player or queue.
-- iOS download actions remain Audio-only in the first Video release. An Album
-  containing any Video MediaTrack is playable online but is not offered as a
-  complete Album download.
+- When a Video MediaTrack becomes current on Android, Finitude automatically
+  opens the expanded shared-player surface and renders the Video contain-fit.
+  The listener may collapse it back to the compact player; Video has no
+  cover-only or audio-only mode switch.
+- Android's inline and fullscreen Video surfaces attach to the same app-owned
+  Media3 player and MediaSession used by the compact player, expanded player,
+  queue, elapsed clock, transport controls, and system controls. Entering or
+  exiting fullscreen must not replace or restart playback.
+- Native download actions remain Audio-only in the first Video release. An
+  Album containing any Video MediaTrack is playable online but is not offered
+  as a complete Album download.
 
 ## Web Listener
 

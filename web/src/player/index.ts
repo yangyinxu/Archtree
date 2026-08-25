@@ -1,5 +1,6 @@
 export { playbackActivityTarget } from './activityPolicy';
 export { createPlayerStore, playerStore } from './playerStore';
+export { localizedPlayerError } from './localizedError';
 export { usePlayer } from './usePlayer';
 export type {
   PlaybackActivityEvent,

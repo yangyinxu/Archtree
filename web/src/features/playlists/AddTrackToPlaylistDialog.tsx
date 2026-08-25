@@ -19,19 +19,23 @@ import { ModalDialog } from '../../components/ModalDialog';
 import { commitPlaylistDetail, revalidatePlaylistLists } from './playlistCache';
 import styles from './AddTrackToPlaylistButton.module.css';
 import playlistStyles from './Playlists.module.css';
+import {
+  useLocalization,
+  type LocalizationContextValue
+} from '../../localization/LocalizationProvider';
 
-const addFailureMessage = (error: unknown) => {
-  if (!(error instanceof ApiError)) return 'Finitude could not confirm that addition.';
-  if (error.code === 'playlist_item_limit_reached') return 'That Playlist already contains 500 MediaTracks.';
-  if (error.code === 'idempotency_in_progress') return 'That addition is still being confirmed. Wait a moment, then retry.';
-  if (error.code === 'idempotency_key_reused') return 'That retry no longer matches this addition. Close the picker and start again.';
+const addFailureMessage = (error: unknown, t: LocalizationContextValue['t']) => {
+  if (!(error instanceof ApiError)) return t('playlist.error.add_unconfirmed');
+  if (error.code === 'playlist_item_limit_reached') return t('playlist.error.item_limit_that');
+  if (error.code === 'idempotency_in_progress') return t('playlist.error.add_pending');
+  if (error.code === 'idempotency_key_reused') return t('playlist.error.add_retry_mismatch');
   if (error.code === 'account_viewer_mismatch' || error.status === 401) {
-    return 'Your signed-in account changed. Reload the page before adding this MediaTrack.';
+    return t('playlist.error.account_add_this');
   }
   if (error.code === 'playlist_revision_conflict' || error.status === 409) {
-    return 'That Playlist changed on another device. Its latest revision is loading.';
+    return t('playlist.error.revision_that_loading');
   }
-  return error.message;
+  return t('playlist.error.add_unconfirmed');
 };
 
 /** Loads the owner-scoped picker only after its lightweight row action is activated. */
@@ -46,6 +50,7 @@ export const AddTrackToPlaylistDialog = ({
   onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
 }) => {
+  const { t } = useLocalization();
   const queryClient = useQueryClient();
   const closeRef = useRef<HTMLButtonElement>(null);
   const idempotencyKeysRef = useRef(new Map<string, string>());
@@ -104,33 +109,35 @@ export const AddTrackToPlaylistDialog = ({
   return (
     <ModalDialog
       closeDisabled={mutation.isPending}
-      description={`Choose where to add “${track.title || 'Untitled MediaTrack'}”. This action never starts playback.`}
+      description={t('playlist.add_one.choose_description', {
+        title: track.title || t('content.title.untitled_track')
+      })}
       initialFocusRef={closeRef}
-      kicker="Add to Playlist"
+      kicker={t('playlist.add_one.button_title')}
       onClose={onClose}
       returnFocusRef={returnFocusRef}
-      title="Choose a Playlist"
+      title={t('playlist.add_one.choose_title')}
     >
-      {ownsLocalState && mutation.isError && <p className={playlistStyles.feedbackError} role="alert">{addFailureMessage(mutation.error)}</p>}
+      {ownsLocalState && mutation.isError && <p className={playlistStyles.feedbackError} role="alert">{addFailureMessage(mutation.error, t)}</p>}
       {memberships.isError && (
         <p className={playlistStyles.feedbackError} role="alert">
-          Existing membership could not be checked. Adding remains safe and will not create a duplicate.
+          {t('playlist.add_one.membership_error')}
         </p>
       )}
       {playlists.isPending ? (
-        <p aria-busy="true" className={styles.state}>Loading your Playlists…</p>
+        <p aria-busy="true" className={styles.state}>{t('playlist.add_one.loading')}</p>
       ) : playlists.isError ? (
         <div className={styles.state} role="alert">
-          <span>Your Playlists could not be loaded.</span>
-          <button className={playlistStyles.textButton} onClick={() => playlists.refetch()} type="button">Try again</button>
+          <span>{t('playlist.index.load_error')}</span>
+          <button className={playlistStyles.textButton} onClick={() => playlists.refetch()} type="button">{t('common.action.try_again')}</button>
         </div>
       ) : playlists.data.items.length === 0 ? (
         <div className={styles.state}>
-          <span>Create a Playlist first, then return to add this MediaTrack.</span>
-          <Link className={playlistStyles.primaryButton} onClick={onClose} to="/playlists">Create a Playlist</Link>
+          <span>{t('playlist.add_one.empty')}</span>
+          <Link className={playlistStyles.primaryButton} onClick={onClose} to="/playlists">{t('playlist.action.create')}</Link>
         </div>
       ) : (
-        <ul aria-label="Choose a Playlist" className={styles.list}>
+        <ul aria-label={t('playlist.add_one.choose_title')} className={styles.list}>
           {playlists.data.items.map((playlist) => {
             const cachedDetail = queryClient.getQueryData<PlaylistDetail>(
               playlistQueryKeys.detail(viewerId, playlist.id)
@@ -154,23 +161,38 @@ export const AddTrackToPlaylistDialog = ({
                   />
                   <span className={styles.listCopy}>
                     <span title={playlist.name}>{playlist.name}</span>
-                    <span>Playlist · {playlist.itemCount} MediaTrack{playlist.itemCount === 1 ? '' : 's'}</span>
+                    <span>{t('common.label.playlist')} · {t('playlist.item_count', { count: playlist.itemCount })}</span>
                   </span>
                 </span>
                 <button
                   aria-label={checkingMembership
-                    ? `Checking whether ${track.title || 'Untitled MediaTrack'} is in ${playlist.name}`
+                    ? t('playlist.add_one.checking_label', {
+                        title: track.title || t('content.title.untitled_track'),
+                        playlist: playlist.name
+                      })
                     : alreadyAdded
-                    ? `${track.title || 'Untitled MediaTrack'} is already in ${playlist.name}`
+                    ? t('playlist.add.existing_label', {
+                        title: track.title || t('content.title.untitled_track'),
+                        playlist: playlist.name
+                      })
                     : playlist.itemCount >= 500
-                      ? `${playlist.name} is full`
-                      : `Add ${track.title || 'Untitled MediaTrack'} to ${playlist.name}`}
+                      ? t('playlist.add_one.full_label', { playlist: playlist.name })
+                      : t('playlist.add.label', {
+                          title: track.title || t('content.title.untitled_track'),
+                          playlist: playlist.name
+                        })}
                   className={playlistStyles.secondaryButton}
                   disabled={checkingMembership || Boolean(alreadyAdded) || playlist.itemCount >= 500 || mutation.isPending}
                   onClick={() => mutation.mutate(playlist)}
                   type="button"
                 >
-                  {checkingMembership ? 'Checking…' : alreadyAdded ? 'Added' : playlist.itemCount >= 500 ? 'Full' : 'Add'}
+                  {checkingMembership
+                    ? t('playlist.add_one.checking')
+                    : alreadyAdded
+                      ? t('playlist.add.added')
+                      : playlist.itemCount >= 500
+                        ? t('playlist.add_one.full')
+                        : t('playlist.action.add')}
                 </button>
               </li>
             );
@@ -178,8 +200,8 @@ export const AddTrackToPlaylistDialog = ({
         </ul>
       )}
       <div className={playlistStyles.dialogActions}>
-        <Link className={playlistStyles.textButton} onClick={onClose} to="/playlists">Manage Playlists</Link>
-        <button className={playlistStyles.secondaryButton} disabled={mutation.isPending} onClick={onClose} ref={closeRef} type="button">Done</button>
+        <Link className={playlistStyles.textButton} onClick={onClose} to="/playlists">{t('playlist.action.manage')}</Link>
+        <button className={playlistStyles.secondaryButton} disabled={mutation.isPending} onClick={onClose} ref={closeRef} type="button">{t('common.action.done')}</button>
       </div>
     </ModalDialog>
   );

@@ -84,7 +84,7 @@ const signAccessToken = (user: SessionUser, sessionId: string) => {
             tokenType: 'access'
         } satisfies AccessTokenPayload,
         getJwtSecret(),
-        { expiresIn: accessTokenDurationSeconds() }
+        { algorithm: 'HS256', expiresIn: accessTokenDurationSeconds() }
     );
 };
 
@@ -101,7 +101,7 @@ export const createLegacyMigrationToken = (user: SessionUser) => {
             role: normalizeUserRole(user.role)
         },
         getJwtSecret(),
-        { expiresIn: legacyDays * 24 * 60 * 60 }
+        { algorithm: 'HS256', expiresIn: legacyDays * 24 * 60 * 60 }
     );
 };
 

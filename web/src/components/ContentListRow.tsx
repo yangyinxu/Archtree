@@ -4,18 +4,7 @@ import { Link } from 'react-router';
 import { contentByline, type AudioTrackSummary, type ContentSummary } from '../api/contentSchemas';
 import { Artwork } from './Artwork';
 import styles from './ContentListRow.module.css';
-
-const titleFor = (item: ContentSummary) => item.contentType === 'artist'
-  ? item.name.trim() || 'Unknown artist'
-  : item.title.trim() || (item.contentType === 'album' ? 'Untitled album' : 'Untitled MediaTrack');
-
-const metadataFor = (item: ContentSummary) => {
-  if (item.contentType === 'artist') return ['Artist'];
-  if (item.contentType === 'album') {
-    return ['Album', contentByline(item) || null, item.releaseDate?.year ?? null];
-  }
-  return ['MediaTrack', contentByline(item) || null, item.albumTitle, item.duration];
-};
+import { useLocalization } from '../localization/LocalizationProvider';
 
 export interface ContentListRowProps {
   item: ContentSummary;
@@ -25,8 +14,24 @@ export interface ContentListRowProps {
 
 /** Renders a canonical single-column row whose whole surface is the primary action. */
 export const ContentListRow = ({ item, onPlay, trailing }: ContentListRowProps) => {
-  const title = titleFor(item);
-  const metadata = metadataFor(item).filter((value) => value !== null && value !== '').join(' · ');
+  const { locale, t } = useLocalization();
+  const title = item.contentType === 'artist'
+    ? item.name.trim() || t('content.title.unknown_artist')
+    : item.title.trim() || (item.contentType === 'album'
+      ? t('content.title.untitled_album')
+      : t('content.title.untitled_track'));
+  const type = item.contentType === 'artist'
+    ? t('common.label.artist')
+    : item.contentType === 'album'
+      ? t('common.label.album')
+      : t('common.label.mediatrack');
+  const metadata = [
+    type,
+    item.contentType === 'artist' ? null : contentByline(item) || null,
+    item.contentType === 'album' ? item.releaseDate?.year ?? null : null,
+    item.contentType === 'audioTrack' ? item.albumTitle : null,
+    item.contentType === 'audioTrack' ? item.duration : null
+  ].filter((value) => value !== null && value !== '').join(' · ');
   const body = (
     <>
       <Artwork alt="" className={styles.artwork} kind={item.contentType} sizes="3.15rem" src={item.artworkUrl} />
@@ -42,7 +47,9 @@ export const ContentListRow = ({ item, onPlay, trailing }: ContentListRowProps) 
       {item.contentType === 'audioTrack' ? (
         onPlay ? (
           <button
-            aria-label={`Play ${title}${contentByline(item) ? ` by ${contentByline(item)}` : ''}`}
+            aria-label={contentByline(item)
+              ? t('content.play.byline_label', { title, byline: contentByline(item) })
+              : t('content.play.label', { title })}
             className={styles.action}
             onClick={() => onPlay(item)}
             type="button"
@@ -54,7 +61,7 @@ export const ContentListRow = ({ item, onPlay, trailing }: ContentListRowProps) 
         )
       ) : (
         <Link
-          aria-label={`${title}, ${item.contentType === 'artist' ? 'artist' : 'album'}`}
+          aria-label={t('content.link.label', { title, type: type.toLocaleLowerCase(locale) })}
           className={styles.action}
           to={`/${item.contentType === 'artist' ? 'artists' : 'albums'}/${encodeURIComponent(item.id)}`}
         >

@@ -235,23 +235,6 @@
   padding: 0.75rem 0.55rem 0.55rem;
 }
 
-.sidebarHeader {
-  align-items: center;
-  color: var(--color-text);
-  display: flex;
-  font-size: 0.98rem;
-  font-weight: 730;
-  gap: 0.75rem;
-  min-height: 2.6rem;
-  padding: 0 0.75rem 0.45rem;
-}
-
-.sidebarHeader svg {
-  flex: 0 0 auto;
-  height: 1.25rem;
-  width: 1.25rem;
-}
-
 .navigation {
   border-bottom: 1px solid var(--color-border);
   display: grid;
@@ -411,10 +394,6 @@
     padding-right: 0.45rem;
   }
 
-  .sidebarHeader {
-    display: none;
-  }
-
   .navigationLink {
     justify-content: center;
     padding-left: 0;
@@ -448,7 +427,7 @@
     gap: 0.65rem;
     grid-column: 1;
     grid-row: 1;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     padding: 0.5rem 0.75rem;
   }
 

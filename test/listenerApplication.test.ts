@@ -78,9 +78,9 @@ test('production defaults to the single trusted Nginx proxy hop', () => {
 test('landing actions expose Finitude while reserving Content Manager for admins', () => {
   const signedOut = renderLandingActions();
   assert.doesNotMatch(signedOut.headerActions, /href="\/finitude">Open Finitude/);
-  assert.match(signedOut.heroActions, /href="\/finitude">Open Finitude/);
-  assert.match(signedOut.headerActions, /href="\/auth\/login-web">Log in/);
-  assert.match(signedOut.heroActions, /href="\/auth\/signup-web">Create account/);
+  assert.match(signedOut.heroActions, /href="\/finitude"><i class="ph ph-music-notes"[^>]*><\/i>Open Finitude/);
+  assert.match(signedOut.headerActions, /href="\/auth\/login-web"><i class="ph ph-sign-in"[^>]*><\/i>Log in/);
+  assert.match(signedOut.heroActions, /href="\/auth\/signup-web"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
 
   const signedInUser = renderLandingActions({
     userId: 'listener-id',
@@ -88,7 +88,7 @@ test('landing actions expose Finitude while reserving Content Manager for admins
     role: 'user'
   });
   assert.doesNotMatch(signedInUser.headerActions, /href="\/finitude">Open Finitude/);
-  assert.match(signedInUser.heroActions, /href="\/finitude">Open Finitude/);
+  assert.match(signedInUser.heroActions, /href="\/finitude"><i class="ph ph-music-notes"[^>]*><\/i>Open Finitude/);
   assert.match(signedInUser.headerActions, /listener\+&lt;beta&gt;@example\.com/);
   assert.doesNotMatch(signedInUser.headerActions, /<beta>/);
   assert.doesNotMatch(signedInUser.headerActions, /content\/manage/);
@@ -109,9 +109,9 @@ test('landing actions expose Finitude while reserving Content Manager for admins
     email: 'admin@example.com',
     role: 'admin'
   });
-  assert.match(admin.headerActions, /href="\/content\/manage">Content Manager/);
-  assert.match(admin.heroActions, /href="\/content\/manage">Open Content Manager/);
-  assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks">Browse MediaTracks/);
+  assert.match(admin.headerActions, /href="\/content\/manage"><i class="ph ph-stack"[^>]*><\/i>Content Manager/);
+  assert.match(admin.heroActions, /href="\/content\/manage"><i class="ph ph-stack"[^>]*><\/i>Open Content Manager/);
+  assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks"><i class="ph ph-waveform"[^>]*><\/i>Browse MediaTracks/);
 });
 
 test('listener routes report a clear service error when the bundle is absent', async () => {
@@ -150,9 +150,23 @@ test('listener routes report a clear service error when the bundle is absent', a
     assertSecurityHeaders(loginPage, { inlineStyles: true });
     assert.equal(loginPage.headers.getSetCookie().length, 0);
     const loginHtml = await loginPage.text();
+    assert.match(loginHtml, /<html lang="en" class="auth-document">/);
     assert.match(loginHtml, /<h1>Log in to Archtree<\/h1>/);
+    assert.match(loginHtml, /<body class="auth-page auth-page--login">/);
+    assert.match(loginHtml, /class="auth-layout"/);
+    assert.match(loginHtml, /ph ph-tree-structure/);
+    assert.match(loginHtml, /ph ph-sign-in/);
     assert.match(loginHtml, /data-browser-session-login/);
     assert.doesNotMatch(loginHtml, /\/finitude\/login/);
+
+    const signupPage = await fetch(`${baseUrl}/auth/signup-web`);
+    assert.equal(signupPage.status, 200);
+    assertSecurityHeaders(signupPage);
+    const signupHtml = await signupPage.text();
+    assert.match(signupHtml, /<html lang="en" class="auth-document">/);
+    assert.match(signupHtml, /<body class="auth-page auth-page--signup">/);
+    assert.match(signupHtml, /<h1>Create your account<\/h1>/);
+    assert.match(signupHtml, /ph ph-user-plus/);
 
     const contentManagerRedirect = await fetch(`${baseUrl}/content/manage`, {
       redirect: 'manual'
@@ -164,12 +178,40 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.equal(serverRenderedStyles.status, 200);
     assertSecurityHeaders(serverRenderedStyles);
     assert.match(serverRenderedStyles.headers.get('content-type') ?? '', /text\/css/);
+    assert.match(await serverRenderedStyles.clone().text(), /html\.auth-document\s*\{[^}]*background:\s*#101914;/);
+
+    const managerStyles = await fetch(`${baseUrl}/assets/content-manager.css`);
+    assert.equal(managerStyles.status, 200);
+    assert.match(managerStyles.headers.get('content-type') ?? '', /text\/css/);
+
+    const iconStyles = await fetch(`${baseUrl}/assets/fonts/phosphor.css`);
+    assert.equal(iconStyles.status, 200);
+    assert.match(iconStyles.headers.get('content-type') ?? '', /text\/css/);
+
+    const interfaceFont = await fetch(`${baseUrl}/assets/fonts/manrope-latin-wght-normal.woff2`);
+    assert.equal(interfaceFont.status, 200);
+    assert.match(interfaceFont.headers.get('content-type') ?? '', /font\/woff2/);
+
+    const iconFont = await fetch(`${baseUrl}/assets/fonts/Phosphor.woff2`);
+    assert.equal(iconFont.status, 200);
+    assert.match(iconFont.headers.get('content-type') ?? '', /font\/woff2/);
+
+    const landingArtwork = await fetch(`${baseUrl}/assets/archtree-catalog-workspace.webp`);
+    assert.equal(landingArtwork.status, 200);
+    assert.match(landingArtwork.headers.get('content-type') ?? '', /image\/webp/);
 
     const landingPage = await fetch(`${baseUrl}/`);
     assert.equal(landingPage.status, 200);
     assertSecurityHeaders(landingPage);
     const landingHtml = await landingPage.text();
     assert.equal(landingHtml.match(/href="\/finitude"/g)?.length, 1);
+    assert.match(landingHtml, /<body class="landing-page">/);
+    assert.match(landingHtml, /<h1>Every release, connected\.<\/h1>/);
+    assert.match(landingHtml, /src="\/assets\/archtree-catalog-workspace\.webp"/);
+    assert.match(landingHtml, /ph ph-tree-structure/);
+    assert.match(landingHtml, /ph ph-waveform/);
+    assert.match(landingHtml, /aria-labelledby="capabilities-title"/);
+    assert.doesNotMatch(landingHtml, /class="grid" aria-label="Archtree capabilities"/);
   } finally {
     await close(server);
     await rm(temporaryRoot, { recursive: true, force: true });

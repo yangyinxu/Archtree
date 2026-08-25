@@ -7,16 +7,16 @@ import {
   registerBrowserAccount
 } from '../../api/account';
 import styles from './AccountSurfaces.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
 import {
   AuthFormFeedback,
   AuthPageFrame,
   privateAccountActionError
 } from './AuthFormSupport';
 
-const acceptedRegistrationMessage = 'If this address can be registered, a verification email has been sent.';
-
 /** Creates an email account without revealing whether the address already exists. */
 export const RegisterPage = () => {
+  const { t } = useLocalization();
   const navigate = useNavigate();
   const capabilities = useQuery(browserAuthenticationCapabilitiesQuery());
   const [localError, setLocalError] = useState('');
@@ -24,19 +24,21 @@ export const RegisterPage = () => {
     mutationFn: registerBrowserAccount,
     onSuccess: (_data, variables) => {
       navigate('/verify-email', {
-        state: { email: variables.email, notice: acceptedRegistrationMessage }
+        state: { email: variables.email, notice: t('auth.register.accepted') }
       });
     }
   });
   const registrationUnavailable = capabilities.isError
     || (capabilities.isSuccess && !capabilities.data.emailRegistration);
-  const error = localError || (register.isError ? privateAccountActionError(register.error) : '');
+  const error = localError || (register.isError
+    ? privateAccountActionError(register.error, t('account.common.request_error'))
+    : '');
 
   return (
     <AuthPageFrame
-      eyebrow="Create account"
-      title="Make your Library yours."
-      description="Create a Finitude listener account, then verify your email with the six-digit code we send."
+      eyebrow={t('auth.register.eyebrow')}
+      title={t('auth.register.title')}
+      description={t('auth.register.description')}
     >
       <form
         aria-busy={register.isPending}
@@ -48,7 +50,7 @@ export const RegisterPage = () => {
           const form = new FormData(event.currentTarget);
           const password = String(form.get('password') ?? '');
           if (password !== String(form.get('confirmPassword') ?? '')) {
-            setLocalError('The passwords do not match.');
+            setLocalError(t('account.common.password_mismatch'));
             return;
           }
           register.mutate({
@@ -58,30 +60,30 @@ export const RegisterPage = () => {
           });
         }}
       >
-        <h2 className={styles.formTitle}>Create your listener account</h2>
+        <h2 className={styles.formTitle}>{t('auth.register.form_title')}</h2>
         <AuthFormFeedback error={error} focusKey={register.submittedAt} />
         {registrationUnavailable ? (
           <div className={styles.compactState}>
             <p>{capabilities.isError
-              ? 'Finitude could not confirm whether registration is available.'
-              : 'Email registration is not available on this deployment.'}</p>
+              ? t('auth.register.availability_error')
+              : t('auth.register.unavailable')}</p>
             {capabilities.isError && (
-              <button className={styles.textButton} onClick={() => capabilities.refetch()} type="button">Try again</button>
+              <button className={styles.textButton} onClick={() => capabilities.refetch()} type="button">{t('common.action.try_again')}</button>
             )}
-            <Link className={styles.inlineLink} to="/login">Return to Log in</Link>
+            <Link className={styles.inlineLink} to="/login">{t('account.common.return_login')}</Link>
           </div>
         ) : (
           <>
             <div className={styles.field}>
-              <label htmlFor="register-name">Name <span className={styles.optional}>(optional)</span></label>
+              <label htmlFor="register-name">{t('account.field.name')} <span className={styles.optional}>{t('account.field.optional')}</span></label>
               <input autoComplete="name" id="register-name" maxLength={80} name="displayName" type="text" />
             </div>
             <div className={styles.field}>
-              <label htmlFor="register-email">Email</label>
+              <label htmlFor="register-email">{t('account.field.email')}</label>
               <input autoComplete="email" id="register-email" maxLength={254} name="email" required type="email" />
             </div>
             <div className={styles.field}>
-              <label htmlFor="register-password">Password</label>
+              <label htmlFor="register-password">{t('account.field.password')}</label>
               <input
                 aria-describedby="register-password-hint"
                 autoComplete="new-password"
@@ -92,18 +94,18 @@ export const RegisterPage = () => {
                 required
                 type="password"
               />
-              <p className={styles.fieldHint} id="register-password-hint">Use 12–256 characters and avoid common passwords.</p>
+              <p className={styles.fieldHint} id="register-password-hint">{t('account.common.password_hint')}</p>
             </div>
             <div className={styles.field}>
-              <label htmlFor="register-confirm-password">Confirm password</label>
+              <label htmlFor="register-confirm-password">{t('account.field.confirm_password')}</label>
               <input autoComplete="new-password" id="register-confirm-password" maxLength={256} minLength={12} name="confirmPassword" required type="password" />
             </div>
             <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={register.isPending || capabilities.isPending} type="submit">
-              {register.isPending ? 'Creating account…' : capabilities.isPending ? 'Checking availability…' : 'Create account'}
+              {register.isPending ? t('auth.register.creating') : capabilities.isPending ? t('auth.register.checking') : t('auth.login.create_account')}
             </button>
           </>
         )}
-        <p className={styles.authFooter}>Already have an account? <Link className={styles.inlineLink} to="/login">Log in</Link></p>
+        <p className={styles.authFooter}>{t('auth.register.already_account')} <Link className={styles.inlineLink} to="/login">{t('common.action.log_in')}</Link></p>
       </form>
     </AuthPageFrame>
   );

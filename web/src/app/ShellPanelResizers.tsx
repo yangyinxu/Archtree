@@ -3,6 +3,7 @@ import { useLayoutEffect, type RefObject } from 'react';
 import { PanelResizeHandle } from './PanelResizeHandle';
 import styles from './ShellPanelResizers.module.css';
 import { useShellPanelSizes } from './useShellPanelSizes';
+import { useLocalization } from '../localization/LocalizationProvider';
 
 interface ShellPanelResizersProps {
   nowPlayingOpen: boolean;
@@ -15,6 +16,7 @@ export const ShellPanelResizers = ({
   shellRef
 }: ShellPanelResizersProps) => {
   const panelSizes = useShellPanelSizes(nowPlayingOpen);
+  const { t } = useLocalization();
 
   useLayoutEffect(() => {
     const shell = shellRef.current;
@@ -41,11 +43,11 @@ export const ShellPanelResizers = ({
   }, [shellRef]);
 
   return (
-    <aside aria-label="Panel layout controls" className={styles.landmark}>
+    <aside aria-label={t('panel_resize.layout_label')} className={styles.landmark}>
       {panelSizes.canResizeSidebar && (
         <PanelResizeHandle
           controls="library-sidebar"
-          label="Resize Library panel"
+          label={t('panel_resize.library_label')}
           max={panelSizes.layout.limits.sidebar.maximum}
           min={panelSizes.layout.limits.sidebar.minimum}
           onCancel={panelSizes.cancelPanelResize}
@@ -59,7 +61,7 @@ export const ShellPanelResizers = ({
       {panelSizes.canResizeNowPlaying && (
         <PanelResizeHandle
           controls="now-playing-aside"
-          label="Resize Now Playing panel"
+          label={t('panel_resize.now_playing_label')}
           max={panelSizes.layout.limits.nowPlaying.maximum}
           min={panelSizes.layout.limits.nowPlaying.minimum}
           onCancel={panelSizes.cancelPanelResize}

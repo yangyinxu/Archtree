@@ -158,7 +158,7 @@ const contentManagerUploadLimiter = rateLimit(
     (_req, res, retryAfterSeconds) => res.status(429).type('html').send(`<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Upload temporarily limited</title><link rel="stylesheet" href="/assets/archtree.css" /></head>
-<body><main class="page-shell"><section class="card"><p class="eyebrow">Content Manager</p><h1>Upload temporarily limited</h1><p>Upload capacity will be available again in about ${retryAfterSeconds} seconds. No catalog changes were made.</p><p>Use your browser's Back button to retain the form values, or return to Content Manager.</p><div class="action-row"><a class="button button--secondary" href="/content/manage">Content Manager</a></div></section></main></body>
+<body class="notice-page"><main class="notice-shell"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span><span>Archtree</span></a><section class="card card--raised notice-card"><span class="notice-card__icon" aria-hidden="true"><i class="ph ph-clock-countdown"></i></span><p class="eyebrow">Content Manager</p><h1>Upload temporarily limited</h1><p>Upload capacity will be available again in about ${retryAfterSeconds} seconds. No catalog changes were made.</p><p>Use your browser's Back button to retain the form values, or return to Content Manager.</p><div class="action-row"><a class="button button--secondary" href="/content/manage"><i class="ph ph-arrow-left" aria-hidden="true"></i>Content Manager</a></div></section></main></body>
 </html>`)
 );
 /** Keeps genuine Manager uploads bounded while returning a usable browser response. */

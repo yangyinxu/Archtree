@@ -25,6 +25,7 @@ const artifactEntries = [
   'package-lock.json',
   'tsconfig.json',
   'src',
+  'localization',
   'web/package.json',
   'web/dist',
   '.platform',
@@ -62,6 +63,7 @@ const expectedRootEntries = new Set([
   'RELEASE.json',
   'package-lock.json',
   'package.json',
+  'localization',
   'src',
   'tsconfig.json',
   'web'

@@ -8,9 +8,11 @@ import { browserSessionQuery, browserSessionQueryKey } from '../../api/session';
 import { NewPlaylistButton } from './PlaylistControls';
 import { PlaylistSummaryList } from './PlaylistSummaryList';
 import styles from './Playlists.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
 
 /** Adds summary-only owner discovery without hydrating members into the shell. */
 export const PlaylistSidebar = () => {
+  const { t } = useLocalization();
   const queryClient = useQueryClient();
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id ?? '';
@@ -23,7 +25,7 @@ export const PlaylistSidebar = () => {
   }, [playlists.error, queryClient]);
 
   return (
-    <section className={styles.sidebarSection} aria-label="Playlists">
+    <section className={styles.sidebarSection} aria-label={t('playlist.index.title')}>
       <NewPlaylistButton
         accountPending={session.isPending}
         accountUnavailable={session.isError}
@@ -33,22 +35,22 @@ export const PlaylistSidebar = () => {
       {viewerId && (
         <div className={styles.sidebarCollection}>
           <div className={styles.sidebarHeading}>
-            <span>Your Playlists</span>
-            <Link to="/playlists">View all</Link>
+            <span>{t('playlist.sidebar.heading')}</span>
+            <Link to="/playlists">{t('playlist.action.view_all')}</Link>
           </div>
           {playlists.isPending ? (
-            <p aria-busy="true" className={styles.sidebarState}>Loading Playlists…</p>
+            <p aria-busy="true" className={styles.sidebarState}>{t('playlist.sidebar.loading')}</p>
           ) : playlists.isError ? (
             <div className={styles.sidebarState} role="alert">
-              <span>Playlists unavailable.</span>
-              <button onClick={() => playlists.refetch()} type="button">Retry</button>
+              <span>{t('playlist.sidebar.unavailable')}</span>
+              <button onClick={() => playlists.refetch()} type="button">{t('common.action.retry')}</button>
             </div>
           ) : playlists.data.items.length === 0 ? (
-            <p className={styles.sidebarState}>Your first Playlist will appear here.</p>
+            <p className={styles.sidebarState}>{t('playlist.sidebar.empty')}</p>
           ) : (
             <>
               <PlaylistSummaryList compact playlists={playlists.data.items} viewerId={viewerId} />
-              {playlists.data.nextCursor && <Link className={styles.sidebarViewAll} to="/playlists">View all Playlists</Link>}
+              {playlists.data.nextCursor && <Link className={styles.sidebarViewAll} to="/playlists">{t('playlist.action.view_all')} {t('playlist.index.title')}</Link>}
             </>
           )}
         </div>

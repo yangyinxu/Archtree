@@ -25,28 +25,36 @@ import {
   revalidatePlaylistLists
 } from './playlistCache';
 import styles from './Playlists.module.css';
+import {
+  useLocalization,
+  type LocalizationContextValue
+} from '../../localization/LocalizationProvider';
 
-const playlistMutationMessage = (error: unknown, operation: 'create' | 'rename' | 'delete') => {
-  if (!(error instanceof ApiError)) return 'Finitude could not confirm that Playlist change.';
+const playlistMutationMessage = (
+  error: unknown,
+  operation: 'create' | 'rename' | 'delete',
+  t: LocalizationContextValue['t']
+) => {
+  if (!(error instanceof ApiError)) return t('playlist.error.change_unconfirmed');
   if (error.code === 'playlist_limit_reached') {
-    return 'You already have 100 Playlists. Delete one before creating another.';
+    return t('playlist.error.playlist_limit');
   }
   if (error.code === 'idempotency_in_progress') {
-    return 'That Playlist request is still being confirmed. Wait a moment, then retry this same action.';
+    return t('playlist.error.request_pending');
   }
   if (error.code === 'idempotency_key_reused') {
-    return 'That request key no longer matches this change. Close the dialog and start the action again.';
+    return t('playlist.error.request_key_mismatch');
   }
   if (error.code === 'account_viewer_mismatch' || error.status === 401) {
-    return 'Your signed-in account changed. Reload the page before trying again.';
+    return t('playlist.error.account_changed');
   }
   if (error.code === 'playlist_revision_conflict' || error.status === 409) {
     return operation === 'create'
-      ? 'That request could not be replayed safely. Close this dialog and try again.'
-      : 'This Playlist changed on another device. Finitude is loading the newest version.';
+      ? t('playlist.error.replay_unsafe')
+      : t('playlist.error.revision_loading');
   }
-  if (error.status === 429) return 'Too many Playlist requests were sent. Wait a moment and try again.';
-  return error.message;
+  if (error.status === 429) return t('playlist.error.rate_limit');
+  return t('playlist.error.change_unconfirmed');
 };
 
 interface PlaylistNameDialogProps {
@@ -67,6 +75,7 @@ export const PlaylistNameDialog = ({
   onConfirmed,
   returnFocusRef
 }: PlaylistNameDialogProps) => {
+  const { t } = useLocalization();
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const submittedRef = useRef<{ name: string; key: string } | null>(null);
@@ -113,7 +122,7 @@ export const PlaylistNameDialog = ({
     event.preventDefault();
     const parsed = playlistNameSchema.safeParse(name);
     if (!parsed.success) {
-      setValidationError('Enter a name between 1 and 100 characters.');
+      setValidationError(t('playlist.name.validation'));
       inputRef.current?.focus();
       return;
     }
@@ -130,17 +139,17 @@ export const PlaylistNameDialog = ({
     <ModalDialog
       closeDisabled={mutation.isPending}
       description={mode === 'create'
-        ? 'Playlist names can be reused and changed later.'
-        : 'Only the name changes; saved music and the active playback queue stay as they are.'}
+        ? t('playlist.name.create_description')
+        : t('playlist.name.rename_description')}
       initialFocusRef={inputRef}
-      kicker="Your Library"
+      kicker={t('library.title')}
       onClose={onClose}
       returnFocusRef={returnFocusRef}
-      title={mode === 'create' ? 'Create a Playlist' : 'Rename Playlist'}
+      title={mode === 'create' ? t('playlist.name.create_title') : t('playlist.name.rename_title')}
     >
       <form className={styles.dialogForm} onSubmit={submit}>
         <label className={styles.field}>
-          <span>Name</span>
+          <span>{t('playlist.name.field')}</span>
           <input
             aria-describedby="playlist-name-hint"
             aria-busy={mutation.isPending}
@@ -155,16 +164,20 @@ export const PlaylistNameDialog = ({
             value={name}
           />
         </label>
-        <p className={styles.fieldHint} id="playlist-name-hint">1–100 characters</p>
+        <p className={styles.fieldHint} id="playlist-name-hint">{t('playlist.name.hint')}</p>
         {(validationError || mutation.isError) && (
           <p className={styles.feedbackError} role="alert">
-            {validationError || playlistMutationMessage(mutation.error, mode)}
+            {validationError || playlistMutationMessage(mutation.error, mode, t)}
           </p>
         )}
         <div className={styles.dialogActions}>
-          <button className={styles.secondaryButton} disabled={mutation.isPending} onClick={onClose} type="button">Cancel</button>
+          <button className={styles.secondaryButton} disabled={mutation.isPending} onClick={onClose} type="button">{t('common.action.cancel')}</button>
           <button className={styles.primaryButton} disabled={mutation.isPending} type="submit">
-            {mutation.isPending ? 'Saving…' : mode === 'create' ? 'Create Playlist' : 'Save name'}
+            {mutation.isPending
+              ? t('playlist.name.saving')
+              : mode === 'create'
+                ? t('playlist.action.create')
+                : t('playlist.action.save_name')}
           </button>
         </div>
       </form>
@@ -185,6 +198,7 @@ export const PlaylistDeleteDialog = ({
   onDeleted: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
 }) => {
+  const { t } = useLocalization();
   const queryClient = useQueryClient();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const idempotencyKeyRef = useRef('');
@@ -228,22 +242,22 @@ export const PlaylistDeleteDialog = ({
   return (
     <ModalDialog
       closeDisabled={mutation.isPending}
-      description={`“${playlist.name}” will disappear, but its MediaTracks, Saved Library state, and anything already playing will stay unchanged.`}
+      description={t('playlist.delete.description', { name: playlist.name })}
       initialFocusRef={cancelRef}
-      kicker="Permanent action"
+      kicker={t('playlist.delete.kicker')}
       onClose={onClose}
       returnFocusRef={returnFocusRef}
-      title="Delete this Playlist?"
+      title={t('playlist.delete.title')}
     >
       {mutation.isError && (
         <p className={styles.feedbackError} role="alert">
-          {playlistMutationMessage(mutation.error, 'delete')}
+          {playlistMutationMessage(mutation.error, 'delete', t)}
         </p>
       )}
       <div className={styles.dialogActions}>
-        <button className={styles.secondaryButton} disabled={mutation.isPending} onClick={onClose} ref={cancelRef} type="button">Cancel</button>
+        <button className={styles.secondaryButton} disabled={mutation.isPending} onClick={onClose} ref={cancelRef} type="button">{t('common.action.cancel')}</button>
         <button className={styles.dangerButton} disabled={mutation.isPending} onClick={() => mutation.mutate()} type="button">
-          {mutation.isPending ? 'Deleting…' : 'Delete Playlist'}
+          {mutation.isPending ? t('playlist.delete.deleting') : t('playlist.action.delete')}
         </button>
       </div>
     </ModalDialog>

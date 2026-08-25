@@ -1,6 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-import { ApiError } from '../../api/client';
 import styles from './AccountSurfaces.module.css';
 
 interface AuthPageFrameProps {
@@ -55,15 +54,10 @@ export const AuthFormFeedback = ({ error, status, focusKey }: AuthFormFeedbackPr
 };
 
 /** Reduces unexpected server details to a stable account-safe failure message. */
-export const privateAccountActionError = (error: unknown) => {
-  if (error instanceof ApiError && error.kind === 'network') return error.message;
-  return 'Finitude could not complete that request. Please try again.';
-};
+export const privateAccountActionError = (_error: unknown, localizedFallback: string) => localizedFallback;
 
 /** Verification errors are safe to surface because they do not confirm account existence. */
-export const verificationActionError = (error: unknown) => error instanceof ApiError
-  ? error.message
-  : 'Finitude could not check that code. Please try again.';
+export const verificationActionError = (_error: unknown, localizedFallback: string) => localizedFallback;
 
 export const emailFromRouteState = (state: unknown) => {
   if (!state || typeof state !== 'object' || !('email' in state)) return '';

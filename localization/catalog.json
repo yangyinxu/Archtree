@@ -1,0 +1,4178 @@
+{
+  "schemaVersion": 1,
+  "locales": {
+    "en-US": {
+      "nativeName": "English (United States)",
+      "englishName": "English (United States)"
+    },
+    "zh-Hans": {
+      "nativeName": "简体中文",
+      "englishName": "Simplified Chinese"
+    }
+  },
+  "messages": {
+    "account.common.back_account": {
+      "description": "Link returning to the Account page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.common.back_login": {
+      "description": "Link returning to Log in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.common.checking": {
+      "description": "Shared loading state while the current account is checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.common.code_error": {
+      "description": "Safe fallback when an account verification code cannot be checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.common.password_hint": {
+      "description": "Password length and strength guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.common.password_mismatch": {
+      "description": "Validation error when password confirmation differs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.common.request_error": {
+      "description": "Safe fallback for a private account request failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.common.return_home": {
+      "description": "Action returning to the Finitude home page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.common.return_login": {
+      "description": "Action returning to Log in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.confirm_new_password": {
+      "description": "New password confirmation field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.confirm_password": {
+      "description": "Password confirmation field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.current_password": {
+      "description": "Current password field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.email": {
+      "description": "Account email field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.email_or_username": {
+      "description": "Login identifier field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.name": {
+      "description": "Account name field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.new_password": {
+      "description": "New password field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.optional": {
+      "description": "Marker for an optional account field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.password": {
+      "description": "Account password field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.reset_code": {
+      "description": "Password reset code field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.field.verification_code": {
+      "description": "Email verification code field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.avatar_blocked": {
+      "description": "Account deletion guidance when an avatar must be removed first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.cancel": {
+      "description": "Cancel action in an account lifecycle confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.clear.confirm": {
+      "description": "Clear-listening-history confirmation action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.clear.description": {
+      "description": "Clear-listening-history confirmation explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.clear.error": {
+      "description": "Fallback clear-listening-history failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.clear.pending": {
+      "description": "Pending clear-listening-history label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.clear.success": {
+      "description": "Success status after clearing listening history.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.clear.title": {
+      "description": "Clear-listening-history confirmation title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.confirm_eyebrow": {
+      "description": "Eyebrow in an account lifecycle confirmation dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete_row.action": {
+      "description": "Action opening account deletion confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete_row.copy": {
+      "description": "Account deletion lifecycle action explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete_row.title": {
+      "description": "Account deletion lifecycle action title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete.confirm": {
+      "description": "Permanent account deletion confirmation action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete.creator_blocked": {
+      "description": "Recovery guidance when catalog provenance prevents account deletion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete.description": {
+      "description": "Account deletion confirmation explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete.error": {
+      "description": "Fallback account deletion failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete.pending": {
+      "description": "Pending account deletion label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete.success": {
+      "description": "Success status after account deletion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.delete.title": {
+      "description": "Account deletion confirmation title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.devices.copy": {
+      "description": "Global sign-out lifecycle action explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.devices.title": {
+      "description": "Global sign-out lifecycle action title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.eyebrow": {
+      "description": "Eyebrow above account lifecycle controls.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.heading": {
+      "description": "Account lifecycle panel heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.history.action": {
+      "description": "Action opening clear-listening-history confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.history.copy": {
+      "description": "Listening-history lifecycle action explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.history.title": {
+      "description": "Listening-history lifecycle action title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.signout_aria": {
+      "description": "Accessible label for confirming global sign-out.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.signout.confirm": {
+      "description": "Global sign-out confirmation action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.signout.description": {
+      "description": "Global sign-out confirmation explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.signout.error": {
+      "description": "Fallback global sign-out failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.signout.pending": {
+      "description": "Pending global sign-out label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.signout.success": {
+      "description": "Success status after global sign-out.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.lifecycle.signout.title": {
+      "description": "Global sign-out confirmation title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.method.apple": {
+      "description": "Apple authentication method label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.method.google": {
+      "description": "Google authentication method label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.method.passkey": {
+      "description": "Passkey authentication method label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.method.password": {
+      "description": "Password authentication method label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.change_password": {
+      "description": "Change-password action and title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.email_verified": {
+      "description": "Verified email account status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.eyebrow": {
+      "description": "Eyebrow above the Account page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.listener_fallback": {
+      "description": "Fallback listener name when no display name is set.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.log_out": {
+      "description": "Browser logout action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.logging_out": {
+      "description": "Pending browser logout label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.logout_error": {
+      "description": "Fallback when browser logout fails.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.not_set": {
+      "description": "Value shown for an unset account field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.set_password": {
+      "description": "Set-password action and title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.settings_label": {
+      "description": "Accessible label for account settings navigation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.sign_in_methods": {
+      "description": "Authentication methods field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.signed_in_devices": {
+      "description": "Link to signed-in device management.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.signed_out_title": {
+      "description": "Heading for the signed-out Account page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.status": {
+      "description": "Account status field label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.title": {
+      "description": "Account page title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.unavailable_copy": {
+      "description": "Explanation when account state cannot be checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.unavailable_title": {
+      "description": "Heading when account state cannot be checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.verification_required": {
+      "description": "Unverified email account status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.page.verify_email": {
+      "description": "Action to verify the current email.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.password.lede": {
+      "description": "Password change session behavior explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.password.login_required": {
+      "description": "Heading when password settings require login.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.password.set_action": {
+      "description": "Submit action for setting a password.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.password.unavailable": {
+      "description": "Heading when password settings cannot be opened.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.password.update_error": {
+      "description": "Fallback when a password update fails.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.password.updated": {
+      "description": "Success status after changing a password.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.password.updating": {
+      "description": "Pending password update label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.current": {
+      "description": "Badge identifying the current session.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.eyebrow": {
+      "description": "Eyebrow for account security pages.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.last_active": {
+      "description": "Last-active timestamp for another session.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "timestamp": "string"
+      }
+    },
+    "account.sessions.lede": {
+      "description": "Signed-in devices page introduction.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.list_label": {
+      "description": "Accessible label for the active session list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.load_error": {
+      "description": "Error loading signed-in devices.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.loading": {
+      "description": "Loading state for signed-in devices.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.login_required": {
+      "description": "Heading when device management requires login.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.remove": {
+      "description": "Remove-session action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.remove_error": {
+      "description": "Fallback when a session cannot be removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.removing": {
+      "description": "Pending device removal label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.this_device": {
+      "description": "Label for the current browser session.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.title": {
+      "description": "Signed-in devices page title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.unavailable": {
+      "description": "Heading when signed-in devices cannot be opened.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.already_listening": {
+      "description": "Heading when a signed-in listener opens Log in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "auth.login.create_account": {
+      "description": "Account registration action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.error": {
+      "description": "Fallback when login fails.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.eyebrow": {
+      "description": "Eyebrow above the Log in page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.forgot_password": {
+      "description": "Password recovery link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.form_title": {
+      "description": "Password login form title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.lede": {
+      "description": "Log in page introduction.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.logging_in": {
+      "description": "Pending login label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.privacy": {
+      "description": "Login session privacy explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.title": {
+      "description": "Log in page title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.verify_prompt": {
+      "description": "Link shown when login requires email verification.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.recovery.accepted": {
+      "description": "Non-enumerating password recovery acceptance status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.recovery.description": {
+      "description": "Password recovery page introduction.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.recovery.enter": {
+      "description": "Action opening the password reset form.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.recovery.eyebrow": {
+      "description": "Eyebrow above password recovery.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.recovery.form_title": {
+      "description": "Password recovery form title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.recovery.send": {
+      "description": "Reset-code request action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.recovery.sending": {
+      "description": "Pending reset-code request label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.recovery.title": {
+      "description": "Password recovery page title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.accepted": {
+      "description": "Non-enumerating registration acceptance status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.already_account": {
+      "description": "Prompt preceding the Log in link on registration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.availability_error": {
+      "description": "Registration capability check error.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.checking": {
+      "description": "Pending registration capability label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.creating": {
+      "description": "Pending registration label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.description": {
+      "description": "Registration page introduction.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.eyebrow": {
+      "description": "Eyebrow above registration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.form_title": {
+      "description": "Registration form title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.title": {
+      "description": "Registration page title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.unavailable": {
+      "description": "Registration-disabled state.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.reset.action": {
+      "description": "Password reset submit action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.reset.description": {
+      "description": "Password reset page introduction.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.reset.eyebrow": {
+      "description": "Eyebrow above password reset.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.reset.form_title": {
+      "description": "Password reset form title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.reset.request_another": {
+      "description": "Action requesting another reset code.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.reset.resetting": {
+      "description": "Pending password reset label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.reset.success": {
+      "description": "Success notice after resetting a password.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.reset.title": {
+      "description": "Password reset page title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.accepted": {
+      "description": "Non-enumerating resend acceptance status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.action": {
+      "description": "Email verification submit action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.description": {
+      "description": "Email verification page introduction.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.eyebrow": {
+      "description": "Eyebrow above email verification.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.form_title": {
+      "description": "Email verification form title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.send_new": {
+      "description": "Verification-code resend action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.sending": {
+      "description": "Pending verification-code resend label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.success": {
+      "description": "Success notice after email verification.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.title": {
+      "description": "Email verification page title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.verify.verifying": {
+      "description": "Pending email verification label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.choose_label": {
+      "description": "Accessible label for the avatar file input.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.choose_size": {
+      "description": "Client-side avatar file size validation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.choose_type": {
+      "description": "Client-side avatar file type validation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.back": {
+      "description": "Action returning from avatar preview to crop.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.cancel_label": {
+      "description": "Accessible label for closing the avatar editor.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.canvas_label": {
+      "description": "Accessible label for the avatar crop canvas.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.editor_description": {
+      "description": "Avatar crop editor instructions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.editor_kicker": {
+      "description": "Eyebrow above the avatar crop editor.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.editor_title": {
+      "description": "Avatar crop editor title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.horizontal": {
+      "description": "Avatar crop horizontal position control label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.open_error": {
+      "description": "Avatar image decoding error.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.pixel_error": {
+      "description": "Avatar image pixel-count validation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.prepare_error": {
+      "description": "Avatar crop rendering failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.preparing": {
+      "description": "Pending avatar crop preview label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.preview_action": {
+      "description": "Action generating the avatar crop preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.preview_alt": {
+      "description": "Alternative text for the avatar preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.preview_description": {
+      "description": "Avatar preview explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.preview_kicker": {
+      "description": "Eyebrow above the final avatar preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.preview_title": {
+      "description": "Avatar final preview confirmation title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.use": {
+      "description": "Action accepting the avatar crop.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.vertical": {
+      "description": "Avatar crop vertical position control label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.crop.zoom": {
+      "description": "Avatar crop zoom control label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.delete.description": {
+      "description": "Avatar deletion confirmation explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.delete.keep": {
+      "description": "Cancel avatar deletion action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.delete.kicker": {
+      "description": "Eyebrow in the avatar deletion dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.delete.remove": {
+      "description": "Avatar deletion action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.delete.removing": {
+      "description": "Pending avatar deletion label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.delete.title": {
+      "description": "Avatar deletion confirmation title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.description": {
+      "description": "Avatar settings privacy and upload explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.edit_label": {
+      "description": "Accessible label for editing the avatar.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.error.conflict": {
+      "description": "Avatar revision conflict message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "preserved": "string"
+      }
+    },
+    "avatar.error.rate": {
+      "description": "Avatar rate-limit message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "preserved": "string"
+      }
+    },
+    "avatar.error.rejected": {
+      "description": "Avatar media validation rejection message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "preserved": "string"
+      }
+    },
+    "avatar.error.server": {
+      "description": "Avatar server failure message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "preserved": "string"
+      }
+    },
+    "avatar.error.session": {
+      "description": "Avatar session expiry message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "preserved": "string"
+      }
+    },
+    "avatar.error.too_large": {
+      "description": "Avatar upload size rejection message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "preserved": "string"
+      }
+    },
+    "avatar.error.unconfirmed": {
+      "description": "Fallback avatar mutation failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "preserved": "string"
+      }
+    },
+    "avatar.heading": {
+      "description": "Avatar settings heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.preserved.delete": {
+      "description": "Avatar deletion failure preservation guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.preserved.upload": {
+      "description": "Avatar upload failure preservation guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.removed": {
+      "description": "Avatar removal success status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.removed_cleanup": {
+      "description": "Avatar removal success with pending private-storage cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.updated": {
+      "description": "Avatar update success status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.updated_cleanup": {
+      "description": "Avatar update success with pending cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.uploading": {
+      "description": "Pending avatar upload status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.album.attribution": {
+      "description": "Eyebrow above Album attribution credits.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.album.empty": {
+      "description": "Empty state when an Album has no playable MediaTracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.album.in_album": {
+      "description": "Eyebrow above the MediaTracks in an Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.album.loading": {
+      "description": "Loading state for an Album route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.album.no_tracks": {
+      "description": "Guidance when an Album has no linked playable MediaTracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.album.select_track": {
+      "description": "Guidance explaining that an Album row starts playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.album.track_count": {
+      "description": "Pluralized count of MediaTracks in an Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "catalog.album.unavailable": {
+      "description": "Heading when an Album route is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.artist.empty": {
+      "description": "Empty state when an Artist has no public releases.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.artist.loading": {
+      "description": "Loading state for an Artist route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.artist.section.appears_on": {
+      "description": "Artist section title for Albums on which they appear.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.artist.section.collaborations": {
+      "description": "Artist section title for collaborations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.artist.section.discography": {
+      "description": "Artist section title for their discography.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.artist.unavailable": {
+      "description": "Heading when an Artist route is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.composer": {
+      "description": "Catalog credit role label for a composer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.credit": {
+      "description": "Fallback catalog credit role label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.distributor": {
+      "description": "Catalog credit role label for a distributor.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.featured": {
+      "description": "Catalog credit role label for a featured Artist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.label": {
+      "description": "Catalog credit role label for a record label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.performer": {
+      "description": "Catalog credit role label for a performer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.presenter": {
+      "description": "Catalog credit role label for a presenter.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.primary": {
+      "description": "Catalog credit role label for a primary creator.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.producer": {
+      "description": "Catalog credit role label for a producer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.publisher": {
+      "description": "Catalog credit role label for a publisher.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.credit.remixer": {
+      "description": "Catalog credit role label for a remixer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.error.copy": {
+      "description": "Shared explanation for a temporarily unavailable catalog entity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.organization.empty": {
+      "description": "Empty state when no public releases credit an Organization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.organization.loading": {
+      "description": "Loading state for an Organization route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "catalog.organization.unavailable": {
+      "description": "Heading when an Organization route is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.cancel": {
+      "description": "Cancels the current listener action without saving changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.clear": {
+      "description": "Clears the current local list or input.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.close": {
+      "description": "Closes the current listener surface.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.done": {
+      "description": "Completes the current listener action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.explore_music": {
+      "description": "Link inviting the listener to explore the public catalog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.go_home": {
+      "description": "Returns the listener to Finitude Home.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.load_more": {
+      "description": "Loads the next page of a paginated list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.log_in": {
+      "description": "Action label for logging in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.play": {
+      "description": "Generic action label for starting playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.retry": {
+      "description": "Retries the most recent failed operation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.search": {
+      "description": "Submits a catalog search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.action.try_again": {
+      "description": "Invites the listener to try a failed operation again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.album": {
+      "description": "Singular content-type label for an Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.albums": {
+      "description": "Plural content-type label for Albums.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.artist": {
+      "description": "Singular content-type label for an Artist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.artists": {
+      "description": "Plural content-type label for Artists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.audio": {
+      "description": "Label for audio media.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.credits": {
+      "description": "Title for catalog Credits.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.mediatrack": {
+      "description": "Singular Finitude MediaTrack label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.mediatracks": {
+      "description": "Plural Finitude MediaTracks label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.organization": {
+      "description": "Singular content-type label for an Organization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.organizations": {
+      "description": "Plural content-type label for Organizations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.playlist": {
+      "description": "Singular label for a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.playlists": {
+      "description": "Plural label for Playlists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.releases": {
+      "description": "Plural label for catalog releases.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.songs": {
+      "description": "Plural listener-facing label for songs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.label.video": {
+      "description": "Label for video media.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.state.loading_more": {
+      "description": "Status while another page of results loads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "common.state.unavailable": {
+      "description": "Short unavailable-state label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "content.album.cover_alt": {
+      "description": "Alternative text for an Album cover image.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "content.artist.portrait_alt": {
+      "description": "Alternative text for an Artist portrait image.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "content.link.label": {
+      "description": "Accessible label for a linked catalog card or row.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string",
+        "type": "string"
+      }
+    },
+    "content.play.byline_label": {
+      "description": "Accessible playback label including a creator byline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "byline": "string",
+        "title": "string"
+      }
+    },
+    "content.play.label": {
+      "description": "Accessible playback label for a MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "content.title.unknown_artist": {
+      "description": "Fallback title for an unnamed Artist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "content.title.unknown_organization": {
+      "description": "Fallback title for an unnamed Organization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "content.title.untitled_album": {
+      "description": "Fallback title for an unnamed Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "content.title.untitled_track": {
+      "description": "Fallback title for an unnamed MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.collections.label": {
+      "description": "Accessible fallback label for configured Home collections.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.default_title": {
+      "description": "Default Finitude Home heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.error.copy": {
+      "description": "Home catalog failure explanation that points to Search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.error.title": {
+      "description": "Heading when Home catalog data cannot load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.loading.eyebrow": {
+      "description": "Eyebrow above the Home loading state.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.loading.label": {
+      "description": "Accessible label for the Home loading region.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.loading.title": {
+      "description": "Home loading status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.after_dark.meta": {
+      "description": "Supporting copy for the After dark mood card.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.after_dark.title": {
+      "description": "Title of the After dark mood card.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.eyebrow": {
+      "description": "Eyebrow above Home mood suggestions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.hint": {
+      "description": "Hint beside Home mood suggestions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.quiet_focus.meta": {
+      "description": "Supporting copy for the Quiet focus mood card.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.quiet_focus.title": {
+      "description": "Title of the Quiet focus mood card.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.slow_mornings.meta": {
+      "description": "Supporting copy for the Slow mornings mood card.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.slow_mornings.title": {
+      "description": "Title of the Slow mornings mood card.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "home.moods.title": {
+      "description": "Heading above Home mood suggestions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.button.change": {
+      "description": "Accessible label for the language selector button.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "language": "string"
+      }
+    },
+    "language.dialog.browser_description": {
+      "description": "Legacy Web copy retained for clients that still expose browser preferences.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "language": "string"
+      }
+    },
+    "language.dialog.description": {
+      "description": "Explains that the app can use an explicit language or follow device preferences.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.dialog.kicker": {
+      "description": "Short category label above the language selector title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.dialog.system_description": {
+      "description": "Describes the language currently resolved from device preferences.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "language": "string"
+      }
+    },
+    "language.dialog.title": {
+      "description": "Title of the language selector dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.dialog.web_description": {
+      "description": "Explains that Web uses an explicitly selected language.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.name.browser_default": {
+      "description": "Legacy Web label retained for clients that still expose browser preferences.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.name.en_us": {
+      "description": "Autonym for the en-US language option.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.name.system": {
+      "description": "Label for following the browser or operating-system language.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.name.zh_hans": {
+      "description": "Autonym for the Simplified Chinese language option.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "language.status.downloading": {
+      "description": "Status announced while a selected language bundle downloads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "language": "string"
+      }
+    },
+    "language.status.unavailable": {
+      "description": "Retryable error shown when a selected language cannot be downloaded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "language": "string"
+      }
+    },
+    "library.empty.filtered_copy": {
+      "description": "Guidance when Library filters have no matches.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.empty.filtered_title": {
+      "description": "Heading when Library filters have no matches.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.empty.first_copy": {
+      "description": "Guidance for an empty saved Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.empty.first_title": {
+      "description": "Heading for an empty saved Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.error.auth_required": {
+      "description": "Heading when Library authentication has expired.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.error.load": {
+      "description": "Heading when saved Library content cannot load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.error.pagination": {
+      "description": "Error after a later Library page cannot load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.error.session": {
+      "description": "Heading when the account session cannot be resolved for Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.filters.label": {
+      "description": "Accessible label for Library content filters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.lede": {
+      "description": "Supporting copy beneath the signed-in Library heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.loading": {
+      "description": "Status while saved Library content loads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.loading_initial": {
+      "description": "Status while the account-bound Library initializes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.nav.label": {
+      "description": "Accessible label for Library subsection navigation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.nav.saved_music": {
+      "description": "Library subsection label for saved music.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.saved_list.label": {
+      "description": "Accessible label for the saved Album and MediaTrack list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.signed_out.copy": {
+      "description": "Explanation of account ownership for a signed-out Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.signed_out.title": {
+      "description": "Heading prompting a signed-out listener to log in for Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.sort.label": {
+      "description": "Label for the Library sort selector.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.sort.recent_activity": {
+      "description": "Library sort option combining save and play activity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.sort.recently_played": {
+      "description": "Library sort option for most recently played.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.sort.recently_saved": {
+      "description": "Library sort option for most recently saved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.subtitle": {
+      "description": "Eyebrow above the Library heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.title": {
+      "description": "Main Library page heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.current_label": {
+      "description": "Accessible label for the current MediaTrack detail region.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.empty.copy": {
+      "description": "Guidance shown when no MediaTrack is playing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.empty.title": {
+      "description": "Heading shown when no MediaTrack is playing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.eyebrow": {
+      "description": "Short label for current playback context.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.fallback_byline": {
+      "description": "Fallback byline for a MediaTrack without creator attribution.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.order.playback": {
+      "description": "Queue order label when shuffle is off.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.order.shuffled": {
+      "description": "Queue order label when shuffle is on.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.queue_end": {
+      "description": "Empty state at the end of the playback queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.repeats_next": {
+      "description": "Queue heading when the current MediaTrack repeats next.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.up_next": {
+      "description": "Heading for the next item in the playback queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "now_playing.video_queue_label": {
+      "description": "Accessible label for the Video playback queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "page_section.carousel.controls_label": {
+      "description": "Accessible label for one section's carousel controls.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "page_section.carousel.help": {
+      "description": "Keyboard and control instructions for a content carousel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "page_section.carousel.label": {
+      "description": "Accessible label for a named content carousel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "page_section.carousel.next": {
+      "description": "Accessible action to show the next items in a named carousel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "page_section.carousel.previous": {
+      "description": "Accessible action to show the previous items in a named carousel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "page_section.empty": {
+      "description": "Empty state for a configured Home or catalog section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "panel_resize.layout_label": {
+      "description": "Accessible label for wide-screen panel layout controls.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "panel_resize.library_label": {
+      "description": "Accessible label for resizing the Library panel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "panel_resize.now_playing_label": {
+      "description": "Accessible label for resizing the Now Playing panel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "panel_resize.width": {
+      "description": "Accessible description of a resizable panel width in pixels.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "pixels": "number"
+      }
+    },
+    "player.action.close_expanded": {
+      "description": "Accessible action for closing the expanded mobile player.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.hide_now_playing": {
+      "description": "Accessible action for hiding the Now Playing panel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.mute": {
+      "description": "Accessible action for muting playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.next": {
+      "description": "Tooltip for moving to the next queue item.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.next_track": {
+      "description": "Accessible action for moving to the next MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.open_now_playing": {
+      "description": "Accessible action for opening a named MediaTrack in the mobile player.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "player.action.pause": {
+      "description": "Accessible action for pausing playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.previous": {
+      "description": "Tooltip for moving to the previous queue item.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.previous_track": {
+      "description": "Accessible action for moving to the previous MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.retry": {
+      "description": "Accessible action for retrying failed playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.show_now_playing": {
+      "description": "Accessible action for showing the Now Playing panel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.action.unmute": {
+      "description": "Accessible action for unmuting playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.controls.expanded_label": {
+      "description": "Accessible label for expanded playback controls.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.controls.label": {
+      "description": "Accessible label for playback controls.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.error.autoplay_blocked": {
+      "description": "Recovery guidance when browser autoplay policy pauses a ready MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.error.decode": {
+      "description": "Playback failure shown when a MediaTrack cannot be decoded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.error.network": {
+      "description": "Playback failure shown when a MediaTrack cannot be loaded from the network.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.error.stream_unavailable": {
+      "description": "Playback failure shown when a MediaTrack stream is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.error.unknown": {
+      "description": "Fallback playback failure shown for an unclassified media error.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.back": {
+      "description": "Keyboard shortcut description for seeking backward.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.close": {
+      "description": "Accessible action for closing keyboard shortcuts.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.escape": {
+      "description": "Keyboard shortcut description for Escape.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.eyebrow": {
+      "description": "Eyebrow above Player help.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.forward": {
+      "description": "Keyboard shortcut description for seeking forward.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.intro": {
+      "description": "Scope explanation for Player keyboard shortcuts.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.label": {
+      "description": "Accessible label for opening Player keyboard shortcuts.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.play_pause": {
+      "description": "Keyboard shortcut description for Space.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.help.title": {
+      "description": "Title of the Player keyboard-shortcuts dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.identity.choose": {
+      "description": "Empty-player invitation beneath the title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.identity.nothing": {
+      "description": "Title when the Player has no current item.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.region.label": {
+      "description": "Accessible label for the persistent Player region.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.repeat.all": {
+      "description": "Repeat control label when repeat-all is enabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.repeat.off": {
+      "description": "Repeat control label when repeat is off.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.repeat.one": {
+      "description": "Repeat control label when repeat-one is enabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.shuffle.disable": {
+      "description": "Shuffle control label when shuffle is enabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.shuffle.enable": {
+      "description": "Shuffle control label when shuffle is disabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.shuffle.off": {
+      "description": "Tooltip indicating shuffle is off.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.shuffle.on": {
+      "description": "Tooltip indicating shuffle is on.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "player.volume.label": {
+      "description": "Accessible label for the Player volume slider.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.add": {
+      "description": "Short action label for adding a MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.add_tracks": {
+      "description": "Action label for adding MediaTracks to a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.back_library": {
+      "description": "Action returning from disabled Playlists to Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.back_playlists": {
+      "description": "Action returning from one Playlist to the Playlist index.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.create": {
+      "description": "Action label for creating a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.delete": {
+      "description": "Action label for deleting a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.manage": {
+      "description": "Link to manage all Playlists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.move_down": {
+      "description": "Action moving a Playlist item down one position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.move_up": {
+      "description": "Action moving a Playlist item up one position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.new": {
+      "description": "Action label for a new Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.remove": {
+      "description": "Action removing a MediaTrack from a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.rename": {
+      "description": "Action label for renaming a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.save_name": {
+      "description": "Action label for saving a Playlist name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.action.view_all": {
+      "description": "Link label for viewing all Playlists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.actions.for": {
+      "description": "Accessible label for actions on a named Playlist item.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.actions.more_for": {
+      "description": "Accessible label for additional actions on a named Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.add_one.button_label": {
+      "description": "Accessible action to add a named MediaTrack to a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "playlist.add_one.button_title": {
+      "description": "Tooltip for adding a MediaTrack to a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.checking": {
+      "description": "Short status while Playlist membership is checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.checking_label": {
+      "description": "Accessible status while a named MediaTrack's membership is checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "playlist": "string",
+        "title": "string"
+      }
+    },
+    "playlist.add_one.choose_description": {
+      "description": "Explains choosing a Playlist for a named MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "playlist.add_one.choose_title": {
+      "description": "Title for choosing one Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.empty": {
+      "description": "Guidance when the listener has no Playlist for adding a MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.full": {
+      "description": "Short state when a Playlist is full.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.full_label": {
+      "description": "Accessible state when a named Playlist is full.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "playlist": "string"
+      }
+    },
+    "playlist.add_one.loading": {
+      "description": "Status while the listener's Playlists load for a picker.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.membership_error": {
+      "description": "Safe-add guidance when existing membership cannot be checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.opening_title": {
+      "description": "Title while the Playlist picker code is opening.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.signed_out_description": {
+      "description": "Private-account explanation for adding one MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add_one.signed_out_title": {
+      "description": "Login prompt for adding one MediaTrack to a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add.added": {
+      "description": "Short state when a MediaTrack is already added.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add.added_message": {
+      "description": "Confirmation after a named MediaTrack is added.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "playlist.add.description": {
+      "description": "Explains the ready-only Add MediaTracks picker.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add.empty": {
+      "description": "Initial guidance in the Add MediaTracks search picker.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add.existing_label": {
+      "description": "Accessible state for a named MediaTrack already in a named Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "playlist": "string",
+        "title": "string"
+      }
+    },
+    "playlist.add.label": {
+      "description": "Accessible action adding a named MediaTrack to a named Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "playlist": "string",
+        "title": "string"
+      }
+    },
+    "playlist.add.no_results": {
+      "description": "Empty result in Add MediaTracks for a named query.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
+    },
+    "playlist.add.results_label": {
+      "description": "Accessible label for MediaTrack results for a named query.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
+    },
+    "playlist.add.search_error": {
+      "description": "Error when the Add MediaTracks catalog search fails.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add.search_label": {
+      "description": "Accessible label for the Add MediaTracks search field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add.search_placeholder": {
+      "description": "Placeholder in the Add MediaTracks search field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add.searching": {
+      "description": "Status while the Add MediaTracks search runs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.add.title": {
+      "description": "Title of the Add MediaTracks dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.artwork_alt": {
+      "description": "Alternative text for a named Playlist artwork.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.delete.deleting": {
+      "description": "Status while a Playlist deletion is confirmed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.delete.description": {
+      "description": "Explains what remains after deleting a named Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.delete.kicker": {
+      "description": "Kicker identifying Playlist deletion as permanent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.delete.title": {
+      "description": "Title of the Playlist delete confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.cannot_play": {
+      "description": "Accessible state for a named unavailable Playlist member.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "playlist.detail.empty_copy": {
+      "description": "Guidance beneath an empty Playlist heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.empty_title": {
+      "description": "Heading for an empty Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.in_playlist": {
+      "description": "Eyebrow above members of one Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.items_copy": {
+      "description": "Guidance for managing a non-empty Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.load_error_copy": {
+      "description": "Explanation when one private Playlist cannot load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.load_error_title": {
+      "description": "Heading when one private Playlist cannot load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.members_label": {
+      "description": "Accessible label for MediaTracks in a named Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.detail.move_failed": {
+      "description": "Announcement when reordering a Playlist item fails.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.moved": {
+      "description": "Announcement after a named MediaTrack moves within a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "position": "number",
+        "title": "string"
+      }
+    },
+    "playlist.detail.not_found_copy": {
+      "description": "Explanation when one private Playlist is not found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.not_found_title": {
+      "description": "Heading when one private Playlist is not found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.opening": {
+      "description": "Status while one private Playlist opens.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.play_label": {
+      "description": "Accessible action playing a named Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.detail.play_unavailable": {
+      "description": "Tooltip when one Playlist has no ready MediaTracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.private": {
+      "description": "Eyebrow identifying one Playlist as private.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.removed": {
+      "description": "Confirmation after a MediaTrack is removed from a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.signed_out_copy": {
+      "description": "Privacy explanation for a signed-out private Playlist address.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.signed_out_title": {
+      "description": "Heading prompting login for one private Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.table.duration": {
+      "description": "Playlist table heading for duration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.table.title": {
+      "description": "Playlist table heading for MediaTrack title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.unavailable_copy": {
+      "description": "Explanation for a Playlist member no longer ready in the catalog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.detail.unavailable_count": {
+      "description": "Pluralized count of unavailable Playlist members.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "playlist.detail.unavailable_title": {
+      "description": "Fallback title for an unavailable Playlist MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.dialog.description": {
+      "description": "Explanation while a private Playlist dialog chunk loads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.dialog.loading": {
+      "description": "Generic loading status for a Playlist dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.dialog.title": {
+      "description": "Title while a private Playlist action opens.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.duration.hours": {
+      "description": "Playlist duration containing hours and minutes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "hours": "number",
+        "minutes": "number"
+      }
+    },
+    "playlist.duration.minutes": {
+      "description": "Playlist duration in minutes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "minutes": "number"
+      }
+    },
+    "playlist.error.account_add_this": {
+      "description": "Account mismatch while adding the current MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.account_add_track": {
+      "description": "Account mismatch while adding a searched MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.account_changed": {
+      "description": "Account mismatch during a Playlist mutation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.add_pending": {
+      "description": "Pending idempotent add guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.add_pending_track": {
+      "description": "Pending idempotent add guidance for a searched MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.add_retry_mismatch": {
+      "description": "Mismatched idempotent add retry guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.add_unconfirmed": {
+      "description": "Fallback when adding a MediaTrack cannot be confirmed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.change_unconfirmed": {
+      "description": "Fallback when a Playlist mutation cannot be confirmed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.item_limit_that": {
+      "description": "Playlist item-cap error in a picker target.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.item_limit_this": {
+      "description": "Playlist item-cap error in the current Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.member_account_changed": {
+      "description": "Account mismatch during Playlist member editing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.member_missing": {
+      "description": "Missing Playlist member guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.member_pending": {
+      "description": "Pending Playlist member mutation guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.member_retry_mismatch": {
+      "description": "Mismatched Playlist member mutation retry guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.member_revision": {
+      "description": "Playlist member revision conflict guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.playlist_limit": {
+      "description": "Per-account Playlist cap error.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.rate_limit": {
+      "description": "Playlist rate-limit guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.replay_unsafe": {
+      "description": "Unsafe Playlist creation replay guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.request_key_mismatch": {
+      "description": "Mismatched Playlist mutation retry guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.request_pending": {
+      "description": "Pending Playlist mutation guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.revision_loading": {
+      "description": "Playlist name or deletion revision conflict guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.revision_that_loading": {
+      "description": "Picker target Playlist revision conflict guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.revision_this_loading": {
+      "description": "Current Playlist revision conflict guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.track_not_ready": {
+      "description": "MediaTrack no longer ready during Playlist addition.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.error.try_moment": {
+      "description": "Short fallback after a Playlist loading failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.feature.checking": {
+      "description": "Status while Playlist feature availability is checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.feature.error_copy": {
+      "description": "Guidance after Playlist feature availability cannot be checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.feature.error_title": {
+      "description": "Heading when Playlist feature availability cannot be checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.feature.unavailable_copy": {
+      "description": "Assurance when Playlists are not enabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.feature.unavailable_title": {
+      "description": "Heading when Playlists are not enabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.account_error_copy": {
+      "description": "Explanation when account state cannot be confirmed for Playlists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.account_error_title": {
+      "description": "Heading when account state cannot be confirmed for Playlists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.checking_account": {
+      "description": "Status while account state is checked for Playlists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.empty_copy": {
+      "description": "Guidance for creating the first Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.empty_title": {
+      "description": "Heading for an account with no Playlists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.lede": {
+      "description": "Supporting copy beneath the Playlists index heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.load_error": {
+      "description": "Heading when private Playlists cannot load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.loading": {
+      "description": "Status while the private Playlist index loads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.signed_out_copy": {
+      "description": "Private-account explanation for the Playlist index.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.signed_out_title": {
+      "description": "Heading prompting login for the Playlist index.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.index.title": {
+      "description": "Main heading for the Playlist index.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.item_count": {
+      "description": "Pluralized number of MediaTracks in a Playlist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "playlist.name.create_description": {
+      "description": "Explanation in the Create Playlist name dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.name.create_title": {
+      "description": "Title of the Create Playlist dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.name.field": {
+      "description": "Field label for a Playlist name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.name.hint": {
+      "description": "Character-limit hint for a Playlist name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.name.rename_description": {
+      "description": "Explanation in the Rename Playlist dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.name.rename_title": {
+      "description": "Title of the Rename Playlist dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.name.saving": {
+      "description": "Status while a Playlist name is saved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.name.validation": {
+      "description": "Validation error for an invalid Playlist name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.sidebar.empty": {
+      "description": "Empty state in the Playlist sidebar.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.sidebar.heading": {
+      "description": "Heading above account Playlists in the sidebar.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.sidebar.loading": {
+      "description": "Status while sidebar Playlist summaries load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.sidebar.unavailable": {
+      "description": "Error when sidebar Playlist summaries cannot load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.signed_out.account_error_copy": {
+      "description": "Explanation when account status is unavailable for a Playlist action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.signed_out.account_error_title": {
+      "description": "Title when account status is unavailable for a Playlist action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.signed_out.description": {
+      "description": "Default private-account explanation for a Playlist action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.signed_out.kicker": {
+      "description": "Kicker for a Playlist login-required dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.signed_out.title": {
+      "description": "Default title for a Playlist login-required dialog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.summary.label": {
+      "description": "Accessible label for a Playlist summary with a MediaTrack count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "name": "string"
+      }
+    },
+    "route.announcement.page": {
+      "description": "Live-region announcement after a client-side route change.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "route.error.copy": {
+      "description": "Recovery guidance after an unexpected route failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.error.eyebrow": {
+      "description": "Short label above an unexpected route failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.error.title": {
+      "description": "Heading for an unexpected route failure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.loading": {
+      "description": "Status shown while a lazy listener route opens.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.not_found.copy": {
+      "description": "Explanation shown when a listener route does not exist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.not_found.title": {
+      "description": "Heading shown when a listener route does not exist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.account": {
+      "description": "Document title for the Account route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.album": {
+      "description": "Document title for an Album route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.artist": {
+      "description": "Document title for an Artist route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.create_account": {
+      "description": "Document title for account registration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.forgot_password": {
+      "description": "Document title for password recovery.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.home": {
+      "description": "Document title for Home.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.library": {
+      "description": "Document title for Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.log_in": {
+      "description": "Document title for login.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.not_found": {
+      "description": "Document title for an unknown route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.organization": {
+      "description": "Document title for an Organization route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.password_settings": {
+      "description": "Document title for password settings.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.playlist": {
+      "description": "Document title for one Playlist route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.playlists": {
+      "description": "Document title for the Playlists route.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.reset_password": {
+      "description": "Document title for resetting a password.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.search": {
+      "description": "Document title for Search without a query.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.search_results": {
+      "description": "Document title for Search with an active query.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
+    },
+    "route.title.sessions": {
+      "description": "Document title for signed-in devices.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.verify_email": {
+      "description": "Document title for email verification.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "save.action.remove": {
+      "description": "Action label for removing content from Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "save.action.save": {
+      "description": "Action label for saving content to Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "save.error.update": {
+      "description": "Error shown when Library save state cannot update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "save.status.removed": {
+      "description": "Confirmation after content is removed from Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "save.status.saved": {
+      "description": "Confirmation after content is saved to Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "save.status.signed_out": {
+      "description": "Prompt after a signed-out listener tries to save content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "save.status.updating": {
+      "description": "Status while Library save state updates.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.browse.mood_title": {
+      "description": "Heading above suggested searches when history is empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.browse.recent_title": {
+      "description": "Heading above recent local searches.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.error": {
+      "description": "Error shown when public Search cannot load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.eyebrow": {
+      "description": "Eyebrow above the Search heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.field.label": {
+      "description": "Accessible label for the Search page field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.field.placeholder": {
+      "description": "Placeholder in the Search page field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.form.label": {
+      "description": "Accessible label for the Search results form.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.lede": {
+      "description": "Supporting copy beneath the Search heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.no_results": {
+      "description": "Empty state for a Search query with no matches.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.organization.label": {
+      "description": "Accessible label for an Organization Search result.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "search.results.title": {
+      "description": "Heading above results for the active Search query.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
+    },
+    "search.searching": {
+      "description": "Status while Search results load.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.suggestion.acoustic": {
+      "description": "Localized display label for the Acoustic suggestion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.suggestion.ambient": {
+      "description": "Localized display label for the Ambient suggestion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.suggestion.evening": {
+      "description": "Localized display label for the Evening suggestion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.suggestion.mediatracks": {
+      "description": "Localized display label for the MediaTracks suggestion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.suggestion.piano": {
+      "description": "Localized display label for the Piano suggestion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.title": {
+      "description": "Main Search page heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "seek.position_label": {
+      "description": "Accessible label for the playback position slider.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.account.checking": {
+      "description": "Account control label while the browser session is loading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.account.log_in": {
+      "description": "Account control label for a signed-out listener.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.brand.home_label": {
+      "description": "Accessible label for the Finitude brand link to Home.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.history.back": {
+      "description": "Accessible label and tooltip for backward browser history.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.history.forward": {
+      "description": "Accessible label and tooltip for forward browser history.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.history.label": {
+      "description": "Accessible label for the browser history controls.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.nav.home": {
+      "description": "Primary navigation label for Home.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.nav.library": {
+      "description": "Primary navigation label for Library.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.nav.primary_label": {
+      "description": "Accessible label for Finitude primary navigation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.nav.search": {
+      "description": "Primary navigation label for Search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.now_playing.details_label": {
+      "description": "Accessible label for the Now Playing detail panel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.search.field_label": {
+      "description": "Accessible label describing the global catalog search field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.search.global_label": {
+      "description": "Accessible label for the global search form.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.search.placeholder": {
+      "description": "Short placeholder in the global catalog search field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.search.submit_label": {
+      "description": "Accessible label for submitting global search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.sidebar.label": {
+      "description": "Accessible label for the Finitude Library sidebar.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "shell.skip_to_main": {
+      "description": "Keyboard skip-link label for moving to routed content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "video.error.title": {
+      "description": "Heading when Video playback fails.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "video.fullscreen.action": {
+      "description": "Accessible action for entering Video fullscreen.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "video.fullscreen.player_label": {
+      "description": "Accessible label for a named fullscreen Video player.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "video.fullscreen.title": {
+      "description": "Tooltip for entering Video fullscreen.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "video.surface.label": {
+      "description": "Accessible label for a named in-page Video surface.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    }
+  }
+}

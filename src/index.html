@@ -6,46 +6,50 @@
     <title>Archtree</title>
     <link rel="stylesheet" href="/assets/archtree.css" />
 </head>
-<body>
+<body class="landing-page">
     <main class="page-shell">
-        <header class="site-header">
+        <header class="site-header landing-header">
             <a class="brand" href="/">
-                <span class="brand-mark" aria-hidden="true">A</span>
+                <span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span>
                 <span>Archtree</span>
             </a>
             {{HEADER_ACTIONS}}
         </header>
 
         <section class="hero">
-            <p class="eyebrow">Music catalog workspace</p>
-            <h1>Shape your catalog.<br />Keep every release connected.</h1>
-            <p class="lede">Archtree brings artists, albums, MediaTracks, pages, and carousels into one focused publishing workspace.</p>
-            {{HERO_ACTIONS}}
+            <div class="hero__copy">
+                <p class="eyebrow">Music catalog workspace</p>
+                <h1>Every release, connected.</h1>
+                <p class="lede">Archtree brings artists, albums, MediaTracks, pages, and carousels into one focused publishing workspace.</p>
+                {{HERO_ACTIONS}}
+            </div>
+            <figure class="hero__visual">
+                <img src="/assets/archtree-catalog-workspace.webp" width="1120" height="1400" alt="Layered catalog materials connected by fine threads" fetchpriority="high" />
+            </figure>
         </section>
 
-        <div class="section-heading">
-            <div>
-                <p class="eyebrow">Workspace</p>
-                <h2>Everything has a place</h2>
+        <section class="capabilities" aria-labelledby="capabilities-title">
+            <div class="capabilities__intro">
+                <h2 id="capabilities-title">Everything has a place</h2>
+                <p class="muted">One workspace keeps the catalog precise from first credit to final placement.</p>
             </div>
-        </div>
-        <section class="grid" aria-label="Archtree capabilities">
-            <article class="card">
-                <span class="pill">Catalog</span>
-                <h3>Connected music metadata</h3>
-                <p class="muted">Organize artists, albums, tracks, artwork, credits, and release details.</p>
-            </article>
-            <article class="card">
-                <span class="pill">Audio</span>
-                <h3>File-backed tracks</h3>
-                <p class="muted">Create tracks through S3-backed uploads and keep original filenames available.</p>
-            </article>
-            <article class="card">
-                <span class="pill">Publishing</span>
-                <h3>Composable pages</h3>
-                <p class="muted">Build home and library experiences with reusable, reorderable carousels.</p>
-            </article>
+            <div class="capability-list" aria-label="Archtree capabilities">
+                <article class="capability-item">
+                    <p class="capability-item__label"><i class="ph ph-stack" aria-hidden="true"></i> Catalog</p>
+                    <div><h3>Connected music metadata</h3><p class="muted">Organize artists, albums, MediaTracks, artwork, credits, and release details.</p></div>
+                </article>
+                <article class="capability-item">
+                    <p class="capability-item__label"><i class="ph ph-waveform" aria-hidden="true"></i> Media</p>
+                    <div><h3>File-backed publishing</h3><p class="muted">Publish Audio and Video through traceable storage lifecycles without losing the original identity.</p></div>
+                </article>
+                <article class="capability-item">
+                    <p class="capability-item__label"><i class="ph ph-files" aria-hidden="true"></i> Presentation</p>
+                    <div><h3>Composable pages</h3><p class="muted">Build Home and Library experiences with reusable, reorderable Carousels, Grids, and Lists.</p></div>
+                </article>
+            </div>
         </section>
+
+        <footer class="site-footer"><span>Archtree</span><span class="muted">Catalog publishing, kept connected.</span></footer>
     </main>
     <script src="/assets/browser-session-forms.js"></script>
 </body>

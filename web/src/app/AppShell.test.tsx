@@ -73,6 +73,7 @@ test('renders responsive navigation and exactly one persistent player surface', 
   expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main-content');
   expect(container.querySelectorAll('nav[aria-label="Primary"]')).toHaveLength(2);
   expect(screen.getAllByRole('link', { name: 'Library' })).toHaveLength(1);
+  expect(screen.queryByText('Your Library', { exact: true })).not.toBeInTheDocument();
   expect(await screen.findAllByRole('region', { name: 'Now playing' })).toHaveLength(1);
 });
 

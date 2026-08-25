@@ -12,16 +12,26 @@ import { SaveButton } from '../../components/SaveButton';
 import { launchAlbumPlayback } from '../playback/launchPlayback';
 import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton';
 import styles from './CatalogPages.module.css';
+import { useLocalization } from '../../localization/LocalizationProvider';
+import type { MessageKey } from '../../localization/contract';
 
-const releaseLabel = (year?: number) => year ? String(year) : 'Album';
-const creditRoleLabel = (role: string) => ({
-  primary: 'Primary', featured: 'Featured', performer: 'Performer', composer: 'Composer',
-  producer: 'Producer', remixer: 'Remixer', label: 'Label', publisher: 'Publisher',
-  distributor: 'Distributor', presenter: 'Presenter', legacyUnspecified: 'Credit'
-}[role] ?? role);
+const creditRoleKeys: Record<string, MessageKey> = {
+  primary: 'catalog.credit.primary',
+  featured: 'catalog.credit.featured',
+  performer: 'catalog.credit.performer',
+  composer: 'catalog.credit.composer',
+  producer: 'catalog.credit.producer',
+  remixer: 'catalog.credit.remixer',
+  label: 'catalog.credit.label',
+  publisher: 'catalog.credit.publisher',
+  distributor: 'catalog.credit.distributor',
+  presenter: 'catalog.credit.presenter',
+  legacyUnspecified: 'catalog.credit.credit'
+};
 
 /** Renders one expanded Album and launches its canonical ready-only queue. */
 export const AlbumPage = () => {
+  const { t } = useLocalization();
   const { albumId = '' } = useParams();
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id;
@@ -64,15 +74,15 @@ export const AlbumPage = () => {
   };
 
   if (albumQuery.isPending) {
-    return <div className={styles.page}><div className={styles.state} aria-busy="true">Loading Album…</div></div>;
+    return <div className={styles.page}><div className={styles.state} aria-busy="true">{t('catalog.album.loading')}</div></div>;
   }
   if (albumQuery.isError) {
     return (
       <div className={styles.page}>
         <div className={styles.state} role="alert">
-          <h1>This Album is unavailable</h1>
-          <p>It may have moved, or the catalog may be temporarily out of reach.</p>
-          <button onClick={() => albumQuery.refetch()} type="button">Try again</button>
+          <h1>{t('catalog.album.unavailable')}</h1>
+          <p>{t('catalog.error.copy')}</p>
+          <button onClick={() => albumQuery.refetch()} type="button">{t('common.action.try_again')}</button>
         </div>
       </div>
     );
@@ -86,7 +96,7 @@ export const AlbumPage = () => {
       <header className={styles.albumHeroBlock}>
         <div className={styles.hero}>
           <Artwork
-            alt={`${album.title} cover`}
+            alt={t('content.album.cover_alt', { title: album.title })}
             className={styles.heroArtwork}
             fetchPriority="high"
             kind="album"
@@ -95,10 +105,12 @@ export const AlbumPage = () => {
             src={album.artworkUrl}
           />
           <div className={styles.heroCopy}>
-            <p className={styles.eyebrow}>Album</p>
-            <h1>{album.title || 'Untitled album'}</h1>
+            <p className={styles.eyebrow}>{t('common.label.album')}</p>
+            <h1>{album.title || t('content.title.untitled_album')}</h1>
             <p className={styles.metadata}>
-              {[contentByline(album), releaseLabel(album.releaseDate?.year), `${tracks.length} MediaTrack${tracks.length === 1 ? '' : 's'}`]
+              {[contentByline(album), album.releaseDate?.year
+                ? String(album.releaseDate.year)
+                : t('common.label.album'), t('catalog.album.track_count', { count: tracks.length })]
                 .filter(Boolean)
                 .join(' · ')}
             </p>
@@ -106,14 +118,14 @@ export const AlbumPage = () => {
         </div>
         <div className={`${styles.actions} ${styles.albumActions}`}>
           <button
-            aria-label="Play"
+            aria-label={t('common.action.play')}
             className={styles.playButton}
             disabled={tracks.length === 0}
             onClick={() => { void launchAlbumPlayback(album.id, tracks, viewerId); }}
             type="button"
           >
             <Icon name="play" />
-            <span className={styles.playLabel}>Play</span>
+            <span className={styles.playLabel}>{t('common.action.play')}</span>
           </button>
           <SaveButton
             compact
@@ -129,8 +141,8 @@ export const AlbumPage = () => {
         <section className={styles.creditSection} aria-labelledby="album-credits-title">
           <div className={styles.sectionHeader}>
             <div>
-              <p className={styles.eyebrow}>Attribution</p>
-              <h2 id="album-credits-title">Credits</h2>
+              <p className={styles.eyebrow}>{t('catalog.album.attribution')}</p>
+              <h2 id="album-credits-title">{t('common.label.credits')}</h2>
             </div>
           </div>
           <ul className={styles.creditList}>
@@ -138,7 +150,7 @@ export const AlbumPage = () => {
               <li key={`${credit.subjectType}:${credit.subjectId}:${credit.role}`}>
                 <Link to={`/${credit.subjectType === 'artist' ? 'artists' : 'organizations'}/${encodeURIComponent(credit.subjectId)}`}>
                   <span>{credit.name}</span>
-                  <small>{creditRoleLabel(credit.role)}</small>
+                  <small>{t(creditRoleKeys[credit.role] ?? 'catalog.credit.credit')}</small>
                 </Link>
               </li>
             ))}
@@ -149,10 +161,10 @@ export const AlbumPage = () => {
       <section className={styles.trackSection} aria-labelledby="album-soundtracks-title">
         <div className={styles.sectionHeader}>
           <div>
-            <p className={styles.eyebrow}>In this Album</p>
-            <h2 id="album-soundtracks-title">MediaTracks</h2>
+            <p className={styles.eyebrow}>{t('catalog.album.in_album')}</p>
+            <h2 id="album-soundtracks-title">{t('common.label.mediatracks')}</h2>
           </div>
-          <p>{tracks.length > 0 ? 'Select any row to begin from that MediaTrack.' : 'No playable MediaTracks are linked yet.'}</p>
+          <p>{tracks.length > 0 ? t('catalog.album.select_track') : t('catalog.album.no_tracks')}</p>
         </div>
         {tracks.length > 0 ? (
           <ol className={styles.trackList}>
@@ -161,14 +173,16 @@ export const AlbumPage = () => {
               return (
                 <li className={styles.trackRow} key={track.id}>
                   <button
-                    aria-label={`Play ${track.title || 'Untitled MediaTrack'}`}
+                    aria-label={t('content.play.label', {
+                      title: track.title || t('content.title.untitled_track')
+                    })}
                     className={styles.trackAction}
                     onClick={() => { void launchAlbumPlayback(album.id, tracks, viewerId, track.id); }}
                     type="button"
                   >
                     <span className={styles.trackNumber}>{index + 1}</span>
                     <span className={styles.trackCopy}>
-                      <span className={styles.trackTitle}>{track.title || 'Untitled MediaTrack'}</span>
+                      <span className={styles.trackTitle}>{track.title || t('content.title.untitled_track')}</span>
                       <span className={styles.trackMeta}>{contentByline(track) || album.title}</span>
                     </span>
                     <span className={styles.duration}>{track.duration || ''}</span>
@@ -193,7 +207,7 @@ export const AlbumPage = () => {
             })}
           </ol>
         ) : (
-          <div className={styles.empty}>There is nothing playable in this Album right now.</div>
+          <div className={styles.empty}>{t('catalog.album.empty')}</div>
         )}
       </section>
     </div>
