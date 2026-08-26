@@ -266,6 +266,59 @@
   text-align: center;
 }
 
+.trackPlaybackIndicator {
+  color: var(--color-accent);
+  display: grid;
+  height: 1.1rem;
+  margin: 0 auto;
+  place-items: center;
+  width: 1.1rem;
+}
+
+.trackPlaybackIndicator svg {
+  grid-area: 1 / 1;
+  height: 1.05rem;
+  width: 1.05rem;
+}
+
+.trackPlaybackBars,
+.trackPauseIcon {
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.trackPlaybackBars :global(path) {
+  animation: trackPlaybackBar 720ms ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.trackPlaybackBars :global(path):nth-child(2n) {
+  animation-delay: -240ms;
+}
+
+.trackPlaybackBars :global(path):nth-child(3n) {
+  animation-delay: -480ms;
+}
+
+.trackPauseIcon {
+  opacity: 0;
+  transform: scale(0.78);
+}
+
+.trackRow:hover .trackPlaybackBars,
+.trackRow:focus-within .trackPlaybackBars {
+  opacity: 0;
+  transform: scale(0.78);
+}
+
+.trackRow:hover .trackPauseIcon,
+.trackRow:focus-within .trackPauseIcon {
+  opacity: 1;
+  transform: scale(1);
+}
+
 .trackCopy,
 .trackTitle,
 .trackMeta {
@@ -283,6 +336,10 @@
 .trackTitle {
   font-size: 0.92rem;
   font-weight: 680;
+}
+
+.trackTitlePlaying {
+  color: var(--color-accent);
 }
 
 .trackMeta {
@@ -312,6 +369,37 @@
   color: var(--color-text);
   font-family: var(--font-display);
   font-size: 1.6rem;
+}
+
+@keyframes trackPlaybackBar {
+  0%,
+  100% {
+    opacity: 0.62;
+    transform: scaleY(0.42);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trackPlaybackBars,
+  .trackPauseIcon {
+    transition: none;
+  }
+
+  .trackPlaybackBars :global(path) {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .trackPlaybackIndicator,
+  .trackTitlePlaying {
+    color: Highlight;
+  }
 }
 
 /* Keep Album and Artist heroes usable when the persistent side panels narrow the content pane. */

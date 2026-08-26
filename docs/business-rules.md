@@ -42,6 +42,10 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   sans-serif stack led by Helvetica Neue, Helvetica, and Arial, with explicit
   CJK and emoji fallbacks. It does not download, bundle, or hotlink Spotify's
   proprietary typefaces.
+- In an Album MediaTrack list, the actively playing row uses the Web accent for
+  its title and replaces the Track Number with animated music bars. Highlighting
+  that row by pointer or keyboard replaces the bars with the Pause action;
+  Reduce Motion keeps the indicator static.
 - This presentation contract is Web-only. Finitude retains its own name, mark,
   artwork, copy, components, and supported capabilities; the rule does not
   authorize Spotify assets or an iOS theme change.

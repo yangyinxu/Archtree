@@ -142,3 +142,69 @@ media checks, exact-artifact promotion, and rollback rehearsal. The current
 candidate also still requires a separately reviewed Linux baseline followed by
 a strict no-update CI pass; these release-only gaps are not open visual defects
 in the local macOS candidate.
+
+---
+
+## 2026-08-26 Album now-playing row amendment
+
+### Comparison target
+
+- Source visual truth: user attachment `codex-clipboard-4a60a024-7cca-4921-9dbc-be5708b88967.png`.
+- Source dimensions: 2308 × 1482 pixels; source CSS viewport and density are not available.
+- Implementation route: `http://127.0.0.1:4174/finitude/albums/e2e-quiet-hours`
+- Implementation default-state screenshot: `~/.codex/visualizations/2026/08/26/01a03be4-2679-7c50-8277-b6fb6753e29d/finitude-now-playing-default.jpg`
+- Implementation highlighted-state screenshot: `~/.codex/visualizations/2026/08/26/01a03be4-2679-7c50-8277-b6fb6753e29d/finitude-now-playing-hover.jpg`
+- Implementation dimensions: 1440 × 900 pixels at a 1440 × 900 CSS viewport and device pixel ratio 1.
+- State: dark desktop Album page with `Night Window` actively playing; default and pointer-highlighted row states were captured.
+- Density normalization: the source is a different product shell and its CSS density is unknown, so the full views were compared for state hierarchy rather than pixel geometry. Focused row crops were opened in the same comparison input to verify the leading icon, title color, highlight treatment, and row rhythm without claiming false pixel precision.
+
+### Full-view comparison evidence
+
+The source and implementation screenshots were opened together. The implementation keeps Finitude's existing three-panel shell, typography, row density, dark tokens, and controls while adopting the requested now-playing hierarchy. No page-level layout, crop, wrapping, or persistent-player regression was visible at 1440 × 900.
+
+The source uses a lighter hover surface from another product. The implementation intentionally uses Finitude's existing `--color-surface-hover` token so the new state belongs to the current design system instead of copying an unrelated surface value.
+
+### Focused region comparison evidence
+
+- Source row crop: `~/.codex/visualizations/2026/08/26/01a03be4-2679-7c50-8277-b6fb6753e29d/reference-now-playing-row.png` (2180 × 180 pixels).
+- Implementation row crop: `~/.codex/visualizations/2026/08/26/01a03be4-2679-7c50-8277-b6fb6753e29d/implementation-now-playing-row.jpg` (540 × 110 pixels).
+- Browser measurements: row 504 × 60.625 CSS pixels; music-bars icon 16.797 × 16.797 CSS pixels; active title `rgb(30, 215, 96)`.
+
+The focused comparison confirms a stable Track Number column, green active title, aligned secondary metadata, and a compact green indicator. The supplied image visually retains bars in its captured highlighted frame, while the user's explicit request requires Pause when highlighted; the implementation follows the explicit interaction requirement.
+
+### Required fidelity surfaces
+
+- Fonts and typography: existing Finitude platform sans stack, title weight, line height, truncation, and metadata hierarchy are unchanged. The accent changes only semantic state color.
+- Spacing and layout rhythm: the existing 2rem number track and 3.75rem minimum row height remain intact. Swapping number, bars, and Pause does not shift title, duration, or trailing actions.
+- Colors and visual tokens: active title and indicator use the canonical Web accent `#1ed760`; highlighted background uses the existing Finitude hover surface; keyboard focus retains the distinct white outline.
+- Image and icon quality: the indicator uses Lucide's `AudioLines` asset and the established Finitude Pause icon. No custom SVG, CSS-drawn asset, emoji, or placeholder was introduced.
+- Copy and content: no new listener-facing copy was needed. The active primary action reuses the localized `Pause` label and exposes `aria-current="true"`.
+
+### Interaction and accessibility evidence
+
+- Resting active row: animated music bars are visible and the Track Number is hidden.
+- Pointer highlight: the row receives its standard hover surface and the indicator transitions to Pause.
+- Keyboard focus: the same Pause state appears with the existing white focus outline.
+- Pause activation: pauses the shared player without relaunching the Album queue.
+- Reduce Motion: the bars remain visible but their path animation becomes `none`.
+- Browser console: no error-level messages were recorded during playback, hover, and pause checks.
+
+### Findings
+
+No actionable P0, P1, or P2 differences were found. The visual differences in shell proportions, content, and hover brightness are intentional product-context differences rather than fidelity defects.
+
+### Comparison history
+
+- Pass 1: compared both full views and both focused row crops in the same visual input. No P0/P1/P2 finding required a visual correction, so no post-fix comparison iteration was necessary.
+
+### Follow-up polish
+
+No P3 follow-up is required for this scope.
+
+### Residual repository gate
+
+The strict no-update browser matrix completed with 204 passing checks and 10 documented skips. Eight existing Darwin Chromium goldens failed: seven show the previously implemented language selector missing from their stored baselines, and the active Album golden also contains this amendment's intentional title and music-bars change. Those unrelated/stale baselines were reviewed but not bulk-updated in this focused change.
+
+### Final result
+
+final result: passed
