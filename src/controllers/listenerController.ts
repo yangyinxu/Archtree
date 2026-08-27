@@ -143,7 +143,7 @@ export const collectionPage = async (req: Request, res: Response, next: NextFunc
             rawCursor,
             auth?.userId
         );
-        if (pageSlug === 'library') {
+        if (pageSlug === 'library' || auth) {
             res.setHeader('Cache-Control', 'private, no-store');
             res.setHeader('Pragma', 'no-cache');
             res.vary('Cookie');

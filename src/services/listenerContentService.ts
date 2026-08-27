@@ -273,7 +273,7 @@ interface OrderedCollectionRef extends ListenerCollectionPageRef {
 }
 
 interface ListenerCollectionCursor {
-    version: 1;
+    version: 2;
     pageSlug: ListenerPageSlug;
     viewer: string;
     pageItemId: string;
@@ -281,6 +281,7 @@ interface ListenerCollectionCursor {
     pageRevision: string;
     itemRevision: string;
     collectionRevision: string;
+    visibilityRevision: string;
     order: number;
     contentType: 'album' | 'audioTrack';
     contentId: string;
@@ -360,7 +361,7 @@ const encodeCollectionCursor = (cursor: ListenerCollectionCursor) => {
 
 /** Rejects malformed collection cursors instead of restarting from the first page. */
 const decodeCollectionCursor = (value?: string): ListenerCollectionCursor | null => {
-    if (!value) return null;
+    if (value === undefined) return null;
     if (value.length > 2_048 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)) {
         throw new ListenerCollectionPageError(
             400,
@@ -380,12 +381,13 @@ const decodeCollectionCursor = (value?: string): ListenerCollectionCursor | null
         const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as any;
         const exactKeys = [
             'collectionId', 'collectionRevision', 'contentId', 'contentType', 'itemRevision',
-            'order', 'pageItemId', 'pageRevision', 'pageSlug', 'sourceIndex', 'version', 'viewer'
+            'order', 'pageItemId', 'pageRevision', 'pageSlug', 'sourceIndex', 'version',
+            'viewer', 'visibilityRevision'
         ];
         if (Object.keys(parsed ?? {}).sort().join(',') !== exactKeys.sort().join(',')) {
             throw new Error('Cursor fields are invalid.');
         }
-        if (parsed.version !== 1
+        if (parsed.version !== 2
             || (parsed.pageSlug !== 'home' && parsed.pageSlug !== 'library')
             || !String(parsed.viewer ?? '')
             || !isHexObjectId(parsed.pageItemId)
@@ -393,6 +395,7 @@ const decodeCollectionCursor = (value?: string): ListenerCollectionCursor | null
             || !String(parsed.pageRevision ?? '')
             || !String(parsed.itemRevision ?? '')
             || !String(parsed.collectionRevision ?? '')
+            || !String(parsed.visibilityRevision ?? '')
             || !Number.isSafeInteger(parsed.order)
             || parsed.order < 0
             || (parsed.contentType !== 'album' && parsed.contentType !== 'audioTrack')
@@ -1023,26 +1026,41 @@ export const getListenerCollectionPage = async (
         startIndex = anchorIndex + 1;
     }
 
-    const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0
-        ? Math.min(requestedLimit, maximumListenerCollectionPageSize)
-        : defaultListenerCollectionPageSize;
-    const candidateRefs = allRefs.slice(startIndex);
-    const candidateIds = uniqueIds(candidateRefs.map((item) => item.contentId), maximumSectionItems);
-    const documents = candidateIds.length > 0
+    const allContentIds = uniqueIds(allRefs.map((item) => item.contentId), maximumSectionItems);
+    const documents = allContentIds.length > 0
         ? collection.contentType === 'album'
             ? await db.collection('albums').find({
-                _id: { $in: candidateIds.map(toObjectId) },
+                _id: { $in: allContentIds.map(toObjectId) },
                 ...readyAlbumLifecycleFilter
             }).project(albumProjection).maxTimeMS(queryTimeoutMs).toArray()
             : await db.collection('audioTracks').find({
                 ...readyAudioFilter,
-                _id: { $in: candidateIds.map(toObjectId) }
+                _id: { $in: allContentIds.map(toObjectId) }
             }).project(audioTrackProjection).maxTimeMS(queryTimeoutMs).toArray()
         : [];
+    const readyIds = new Set(documents.map((document) => String(document._id).toLowerCase()));
+    const visibilityRevision = snapshotHash(allRefs.map((ref) => ({
+        contentId: ref.contentId,
+        sourceIndex: ref.sourceIndex,
+        ready: readyIds.has(ref.contentId)
+    })));
+    if (cursor && cursor.visibilityRevision !== visibilityRevision) {
+        throw new ListenerCollectionPageError(
+            409,
+            'stale_collection_cursor',
+            'The Grid/List visibility changed after this cursor was issued.'
+        );
+    }
+
+    const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, maximumListenerCollectionPageSize)
+        : defaultListenerCollectionPageSize;
+    const candidateRefs = allRefs.slice(startIndex);
     const context = collection.contentType === 'album'
         ? await createCatalogContext(documents, [])
         : await createCatalogContext([], documents);
     const visible = candidateRefs.flatMap((ref) => {
+        if (!readyIds.has(ref.contentId)) return [];
         const document = ref.contentType === 'album'
             ? context.albumsById.get(ref.contentId)
             : context.tracksById.get(ref.contentId);
@@ -1058,7 +1076,7 @@ export const getListenerCollectionPage = async (
     const last = pageEntries[pageEntries.length - 1]?.ref;
     const nextCursor = visible.length > limit && last
         ? encodeCollectionCursor({
-            version: 1,
+            version: 2,
             pageSlug,
             viewer,
             pageItemId: pageItem.itemId,
@@ -1066,6 +1084,7 @@ export const getListenerCollectionPage = async (
             pageRevision,
             itemRevision,
             collectionRevision,
+            visibilityRevision,
             order: last.order,
             contentType: last.contentType,
             contentId: last.contentId,

@@ -7,11 +7,13 @@ import {
     PageItemReferenceUnavailableError,
     touchAvailablePageItemReferences
 } from '../services/pageReferenceLifecycleService';
-import { newPageItemId } from '../utils/pageItemIdentity';
+import {
+    newPageItemId,
+    withPersistedPageItemIds
+} from '../utils/pageItemIdentity';
 
 const collectionId = 'pages';
 const maximumPageItems = 100;
-const pageItemIdPattern = /^[0-9a-f]{24}$/i;
 
 // v1 page surfaces are fixed to Home and Library.
 export type PageSlug = 'home' | 'library';
@@ -39,13 +41,6 @@ const normalizeOrder = (items: PageItemRef[]) => {
         order: index
     }));
 };
-
-const withPersistedItemIds = (items: PageItemRef[]) => items.map((item) => ({
-    ...item,
-    itemId: pageItemIdPattern.test(String(item.itemId ?? '').trim())
-        ? String(item.itemId).trim().toLowerCase()
-        : newPageItemId()
-}));
 
 const moveByIndex = <T>(items: T[], fromIndex: number, toIndex: number) => {
     const copy = [...items];
@@ -99,7 +94,7 @@ const mutatePageItems = async (
                     prepared.items[index] = normalizedReferences[referenceIndex] as PageItemRef;
                 });
             }
-            const items = normalizeOrder(withPersistedItemIds(prepared.items));
+            const items = normalizeOrder(withPersistedPageItemIds(prepared.items));
             const updated = await getDb()!.collection(collectionId).updateOne(
                 { _id: page._id },
                 {
@@ -136,7 +131,7 @@ export class Page {
     constructor(slug: PageSlug, title: string, items: PageItemRef[], createdBy: string, updatedBy: string, createdAt: Date = new Date(), updatedAt: Date = new Date()) {
         this.slug = slug;
         this.title = title;
-        this.items = normalizeOrder(withPersistedItemIds(items));
+        this.items = normalizeOrder(withPersistedPageItemIds(items));
         this.createdBy = createdBy;
         this.updatedBy = updatedBy;
         this.createdAt = createdAt;

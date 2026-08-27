@@ -8,6 +8,7 @@ import { ObjectId } from 'mongodb';
 
 import { createApp } from '../src/app';
 import { getDb } from '../src/infrastructure/database';
+import { deleteAlbumAndReferences } from '../src/services/albumLifecycleService';
 import {
     MongoReplicaSetHarness,
     startMongoReplicaSet
@@ -32,10 +33,13 @@ const ids = {
     trackPending: new ObjectId(),
     gridCollection: new ObjectId(),
     listCollection: new ObjectId(),
+    visibilityCollection: new ObjectId(),
     libraryCollection: new ObjectId(),
     dynamicCollection: new ObjectId(),
     gridItem: new ObjectId(),
     listItem: new ObjectId(),
+    duplicateListItem: new ObjectId(),
+    visibilityItem: new ObjectId(),
     libraryItem: new ObjectId(),
     dynamicItem: new ObjectId()
 };
@@ -82,6 +86,16 @@ const request = (
 ) => fetch(`${baseUrl}${pathname}`, token ? {
     headers: { Authorization: `Bearer ${token}` }
 } : undefined);
+
+const cookieRequest = (pathname: string, token: string, viewerUserId: ObjectId) => fetch(
+    `${baseUrl}${pathname}`,
+    {
+        headers: {
+            Cookie: `session_token=${encodeURIComponent(token)}`,
+            'X-Finitude-Account-Viewer': viewerUserId.toHexString()
+        }
+    }
+);
 
 before(async () => {
     harness = await startMongoReplicaSet('archtree-listener-collection-pagination-test');
@@ -211,6 +225,18 @@ before(async () => {
                 ]
             },
             {
+                _id: ids.visibilityCollection,
+                name: 'Lifecycle Songs',
+                presentation: 'list',
+                mode: 'manual',
+                contentType: 'audioTrack',
+                items: [
+                    { contentType: 'audioTrack', contentId: ids.trackPending.toHexString(), order: 0 },
+                    { contentType: 'audioTrack', contentId: ids.trackOne.toHexString(), order: 1 },
+                    { contentType: 'audioTrack', contentId: ids.trackThree.toHexString(), order: 2 }
+                ]
+            },
+            {
                 _id: ids.dynamicCollection,
                 name: 'Downloaded Songs',
                 presentation: 'list',
@@ -238,22 +264,44 @@ before(async () => {
                         order: 1
                     },
                     {
+                        itemId: ids.duplicateListItem.toHexString(),
+                        itemType: 'list',
+                        collectionId: ids.listCollection.toHexString(),
+                        order: 2
+                    },
+                    {
+                        itemId: ids.visibilityItem.toHexString(),
+                        itemType: 'list',
+                        collectionId: ids.visibilityCollection.toHexString(),
+                        order: 3
+                    },
+                    {
                         itemId: ids.dynamicItem.toHexString(),
                         itemType: 'list',
                         collectionId: ids.dynamicCollection.toHexString(),
-                        order: 2
+                        order: 4
                     }
                 ]
             },
             {
                 slug: 'library',
                 title: 'Library',
-                items: [{
-                    itemId: ids.libraryItem.toHexString(),
-                    itemType: 'list',
-                    collectionId: ids.libraryCollection.toHexString(),
-                    order: 0
-                }]
+                items: [
+                    {
+                        itemId: ids.libraryItem.toHexString(),
+                        itemType: 'list',
+                        collectionId: ids.libraryCollection.toHexString(),
+                        order: 0
+                    },
+                    {
+                        // Deliberately shares the Home item ID and definition so the
+                        // cursor test isolates the parent Page scope.
+                        itemId: ids.listItem.toHexString(),
+                        itemType: 'list',
+                        collectionId: ids.listCollection.toHexString(),
+                        order: 1
+                    }
+                ]
             }
         ])
     ]);
@@ -281,6 +329,8 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
     assert.deepEqual(home.sections.map((section: any) => section.id), [
         ids.gridItem.toHexString(),
         ids.listItem.toHexString(),
+        ids.duplicateListItem.toHexString(),
+        ids.visibilityItem.toHexString(),
         ids.dynamicItem.toHexString()
     ]);
 
@@ -289,6 +339,7 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
     );
     const firstGrid: any = await firstGridResponse.json();
     assert.equal(firstGridResponse.status, 200);
+    assert.equal(firstGridResponse.headers.get('cache-control'), 'public, max-age=60');
     assert.equal(firstGrid.limit, 1);
     assert.equal(firstGrid.pageItem.id, ids.gridItem.toHexString());
     assert.deepEqual(firstGrid.items, [{
@@ -319,6 +370,12 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
     );
     assert.equal(malformed.status, 400);
     assert.equal((await malformed.json() as any).code, 'invalid_collection_cursor');
+
+    const emptyCursor = await request(
+        `/api/listener/v1/pages/home/items/${ids.gridItem}?cursor=`
+    );
+    assert.equal(emptyCursor.status, 400);
+    assert.equal((await emptyCursor.json() as any).code, 'invalid_collection_cursor');
 
     const [cursorPayload, cursorSignature] = firstGrid.nextCursor.split('.');
     const tamperedCursor = `${cursorPayload}.${
@@ -351,6 +408,20 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
     assert.deepEqual(boundedBody.included.audioTracks[0].artistNames, ['Cursor Artist']);
     expectSafe(boundedBody);
 
+    const firstMountedListResponse = await request(
+        `/api/listener/v1/pages/home/items/${ids.listItem}?limit=1`
+    );
+    const firstMountedList: any = await firstMountedListResponse.json();
+    assert.ok(firstMountedList.nextCursor);
+    const replayedAcrossSameCollectionMount = await request(
+        `/api/listener/v1/pages/home/items/${ids.duplicateListItem}?limit=1&cursor=${encodeURIComponent(firstMountedList.nextCursor)}`
+    );
+    assert.equal(replayedAcrossSameCollectionMount.status, 409);
+    assert.equal(
+        (await replayedAcrossSameCollectionMount.json() as any).code,
+        'collection_cursor_mismatch'
+    );
+
     const invalidLimit = await request(
         `/api/listener/v1/pages/home/items/${ids.listItem}?limit=1.5`
     );
@@ -376,6 +447,47 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
 
     const tokenOne = accessToken(ids.userOne, ids.sessionOne, 'listener-one@example.test');
     const tokenTwo = accessToken(ids.userTwo, ids.sessionTwo, 'listener-two@example.test');
+
+    const cookieHomeOne = await cookieRequest(
+        `/api/listener/v1/pages/home/items/${ids.gridItem}?limit=1`,
+        tokenOne,
+        ids.userOne
+    );
+    assert.equal(cookieHomeOne.status, 200);
+    assert.equal(cookieHomeOne.headers.get('cache-control'), 'private, no-store');
+    assert.equal(
+        cookieHomeOne.headers.get('x-finitude-account-viewer'),
+        ids.userOne.toHexString()
+    );
+
+    const staleCookieViewer = await cookieRequest(
+        `/api/listener/v1/pages/home/items/${ids.gridItem}?limit=1`,
+        tokenOne,
+        ids.userTwo
+    );
+    assert.equal(staleCookieViewer.status, 409);
+    assert.match(staleCookieViewer.headers.get('cache-control') ?? '', /no-store/);
+    assert.equal((await staleCookieViewer.json() as any).code, 'account_viewer_mismatch');
+
+    const cookieHomeTwo = await cookieRequest(
+        `/api/listener/v1/pages/home/items/${ids.gridItem}?limit=1`,
+        tokenTwo,
+        ids.userTwo
+    );
+    assert.equal(cookieHomeTwo.status, 200);
+    assert.equal(cookieHomeTwo.headers.get('cache-control'), 'private, no-store');
+    assert.equal(
+        cookieHomeTwo.headers.get('x-finitude-account-viewer'),
+        ids.userTwo.toHexString()
+    );
+
+    const replayedAcrossPage = await request(
+        `/api/listener/v1/pages/library/items/${ids.listItem}?limit=1&cursor=${encodeURIComponent(firstMountedList.nextCursor)}`,
+        tokenOne
+    );
+    assert.equal(replayedAcrossPage.status, 409);
+    assert.equal((await replayedAcrossPage.json() as any).code, 'collection_cursor_mismatch');
+
     const firstLibraryResponse = await request(
         `/api/listener/v1/pages/library/items/${ids.libraryItem}?limit=1`,
         tokenOne
@@ -392,17 +504,58 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
     assert.equal(replayedAcrossViewer.status, 409);
     assert.equal((await replayedAcrossViewer.json() as any).code, 'collection_cursor_mismatch');
 
-    await getDb()!.collection('audioTracks').deleteOne({ _id: ids.trackTwo });
-    const afterDeletionResponse = await request(
+    const secondLibraryResponse = await request(
         `/api/listener/v1/pages/library/items/${ids.libraryItem}?limit=1&cursor=${encodeURIComponent(firstLibrary.nextCursor)}`,
         tokenOne
     );
-    const afterDeletion: any = await afterDeletionResponse.json();
-    assert.equal(afterDeletionResponse.status, 200);
-    assert.deepEqual(afterDeletion.items.map((item: any) => item.contentId), [
-        ids.trackThree.toHexString()
+    const secondLibrary: any = await secondLibraryResponse.json();
+    assert.equal(secondLibraryResponse.status, 200);
+    assert.deepEqual(secondLibrary.items.map((item: any) => item.contentId), [
+        ids.trackTwo.toHexString()
     ]);
-    assert.equal(afterDeletion.nextCursor, null);
+
+    const firstVisibilityResponse = await request(
+        `/api/listener/v1/pages/home/items/${ids.visibilityItem}?limit=1`
+    );
+    const firstVisibility: any = await firstVisibilityResponse.json();
+    assert.equal(firstVisibilityResponse.status, 200);
+    assert.deepEqual(firstVisibility.items.map((item: any) => item.contentId), [
+        ids.trackOne.toHexString()
+    ]);
+    assert.ok(firstVisibility.nextCursor);
+
+    await getDb()!.collection('audioTracks').updateOne(
+        { _id: ids.trackPending },
+        { $set: { uploadStatus: 'ready' } }
+    );
+    const staleAfterPromotion = await request(
+        `/api/listener/v1/pages/home/items/${ids.visibilityItem}?limit=1&cursor=${encodeURIComponent(firstVisibility.nextCursor)}`
+    );
+    assert.equal(staleAfterPromotion.status, 409);
+    assert.equal((await staleAfterPromotion.json() as any).code, 'stale_collection_cursor');
+    await getDb()!.collection('audioTracks').updateOne(
+        { _id: ids.trackPending },
+        { $set: { uploadStatus: 'pending' } }
+    );
+
+    const secondVisibilityResponse = await request(
+        `/api/listener/v1/pages/home/items/${ids.visibilityItem}?limit=1`
+    );
+    const secondVisibility: any = await secondVisibilityResponse.json();
+    assert.ok(secondVisibility.nextCursor);
+    await getDb()!.collection('audioTracks').updateOne(
+        { _id: ids.trackThree },
+        { $set: { uploadStatus: 'pending' } }
+    );
+    const staleAfterDemotion = await request(
+        `/api/listener/v1/pages/home/items/${ids.visibilityItem}?limit=1&cursor=${encodeURIComponent(secondVisibility.nextCursor)}`
+    );
+    assert.equal(staleAfterDemotion.status, 409);
+    assert.equal((await staleAfterDemotion.json() as any).code, 'stale_collection_cursor');
+    await getDb()!.collection('audioTracks').updateOne(
+        { _id: ids.trackThree },
+        { $set: { uploadStatus: 'ready' } }
+    );
 
     const firstListResponse = await request(
         `/api/listener/v1/pages/home/items/${ids.listItem}?limit=1`
@@ -417,12 +570,11 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
     const afterLifecycleChangeResponse = await request(
         `/api/listener/v1/pages/home/items/${ids.listItem}?limit=1&cursor=${encodeURIComponent(firstList.nextCursor)}`
     );
-    const afterLifecycleChange: any = await afterLifecycleChangeResponse.json();
-    assert.equal(afterLifecycleChangeResponse.status, 200);
-    assert.deepEqual(afterLifecycleChange.items.map((item: any) => item.contentId), [
-        ids.trackThree.toHexString()
-    ]);
-    assert.equal(afterLifecycleChange.nextCursor, null);
+    assert.equal(afterLifecycleChangeResponse.status, 409);
+    assert.equal(
+        (await afterLifecycleChangeResponse.json() as any).code,
+        'stale_collection_cursor'
+    );
 
     await getDb()!.collection('audioTracks').updateOne(
         { _id: ids.trackOne },
@@ -463,6 +615,38 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
     );
     assert.equal(staleAfterCollectionChange.status, 409);
     assert.equal((await staleAfterCollectionChange.json() as any).code, 'stale_collection_cursor');
+
+    await getDb()!.collection('contentCollections').updateOne(
+        { _id: ids.gridCollection },
+        {
+            $set: {
+                'items.0.order': 0,
+                'items.1.order': 1,
+                'items.2.order': 2
+            }
+        }
+    );
+    const deletionCursorResponse = await request(
+        `/api/listener/v1/pages/home/items/${ids.gridItem}?limit=1`
+    );
+    const deletionCursor: any = await deletionCursorResponse.json();
+    assert.ok(deletionCursor.nextCursor);
+    const deletion = await deleteAlbumAndReferences(ids.albumOne.toHexString());
+    assert.equal(deletion.deleted, true);
+    assert.equal(await getDb()!.collection('albums').findOne({ _id: ids.albumOne }), null);
+    const collectionAfterDeletion: any = await getDb()!.collection('contentCollections')
+        .findOne({ _id: ids.gridCollection });
+    assert.equal(
+        collectionAfterDeletion.items.some((item: any) =>
+            String(item.contentId).toLowerCase() === ids.albumOne.toHexString()
+        ),
+        false
+    );
+    const staleAfterRealDeletion = await request(
+        `/api/listener/v1/pages/home/items/${ids.gridItem}?limit=1&cursor=${encodeURIComponent(deletionCursor.nextCursor)}`
+    );
+    assert.equal(staleAfterRealDeletion.status, 409);
+    assert.equal((await staleAfterRealDeletion.json() as any).code, 'stale_collection_cursor');
 
     await getDb()!.collection('pages').updateOne(
         { slug: 'home' },

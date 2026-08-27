@@ -614,15 +614,17 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   sort, and page size in Content Manager; their resolved items are read-only.
 - A server-backed manual Grid or List is read through its parent Page item with
   a bounded opaque cursor. The cursor is bound to the Page item, collection,
-  Page and collection revisions, and—when the parent is Library—the
-  authenticated viewer. A cursor cannot be replayed across viewers or Page
-  items; malformed, stale, reordered, detached, or reconfigured snapshots fail
-  explicitly instead of restarting silently or returning a different slice.
+  Page, collection, and ready-content visibility revisions, and—when the parent
+  is Library—the authenticated viewer. A cursor cannot be replayed across
+  viewers or Page items; malformed, stale, reordered, detached, reconfigured,
+  or lifecycle-changed snapshots fail explicitly instead of restarting silently
+  or returning a position-dependent slice.
 - Server Grid/List pages preserve deterministic configured order and include
-  only allowlisted, database-confirmed ready content. If referenced content
-  becomes non-ready between requests, pagination continues past that reference
-  without exposing it. Device-local Downloaded sources are rejected by the
-  server pagination surface and must be resolved from the device store.
+  only allowlisted, database-confirmed ready content. If any referenced content
+  changes between ready and non-ready during a traversal, the cursor becomes
+  stale and the client restarts from the first page. Device-local Downloaded
+  sources are rejected by the server pagination surface and must be resolved
+  from the device store.
 - Outside the unified iOS Library, a Grid always presents its source as a grid.
   A List always presents its source as a vertical list. One page-item type does
   not change into another layout in response to filtering.

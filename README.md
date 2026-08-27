@@ -240,9 +240,12 @@ authenticated current-viewer fence as the parent Library. The default page is
 20 items and the server caps requested pages at 100. Responses contain ordered
 content references, allowlisted ready Album/MediaTrack DTOs under `included`,
 and a tamper-evident opaque `nextCursor`. Each cursor binds the stable Page-item
-and collection identities, Page/item/collection snapshots, and—where
-applicable—the authenticated viewer. Malformed cursors return `400`, while
-cross-scope or stale cursors return `409`.
+and collection identities, Page/item/collection snapshots, ready-content
+visibility, and—where applicable—the authenticated viewer. Malformed cursors
+return `400`, while cross-scope, lifecycle-changed, or stale cursors return
+`409`. Anonymous Home collection pages may use the public catalog cache;
+authenticated Home and Library collection pages remain private and
+non-cacheable so account-viewer identity headers never enter a shared cache.
 Device-local Downloaded Grid/List definitions return
 `collection_source_not_server_backed` and are never populated from server
 catalog data. Public media streaming is limited to database-confirmed `ready`
