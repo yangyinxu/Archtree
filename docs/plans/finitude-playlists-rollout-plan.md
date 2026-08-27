@@ -1,9 +1,10 @@
 # Finitude Playlists Rollout Plan
 
-The shared Playlist implementation is complete in Archtree/Web and iOS, with
-an authenticated owner-fenced Android foundation. This plan tracks only the
-remaining integration and rollout boundary; canonical Playlist behavior
-remains in `docs/business-rules.md`.
+The shared Playlist implementation is complete in Archtree/Web and iOS. The
+Android local candidate now includes authenticated owner fencing, UI, shared
+playback, and actual-start activity; local-Audio resolution remains incomplete.
+This plan tracks only that final integration and the rollout boundary;
+canonical Playlist behavior remains in `docs/business-rules.md`.
 
 ## Stage 1 — Reconcile implementation candidates
 
@@ -17,10 +18,13 @@ Status: Complete
   unavailable members, and three-digit positions.
 - Finitude Android implements the owner-fenced API, validation, mutation
   recovery, state, Compose UI, localization, secure session restoration, and a
-  real Bearer-authenticated shared-queue path.
-- Android still lacks the required Recently Played write and completed
-  local-Audio resolution. Those boundaries, the disabled Archtree production
-  capability, and unpublished native commits prevent a deployed-feature claim.
+  real Bearer-authenticated shared-queue path. Its shared actual-start
+  coordinator records the exact initial Playlist MediaTrack once without
+  counting Previous, Next, automatic advancement, restored playback, or failed
+  starts.
+- Android still lacks completed local-Audio resolution. That boundary, the
+  disabled Archtree production capability, and unpublished native commits
+  prevent a deployed-feature claim.
 
 ## Stage 2 — Publish the native client candidates
 

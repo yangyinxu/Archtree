@@ -34,7 +34,7 @@ also be added to `business-rules.md` during implementation.
 | --- | --- | --- | --- | --- |
 | P0 | Close the current integrated release | Automated release baseline complete; remaining user/device gates Skipped | Very high | Medium |
 | P1 | Adopt server-backed Playlists on iOS | Implemented; automated contract/simulator verification complete | High | Medium |
-| P1 | Adopt server-backed Playlists on Android | Secure authentication implemented; activity, local-Audio, and rollout remain | High | Medium |
+| P1 | Adopt server-backed Playlists on Android | Local candidate complete except local-Audio resolution and rollout evidence | High | Medium |
 | P1 | Explainable personalized discovery | Contract spike complete; implementation not started | Very high | Medium |
 | P2 | Content Manager validation, preview, drafts, and atomic publishing | Contract/lifecycle spike complete; implementation not started | High | Medium–high |
 | P2 | Follow Artists and show new releases | Contract spike complete; implementation not started | High | Medium |
@@ -46,17 +46,22 @@ also be added to `business-rules.md` during implementation.
 - Archtree now exposes stable Page-item identities and strict, signed,
   snapshot-bound pagination for attached manual Grid/List definitions. The
   implementation preserves ready-only public DTOs, private Library viewer
-  fencing, and the Web streaming-only boundary.
+  fencing, and the Web streaming-only boundary. Web, iOS, and Android Home now
+  consume the page-scoped endpoint while preserving Carousel compatibility.
 - Finitude iOS now has a versioned and recoverable download manifest, bounded
   Album concurrency, strict resume validation, account-transition fencing,
-  shared-asset ownership, and explicit incompatible-manifest protection.
-  System-restored background `URLSession` work and an indexed offline catalog
-  remain in its dedicated plan.
+  shared-asset ownership, explicit incompatible-manifest protection, and a
+  SQLite-backed offline catalog used for bounded Library and device-local Home
+  pagination. System-restored background `URLSession` work and physical-device
+  suspend/termination evidence remain in its dedicated plan.
 - Finitude Android now has secure password authentication, encrypted rotating
   credentials, authoritative viewer recovery, account-epoch fencing, and a
-  real Bearer-authenticated path to the existing Playlist client. Recently
-  Played writes, completed local-Audio resolution, broader account flows, and
-  release enablement remain separate work.
+  real Bearer-authenticated path to the existing Playlist client. Its Home
+  supports strict, independently paged Grid/List sections, and one shared
+  actual-start coordinator records the correct Album or MediaTrack from Home,
+  Search, Album details, and Playlists without navigation or retry duplicates.
+  Completed local-Audio resolution, a Saved/Downloaded Library surface,
+  broader account flows, and release enablement remain separate work.
 
 ## P0 — Close the Current Integrated Release
 
@@ -104,16 +109,18 @@ rather than designing another backend feature.
 
 Current disposition:
 
-- iOS server-backed Playlists are implemented. The full local suite passes 198
-  unit and 19 UI tests, including account-transition fencing, automated
-  accessibility audit, maximum Dynamic Type, unavailable-member order, and
-  three-digit positions. Shared authenticated Web/iOS and physical-device
-  playback/VoiceOver gates are `Skipped` because safe credentials/signing were
-  unavailable.
+- iOS server-backed Playlists are implemented. The current integrated local
+  suite passes 236 unit and 22 UI tests, including account-transition fencing,
+  automated accessibility audit, maximum Dynamic Type, unavailable-member
+  order, and three-digit positions. Shared authenticated Web/iOS and
+  physical-device playback/VoiceOver gates are `Skipped` because safe
+  credentials/signing were unavailable.
 - Android now has the owner-fenced API, validation, idempotency, state, Compose,
   localization, secure password authentication, encrypted rotating
   credentials, authoritative viewer recovery, and a real Bearer-authenticated
-  ready-only shared-queue path. Real Recently Played writes, completed
+  ready-only shared-queue path. Playlist playback records Recently Played only
+  after the exact initial MediaTrack actually starts, through the same
+  coordinator now used by Home, Search, and Album playback. Completed
   local-Audio resolution, broader account flows, production capability
   enablement, and physical-device evidence remain separate milestones; the
   local implementation does not prove that the feature is deployed.
