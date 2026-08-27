@@ -87,7 +87,8 @@ test('guided setup creates and links one release and is idempotent on resubmissi
     assert.equal(carousel!.artistConfig.artistId, first.artistId);
     assert.equal(carousel!.artistConfig.contentType, 'album');
     const page = await getDb()!.collection('pages').findOne({ slug: 'home' });
-    assert.deepEqual(page!.items, [{
+    assert.equal(ObjectId.isValid(page!.items[0].itemId), true);
+    assert.deepEqual(page!.items.map(({ itemId: _itemId, ...item }: any) => item), [{
         itemType: 'carousel',
         carouselId: first.carouselId,
         order: 0

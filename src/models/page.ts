@@ -7,20 +7,24 @@ import {
     PageItemReferenceUnavailableError,
     touchAvailablePageItemReferences
 } from '../services/pageReferenceLifecycleService';
+import { newPageItemId } from '../utils/pageItemIdentity';
 
 const collectionId = 'pages';
 const maximumPageItems = 100;
+const pageItemIdPattern = /^[0-9a-f]{24}$/i;
 
 // v1 page surfaces are fixed to Home and Library.
 export type PageSlug = 'home' | 'library';
 
 export interface CarouselPageItemRef {
+    itemId?: string;
     itemType: 'carousel';
     carouselId: string;
     order: number;
 }
 
 export interface CollectionPageItemRef {
+    itemId?: string;
     itemType: 'grid' | 'list';
     collectionId: string;
     order: number;
@@ -35,6 +39,13 @@ const normalizeOrder = (items: PageItemRef[]) => {
         order: index
     }));
 };
+
+const withPersistedItemIds = (items: PageItemRef[]) => items.map((item) => ({
+    ...item,
+    itemId: pageItemIdPattern.test(String(item.itemId ?? '').trim())
+        ? String(item.itemId).trim().toLowerCase()
+        : newPageItemId()
+}));
 
 const moveByIndex = <T>(items: T[], fromIndex: number, toIndex: number) => {
     const copy = [...items];
@@ -88,7 +99,7 @@ const mutatePageItems = async (
                     prepared.items[index] = normalizedReferences[referenceIndex] as PageItemRef;
                 });
             }
-            const items = normalizeOrder(prepared.items);
+            const items = normalizeOrder(withPersistedItemIds(prepared.items));
             const updated = await getDb()!.collection(collectionId).updateOne(
                 { _id: page._id },
                 {
@@ -125,7 +136,7 @@ export class Page {
     constructor(slug: PageSlug, title: string, items: PageItemRef[], createdBy: string, updatedBy: string, createdAt: Date = new Date(), updatedAt: Date = new Date()) {
         this.slug = slug;
         this.title = title;
-        this.items = normalizeOrder(items);
+        this.items = normalizeOrder(withPersistedItemIds(items));
         this.createdBy = createdBy;
         this.updatedBy = updatedBy;
         this.createdAt = createdAt;
@@ -224,6 +235,7 @@ export class Page {
                 ? Math.max(0, Math.min(position, nextItems.length))
                 : nextItems.length;
             nextItems.splice(insertAt, 0, {
+                itemId: newPageItemId(),
                 itemType: 'carousel',
                 carouselId,
                 order: insertAt
@@ -246,6 +258,7 @@ export class Page {
                 ? Math.max(0, Math.min(position, nextItems.length))
                 : nextItems.length;
             nextItems.splice(insertAt, 0, {
+                itemId: newPageItemId(),
                 itemType,
                 collectionId: collectionRefId,
                 order: insertAt

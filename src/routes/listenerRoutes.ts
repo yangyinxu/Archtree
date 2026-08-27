@@ -26,6 +26,20 @@ router.get(
     asyncHandler(listenerController.home)
 );
 router.get('/search', publicReadRateLimit, asyncHandler(listenerController.search));
+router.get(
+    '/pages/:slug(library)/items/:itemId',
+    publicReadRateLimit,
+    requireAuth,
+    requireCurrentAccountViewer,
+    asyncHandler(listenerController.collectionPage)
+);
+router.get(
+    '/pages/:slug(home)/items/:itemId',
+    publicReadRateLimit,
+    attachOptionalAccessAuth,
+    requireCurrentAccountViewerWhenAuthenticated,
+    asyncHandler(listenerController.collectionPage)
+);
 router.get('/albums/:id', publicReadRateLimit, asyncHandler(listenerController.album));
 router.get('/artists/:id', publicReadRateLimit, asyncHandler(listenerController.artist));
 router.get('/organizations/:id', publicReadRateLimit, asyncHandler(listenerController.organization));

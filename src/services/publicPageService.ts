@@ -1,3 +1,5 @@
+import { pageItemIdentity } from '../utils/pageItemIdentity';
+
 export interface PublicContentVisibility {
     albumIds: ReadonlySet<string>;
     audioTrackIds: ReadonlySet<string>;
@@ -27,14 +29,16 @@ export const toPublicPage = (page: any) => ({
     slug: String(page?.slug ?? ''),
     title: String(page?.title ?? '').trim(),
     items: sortedItems(page?.items, maximumPageItems).flatMap((item: any): Array<Record<string, unknown>> => {
+        const itemId = pageItemIdentity(item);
+        if (!itemId) return [];
         if (item?.itemType === 'carousel') {
             const carouselId = asObjectId(item.carouselId);
-            return carouselId ? [{ itemType: 'carousel', carouselId }] : [];
+            return carouselId ? [{ itemId, itemType: 'carousel', carouselId }] : [];
         }
         if (item?.itemType === 'grid' || item?.itemType === 'list') {
             const collectionId = asObjectId(item.collectionId);
             return collectionId
-                ? [{ itemType: item.itemType, collectionId }]
+                ? [{ itemId, itemType: item.itemType, collectionId }]
                 : [];
         }
         return [];
@@ -159,6 +163,7 @@ export const toPublicExpandedPage = (
         if (item.itemType === 'carousel') {
             const carousel = carouselsById.get(item.carouselId);
             return carousel ? [{
+                itemId: item.itemId,
                 itemType: 'carousel',
                 carouselId: item.carouselId,
                 carousel: toPublicCarousel(carousel, visibility)
@@ -166,6 +171,7 @@ export const toPublicExpandedPage = (
         }
         const collection = collectionsById.get(item.collectionId);
         return collection ? [{
+            itemId: item.itemId,
             itemType: item.itemType,
             collectionId: item.collectionId,
             contentCollection: toPublicContentCollection(collection, visibility)

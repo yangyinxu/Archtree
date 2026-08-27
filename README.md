@@ -232,9 +232,21 @@ scoped so one operating system never silently approves another system font's
 rendering.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
-namespace provides Home, Search, Album, Artist, Track, and authenticated Library
-responses without exposing storage lifecycle fields. Public media streaming is
-limited to database-confirmed `ready` MediaTracks and preserves HTTP Range seeking.
+namespace provides Home, Search, Album, Artist, Track, authenticated Library,
+and page-scoped Grid/List responses without exposing storage lifecycle fields.
+`GET /api/listener/v1/pages/:slug/items/:itemId?limit=&cursor=` resolves one
+attached manual Grid or List. `home` is public; `library` requires the same
+authenticated current-viewer fence as the parent Library. The default page is
+20 items and the server caps requested pages at 100. Responses contain ordered
+content references, allowlisted ready Album/MediaTrack DTOs under `included`,
+and a tamper-evident opaque `nextCursor`. Each cursor binds the stable Page-item
+and collection identities, Page/item/collection snapshots, and—where
+applicable—the authenticated viewer. Malformed cursors return `400`, while
+cross-scope or stale cursors return `409`.
+Device-local Downloaded Grid/List definitions return
+`collection_source_not_server_backed` and are never populated from server
+catalog data. Public media streaming is limited to database-confirmed `ready`
+MediaTracks and preserves HTTP Range seeking.
 Legacy native-client reads under `/content` and `/feed` also remain available
 without authentication. Their Artist, Album, MediaTrack, Page, Carousel,
 Grid/List, and Feed Post responses use explicit public projections rather than

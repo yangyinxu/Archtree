@@ -239,10 +239,25 @@ test('Page.save fences every exact target, canonicalizes IDs, and rejects missin
         }
     ], actorId.toHexString(), actorId.toHexString()).save();
     const saved: any = await getDb()!.collection('pages').findOne({ slug: 'home' });
-    assert.deepEqual(saved.items, [
-        { itemType: 'carousel', carouselId: carouselId.toHexString(), order: 0 },
-        { itemType: 'grid', collectionId: gridId.toHexString(), order: 1 }
+    assert.deepEqual(saved.items.map((item: any) => ({
+        ...item,
+        itemId: '<stable-id>'
+    })), [
+        {
+            itemId: '<stable-id>',
+            itemType: 'carousel',
+            carouselId: carouselId.toHexString(),
+            order: 0
+        },
+        {
+            itemId: '<stable-id>',
+            itemType: 'grid',
+            collectionId: gridId.toHexString(),
+            order: 1
+        }
     ]);
+    assert.equal(saved.items.every((item: any) => ObjectId.isValid(item.itemId)), true);
+    assert.equal(new Set(saved.items.map((item: any) => item.itemId)).size, 2);
 
     const missing = new Page('library', 'Library', [{
         itemType: 'carousel',

@@ -15,8 +15,22 @@ Implemented in the first slice:
   reconciliation, logout pausing, Settings management, and local playback;
 - initial Library Grid/List rendering and download progress/warning overlays.
 
+Implemented in the server-pagination slice:
+
+- persisted, order-independent identities for newly written Page items, with a
+  definition-ID compatibility identity for unique legacy references;
+- `GET /api/listener/v1/pages/:slug/items/:itemId` for bounded manual Grid/List
+  traversal with ready-only allowlisted DTOs and deterministic ordering;
+- opaque cursors bound to the viewer for Library plus Page, Page-item, and
+  collection snapshots, including explicit malformed, cross-scope, and stale
+  failures;
+- explicit rejection of device-local Downloaded sources on the server surface.
+
 Album orchestration, track-row action menus, local keyset pagination, complete
-Content Manager UI, and server Grid/List pagination remain to be implemented.
+Content Manager UI, and client migration to the server Grid/List endpoint remain
+to be implemented. The generic expanded-page and Listener Home compatibility
+responses still carry their existing manual collection payloads until native
+and Web clients consume the new endpoint.
 
 ## Objective
 
@@ -191,6 +205,17 @@ out of scope until a live queue feature is designed and implemented.
 
 ### Phase 1: Define the page-item, pagination, and download contracts
 
+**Status: In progress**
+
+The server pagination contract is complete for attached manual Grid/List
+definitions. Remaining Phase 1 dependencies are client decoding/adoption and
+then removal of complete manual collections from parent responses. Content
+Manager item removal/update is intentionally deferred until collection members
+also have stable identities and an optimistic collection revision; adding an
+index-only destructive mutation now would be ambiguous during duplicate or
+concurrent edits. Device-local dynamic definitions remain client-owned, while
+any future server dynamic source needs its own source/filter/sort contract.
+
 #### Reusable page-item presentations
 
 - Change the page-item contract from a Carousel-only record to a discriminated
@@ -273,6 +298,8 @@ out of scope until a live queue feature is designed and implemented.
 
 ### Phase 2: Build local download infrastructure in iOS
 
+**Status: In progress**
+
 - Add a small download domain model containing content ID, local URL, status,
   byte progress, total bytes, and last error.
 - Add a download store/manager responsible for:
@@ -336,6 +363,8 @@ out of scope until a live queue feature is designed and implemented.
 
 ### Phase 3: Add track actions to ContentDetails
 
+**Status: Not started**
+
 - Replace the per-track `saveButton` with the ellipsis control.
 - Extract the action sheet into a reusable SwiftUI component so the audio
   player and future content surfaces can use the same actions.
@@ -350,6 +379,8 @@ out of scope until a live queue feature is designed and implemented.
   availability, or playback activity recording.
 
 ### Phase 4: Add offline Library Grid and List page items
+
+**Status: In progress**
 
 - Refactor the iOS `PageItem` representation into a type-safe discriminated
   model that decodes Carousel, Grid, and List items and can also host the
@@ -379,6 +410,8 @@ out of scope until a live queue feature is designed and implemented.
 
 ### Phase 5: Add album download orchestration
 
+**Status: Not started**
+
 - Resolve the album through a dedicated album-track API or fetch every required
   page until all canonical track IDs are accounted for. The current first page
   of the global soundtrack endpoint is not evidence that the album is complete.
@@ -399,6 +432,8 @@ out of scope until a live queue feature is designed and implemented.
   have different lifecycle and persistence requirements.
 
 ### Phase 6: Test and document
+
+**Status: In progress**
 
 - Add unit tests for download state transitions, deduplication, retries,
   cancellation, atomic file finalization, missing-file reconciliation, and

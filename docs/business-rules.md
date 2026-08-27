@@ -589,6 +589,10 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 
 - Page items use a discriminated contract with three supported presentation
   types: Carousel, Grid, and List.
+- Each newly written Page item has a persisted identity that does not change
+  when administrators reorder the Page. Legacy references without that field
+  use their unique referenced Carousel or Grid/List definition ID until the
+  next Page mutation backfills persisted item identities.
 - Grid and List definitions each have one source mode: manual or dynamic.
   Manual definitions contain explicitly curated content references; dynamic
   definitions resolve items from a declared source and cannot be manually
@@ -608,6 +612,17 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   dynamic list.
 - Dynamic Grid and List definitions expose only source configuration, filters,
   sort, and page size in Content Manager; their resolved items are read-only.
+- A server-backed manual Grid or List is read through its parent Page item with
+  a bounded opaque cursor. The cursor is bound to the Page item, collection,
+  Page and collection revisions, and—when the parent is Library—the
+  authenticated viewer. A cursor cannot be replayed across viewers or Page
+  items; malformed, stale, reordered, detached, or reconfigured snapshots fail
+  explicitly instead of restarting silently or returning a different slice.
+- Server Grid/List pages preserve deterministic configured order and include
+  only allowlisted, database-confirmed ready content. If referenced content
+  becomes non-ready between requests, pagination continues past that reference
+  without exposing it. Device-local Downloaded sources are rejected by the
+  server pagination surface and must be resolved from the device store.
 - Outside the unified iOS Library, a Grid always presents its source as a grid.
   A List always presents its source as a vertical list. One page-item type does
   not change into another layout in response to filtering.
