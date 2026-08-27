@@ -7,6 +7,8 @@ import {
   type AudioTrackSummary
 } from './contentSchemas';
 
+export const maximumListenerCollectionCursorLength = 2_048;
+
 const contentIdSchema = z.string().trim().min(1);
 const listenerPageSlugSchema = z.enum(['home', 'library']);
 const collectionPageContentTypeSchema = z.enum(['album', 'audioTrack']);
@@ -39,7 +41,7 @@ export const listenerCollectionPageSchema = z
       })
       .strict(),
     limit: z.number().int().min(1).max(100),
-    nextCursor: z.string().trim().min(1).nullable()
+    nextCursor: z.string().trim().min(1).max(maximumListenerCollectionCursorLength).nullable()
   })
   .strict()
   .superRefine((page, context) => {

@@ -12,7 +12,8 @@ import {
 } from '../api/collectionSchemas';
 import {
   getListenerCollectionPage,
-  listenerCollectionQueryKey
+  listenerCollectionQueryKey,
+  type ListenerCollectionContinuation
 } from '../api/listenerCollections';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { PageSection } from './PageSection';
@@ -32,6 +33,11 @@ export interface PaginatedPageSectionProps {
   pageSlug: ListenerPageSlug;
   viewerKey?: string | null;
   onPlay?: (audioTrack: AudioTrackSummary) => void;
+}
+
+interface CollectionPageParam {
+  cursor?: string;
+  continuation?: ListenerCollectionContinuation;
 }
 
 /** Loads a Grid/List independently so large collections never bloat the parent page. */
@@ -54,14 +60,30 @@ export const PaginatedPageSection = ({
       viewerKey,
       {
         limit: 20,
-        cursor: typeof pageParam === 'string' ? pageParam : undefined
+        cursor: pageParam.cursor,
+        continuation: pageParam.continuation
       },
       signal
     ),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    initialPageParam: {} as CollectionPageParam,
+    getNextPageParam: (lastPage, allPages, lastPageParam) => {
+      if (!lastPage.nextCursor) return undefined;
+      const afterOrder = allPages.flatMap((page) => page.items).at(-1)?.order;
+      return {
+        cursor: lastPage.nextCursor,
+        continuation: {
+          pageItem: allPages[0].pageItem,
+          afterOrder,
+          usedCursors: [
+            ...(lastPageParam.continuation?.usedCursors ?? []),
+            lastPage.nextCursor
+          ]
+        }
+      } satisfies CollectionPageParam;
+    },
     enabled: pageSlug === 'home' || Boolean(viewerKey),
     retry: (failureCount, error) => failureCount < 1
+      && !isRestartableCursorError(error)
       && !(error instanceof ApiError && error.kind === 'http' && (error.status ?? 500) < 500)
   });
 
@@ -73,7 +95,9 @@ export const PaginatedPageSection = ({
   const presentation = firstPage?.pageItem.presentation || section.presentation;
   const deviceLocalOnly = collection.error instanceof ApiError
     && collection.error.code === 'collection_source_not_server_backed';
-  const paginationError = collection.isFetchNextPageError ? collection.error : null;
+  const paginationError = collection.isFetchNextPageError && !deviceLocalOnly
+    ? collection.error
+    : null;
   const restartRequired = isRestartableCursorError(paginationError);
 
   const initialState = collection.isPending ? (
@@ -89,7 +113,8 @@ export const PaginatedPageSection = ({
     </div>
   ) : undefined;
 
-  const footer = collection.data && (collection.hasNextPage || paginationError) ? (
+  const footer = collection.data && !deviceLocalOnly
+    && (collection.hasNextPage || paginationError) ? (
     <div className={styles.pagination}>
       {paginationError && (
         <p className={styles.paginationError} role="alert">
@@ -130,7 +155,7 @@ export const PaginatedPageSection = ({
     <div>
       <PageSection
         id={section.id}
-        items={items}
+        items={deviceLocalOnly ? [] : items}
         onPlay={onPlay}
         presentation={presentation}
         title={title}

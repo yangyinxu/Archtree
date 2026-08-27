@@ -20,7 +20,7 @@ const collectionResponse = {
     presentation: 'grid',
     mode: 'manual',
     contentType: 'album'
-  },
+  } as const,
   items: [],
   included: { albums: [], audioTracks: [] },
   limit: 20,
@@ -88,9 +88,11 @@ test('builds a normalized safe Listener Library request', async () => {
 test('scopes Grid/List pagination to the parent page and current viewer', async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const path = String(input);
+    const url = new URL(path, 'https://finitude.test');
     const isLibrary = path.includes('/pages/library/');
     return jsonResponse({
       ...collectionResponse,
+      limit: Number(url.searchParams.get('limit')),
       pageItem: {
         ...collectionResponse.pageItem,
         id: path.includes('private-item') ? 'private-item' : 'page-item-1',
@@ -125,7 +127,40 @@ test('rejects a Grid/List response for a different parent identity', async () =>
   })));
 
   await expect(getListenerCollectionPage('home', 'page-item-1')).rejects.toMatchObject({
-    kind: 'invalid-response'
+    kind: 'invalid-response',
+    code: 'collection_cursor_mismatch'
+  });
+});
+
+test('rejects an oversized collection cursor before it can enter a request URL', async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+
+  await expect(getListenerCollectionPage('home', 'page-item-1', null, {
+    cursor: 'x'.repeat(2_049)
+  })).rejects.toMatchObject({
+    kind: 'invalid-response',
+    code: 'invalid_collection_cursor'
+  });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test('turns a malformed continuation DTO into an explicit traversal restart', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    ...collectionResponse,
+    nextCursor: 'x'.repeat(2_049)
+  })));
+
+  await expect(getListenerCollectionPage('home', 'page-item-1', null, {
+    cursor: 'prior-page',
+    continuation: {
+      pageItem: collectionResponse.pageItem,
+      afterOrder: 0,
+      usedCursors: ['prior-page']
+    }
+  })).rejects.toMatchObject({
+    kind: 'invalid-response',
+    code: 'invalid_collection_cursor'
   });
 });
 

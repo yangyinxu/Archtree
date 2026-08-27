@@ -7,7 +7,7 @@ import { ContentCard } from '../../components/ContentCard';
 import { Icon } from '../../components/Icon';
 import { PageSection } from '../../components/PageSection';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
-import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton';
+import { LazyAddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
 import {
   clearSearchHistory,
   readSearchHistory,
@@ -162,7 +162,7 @@ export const SearchPage = () => {
                   onPlay={(track) => { void launchStandalonePlayback(track, viewerId); }}
                   presentation="list"
                   renderTrackTrailing={(track) => (
-                    <AddTrackToPlaylistButton
+                    <LazyAddTrackToPlaylistButton
                       accountPending={!historyIsReady}
                       track={track}
                       viewerId={viewerId}

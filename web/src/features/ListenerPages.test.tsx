@@ -211,7 +211,7 @@ test('Search renders grouped public results and keeps content actions canonical'
     `/organizations/${organization.id}`
   );
   expect(screen.getByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
   expect(readSearchHistory(null)).toEqual([]);
 });
 
@@ -496,7 +496,7 @@ test('Library sends type filters to the server and retains the mixed saved list'
   renderRoute('/library', '/library', <LibraryPage />, listenerSession);
 
   expect(await screen.findByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Downloads' })).not.toBeInTheDocument();
   expect(screen.queryByText(/offline/i)).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Albums' }));

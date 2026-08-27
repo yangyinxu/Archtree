@@ -125,6 +125,11 @@ test('rejects incomplete, out-of-order, and private Grid/List page projections',
     ...basePage,
     pageItem: { ...basePage.pageItem, contentType: 'audioTrack' }
   }).success).toBe(false);
+  expect(listenerCollectionPageSchema.safeParse({
+    ...basePage,
+    limit: 1,
+    nextCursor: 'x'.repeat(2_049)
+  }).success).toBe(false);
 });
 
 test('Credit attribution is additive and prefers a resolved Organization byline', () => {
