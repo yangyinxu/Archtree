@@ -52,8 +52,8 @@ could not be run safely remain recorded as `Skipped`, not passed.
 Relevant tracking documents include:
 
 - [`plans/finitude-integrated-release-execution-plan.md`](plans/finitude-integrated-release-execution-plan.md)
-- [`plans/finitude-web-listener-plan.md`](plans/finitude-web-listener-plan.md)
-- [`plans/finitude-user-playlists-plan.md`](plans/finitude-user-playlists-plan.md)
+- [`plans/finitude-playlists-rollout-plan.md`](plans/finitude-playlists-rollout-plan.md)
+- [`testing/finitude-web-release-matrix.md`](testing/finitude-web-release-matrix.md)
 - [`deployment-todos.md`](deployment-todos.md)
 
 Current disposition: the release prerequisite no longer blocks independent
