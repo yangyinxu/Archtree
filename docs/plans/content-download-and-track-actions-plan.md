@@ -26,11 +26,18 @@ Implemented in the server-pagination slice:
   failures;
 - explicit rejection of device-local Downloaded sources on the server surface.
 
+Implemented in the Web-adoption slice:
+
+- strict client decoding and cursor traversal for attached manual Grid/List
+  items, with Home viewer scoping and authenticated Library request support;
+- explicit first-page, next-page, and stale-cursor recovery states without
+  adding any Web download or offline behavior.
+
 Album orchestration, track-row action menus, local keyset pagination, complete
-Content Manager UI, and client migration to the server Grid/List endpoint remain
-to be implemented. The generic expanded-page and Listener Home compatibility
-responses still carry their existing manual collection payloads until native
-and Web clients consume the new endpoint.
+Content Manager UI, and native client migration to the server Grid/List
+endpoint remain to be implemented. Web Home now consumes the endpoint, while
+the generic expanded-page and Listener Home compatibility responses retain
+their existing manual collection payloads until native clients also migrate.
 
 ## Objective
 
@@ -208,13 +215,17 @@ out of scope until a live queue feature is designed and implemented.
 **Status: In progress**
 
 The server pagination contract is complete for attached manual Grid/List
-definitions. Remaining Phase 1 dependencies are client decoding/adoption and
-then removal of complete manual collections from parent responses. Content
-Manager item removal/update is intentionally deferred until collection members
-also have stable identities and an optimistic collection revision; adding an
-index-only destructive mutation now would be ambiguous during duplicate or
-concurrent edits. Device-local dynamic definitions remain client-owned, while
-any future server dynamic source needs its own source/filter/sort contract.
+definitions, and Web Home client decoding/adoption is complete. Remaining
+Phase 1 dependencies are native client adoption, a versioned Listener parent
+descriptor for configured Library sections, and then removal of complete
+manual collections from parent responses. The Web API client already applies
+the authenticated viewer fence to Library collection reads, but does not
+reintroduce the legacy expanded-page response merely to discover IDs. Content
+Manager item removal/update remains blocked until collection members also have
+stable identities and an optimistic collection revision; adding an index-only
+destructive mutation now would be ambiguous during duplicate or concurrent
+edits. Device-local dynamic definitions remain client-owned, while any future
+server dynamic source needs its own source/filter/sort contract.
 
 #### Reusable page-item presentations
 
@@ -434,6 +445,11 @@ any future server dynamic source needs its own source/filter/sort contract.
 ### Phase 6: Test and document
 
 **Status: In progress**
+
+Completed for the Web pagination slice: strict response-schema tests, viewer
+and request-shape tests, first/next/stale-cursor component tests, a production-
+bundle Chromium traversal test, and the existing Listener smoke,
+accessibility, and cross-account isolation gates.
 
 - Add unit tests for download state transitions, deduplication, retries,
   cancellation, atomic file finalization, missing-file reconciliation, and

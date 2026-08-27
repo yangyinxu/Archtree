@@ -7,6 +7,10 @@ import {
   listenerHomeSchema,
   listenerOrganizationSchema
 } from './contentSchemas';
+import {
+  collectionPageSummaries,
+  listenerCollectionPageSchema
+} from './collectionSchemas';
 
 const album = {
   contentType: 'album' as const,
@@ -53,6 +57,73 @@ test('rejects internal fields and artists inside Home music sections', () => {
       bio: '',
       artworkUrl: ''
     }]
+  }).success).toBe(false);
+});
+
+test('validates and rejoins a strict Grid/List page in configured order', () => {
+  const laterTrack = { ...audioTrack, id: 'track-2', title: 'Night Window' };
+  const page = listenerCollectionPageSchema.parse({
+    pageItem: {
+      id: 'page-item-1',
+      pageSlug: 'home',
+      title: 'Focus',
+      presentation: 'list',
+      mode: 'manual',
+      contentType: 'audioTrack'
+    },
+    items: [
+      { contentType: 'audioTrack', contentId: laterTrack.id, order: 4 },
+      { contentType: 'audioTrack', contentId: audioTrack.id, order: 8 }
+    ],
+    included: {
+      albums: [],
+      audioTracks: [audioTrack, laterTrack]
+    },
+    limit: 20,
+    nextCursor: 'opaque-cursor'
+  });
+
+  expect(collectionPageSummaries(page).map((item) => item.id)).toEqual([
+    laterTrack.id,
+    audioTrack.id
+  ]);
+});
+
+test('rejects incomplete, out-of-order, and private Grid/List page projections', () => {
+  const basePage = {
+    pageItem: {
+      id: 'page-item-1',
+      pageSlug: 'home',
+      title: 'Albums',
+      presentation: 'grid',
+      mode: 'manual',
+      contentType: 'album'
+    },
+    items: [{ contentType: 'album', contentId: album.id, order: 0 }],
+    included: { albums: [album], audioTracks: [] },
+    limit: 20,
+    nextCursor: null
+  } as const;
+
+  expect(listenerCollectionPageSchema.safeParse({
+    ...basePage,
+    included: { albums: [], audioTracks: [] }
+  }).success).toBe(false);
+  expect(listenerCollectionPageSchema.safeParse({
+    ...basePage,
+    items: [
+      { contentType: 'album', contentId: album.id, order: 1 },
+      { contentType: 'album', contentId: album.id, order: 0 }
+    ],
+    included: { albums: [album, album], audioTracks: [] }
+  }).success).toBe(false);
+  expect(listenerCollectionPageSchema.safeParse({
+    ...basePage,
+    included: { albums: [{ ...album, createdBy: 'private-owner' }], audioTracks: [] }
+  }).success).toBe(false);
+  expect(listenerCollectionPageSchema.safeParse({
+    ...basePage,
+    pageItem: { ...basePage.pageItem, contentType: 'audioTrack' }
   }).success).toBe(false);
 });
 

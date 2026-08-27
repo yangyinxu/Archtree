@@ -250,6 +250,16 @@ Device-local Downloaded Grid/List definitions return
 `collection_source_not_server_backed` and are never populated from server
 catalog data. Public media streaming is limited to database-confirmed `ready`
 MediaTracks and preserves HTTP Range seeking.
+
+Finitude Web keeps Carousel compatibility in the parent Home response, but
+loads each attached Grid/List through the page-scoped endpoint above. The Web
+client preserves returned reference order, requests later pages only from the
+opaque `nextCursor`, and offers an explicit first-page retry when a cursor is
+malformed, mismatched, or stale. Authenticated Home and Library collection
+requests send the current viewer fence; Web remains streaming-only. The
+versioned Listener API does not yet expose a Library parent-page descriptor,
+so Web Library collection discovery remains blocked rather than falling back
+to the legacy expanded-page response.
 Legacy native-client reads under `/content` and `/feed` also remain available
 without authentication. Their Artist, Album, MediaTrack, Page, Carousel,
 Grid/List, and Feed Post responses use explicit public projections rather than

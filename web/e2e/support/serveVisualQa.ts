@@ -19,6 +19,7 @@ import {
 import {
   visualAlbumFixture,
   visualArtworkSlots,
+  visualCollectionPageFixtures,
   visualHomeFixture
 } from '../fixtures/visualCatalog';
 
@@ -227,6 +228,18 @@ const routeApplicationRequest = async (
   }
   if (request.method === 'GET' && pathname === '/api/listener/v1/home') {
     sendPrivateJson(200, visualHomeFixture);
+    return true;
+  }
+  if (request.method === 'GET' && pathname.startsWith('/api/listener/v1/pages/home/items/')) {
+    const page = visualCollectionPageFixtures.get(pathname.split('/').at(-1) ?? '');
+    if (page) {
+      sendPrivateJson(200, page);
+    } else {
+      sendPrivateJson(404, {
+        code: 'listener_page_item_not_found',
+        message: 'Grid/List page item was not found.'
+      });
+    }
     return true;
   }
   if (request.method === 'GET' && pathname === '/api/listener/v1/search') {
