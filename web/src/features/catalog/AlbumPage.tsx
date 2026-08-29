@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { AudioLines } from 'lucide-react';
 import { Link, useParams } from 'react-router';
 
 import type { LibraryTarget } from '../../api/contentSchemas';
@@ -14,6 +15,7 @@ import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton'
 import styles from './CatalogPages.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
+import { playerStore } from '../../player';
 
 const creditRoleKeys: Record<string, MessageKey> = {
   primary: 'catalog.credit.primary',
@@ -29,9 +31,27 @@ const creditRoleKeys: Record<string, MessageKey> = {
   legacyUnspecified: 'catalog.credit.credit'
 };
 
+const readPlayingTrackId = () => {
+  const snapshot = playerStore.getSnapshot();
+  return snapshot.status === 'playing' ? snapshot.currentItem?.id ?? null : null;
+};
+
+const readServerPlayingTrackId = () => {
+  const snapshot = playerStore.getServerSnapshot();
+  return snapshot.status === 'playing' ? snapshot.currentItem?.id ?? null : null;
+};
+
+/** Subscribes Album rows to playback identity without repainting on every clock tick. */
+const usePlayingTrackId = () => useSyncExternalStore(
+  playerStore.subscribe,
+  readPlayingTrackId,
+  readServerPlayingTrackId
+);
+
 /** Renders one expanded Album and launches its canonical ready-only queue. */
 export const AlbumPage = () => {
   const { t } = useLocalization();
+  const playingTrackId = usePlayingTrackId();
   const { albumId = '' } = useParams();
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id;
@@ -170,19 +190,46 @@ export const AlbumPage = () => {
           <ol className={styles.trackList}>
             {tracks.map((track, index) => {
               const target: LibraryTarget = { contentType: 'audioTrack', contentId: track.id };
+              const title = track.title || t('content.title.untitled_track');
+              const isPlaying = playingTrackId === track.id;
               return (
-                <li className={styles.trackRow} key={track.id}>
+                <li
+                  className={styles.trackRow}
+                  data-playback-state={isPlaying ? 'playing' : undefined}
+                  key={track.id}
+                >
                   <button
-                    aria-label={t('content.play.label', {
-                      title: track.title || t('content.title.untitled_track')
-                    })}
+                    aria-current={isPlaying ? 'true' : undefined}
+                    aria-label={isPlaying
+                      ? t('player.action.pause')
+                      : t('content.play.label', { title })}
                     className={styles.trackAction}
-                    onClick={() => { void launchAlbumPlayback(album.id, tracks, viewerId, track.id); }}
+                    onClick={() => {
+                      if (isPlaying) {
+                        playerStore.pause();
+                        return;
+                      }
+                      void launchAlbumPlayback(album.id, tracks, viewerId, track.id);
+                    }}
                     type="button"
                   >
-                    <span className={styles.trackNumber}>{index + 1}</span>
+                    <span aria-hidden="true" className={styles.trackNumber}>
+                      {isPlaying ? (
+                        <span className={styles.trackPlaybackIndicator}>
+                          <AudioLines
+                            aria-hidden="true"
+                            className={styles.trackPlaybackBars}
+                            focusable="false"
+                            strokeWidth={1.9}
+                          />
+                          <Icon className={styles.trackPauseIcon} name="pause" />
+                        </span>
+                      ) : index + 1}
+                    </span>
                     <span className={styles.trackCopy}>
-                      <span className={styles.trackTitle}>{track.title || t('content.title.untitled_track')}</span>
+                      <span className={`${styles.trackTitle} ${isPlaying ? styles.trackTitlePlaying : ''}`}>
+                        {title}
+                      </span>
                       <span className={styles.trackMeta}>{contentByline(track) || album.title}</span>
                     </span>
                     <span className={styles.duration}>{track.duration || ''}</span>

@@ -7,6 +7,7 @@ import {
   browserSessionResolvingQuery
 } from '../../api/session';
 import { PageSection } from '../../components/PageSection';
+import { PaginatedPageSection } from '../../components/PaginatedPageSection';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
 import { useSearchQuery } from '../search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../search/useSearchHistoryRecorder';
@@ -95,11 +96,21 @@ export const HomePage = () => {
       ) : home.data.sections.length > 0 ? (
         <div className={`${styles.sectionStack} ${styles.sectionStackReady}`} aria-label={home.data.title || t('home.collections.label')}>
           {home.data.sections.map((section) => (
-            <PageSection
-              {...section}
-              key={section.id}
-              onPlay={(track) => { void launchStandalonePlayback(track, viewerId); }}
-            />
+            section.presentation === 'carousel' ? (
+              <PageSection
+                {...section}
+                key={section.id}
+                onPlay={(track) => { void launchStandalonePlayback(track, viewerId); }}
+              />
+            ) : (
+              <PaginatedPageSection
+                key={section.id}
+                onPlay={(track) => { void launchStandalonePlayback(track, viewerId); }}
+                pageSlug="home"
+                section={section}
+                viewerKey={viewerId}
+              />
+            )
           ))}
         </div>
       ) : (

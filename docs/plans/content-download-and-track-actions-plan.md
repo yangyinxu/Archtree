@@ -13,10 +13,43 @@ Implemented in the first slice:
   mutation rules, and expanded-page decoding alongside Carousel;
 - a device-owned iOS manifest with app-owned resumable partial files, startup
   reconciliation, logout pausing, Settings management, and local playback;
-- initial Library Grid/List rendering and download progress/warning overlays.
+- unified Saved + Downloaded Library rendering and download progress/warning
+  overlays.
 
-Album orchestration, track-row action menus, local keyset pagination, complete
-Content Manager UI, and server Grid/List pagination remain to be implemented.
+Implemented in the server-pagination slice:
+
+- persisted, order-independent identities for newly written Page items, with a
+  definition-ID compatibility identity for unique legacy references;
+- `GET /api/listener/v1/pages/:slug/items/:itemId` for bounded manual Grid/List
+  traversal with ready-only allowlisted DTOs and deterministic ordering;
+- opaque cursors bound to the viewer for Library plus Page, Page-item, and
+  collection snapshots, including explicit malformed, cross-scope, and stale
+  failures;
+- explicit rejection of device-local Downloaded sources on the server surface.
+
+Implemented in the Web-adoption slice:
+
+- strict client decoding and cursor traversal for attached manual Grid/List
+  items, with Home viewer scoping and authenticated Library request support;
+- explicit first-page, next-page, and stale-cursor recovery states without
+  adding any Web download or offline behavior.
+
+Implemented in the native-adoption and reliability slices:
+
+- iOS and Android Home consume independently paged server Grid/List items with
+  strict metadata, viewer/account, cursor, overlap, and request-ownership
+  fencing while preserving Carousel compatibility;
+- iOS track-row actions, bounded Album orchestration, shared-asset ownership,
+  offline playback, unified Saved + Downloaded Library, Settings management,
+  and a versioned manifest are implemented;
+- iOS device-local queries use a rebuildable SQLite index with keyset
+  pagination, content-addressed metadata snapshots, revision fencing, explicit
+  retry, and future-schema fail-closed behavior.
+
+System-restored background `URLSession` execution, physical-device lifecycle
+evidence, complete Content Manager preview/draft/publish workflows, and safe
+destructive collection-member editing remain. Compatibility parent responses
+continue to retain their existing manual collection payloads for older clients.
 
 ## Objective
 
@@ -32,17 +65,15 @@ API. It does not add a live, user-editable playback queue.
 
 ## Current state
 
-- `ContentDetails` already loads an album’s linked soundtracks and checks each
-  stream with `HEAD` before enabling playback.
-- Album playback builds an in-memory queue for Play, Previous, Next, and
-  automatic advancement.
-- The iOS client has Save-to-Library state and authentication handling, but no
-  local download manager or offline audio storage.
-- Archtree exposes an audio stream endpoint backed by S3 with HTTP Range
-  support. Its current response is optimized for playback and uses inline
-  content disposition.
+- `ContentDetails` loads the canonical Album track list, preserves the shared
+  player queue, exposes track actions, and coordinates bounded Album downloads.
+- The iOS download store persists device-owned intent and shared Audio assets,
+  validates resumable Range responses, reconciles startup state, and serves
+  bounded Library/Home pages from its SQLite projection.
+- Archtree exposes authenticated validator-aware Audio downloads separately
+  from the existing streaming response.
 - There are no implemented “Play next,” “Add to queue,” Up Next, or queue
-  editing actions.
+  editing actions; those remain intentionally out of scope.
 
 ## Agreed product behavior
 
@@ -75,9 +106,9 @@ The following agreed rules are also recorded in
    preserving validated partial files, validators, and resume state. Late
    callbacks cannot complete paused entries. Resuming creates a newly
    authenticated request.
-10. The Downloaded collection has a filter control with Songs, Albums, Artists,
-    and Playlists. Albums resolve to a Grid page item and Songs resolve to a
-    List page item. Artists and Playlists remain visible but unavailable.
+10. The Library has additive Albums and Songs content filters plus a Downloads
+    availability filter. The Library remains one vertically scrolling dynamic
+    list; it does not expose unavailable Artists or Playlists filters.
 11. “Download album” is available only when the complete album track list has
     loaded and all required tracks are known. Partial album data must not be
     presented as a complete album download.
@@ -135,25 +166,22 @@ out of scope until a live queue feature is designed and implemented.
 
 ### Offline Library and downloaded content
 
-- Library always includes a device-local “Downloaded” collection, including
-  while signed out or when the server is unreachable. Show a compact local
-  empty state when the device has no downloads.
-- The collection uses the same cached server-shaped album and soundtrack
-  objects as the online UI. Preserve the original versioned JSON response
-  snapshots and maintain a small local index for content type, content ID,
-  status, ordering, metadata validity, and transfer progress. Do not
-  reconstruct display records from filenames.
+- Library always includes device-local downloads in its unified Saved +
+  Downloaded union, including while signed out or when the server is
+  unreachable. Show a compact local empty state when the device has no saved
+  or downloaded content.
+- Local entries use the same cached server-shaped album and soundtrack objects
+  as the online UI. Preserve the original versioned JSON response snapshots
+  and maintain a small local index for content type, content ID, status,
+  ordering, metadata validity, and transfer progress. Do not reconstruct
+  display records from filenames.
 - Downloaded audio files and cached metadata use one device-local store. A
   manifest missing its required content ID is corrupted and cannot play or
   retry; render its remaining data with a warning and offer confirmed deletion.
-- Inject the Downloaded destination first in the Library page model so it is
-  available in online, offline, signed-in, and signed-out states.
-- Add a Downloaded filter control with Songs, Albums, Artists, and Playlists
-  options. Resolve Albums through a device-local Grid page item and Songs
-  through a separate device-local List page item; neither type changes layout.
-  Keep Artists and Playlists visible but unavailable until a later release.
-  Local pagination fetches the next page from the local store as the user
-  scrolls, without making a server request for already-downloaded content.
+- Add additive Albums and Songs filters plus a Downloads availability filter.
+  Applying any combination keeps the same Library list presentation. Local
+  pagination fetches the next page from the indexed store as the user scrolls,
+  without making a server request for already-downloaded content.
 - Show per-item download progress on the packshot image for every in-progress
   track or album download in a Carousel, Grid, or List. Completed items replace
   the progress state with their completed action state; failed items retain a
@@ -161,10 +189,10 @@ out of scope until a live queue feature is designed and implemented.
 - The local store should order by `downloadedAt` and a stable unique ID, newest
   first, and use a keyset cursor. Offset pagination can skip or duplicate rows
   when downloads are added or removed during scrolling.
-- When online, the normal server Library content may refresh independently;
-  the Downloaded collection must remain available if that refresh fails.
+- When online, normal server Library content may refresh independently;
+  device-local rows must remain available if that refresh fails.
 - If the device has no downloaded content, show an intentional local
-  empty state without suppressing configured online Library page items.
+  empty state without suppressing saved server content.
 
 ### List presentation
 
@@ -191,6 +219,19 @@ out of scope until a live queue feature is designed and implemented.
 
 ### Phase 1: Define the page-item, pagination, and download contracts
 
+**Status: In progress**
+
+The server pagination contract and Web, iOS, and Android Home adoption are
+complete for attached manual Grid/List definitions. The iOS Library remains
+the canonical unified Saved + Downloaded list, so an administrator-configured
+Library parent descriptor is not a remaining dependency. Content Manager item
+removal/update remains blocked until collection members also have stable
+identities and an optimistic collection revision; adding an index-only
+destructive mutation now would be ambiguous during duplicate or concurrent
+edits. Compatibility parent payload removal also waits for legacy-client
+retirement. Device-local dynamic definitions remain client-owned, while any
+future server dynamic source needs its own source/filter/sort contract.
+
 #### Reusable page-item presentations
 
 - Change the page-item contract from a Carousel-only record to a discriminated
@@ -209,9 +250,10 @@ out of scope until a live queue feature is designed and implemented.
 - Support both manual and dynamic Lists. Manual Lists preserve explicit item
   order and supported content types; dynamic Lists derive membership and order
   from their declared source.
-- Model device-local Downloaded Albums as a dynamic album-only Grid and
-  Downloaded Songs as a separate dynamic soundtrack-only List. These local
-  sources are synthesized by the client and are not editable in Content Manager.
+- Model optional device-local Home sections as a Downloaded Albums dynamic
+  album-only Grid and a Downloaded Songs dynamic soundtrack-only List. These
+  sources are synthesized by the client and are not editable in Content Manager;
+  they do not replace the unified Library list.
 - Preserve backward decoding for existing carousel page records that do not
   yet contain a stable page-item ID.
 - Keep Grid and List configuration in the page response, but do not embed their
@@ -272,6 +314,14 @@ out of scope until a live queue feature is designed and implemented.
 - Update API documentation with the final endpoint shape and error contract.
 
 ### Phase 2: Build local download infrastructure in iOS
+
+**Status: In progress**
+
+The foreground/relaunch engine, recoverable manifest, shared ownership,
+strict resume validation, SQLite catalog, offline resolution, and storage
+protection below are implemented. System-restored background `URLSession`
+task mapping and physical suspend/termination proof remain blocked on the
+target lifecycle environment.
 
 - Add a small download domain model containing content ID, local URL, status,
   byte progress, total bytes, and last error.
@@ -336,6 +386,8 @@ out of scope until a live queue feature is designed and implemented.
 
 ### Phase 3: Add track actions to ContentDetails
 
+**Status: Complete**
+
 - Replace the per-track `saveButton` with the ellipsis control.
 - Extract the action sheet into a reusable SwiftUI component so the audio
   player and future content surfaces can use the same actions.
@@ -349,18 +401,20 @@ out of scope until a live queue feature is designed and implemented.
 - Ensure menu presentation does not interfere with navigation links, track
   availability, or playback activity recording.
 
-### Phase 4: Add offline Library Grid and List page items
+### Phase 4: Add unified offline Library and device-local collection pages
 
-- Refactor the iOS `PageItem` representation into a type-safe discriminated
-  model that decodes Carousel, Grid, and List items and can also host the
-  synthetic device-local Downloaded Grid and List.
-- Add reusable lazy collection renderers with injected paginated data sources:
-  authenticated server sources for configured online Grid/List items and a
-  device-local source for Downloaded. Use a Grid for Albums and a List for
-  Songs; keep pagination out of the SwiftUI views.
+**Status: Complete**
+
+- The iOS Home `PageItem` representation decodes Carousel, Grid, and List
+  items. Manual server collections use page-scoped requests, while configured
+  Downloaded Album/Song sources use the device-local SQLite catalog and never
+  request a server child page.
+- The Library remains one dynamic, vertically scrolling Saved + Downloaded
+  union per the canonical business rule. Albums, Songs, and Downloaded are
+  composable filters rather than administrator-configured Library page items.
 - Reuse the existing album and soundtrack cards, but resolve playback URLs to
   local files when available and retain server URLs as online fallbacks.
-- Make the Library view model compose the local collection with server sections:
+- The Library view model composes local records with server content:
   - Load local downloaded content immediately.
   - Attempt the server request normally and treat offline transport failure as
     recoverable; do not gate requests solely on reachability hints.
@@ -378,6 +432,8 @@ out of scope until a live queue feature is designed and implemented.
   than implementing them in this release.
 
 ### Phase 5: Add album download orchestration
+
+**Status: Complete**
 
 - Resolve the album through a dedicated album-track API or fetch every required
   page until all canonical track IDs are accounted for. The current first page
@@ -400,6 +456,20 @@ out of scope until a live queue feature is designed and implemented.
 
 ### Phase 6: Test and document
 
+**Status: In progress**
+
+Completed for the Web pagination slice: strict response-schema tests, viewer
+and request-shape tests, first/next/stale-cursor component tests, a production-
+bundle Chromium traversal test, and the existing Listener smoke,
+accessibility, and cross-account isolation gates.
+
+Completed for native adoption: iOS passes 236 unit and 22 UI tests, including
+indexed local second-page traversal, server continuation/restart behavior,
+account/request fencing, offline playback, and shared-player launch. Android
+passes 127 JVM and 22 API 31 device tests, including strict Home pagination and
+actual-start Recently Played fencing. Physical-device, authenticated deployed
+environment, and system-restored background-session checks remain unrun.
+
 - Add unit tests for download state transitions, deduplication, retries,
   cancellation, atomic file finalization, missing-file reconciliation, and
   album aggregation.
@@ -418,8 +488,8 @@ out of scope until a live queue feature is designed and implemented.
     Carousel, Grid, or List item’s packshot.
   - Entries missing required IDs cannot be played and expose confirmed Delete
     download; entries with valid IDs can retry metadata or file recovery.
-  - Downloaded filtering shows Albums in a Grid and Songs in a List;
-    Artists and Playlists remain visible but unavailable.
+  - Albums, Songs, and Downloads filters compose without changing the unified
+    Library list presentation.
   - List rows show square packshots, title and content attribution, preserve full
     accessible titles, and keep progress/warnings on the packshot.
   - Changing List sort resets pagination and returns deterministic ordering.
@@ -450,14 +520,13 @@ out of scope until a live queue feature is designed and implemented.
 - A complete loaded album can be downloaded with visible aggregate progress.
 - Each affected Carousel, Grid, or List item shows track or album download
   progress on its packshot while the transfer is incomplete.
-- The Downloaded filter shows Albums in a Grid and Songs in a List;
-  Artists and Playlists are visible but unavailable.
+- Albums, Songs, and Downloads filters compose over the unified Library list.
 - Content Manager creators can curate and reorder albums in a manual Grid.
   Dynamic Grids reject manual item mutations.
 - Manual Lists preserve curated membership and order; dynamic Lists derive both
   from their configured source.
-- Downloaded Albums contains only downloaded album entries, and Downloaded
-  Songs contains only independently downloaded soundtrack entries.
+- The Albums + Downloads result contains only downloaded Album entries, and
+  Songs + Downloads contains only independently downloaded soundtrack entries.
 - Failed album tracks can be retried without duplicating completed downloads.
 - Items missing required content IDs are corrupted and not playable; they offer
   confirmed deletion. Missing non-identity metadata uses fallbacks and warnings.

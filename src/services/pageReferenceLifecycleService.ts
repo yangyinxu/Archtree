@@ -2,6 +2,7 @@ import { ClientSession, ObjectId } from 'mongodb';
 
 import { getDatabaseClient, getDb } from '../infrastructure/database';
 import { touchActiveAccount } from './accountReferenceFenceService';
+import { withPersistedPageItemIds } from '../utils/pageItemIdentity';
 
 type PageItemReference = {
     itemType?: unknown;
@@ -82,45 +83,16 @@ export interface PageTargetDeletionHooks {
     afterTargetFence?: () => Promise<void>;
 }
 
-const normalizedPageItemsWithout = (field: 'carouselId' | 'collectionId', targetId: string) => ({
-    $let: {
-        vars: {
-            retained: {
-                $filter: {
-                    input: { $cond: [{ $isArray: '$items' }, '$items', []] },
-                    as: 'item',
-                    cond: {
-                        $ne: [
-                            {
-                                $toLower: {
-                                    $convert: {
-                                        input: `$$item.${field}`,
-                                        to: 'string',
-                                        onError: '',
-                                        onNull: ''
-                                    }
-                                }
-                            },
-                            targetId
-                        ]
-                    }
-                }
-            }
-        },
-        in: {
-            $map: {
-                input: { $range: [0, { $size: '$$retained' }] },
-                as: 'itemIndex',
-                in: {
-                    $mergeObjects: [
-                        { $arrayElemAt: ['$$retained', '$$itemIndex'] },
-                        { order: '$$itemIndex' }
-                    ]
-                }
-            }
-        }
-    }
-});
+/** Removes one exact target while atomically backfilling stable IDs on every retained item. */
+const normalizedPageItemsWithout = (
+    items: unknown,
+    field: 'carouselId' | 'collectionId',
+    targetId: string
+) => withPersistedPageItemIds(
+    (Array.isArray(items) ? items : []).filter((item: any) =>
+        String(item?.[field] ?? '').trim().toLowerCase() !== targetId
+    )
+).map((item, order) => ({ ...item, order }));
 
 const deleteTargetAndDetachPages = async (
     targetType: 'carousel' | 'contentCollection',
@@ -158,17 +130,30 @@ const deleteTargetAndDetachPages = async (
                 return;
             }
             await hooks.afterTargetFence?.();
-            await getDb()!.collection('pages').updateMany(
+            const pages = await getDb()!.collection('pages').find(
                 { [`items.${pageReferenceField}`]: { $in: referenceVariants } },
-                [{
-                    $set: {
-                        items: normalizedPageItemsWithout(pageReferenceField, canonicalTargetId),
-                        updatedBy: canonicalUpdatedBy,
-                        updatedAt: new Date()
-                    }
-                }],
-                { session }
-            );
+                { session, projection: { _id: 1, items: 1 } }
+            ).toArray();
+            for (const page of pages) {
+                const updated = await getDb()!.collection('pages').updateOne(
+                    { _id: page._id },
+                    {
+                        $set: {
+                            items: normalizedPageItemsWithout(
+                                page.items,
+                                pageReferenceField,
+                                canonicalTargetId
+                            ),
+                            updatedBy: canonicalUpdatedBy,
+                            updatedAt: new Date()
+                        }
+                    },
+                    { session }
+                );
+                if (updated.matchedCount !== 1) {
+                    throw new Error('A Page changed during target deletion.');
+                }
+            }
             const removed = await getDb()!.collection(collectionName).deleteOne(
                 { _id: targetObjectId },
                 { session }

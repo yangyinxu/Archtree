@@ -41,49 +41,20 @@
 
 ## Stage 4 — Publish the immutable candidate
 
-**Status: In progress**
+**Status: Complete**
 
-- The 2026-08-24 clean `origin/develop` preflight passed `npm test`,
-  `npm run build`, 148/148 Mongo integration tests, and E2E TypeScript, but the
-  strict three-engine browser gate failed its account-isolation bookkeeping in
-  Chromium, Firefox, and WebKit. The public localization-manifest request was
-  incorrectly included in the test's private-request ledger; trace evidence
-  shows every actual post-switch private request used the replacement viewer.
-- Release remediation is authorized and in progress: narrow the E2E private
-  request ledger, update necessary security dependencies, rerun the exact
-  release gates, then publish and monitor the candidate through the merged
-  `main` SHA. Darwin visual baselines also drift under the current local
-  Chromium and must not be updated without review; Linux CI remains the
-  release-owned pixel evidence.
-- The repaired account-isolation scenario passes Chromium, Firefox, and WebKit.
-  JWT verification now allowlists HS256, necessary direct and transitive
-  dependencies are on patched versions, and both production-only and complete
-  dependency audits report zero known vulnerabilities.
-- The remediated tree passes 312/312 server tests, 224/224 Web tests, the
-  production build and E2E typecheck, and 148/148 Mongo integration tests. Its
-  complete local browser matrix has 202 passes, 10 expected skips, and only the
-  seven already identified Darwin Chromium pixel-baseline differences; no
-  Darwin snapshot was updated.
-- PR #57's exact-head Linux gate passed every non-visual check and the same 202
-  browser tests, then exposed seven stale Linux Chromium baselines. Retained CI
-  expected/actual/diff evidence confirms the intended Library heading removal,
-  carousel copy inset, and language control across the reviewed desktop,
-  mobile, landscape, and active-playback views. Only those seven release-owned
-  Linux baselines are being replaced from the reviewed CI actual images.
-
-- Stage only the confirmed integrated candidate and inspect the staged diff.
-- The staged candidate contains 247 reviewed files, excludes the user-owned
-  `AGENTS.md`, and passes the cached whitespace, dependency, generated-output,
-  credential, path, and candidate-blob hygiene checks.
-- Commit with neutral metadata, push the chosen branch, and retain its exact
-  commit identity.
-- Wait for the GitHub release workflow, resolve any retry-recovered flaky check
-  rather than silently accepting it, and use only the final commit-named
-  Elastic Beanstalk archive.
+- PR #58 merged candidate `1ca9ec9` into exact `main` commit `f54fb4e`.
+- Merged-main workflow `32852606600` passed and retained the commit-named
+  artifact whose `RELEASE.json` records `github-32852606600-1`.
+- The immediately previous artifact remains retained as the rollback input.
+- Production health, `/finitude` routes, compatibility redirect, and the
+  canonical 52-track Album response were verified independently of CI.
+- Artifact availability and production health do not satisfy the still-missing
+  staging, manual-device, Playlist-enable, observation, or rollback stages.
 
 ## Stage 5 — Deploy and verify staging
 
-**Status: Not started**
+**Status: Blocked**
 
 - Record the staging target, release owner, rollback owner, observation window,
   stop conditions, candidate archive, and previous known-good archive.
@@ -91,10 +62,12 @@
   then explicitly enable staging Playlists for the complete smoke matrix.
 - Capture Web Vitals, real-browser/device/assistive-technology evidence, and an
   approved media-load result where authorized.
+- This stage requires an authorized staging target, safe accounts, devices,
+  and named release ownership. It is skipped while those inputs are absent.
 
 ## Stage 6 — Rehearse rollback and promote production
 
-**Status: Not started**
+**Status: Blocked**
 
 - Redeploy the previous exact archive, verify recovery, then restore the same
   staging-tested candidate archive.
@@ -103,3 +76,6 @@
 - Promote that archive to production with Playlists initially disabled.
 - Enable the feature only after health, index, isolation, and production-safe
   smoke checks pass; retain the rollback bundle through the observation window.
+- The base application is already healthy in production, but Playlists remain
+  fail-closed and an actual rollback rehearsal has not been performed. Neither
+  condition is silently promoted to passed evidence.

@@ -14,18 +14,20 @@ const AddTrackToPlaylistDialog = lazy(() => import('./AddTrackToPlaylistDialog')
   default: module.AddTrackToPlaylistDialog
 })));
 
+export interface AddTrackToPlaylistButtonProps {
+  track: AudioTrackSummary;
+  viewerId?: string | null;
+  accountPending?: boolean;
+  accountUnavailable?: boolean;
+}
+
 /** Adds a ready MediaTrack without nesting the action inside its playback target. */
 export const AddTrackToPlaylistButton = ({
   track,
   viewerId,
   accountPending = false,
   accountUnavailable = false
-}: {
-  track: AudioTrackSummary;
-  viewerId?: string | null;
-  accountPending?: boolean;
-  accountUnavailable?: boolean;
-}) => {
+}: AddTrackToPlaylistButtonProps) => {
   const { t } = useLocalization();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const loadingCloseRef = useRef<HTMLButtonElement>(null);

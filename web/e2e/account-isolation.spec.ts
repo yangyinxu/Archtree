@@ -1,6 +1,6 @@
 import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
 
-import { homeFixture } from './fixtures/catalog';
+import { collectionPageFixture, homeFixture } from './fixtures/catalog';
 import { privateLibraryPage } from './fixtures/privateListener';
 
 const viewerA = 'e2e-viewer-a';
@@ -209,6 +209,18 @@ test('an A tab cannot consume or mutate B data and both tabs reconcile to B', as
         ...homeFixture,
         title: `${activeViewer} private home`
       });
+      return;
+    }
+    if (path.startsWith('/api/listener/v1/pages/home/items/')) {
+      const pageItemId = path.split('/').at(-1);
+      const section = homeFixture.sections.find((candidate) => candidate.id === pageItemId
+        && candidate.presentation !== 'carousel');
+      await privateJson(route, activeViewer, section
+        ? collectionPageFixture(section)
+        : {
+            code: 'listener_page_item_not_found',
+            message: 'Grid/List page item was not found.'
+          });
       return;
     }
     if (path === '/content/me/playlists' && request.method() === 'GET') {

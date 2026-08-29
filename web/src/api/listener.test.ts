@@ -8,9 +8,24 @@ import {
   saveContent,
   unsaveContent
 } from './listener';
+import { getListenerCollectionPage } from './listenerCollections';
 import { getListenerCapabilities } from './listenerCapabilities';
 
 const homeResponse = { title: 'Home', sections: [] };
+const collectionResponse = {
+  pageItem: {
+    id: 'page-item-1',
+    pageSlug: 'home',
+    title: 'Quiet albums',
+    presentation: 'grid',
+    mode: 'manual',
+    contentType: 'album'
+  } as const,
+  items: [],
+  included: { albums: [], audioTracks: [] },
+  limit: 20,
+  nextCursor: null
+};
 const jsonResponse = (body: unknown, status = 200, viewerId?: string) => new Response(JSON.stringify(body), {
   status,
   headers: {
@@ -68,6 +83,85 @@ test('builds a normalized safe Listener Library request', async () => {
     '/api/listener/v1/library?sort=recentlyPlayed&limit=100&types=album%2CaudioTrack&cursor=next-page',
     expect.objectContaining({ credentials: 'same-origin' })
   );
+});
+
+test('scopes Grid/List pagination to the parent page and current viewer', async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    const path = String(input);
+    const url = new URL(path, 'https://finitude.test');
+    const isLibrary = path.includes('/pages/library/');
+    return jsonResponse({
+      ...collectionResponse,
+      limit: Number(url.searchParams.get('limit')),
+      pageItem: {
+        ...collectionResponse.pageItem,
+        id: path.includes('private-item') ? 'private-item' : 'page-item-1',
+        pageSlug: isLibrary ? 'library' : 'home'
+      }
+    }, 200, path.includes('private-item') ? 'viewer-1' : undefined);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  await getListenerCollectionPage('home', 'page-item-1', null, {
+    limit: 999,
+    cursor: ' next-page '
+  });
+  await getListenerCollectionPage('library', 'private-item', 'viewer-1', {
+    limit: 0,
+    cursor: '   '
+  });
+
+  expect(fetchMock.mock.calls.map(([path, init]) => [
+    path,
+    new Headers(init?.headers).get('X-Finitude-Account-Viewer')
+  ])).toEqual([
+    ['/api/listener/v1/pages/home/items/page-item-1?limit=100&cursor=next-page', null],
+    ['/api/listener/v1/pages/library/items/private-item?limit=1', 'viewer-1']
+  ]);
+});
+
+test('rejects a Grid/List response for a different parent identity', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    ...collectionResponse,
+    pageItem: { ...collectionResponse.pageItem, id: 'other-item' }
+  })));
+
+  await expect(getListenerCollectionPage('home', 'page-item-1')).rejects.toMatchObject({
+    kind: 'invalid-response',
+    code: 'collection_cursor_mismatch'
+  });
+});
+
+test('rejects an oversized collection cursor before it can enter a request URL', async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+
+  await expect(getListenerCollectionPage('home', 'page-item-1', null, {
+    cursor: 'x'.repeat(2_049)
+  })).rejects.toMatchObject({
+    kind: 'invalid-response',
+    code: 'invalid_collection_cursor'
+  });
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test('turns a malformed continuation DTO into an explicit traversal restart', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    ...collectionResponse,
+    nextCursor: 'x'.repeat(2_049)
+  })));
+
+  await expect(getListenerCollectionPage('home', 'page-item-1', null, {
+    cursor: 'prior-page',
+    continuation: {
+      pageItem: collectionResponse.pageItem,
+      afterOrder: 0,
+      usedCursors: ['prior-page']
+    }
+  })).rejects.toMatchObject({
+    kind: 'invalid-response',
+    code: 'invalid_collection_cursor'
+  });
 });
 
 test('types save status, save, unsave, and recent activity mutations', async () => {

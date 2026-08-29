@@ -139,6 +139,21 @@ Required variables:
 - `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
 
+### Naruto Mobile private analysis proxy
+
+The fixed API lives at `/naruto-mobile/api/v1`:
+
+- `GET /status` returns availability and protocol compatibility.
+- `GET /access` verifies an authenticated Archtree Bearer session.
+- `POST /classify` accepts only the bounded `triage` or `detail` protocol.
+
+Set only `OPENAI_API_KEY` in the Elastic Beanstalk runtime environment. Every
+authenticated Archtree account may use this endpoint. The Windows app signs in
+through the existing `/auth/login`, `/auth/refresh`, and `/auth/logout`
+endpoints and stores the rotating session with operating-system encryption.
+The proxy never returns the OpenAI key or accepts arbitrary OpenAI request
+options.
+
 ### Verify refresh-token rotation locally
 
 Stop any existing Archtree process, then start the development server with its
@@ -232,9 +247,34 @@ scoped so one operating system never silently approves another system font's
 rendering.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
-namespace provides Home, Search, Album, Artist, Track, and authenticated Library
-responses without exposing storage lifecycle fields. Public media streaming is
-limited to database-confirmed `ready` MediaTracks and preserves HTTP Range seeking.
+namespace provides Home, Search, Album, Artist, Track, authenticated Library,
+and page-scoped Grid/List responses without exposing storage lifecycle fields.
+`GET /api/listener/v1/pages/:slug/items/:itemId?limit=&cursor=` resolves one
+attached manual Grid or List. `home` is public; `library` requires the same
+authenticated current-viewer fence as the parent Library. The default page is
+20 items and the server caps requested pages at 100. Responses contain ordered
+content references, allowlisted ready Album/MediaTrack DTOs under `included`,
+and a tamper-evident opaque `nextCursor`. Each cursor binds the stable Page-item
+and collection identities, Page/item/collection snapshots, ready-content
+visibility, and—where applicable—the authenticated viewer. Malformed cursors
+return `400`, while cross-scope, lifecycle-changed, or stale cursors return
+`409`. Anonymous Home collection pages may use the public catalog cache;
+authenticated Home and Library collection pages remain private and
+non-cacheable so account-viewer identity headers never enter a shared cache.
+Device-local Downloaded Grid/List definitions return
+`collection_source_not_server_backed` and are never populated from server
+catalog data. Public media streaming is limited to database-confirmed `ready`
+MediaTracks and preserves HTTP Range seeking.
+
+Finitude Web keeps Carousel compatibility in the parent Home response, but
+loads each attached Grid/List through the page-scoped endpoint above. The Web
+client preserves returned reference order, requests later pages only from the
+opaque `nextCursor`, and offers an explicit first-page retry when a cursor is
+malformed, mismatched, or stale. Authenticated Home and Library collection
+requests send the current viewer fence; Web remains streaming-only. The
+versioned Listener API does not yet expose a Library parent-page descriptor,
+so Web Library collection discovery remains blocked rather than falling back
+to the legacy expanded-page response.
 Legacy native-client reads under `/content` and `/feed` also remain available
 without authentication. Their Artist, Album, MediaTrack, Page, Carousel,
 Grid/List, and Feed Post responses use explicit public projections rather than

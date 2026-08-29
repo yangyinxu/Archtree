@@ -24,7 +24,7 @@ import { ContentListRow } from '../../components/ContentListRow';
 import { Icon } from '../../components/Icon';
 import { SaveButton } from '../../components/SaveButton';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
-import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton';
+import { LazyAddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
 import styles from './LibraryPage.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
@@ -212,7 +212,7 @@ export const LibraryPage = () => {
                     <span className={styles.rowActions}>
                       {!playable && <span className={styles.unavailable}>{t('common.state.unavailable')}</span>}
                       {summary.contentType === 'audioTrack' && playable && (
-                        <AddTrackToPlaylistButton track={summary} viewerId={viewerId} />
+                        <LazyAddTrackToPlaylistButton track={summary} viewerId={viewerId} />
                       )}
                       <SaveButton
                         compact

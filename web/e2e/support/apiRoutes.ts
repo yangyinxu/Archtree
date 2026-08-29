@@ -4,6 +4,8 @@ import { createTestTone, createTestVideo } from '../fixtures/audio';
 import {
   catalogIds,
   expandedAlbumFixture,
+  homeCollectionPageFixture,
+  homePageItemIds,
   homeFixture,
   searchFixture
 } from '../fixtures/catalog';
@@ -159,6 +161,11 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
     }
     if (call.method === 'GET' && call.pathname === '/api/listener/v1/home') {
       await jsonResponse(route, 200, homeFixture);
+      return;
+    }
+    if (call.method === 'GET'
+      && call.pathname === `/api/listener/v1/pages/home/items/${homePageItemIds.focusTracks}`) {
+      await jsonResponse(route, 200, homeCollectionPageFixture);
       return;
     }
     if (call.method === 'GET'

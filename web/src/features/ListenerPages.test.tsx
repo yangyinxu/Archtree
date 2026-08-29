@@ -137,6 +137,35 @@ test('Album Play and explicit soundtrack selection share the ordered Album queue
   expect(launch).toHaveBeenCalledTimes(2);
 });
 
+test('Album marks the actively playing track and pauses it without relaunching the queue', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ album, tracks: [track] })));
+  const snapshot = playerStore.getSnapshot();
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...snapshot,
+    currentIndex: 0,
+    currentItem: track,
+    queue: [track],
+    status: 'playing'
+  });
+  const pause = vi.spyOn(playerStore, 'pause').mockImplementation(() => undefined);
+  const launch = vi.spyOn(playerStore, 'launchAlbumQueue').mockResolvedValue();
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const pauseAction = await screen.findByRole('button', { name: 'Pause' });
+  const trackRow = pauseAction.closest('li');
+  expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
+  expect(pauseAction).toHaveAttribute('aria-current', 'true');
+  expect(pauseAction.querySelector('.lucide-audio-lines')).toBeInTheDocument();
+  expect(pauseAction.querySelector('.lucide-pause')).toBeInTheDocument();
+  expect(screen.getByText('Blue Interval').className).toContain('trackTitlePlaying');
+
+  await user.click(pauseAction);
+
+  expect(pause).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
+});
+
 test('Organization page renders its public metadata and credited releases', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
     organization: {
@@ -182,7 +211,7 @@ test('Search renders grouped public results and keeps content actions canonical'
     `/organizations/${organization.id}`
   );
   expect(screen.getByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
   expect(readSearchHistory(null)).toEqual([]);
 });
 
@@ -467,7 +496,7 @@ test('Library sends type filters to the server and retains the mixed saved list'
   renderRoute('/library', '/library', <LibraryPage />, listenerSession);
 
   expect(await screen.findByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Downloads' })).not.toBeInTheDocument();
   expect(screen.queryByText(/offline/i)).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Albums' }));

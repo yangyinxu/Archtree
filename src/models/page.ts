@@ -7,6 +7,10 @@ import {
     PageItemReferenceUnavailableError,
     touchAvailablePageItemReferences
 } from '../services/pageReferenceLifecycleService';
+import {
+    newPageItemId,
+    withPersistedPageItemIds
+} from '../utils/pageItemIdentity';
 
 const collectionId = 'pages';
 const maximumPageItems = 100;
@@ -15,12 +19,14 @@ const maximumPageItems = 100;
 export type PageSlug = 'home' | 'library';
 
 export interface CarouselPageItemRef {
+    itemId?: string;
     itemType: 'carousel';
     carouselId: string;
     order: number;
 }
 
 export interface CollectionPageItemRef {
+    itemId?: string;
     itemType: 'grid' | 'list';
     collectionId: string;
     order: number;
@@ -88,7 +94,7 @@ const mutatePageItems = async (
                     prepared.items[index] = normalizedReferences[referenceIndex] as PageItemRef;
                 });
             }
-            const items = normalizeOrder(prepared.items);
+            const items = normalizeOrder(withPersistedPageItemIds(prepared.items));
             const updated = await getDb()!.collection(collectionId).updateOne(
                 { _id: page._id },
                 {
@@ -125,7 +131,7 @@ export class Page {
     constructor(slug: PageSlug, title: string, items: PageItemRef[], createdBy: string, updatedBy: string, createdAt: Date = new Date(), updatedAt: Date = new Date()) {
         this.slug = slug;
         this.title = title;
-        this.items = normalizeOrder(items);
+        this.items = normalizeOrder(withPersistedPageItemIds(items));
         this.createdBy = createdBy;
         this.updatedBy = updatedBy;
         this.createdAt = createdAt;
@@ -224,6 +230,7 @@ export class Page {
                 ? Math.max(0, Math.min(position, nextItems.length))
                 : nextItems.length;
             nextItems.splice(insertAt, 0, {
+                itemId: newPageItemId(),
                 itemType: 'carousel',
                 carouselId,
                 order: insertAt
@@ -246,6 +253,7 @@ export class Page {
                 ? Math.max(0, Math.min(position, nextItems.length))
                 : nextItems.length;
             nextItems.splice(insertAt, 0, {
+                itemId: newPageItemId(),
                 itemType,
                 collectionId: collectionRefId,
                 order: insertAt

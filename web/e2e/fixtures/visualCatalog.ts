@@ -4,6 +4,8 @@ import type {
   ListenerAlbum,
   ListenerHome
 } from '../../src/api/contentSchemas';
+import type { ListenerCollectionPage } from '../../src/api/collectionSchemas';
+import { collectionPageFixture } from './catalog';
 
 /**
  * Reserved same-origin artwork slots served from browser-test fixtures. The
@@ -13,6 +15,11 @@ export const visualArtworkSlots = {
   blueHour: '/__e2e__/artwork/first-light.jpg',
   paperMoon: '/__e2e__/artwork/night-window.jpg',
   quietGarden: '/__e2e__/artwork/quiet-hours.jpg'
+} as const;
+
+export const visualPageItemIds = {
+  grid: '64b000000000000000000201',
+  list: '64b000000000000000000202'
 } as const;
 
 const albums = [
@@ -152,16 +159,22 @@ export const visualHomeFixture = {
       items: albums
     },
     {
-      id: 'visual-grid',
+      id: visualPageItemIds.grid,
       title: 'Albums across scripts 🌏',
       presentation: 'grid',
       items: albums
     },
     {
-      id: 'visual-list',
+      id: visualPageItemIds.list,
       title: 'MediaTracks for focus',
       presentation: 'list',
       items: tracks
     }
   ]
 } satisfies ListenerHome;
+
+export const visualCollectionPageFixtures = new Map<string, ListenerCollectionPage>(
+  visualHomeFixture.sections
+    .filter((section) => section.presentation !== 'carousel')
+    .map((section) => [section.id, collectionPageFixture(section)] as const)
+);

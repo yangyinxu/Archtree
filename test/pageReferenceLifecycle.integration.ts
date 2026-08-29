@@ -239,10 +239,25 @@ test('Page.save fences every exact target, canonicalizes IDs, and rejects missin
         }
     ], actorId.toHexString(), actorId.toHexString()).save();
     const saved: any = await getDb()!.collection('pages').findOne({ slug: 'home' });
-    assert.deepEqual(saved.items, [
-        { itemType: 'carousel', carouselId: carouselId.toHexString(), order: 0 },
-        { itemType: 'grid', collectionId: gridId.toHexString(), order: 1 }
+    assert.deepEqual(saved.items.map((item: any) => ({
+        ...item,
+        itemId: '<stable-id>'
+    })), [
+        {
+            itemId: '<stable-id>',
+            itemType: 'carousel',
+            carouselId: carouselId.toHexString(),
+            order: 0
+        },
+        {
+            itemId: '<stable-id>',
+            itemType: 'grid',
+            collectionId: gridId.toHexString(),
+            order: 1
+        }
     ]);
+    assert.equal(saved.items.every((item: any) => ObjectId.isValid(item.itemId)), true);
+    assert.equal(new Set(saved.items.map((item: any) => item.itemId)).size, 2);
 
     const missing = new Page('library', 'Library', [{
         itemType: 'carousel',
@@ -265,7 +280,7 @@ test('Page.save fences every exact target, canonicalizes IDs, and rejects missin
     assert.equal(await getDb()!.collection('pages').findOne({ slug: 'library' }), null);
 });
 
-test('target deletion removes legacy ID variants and reindexes every retained Page item', async () => {
+test('target deletion removes legacy variants, reindexes, and backfills retained Page item IDs', async () => {
     const actorId = new ObjectId();
     const carouselId = new ObjectId();
     const retainedCollectionId = new ObjectId();
@@ -312,12 +327,17 @@ test('target deletion removes legacy ID variants and reindexes every retained Pa
         ),
         true
     );
+    const retainedItems = (await getDb()!.collection('pages')
+        .findOne({ slug: 'home' }))!.items;
+    assert.equal(retainedItems.length, 1);
+    assert.equal(ObjectId.isValid(retainedItems[0].itemId), true);
     assert.deepEqual(
-        (await getDb()!.collection('pages').findOne({ slug: 'home' }))!.items,
-        [{
+        { ...retainedItems[0], itemId: '<stable-id>' },
+        {
+            itemId: '<stable-id>',
             itemType: 'grid',
             collectionId: retainedCollectionId.toHexString(),
             order: 0
-        }]
+        }
     );
 });

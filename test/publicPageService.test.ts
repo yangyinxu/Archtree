@@ -38,8 +38,8 @@ test('public Page projection strips mutation provenance and invalid references',
         slug: 'home',
         title: 'Home',
         items: [
-            { itemType: 'list', collectionId, order: 0 },
-            { itemType: 'carousel', carouselId, order: 1 }
+            { itemId: collectionId, itemType: 'list', collectionId, order: 0 },
+            { itemId: carouselId, itemType: 'carousel', carouselId, order: 1 }
         ]
     });
 });
@@ -83,6 +83,10 @@ test('expanded public Page removes dangling and non-ready section items', () => 
     }], visibility);
 
     assert.equal(expanded.items.length, 2);
+    assert.deepEqual(expanded.items.map((item: any) => item.itemId), [
+        carouselId,
+        collectionId
+    ]);
     assert.deepEqual(expanded.items[0].carousel.items, [
         { contentType: 'album', contentId: albumId, order: 0 },
         { contentType: 'audioTrack', contentId: readyTrackId, order: 1 },

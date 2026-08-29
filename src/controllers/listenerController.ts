@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import {
@@ -6,8 +6,13 @@ import {
     getListenerArtist,
     getListenerOrganization,
     getListenerAudioTrack,
+    getListenerCollectionPage,
     getListenerHome,
     listListenerLibrary,
+    defaultListenerCollectionPageSize,
+    ListenerCollectionPageError,
+    ListenerPageSlug,
+    maximumListenerCollectionPageSize,
     searchListenerContent
 } from '../services/listenerContentService';
 import {
@@ -91,6 +96,68 @@ export const audioTrack = async (req: Request, res: Response) => {
     if (!result) return res.status(404).json({ message: 'MediaTrack was not found.' });
     setPublicCatalogCache(res);
     return res.status(200).json(result);
+};
+
+/** Returns one strict, page-scoped Grid/List slice without exposing its definition document. */
+export const collectionPage = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const pageSlug = String(req.params.slug ?? '').trim().toLowerCase();
+        if (pageSlug !== 'home' && pageSlug !== 'library') {
+            return res.status(404).json({ message: 'Grid/List page item was not found.' });
+        }
+        if (Object.keys(req.query).some((key) => key !== 'limit' && key !== 'cursor')) {
+            return res.status(400).json({
+                code: 'invalid_collection_page_query',
+                message: 'Grid/List pagination accepts only limit and cursor.'
+            });
+        }
+        const rawLimit = req.query.limit;
+        if (Array.isArray(rawLimit) || (rawLimit !== undefined && typeof rawLimit !== 'string')) {
+            return res.status(400).json({
+                code: 'invalid_collection_page_limit',
+                message: 'Grid/List limit is invalid.'
+            });
+        }
+        const requestedLimit = rawLimit === undefined
+            ? defaultListenerCollectionPageSize
+            : Number(rawLimit);
+        if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+            return res.status(400).json({
+                code: 'invalid_collection_page_limit',
+                message: 'Grid/List limit must be a positive integer.'
+            });
+        }
+        const rawCursor = req.query.cursor;
+        if (Array.isArray(rawCursor) || (rawCursor !== undefined && typeof rawCursor !== 'string')) {
+            return res.status(400).json({
+                code: 'invalid_collection_cursor',
+                message: 'Collection cursor is invalid.'
+            });
+        }
+
+        const auth = (req as AuthenticatedRequest).auth;
+        const result = await getListenerCollectionPage(
+            pageSlug as ListenerPageSlug,
+            String(req.params.itemId ?? ''),
+            Math.min(requestedLimit, maximumListenerCollectionPageSize),
+            rawCursor,
+            auth?.userId
+        );
+        if (pageSlug === 'library' || auth) {
+            res.setHeader('Cache-Control', 'private, no-store');
+            res.setHeader('Pragma', 'no-cache');
+            res.vary('Cookie');
+            res.vary('Authorization');
+        } else {
+            setPublicCatalogCache(res);
+        }
+        return res.status(200).json(result);
+    } catch (error) {
+        if (error instanceof ListenerCollectionPageError) {
+            return res.status(error.statusCode).json({ code: error.code, message: error.message });
+        }
+        return next(error);
+    }
 };
 
 /** Wraps the complete server Library in a lifecycle-safe public projection. */

@@ -42,6 +42,10 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   sans-serif stack led by Helvetica Neue, Helvetica, and Arial, with explicit
   CJK and emoji fallbacks. It does not download, bundle, or hotlink Spotify's
   proprietary typefaces.
+- In an Album MediaTrack list, the actively playing row uses the Web accent for
+  its title and replaces the Track Number with animated music bars. Highlighting
+  that row by pointer or keyboard replaces the bars with the Pause action;
+  Reduce Motion keeps the indicator static.
 - This presentation contract is Web-only. Finitude retains its own name, mark,
   artwork, copy, components, and supported capabilities; the rule does not
   authorize Spotify assets or an iOS theme change.
@@ -585,6 +589,10 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 
 - Page items use a discriminated contract with three supported presentation
   types: Carousel, Grid, and List.
+- Each newly written Page item has a persisted identity that does not change
+  when administrators reorder the Page. Legacy references without that field
+  use their unique referenced Carousel or Grid/List definition ID until the
+  next Page mutation backfills persisted item identities.
 - Grid and List definitions each have one source mode: manual or dynamic.
   Manual definitions contain explicitly curated content references; dynamic
   definitions resolve items from a declared source and cannot be manually
@@ -604,6 +612,19 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   dynamic list.
 - Dynamic Grid and List definitions expose only source configuration, filters,
   sort, and page size in Content Manager; their resolved items are read-only.
+- A server-backed manual Grid or List is read through its parent Page item with
+  a bounded opaque cursor. The cursor is bound to the Page item, collection,
+  Page, collection, and ready-content visibility revisions, and—when the parent
+  is Library—the authenticated viewer. A cursor cannot be replayed across
+  viewers or Page items; malformed, stale, reordered, detached, reconfigured,
+  or lifecycle-changed snapshots fail explicitly instead of restarting silently
+  or returning a position-dependent slice.
+- Server Grid/List pages preserve deterministic configured order and include
+  only allowlisted, database-confirmed ready content. If any referenced content
+  changes between ready and non-ready during a traversal, the cursor becomes
+  stale and the client restarts from the first page. Device-local Downloaded
+  sources are rejected by the server pagination surface and must be resolved
+  from the device store.
 - Outside the unified iOS Library, a Grid always presents its source as a grid.
   A List always presents its source as a vertical list. One page-item type does
   not change into another layout in response to filtering.
@@ -790,6 +811,24 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   match the declared content type.
 - Deleted content is removed from saved and recent-activity references and is
   also omitted defensively during carousel resolution.
+
+## Naruto Mobile private analysis proxy
+
+- Naruto Mobile collection, Chrome access, raw records, cache, and reports remain
+  on the user's Windows computer. Archtree receives only the bounded,
+  de-identified classification fields required by the versioned protocol.
+- The proxy is not an OpenAI-compatible pass-through. The server fixes the
+  model, prompts, schemas, reasoning level, output ceiling, provider endpoint,
+  and `store: false`; client attempts to add fields or select capabilities fail.
+- The OpenAI key is server-only runtime configuration. It is never returned to
+  the desktop app, browser, logs, database, report, or packaged EXE.
+- Every authenticated Archtree account can use the proxy. The Windows app uses
+  the existing access/refresh session contract, encrypts that session with
+  operating-system secure storage, and never stores the account password. No
+  Naruto-specific account, invitation, token, or allowlist record is created.
+- Bearer authentication runs before the classifier body parser. Request bodies,
+  comments, model output, authorization headers, and session tokens are not
+  logged or stored by the proxy.
 
 ## Database and S3 Lifecycle
 
