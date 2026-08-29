@@ -139,6 +139,21 @@ Required variables:
 - `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
 
+### Naruto Mobile private analysis proxy
+
+The fixed API lives at `/naruto-mobile/api/v1`:
+
+- `GET /status` returns availability and protocol compatibility.
+- `GET /access` verifies an authenticated Archtree Bearer session.
+- `POST /classify` accepts only the bounded `triage` or `detail` protocol.
+
+Set only `OPENAI_API_KEY` in the Elastic Beanstalk runtime environment. Every
+authenticated Archtree account may use this endpoint. The Windows app signs in
+through the existing `/auth/login`, `/auth/refresh`, and `/auth/logout`
+endpoints and stores the rotating session with operating-system encryption.
+The proxy never returns the OpenAI key or accepts arbitrary OpenAI request
+options.
+
 ### Verify refresh-token rotation locally
 
 Stop any existing Archtree process, then start the development server with its

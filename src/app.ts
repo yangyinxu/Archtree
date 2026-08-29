@@ -10,6 +10,7 @@ import feedRoutes from './routes/feedRoutes';
 import listenerRoutes from './routes/listenerRoutes';
 import { createLocalizationRouter } from './routes/localizationRoutes';
 import videoRoutes from './routes/videoRoutes';
+import narutoMobileRoutes from './routes/narutoMobileRoutes';
 import {
   attachOptionalAuth,
   requireAdmin,
@@ -233,6 +234,9 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use(requireSameOriginCookieMutation);
   app.use('/content/manage', requireAuthForWeb, requireAdminForWeb);
   app.use(requireSharedContentAdminBeforeBody);
+
+  // Authenticate paid Naruto requests before accepting their bounded JSON bodies.
+  app.use('/naruto-mobile/api/v1', narutoMobileRoutes);
 
   // Protect and bound anonymous diagnostics before the general JSON parser can
   // consume a larger request. The listener router owns the final controller.

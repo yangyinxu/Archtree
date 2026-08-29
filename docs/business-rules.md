@@ -812,6 +812,24 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - Deleted content is removed from saved and recent-activity references and is
   also omitted defensively during carousel resolution.
 
+## Naruto Mobile private analysis proxy
+
+- Naruto Mobile collection, Chrome access, raw records, cache, and reports remain
+  on the user's Windows computer. Archtree receives only the bounded,
+  de-identified classification fields required by the versioned protocol.
+- The proxy is not an OpenAI-compatible pass-through. The server fixes the
+  model, prompts, schemas, reasoning level, output ceiling, provider endpoint,
+  and `store: false`; client attempts to add fields or select capabilities fail.
+- The OpenAI key is server-only runtime configuration. It is never returned to
+  the desktop app, browser, logs, database, report, or packaged EXE.
+- Every authenticated Archtree account can use the proxy. The Windows app uses
+  the existing access/refresh session contract, encrypts that session with
+  operating-system secure storage, and never stores the account password. No
+  Naruto-specific account, invitation, token, or allowlist record is created.
+- Bearer authentication runs before the classifier body parser. Request bodies,
+  comments, model output, authorization headers, and session tokens are not
+  logged or stored by the proxy.
+
 ## Database and S3 Lifecycle
 
 - Database and S3 mutations must not silently create orphaned records, objects,
