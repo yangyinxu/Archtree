@@ -326,6 +326,12 @@ video playback capacity.
 
 ### Verify media Range behavior under bounded load
 
+For a synthetic local memory screen without MongoDB or AWS access, run
+`node --max-old-space-size=384 --import tsx scripts/capacity-screen.ts` with
+Node 24. This measures application-process RSS, not a total-machine memory
+limit or AWS throughput. See [the t4g.micro screening report](docs/testing/t4g-micro-capacity-screen.md)
+for workloads, reproduction details, observed limits, and remaining release checks.
+
 The media load command targets `http://127.0.0.1:8081` by default and requires
 one or more database-confirmed ready Audio MediaTrack ObjectIds. Optional
 `MEDIA_LOAD_VIDEO_TRACK_IDS` adds ready Video MediaTracks for mixed playback
@@ -397,6 +403,28 @@ Linux 2023 Elastic Beanstalk environment without a load balancer:
 2. Set `HTTPS_DOMAIN`, `ACME_EMAIL`, and `TRUST_PROXY_HOPS=1` in the environment.
 3. Deploy with ports 80 and 443 allowed. The included `.ebextensions` resource
    admits port 443 on the instance security group.
+
+On small Amazon Linux 2023 instances, set runtime `TMPDIR=/var/tmp` so Multer's
+temporary audio files use the EBS root disk. The capacity trial found `/tmp`
+was a memory-backed filesystem with less free space than the default 512 MiB
+audio limit. Check `df -m / /tmp /var/tmp` and budget disk space for both Nginx
+request buffering and Multer staging, including concurrent uploads. The
+[capacity report](docs/testing/t4g-micro-capacity-screen.md) records the tested
+instance settings and remaining limits.
+
+For a 1 GiB instance, set `COVER_ART_MAX_TRANSFORMS=1` to serialize native
+cover-art variant transforms across clients. The default is 4 globally and
+at most 2 per client; accepted values are integers 1–4, and invalid non-empty
+values fail startup. Lower limits retain the bounded queue and cancellation
+behavior but can increase image latency. Set `NODE_OPTIONS=--max-old-space-size=384`
+for the tested V8 old-space ceiling; native image memory remains outside it.
+On glibc-based Amazon Linux, also set `MALLOC_ARENA_MAX=2` before Node starts
+to reduce native allocator fragmentation. The isolated trial's minimum available
+memory improved from 187.5 to 288.5 MiB under the measured workload. EB installs
+dependencies alongside the old application during configuration updates, so
+reserve memory for deployment as well as requests. See the
+[deployment verification report](docs/testing/low-cost-production-deployment.md)
+for update/recovery checks and client-network limitations.
 
 The first successful post-deployment run obtains a public Let's Encrypt
 certificate through the HTTP-01 challenge, enables port 443, and redirects
