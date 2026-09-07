@@ -541,7 +541,19 @@ export const createCoverArtVariantScheduler = (
     };
 };
 
-const scheduleCoverArtVariant = createCoverArtVariantScheduler();
+/** Low-memory deployments can reduce native image work without changing queue semantics. */
+export const createConfiguredCoverArtVariantScheduler = (configuredLimit?: string) => {
+    const value = configuredLimit?.trim() || '4';
+    if (!/^[1-4]$/.test(value)) {
+        throw new Error('COVER_ART_MAX_TRANSFORMS must be an integer from 1 to 4.');
+    }
+    const globalLimit = Number(value);
+    return createCoverArtVariantScheduler(Math.min(2, globalLimit), globalLimit);
+};
+
+const scheduleCoverArtVariant = createConfiguredCoverArtVariantScheduler(
+    process.env.COVER_ART_MAX_TRANSFORMS
+);
 
 /** Keeps account-owned avatar bytes out of the public cover-art resolver. */
 export const isPublicCoverArtAsset = (asset: unknown): asset is PublicCoverArtAsset => {

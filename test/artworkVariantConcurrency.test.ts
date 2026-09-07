@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createCoverArtVariantScheduler } from '../src/services/imageStorageService';
+import {
+    createConfiguredCoverArtVariantScheduler,
+    createCoverArtVariantScheduler
+} from '../src/services/imageStorageService';
 
 const deferred = () => {
     let resolve!: () => void;
@@ -10,6 +13,45 @@ const deferred = () => {
 };
 
 const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('configured low-memory limit serializes clients and releases capacity after failure', async () => {
+    const schedule = createConfiguredCoverArtVariantScheduler('1');
+    const gate = deferred();
+    const started: string[] = [];
+    const first = schedule('client-a', undefined, async () => {
+        started.push('first');
+        await gate.promise;
+        throw new Error('transform failed');
+    });
+    const failure = assert.rejects(first, /transform failed/);
+    const second = schedule('client-b', undefined, async () => { started.push('second'); });
+    await nextTurn();
+    assert.deepEqual(started, ['first']);
+    gate.resolve();
+    await Promise.all([failure, second]);
+    assert.deepEqual(started, ['first', 'second']);
+});
+
+test('runtime transform limits keep the default and reject unsafe configuration', async () => {
+    for (const value of [undefined, '', '  ', '1', ' 2 ', '3', '4']) {
+        assert.doesNotThrow(() => createConfiguredCoverArtVariantScheduler(value));
+    }
+    for (const value of ['0', '5', '-1', '1.5', 'NaN', '1e0', '01']) {
+        assert.throws(() => createConfiguredCoverArtVariantScheduler(value), /COVER_ART_MAX_TRANSFORMS/);
+    }
+    const schedule = createConfiguredCoverArtVariantScheduler();
+    const gate = deferred();
+    let started = 0;
+    const requests = Array.from({ length: 5 }, (_, i) => schedule(`client-${i}`, undefined, async () => {
+        started += 1;
+        await gate.promise;
+    }));
+    await nextTurn();
+    assert.equal(started, 4);
+    gate.resolve();
+    await Promise.all(requests);
+    assert.equal(started, 5);
+});
 
 test('artwork derivative work queues bursts under per-client and global bounds', async () => {
     const schedule = createCoverArtVariantScheduler(1, 2, 8);
