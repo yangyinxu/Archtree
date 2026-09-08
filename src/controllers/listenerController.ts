@@ -9,6 +9,7 @@ import {
     getListenerCollectionPage,
     getListenerHome,
     listListenerLibrary,
+    getListenerRecentlyPlayed,
     defaultListenerCollectionPageSize,
     ListenerCollectionPageError,
     ListenerPageSlug,
@@ -163,6 +164,9 @@ export const collectionPage = async (req: Request, res: Response, next: NextFunc
 /** Wraps the complete server Library in a lifecycle-safe public projection. */
 export const library = async (req: Request, res: Response) => {
     const auth = (req as AuthenticatedRequest).auth!;
+    if (req.query.q !== undefined && (typeof req.query.q !== 'string' || req.query.q.length > 100)) {
+        return res.status(400).json({ message: 'Library search must be at most 100 characters.' });
+    }
     const requestedTypes = String(req.query.types ?? '')
         .split(',')
         .map((value) => value.trim())
@@ -185,9 +189,20 @@ export const library = async (req: Request, res: Response) => {
     res.vary('Cookie');
     res.vary('Authorization');
     return res.status(200).json(await listListenerLibrary(auth.userId, {
+        query: boundedSearchQuery(req.query.q, 100),
         contentTypes: requestedTypes as LibraryContentType[],
         sort: requestedSort as LibrarySort,
         limit: Math.floor(requestedLimit),
         cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined
     }));
+};
+
+/** Returns only the authenticated viewer's ready recent content and actual Save state. */
+export const recentlyPlayed = async (req: Request, res: Response) => {
+    if (Object.keys(req.query).length) return res.status(400).json({ message: 'Recent playback accepts no query parameters.' });
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Pragma', 'no-cache');
+    res.vary('Cookie');
+    res.vary('Authorization');
+    return res.status(200).json(await getListenerRecentlyPlayed((req as AuthenticatedRequest).auth!.userId));
 };

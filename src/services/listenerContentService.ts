@@ -1429,3 +1429,31 @@ export const sanitizeListenerLibraryPage = (page: any) => ({
 /** Preserves Library pagination semantics while returning only listener-safe fields. */
 export const listListenerLibrary = async (userId: string, options: LibraryListOptions) =>
     sanitizeListenerLibraryPage(await UserLibrary.list(userId, options));
+
+/** Resolves the bounded personal history independently of configured Home carousels. */
+export const getListenerRecentlyPlayed = async (userId: string) => {
+    const entries = await UserLibrary.recent(userId, 'recentlyPlayed', 20);
+    const albumIds = uniqueIds(entries.filter((entry) => entry.contentType === 'album').map((entry) => entry.contentId));
+    const trackIds = uniqueIds(entries.filter((entry) => entry.contentType === 'audioTrack').map((entry) => entry.contentId));
+    const db = getDb()!;
+    const [albums, tracks, statuses] = await Promise.all([
+        albumIds.length ? db.collection('albums').find({
+            ...readyAlbumLifecycleFilter, _id: { $in: albumIds.map(toObjectId) }
+        }).project(albumProjection).maxTimeMS(queryTimeoutMs).toArray() : [],
+        trackIds.length ? db.collection('audioTracks').find({
+            ...readyAudioFilter, _id: { $in: trackIds.map(toObjectId) }
+        }).project(audioTrackProjection).maxTimeMS(queryTimeoutMs).toArray() : [],
+        UserLibrary.statuses(userId, entries.map(({ contentType, contentId }) => ({ contentType, contentId })))
+    ]);
+    const context = await createCatalogContext(albums, tracks);
+    const content = new Map<string, ListenerAlbumSummary | ListenerAudioTrackSummary>([
+        ...albums.map((album): [string, ListenerAlbumSummary] => [`album:${album._id}`, toAlbumSummary(album, context)]),
+        ...tracks.map((track): [string, ListenerAudioTrackSummary] => [`audioTrack:${track._id}`, toAudioTrackSummary(track, context)])
+    ]);
+    const saved = new Set(statuses.filter((status) => status.saved).map((status) => `${status.contentType}:${status.contentId}`));
+    return { items: entries.flatMap((entry) => {
+        const key = `${entry.contentType}:${entry.contentId}`;
+        const item = content.get(key);
+        return item ? [{ content: item, playedAt: entry.occurredAt, saved: saved.has(key) }] : [];
+    }), limit: 20 as const };
+};

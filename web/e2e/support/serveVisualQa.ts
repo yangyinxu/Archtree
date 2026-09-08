@@ -3,6 +3,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { filterLibraryFixture } from '../fixtures/library';
+import { trackFixtures } from '../fixtures/catalog';
 import { createTestTone } from '../fixtures/audio';
 import {
   catalogIds,
@@ -48,14 +50,14 @@ const visualLibraryPage = {
   ...privateLibraryPage,
   items: privateLibraryPage.items.map((item) => item.contentType === 'album' ? {
     ...item,
-    album: item.album ? { ...item.album, coverArtUrl: visualArtworkSlots.quietGarden } : null
+    album: { ...item.album, coverArtUrl: visualArtworkSlots.quietGarden }
   } : {
     ...item,
-    audioTrack: item.audioTrack ? {
+    audioTrack: {
       ...item.audioTrack,
       coverArtUrl: visualArtworkSlots.blueHour,
       displayCoverArtUrl: visualArtworkSlots.blueHour
-    } : null
+    }
   })
 };
 
@@ -261,7 +263,11 @@ const routeApplicationRequest = async (
     return true;
   }
   if (request.method === 'GET' && pathname === '/api/listener/v1/library') {
-    sendPrivateJson(200, visualLibraryPage);
+    sendPrivateJson(200, filterLibraryFixture(visualLibraryPage, url));
+    return true;
+  }
+  if (request.method === 'GET' && pathname === '/api/listener/v1/recently-played') {
+    sendPrivateJson(200, { items: [{ content: { ...trackFixtures[1], artworkUrl: visualArtworkSlots.paperMoon }, saved: false, playedAt: '2026-09-07T10:00:00.000Z' }], limit: 20 });
     return true;
   }
   if (request.method === 'POST' && pathname === '/content/me/saves/status') {

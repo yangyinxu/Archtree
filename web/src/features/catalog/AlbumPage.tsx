@@ -11,7 +11,7 @@ import { Artwork } from '../../components/Artwork';
 import { Icon } from '../../components/Icon';
 import { SaveButton } from '../../components/SaveButton';
 import { launchAlbumPlayback } from '../playback/launchPlayback';
-import { AddTrackToPlaylistButton } from '../playlists/AddTrackToPlaylistButton';
+import { LazyAddTrackToPlaylistButton as AddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
 import styles from './CatalogPages.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';

@@ -10,6 +10,7 @@ import { createApp } from '../src/app';
 import { getDb } from '../src/infrastructure/database';
 import { getS3 } from '../src/infrastructure/s3';
 import { Carousel } from '../src/models/carousel';
+import { UserLibrary } from '../src/models/userLibrary';
 import {
     MongoReplicaSetHarness,
     startMongoReplicaSet
@@ -496,6 +497,49 @@ test('listener Library requires authentication and retains non-ready items safel
         legacyLibrary.items.find((item: any) => item.contentType === 'album').album.audioTrackIds,
         []
     );
+});
+
+test('recent playback is private, independent of saves, ready-only and bounded', async () => {
+    const path = `${baseUrl}/api/listener/v1/recently-played`;
+    assert.equal((await fetch(path)).status, 401);
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    assert.equal((await fetch(`${path}?userId=${ids.admin}`, { headers })).status, 400);
+    const entries = [ids.readyOne, ids.pending, ids.readyTwo, ids.missing, ids.album].map((id, index) => ({
+        contentType: id === ids.album ? 'album' : 'audioTrack', contentId: id.toString(),
+        occurredAt: new Date(2026, 0, index + 1)
+    }));
+    await getDb()!.collection('userActivity').updateOne({ userId: ids.user.toString() }, { $set: { recentlyPlayed: entries } });
+    const response = await fetch(path, { headers });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    const page: any = await response.json();
+    assert.equal(page.limit, 20);
+    assert.deepEqual(page.items.map((item: any) => [item.content.id, item.saved]), [
+        [ids.album.toString(), true], [ids.readyTwo.toString(), false], [ids.readyOne.toString(), true]
+    ]);
+    expectSafe(page);
+    const other: any = await (await fetch(path, { headers: { Authorization: `Bearer ${adminAccessToken}` } })).json();
+    assert.deepEqual(other.items, []);
+    await UserLibrary.unsave(ids.user.toString(), 'audioTrack', ids.readyOne.toString());
+    const after: any = await (await fetch(path, { headers })).json();
+    assert.equal(after.items.find((item: any) => item.content.id === ids.readyOne.toString()).saved, false);
+    assert.equal(after.items.length, 3);
+    // A historical window is bounded even if legacy persisted input exceeds its normal writer limit.
+    await getDb()!.collection('userActivity').updateOne({ userId: ids.user.toString() }, { $set: {
+        recentlyPlayed: [entries[0], ...Array.from({ length: 20 }, (_, i) => ({ ...entries[2], occurredAt: new Date(2026, 1, i + 1) }))]
+    } });
+    const bounded: any = await (await fetch(path, { headers })).json();
+    assert.equal(bounded.items.length, 20);
+    assert.equal(bounded.items.some((item: any) => item.content.id === ids.readyOne.toString()), false);
+});
+
+test('Library title search rejects malformed or oversized input', async () => {
+    for (const q of ['q[x]=a', `q=${'x'.repeat(101)}`]) {
+        const response = await fetch(`${baseUrl}/api/listener/v1/library?${q}`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        assert.equal(response.status, 400);
+    }
 });
 
 test('legacy public catalog is role-independent, allowlisted, and ready-filtered', async () => {

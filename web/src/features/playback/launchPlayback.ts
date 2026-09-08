@@ -1,5 +1,5 @@
 import type { AudioTrackSummary } from '../../api/contentSchemas';
-import { recordRecentlyPlayed } from '../../api/listener';
+import { captureAccountOperation } from '../../api/accountEpoch';
 import {
   playbackActivityTarget,
   playerStore,
@@ -33,7 +33,10 @@ const recordAfterPlaybackStarts = (
     || snapshot.currentItem?.id !== expectedTrackId) return;
   const target = playbackActivityTarget(event);
   if (!target) return;
-  void recordRecentlyPlayed(target, viewerId).catch(() => {
+  const guard = captureAccountOperation(viewerId);
+  void import('./recordPlaybackHistory').then(({ recordPlaybackHistory }) => {
+    return recordPlaybackHistory(target, viewerId, guard);
+  }).catch(() => {
     // Activity history is best-effort and never interrupts public playback.
   });
 };

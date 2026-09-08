@@ -22,6 +22,7 @@ const listenerBasePath = '/api/listener/v1';
 const anonymousViewerKey = 'anonymous';
 
 export interface LibraryPageOptions {
+  query?: string;
   contentTypes?: LibraryContentType[];
   sort?: LibrarySort;
   limit?: number;
@@ -34,6 +35,7 @@ const encodedContentPath = (segment: string, contentId: string) =>
   `${listenerBasePath}/${segment}/${encodeURIComponent(contentId.trim())}`;
 
 const normalizedLibraryOptions = (options: LibraryPageOptions = {}) => ({
+  query: options.query?.trim().slice(0, 100) || '',
   contentTypes: [...new Set(options.contentTypes ?? [])].sort(),
   sort: options.sort ?? 'recentActivity',
   limit: Math.max(1, Math.min(100, Math.floor(options.limit ?? 50))),
@@ -50,6 +52,7 @@ export const listenerQueryKeys = {
   track: (audioTrackId: string) => ['listener', 'audioTrack', audioTrackId.trim()] as const,
   library: (viewerKey: string, options: LibraryPageOptions = {}) =>
     ['listener', 'library', viewerKey, normalizedLibraryOptions(options)] as const,
+  recentlyPlayed: (viewerKey: string) => ['listener', 'library', viewerKey, 'recently-played'] as const,
   saveStatuses: (viewerKey: string, items: LibraryTarget[]) => [
     'listener',
     'save-statuses',
@@ -133,6 +136,7 @@ export const getLibraryPage = (
   });
   if (normalized.contentTypes.length > 0) parameters.set('types', normalized.contentTypes.join(','));
   if (normalized.cursor) parameters.set('cursor', normalized.cursor);
+  if (normalized.query) parameters.set('q', normalized.query);
   return apiRequest(`${listenerBasePath}/library?${parameters}`, libraryPageSchema, {
     signal,
     accountViewer: viewerKey

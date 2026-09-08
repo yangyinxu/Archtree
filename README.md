@@ -51,7 +51,8 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run stage:eb-artifact`: validate and stage the exact allowlisted Elastic
   Beanstalk runtime tree in `elastic-beanstalk-artifact`
 
-The integration suite requires a trusted `mongod` executable on `PATH`. On
+The integration suite requires a trusted `mongod` executable on `PATH`. Windows
+runs use the official Windows binary and omit Unix socket flags. On
 macOS, approve or install that binary according to the machine's security
 policy before running the suite; the tests never weaken Gatekeeper themselves.
 The Linux release workflow installs the pinned, GPG-verified MongoDB Community
@@ -664,6 +665,26 @@ Artist carousels:
 - Artist carousel items cannot be manually added, reordered, or moved between carousels.
 
 Personalized Library:
+
+- Finitude Web `/finitude/library` opens a personal overview with My Playlists
+  (when the existing service capability is enabled), Saved music, and Recently
+  played. `?section=playlists`, `?section=saved`, and `?section=recent` open
+  those destinations. Save remains the existing single saved-content state.
+- `GET /api/listener/v1/library` keeps its saved-content DTO, filters, sorting,
+  and cursor pagination. Optional `q` is a literal case-insensitive title
+  search, at most 100 characters, applied before pagination. Web All / Albums /
+  Songs filters are mutually exclusive; the compatibility API still accepts
+  multiple types. Change filters/search/sort with a fresh cursor.
+- `GET /api/listener/v1/recently-played` accepts no query parameters and returns
+  `{ items: [{ content, playedAt, saved }], limit: 20 }`. `content` is an
+  allowlisted ready Album or MediaTrack summary. The response preserves the
+  newest-first personal activity window and omits missing/non-ready content.
+  It requires authentication and the current-account viewer fence, uses
+  private/no-store caching, and never changes Save state. This read does not
+  depend on administrator-configured Home carousels.
+- Playlist availability remains controlled by `FINITUDE_PLAYLISTS_ENABLED`;
+  production defaults to disabled until its existing rollout prerequisites
+  pass. The Library does not override that deployment decision.
 
 - Authenticated users can save and unsave Albums or MediaTracks through
   `/content/me/saves/:contentType/:contentId`.

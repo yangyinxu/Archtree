@@ -173,7 +173,8 @@ export const startMongoReplicaSet = async (
         '--port', String(port),
         '--bind_ip', '127.0.0.1',
         '--replSet', 'archtree-test',
-        '--nounixsocket',
+        // Windows mongod does not support Unix socket options.
+        ...(process.platform === 'win32' ? [] : ['--nounixsocket']),
         '--quiet'
     ], { stdio: 'pipe' });
     const appendLog = (chunk: Buffer) => {

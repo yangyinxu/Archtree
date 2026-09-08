@@ -19,9 +19,25 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   every device-local Album and MediaTrack download. Matching saved and
   downloaded representations are one row, keyed by canonical content type and
   ID.
-- Albums and Songs are additive content-type filters. Downloads is an
+- In the native Library, Albums and Songs remain additive content-type filters. Downloads is an
   availability filter that can be combined with either content type. With no
   filters selected, the complete supported Library is visible.
+- Web Library is a personal overview with separate My Playlists, Saved music,
+  and Recently played destinations. Its Saved music destination uses mutually
+  exclusive All, Albums, and Songs filters. Search matches saved titles across
+  the complete saved collection before pagination. Sorting changes only the
+  current collection's order; it does not switch its source.
+- Save and Unsave are the only collection preference state. There is no
+  separate Like or Add-to-Library state. Saving an Album does not save its
+  individual MediaTracks, and saving a MediaTrack does not save its Album.
+- Web Recently played shows the existing latest 20 activity items independently
+  of configured Home carousels, including unsaved content, newest first.
+  Missing or non-ready content is omitted using public catalog visibility rules.
+  Each row shows its actual Save state. Unsaving removes a saved row but does
+  not remove a history row or a Playlist membership; clearing history does not
+  unsave content. Playing content does not automatically save it.
+- Web overview sections load and recover independently. A section failure
+  must not be presented as an empty collection or hide other working sections.
 - The Library supports Recent Activity, Recently Saved, and Recently Played
   sorting. Recent Activity uses the newest saved, played, or downloaded event.
   Items without the selected sort event follow items that have one, using a
@@ -83,7 +99,7 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - The desktop Web sidebar begins with primary navigation and does not render a
   separate `Your Library` heading. The Library destination and the Library
   page's own title remain available.
-- On tablet and mobile Web, Playlists are available as a Library-owned
+- On Web, Playlists are available as a Library-owned
   destination rather than as an additional primary-navigation tab. Playlists
   remain separate from the Saved/Downloaded Album and MediaTrack union and its
   filters and sorting.
@@ -386,8 +402,9 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - The Web listener renders administrator-configured Carousel, Grid, and List
   Home sections in persisted order. A client limitation on another platform
   does not change the configured presentation type.
-- The Web Library is the complete server-backed union of saved Albums and
-  MediaTracks. Web is streaming-only: it provides no Download action, Download
+- The Web Saved music collection is the complete server-backed union of saved
+  Albums and MediaTracks. My Playlists also includes empty owner-created
+  Playlists, and its members need not be saved. Web is streaming-only: it provides no Download action, Download
   filter, offline state, or browser-local Finitude media lifecycle. An ordinary
   browser file download is not represented as Finitude offline content.
 - The Web listener owns one long-lived media element, queue, and playback

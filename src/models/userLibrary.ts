@@ -8,6 +8,7 @@ import { resolvePublicCatalogBylines } from '../services/publicCatalogService';
 import { withReadyCatalogItemReferences } from '../services/catalogItemReferenceFenceService';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { touchActiveAccount } from '../services/accountReferenceFenceService';
+import { escapeRegex } from '../utils/search';
 
 export type LibraryContentType = 'album' | 'audioTrack';
 export type ActivitySource = 'recentlySaved' | 'recentlyPlayed';
@@ -30,6 +31,7 @@ interface LibraryCursor {
 }
 
 export interface LibraryListOptions {
+    query?: string;
     contentTypes?: LibraryContentType[];
     sort?: LibrarySort;
     limit?: number;
@@ -161,6 +163,30 @@ export class UserLibrary {
             { $match: match },
             { $addFields: { librarySortAt: sortExpression } }
         ];
+        // Search the complete saved set before pagination; never search only a loaded page.
+        const query = options.query?.trim().slice(0, 100);
+        if (query) {
+            pipeline.push(
+                { $addFields: { searchContentId: { $convert: {
+                    input: '$contentId', to: 'objectId', onError: null, onNull: null
+                } } } },
+                ...(['album', 'audioTrack'] as const).map((type) => ({ $lookup: {
+                    from: type === 'album' ? 'albums' : 'audioTracks',
+                    let: { id: '$searchContentId', type: '$contentType' },
+                    pipeline: [
+                        { $match: { $expr: { $and: [
+                            { $eq: ['$_id', '$$id'] }, { $eq: ['$$type', type] }
+                        ] }, title: { $regex: escapeRegex(query), $options: 'i' } } },
+                        { $project: { _id: 1 } }
+                    ],
+                    as: type === 'album' ? 'matchingAlbum' : 'matchingTrack'
+                } })),
+                { $match: { $or: [
+                    { 'matchingAlbum.0': { $exists: true } },
+                    { 'matchingTrack.0': { $exists: true } }
+                ] } }
+            );
+        }
         if (cursor) {
             const cursorId = ObjectId.createFromHexString(cursor.id);
             pipeline.push(cursor.sortAt

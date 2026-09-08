@@ -11,6 +11,30 @@ import {
 
 let harness: MongoReplicaSetHarness | undefined;
 
+test('saved search covers the full collection before pagination and escapes regex syntax', async () => {
+    const userId = new ObjectId().toString();
+    const otherUser = new ObjectId().toString();
+    const albums = Array.from({ length: 35 }, (_, index) => ({
+        _id: new ObjectId(), title: index < 2 ? 'Old [record]' : `Recent ${index}`, coverArtUrl: '', audioTrackIds: []
+    }));
+    await getDb()!.collection('albums').insertMany(albums);
+    await getDb()!.collection('userSaves').insertMany(albums.map((album, index) => ({
+        userId, contentType: 'album', contentId: album._id.toString(),
+        savedAt: new Date(2026, 0, index + 1), lastActivityAt: new Date(2026, 0, index + 1)
+    })));
+    const all = await UserLibrary.list(userId, { limit: 100 });
+    assert.equal(all.items.length, 35);
+    const first = await UserLibrary.list(userId, { query: '[record]', limit: 1 });
+    assert.equal(first.items.length, 1);
+    assert.ok(first.nextCursor);
+    const second = await UserLibrary.list(userId, { query: '[record]', limit: 1, cursor: first.nextCursor });
+    assert.equal(second.items.length, 1);
+    assert.notEqual(first.items[0].contentId, second.items[0].contentId);
+    assert.equal(second.nextCursor, null);
+    assert.equal((await UserLibrary.list(userId, { query: '[record]', contentTypes: ['audioTrack'] })).items.length, 0);
+    assert.equal((await UserLibrary.list(otherUser, { query: '[record]' })).items.length, 0);
+});
+
 before(async () => {
     harness = await startMongoReplicaSet('archtree-user-library-test');
 });

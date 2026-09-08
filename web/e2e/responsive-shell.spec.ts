@@ -331,7 +331,7 @@ test('stacks authentication content inside the 416 px main pane', async ({ page 
 test('stacks Library heading controls inside the 416 px main pane', async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   await installPrivateListenerRoutes(page);
-  await page.goto('/finitude/library');
+  await page.goto('/finitude/library?section=saved');
 
   const main = await page.getByRole('main').boundingBox();
   const title = await page.getByRole('heading', { level: 1, name: 'Your Library' }).boundingBox();
