@@ -132,7 +132,7 @@ test('Album Play and explicit soundtrack selection share the ordered Album queue
     expect.objectContaining({ id: track.id })
   ], 0);
 
-  await user.click(screen.getByRole('button', { name: 'Add Blue Interval to Playlist' }));
+  await user.click(await screen.findByRole('button', { name: 'Add Blue Interval to Playlist' }));
   expect(screen.getByRole('dialog', { name: 'Log in to add to a Playlist' })).toBeInTheDocument();
   expect(launch).toHaveBeenCalledTimes(2);
 });
@@ -493,7 +493,7 @@ test('Library sends type filters to the server and retains the mixed saved list'
     return jsonResponse({ items, nextCursor: null });
   });
   vi.stubGlobal('fetch', fetchMock);
-  renderRoute('/library', '/library', <LibraryPage />, listenerSession);
+  renderRoute('/library?section=saved', '/library', <LibraryPage />, listenerSession);
 
   expect(await screen.findByRole('button', { name: 'Play Blue Interval by Finite Ensemble' })).toBeInTheDocument();
   expect(await screen.findByRole('button', { name: 'Add Blue Interval to Playlist' })).toBeInTheDocument();

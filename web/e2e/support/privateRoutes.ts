@@ -11,6 +11,7 @@ import type {
 } from '../../src/api/playlists';
 import type { BrowserSession } from '../../src/api/schemas';
 import { collectionPageFixture, homeFixture } from '../fixtures/catalog';
+import { filterLibraryFixture } from '../fixtures/library';
 import {
   privateArtistPage,
   privateLibraryPage,
@@ -70,7 +71,8 @@ export const installPrivateListenerRoutes = async (
           message: 'Grid/List page item was not found.'
         });
   });
-  await page.route('**/api/listener/v1/library**', (route) => privateJson(route, 200, library));
+  await page.route('**/api/listener/v1/library**', (route) => privateJson(route, 200, filterLibraryFixture(library, new URL(route.request().url()))));
+  await page.route('**/api/listener/v1/recently-played', (route) => privateJson(route, 200, { items: [], limit: 20 }));
   await page.route('**/api/listener/v1/artists/**', (route) => json(route, 200, artist));
   await page.route('**/content/me/saves/status', async (route) => {
     const input = route.request().postDataJSON() as {

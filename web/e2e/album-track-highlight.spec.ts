@@ -1,5 +1,6 @@
 import { catalogIds } from './fixtures/catalog';
 import { expect, test } from './support/test';
+import { installDeterministicAudio } from './support/deterministicAudio';
 
 test('highlights the complete Album track row through its Save column', async ({ page }) => {
   await page.setViewportSize({ width: 1_440, height: 900 });
@@ -35,6 +36,7 @@ test('highlights the complete Album track row through its Save column', async ({
 });
 
 test('shows the active Album track with animated bars and a highlighted Pause action', async ({ page }) => {
+  await installDeterministicAudio(page);
   await page.setViewportSize({ width: 1_440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto(`/finitude/albums/${catalogIds.album}`);

@@ -1,244 +1,167 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router';
-
-import { ApiError } from '../../api/client';
-import type {
-  ContentSummary,
-  LibraryContentType,
-  LibraryItem,
-  LibrarySort,
-  LibraryTarget
-} from '../../api/contentSchemas';
-import {
-  getLibraryPage,
-  listenerQueryKeys,
-  type LibraryPageOptions
-} from '../../api/listener';
+import { lazy, Suspense, useMemo, useState } from 'react';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { Link, useSearchParams } from 'react-router';
+import type { ContentSummary, LibraryContentType, LibraryItem, LibrarySort } from '../../api/contentSchemas';
+import { getLibraryPage, listenerQueryKeys } from '../../api/listener';
+import { playlistPageQuery } from '../../api/playlists';
+import { recentlyPlayedQuery } from '../../api/recentPlayback';
 import { listenerCapabilitiesQuery } from '../../api/listenerCapabilities';
-import {
-  browserSessionQuery,
-  browserSessionQueryKey
-} from '../../api/session';
-import { ContentListRow } from '../../components/ContentListRow';
-import { Icon } from '../../components/Icon';
-import { SaveButton } from '../../components/SaveButton';
-import { launchStandalonePlayback } from '../playback/launchPlayback';
-import { LazyAddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
-import styles from './LibraryPage.module.css';
+import { browserSessionQuery } from '../../api/session';
+import { useSectionAuthentication, SectionError } from './LibrarySectionState';
 import { useLocalization } from '../../localization/LocalizationProvider';
-import type { MessageKey } from '../../localization/contract';
+import styles from './LibraryPage.module.css';
 
+const PlaylistSummaryList = lazy(() => import('../playlists/PlaylistSummaryList').then((module) => ({ default: module.PlaylistSummaryList })));
+const NewPlaylistButton = lazy(() => import('../playlists/PlaylistControls').then((module) => ({ default: module.NewPlaylistButton })));
+
+const DeferredMusicRows = lazy(() => import('./LibraryMusicRows'));
+/** Load playable row code before exposing its Play controls. */
+const MusicRows = (props: import('./LibraryMusicRows').MusicRowsProps) => <Suspense fallback={null}><DeferredMusicRows {...props} /></Suspense>;
+
+/** Adapts the existing saved-content DTO without changing the Save contract. */
 const librarySummary = (item: LibraryItem): ContentSummary => item.contentType === 'album'
-  ? {
-      contentType: 'album',
-      id: item.contentId,
-      title: item.album.title,
-      artworkUrl: item.album.coverArtUrl,
-      artistNames: item.creator ? [item.creator] : [],
-      releaseDate: item.album.releaseDate
-    }
-  : {
-      contentType: 'audioTrack',
-      id: item.contentId,
-      title: item.audioTrack.title,
+  ? { contentType: 'album', id: item.contentId, title: item.album.title,
+      artworkUrl: item.album.coverArtUrl, artistNames: item.creator ? [item.creator] : [],
+      releaseDate: item.album.releaseDate }
+  : { contentType: 'audioTrack', id: item.contentId, title: item.audioTrack.title,
       artworkUrl: item.audioTrack.displayCoverArtUrl || item.audioTrack.coverArtUrl,
-      artistNames: item.creator ? [item.creator] : [],
-      albumId: item.audioTrack.albumId,
-      albumTitle: null,
-      duration: item.audioTrack.duration,
-      mediaType: item.audioTrack.mediaType,
-      streamUrl: item.audioTrack.streamUrl ?? ''
-    };
+      artistNames: item.creator ? [item.creator] : [], albumId: item.audioTrack.albumId,
+      albumTitle: null, duration: item.audioTrack.duration, mediaType: item.audioTrack.mediaType,
+      streamUrl: item.audioTrack.streamUrl ?? '' };
 
-const sortOptions: Array<{ value: LibrarySort; labelKey: MessageKey }> = [
-  { value: 'recentActivity', labelKey: 'library.sort.recent_activity' },
-  { value: 'recentlySaved', labelKey: 'library.sort.recently_saved' },
-  { value: 'recentlyPlayed', labelKey: 'library.sort.recently_played' }
-];
+type Section = 'overview' | 'saved' | 'recent' | 'playlists';
 
-/** Keeps Playlists reachable from the Library-owned mobile and tablet hierarchy. */
-const LibrarySections = () => (
-  <LibrarySectionsContent />
-);
-
-const LibrarySectionsContent = () => {
-  const capabilities = useQuery(listenerCapabilitiesQuery());
+/** Fetches saved titles with server-side filtering before cursor pagination. */
+const SavedSection = ({ viewerId, preview }: { viewerId: string; preview: boolean }) => {
   const { t } = useLocalization();
-  return (
-    <nav aria-label={t('library.nav.label')} className={styles.sections}>
-      <span aria-current="page">{t('library.nav.saved_music')}</span>
-      {capabilities.data?.playlists && <Link to="/playlists">{t('common.label.playlists')}</Link>}
-    </nav>
-  );
-};
-
-/** Renders the complete mixed Saved Library with server-side filters and cursor pagination. */
-export const LibraryPage = () => {
-  const { t } = useLocalization();
-  const session = useQuery(browserSessionQuery());
-  const viewerId = session.data?.user.id ?? '';
-  const queryClient = useQueryClient();
-  const [selectedTypes, setSelectedTypes] = useState<LibraryContentType[]>([]);
+  const [type, setType] = useState<LibraryContentType | ''>('');
   const [sort, setSort] = useState<LibrarySort>('recentActivity');
-  const [removedKeys, setRemovedKeys] = useState<Set<string>>(() => new Set());
-  const options = useMemo<LibraryPageOptions>(() => ({
-    contentTypes: selectedTypes,
-    sort,
-    limit: 30
-  }), [selectedTypes, sort]);
-  const library = useInfiniteQuery({
+  const [query, setQuery] = useState('');
+  const options = useMemo(() => ({ contentTypes: type ? [type] : [], sort, query, limit: preview ? 4 : 30 }), [type, sort, query, preview]);
+  const result = useInfiniteQuery({
     queryKey: listenerQueryKeys.library(viewerId, options),
-    queryFn: ({ pageParam, signal }) => getLibraryPage(viewerId, {
-      ...options,
-      cursor: typeof pageParam === 'string' ? pageParam : undefined
-    }, signal),
+    queryFn: ({ pageParam, signal }) => getLibraryPage(viewerId, { ...options, cursor: pageParam }, signal),
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    enabled: Boolean(viewerId)
+    getNextPageParam: (page) => page.nextCursor ?? undefined
   });
-
-  useEffect(() => setRemovedKeys(new Set()), [selectedTypes, sort, viewerId]);
-  useEffect(() => {
-    if (library.error instanceof ApiError && library.error.status === 401) {
-      queryClient.setQueryData(browserSessionQueryKey, null);
-    }
-  }, [library.error, queryClient]);
-
-  const items = useMemo(() => {
-    const byKey = new Map<string, LibraryItem>();
-    for (const page of library.data?.pages ?? []) {
-      for (const item of page.items) {
-        const key = `${item.contentType}:${item.contentId}`;
-        if (!removedKeys.has(key)) byKey.set(key, item);
-      }
-    }
-    return [...byKey.values()];
-  }, [library.data, removedKeys]);
-
-  const toggleType = (contentType: LibraryContentType) => {
-    setSelectedTypes((current) => current.includes(contentType)
-      ? current.filter((value) => value !== contentType)
-      : [...current, contentType]);
-  };
-
-  if (session.isPending) {
-    return <div className={styles.page}><LibrarySections /><div className={styles.state} aria-busy="true">{t('library.loading_initial')}</div></div>;
-  }
-  if (session.isError) {
-    return (
-      <div className={styles.page}>
-        <LibrarySections />
-        <div className={styles.state} role="alert">
-          <h1>{t('library.error.session')}</h1>
-          <button onClick={() => session.refetch()} type="button">{t('common.action.try_again')}</button>
-        </div>
-      </div>
-    );
-  }
-  if (!session.data) {
-    return (
-      <div className={styles.page}>
-        <LibrarySections />
-        <p className={styles.eyebrow}>{t('library.subtitle')}</p>
-        <h1 className={styles.title}>{t('library.title')}</h1>
-        <div className={styles.state}>
-          <span className={styles.stateIcon}><Icon name="lock" /></span>
-          <h2>{t('library.signed_out.title')}</h2>
-          <p>{t('library.signed_out.copy')}</p>
-          <Link className={styles.loginLink} state={{ from: '/library' }} to="/login">{t('common.action.log_in')}</Link>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={styles.page}>
-      <LibrarySections />
-      <div className={styles.heading}>
-        <div>
-          <p className={styles.eyebrow}>{t('library.subtitle')}</p>
-          <h1 className={styles.title}>{t('library.title')}</h1>
-          <p className={styles.lede}>{t('library.lede')}</p>
-        </div>
-        <label className={styles.sortControl}>
-          <span>{t('library.sort.label')}</span>
-          <select onChange={(event) => setSort(event.currentTarget.value as LibrarySort)} value={sort}>
-            {sortOptions.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}
+  useSectionAuthentication(result.error);
+  const rows = [...new Map((result.data?.pages ?? []).flatMap((page) => page.items)
+    .map((item) => [`${item.contentType}:${item.contentId}`, item])).values()];
+  return <section className={styles.section} aria-labelledby="saved-heading">
+    <div className={styles.sectionHeading}><h2 id="saved-heading">{t('library.nav.saved_music')}</h2>
+      {preview && <Link to="?section=saved">{t('library.action.view_all')}</Link>}
+    </div>
+    {!preview && <>
+      <div className={styles.toolbar}>
+        <label className={styles.searchControl}>{t('library.search.saved')}<input type="search" maxLength={100} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        <label className={styles.sortControl}><span>{t('library.sort.label')}</span>
+          <select value={sort} onChange={(event) => setSort(event.target.value as LibrarySort)}>
+            <option value="recentActivity">{t('library.sort.recent_activity')}</option>
+            <option value="recentlySaved">{t('library.sort.recently_saved')}</option>
+            <option value="recentlyPlayed">{t('library.sort.recently_played')}</option>
           </select>
         </label>
       </div>
-
-      <div className={styles.filters} aria-label={t('library.filters.label')} role="group">
-        <button aria-pressed={selectedTypes.includes('album')} onClick={() => toggleType('album')} type="button">{t('common.label.albums')}</button>
-        <button aria-pressed={selectedTypes.includes('audioTrack')} onClick={() => toggleType('audioTrack')} type="button">{t('common.label.songs')}</button>
+      <div className={styles.filters} role="group" aria-label={t('library.filters.label')}>
+        <button type="button" aria-pressed={type === ''} onClick={() => setType('')}>{t('library.filter.all')}</button>
+        <button type="button" aria-pressed={type === 'album'} onClick={() => setType('album')}>{t('common.label.albums')}</button>
+        <button type="button" aria-pressed={type === 'audioTrack'} onClick={() => setType('audioTrack')}>{t('common.label.songs')}</button>
       </div>
+    </>}
+    {result.isPending ? <p aria-busy="true">{t('library.loading')}</p>
+      : result.isError && !result.data ? <SectionError retry={result.refetch} />
+      : <>
+        {result.isRefetchError && <SectionError retry={result.refetch} />}
+        {rows.length ? <MusicRows key={result.dataUpdatedAt} savedOnly viewerId={viewerId} label={t('library.saved_list.label')} rows={rows.map((item) => ({
+          content: librarySummary(item), saved: true, available: item.contentType !== 'audioTrack' || item.audioTrack.available
+        }))} /> : <div className={styles.empty}>
+          <p>{t(query || type ? 'library.empty.filtered_title' : 'library.empty.first_title')}</p>
+          <Link to="/search">{t('common.action.explore_music')}</Link>
+        </div>}
+        {!preview && result.hasNextPage && <div className={styles.loadMore}>
+          <button type="button" disabled={result.isFetchingNextPage} onClick={() => result.fetchNextPage()}>{t(result.isFetchingNextPage ? 'common.state.loading_more' : 'common.action.load_more')}</button>
+        </div>}
+        {result.isFetchNextPageError && <p role="alert">{t('library.error.pagination')}</p>}
+      </>}
+  </section>;
+};
 
-      {library.isPending ? (
-        <div className={styles.state} aria-busy="true">{t('library.loading')}</div>
-      ) : library.isError ? (
-        <div className={styles.state} role="alert">
-          <h2>{library.error instanceof ApiError && library.error.status === 401
-            ? t('library.error.auth_required')
-            : t('library.error.load')}</h2>
-          <button onClick={() => library.refetch()} type="button">{t('common.action.try_again')}</button>
-        </div>
-      ) : items.length === 0 ? (
-        <div className={styles.state}>
-          <h2>{selectedTypes.length > 0
-            ? t('library.empty.filtered_title')
-            : t('library.empty.first_title')}</h2>
-          <p>{selectedTypes.length > 0
-            ? t('library.empty.filtered_copy')
-            : t('library.empty.first_copy')}</p>
-          {selectedTypes.length === 0 && <Link className={styles.loginLink} to="/search">{t('common.action.explore_music')}</Link>}
-        </div>
-      ) : (
-        <>
-          <ul className={styles.list} aria-label={t('library.saved_list.label')}>
-            {items.map((item) => {
-              const summary = librarySummary(item);
-              const playable = item.contentType !== 'audioTrack' || item.audioTrack.available;
-              const target: LibraryTarget = { contentType: item.contentType, contentId: item.contentId };
-              const key = `${item.contentType}:${item.contentId}`;
-              return (
-                <ContentListRow
-                  item={summary}
-                  key={key}
-                  onPlay={summary.contentType === 'audioTrack' && playable
-                    ? (track) => { void launchStandalonePlayback(track, viewerId); }
-                    : undefined}
-                  trailing={(
-                    <span className={styles.rowActions}>
-                      {!playable && <span className={styles.unavailable}>{t('common.state.unavailable')}</span>}
-                      {summary.contentType === 'audioTrack' && playable && (
-                        <LazyAddTrackToPlaylistButton track={summary} viewerId={viewerId} />
-                      )}
-                      <SaveButton
-                        compact
-                        onSavedChange={(saved) => {
-                          if (!saved) setRemovedKeys((current) => new Set(current).add(key));
-                        }}
-                        saved
-                        target={target}
-                        viewerId={viewerId}
-                      />
-                    </span>
-                  )}
-                />
-              );
-            })}
-          </ul>
-          {library.hasNextPage && (
-            <div className={styles.loadMore}>
-              <button disabled={library.isFetchingNextPage} onClick={() => library.fetchNextPage()} type="button">
-                {library.isFetchingNextPage ? t('common.state.loading_more') : t('common.action.load_more')}
-              </button>
-            </div>
-          )}
-          {library.isFetchNextPageError && <p className={styles.paginationError} role="alert">{t('library.error.pagination')}</p>}
-        </>
-      )}
+/** The complete bounded history can be searched locally without dropping unloaded results. */
+const RecentSection = ({ viewerId, preview }: { viewerId: string; preview: boolean }) => {
+  const { t } = useLocalization();
+  const result = useQuery(recentlyPlayedQuery(viewerId));
+  const [query, setQuery] = useState('');
+  useSectionAuthentication(result.error);
+  const items = (result.data?.items ?? []).filter((item) => item.content.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  return <section className={styles.section} aria-labelledby="recent-heading">
+    <div className={styles.sectionHeading}><h2 id="recent-heading">{t('library.nav.recent')}</h2>
+      {preview && <Link to="?section=recent">{t('library.action.view_all')}</Link>}
     </div>
-  );
+    <p className={styles.description}>{t('library.recent.description')}</p>
+    {!preview && <label className={styles.searchControl}>{t('library.search.recent')}<input type="search" maxLength={100} value={query} onChange={(event) => setQuery(event.target.value)} /></label>}
+    {result.isPending ? <p aria-busy="true">{t('library.recent.loading')}</p>
+      : result.isError && !result.data ? <SectionError retry={result.refetch} />
+      : <>
+        {result.isRefetchError && <SectionError retry={result.refetch} />}
+        {items.length ? <MusicRows key={result.dataUpdatedAt} viewerId={viewerId} label={t('library.nav.recent')} rows={preview ? items.slice(0, 4) : items} />
+          : <p className={styles.empty}>{t(query ? 'library.empty.filtered_title' : 'library.recent.empty')}</p>}
+      </>}
+  </section>;
+};
+
+/** Own playlists remain separate from saved music, including playlists with no members. */
+const PlaylistsSection = ({ viewerId, preview }: { viewerId: string; preview: boolean }) => {
+  const { t } = useLocalization();
+  const [query, setQuery] = useState('');
+  const result = useQuery(playlistPageQuery(viewerId, { limit: 100 }));
+  useSectionAuthentication(result.error);
+  const items = (result.data?.items ?? []).filter((item) => item.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  return <section className={styles.section} aria-labelledby="playlists-heading">
+    <div className={styles.sectionHeading}><h2 id="playlists-heading">{t('library.nav.playlists')}</h2>
+      {preview ? <Link to="?section=playlists">{t('library.action.view_all')}</Link> : <Suspense fallback={null}><NewPlaylistButton viewerId={viewerId} className={styles.action} /></Suspense>}
+    </div>
+    {!preview && <label className={styles.searchControl}>{t('library.search.playlists')}<input type="search" maxLength={100} value={query} onChange={(event) => setQuery(event.target.value)} /></label>}
+    {result.isPending ? <p aria-busy="true">{t('playlist.index.loading')}</p>
+      : result.isError && !result.data ? <SectionError retry={result.refetch} />
+      : <>
+        {result.isRefetchError && <SectionError retry={result.refetch} />}
+        {items.length ? <Suspense fallback={null}><PlaylistSummaryList playlists={preview ? items.slice(0, 4) : items} viewerId={viewerId} /></Suspense>
+          : <div className={styles.empty}><p>{t(query ? 'library.empty.filtered_title' : 'playlist.index.empty_title')}</p>
+            {!query && <NewPlaylistButton viewerId={viewerId} className={styles.action} />}</div>}
+      </>}
+  </section>;
+};
+
+/** Library is a personal hub: navigation chooses a source; Save never means history or membership. */
+export const LibraryPage = () => {
+  const { t } = useLocalization();
+  const session = useQuery(browserSessionQuery());
+  const capabilities = useQuery(listenerCapabilitiesQuery());
+  const [parameters] = useSearchParams();
+  const requested = parameters.get('section');
+  const section: Section = requested === 'saved' || requested === 'recent' || requested === 'playlists' ? requested : 'overview';
+  const viewerId = session.data?.user.id ?? '';
+  const preview = section === 'overview';
+  return <div className={styles.page}>
+    <header className={styles.heading}><div><h1 className={styles.title}>{t('library.title')}</h1><p className={styles.lede}>{t('library.lede')}</p></div>
+      {capabilities.data?.playlists && <Suspense fallback={null}><NewPlaylistButton viewerId={viewerId || undefined} accountPending={session.isPending} accountUnavailable={session.isError} className={styles.action} /></Suspense>}
+    </header>
+    <nav className={styles.sections} aria-label={t('library.nav.label')}>
+      <Link aria-current={preview ? 'page' : undefined} to="/library">{t('library.nav.overview')}</Link>
+      {capabilities.data?.playlists && <Link aria-current={section === 'playlists' ? 'page' : undefined} to="?section=playlists">{t('library.nav.playlists')}</Link>}
+      <Link aria-current={section === 'saved' ? 'page' : undefined} to="?section=saved">{t('library.nav.saved_music')}</Link>
+      <Link aria-current={section === 'recent' ? 'page' : undefined} to="?section=recent">{t('library.nav.recent')}</Link>
+    </nav>
+    {session.isPending ? <p aria-busy="true">{t('library.loading_initial')}</p>
+      : session.isError ? <SectionError retry={session.refetch} />
+      : !viewerId ? <div className={styles.state}><h2>{t('library.signed_out.title')}</h2><p>{t('library.signed_out.copy')}</p><Link className={styles.loginLink} to="/login" state={{ from: '/library' }}>{t('common.action.log_in')}</Link></div>
+      : <div key={viewerId}>
+        {(preview || section === 'playlists') && (capabilities.isPending ? <p aria-busy="true">{t('library.loading_initial')}</p>
+          : capabilities.isError ? <SectionError retry={capabilities.refetch} />
+          : capabilities.data?.playlists ? <Suspense fallback={<p aria-busy="true">{t('playlist.index.loading')}</p>}><PlaylistsSection key={`playlists:${section}`} viewerId={viewerId} preview={preview} /></Suspense>
+          : section === 'playlists' ? <p className={styles.empty}>{t('library.playlists.unavailable')}</p> : null)}
+        {(preview || section === 'saved') && <SavedSection key={`saved:${section}`} viewerId={viewerId} preview={preview} />}
+        {(preview || section === 'recent') && <RecentSection key={`recent:${section}`} viewerId={viewerId} preview={preview} />}
+      </div>}
+  </div>;
 };

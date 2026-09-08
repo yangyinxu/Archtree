@@ -1,4 +1,4 @@
-import { advanceAccountEpoch } from './accountEpoch';
+import { advanceAccountEpoch, captureAccountOperation, isAccountOperationCurrent } from './accountEpoch';
 
 export type BrowserSessionTransitionKind =
   | 'login'
@@ -7,6 +7,12 @@ export type BrowserSessionTransitionKind =
   | 'logout-all'
   | 'account-delete';
 export type BrowserSessionTransitionCapability = 'web-locks-v1' | undefined;
+
+/** A request may reuse this scope only while its owning transition holds the lock. */
+export interface BrowserSessionTransitionScope {
+  readonly capability: BrowserSessionTransitionCapability;
+  assertActive(): void;
+}
 
 interface BrowserSessionTransitionOptions<Output> {
   kind: BrowserSessionTransitionKind;
@@ -207,13 +213,31 @@ export const runBrowserSessionTransition = <Output>(
   options: BrowserSessionTransitionOptions<Output>,
   operation: (
     capability: BrowserSessionTransitionCapability,
-    generation: number | undefined
+    generation: number | undefined,
+    scope: BrowserSessionTransitionScope
   ) => Promise<Output>
 ) => {
   const generation = options.changesIdentity ? advanceAccountEpoch() : undefined;
+  const identityGuard = generation === undefined ? undefined : captureAccountOperation('', generation);
   const result = localTail.then(() => runShared(
     options,
-    (capability) => operation(capability, generation)
+    async (capability) => {
+      let active = true;
+      const scope: BrowserSessionTransitionScope = {
+        capability,
+        assertActive() {
+          if (!active) throw new BrowserSessionTransitionUnavailableError();
+          if (identityGuard && !isAccountOperationCurrent(identityGuard)) {
+            throw new BrowserSessionTransitionConflictError();
+          }
+        }
+      };
+      try {
+        return await operation(capability, generation, scope);
+      } finally {
+        active = false;
+      }
+    }
   ));
   localTail = result.then(() => undefined, () => undefined);
   return result;

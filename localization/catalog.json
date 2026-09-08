@@ -2048,6 +2048,13 @@
         "language": "string"
       }
     },
+    "library.action.view_all": {
+      "description": "View all",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "library.empty.filtered_copy": {
       "description": "Guidance when Library filters have no matches.",
       "delivery": [
@@ -2104,6 +2111,13 @@
       ],
       "variables": {}
     },
+    "library.filter.all": {
+      "description": "All",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "library.filters.label": {
       "description": "Accessible label for Library content filters.",
       "delivery": [
@@ -2139,6 +2153,27 @@
       ],
       "variables": {}
     },
+    "library.nav.overview": {
+      "description": "Overview",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.nav.playlists": {
+      "description": "My Playlists",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.nav.recent": {
+      "description": "Recently played",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "library.nav.saved_music": {
       "description": "Library subsection label for saved music.",
       "delivery": [
@@ -2146,8 +2181,64 @@
       ],
       "variables": {}
     },
+    "library.playlists.unavailable": {
+      "description": "Playlists are not available on this service yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.recent.description": {
+      "description": "Your 20 most recent items, whether saved or not. Newest plays appear first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.recent.empty": {
+      "description": "Play some music and find it here next time.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.recent.loading": {
+      "description": "Loading recent playback…",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "library.saved_list.label": {
       "description": "Accessible label for the saved Album and MediaTrack list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.search.playlists": {
+      "description": "Search playlist names",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.search.recent": {
+      "description": "Search recent titles",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.search.saved": {
+      "description": "Search saved titles",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "library.section.error": {
+      "description": "This section could not be loaded. Your other collections are still available.",
       "delivery": [
         "runtime"
       ],

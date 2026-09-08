@@ -10,7 +10,8 @@ import {
 } from '../middleware/authMiddleware';
 import {
     asyncHandler,
-    publicReadRateLimit
+    publicReadRateLimit,
+    searchConcurrencyLimit
 } from '../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
@@ -25,7 +26,7 @@ router.get(
     requireCurrentAccountViewerWhenAuthenticated,
     asyncHandler(listenerController.home)
 );
-router.get('/search', publicReadRateLimit, asyncHandler(listenerController.search));
+router.get('/search', publicReadRateLimit, searchConcurrencyLimit, asyncHandler(listenerController.search));
 router.get(
     '/pages/:slug(library)/items/:itemId',
     publicReadRateLimit,
@@ -44,6 +45,13 @@ router.get('/albums/:id', publicReadRateLimit, asyncHandler(listenerController.a
 router.get('/artists/:id', publicReadRateLimit, asyncHandler(listenerController.artist));
 router.get('/organizations/:id', publicReadRateLimit, asyncHandler(listenerController.organization));
 router.get('/tracks/:id', publicReadRateLimit, asyncHandler(listenerController.audioTrack));
+router.get(
+    '/recently-played',
+    publicReadRateLimit,
+    requireAuth,
+    requireCurrentAccountViewer,
+    asyncHandler(listenerController.recentlyPlayed)
+);
 router.get(
     '/library',
     publicReadRateLimit,

@@ -16,9 +16,15 @@ import {
     connectToDatabase,
     disconnectFromDatabase
 } from '../../src/infrastructure/database';
+import { assertMongoRuntime } from '../../scripts/check-runtime.mjs';
 
 export interface MongoReplicaSetHarness {
     stop: () => Promise<void>;
+}
+
+interface MongoTestDatabaseOptions {
+    topology?: 'replicaSet' | 'standalone';
+    connectApplication?: boolean;
 }
 
 const testDirectoryPrefix = 'archtree-auth-test-';
@@ -92,9 +98,10 @@ const availablePort = () => new Promise<number>((resolve, reject) => {
 });
 
 /** Waits for a direct Mongo connection while retaining useful startup diagnostics. */
-const waitForMongo = async (uri: string, output: () => string) => {
+const waitForMongo = async (uri: string, output: () => string, failure: () => Error | undefined) => {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
+        if (failure()) throw failure();
         const client = new MongoClient(uri, { serverSelectionTimeoutMS: 500 });
         try {
             await client.connect();
@@ -114,9 +121,10 @@ const waitForMongo = async (uri: string, output: () => string) => {
 };
 
 /** Waits until the single-node replica set can accept transactional writes. */
-const waitForPrimary = async (client: MongoClient, output: () => string) => {
+const waitForPrimary = async (client: MongoClient, output: () => string, failure: () => Error | undefined) => {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
+        if (failure()) throw failure();
         try {
             const hello = await client.db('admin').command({ hello: 1 });
             if (hello.isWritablePrimary) return;
@@ -130,7 +138,7 @@ const waitForPrimary = async (client: MongoClient, output: () => string) => {
 
 /** Stops mongod gracefully, escalating only after its bounded shutdown window. */
 const stopMongoProcess = async (mongodProcess: ChildProcessWithoutNullStreams) => {
-    if (mongodProcess.exitCode !== null || mongodProcess.signalCode !== null) return;
+    if (!mongodProcess.pid || mongodProcess.exitCode !== null || mongodProcess.signalCode !== null) return;
 
     const closed = new Promise<void>(
         resolve => mongodProcess.once('close', () => resolve())
@@ -152,10 +160,14 @@ const stopMongoProcess = async (mongodProcess: ChildProcessWithoutNullStreams) =
     }
 };
 
-/** Starts a disposable local replica set and points the application cache at it. */
-export const startMongoReplicaSet = async (
-    databaseName: string
+/** Owns an isolated daemon; standalone mode exercises rejected application startup. */
+export const startMongoTestDatabase = async (
+    databaseName: string,
+    options: MongoTestDatabaseOptions = {}
 ): Promise<MongoReplicaSetHarness> => {
+    // Fail before allocating any test database directory when the daemon is missing.
+    const mongoBinary = process.env.MONGOD_BINARY || 'mongod';
+    assertMongoRuntime(mongoBinary);
     await removeStaleMongoTestDirectories();
     const port = await availablePort();
     const directory = await mkdtemp(join(tmpdir(), testDirectoryPrefix));
@@ -168,14 +180,24 @@ export const startMongoReplicaSet = async (
         { encoding: 'utf8', mode: 0o600 }
     );
     let logs = '';
-    const mongodProcess: ChildProcessWithoutNullStreams = spawn('mongod', [
+    const mongodProcess: ChildProcessWithoutNullStreams = spawn(mongoBinary, [
         '--dbpath', directory,
         '--port', String(port),
         '--bind_ip', '127.0.0.1',
-        '--replSet', 'archtree-test',
-        '--nounixsocket',
+        ...(options.topology === 'standalone' ? [] : ['--replSet', 'archtree-test']),
+        // Windows mongod does not support Unix socket options.
+        ...(process.platform === 'win32' ? [] : ['--nounixsocket']),
         '--quiet'
-    ], { stdio: 'pipe' });
+    ], { stdio: 'pipe', windowsHide: true });
+    let startupFailure: Error | undefined;
+    // A binary may disappear or exit between preflight and spawn; consume errors
+    // immediately and preserve cleanup rather than leaving an unhandled event.
+    mongodProcess.once('error', () => {
+        startupFailure = new Error('Could not start the isolated MongoDB daemon after preflight.');
+    });
+    mongodProcess.once('exit', (code, signal) => {
+        startupFailure = new Error(`Isolated MongoDB exited during startup (${signal || code || 'unknown'}).`);
+    });
     const appendLog = (chunk: Buffer) => {
         logs = `${logs}${chunk.toString('utf8')}`.slice(-8_000);
     };
@@ -215,24 +237,26 @@ export const startMongoReplicaSet = async (
     }
 
     try {
-        directClient = await waitForMongo(directUri, () => logs);
-        await directClient.db('admin').command({
-            replSetInitiate: {
-                _id: 'archtree-test',
-                members: [{ _id: 0, host: `127.0.0.1:${port}` }]
-            }
-        });
-        await waitForPrimary(directClient, () => logs);
+        directClient = await waitForMongo(directUri, () => logs, () => startupFailure);
+        if (options.topology !== 'standalone') {
+            await directClient.db('admin').command({
+                replSetInitiate: {
+                    _id: 'archtree-test',
+                    members: [{ _id: 0, host: `127.0.0.1:${port}` }]
+                }
+            });
+            await waitForPrimary(directClient, () => logs, () => startupFailure);
+        }
         await directClient.close();
         directClient = undefined;
 
         process.env.DB_CONN_STRING =
-            `mongodb://127.0.0.1:${port}/?replicaSet=archtree-test`;
+            options.topology === 'standalone' ? directUri : `mongodb://127.0.0.1:${port}/?replicaSet=archtree-test`;
         process.env.DB_NAME = databaseName;
         process.env.JWT_SECRET = 'integration-test-jwt-secret';
         process.env.AUTH_CODE_PEPPER = 'integration-test-code-pepper';
         process.env.NODE_ENV = 'test';
-        await connectToDatabase();
+        if (options.connectApplication !== false) await connectToDatabase();
     } catch (error) {
         unregisterSignalHandlers();
         await cleanup();
@@ -246,3 +270,6 @@ export const startMongoReplicaSet = async (
         }
     };
 };
+
+/** Preserves the transactional default for existing integration suites. */
+export const startMongoReplicaSet = (databaseName: string) => startMongoTestDatabase(databaseName);

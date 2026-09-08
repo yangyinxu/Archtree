@@ -1,3 +1,4 @@
+import { runRequestWork } from '../services/serverLifecycleService';
 import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/user';
@@ -86,7 +87,7 @@ const attachAuthContext = async (req: Request, replacementToken?: string) => {
     return (req as AuthenticatedRequest).auth;
 };
 
-export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+export const requireAuth = (req: Request, res: Response, next: NextFunction) => runRequestWork(req, async () => {
     // Reuse the database-backed context installed by an earlier pre-body guard.
     if ((req as AuthenticatedRequest).auth) return next();
     try {
@@ -99,7 +100,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     } catch (error) {
         return res.status(401).json({ message: 'Authentication failed.' });
     }
-};
+}).catch(next);
 
 /** Rejects stale Web account actions while leaving Bearer-authenticated native clients compatible. */
 export const requireCurrentAccountViewer = (
@@ -138,7 +139,7 @@ export const requireCurrentAccountViewerWhenAuthenticated = (
 };
 
 /** Authenticates the listener SPA from its HttpOnly access cookie only. */
-export const requireBrowserAuth = async (req: Request, res: Response, next: NextFunction) => {
+export const requireBrowserAuth = (req: Request, res: Response, next: NextFunction) => runRequestWork(req, async () => {
     setBrowserSessionPrivacyHeaders(res);
     try {
         const accessCookie = getCookieValue(req, 'session_token');
@@ -151,9 +152,9 @@ export const requireBrowserAuth = async (req: Request, res: Response, next: Next
     } catch {
         return res.status(401).json({ message: 'Authentication failed.' });
     }
-};
+}).catch(next);
 
-export const requireAuthForWeb = async (req: Request, res: Response, next: NextFunction) => {
+export const requireAuthForWeb = (req: Request, res: Response, next: NextFunction) => runRequestWork(req, async () => {
     // Content Manager authenticates before the application body parser runs.
     if ((req as AuthenticatedRequest).auth) return next();
     try {
@@ -168,7 +169,7 @@ export const requireAuthForWeb = async (req: Request, res: Response, next: NextF
         const returnTo = encodeURIComponent(req.originalUrl || '/content/manage');
         return res.redirect(`/auth/login-web?returnTo=${returnTo}`);
     }
-};
+}).catch(next);
 
 /** Returns a non-HTML denial when an authenticated Web user is not an administrator. */
 export const requireAdminForWeb = (req: Request, res: Response, next: NextFunction) => {
@@ -184,7 +185,7 @@ export const requireAdminForWeb = (req: Request, res: Response, next: NextFuncti
     return next();
 };
 
-export const attachOptionalAuth = async (req: Request, res: Response, next: NextFunction) => {
+export const attachOptionalAuth = (req: Request, res: Response, next: NextFunction) => runRequestWork(req, async () => {
     try {
         await attachAuthContext(req);
     } catch (error) {
@@ -192,10 +193,10 @@ export const attachOptionalAuth = async (req: Request, res: Response, next: Next
     }
 
     return next();
-};
+}).catch(next);
 
 /** Adds an optional viewer without rotating cookies during a public GET. */
-export const attachOptionalAccessAuth = async (req: Request, _res: Response, next: NextFunction) => {
+export const attachOptionalAccessAuth = (req: Request, _res: Response, next: NextFunction) => runRequestWork(req, async () => {
     try {
         await attachAuthContext(req);
     } catch {
@@ -203,19 +204,19 @@ export const attachOptionalAccessAuth = async (req: Request, _res: Response, nex
     }
 
     return next();
-};
+}).catch(next);
 
 /** Rejects a supplied invalid bearer token while allowing truly signed-out provider login. */
-export const requireAuthWhenPresented = async (
+export const requireAuthWhenPresented = (
     req: Request,
     res: Response,
     next: NextFunction
-) => {
+) => runRequestWork(req, async () => {
     if (req.get('Authorization')) {
         return requireAuth(req, res, next);
     }
     return next();
-};
+}).catch(next);
 
 export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
     const auth = (req as AuthenticatedRequest).auth;

@@ -5,9 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
-const repositoryRoot = path.resolve(new URL('..', import.meta.url).pathname);
+const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const configureHook = path.join(
   repositoryRoot,
   '.platform/hooks/postdeploy/01_configure_https.sh'
@@ -321,11 +322,10 @@ test('configuration deployments rerun the stable HTTPS configurator', async (t) 
 });
 
 test('platform hook scripts pass Bash syntax validation', async () => {
-  await execFileAsync('/bin/bash', [
-    '-n',
+  for (const hook of [
     configurationHook,
     path.join(repositoryRoot, '.platform/hooks/prebuild/01_install_certbot.sh'),
     configureHook,
     timerHook
-  ]);
+  ]) await execFileAsync('/bin/bash', ['-n', hook]);
 });

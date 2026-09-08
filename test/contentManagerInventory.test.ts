@@ -252,6 +252,8 @@ test('Content Manager loads global inventory into focused Catalog sections', asy
     assert.equal(nextError, undefined);
     assert.equal(capture.statusCode, 200);
     assert.match(capture.html, /href="\/assets\/content-manager\.css"/);
+    assert.match(capture.html, /content-manager-base\.css[\s\S]*content-manager\.css/);
+    assert.doesNotMatch(capture.html, /<style>/);
     assert.match(capture.html, /<body class="manager-page manager-view-overview/);
     const managerHeader = capture.html.match(/<header class="site-header">[\s\S]*?<\/header>/)?.[0] ?? '';
     assert.match(managerHeader, /<details class="manager-account" id="manager-account-menu">/);

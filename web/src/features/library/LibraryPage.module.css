@@ -7,26 +7,32 @@
 }
 
 .sections {
-  background: var(--color-surface-hover);
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
-  display: inline-flex;
-  gap: 0.25rem;
+  /* Keep every destination visible even when sidebar changes resize the pane. */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 30rem;
+  margin-top: 1.5rem;
   margin-bottom: 1.25rem;
-  padding: 0.25rem;
+  padding: 0;
 }
 
 .sections a,
 .sections span {
   align-items: center;
+  background: var(--color-surface-hover);
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   display: inline-flex;
+  min-width: 0;
   font-size: 0.82rem;
   justify-content: center;
-  min-height: 2.15rem;
+  min-height: 2.75rem;
   padding: 0.4rem 0.8rem;
   text-decoration: none;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .sections a {
@@ -147,15 +153,7 @@
   font-weight: 700;
 }
 
-.list {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  list-style: none;
-  margin: 0;
-  overflow: visible;
-  padding: 0;
-}
+
 
 .state {
   background: var(--color-surface-raised);
@@ -233,16 +231,33 @@
   text-align: center;
 }
 
-.rowActions {
-  align-items: center;
-  display: flex;
-  gap: 0.55rem;
-}
 
-.unavailable {
-  color: var(--color-text-subtle);
-  font-size: 0.72rem;
+
+
+
+.section { border-top: 1px solid var(--color-border-strong); padding: 1.5rem 0; min-width: 0; }
+.sectionHeading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 1rem; }
+.sectionHeading h2 { font-size: 1.35rem; }
+.section a { color: var(--color-text); }
+.description, .empty { color: var(--color-text-muted); margin: 0.75rem 0; }
+.empty p { margin-bottom: 0.75rem; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; }
+.searchControl { display: grid; gap: 0.4rem; flex: 1; min-width: 0; font-size: 0.85rem; }
+.searchControl input {
+  background: var(--color-surface); border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm); color: var(--color-text);
+  min-height: 2.75rem; width: 100%; padding: 0.5rem 0.75rem;
 }
+.searchControl input:focus-visible, .sections a:focus-visible, .filters button:focus-visible, .action:focus-visible {
+  outline: 2px solid var(--color-text); outline-offset: 3px;
+}
+.action {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  background: var(--color-surface-hover); color: var(--color-text);
+  border: 1px solid var(--color-border-strong); border-radius: var(--radius-pill);
+  min-height: 2.75rem; padding: 0.5rem 1rem;
+}
+.action svg { width: 1.1rem; height: 1.1rem; }
 
 /* Respond to the center panel, not only the outer browser viewport. */
 @container (max-width: 34rem) {

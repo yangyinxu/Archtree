@@ -495,18 +495,22 @@ test('unexpected telemetry sink failures emit only bounded server error fields',
     assert.doesNotMatch(logged, /listener@example|private|content-id|access-token|198\.51\.100/);
     assert.deepEqual(
       Object.keys(JSON.parse(logged)).sort(),
-      ['category', 'method', 'occurredAt', 'requestArea', 'status'].sort()
+      ['category', 'errorCategory', 'requestId', 'method', 'occurredAt', 'requestArea', 'status'].sort()
     );
     assert.deepEqual(
-      { ...JSON.parse(logged), occurredAt: '<bounded-server-time>' },
+      { ...JSON.parse(logged), occurredAt: '<bounded-server-time>', requestId: '<random-request-id>' },
       {
         category: 'server_error',
+        errorCategory: 'internal',
+        requestId: '<random-request-id>',
         requestArea: 'listener_telemetry',
         method: 'POST',
         status: 500,
         occurredAt: '<bounded-server-time>'
       }
     );
+    assert.match(JSON.parse(logged).requestId, /^[a-f0-9-]{36}$/);
+    assert.equal(JSON.parse(logged).requestId, response.headers.get('X-Request-Id'));
   } finally {
     console.info = originalInfo;
     console.error = originalError;

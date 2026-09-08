@@ -41,6 +41,11 @@
 
 ## Documentation Hygiene
 
+- Prefer updating existing documentation over adding Markdown files. Keep only
+  necessary, durable documents; do not retain one-off assessment or verification
+  reports. Write all new Markdown documentation in English. Temporary plans must
+  follow the planning lifecycle above and be removed when complete.
+
 - When a change affects setup, dependencies, commands, configuration,
   environment variables, endpoints, authentication, media behavior, or
   deployment, update the relevant README or operational documentation in the

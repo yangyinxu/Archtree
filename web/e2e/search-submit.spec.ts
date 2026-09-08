@@ -10,14 +10,13 @@ test('previews debounced searches but records only explicit submissions', async 
   await expect(input).toHaveAttribute('enterkeyhint', 'search');
   await expect(search.getByRole('button', { name: 'Search' })).toHaveCount(0);
   await input.fill('Night');
-  await page.waitForTimeout(350);
 
   const searchCalls = () => api.calls.filter(
     (call) => call.method === 'GET' && call.pathname === '/api/listener/v1/search'
   );
   await expect(page).toHaveURL(/\/finitude\/search\?q=Night$/);
   await expect(page.getByRole('heading', { name: 'Results for “Night”' })).toBeVisible();
-  expect(searchCalls()).toEqual([
+  await expect.poll(searchCalls).toEqual([
     expect.objectContaining({ search: '?q=Night' })
   ]);
   expect(await page.evaluate(() => localStorage.getItem(
@@ -25,11 +24,10 @@ test('previews debounced searches but records only explicit submissions', async 
   ))).toBeNull();
 
   await input.press('Backspace');
-  await page.waitForTimeout(350);
 
   await expect(page).toHaveURL(/\/finitude\/search\?q=Nigh$/);
   await expect(page.getByRole('heading', { name: 'Results for “Nigh”' })).toBeVisible();
-  expect(searchCalls()).toEqual([
+  await expect.poll(searchCalls).toEqual([
     expect.objectContaining({ search: '?q=Night' }),
     expect.objectContaining({ search: '?q=Nigh' })
   ]);
@@ -38,15 +36,14 @@ test('previews debounced searches but records only explicit submissions', async 
 
   await expect(page).toHaveURL(/\/finitude\/search\?q=Nigh$/);
   await expect(page.getByRole('heading', { name: 'Results for “Nigh”' })).toBeVisible();
-  expect(searchCalls()).toHaveLength(2);
+  await expect.poll(searchCalls).toHaveLength(2);
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem(
     'finitude:search-history:anonymous'
   )) ?? 'null')).toEqual(['Nigh']);
 
   await input.fill('Dawn');
-  await page.waitForTimeout(350);
   await expect(page).toHaveURL(/\/finitude\/search\?q=Dawn$/);
-  expect(searchCalls()).toHaveLength(3);
+  await expect.poll(searchCalls).toHaveLength(3);
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem(
     'finitude:search-history:anonymous'
   )) ?? 'null')).toEqual(['Nigh']);

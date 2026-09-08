@@ -2,6 +2,7 @@ import express, { Application, NextFunction, Request, Response } from 'express';
 import bodyParser from 'body-parser';
 import fs from 'fs';
 import path from 'path';
+import { createStartupFailureDiagnostic } from './infrastructure/startupDiagnostics';
 
 import adminRoutes from './routes/adminRoutes';
 import authRoutes from './routes/authRoutes';
@@ -20,7 +21,9 @@ import {
   type AuthContext,
   type AuthenticatedRequest
 } from './middleware/authMiddleware';
-import { getHealth } from './controllers/healthController';
+import { createHealthController } from './controllers/healthController';
+import { ServerLifecycle } from './services/serverLifecycleService';
+import { createRequestDiagnostics, safeServerErrorCategory } from './middleware/requestDiagnosticsMiddleware';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
 import { maxAvatarUploadMb, maxImageUploadMb } from './middleware/imageUpload';
@@ -36,6 +39,8 @@ import {
 } from './middleware/requestProtectionMiddleware';
 
 export interface CreateAppOptions {
+  /** One instance controls admission/readiness throughout server shutdown. */
+  lifecycle?: ServerLifecycle;
   /** Overrides the production listener bundle location for isolated route tests. */
   listenerDistPath?: string;
   /** Overrides generated localization artifacts for isolated route tests. */
@@ -205,6 +210,8 @@ export const renderLandingActions = (
 /** Constructs the Express application without connecting to MongoDB or opening a socket. */
 export const createApp = (options: CreateAppOptions = {}): Application => {
   const app: Application = express();
+  const lifecycle = options.lifecycle ?? new ServerLifecycle();
+  const diagnostics = createRequestDiagnostics();
   app.disable('x-powered-by');
   const defaultProxyHops = 1;
   const configuredProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? defaultProxyHops);
@@ -213,6 +220,8 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     : defaultProxyHops);
 
   app.use(applySecurityHeaders);
+  app.use(diagnostics.observe);
+  app.use((req, res, next) => req.path === '/health' ? next() : lifecycle.admit(req, res, next));
   app.use('/assets', express.static(path.join(__dirname, 'public')));
 
   app.use((_req, res, next) => {
@@ -224,7 +233,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     );
     res.setHeader(
       'Access-Control-Expose-Headers',
-      'Content-Language, ETag, X-Finitude-Account-Viewer'
+      'Content-Language, ETag, X-Finitude-Account-Viewer, X-Request-Id'
     );
     next();
   });
@@ -280,7 +289,10 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     }
   });
 
-  app.get('/health', getHealth);
+  app.get('/health', createHealthController({
+    isDraining: () => lifecycle.draining,
+    getRequestMetrics: diagnostics.snapshot
+  }));
 
   app.use((error: any, req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) {
@@ -335,6 +347,8 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
                         : 'other';
       console.error(JSON.stringify({
         category: 'server_error',
+        errorCategory: safeServerErrorCategory(error),
+        requestId: res.locals.requestId,
         requestArea,
         method,
         status: Number.isInteger(status) && status <= 599 ? status : 500,
@@ -357,9 +371,9 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
 if (typeof require !== 'undefined' && require.main === module) {
   void import('./server')
     .then(({ startServer }) => startServer())
-    .catch(() => {
+    .catch(error => {
       console.error(JSON.stringify({
-        category: 'server_start_failed',
+        ...createStartupFailureDiagnostic(error),
         occurredAt: new Date().toISOString()
       }));
       process.exitCode = 1;

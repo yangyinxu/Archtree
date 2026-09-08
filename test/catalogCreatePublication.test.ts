@@ -13,8 +13,8 @@ import {
     confirmAlbumCreationAfterWriteError
 } from '../src/models/album';
 import { SimpleDate } from '../src/models/simpleDate';
-import { publishNewArtist } from '../src/controllers/artistController';
-import { publishNewAlbum } from '../src/controllers/albumController';
+import { publishNewArtist } from '../src/application/catalog/publishNewArtist';
+import { publishNewAlbum } from '../src/application/catalog/publishNewAlbum';
 import { postArtist } from '../src/controllers/artistController';
 import { postAlbum } from '../src/controllers/albumController';
 import {

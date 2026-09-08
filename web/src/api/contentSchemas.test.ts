@@ -43,9 +43,9 @@ test('accepts the discriminated listener content contract', () => {
   }).sections[0].items).toHaveLength(2);
 });
 
-test('rejects internal fields and artists inside Home music sections', () => {
-  expect(albumSummarySchema.safeParse({ ...album, createdBy: 'private-owner' }).success).toBe(false);
-  expect(contentSummarySchema.safeParse({ ...audioTrack, s3Key: 'private-storage-key' }).success).toBe(false);
+test('strips unrecognized fields and rejects artists inside Home music sections', () => {
+  expect(albumSummarySchema.parse({ ...album, createdBy: 'private-owner' })).toEqual(album);
+  expect(contentSummarySchema.parse({ ...audioTrack, s3Key: 'private-storage-key' })).toEqual(audioTrack);
   expect(homeSectionSchema.safeParse({
     id: 'invalid',
     title: 'Invalid section',
@@ -60,7 +60,7 @@ test('rejects internal fields and artists inside Home music sections', () => {
   }).success).toBe(false);
 });
 
-test('validates and rejoins a strict Grid/List page in configured order', () => {
+test('validates and rejoins a Grid/List page in configured order', () => {
   const laterTrack = { ...audioTrack, id: 'track-2', title: 'Night Window' };
   const page = listenerCollectionPageSchema.parse({
     pageItem: {
@@ -89,7 +89,7 @@ test('validates and rejoins a strict Grid/List page in configured order', () => 
   ]);
 });
 
-test('rejects incomplete, out-of-order, and private Grid/List page projections', () => {
+test('rejects incomplete and out-of-order Grid/List pages and strips unknown fields', () => {
   const basePage = {
     pageItem: {
       id: 'page-item-1',
@@ -117,10 +117,10 @@ test('rejects incomplete, out-of-order, and private Grid/List page projections',
     ],
     included: { albums: [album, album], audioTracks: [] }
   }).success).toBe(false);
-  expect(listenerCollectionPageSchema.safeParse({
+  expect(listenerCollectionPageSchema.parse({
     ...basePage,
     included: { albums: [{ ...album, createdBy: 'private-owner' }], audioTracks: [] }
-  }).success).toBe(false);
+  }).included.albums).toEqual([album]);
   expect(listenerCollectionPageSchema.safeParse({
     ...basePage,
     pageItem: { ...basePage.pageItem, contentType: 'audioTrack' }
@@ -159,7 +159,7 @@ test('accepts a public Organization page without internal lifecycle fields', () 
     },
     releases: [album]
   }).organization.name).toBe('Release House');
-  expect(listenerOrganizationSchema.safeParse({
+  expect(listenerOrganizationSchema.parse({
     organization: {
       id: 'organization-1',
       name: 'Release House',
@@ -168,7 +168,7 @@ test('accepts a public Organization page without internal lifecycle fields', () 
       lifecycleStatus: 'ready'
     },
     releases: []
-  }).success).toBe(false);
+  }).organization).not.toHaveProperty('lifecycleStatus');
 });
 
 test('sanitizes unknown fields from the legacy nested Library response', () => {

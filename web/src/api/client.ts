@@ -8,6 +8,7 @@ import {
   statusBucket
 } from '../telemetry/routeClassifier';
 import { publishAccountSessionChange } from './accountSessionEvents';
+import type { BrowserSessionTransitionScope } from './sessionTransition';
 import {
   advanceAccountEpoch,
   captureAccountOperation,
@@ -37,10 +38,12 @@ export interface ApiRequestOptions extends RequestInit {
   accountViewer?: string;
   /** Allows only the authoritative browser-session bootstrap to rotate without a known viewer. */
   bootstrapBrowserSession?: boolean;
+  /** Reuses an active caller-owned lock instead of queuing a nested refresh. */
+  sessionTransition?: BrowserSessionTransitionScope;
 }
 
 let authGeneration = 0;
-let refreshInFlight: Promise<boolean> | null = null;
+let refreshInFlight: { key: string; promise: Promise<boolean> } | null = null;
 
 const reportTerminalApiFailure = (
   path: string,
@@ -72,7 +75,8 @@ const requestHeaders = (init?: RequestInit) => {
   return headers;
 };
 
-const responseError = async (response: Response) => {
+const responseError = async (response: Response, assertCurrent?: () => void) => {
+  assertCurrent?.();
   let message = response.status === 401
     ? 'Your listening session has expired.'
     : 'Finitude could not complete that request.';
@@ -88,6 +92,8 @@ const responseError = async (response: Response) => {
     // Non-JSON error pages are reduced to the bounded fallback above.
   }
 
+  // Reading an error body is asynchronous too; stale errors cannot trigger reconciliation.
+  assertCurrent?.();
   if (response.status === 409 && code === 'account_viewer_mismatch') {
     publishAccountSessionChange('viewer-mismatch');
   }
@@ -156,17 +162,19 @@ const requestOnce = async <Output>(
   path: string,
   schema: z.ZodType<Output>,
   init?: RequestInit,
-  accountViewer?: string
+  accountViewer?: string,
+  assertCurrent?: () => void
 ) => {
   const response = await fetchResponse(path, init, accountViewer);
-  if (!response.ok) throw await responseError(response);
+  assertCurrent?.();
+  if (!response.ok) throw await responseError(response, assertCurrent);
   assertAccountBoundResponse(response, accountViewer);
   return parseJson(response, schema);
 };
 
-const readCurrentBrowserSession = async () => {
+const readCurrentBrowserSession = async (assertCurrent?: () => void) => {
   try {
-    return await requestOnce('/auth/browser/session', browserSessionSchema);
+    return await requestOnce('/auth/browser/session', browserSessionSchema, undefined, undefined, assertCurrent);
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) return null;
     throw error;
@@ -201,13 +209,14 @@ const adoptUnboundBrowserSession = () => {
   publishAccountSessionChange('login', { includeCurrentTab: true });
 };
 
-const rotateBrowserSession = async (expectedViewer?: string) => {
+const rotateBrowserSession = async (expectedViewer?: string, assertCurrent?: () => void) => {
   const response = await fetchResponse('/auth/browser/refresh', {
     method: 'POST',
     body: '{}',
     headers: { 'X-Finitude-Session-Transition': 'web-locks-v1' }
   }, expectedViewer);
-  if (!response.ok) throw await responseError(response);
+  assertCurrent?.();
+  if (!response.ok) throw await responseError(response, assertCurrent);
   const session = await parseJson(response, browserSessionSchema);
   const returnedViewer = response.headers.get('X-Finitude-Account-Viewer')?.trim();
   if (!returnedViewer
@@ -223,48 +232,77 @@ const rotateBrowserSession = async (expectedViewer?: string) => {
   return session;
 };
 
-/** Rechecks the shared cookie after waiting so only one tab rotates it. */
+/** Recovers authentication inside the caller's live lock, never by acquiring it again. */
+const refreshBrowserSessionWhileLocked = async (
+  expectedViewer: string | undefined,
+  bootstrapBrowserSession: boolean,
+  scope: BrowserSessionTransitionScope,
+  guard: AccountOperationGuard
+) => {
+  const assertCurrent = () => {
+    scope.assertActive();
+    assertAccountEpoch(guard);
+  };
+  assertCurrent();
+  // Cleanup can use the storage fallback, but installing credentials still requires Web Locks.
+  if (!scope.capability) return false;
+  const recoverConflict = async () => {
+    assertCurrent();
+    await recoverBrowserSessionIdentityConflict(scope.capability);
+    return false;
+  };
+  let current;
+  try {
+    current = await readCurrentBrowserSession(assertCurrent);
+  } catch (error) {
+    assertCurrent();
+    if (isBrowserSessionIdentityConflict(error)) return recoverConflict();
+    throw error;
+  }
+  assertCurrent();
+  if (current) {
+    if (expectedViewer && current.user.id !== expectedViewer) return recoverConflict();
+    if (!expectedViewer) adoptUnboundBrowserSession();
+    return true;
+  }
+  if (!expectedViewer && !bootstrapBrowserSession) return false;
+  try {
+    assertCurrent();
+    await rotateBrowserSession(expectedViewer, assertCurrent);
+    assertCurrent();
+    if (!expectedViewer) adoptUnboundBrowserSession();
+    return true;
+  } catch (error) {
+    assertCurrent();
+    if (isBrowserSessionIdentityConflict(error)) return recoverConflict();
+    if (error instanceof ApiError && error.status === 401) {
+      // Another tab can consume the rotating token just before this request.
+      const winner = await readCurrentBrowserSession(assertCurrent);
+      assertCurrent();
+      if (!winner) return false;
+      if (expectedViewer && winner.user.id !== expectedViewer) return recoverConflict();
+      if (!expectedViewer) adoptUnboundBrowserSession();
+      return true;
+    }
+    throw error;
+  }
+};
+
+/** Rechecks the operation epoch after waiting so an old tab request cannot clear a new session. */
 const coordinateBrowserSessionRefresh = async (
   expectedViewer: string | undefined,
-  bootstrapBrowserSession: boolean
+  bootstrapBrowserSession: boolean,
+  guard: AccountOperationGuard
 ) => {
   const transition = await import('./sessionTransition');
+  assertAccountEpoch(guard);
   try {
-    return await transition.runBrowserSessionTransition({ kind: 'refresh' }, async (capability) => {
-      const recoverConflict = async () => {
-        await recoverBrowserSessionIdentityConflict(capability);
-        return false;
-      };
-      let current;
-      try {
-        current = await readCurrentBrowserSession();
-      } catch (error) {
-        if (isBrowserSessionIdentityConflict(error)) return recoverConflict();
-        throw error;
-      }
-      if (current) {
-        if (expectedViewer && current.user.id !== expectedViewer) return recoverConflict();
-        if (!expectedViewer) adoptUnboundBrowserSession();
-        return true;
-      }
-      if (!expectedViewer && !bootstrapBrowserSession) return false;
-      try {
-        await rotateBrowserSession(expectedViewer);
-        if (!expectedViewer) adoptUnboundBrowserSession();
-        return true;
-      } catch (error) {
-        if (isBrowserSessionIdentityConflict(error)) return recoverConflict();
-        if (error instanceof ApiError && error.status === 401) {
-          // Another tab can consume the rotating token just before this request.
-          const winner = await readCurrentBrowserSession();
-          if (!winner) return false;
-          if (expectedViewer && winner.user.id !== expectedViewer) return recoverConflict();
-          if (!expectedViewer) adoptUnboundBrowserSession();
-          return true;
-        }
-        throw error;
-      }
-    });
+    return await transition.runBrowserSessionTransition(
+      { kind: 'refresh' },
+      (_capability, _generation, scope) => refreshBrowserSessionWhileLocked(
+        expectedViewer, bootstrapBrowserSession, scope, guard
+      )
+    );
   } catch (error) {
     if (error instanceof transition.BrowserSessionTransitionUnavailableError
       || error instanceof transition.BrowserSessionTransitionConflictError) return false;
@@ -276,20 +314,36 @@ const coordinateBrowserSessionRefresh = async (
 const refreshAfter = (
   observedGeneration: number,
   expectedViewer: string | undefined,
-  bootstrapBrowserSession: boolean
+  bootstrapBrowserSession: boolean,
+  guard: AccountOperationGuard,
+  scope?: BrowserSessionTransitionScope
 ) => {
-  if (observedGeneration !== authGeneration) return Promise.resolve(true);
-  if (!refreshInFlight) {
-    refreshInFlight = coordinateBrowserSessionRefresh(expectedViewer, bootstrapBrowserSession)
+  assertAccountEpoch(guard);
+  if (scope) {
+    // A queued refresh can itself be waiting for this scope; joining it would also deadlock.
+    return refreshBrowserSessionWhileLocked(expectedViewer, bootstrapBrowserSession, scope, guard)
       .then((refreshed) => {
         if (refreshed) authGeneration += 1;
         return refreshed;
-      })
-      .finally(() => {
-        refreshInFlight = null;
       });
   }
-  return refreshInFlight;
+  if (observedGeneration !== authGeneration) return Promise.resolve(true);
+  const key = JSON.stringify([guard.epoch, expectedViewer, bootstrapBrowserSession]);
+  if (!refreshInFlight || refreshInFlight.key !== key) {
+    const entry = {
+      key,
+      promise: coordinateBrowserSessionRefresh(expectedViewer, bootstrapBrowserSession, guard)
+        .then((refreshed) => {
+          if (refreshed) authGeneration += 1;
+          return refreshed;
+        })
+        .finally(() => {
+          if (refreshInFlight === entry) refreshInFlight = null;
+        })
+    };
+    refreshInFlight = entry;
+  }
+  return refreshInFlight.promise;
 };
 
 /** Requests and validates JSON, retrying exactly once after cookie rotation. */
@@ -302,14 +356,22 @@ export const apiRequest = async <Output>(
     retryAuthentication = true,
     accountViewer,
     bootstrapBrowserSession = false,
+    sessionTransition,
     ...init
   } = options;
   const viewer = accountViewer?.trim() || undefined;
   const accountGuard = viewer ? captureAccountOperation(viewer) : undefined;
+  const refreshGuard = accountGuard ?? captureAccountOperation('');
   const observedGeneration = authGeneration;
+  const assertCurrent = () => {
+    sessionTransition?.assertActive();
+    assertAccountEpoch(accountGuard);
+    init.signal?.throwIfAborted();
+  };
 
   try {
-    const result = await requestOnce(path, schema, init, viewer);
+    assertCurrent();
+    const result = await requestOnce(path, schema, init, viewer, assertCurrent);
     assertAccountEpoch(accountGuard);
     return result;
   } catch (error) {
@@ -320,7 +382,10 @@ export const apiRequest = async <Output>(
 
     let refreshed: boolean;
     try {
-      refreshed = await refreshAfter(observedGeneration, viewer, bootstrapBrowserSession);
+      assertCurrent();
+      refreshed = await refreshAfter(
+        observedGeneration, viewer, bootstrapBrowserSession, refreshGuard, sessionTransition
+      );
     } catch (refreshError) {
       reportTerminalApiFailure(path, init.method, error, 'initial');
       throw refreshError;
@@ -330,7 +395,8 @@ export const apiRequest = async <Output>(
       throw error;
     }
     try {
-      const result = await requestOnce(path, schema, init, viewer);
+      assertCurrent();
+      const result = await requestOnce(path, schema, init, viewer, assertCurrent);
       assertAccountEpoch(accountGuard);
       return result;
     } catch (retryError) {
@@ -349,15 +415,24 @@ export const apiRequestNoContent = async (
     retryAuthentication = true,
     accountViewer,
     bootstrapBrowserSession = false,
+    sessionTransition,
     ...init
   } = options;
   const viewer = accountViewer?.trim() || undefined;
   const accountGuard = viewer ? captureAccountOperation(viewer) : undefined;
+  const refreshGuard = accountGuard ?? captureAccountOperation('');
   const observedGeneration = authGeneration;
+  const assertCurrent = () => {
+    sessionTransition?.assertActive();
+    assertAccountEpoch(accountGuard);
+    init.signal?.throwIfAborted();
+  };
 
   const run = async () => {
+    assertCurrent();
     const response = await fetchResponse(path, init, viewer);
-    if (!response.ok) throw await responseError(response);
+    assertCurrent();
+    if (!response.ok) throw await responseError(response, assertCurrent);
     assertAccountBoundResponse(response, viewer);
     if (response.status !== 204) {
       throw new ApiError('The server returned an unexpected response.', 'invalid-response', response.status);
@@ -374,7 +449,10 @@ export const apiRequestNoContent = async (
     }
     let refreshed: boolean;
     try {
-      refreshed = await refreshAfter(observedGeneration, viewer, bootstrapBrowserSession);
+      assertCurrent();
+      refreshed = await refreshAfter(
+        observedGeneration, viewer, bootstrapBrowserSession, refreshGuard, sessionTransition
+      );
     } catch (refreshError) {
       reportTerminalApiFailure(path, init.method, error, 'initial');
       throw refreshError;

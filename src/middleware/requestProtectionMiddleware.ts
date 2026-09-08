@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express';
 import crypto from 'crypto';
+import { onRequestWorkComplete, runRequestWork } from '../services/serverLifecycleService';
 
 type WindowEntry = {
     count: number;
@@ -116,8 +117,6 @@ export const limitConcurrency = (
         const release = () => {
             if (released) return;
             released = true;
-            res.off('finish', release);
-            res.off('close', release);
             const remainingClient = (activeByScopeAndClient.get(scopedClient) ?? 1) - 1;
             const remainingGlobal = (activeByScope.get(scope) ?? 1) - 1;
             if (remainingClient <= 0) activeByScopeAndClient.delete(scopedClient);
@@ -125,8 +124,7 @@ export const limitConcurrency = (
             if (remainingGlobal <= 0) activeByScope.delete(scope);
             else activeByScope.set(scope, remainingGlobal);
         };
-        res.once('finish', release);
-        res.once('close', release);
+        onRequestWorkComplete(req, res, release);
         return next();
     };
 };
@@ -135,7 +133,7 @@ export const asyncHandler = (
     handler: (req: Request, res: Response, next: NextFunction) => unknown
 ): RequestHandler => {
     return (req, res, next) => {
-        Promise.resolve(handler(req, res, next)).catch(next);
+        return runRequestWork(req, () => handler(req, res, next)).catch(next);
     };
 };
 
@@ -144,6 +142,8 @@ export const browserRefreshRateLimit = rateLimit('browser-refresh', 120, 15 * 60
 export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
 export const authConcurrencyLimit = limitConcurrency('auth-password', 2, 20);
 export const publicReadRateLimit = rateLimit('public-read', 120, 60_000);
+/** Bounds substring search work independently of lightweight catalog metadata reads. */
+export const searchConcurrencyLimit = limitConcurrency('catalog-search', 2, 8);
 /** Bounds private Playlist reads and writes before they consume database work. */
 export const playlistRateLimit = rateLimit('playlist', 240, 60_000);
 /** Prevents one client from occupying the transactional Playlist write pool. */

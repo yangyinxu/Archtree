@@ -1,20 +1,21 @@
-import { getDb } from '../infrastructure/database';
 import { ClientSession, ObjectId } from 'mongodb';
+import { getDb } from '../infrastructure/database';
 import { SimpleDate } from '../models/simpleDate';
-import { withDerivedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { insertPublishedArtist } from '../repositories/catalog/artistPublicationRepository';
+import { touchReadyAlbumReferences } from '../services/albumReferenceFenceService';
+import { deleteArtistAndReferences } from '../services/artistLifecycleService';
 import {
     ArtistLifecycleStatus,
     ArtistReferenceUnavailableError,
     readyArtistLifecycleFilter,
     withReadyArtistReferences
 } from '../services/artistReferenceFenceService';
-import { deleteArtistAndReferences } from '../services/artistLifecycleService';
-import {
-    touchReadyAlbumReferences,
-    withReadyAlbumReferences
-} from '../services/albumReferenceFenceService';
-import { touchActiveAccount } from '../services/accountReferenceFenceService';
+import { withDerivedCoverArtUrl } from '../utils/coverArt';
+import { escapeRegex } from '../utils/search';
+export {
+    ArtistCreationOutcomeUnknownError,
+    confirmArtistCreationAfterWriteError
+} from '../repositories/catalog/artistPublicationRepository';
 
 const withoutLegacyTrackIds = (artist: any) => {
     if (artist) {
@@ -23,17 +24,7 @@ const withoutLegacyTrackIds = (artist: any) => {
     return withDerivedCoverArtUrl(artist);
 };
 
-const artistCreationWriteMayHaveCommitted = (error: any) =>
-    error?.hasErrorLabel?.('UnknownTransactionCommitResult') === true
-    || [
-        'MongoNetworkError',
-        'MongoNetworkTimeoutError',
-        'MongoPoolClearedError',
-        'MongoServerSelectionError',
-        'MongoTimeoutError'
-    ].includes(String(error?.name ?? ''));
-
-// define the Artist class
+/** Catalog Artist record with compatibility persistence entry points. */
 export class Artist {
     _id?: ObjectId;
     name: string;
@@ -70,21 +61,9 @@ export class Artist {
         this.referenceRevision = 0;
     }
 
-    // save an artist to the mongodb database
+    /** Compatibility entry point; publication transactions belong to the Catalog repository. */
     async save() {
-        const db = getDb();
-        try {
-            return await withReadyAlbumReferences(
-                Array.isArray(this.albumIds) ? this.albumIds : [],
-                async (session, albumIds) => {
-                    this.albumIds = albumIds as [string];
-                    await touchActiveAccount(this.createdBy, session);
-                    return db!.collection('artists').insertOne(this, { session });
-                }
-            );
-        } catch (error) {
-            return confirmArtistCreationAfterWriteError(this, error);
-        }
+        return insertPublishedArtist(this);
     }
 
     // fetch an artist by its id
@@ -202,54 +181,3 @@ export class Artist {
         return { ...result, deletedCount: result.deleted ? 1 : 0 };
     }
 }
-
-export class ArtistCreationOutcomeUnknownError extends Error {
-    readonly statusCode = 503;
-    readonly code = 'artist_creation_outcome_unknown';
-    readonly cleanupPending = true;
-    readonly outcomeUnknown = true;
-    readonly cause: unknown;
-
-    constructor(artistId: string, cause: unknown) {
-        super(`Artist ${artistId} creation outcome could not be confirmed.`);
-        this.cause = cause;
-    }
-}
-
-/** Recovers a committed insert whose response was lost without publishing a mismatched owner. */
-export const confirmArtistCreationAfterWriteError = async (
-    artist: Pick<Artist, '_id' | 'name' | 'coverArtId' | 'createdBy'>,
-    writeError: unknown,
-    findOwner: (artistId: string) => Promise<any | null> = async (artistId) => getDb()!
-        .collection('artists')
-        .findOne({ _id: ObjectId.createFromHexString(artistId) })
-) => {
-    const artistId = artist._id?.toHexString();
-    if (!artistId) throw writeError;
-
-    let owner: any | null;
-    try {
-        owner = await findOwner(artistId);
-    } catch (confirmationError) {
-        throw new ArtistCreationOutcomeUnknownError(artistId, {
-            writeError,
-            confirmationError
-        });
-    }
-    if (!owner) {
-        if (artistCreationWriteMayHaveCommitted(writeError)) {
-            throw new ArtistCreationOutcomeUnknownError(artistId, { writeError });
-        }
-        throw writeError;
-    }
-
-    const expectedCoverArtId = String(artist.coverArtId ?? '');
-    const actualCoverArtId = String(owner.coverArtId ?? '');
-    if (owner.lifecycleStatus === 'ready'
-        && String(owner.name ?? '') === artist.name
-        && String(owner.createdBy ?? '') === artist.createdBy
-        && actualCoverArtId === expectedCoverArtId) {
-        return { acknowledged: true, insertedId: artist._id };
-    }
-    throw new ArtistCreationOutcomeUnknownError(artistId, { writeError });
-};

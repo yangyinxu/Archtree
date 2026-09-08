@@ -15,7 +15,7 @@ import {
   type RegisterInput,
   type ResetPasswordInput,
   type VerificationInput
-} from './schemas';
+} from './accountSchemas';
 
 export const browserAuthenticationCapabilitiesQueryKey = ['auth', 'browser-capabilities'] as const;
 

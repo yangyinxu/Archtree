@@ -1,4 +1,5 @@
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
+import { acquireCatalogDeletionLease, CatalogDeletionLeaseLostError } from './catalogDeletionLeaseService';
 
 import { getDb } from '../infrastructure/database';
 import { cleanupDeletedContentReferences } from './contentReferenceService';
@@ -9,14 +10,12 @@ import {
     prepareOwnerCoverArtDeletions
 } from './imageStorageService';
 
-const boundedError = (error: unknown) =>
-    (error instanceof Error ? error.message : String(error)).substring(0, 500);
-
 export interface ArtistDeletionDependencies {
     prepareCoverArt: (
         imageId: string | undefined | null,
         artistId: string
     ) => Promise<boolean>;
+    deleteCoverArtObject?: (key: string) => Promise<void>;
     prepareOwnerCoverArt: (
         artistId: string,
         currentImageId: string | undefined | null
@@ -24,7 +23,8 @@ export interface ArtistDeletionDependencies {
     cleanupReferences: typeof cleanupDeletedContentReferences;
     deleteOwner: (
         artistId: string,
-        referenceRevision: number
+        referenceRevision: number,
+        session?: ClientSession
     ) => Promise<{ deletedCount: number }>;
     findOwner: (artistId: string) => Promise<any | null>;
     finalizeCoverArt: (imageId: string | undefined | null) => Promise<void>;
@@ -58,13 +58,13 @@ const defaultArtistDeletionDependencies: ArtistDeletionDependencies = {
     prepareOwnerCoverArt: (artistId, currentImageId) =>
         prepareOwnerCoverArtDeletions('artist', artistId, currentImageId),
     cleanupReferences: cleanupDeletedContentReferences,
-    deleteOwner: async (artistId, referenceRevision) => getDb()!
+    deleteOwner: async (artistId, referenceRevision, session) => getDb()!
         .collection('artists')
         .deleteOne({
             _id: ObjectId.createFromHexString(artistId),
             lifecycleStatus: 'deleting',
             referenceRevision
-        }),
+        }, { session }),
     findOwner: artistId => getDb()!.collection('artists').findOne({
         _id: ObjectId.createFromHexString(artistId)
     }),
@@ -72,7 +72,7 @@ const defaultArtistDeletionDependencies: ArtistDeletionDependencies = {
     finalizeOwnerCoverArt: finalizeOwnerCoverArtDeletions
 };
 
-/** Fences deletion before cleanup and retains retryable Artist evidence after partial failure. */
+/** Retains a leased deletion receipt until both the owner and exact prepared assets are gone. */
 export const deleteArtistAndReferences = async (
     artistId: string,
     dependencies: Partial<ArtistDeletionDependencies> = {}
@@ -80,113 +80,86 @@ export const deleteArtistAndReferences = async (
     if (!/^[0-9a-f]{24}$/i.test(artistId)) {
         return { deleted: false, ownerDeleted: false, cleanupPending: false };
     }
-    const canonicalArtistId = ObjectId.createFromHexString(artistId).toHexString();
+    const canonicalId = ObjectId.createFromHexString(artistId).toHexString();
     const deletion = { ...defaultArtistDeletionDependencies, ...dependencies };
     const usesLegacyCoverHooks = dependencies.prepareCoverArt !== undefined
         || dependencies.finalizeCoverArt !== undefined;
-    const artists = getDb()!.collection('artists');
-    const _id = ObjectId.createFromHexString(canonicalArtistId);
-    const transition: any = await artists.findOneAndUpdate(
-        {
-            _id,
-            $or: [
-                { lifecycleStatus: 'ready' },
-                { lifecycleStatus: 'deleteFailed' },
-                { lifecycleStatus: { $exists: false } }
-            ]
-        },
-        {
-            $set: {
-                lifecycleStatus: 'deleting',
-                lifecycleUpdatedAt: new Date(),
-                lifecycleError: null
-            },
-            $inc: { referenceRevision: 1 }
-        },
-        { returnDocument: 'after' }
-    );
-    const artist = transition.value;
-    if (!artist) {
-        const current = await artists.findOne({ _id }, { projection: { lifecycleStatus: 1 } });
-        if (!current) return { deleted: false, ownerDeleted: false, cleanupPending: false };
-        throw Object.assign(new Error('Artist deletion is already in progress.'), {
-            statusCode: 409,
-            code: 'artist_deletion_in_progress'
-        });
-    }
+    const lease = await acquireCatalogDeletionLease('artist', new ObjectId(canonicalId));
+    if (!lease) return { deleted: false, ownerDeleted: false, cleanupPending: false };
 
-    const referenceRevision = Number(artist.referenceRevision);
-    let coverArtPrepared = false;
-    let preparedCoverArtIds: string[] = [];
+    const owner = lease.owner;
+    let preparedImageIds = lease.operation.preparedImageIds;
+    const fencedImages = {
+        updateAsset: lease.updateImage,
+        ...(dependencies.deleteCoverArtObject ? { deleteObject: dependencies.deleteCoverArtObject } : {})
+    };
     try {
-        if (usesLegacyCoverHooks) {
-            coverArtPrepared = await deletion.prepareCoverArt(artist.coverArtId, canonicalArtistId);
-            if (artist.coverArtId && !coverArtPrepared) {
-                throw new Error('Cover-art lifecycle evidence is missing.');
-            }
-            if (coverArtPrepared && artist.coverArtId) preparedCoverArtIds = [String(artist.coverArtId)];
-        } else {
-            preparedCoverArtIds = await deletion.prepareOwnerCoverArt(
-                canonicalArtistId,
-                artist.coverArtId
-            );
-            coverArtPrepared = preparedCoverArtIds.length > 0;
-        }
-        await deletion.cleanupReferences('artist', canonicalArtistId);
-        let deleteError: unknown;
-        try {
-            const removed = await deletion.deleteOwner(canonicalArtistId, referenceRevision);
-            if (removed.deletedCount !== 1) {
-                deleteError = new Error(`Artist ${canonicalArtistId} could not be finalized.`);
-            }
-        } catch (error) {
-            deleteError = error;
-        }
-        if (deleteError) {
-            let current: any | null;
+        if (owner) {
             try {
-                current = await deletion.findOwner(canonicalArtistId);
-            } catch (confirmationError) {
-                throw new ArtistDeletionOutcomeUnknownError(canonicalArtistId, {
-                    deleteError,
-                    confirmationError
-                });
+                await lease.assertHeld();
+                if (usesLegacyCoverHooks) {
+                    const prepared = await deletion.prepareCoverArt(owner.coverArtId, canonicalId);
+                    if (owner.coverArtId && !prepared) {
+                        throw new Error('Cover-art lifecycle evidence is missing.');
+                    }
+                    preparedImageIds = prepared && owner.coverArtId ? [String(owner.coverArtId)] : [];
+                } else {
+                    preparedImageIds = dependencies.prepareOwnerCoverArt
+                        ? await deletion.prepareOwnerCoverArt(canonicalId, owner.coverArtId)
+                        : await prepareOwnerCoverArtDeletions('artist', canonicalId, owner.coverArtId, fencedImages);
+                }
+                await lease.recordPreparedImages(preparedImageIds);
+                await lease.assertHeld();
+                await deletion.cleanupReferences('artist', canonicalId);
+                try {
+                    const removed = await lease.runFenced((session) => deletion.deleteOwner(
+                        canonicalId, lease.operation.referenceRevision, session
+                    ));
+                    if (removed.deletedCount !== 1) throw new CatalogDeletionLeaseLostError();
+                } catch (deleteError) {
+                    // A superseded worker must never finalize its predecessor's prepared evidence.
+                    if (deleteError instanceof CatalogDeletionLeaseLostError) throw deleteError;
+                    let current: any | null;
+                    try {
+                        current = await deletion.findOwner(canonicalId);
+                    } catch (confirmationError) {
+                        throw new ArtistDeletionOutcomeUnknownError(canonicalId, {
+                            deleteError, confirmationError
+                        });
+                    }
+                    if (current != null) throw deleteError;
+                }
+            } catch (error) {
+                if (error instanceof ArtistDeletionOutcomeUnknownError) throw error;
+                await lease.fail(error).catch(() => undefined);
+                return { deleted: false, ownerDeleted: false, cleanupPending: true, cleanupError: error };
             }
-            if (current != null) throw deleteError;
         }
-    } catch (error) {
-        if (error instanceof ArtistDeletionOutcomeUnknownError) throw error;
-        await artists.updateOne(
-            { _id, lifecycleStatus: 'deleting', referenceRevision },
-            {
-                $set: {
-                    lifecycleStatus: 'deleteFailed',
-                    lifecycleUpdatedAt: new Date(),
-                    lifecycleError: boundedError(error)
+
+        try {
+            if (!owner) {
+                for (const image of await lease.imagesNeedingPreparationRetry(preparedImageIds)) {
+                    await prepareCoverArtDeletion(String(image._id), {
+                        ...fencedImages, expectedOwnerType: 'artist', expectedOwnerId: canonicalId
+                    });
                 }
             }
-        ).catch(() => undefined);
-        return {
-            deleted: false,
-            ownerDeleted: false,
-            cleanupPending: true,
-            cleanupError: error
-        };
-    }
-
-    if (!coverArtPrepared) {
-        return { deleted: true, ownerDeleted: true, cleanupPending: false };
-    }
-    try {
-        if (usesLegacyCoverHooks) await deletion.finalizeCoverArt(artist.coverArtId);
-        else await deletion.finalizeOwnerCoverArt(preparedCoverArtIds);
-        return { deleted: true, ownerDeleted: true, cleanupPending: false };
-    } catch (cleanupError) {
-        return {
-            deleted: true,
-            ownerDeleted: true,
-            cleanupPending: true,
-            cleanupError
-        };
+            if (usesLegacyCoverHooks && dependencies.finalizeCoverArt) {
+                await lease.runFenced(() => deletion.finalizeCoverArt(lease.operation.coverArtId));
+                await lease.recordPreparedImages([]);
+            } else if (dependencies.finalizeOwnerCoverArt) {
+                await lease.runFenced(() => deletion.finalizeOwnerCoverArt(preparedImageIds));
+                await lease.recordPreparedImages([]);
+            } else {
+                await lease.finalizeImages(preparedImageIds);
+            }
+            await lease.complete();
+            return { deleted: true, ownerDeleted: true, cleanupPending: false };
+        } catch (cleanupError) {
+            await lease.fail(cleanupError).catch(() => undefined);
+            return { deleted: true, ownerDeleted: true, cleanupPending: true, cleanupError };
+        }
+    } finally {
+        await lease.stop();
     }
 };

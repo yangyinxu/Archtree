@@ -13,8 +13,7 @@ import { normalizeUtf8Text } from '../utils/textEncoding';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import {
     activeMediaObjectKeyForTrack,
-    activeMediaTypeForTrack,
-    type MediaType
+    activeMediaTypeForTrack
 } from '../utils/mediaStorageKey';
 import {
     isReadyArtistLifecycle,
@@ -27,7 +26,6 @@ import {
 import {
     AttributionStatus,
     CatalogCredit,
-    CatalogCreditRole,
     classifyArtistAlbumCredit,
     normalizeCatalogCredits,
     validateAttribution
@@ -38,99 +36,29 @@ import { catalogCreditRollout } from '../config/catalogCreditRollout';
 import { pageItemIdentity } from '../utils/pageItemIdentity';
 import { getJwtSecret } from './authSessionService';
 
-export interface ListenerDate {
-    year?: number;
-    month?: number;
-    day?: number;
-}
+import type {
+    ListenerDate,
+    ListenerArtistSummary,
+    ListenerOrganizationSummary,
+    ListenerAlbumSummary,
+    ListenerAudioTrackSummary,
+    ListenerCatalogCredit,
+    ListenerPlayableSummary,
+    ListenerPresentation,
+    ListenerHomeSection,
+    ListenerPageSlug,
+    ListenerCollectionPageRef,
+    ListenerCollectionPage,
+    ListenerHome,
+    ListenerSearch,
+    ListenerAlbum,
+    ListenerArtist,
+    ListenerOrganization,
+    ListenerTrack
+} from '../contracts/listenerV1';
 
-export interface ListenerArtistSummary {
-    contentType: 'artist';
-    id: string;
-    name: string;
-    bio: string;
-    artworkUrl: string;
-}
-
-export interface ListenerOrganizationSummary {
-    contentType: 'organization';
-    id: string;
-    name: string;
-    organizationType: string;
-    description: string;
-}
-
-export interface ListenerAlbumSummary {
-    contentType: 'album';
-    id: string;
-    title: string;
-    artworkUrl: string;
-    artistNames: string[];
-    releaseDate: ListenerDate | null;
-    credits?: ListenerCatalogCredit[];
-    displayByline?: string;
-    attributionStatus?: AttributionStatus;
-}
-
-export interface ListenerAudioTrackSummary {
-    contentType: 'audioTrack';
-    id: string;
-    title: string;
-    artworkUrl: string;
-    artistNames: string[];
-    albumId: string | null;
-    albumTitle: string | null;
-    duration: string | null;
-    mediaType: MediaType;
-    streamUrl: string;
-    credits?: ListenerCatalogCredit[];
-    displayByline?: string;
-    attributionStatus?: AttributionStatus;
-}
-
-export interface ListenerCatalogCredit {
-    subjectType: 'artist' | 'organization';
-    subjectId: string;
-    name: string;
-    role: CatalogCreditRole;
-    order: number;
-}
-
-export type ListenerPlayableSummary = ListenerAlbumSummary | ListenerAudioTrackSummary;
-export type ListenerPresentation = 'carousel' | 'grid' | 'list';
-
-export interface ListenerHomeSection {
-    id: string;
-    title: string;
-    presentation: ListenerPresentation;
-    items: ListenerPlayableSummary[];
-}
-
-export type ListenerPageSlug = 'home' | 'library';
-
-export interface ListenerCollectionPageRef {
-    contentType: 'album' | 'audioTrack';
-    contentId: string;
-    order: number;
-}
-
-export interface ListenerCollectionPage {
-    pageItem: {
-        id: string;
-        pageSlug: ListenerPageSlug;
-        title: string;
-        presentation: 'grid' | 'list';
-        mode: 'manual';
-        contentType: 'album' | 'audioTrack';
-    };
-    items: ListenerCollectionPageRef[];
-    included: {
-        albums: ListenerAlbumSummary[];
-        audioTracks: ListenerAudioTrackSummary[];
-    };
-    limit: number;
-    nextCursor: string | null;
-}
+// Preserve existing server imports while the canonical contract stays persistence-free.
+export type * from '../contracts/listenerV1';
 
 export class ListenerCollectionPageError extends Error {
     constructor(
@@ -773,7 +701,7 @@ const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
 };
 
 /** Resolves the composed Home page to public, presentation-preserving sections. */
-export const getListenerHome = async (viewerUserId?: string) => {
+export const getListenerHome = async (viewerUserId?: string): Promise<ListenerHome | null> => {
     const db = getDb()!;
     const page: any = await db.collection('pages')
         .find({ slug: 'home' })
@@ -1120,7 +1048,7 @@ export const getListenerCollectionPage = async (
 };
 
 /** Searches each public catalog group while excluding non-ready audio metadata. */
-export const searchListenerContent = async (query: string, limit = 20) => {
+export const searchListenerContent = async (query: string, limit = 20): Promise<ListenerSearch> => {
     const db = getDb()!;
     const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 50));
     const expression = { $regex: escapeRegex(query), $options: 'i' };
@@ -1163,7 +1091,7 @@ export const searchListenerContent = async (query: string, limit = 20) => {
 };
 
 /** Returns an album and its ready tracks in the canonical declared order. */
-export const getListenerAlbum = async (albumId: string) => {
+export const getListenerAlbum = async (albumId: string): Promise<ListenerAlbum | null> => {
     if (!isHexObjectId(albumId)) return null;
     const normalizedAlbumId = albumId.trim().toLowerCase();
     const db = getDb()!;
@@ -1209,7 +1137,7 @@ export const getListenerAlbum = async (albumId: string) => {
 };
 
 /** Returns one public artist with linked albums and ready soundtracks. */
-export const getListenerArtist = async (artistId: string) => {
+export const getListenerArtist = async (artistId: string): Promise<Required<ListenerArtist> | null> => {
     if (!isHexObjectId(artistId)) return null;
     const normalizedArtistId = artistId.trim().toLowerCase();
     const db = getDb()!;
@@ -1316,7 +1244,7 @@ export const getListenerArtist = async (artistId: string) => {
 };
 
 /** Returns one ready Organization and Albums carrying its institutional Credits. */
-export const getListenerOrganization = async (organizationId: string) => {
+export const getListenerOrganization = async (organizationId: string): Promise<ListenerOrganization | null> => {
     if (!catalogCreditRollout().organizationSurfacesEnabled) return null;
     if (!isHexObjectId(organizationId)) return null;
     const normalizedOrganizationId = organizationId.trim().toLowerCase();
@@ -1353,7 +1281,7 @@ export const getListenerOrganization = async (organizationId: string) => {
 };
 
 /** Returns metadata only when the corresponding audio lifecycle is playable. */
-export const getListenerAudioTrack = async (audioTrackId: string) => {
+export const getListenerAudioTrack = async (audioTrackId: string): Promise<ListenerTrack | null> => {
     if (!isHexObjectId(audioTrackId)) return null;
     const normalizedAudioTrackId = audioTrackId.trim().toLowerCase();
     const track: any = await getDb()!.collection('audioTracks')
@@ -1429,3 +1357,31 @@ export const sanitizeListenerLibraryPage = (page: any) => ({
 /** Preserves Library pagination semantics while returning only listener-safe fields. */
 export const listListenerLibrary = async (userId: string, options: LibraryListOptions) =>
     sanitizeListenerLibraryPage(await UserLibrary.list(userId, options));
+
+/** Resolves the bounded personal history independently of configured Home carousels. */
+export const getListenerRecentlyPlayed = async (userId: string) => {
+    const entries = await UserLibrary.recent(userId, 'recentlyPlayed', 20);
+    const albumIds = uniqueIds(entries.filter((entry) => entry.contentType === 'album').map((entry) => entry.contentId));
+    const trackIds = uniqueIds(entries.filter((entry) => entry.contentType === 'audioTrack').map((entry) => entry.contentId));
+    const db = getDb()!;
+    const [albums, tracks, statuses] = await Promise.all([
+        albumIds.length ? db.collection('albums').find({
+            ...readyAlbumLifecycleFilter, _id: { $in: albumIds.map(toObjectId) }
+        }).project(albumProjection).maxTimeMS(queryTimeoutMs).toArray() : [],
+        trackIds.length ? db.collection('audioTracks').find({
+            ...readyAudioFilter, _id: { $in: trackIds.map(toObjectId) }
+        }).project(audioTrackProjection).maxTimeMS(queryTimeoutMs).toArray() : [],
+        UserLibrary.statuses(userId, entries.map(({ contentType, contentId }) => ({ contentType, contentId })))
+    ]);
+    const context = await createCatalogContext(albums, tracks);
+    const content = new Map<string, ListenerAlbumSummary | ListenerAudioTrackSummary>([
+        ...albums.map((album): [string, ListenerAlbumSummary] => [`album:${album._id}`, toAlbumSummary(album, context)]),
+        ...tracks.map((track): [string, ListenerAudioTrackSummary] => [`audioTrack:${track._id}`, toAudioTrackSummary(track, context)])
+    ]);
+    const saved = new Set(statuses.filter((status) => status.saved).map((status) => `${status.contentType}:${status.contentId}`));
+    return { items: entries.flatMap((entry) => {
+        const key = `${entry.contentType}:${entry.contentId}`;
+        const item = content.get(key);
+        return item ? [{ content: item, playedAt: entry.occurredAt, saved: saved.has(key) }] : [];
+    }), limit: 20 as const };
+};

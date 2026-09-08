@@ -22,7 +22,7 @@ jobs:
       - name: Use Node.js 24
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -45,7 +45,10 @@ jobs:
           sudo apt-get install --yes "mongodb-org-server=${MONGODB_CI_VERSION}"
           mongod --version
 
-      - name: Run server and Web unit tests
+      - name: Verify the complete release runtime
+        run: npm run doctor:release
+
+      - name: Run server and Web unit tests (including Linux platform suites)
         run: npm test
 
       - name: Run Mongo-backed lifecycle integration tests
