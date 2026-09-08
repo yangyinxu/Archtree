@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { EventEmitter } from 'node:events';
 
 import {
     resetRateLimitWindowsForTests,
-    uploadRateLimit
+    uploadRateLimit,
+    searchConcurrencyLimit
 } from '../src/middleware/requestProtectionMiddleware';
 
 const responseCapture = () => {
@@ -52,4 +54,27 @@ test('account-owned upload mutations retain their hourly abuse-protection quota'
     assert.equal(rejected.capture.headers['RateLimit-Limit'], 20);
     assert.equal(rejected.capture.headers['RateLimit-Remaining'], 0);
     assert.equal(typeof rejected.capture.headers['RateLimit-Reset'], 'number');
+});
+
+test('search has shared process and per-client bounds and releases finished capacity', () => {
+    const open: EventEmitter[] = [];
+    const invoke = (ip: string) => {
+        const { capture, response } = responseCapture();
+        const events = Object.assign(new EventEmitter(), response);
+        let admitted = false;
+        searchConcurrencyLimit({ ip, socket: {} } as any, events as any, () => { admitted = true; });
+        if (admitted) open.push(events);
+        return { admitted, capture, events };
+    };
+    try {
+        assert.equal(invoke('client-a').admitted, true);
+        assert.equal(invoke('client-a').admitted, true);
+        assert.equal(invoke('client-a').capture.status, 429);
+        for (let index = 0; index < 6; index++) assert.equal(invoke(`client-${index}`).admitted, true);
+        assert.equal(invoke('client-b').capture.status, 429);
+        open[0].emit('finish');
+        open[0].emit('close');
+        assert.equal(invoke('client-b').admitted, true);
+        assert.equal(invoke('client-c').capture.status, 429);
+    } finally { for (const response of open) response.emit('close'); }
 });

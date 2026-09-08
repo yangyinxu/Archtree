@@ -190,3 +190,53 @@ test('deletes the account before clearing cookies and local account state', asyn
   expect(queryClient.getQueryData(browserSessionQueryKey)).toBeNull();
   expect(readSearchHistory(viewerId)).toEqual([]);
 });
+
+test.each([
+  ['Sign out everywhere', 'Confirm sign out everywhere', '/auth/logout-all'],
+  ['Delete account', 'Delete account permanently', '/auth/account']
+])('finishes %s with an expired access cookie inside one session lock', async (trigger, confirmation, path) => {
+  const user = userEvent.setup();
+  const lockRequest = vi.fn(async (_name: string, _options: unknown, operation: () => Promise<unknown>) => operation());
+  vi.stubGlobal('navigator', { locks: { request: lockRequest } });
+  let accessIsCurrent = false;
+  const fetchMock = vi.fn(async (request: string, init?: RequestInit) => {
+    if (request === '/auth/browser/session') return jsonResponse({}, 401);
+    if (request === '/auth/browser/refresh') {
+      expect(new Headers(init?.headers).get('X-Finitude-Session-Transition')).toBe('web-locks-v1');
+      expect(new Headers(init?.headers).get('X-Finitude-Account-Viewer')).toBe(viewerId);
+      accessIsCurrent = true;
+      return jsonResponse({ user: {
+        id: viewerId, email: 'listener@example.test', role: 'user', displayName: 'Listener',
+        avatarRevision: 0, avatar: null, emailVerified: true
+      } });
+    }
+    return accessIsCurrent ? noContentResponse() : jsonResponse({}, 401);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const { queryClient } = renderPanel();
+  queryClient.setQueryData(['account', viewerId, 'private'], { private: true });
+
+  await user.click(screen.getByRole('button', { name: trigger }));
+  await user.click(screen.getByRole('button', { name: confirmation }));
+  expect(await screen.findByText('Public listener')).toBeInTheDocument();
+  expect(fetchMock.mock.calls.map(([request]) => request)).toEqual([
+    path, '/auth/browser/session', '/auth/browser/refresh', path, '/auth/browser/logout'
+  ]);
+  expect(lockRequest).toHaveBeenCalledTimes(1);
+  expect(queryClient.getQueryData(['account', viewerId, 'private'])).toBeUndefined();
+  expect(queryClient.getQueryData(browserSessionQueryKey)).toBeNull();
+  const { runBrowserSessionTransition } = await import('../../api/sessionTransition');
+  await expect(runBrowserSessionTransition({ kind: 'refresh' }, async () => 'released')).resolves.toBe('released');
+});
+
+test('an expired refresh releases the account lock and leaves the confirmation retryable', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({}, 401)));
+  renderPanel();
+  await user.click(screen.getByRole('button', { name: 'Sign out everywhere' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm sign out everywhere' }));
+  expect(await screen.findByRole('alert')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+  const { runBrowserSessionTransition } = await import('../../api/sessionTransition');
+  await expect(runBrowserSessionTransition({ kind: 'refresh' }, async () => 'released')).resolves.toBe('released');
+});

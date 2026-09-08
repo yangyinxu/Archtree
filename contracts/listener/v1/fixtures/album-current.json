@@ -1,0 +1,52 @@
+{
+  "album": {
+    "contentType": "album",
+    "id": "64b000000000000000000001",
+    "title": "Still Water",
+    "artworkUrl": "/content/images/64b000000000000000000002",
+    "artistNames": [
+      "Finitude Ensemble"
+    ],
+    "releaseDate": {
+      "year": 2026
+    },
+    "credits": [
+      {
+        "subjectType": "artist",
+        "subjectId": "64b000000000000000000004",
+        "name": "Finitude Ensemble",
+        "role": "primary",
+        "order": 0
+      }
+    ],
+    "displayByline": "Finitude Ensemble",
+    "attributionStatus": "documented"
+  },
+  "tracks": [
+    {
+      "contentType": "audioTrack",
+      "id": "64b000000000000000000003",
+      "title": "First Light",
+      "artworkUrl": "",
+      "artistNames": [
+        "Finitude Ensemble"
+      ],
+      "albumId": "64b000000000000000000001",
+      "albumTitle": "Still Water",
+      "duration": "3:48",
+      "streamUrl": "/content/mediaTrack/stream/64b000000000000000000003",
+      "mediaType": "audio",
+      "credits": [
+        {
+          "subjectType": "artist",
+          "subjectId": "64b000000000000000000004",
+          "name": "Finitude Ensemble",
+          "role": "primary",
+          "order": 0
+        }
+      ],
+      "displayByline": "Finitude Ensemble",
+      "attributionStatus": "documented"
+    }
+  ]
+}

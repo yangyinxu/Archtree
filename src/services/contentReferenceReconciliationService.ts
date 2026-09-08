@@ -1,5 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import { catalogDeletionRecoveryReason } from './catalogDeletionLeaseService';
+import { planCreditSubjectLookups } from './catalogCreditAudit';
 import {
     legacyAlbumArtistIdsFromCredits,
     legacyTrackArtistIdsFromCredits,
@@ -54,6 +56,7 @@ export const reconcileContentReferences = async () => {
         db.collection('albums').find().project({
             _id: 1,
             lifecycleStatus: 1,
+            lifecycleUpdatedAt: 1,
             credits: 1,
             attributionStatus: 1,
             creditRevision: 1
@@ -70,7 +73,7 @@ export const reconcileContentReferences = async () => {
             creditRevision: 1,
             artistIds: 1
         }).sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
-        db.collection('artists').find().project({ _id: 1, albumIds: 1, lifecycleStatus: 1 })
+        db.collection('artists').find().project({ _id: 1, albumIds: 1, lifecycleStatus: 1, lifecycleUpdatedAt: 1 })
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
         db.collection('organizations').find().project({ _id: 1, lifecycleStatus: 1 })
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
@@ -201,6 +204,7 @@ export const reconcileContentReferences = async () => {
     const albumTrackReferencesComplete = !embeddedReferencesTruncated;
     const trackArtistReferences = await loadEmbeddedReferences('audioTracks', 'artistIds');
     const artistAlbumReferences = await loadEmbeddedReferences('artists', 'albumIds');
+    const artistAlbumReferencesComplete = !embeddedReferencesTruncated;
     const carouselItemReferences = await loadEmbeddedReferences('carousels', 'items');
     const collectionItemReferences = await loadEmbeddedReferences('contentCollections', 'items');
     const pageItemReferences = await loadEmbeddedReferences('pages', 'items');
@@ -955,18 +959,89 @@ export const reconcileContentReferences = async () => {
         }
     }
 
-    const artistsByLegacyAlbumId = new Map<string, string[]>();
-    for (const artist of scannedArtists) {
-        const artistId = canonicalObjectId(artist._id);
-        if (!artistId) continue;
-        for (const albumIdValue of Array.isArray(artist.albumIds) ? artist.albumIds : []) {
-            const albumId = canonicalObjectId(albumIdValue);
-            if (!albumId) continue;
-            const members = artistsByLegacyAlbumId.get(albumId) ?? [];
-            if (!members.includes(artistId)) members.push(artistId);
-            artistsByLegacyAlbumId.set(albumId, members);
+    // Credit target lookups share the report's remaining reference budget. A bounded
+    // source window can establish presence, but never establish absence outside it.
+    const creditLookups = planCreditSubjectLookups(
+        [...scannedAlbums, ...scannedTracks],
+        { knownIds: artistSet, complete: artists.length <= limit },
+        { knownIds: organizationSet, complete: organizations.length <= limit },
+        embeddedReferencesRemaining
+    );
+    const creditArtistLookups = creditLookups.artistIds;
+    const creditOrganizationLookups = creditLookups.organizationIds;
+    embeddedReferencesRemaining = creditLookups.remainingReferences;
+    const lookupCreditSubjects = async (collection: string, ids: Set<string>) => ids.size === 0 ? []
+        : db.collection(collection).find({ _id: { $in: [...ids].map((id) => new ObjectId(id)) } })
+            .project({ _id: 1, lifecycleStatus: 1 }).limit(ids.size).maxTimeMS(10_000).toArray();
+    const [creditArtists, creditOrganizations] = await Promise.all([
+        lookupCreditSubjects('artists', creditArtistLookups),
+        lookupCreditSubjects('organizations', creditOrganizationLookups)
+    ]);
+    for (const [subjects, known, ready] of [
+        [creditArtists, artistSet, readyCreditArtistSet],
+        [creditOrganizations, organizationSet, readyCreditOrganizationSet]
+    ] as const) {
+        for (const subject of subjects) {
+            const id = String(subject._id);
+            known.add(id);
+            if (subject.lifecycleStatus === undefined || subject.lifecycleStatus === 'ready') ready.add(id);
         }
     }
+
+    const artistsByLegacyAlbumId = new Map<string, Set<string>>();
+    const addLegacyMembership = (artistId: string, albumValue: unknown) => {
+        const albumId = canonicalObjectId(albumValue);
+        if (!albumId) return;
+        const members = artistsByLegacyAlbumId.get(albumId) ?? new Set<string>();
+        members.add(artistId);
+        artistsByLegacyAlbumId.set(albumId, members);
+    };
+    const hasCreditState = (owner: any) => ['credits', 'attributionStatus', 'creditRevision']
+        .some(field => Object.prototype.hasOwnProperty.call(owner, field));
+    const creditAlbumIds = scannedAlbums.filter(hasCreditState)
+        .map((album) => canonicalObjectId(album._id))
+        .filter((id): id is string => Boolean(id));
+    const verifiedProjectionAlbumIds = new Set<string>();
+    if (artists.length <= limit && artistAlbumReferencesComplete) {
+        for (const artist of scannedArtists) {
+            for (const albumId of referencesFor(artistAlbumReferences, artist._id)) {
+                addLegacyMembership(String(artist._id), albumId);
+            }
+        }
+        creditAlbumIds.forEach(id => verifiedProjectionAlbumIds.add(id));
+    } else {
+        // Both requested owners and returned membership rows consume the shared budget.
+        const targets = creditAlbumIds.slice(0, embeddedReferencesRemaining);
+        embeddedReferencesRemaining -= targets.length;
+        if (targets.length > 0) {
+            const rows = await db.collection('artists').aggregate([
+                { $sort: { _id: 1 } },
+                { $project: { albumId: { $filter: {
+                    input: { $cond: [{ $isArray: '$albumIds' }, '$albumIds', []] },
+                    // Match the same ObjectId/string/case forms accepted by canonicalObjectId.
+                    as: 'albumId', cond: { $in: [{ $toLower: { $convert: {
+                        input: '$$albumId', to: 'string', onError: '', onNull: ''
+                    } } }, targets] }
+                } } } },
+                { $unwind: '$albumId' },
+                { $limit: embeddedReferencesRemaining + 1 }
+            ], { maxTimeMS: 10_000 }).toArray();
+            if (rows.length <= embeddedReferencesRemaining) {
+                targets.forEach(id => verifiedProjectionAlbumIds.add(id));
+            }
+            for (const row of rows.slice(0, embeddedReferencesRemaining)) {
+                addLegacyMembership(String(row._id), row.albumId);
+            }
+            embeddedReferencesRemaining = Math.max(0, embeddedReferencesRemaining - rows.length);
+        }
+    }
+    const catalogCreditUnverified: Array<{
+        ownerType: 'album' | 'audioTrack'; ownerId: string; reason: string; subjectId?: string;
+    }> = [];
+    const unverifiedCredit = (finding: typeof catalogCreditUnverified[number]) => {
+        catalogReferenceFindingsTruncated = true;
+        appendFinding(catalogCreditUnverified, finding);
+    };
     const catalogCreditFindings: Array<{
         ownerType: 'album' | 'audioTrack';
         ownerId: string;
@@ -976,10 +1051,7 @@ export const reconcileContentReferences = async () => {
     }> = [];
     const auditCreditOwner = (ownerType: 'album' | 'audioTrack', owner: any) => {
         const ownerId = canonicalObjectId(owner._id) ?? String(owner._id);
-        const hasCreditState = Object.prototype.hasOwnProperty.call(owner, 'credits')
-            || Object.prototype.hasOwnProperty.call(owner, 'attributionStatus')
-            || Object.prototype.hasOwnProperty.call(owner, 'creditRevision');
-        if (!hasCreditState) return;
+        if (!hasCreditState(owner)) return;
         const rawCredits = Array.isArray(owner.credits) ? owner.credits : owner.credits;
         if (Array.isArray(rawCredits) && rawCredits.some((credit: any, index: number) =>
             credit?.order !== index)) {
@@ -998,7 +1070,11 @@ export const reconcileContentReferences = async () => {
                 ? readyCreditArtistSet
                 : readyCreditOrganizationSet;
             const knownSubjects = credit.subjectType === 'artist' ? artistSet : organizationSet;
-            if (!knownSubjects.has(credit.subjectId)) {
+            const queriedSubjects = credit.subjectType === 'artist' ? creditArtistLookups : creditOrganizationLookups;
+            const subjectsTruncated = credit.subjectType === 'artist' ? artists.length > limit : organizations.length > limit;
+            if (!knownSubjects.has(credit.subjectId) && subjectsTruncated && !queriedSubjects.has(credit.subjectId)) {
+                unverifiedCredit({ ownerType, ownerId, reason: 'subjectLookupBudgetExceeded', subjectId: credit.subjectId });
+            } else if (!knownSubjects.has(credit.subjectId)) {
                 appendFinding(catalogCreditFindings, {
                     ownerType,
                     ownerId,
@@ -1029,6 +1105,8 @@ export const reconcileContentReferences = async () => {
                     reason: 'legacyProjectionMismatch'
                 });
             }
+        } else if (!verifiedProjectionAlbumIds.has(ownerId)) {
+            unverifiedCredit({ ownerType, ownerId, reason: 'legacyProjectionLookupBudgetExceeded' });
         } else {
             const expected = [...legacyAlbumArtistIdsFromCredits(credits)].sort();
             const actual = [...(artistsByLegacyAlbumId.get(ownerId) ?? [])].sort();
@@ -1044,6 +1122,35 @@ export const reconcileContentReferences = async () => {
     };
     scannedAlbums.forEach((album) => auditCreditOwner('album', album));
     scannedTracks.forEach((track) => auditCreditOwner('audioTrack', track));
+
+    // Durable deletion receipts remain auditable after their owner has disappeared.
+    const deletionOperations = await db.collection('catalogDeletionOperations').find()
+        .project({ ownerType: 1, ownerId: 1, status: 1, leaseUntil: 1 })
+        .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray();
+    if (deletionOperations.length > limit) catalogReferenceFindingsTruncated = true;
+    const scannedDeletionOperations = deletionOperations.slice(0, limit);
+    const operationIds = new Set(scannedDeletionOperations.map((operation) => String(operation._id)));
+    const catalogDeletionFindings: Array<{ ownerType: string; ownerId: string; reason: string }> = [];
+    const auditNow = new Date();
+    for (const operation of scannedDeletionOperations) {
+        if (operation.status === 'failed'
+            || (operation.leaseUntil instanceof Date && operation.leaseUntil <= auditNow)) {
+            appendFinding(catalogDeletionFindings, {
+                ownerType: String(operation.ownerType), ownerId: String(operation.ownerId),
+                reason: operation.status === 'failed' ? 'deleteFailed' : 'expiredLease'
+            });
+        }
+    }
+    // If the receipt scan is incomplete, absence cannot establish a legacy deletion.
+    if (deletionOperations.length <= limit) {
+        for (const [ownerType, owners] of [['artist', scannedArtists], ['album', scannedAlbums]] as const) {
+            for (const owner of owners) {
+                if (operationIds.has(ownerType + ':' + String(owner._id))) continue;
+                const reason = catalogDeletionRecoveryReason(owner, auditNow);
+                if (reason) appendFinding(catalogDeletionFindings, { ownerType, ownerId: String(owner._id), reason });
+            }
+        }
+    }
 
     const workflowTargetIds = (field: 'artistId' | 'albumId' | 'carouselId') => [
         ...new Set(scannedWorkflowOperations
@@ -1155,6 +1262,8 @@ export const reconcileContentReferences = async () => {
         invalidAccountMutationOwners,
         invalidAccountMutationTargets,
         catalogCreditFindings,
+        catalogCreditUnverified,
+        catalogDeletionFindings,
         artistReleaseWorkflowFindings
     };
 };

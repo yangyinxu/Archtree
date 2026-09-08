@@ -1,10 +1,11 @@
+import { logCatalogFailure } from './catalogDiagnostics';
+import { publishNewAlbum, type UploadedCoverArt } from '../application/catalog/publishNewAlbum';
 import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { Album } from '../models/album';
 import { SimpleDate } from '../models/simpleDate';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import {
-    deleteCoverArt,
     updateCoverArtOwnerAndCleanup,
     uploadCoverArt,
     validateCoverArtFile
@@ -13,55 +14,6 @@ import { getUploadedFile } from '../middleware/imageUpload';
 import { getPublicAlbum, listPublicAlbums } from '../services/publicCatalogService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
 import { deleteAlbumAndReferences } from '../services/albumLifecycleService';
-
-type UploadedCoverArt = { imageId: string; coverArtUrl: string };
-
-interface NewAlbumPublicationDependencies {
-    saveAlbum?: () => Promise<unknown>;
-    deleteUploadedCoverArt?: (imageId: string, albumId: string) => Promise<void>;
-}
-
-/** Publishes a ready Album only after optional artwork is ready and attached in the insert. */
-export const publishNewAlbum = async (
-    album: Album,
-    coverArt?: UploadedCoverArt,
-    dependencies: NewAlbumPublicationDependencies = {}
-) => {
-    const albumId = album._id?.toHexString();
-    if (!albumId) throw new Error('A server-generated Album ID is required before publication.');
-    if (coverArt) {
-        album.coverArtId = coverArt.imageId;
-        album.coverArtUrl = coverArt.coverArtUrl;
-    }
-
-    try {
-        return await (dependencies.saveAlbum ?? (() => album.save()))();
-    } catch (error) {
-        if (!coverArt || (error as any)?.outcomeUnknown) throw error;
-        try {
-            if (dependencies.deleteUploadedCoverArt) {
-                await dependencies.deleteUploadedCoverArt(coverArt.imageId, albumId);
-            } else {
-                await deleteCoverArt(coverArt.imageId, {
-                    expectedOwnerType: 'album',
-                    expectedOwnerId: albumId
-                });
-            }
-        } catch (cleanupError) {
-            throw Object.assign(
-                new Error('Album creation failed and uploaded cover-art cleanup requires reconciliation.'),
-                {
-                    statusCode: 503,
-                    code: 'album_creation_cleanup_pending',
-                    cleanupPending: true,
-                    reconciliationRequired: true,
-                    cause: { creationError: error, cleanupError }
-                }
-            );
-        }
-        throw error;
-    }
-};
 
 // Create a new album via the model and save it to the db
 export const postAlbum = async (req: Request, res: Response, next: NextFunction) => {
@@ -186,7 +138,7 @@ export const updateAlbum = async (req: Request, res: Response, next: NextFunctio
         }
     );
     if (cleanup.cleanupError) {
-        console.log(`Unable to delete detached album cover art ${album.coverArtId}:`, cleanup.cleanupError);
+        logCatalogFailure(res, 'cover_art_cleanup_deferred', cleanup.cleanupError);
     }
     if (!cleanup.updateApplied) {
         return res.status((cleanup as any).outcomeUnknown ? 503 : 409).json({
@@ -210,12 +162,11 @@ export const deleteAlbum = async (req: Request, res: Response, next: NextFunctio
     }
 
     const albumId = req.params.albumId;
-    const album = await Album.findById(albumId);
-    if (!album) {
+    // A deletion receipt can outlive the Album, so let the lifecycle service resolve retries.
+    const cleanup = await deleteAlbumAndReferences(albumId);
+    if (!cleanup.ownerDeleted && !cleanup.cleanupPending) {
         return res.status(404).json({ message: 'Album not found.' });
     }
-
-    const cleanup = await deleteAlbumAndReferences(albumId);
     if (!cleanup.ownerDeleted) {
         return res.status(409).json({
             message: 'Album was retained for retry and lifecycle reconciliation.',

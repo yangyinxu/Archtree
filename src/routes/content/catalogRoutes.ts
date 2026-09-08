@@ -8,12 +8,13 @@ import { requireUploadSize } from '../../middleware/audioUpload';
 import {
     asyncHandler,
     publicReadRateLimit,
+    searchConcurrencyLimit,
     uploadConcurrencyLimit
 } from '../../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
 
-router.get('/search', publicReadRateLimit, asyncHandler(contentController.searchContent));
+router.get('/search', publicReadRateLimit, searchConcurrencyLimit, asyncHandler(contentController.searchContent));
 router.get('/organization/:organizationId', publicReadRateLimit, asyncHandler(contentController.getOrganization));
 
 router.post('/album', requireAuth, requireAdmin, uploadConcurrencyLimit, requireUploadSize(maxImageUploadMb + 1), imageUpload.single('coverArtFile'), asyncHandler(albumController.postAlbum));

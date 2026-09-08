@@ -9,6 +9,13 @@ Product behavior shared by the backend and Finitude clients is documented in
 iOS, and Android localization format, fallback, caching, and delivery contract
 is documented in [`docs/localization.md`](docs/localization.md).
 
+For a reproducible Node 24 development environment, isolated MongoDB tests, and
+the Windows/Linux verification boundary, follow
+[`docs/development-environment.md`](docs/development-environment.md).
+Implementation boundaries, API compatibility, runtime reliability, browser session
+recovery, and catalog reconciliation are documented in
+[`docs/architecture.md`](docs/architecture.md).
+
 ## Code Documentation
 
 Classes, types, and functions should have concise comments describing their
@@ -26,12 +33,16 @@ rather than repeat the code and must stay synchronized with behavior.
 
 ## Scripts
 
+- `npm run doctor`: check Node 24 and the isolated MongoDB test executable
+- `npm run doctor:release`: also require the Linux/Bash release environment
 - `npm run dev`: start development server
 - `npm run dev:web`: start the listener Vite server at `/finitude/`; run the
   Express development server separately so API requests can be proxied
 - `npm start`: start production-mode server
 - `npm run build`: type-check the server and build the listener bundle
 - `npm test`: run server and listener unit/component tests
+- `npm run test:server:linux`: explicitly run the Linux platform-hook and artifact
+  tests; these also run automatically as part of `npm test` on Linux
 - `npm run test:e2e`: run the production listener bundle against Chromium,
   Firefox, and WebKit with accessibility checks
 - `npm run test:e2e:chromium`: run the faster Chromium-only browser gate
@@ -44,6 +55,8 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run test:media-load`: run the bounded audio/video Range, seek/abort,
   artwork, and health-recovery workload against an explicitly authorized
   environment
+- `npm run profile:search`: inspect the current substring-search predicate on
+  10000 synthetic records in a disposable local MongoDB replica set
 - `npm run localization:check`: validate canonical locale files, ICU variable
   contracts, and checked-in generated runtime output without modifying files
 - `npm run localization:generate`: validate locale sources and atomically
@@ -51,7 +64,8 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run stage:eb-artifact`: validate and stage the exact allowlisted Elastic
   Beanstalk runtime tree in `elastic-beanstalk-artifact`
 
-The integration suite requires a trusted `mongod` executable on `PATH`. Windows
+The integration suite requires a trusted `mongod` executable on `PATH` or through
+`MONGOD_BINARY`. A missing daemon fails before loading integration cases. Windows
 runs use the official Windows binary and omit Unix socket flags. On
 macOS, approve or install that binary according to the machine's security
 policy before running the suite; the tests never weaken Gatekeeper themselves.
@@ -62,11 +76,26 @@ Each run owns a uniquely prefixed temporary database directory, verifies its
 removal during teardown, and conservatively removes abandoned test directories
 whose recorded owner process is no longer running.
 
+The application database requires MongoDB 4.2-or-newer protocol capabilities and
+a writable replica set or mongos deployment with sessions and transactions. This
+is the minimum feature prerequisite; integration verification uses MongoDB 8.0.12.
+A standalone daemon can be
+installed for test tooling, but application startup rejects it before index
+writes. `npm run doctor` verifies the local test daemon executable; `/health`
+verifies the connected application's topology, required indexes, and ping.
+Startup also creates the Catalog deletion receipt collection idempotently before
+any deletion transaction; collection-specific roles need its documented permissions.
+
 Notes:
 - The previous `prod` alias was removed to keep scripts minimal.
 - Runtime startup should be configured in your deployment target (Elastic Beanstalk, ECS, App Runner, etc.).
 
 ## Environment Variables
+
+Local `npm run dev` requires application configuration in the current terminal
+or a private root `.env` file. `.env.example` is only a template; `npm ci` and
+`npm run doctor` do not supply database or authentication credentials. Follow
+the [application startup setup](docs/development-environment.md#configure-application-startup).
 
 Required variables:
 
@@ -77,6 +106,10 @@ Required variables:
 - `DB_SOCKET_TIMEOUT_MS`: maximum MongoDB socket inactivity time (defaults to 120000)
 - `DB_WAIT_QUEUE_TIMEOUT_MS`: maximum wait for a pooled MongoDB connection (defaults to 10000)
 - `DB_MAX_POOL_SIZE`: maximum MongoDB connections per server process (defaults to 100)
+- `SERVER_SHUTDOWN_GRACE_MS`: time allowed for connections and business operations
+  to finish during shutdown (defaults to 30000; capped at 120000)
+- `SERVER_SHUTDOWN_CLEANUP_MS`: database shutdown deadline after draining
+  (defaults to 5000; capped at 30000)
 - `JWT_SECRET`: JWT signing secret
 - `AUTH_CODE_PEPPER`: optional separate HMAC secret for verification and reset
   codes (defaults to `JWT_SECRET`)
@@ -916,6 +949,12 @@ Reconciliation:
   ownership/targets; and stalled MediaTrack reference cleanup without mutating
   data. Page target deletion and detachment are atomic, and each reconciliation
   source scan and embedded finding remains bounded by the two limits above.
+- Credit defects appear in `catalogCreditFindings`; checks without enough
+  evidence appear separately in `catalogCreditUnverified` and set `truncated`.
+  Budget exhaustion never establishes a missing subject or projection mismatch.
+  `catalogDeletionFindings` reports failed/expired Artist or Album deletion
+  receipts, including work whose owner is already gone. Retry the existing
+  administrator deletion endpoint; generating the report never performs cleanup.
 
 ## Troubleshooting
 

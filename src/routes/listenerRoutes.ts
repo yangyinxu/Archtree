@@ -10,7 +10,8 @@ import {
 } from '../middleware/authMiddleware';
 import {
     asyncHandler,
-    publicReadRateLimit
+    publicReadRateLimit,
+    searchConcurrencyLimit
 } from '../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
@@ -25,7 +26,7 @@ router.get(
     requireCurrentAccountViewerWhenAuthenticated,
     asyncHandler(listenerController.home)
 );
-router.get('/search', publicReadRateLimit, asyncHandler(listenerController.search));
+router.get('/search', publicReadRateLimit, searchConcurrencyLimit, asyncHandler(listenerController.search));
 router.get(
     '/pages/:slug(library)/items/:itemId',
     publicReadRateLimit,

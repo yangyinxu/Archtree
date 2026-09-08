@@ -3,6 +3,7 @@ import express, { Router } from 'express';
 import * as controller from '../../controllers/playlistController';
 import { requireAuth, requireCurrentAccountViewer } from '../../middleware/authMiddleware';
 import {
+    asyncHandler,
     playlistMutationConcurrencyLimit,
     playlistRateLimit
 } from '../../middleware/requestProtectionMiddleware';
@@ -18,14 +19,14 @@ router.use(
     requireCurrentAccountViewer,
     controller.setPlaylistPrivacyHeaders
 );
-router.get('/me/playlists', controller.listPlaylists);
-router.post('/me/playlists', playlistMutationConcurrencyLimit, controller.createPlaylist);
-router.get('/me/playlists/memberships', controller.getPlaylistMemberships);
-router.get('/me/playlists/:playlistId', controller.getPlaylist);
-router.patch('/me/playlists/:playlistId', playlistMutationConcurrencyLimit, controller.renamePlaylist);
-router.delete('/me/playlists/:playlistId', playlistMutationConcurrencyLimit, controller.deletePlaylist);
-router.post('/me/playlists/:playlistId/items', playlistMutationConcurrencyLimit, controller.addPlaylistItem);
-router.delete('/me/playlists/:playlistId/items/:itemId', playlistMutationConcurrencyLimit, controller.removePlaylistItem);
-router.put('/me/playlists/:playlistId/items/order', playlistMutationConcurrencyLimit, controller.reorderPlaylistItems);
+router.get('/me/playlists', asyncHandler(controller.listPlaylists));
+router.post('/me/playlists', playlistMutationConcurrencyLimit, asyncHandler(controller.createPlaylist));
+router.get('/me/playlists/memberships', asyncHandler(controller.getPlaylistMemberships));
+router.get('/me/playlists/:playlistId', asyncHandler(controller.getPlaylist));
+router.patch('/me/playlists/:playlistId', playlistMutationConcurrencyLimit, asyncHandler(controller.renamePlaylist));
+router.delete('/me/playlists/:playlistId', playlistMutationConcurrencyLimit, asyncHandler(controller.deletePlaylist));
+router.post('/me/playlists/:playlistId/items', playlistMutationConcurrencyLimit, asyncHandler(controller.addPlaylistItem));
+router.delete('/me/playlists/:playlistId/items/:itemId', playlistMutationConcurrencyLimit, asyncHandler(controller.removePlaylistItem));
+router.put('/me/playlists/:playlistId/items/order', playlistMutationConcurrencyLimit, asyncHandler(controller.reorderPlaylistItems));
 
 export default router;

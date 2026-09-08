@@ -10,6 +10,7 @@ import {
     limitMediaConcurrencyFor,
     observeMediaDeliveryFor
 } from '../middleware/mediaDeliveryMiddleware';
+import { asyncHandler } from '../middleware/requestProtectionMiddleware';
 
 const router: Router = express.Router();
 
@@ -19,9 +20,9 @@ router.use(userLibraryRoutes);
 router.get(
     '/images/:imageId/v1/:width.webp',
     observeMediaDeliveryFor('artwork'),
-    imageController.getImageVariant
+    asyncHandler(imageController.getImageVariant)
 );
-router.get('/images/:imageId', limitMediaConcurrencyFor('artwork'), imageController.getImage);
+router.get('/images/:imageId', limitMediaConcurrencyFor('artwork'), asyncHandler(imageController.getImage));
 router.use(audioRoutes);
 router.use(catalogRoutes);
 router.use(compositionRoutes);

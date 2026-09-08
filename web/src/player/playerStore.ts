@@ -3,8 +3,6 @@ import type {
   PlayerAudio,
   PlayerErrorCode,
   PlayerErrorState,
-  PlayerMediaSession,
-  PlayerMediaSessionAction,
   PlayerPlaybackErrorStage,
   PlayerQueueItem,
   PlayerRepeatMode,
@@ -13,10 +11,8 @@ import type {
 } from './types';
 import { enqueueListenerTelemetry } from '../telemetry/client';
 import { classifyListenerRoute } from '../telemetry/routeClassifier';
-import {
-  mediaSessionArtworkSources,
-  type MediaSessionArtworkSource
-} from '../artwork/artworkUrls';
+import { createMediaSessionAdapter } from './mediaSessionAdapter';
+import { canonicalOrder, copyQueue, currentCycleHistory, queueLaunchOrder, shuffledOrder } from './queueOrder';
 
 const DEFAULT_SKIP_SECONDS = 10;
 const PREVIOUS_RESTART_SECONDS = 3;
@@ -73,12 +69,6 @@ const classifyMediaError = (code: number | undefined): PlayerErrorCode => {
   }
 };
 
-const copyQueue = (queue: readonly PlayerQueueItem[]): readonly PlayerQueueItem[] =>
-  Object.freeze(queue.map((item) => Object.freeze({
-    ...item,
-    artistNames: Object.freeze([...item.artistNames])
-  })));
-
 const initialSnapshot = (
   volume: number,
   muted: boolean,
@@ -103,20 +93,6 @@ const initialSnapshot = (
   canNext: false
 });
 
-const resolveMediaSession = (): PlayerMediaSession | null => {
-  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return null;
-  return navigator.mediaSession as unknown as PlayerMediaSession;
-};
-
-const defaultMetadataFactory = (metadata: {
-  title: string;
-  artist: string;
-  artwork: MediaSessionArtworkSource[];
-}): unknown => {
-  if (typeof MediaMetadata === 'undefined') return metadata;
-  return new MediaMetadata(metadata);
-};
-
 const defaultAudioFactory = (): PlayerAudio => {
   if (typeof document === 'undefined') {
     throw new Error('HTML media is unavailable in this environment.');
@@ -137,14 +113,10 @@ export const createPlayerStore = (
   options: CreatePlayerStoreOptions = {}
 ): PlayerStore => {
   const audioFactory = options.audioFactory ?? defaultAudioFactory;
-  const mediaSession = options.mediaSession === undefined
-    ? resolveMediaSession()
-    : options.mediaSession;
-  const metadataFactory = options.mediaMetadataFactory ?? defaultMetadataFactory;
+  const mediaSession = createMediaSessionAdapter(options);
   const random = options.random ?? Math.random;
   const listeners = new Set<() => void>();
   const boundAudioListeners = new Map<string, () => void>();
-  const registeredMediaActions = new Set<PlayerMediaSessionAction>();
   const startingVolume = clamp(
     Number.isFinite(options.initialVolume) ? options.initialVolume ?? 1 : 1,
     0,
@@ -162,7 +134,6 @@ export const createPlayerStore = (
   let sourceGeneration = 0;
   let playAttemptGeneration = 0;
   let lastReportedPlaybackError = '';
-  let lastMediaItem: PlayerQueueItem | null | undefined;
   let playOrder: number[] = [];
   let playOrderPosition = -1;
   let actualHistory: number[] = [];
@@ -170,42 +141,6 @@ export const createPlayerStore = (
   const mediaSurfaceHosts: HTMLElement[] = [];
   let mediaParkingHost: HTMLElement | null = null;
   let destroyed = false;
-
-  const readRandom = () => {
-    try {
-      const value = random();
-      return Number.isFinite(value) ? clamp(value, 0, 0.999999999999) : 0;
-    } catch {
-      return 0;
-    }
-  };
-
-  const shuffled = (indices: readonly number[]) => {
-    const result = [...indices];
-    for (let index = result.length - 1; index > 0; index -= 1) {
-      const swapIndex = Math.floor(readRandom() * (index + 1));
-      [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
-    }
-    return result;
-  };
-
-  const canonicalOrder = (length: number) => Array.from({ length }, (_, index) => index);
-
-  const launchOrder = (length: number, currentIndex: number) => {
-    const canonical = canonicalOrder(length);
-    if (!snapshot.shuffleEnabled) return canonical;
-    return [currentIndex, ...shuffled(canonical.filter((index) => index !== currentIndex))];
-  };
-
-  const currentCycleHistory = () => {
-    const uniqueHistory: number[] = [];
-    actualHistory.slice(0, actualHistoryPosition + 1).forEach((index) => {
-      const earlierPosition = uniqueHistory.indexOf(index);
-      if (earlierPosition >= 0) uniqueHistory.splice(earlierPosition, 1);
-      uniqueHistory.push(index);
-    });
-    return uniqueHistory;
-  };
 
   const recordNavigation = (index: number, direction: 'previous' | 'next') => {
     const adjacentHistoryPosition = direction === 'previous'
@@ -266,51 +201,7 @@ export const createPlayerStore = (
     }
   };
 
-  const syncMediaSession = () => {
-    if (!mediaSession) return;
-
-    if (snapshot.currentItem !== lastMediaItem) {
-      lastMediaItem = snapshot.currentItem;
-      try {
-        mediaSession.metadata = snapshot.currentItem
-          ? metadataFactory({
-              title: snapshot.currentItem.title,
-              artist: snapshot.currentItem.displayByline || snapshot.currentItem.artistNames.join(', '),
-              artwork: mediaSessionArtworkSources(snapshot.currentItem.artworkUrl)
-            })
-          : null;
-      } catch {
-        // Metadata is optional even when transport integration is supported.
-      }
-    }
-
-    try {
-      mediaSession.playbackState = snapshot.currentItem === null
-        ? 'none'
-        : snapshot.status === 'playing' ? 'playing' : 'paused';
-    } catch {
-      // Playback-state integration is optional and isolated from audio state.
-    }
-
-    try {
-      if (mediaSession.setPositionState) {
-        if (snapshot.currentItem && snapshot.duration > 0 && Number.isFinite(snapshot.duration)) {
-          const playbackRate = audio && Number.isFinite(audio.playbackRate) && audio.playbackRate > 0
-            ? audio.playbackRate
-            : 1;
-          mediaSession.setPositionState({
-            duration: snapshot.duration,
-            playbackRate,
-            position: clamp(snapshot.currentTime, 0, snapshot.duration)
-          });
-        } else {
-          mediaSession.setPositionState();
-        }
-      }
-    } catch {
-      // Position support varies independently across Media Session implementations.
-    }
-  };
+  const syncMediaSession = () => mediaSession.sync(snapshot, audio);
 
   const updateSnapshot = (patch: Partial<PlayerSnapshot>) => {
     if (destroyed) return;
@@ -691,7 +582,7 @@ export const createPlayerStore = (
       0,
       ownedQueue.length - 1
     );
-    playOrder = launchOrder(ownedQueue.length, boundedIndex);
+    playOrder = queueLaunchOrder(ownedQueue.length, boundedIndex, snapshot.shuffleEnabled, random);
     playOrderPosition = playOrder.indexOf(boundedIndex);
     actualHistory = [boundedIndex];
     actualHistoryPosition = 0;
@@ -808,11 +699,11 @@ export const createPlayerStore = (
 
       if (snapshot.currentItem) {
         if (shuffleEnabled) {
-          const history = currentCycleHistory();
+          const history = currentCycleHistory(actualHistory, actualHistoryPosition);
           const visited = new Set(history);
           const remaining = canonicalOrder(snapshot.queue.length)
             .filter((index) => !visited.has(index));
-          playOrder = [...history, ...shuffled(remaining)];
+          playOrder = [...history, ...shuffledOrder(remaining, random)];
           playOrderPosition = history.length - 1;
         } else {
           playOrder = canonicalOrder(snapshot.queue.length);
@@ -897,22 +788,7 @@ export const createPlayerStore = (
       mediaParkingHost?.remove();
       mediaParkingHost = null;
 
-      if (mediaSession) {
-        registeredMediaActions.forEach((action) => {
-          try {
-            mediaSession.setActionHandler(action, null);
-          } catch {
-            // Unsupported handlers are safely ignored.
-          }
-        });
-        try {
-          mediaSession.metadata = null;
-          mediaSession.playbackState = 'none';
-          mediaSession.setPositionState?.();
-        } catch {
-          // Media Session teardown is optional.
-        }
-      }
+      mediaSession.destroy();
 
       listeners.clear();
       boundAudioListeners.clear();
@@ -921,34 +797,8 @@ export const createPlayerStore = (
     }
   };
 
-  const mediaHandlers: Record<PlayerMediaSessionAction, (
-    details: { seekOffset?: number; seekTime?: number }
-  ) => void> = {
-    play: () => { void store.play(); },
-    pause: () => store.pause(),
-    previoustrack: () => { void store.previous(); },
-    nexttrack: () => { void store.next(); },
-    seekbackward: ({ seekOffset }) => store.skipBackward(seekOffset),
-    seekforward: ({ seekOffset }) => store.skipForward(seekOffset),
-    seekto: ({ seekTime }) => {
-      if (typeof seekTime === 'number') store.seek(seekTime);
-    }
-  };
-
-  if (mediaSession) {
-    (Object.entries(mediaHandlers) as Array<[
-      PlayerMediaSessionAction,
-      (details: { seekOffset?: number; seekTime?: number }) => void
-    ]>).forEach(([action, handler]) => {
-      try {
-        mediaSession.setActionHandler(action, handler);
-        registeredMediaActions.add(action);
-      } catch {
-        // Browsers may expose Media Session while omitting individual actions.
-      }
-    });
-    syncMediaSession();
-  }
+  mediaSession.register(store);
+  syncMediaSession();
 
   return store;
 };

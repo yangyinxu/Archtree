@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+/** Public response objects discard additive fields; request objects below remain strict. */
 const contentIdSchema = z.string().trim().min(1);
 const artworkUrlSchema = z.string().trim();
 const artistNamesSchema = z.array(z.string().trim().min(1));
@@ -14,7 +15,7 @@ export const catalogCreditSchema = z
     ]),
     order: z.number().int().min(0)
   })
-  .strict();
+  .strip();
 const attributionFields = {
   credits: z.array(catalogCreditSchema).optional(),
   displayByline: z.string().optional(),
@@ -27,7 +28,7 @@ export const listenerDateSchema = z
     month: z.number().int().min(1).max(12).optional(),
     day: z.number().int().min(1).max(31).optional()
   })
-  .strict();
+  .strip();
 
 export const artistSummarySchema = z
   .object({
@@ -37,7 +38,7 @@ export const artistSummarySchema = z
     bio: z.string(),
     artworkUrl: artworkUrlSchema
   })
-  .strict();
+  .strip();
 
 export const organizationSummarySchema = z
   .object({
@@ -47,7 +48,7 @@ export const organizationSummarySchema = z
     organizationType: z.string(),
     description: z.string()
   })
-  .strict();
+  .strip();
 
 export const albumSummarySchema = z
   .object({
@@ -59,7 +60,7 @@ export const albumSummarySchema = z
     releaseDate: listenerDateSchema.nullable(),
     ...attributionFields
   })
-  .strict();
+  .strip();
 
 export const audioTrackSummarySchema = z
   .object({
@@ -75,7 +76,7 @@ export const audioTrackSummarySchema = z
     streamUrl: z.string().trim().min(1),
     ...attributionFields
   })
-  .strict();
+  .strip();
 
 export const contentSummarySchema = z.discriminatedUnion('contentType', [
   artistSummarySchema,
@@ -91,14 +92,14 @@ export const homeSectionSchema = z
     presentation: sectionPresentationSchema,
     items: z.array(z.discriminatedUnion('contentType', [albumSummarySchema, audioTrackSummarySchema]))
   })
-  .strict();
+  .strip();
 
 export const listenerHomeSchema = z
   .object({
     title: z.string(),
     sections: z.array(homeSectionSchema)
   })
-  .strict();
+  .strip();
 
 export const listenerSearchSchema = z
   .object({
@@ -108,14 +109,14 @@ export const listenerSearchSchema = z
     albums: z.array(albumSummarySchema),
     audioTracks: z.array(audioTrackSummarySchema)
   })
-  .strict();
+  .strip();
 
 export const listenerAlbumSchema = z
   .object({
     album: albumSummarySchema,
     tracks: z.array(audioTrackSummarySchema)
   })
-  .strict();
+  .strip();
 
 export const listenerArtistSchema = z
   .object({
@@ -127,20 +128,20 @@ export const listenerArtistSchema = z
     appearsOn: z.array(albumSummarySchema).optional(),
     creditAlbums: z.array(albumSummarySchema).optional()
   })
-  .strict();
+  .strip();
 
 export const listenerTrackSchema = z
   .object({
     audioTrack: audioTrackSummarySchema
   })
-  .strict();
+  .strip();
 
 export const listenerOrganizationSchema = z
   .object({
     organization: organizationSummarySchema.omit({ contentType: true }),
     releases: z.array(albumSummarySchema)
   })
-  .strict();
+  .strip();
 
 export const libraryContentTypeSchema = z.enum(['album', 'audioTrack']);
 export const librarySortSchema = z.enum(['recentActivity', 'recentlySaved', 'recentlyPlayed']);

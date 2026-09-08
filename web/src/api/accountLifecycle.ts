@@ -25,18 +25,20 @@ export const signOutAccountEverywhere = async (viewerId: string) => {
     kind: 'logout-all',
     changesIdentity: true,
     onConflict: () => logoutBrowserSessionUnlocked(viewerId)
-  }, async (capability, generation) => {
+  }, async (capability, generation, sessionTransition) => {
     await apiRequestNoContent('/auth/logout-all', {
       method: 'POST',
       body: '{}',
       headers: accountViewerHeaders(viewerId),
-      accountViewer: viewerId
+      accountViewer: viewerId,
+      sessionTransition
     });
     try {
-      await logoutBrowserSessionUnlocked(viewerId, capability);
+      await logoutBrowserSessionUnlocked(viewerId, capability, sessionTransition);
     } catch {
       // Every server session is already invalid; local privacy cleanup must still finish.
     }
+    sessionTransition.assertActive();
     publishAccountSessionChange('logout-all');
     return captureAccountOperation(viewerId, generation);
   });
@@ -49,18 +51,20 @@ export const deleteListenerAccount = async (viewerId: string) => {
     kind: 'account-delete',
     changesIdentity: true,
     onConflict: () => logoutBrowserSessionUnlocked(viewerId)
-  }, async (capability, generation) => {
+  }, async (capability, generation, sessionTransition) => {
     await apiRequestNoContent('/auth/account', {
       method: 'DELETE',
       body: '{}',
       headers: accountViewerHeaders(viewerId),
-      accountViewer: viewerId
+      accountViewer: viewerId,
+      sessionTransition
     });
     try {
-      await logoutBrowserSessionUnlocked(viewerId, capability);
+      await logoutBrowserSessionUnlocked(viewerId, capability, sessionTransition);
     } catch {
       // The deleted identity can no longer authorize requests; clear local state regardless.
     }
+    sessionTransition.assertActive();
     publishAccountSessionChange('account-deleted');
     return captureAccountOperation(viewerId, generation);
   });

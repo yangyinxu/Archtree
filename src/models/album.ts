@@ -1,40 +1,23 @@
-import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
+import { getDb } from '../infrastructure/database';
 import { SimpleDate } from '../models/simpleDate';
-import { withDerivedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { insertPublishedAlbum } from '../repositories/catalog/albumPublicationRepository';
+import { deleteAlbumAndReferences } from '../services/albumLifecycleService';
 import {
     AlbumLifecycleStatus,
     AlbumReferenceUnavailableError,
     readyAlbumLifecycleFilter
 } from '../services/albumReferenceFenceService';
-import { withReadyAudioTrackReferences } from '../services/audioTrackReferenceFenceService';
-import { deleteAlbumAndReferences } from '../services/albumLifecycleService';
-import { touchActiveAccount } from '../services/accountReferenceFenceService';
-import {
-    assignReadyAudioTracksToNewAlbum,
-    replaceReadyAlbumAudioTracks
-} from '../services/albumTrackLinkService';
-import {
-    type AttributionStatus,
-    type CatalogCredit,
-    normalizeCatalogCredits,
-    validateAttribution
-} from './catalogCredit';
-import { touchReadyArtistReferences } from '../services/artistReferenceFenceService';
-import { touchReadyOrganizationReferences } from '../services/organizationReferenceFenceService';
-import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
+import { replaceReadyAlbumAudioTracks } from '../services/albumTrackLinkService';
+import { withDerivedCoverArtUrl } from '../utils/coverArt';
+import { escapeRegex } from '../utils/search';
+import type { AttributionStatus, CatalogCredit } from './catalogCredit';
+export {
+    AlbumCreationOutcomeUnknownError,
+    confirmAlbumCreationAfterWriteError
+} from '../repositories/catalog/albumPublicationRepository';
 
-const albumCreationWriteMayHaveCommitted = (error: any) =>
-    error?.hasErrorLabel?.('UnknownTransactionCommitResult') === true
-    || [
-        'MongoNetworkError',
-        'MongoNetworkTimeoutError',
-        'MongoPoolClearedError',
-        'MongoServerSelectionError',
-        'MongoTimeoutError'
-    ].includes(String(error?.name ?? ''));
-
+/** Catalog Album record with compatibility persistence entry points. */
 export class Album {
     _id?: ObjectId;
     title: string;
@@ -71,45 +54,9 @@ export class Album {
         this.referenceRevision = 0;
     }
 
-    // save an album to the mongodb database
+    /** Compatibility entry point; publication transactions belong to the Catalog repository. */
     async save() {
-        const db = getDb();
-        if (!this._id) this._id = new ObjectId();
-        const albumId = this._id.toHexString();
-        try {
-            return await withReadyAudioTrackReferences(
-                Array.isArray(this.audioTrackIds) ? this.audioTrackIds : [],
-                async (session, audioTrackIds) => {
-                    if (Array.isArray(this.credits)) {
-                        requireCatalogCreditWrites();
-                        this.credits = normalizeCatalogCredits(this.credits);
-                        this.attributionStatus = validateAttribution(
-                            this.attributionStatus,
-                            this.credits
-                        );
-                        await touchReadyArtistReferences(
-                            this.credits.filter((credit) => credit.subjectType === 'artist')
-                                .map((credit) => credit.subjectId),
-                            session
-                        );
-                        await touchReadyOrganizationReferences(
-                            this.credits.filter((credit) => credit.subjectType === 'organization')
-                                .map((credit) => credit.subjectId),
-                            session
-                        );
-                    }
-                    this.audioTrackIds = await assignReadyAudioTracksToNewAlbum(
-                        session,
-                        albumId,
-                        audioTrackIds
-                    ) as [string];
-                    await touchActiveAccount(this.createdBy, session);
-                    return db!.collection('albums').insertOne(this, { session });
-                }
-            );
-        } catch (error) {
-            return confirmAlbumCreationAfterWriteError(this, error);
-        }
+        return insertPublishedAlbum(this);
     }
 
     // fetch an album by its id
@@ -243,54 +190,3 @@ export class Album {
         return { ...result, deletedCount: result.deleted ? 1 : 0 };
     }
 }
-
-export class AlbumCreationOutcomeUnknownError extends Error {
-    readonly statusCode = 503;
-    readonly code = 'album_creation_outcome_unknown';
-    readonly cleanupPending = true;
-    readonly outcomeUnknown = true;
-    readonly cause: unknown;
-
-    constructor(albumId: string, cause: unknown) {
-        super(`Album ${albumId} creation outcome could not be confirmed.`);
-        this.cause = cause;
-    }
-}
-
-/** Recovers a committed insert whose response was lost without publishing a mismatched owner. */
-export const confirmAlbumCreationAfterWriteError = async (
-    album: Pick<Album, '_id' | 'title' | 'coverArtId' | 'createdBy'>,
-    writeError: unknown,
-    findOwner: (albumId: string) => Promise<any | null> = async (albumId) => getDb()!
-        .collection('albums')
-        .findOne({ _id: ObjectId.createFromHexString(albumId) })
-) => {
-    const albumId = album._id?.toHexString();
-    if (!albumId) throw writeError;
-
-    let owner: any | null;
-    try {
-        owner = await findOwner(albumId);
-    } catch (confirmationError) {
-        throw new AlbumCreationOutcomeUnknownError(albumId, {
-            writeError,
-            confirmationError
-        });
-    }
-    if (!owner) {
-        if (albumCreationWriteMayHaveCommitted(writeError)) {
-            throw new AlbumCreationOutcomeUnknownError(albumId, { writeError });
-        }
-        throw writeError;
-    }
-
-    const expectedCoverArtId = String(album.coverArtId ?? '');
-    const actualCoverArtId = String(owner.coverArtId ?? '');
-    if (owner.lifecycleStatus === 'ready'
-        && String(owner.title ?? '') === album.title
-        && String(owner.createdBy ?? '') === album.createdBy
-        && actualCoverArtId === expectedCoverArtId) {
-        return { acknowledged: true, insertedId: album._id };
-    }
-    throw new AlbumCreationOutcomeUnknownError(albumId, { writeError });
-};

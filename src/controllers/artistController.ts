@@ -1,10 +1,11 @@
+import { logCatalogFailure } from './catalogDiagnostics';
+import { publishNewArtist, type UploadedCoverArt } from '../application/catalog/publishNewArtist';
 import { Request, Response, NextFunction } from 'express';
 import { ObjectId } from 'mongodb';
 import { Artist } from '../models/artist';
 import { SimpleDate } from '../models/simpleDate';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import {
-    deleteCoverArt,
     updateCoverArtOwnerAndCleanup,
     uploadCoverArt,
     validateCoverArtFile
@@ -16,55 +17,6 @@ import { deleteArtistAndReferences } from '../services/artistLifecycleService';
 import { replaceArtistAlbums } from '../services/artistAlbumLinkService';
 import { getListenerArtist } from '../services/listenerContentService';
 import { catalogCreditRollout } from '../config/catalogCreditRollout';
-
-type UploadedCoverArt = { imageId: string; coverArtUrl: string };
-
-interface NewArtistPublicationDependencies {
-    saveArtist?: () => Promise<unknown>;
-    deleteUploadedCoverArt?: (imageId: string, artistId: string) => Promise<void>;
-}
-
-/** Publishes a ready Artist only after optional artwork is ready and attached in the insert. */
-export const publishNewArtist = async (
-    artist: Artist,
-    coverArt?: UploadedCoverArt,
-    dependencies: NewArtistPublicationDependencies = {}
-) => {
-    const artistId = artist._id?.toHexString();
-    if (!artistId) throw new Error('A server-generated Artist ID is required before publication.');
-    if (coverArt) {
-        artist.coverArtId = coverArt.imageId;
-        artist.coverArtUrl = coverArt.coverArtUrl;
-    }
-
-    try {
-        return await (dependencies.saveArtist ?? (() => artist.save()))();
-    } catch (error) {
-        if (!coverArt || (error as any)?.outcomeUnknown) throw error;
-        try {
-            if (dependencies.deleteUploadedCoverArt) {
-                await dependencies.deleteUploadedCoverArt(coverArt.imageId, artistId);
-            } else {
-                await deleteCoverArt(coverArt.imageId, {
-                    expectedOwnerType: 'artist',
-                    expectedOwnerId: artistId
-                });
-            }
-        } catch (cleanupError) {
-            throw Object.assign(
-                new Error('Artist creation failed and uploaded cover-art cleanup requires reconciliation.'),
-                {
-                    statusCode: 503,
-                    code: 'artist_creation_cleanup_pending',
-                    cleanupPending: true,
-                    reconciliationRequired: true,
-                    cause: { creationError: error, cleanupError }
-                }
-            );
-        }
-        throw error;
-    }
-};
 
 // Create a new artist via the model and save it to the db
 export const postArtist = async (req: Request, res: Response, next: NextFunction) => {
@@ -200,7 +152,7 @@ export const updateArtist = async (req: Request, res: Response, next: NextFuncti
         }
     );
     if (cleanup.cleanupError) {
-        console.log(`Unable to delete detached artist cover art ${artist.coverArtId}:`, cleanup.cleanupError);
+        logCatalogFailure(res, 'cover_art_cleanup_deferred', cleanup.cleanupError);
     }
     if (!cleanup.updateApplied) {
         return res.status(409).json({
@@ -225,12 +177,11 @@ export const deleteArtist = async (req: Request, res: Response, next: NextFuncti
     }
 
     const artistId = req.params.artistId;
-    const artist = await Artist.findById(artistId);
-    if (!artist) {
+    // A deletion receipt can outlive the Artist, so let the lifecycle service resolve retries.
+    const cleanup = await deleteArtistAndReferences(artistId);
+    if (!cleanup.ownerDeleted && !cleanup.cleanupPending) {
         return res.status(404).json({ message: 'Artist not found.' });
     }
-
-    const cleanup = await deleteArtistAndReferences(artistId);
     if (!cleanup.ownerDeleted) {
         return res.status(409).json({
             message: 'Artist was retained for retry and lifecycle reconciliation.',
@@ -252,10 +203,10 @@ export const getArtistById = async (req: Request, res: Response, next: NextFunct
         ]);
         const detailedArtist = artist && creditDetail ? {
             ...artist,
-            discographyIds: creditDetail.discography.map((album) => album.id),
-            collaborationIds: creditDetail.collaborations.map((album) => album.id),
-            appearsOnIds: creditDetail.appearsOn.map((album) => album.id),
-            creditAlbumIds: creditDetail.creditAlbums.map((album) => album.id)
+            discographyIds: (creditDetail.discography ?? []).map((album) => album.id),
+            collaborationIds: (creditDetail.collaborations ?? []).map((album) => album.id),
+            appearsOnIds: (creditDetail.appearsOn ?? []).map((album) => album.id),
+            creditAlbumIds: (creditDetail.creditAlbums ?? []).map((album) => album.id)
         } : artist;
         return res.status(detailedArtist ? 200 : 404).json({ artist: detailedArtist });
     } catch (error) {

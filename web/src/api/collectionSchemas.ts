@@ -18,9 +18,9 @@ const collectionPageItemSchema = z
     contentId: contentIdSchema,
     order: z.number().int().min(0)
   })
-  .strict();
+  .strip();
 
-/** Strictly validates the page-scoped Grid/List projection before it reaches UI state. */
+/** Validates known fields and reference integrity while discarding additive response fields. */
 export const listenerCollectionPageSchema = z
   .object({
     pageItem: z
@@ -32,18 +32,18 @@ export const listenerCollectionPageSchema = z
         mode: z.literal('manual'),
         contentType: collectionPageContentTypeSchema
       })
-      .strict(),
+      .strip(),
     items: z.array(collectionPageItemSchema).max(100),
     included: z
       .object({
         albums: z.array(albumSummarySchema).max(100),
         audioTracks: z.array(audioTrackSummarySchema).max(100)
       })
-      .strict(),
+      .strip(),
     limit: z.number().int().min(1).max(100),
     nextCursor: z.string().trim().min(1).max(maximumListenerCollectionCursorLength).nullable()
   })
-  .strict()
+  .strip()
   .superRefine((page, context) => {
     if (page.pageItem.presentation === 'grid' && page.pageItem.contentType !== 'album') {
       context.addIssue({

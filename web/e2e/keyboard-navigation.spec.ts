@@ -94,10 +94,9 @@ test('does not intercept playback shortcuts while typing and restores help focus
   await installDeterministicAudio(page);
   await page.setViewportSize({ width: 1_280, height: 800 });
   await page.goto(`/finitude/albums/${catalogIds.album}`);
-  await page.getByRole('main')
-    .locator('header')
-    .getByRole('button', { name: 'Play', exact: true })
-    .click();
+  // Exercise editable-control shortcuts during Audio browsing; Video intentionally
+  // replaces the main workspace and belongs to the separate continuity gate.
+  await page.getByRole('main').getByRole('button', { name: 'Play Night Window' }).click();
 
   const player = page.getByRole('region', { name: 'Now playing' });
   const controls = player.getByRole('group', { name: 'Playback controls' });

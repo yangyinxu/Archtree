@@ -7,25 +7,31 @@
     "web"
   ],
   "scripts": {
+    "doctor": "node scripts/check-runtime.mjs --mongo",
+    "doctor:release": "node scripts/check-runtime.mjs --mongo --linux",
+    "prebuild": "node scripts/check-runtime.mjs",
     "build": "npm run localization:check && npm run build:server && npm run build:web",
     "build:server": "tsc --noEmit",
     "build:web": "npm run build --workspace @archtree/finitude-web",
+    "pretest": "node scripts/check-runtime.mjs",
     "test": "npm run localization:check && npm run test:server && npm run test:web",
-    "test:server": "tsx --test test/**/*.test.ts",
+    "test:server": "node scripts/run-server-tests.mjs unit",
+    "test:server:linux": "node scripts/run-server-tests.mjs linux",
     "test:web": "npm run test --workspace @archtree/finitude-web",
     "test:e2e": "npm run test:e2e --workspace @archtree/finitude-web",
     "test:e2e:chromium": "npm run test:e2e:chromium --workspace @archtree/finitude-web",
-    "test:integration": "tsx --test --test-concurrency=1 test/**/*.integration.ts",
+    "test:integration": "node scripts/run-server-tests.mjs integration",
+    "profile:search": "node scripts/check-runtime.mjs --mongo && tsx scripts/profile-catalog-search.ts",
     "test:media-load": "node scripts/media-range-load.mjs",
     "localization:check": "node scripts/build-localizations.mjs --check",
     "localization:generate": "node scripts/build-localizations.mjs",
     "localization:sync-native": "node scripts/sync-native-localizations.mjs",
     "migrate:catalog-credits": "tsx scripts/migrate-catalog-credits.ts",
-    "stage:eb-artifact": "node scripts/stage-eb-artifact.mjs",
-    "start": "NODE_ENV=production tsx src/app.ts",
-    "dev": "NODE_ENV=develop tsx src/app.ts",
+    "stage:eb-artifact": "node scripts/check-runtime.mjs --linux && node scripts/stage-eb-artifact.mjs",
+    "start": "cross-env NODE_ENV=production tsx src/app.ts",
+    "dev": "cross-env NODE_ENV=develop tsx src/app.ts",
     "dev:web": "npm run dev --workspace @archtree/finitude-web",
-    "dev:auth-rotation": "NODE_ENV=develop ACCESS_TOKEN_SECONDS=5 tsx src/app.ts"
+    "dev:auth-rotation": "cross-env NODE_ENV=develop ACCESS_TOKEN_SECONDS=5 tsx src/app.ts"
   },
   "author": "Yangyin Xu",
   "license": "ISC",
@@ -37,6 +43,7 @@
     "@simplewebauthn/server": "^13.3.2",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.0",
+    "cross-env": "10.1.0",
     "dotenv": "^16.0.3",
     "express": "^4.19.2",
     "express-validator": "^7.3.2",
@@ -60,5 +67,8 @@
   },
   "engines": {
     "node": "24.x"
+  },
+  "overrides": {
+    "qs": "6.16.0"
   }
 }

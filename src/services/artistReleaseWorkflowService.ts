@@ -7,8 +7,8 @@ import { Artist } from '../models/artist';
 import { Carousel, ArtistCarouselSort } from '../models/carousel';
 import { Page, PageSlug } from '../models/page';
 import { SimpleDate } from '../models/simpleDate';
-import { publishNewAlbum } from '../controllers/albumController';
-import { publishNewArtist } from '../controllers/artistController';
+import { publishNewAlbum } from '../application/catalog/publishNewAlbum';
+import { publishNewArtist } from '../application/catalog/publishNewArtist';
 import {
     uploadCoverArt,
     validateCoverArtFile

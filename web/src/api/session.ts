@@ -18,6 +18,7 @@ import {
   type LoginInput
 } from './schemas';
 import { publishAccountSessionChange } from './accountSessionEvents';
+import type { BrowserSessionTransitionScope } from './sessionTransition';
 
 export const browserSessionQueryKey = ['browser-session'] as const;
 export const browserSessionResolvingQueryKey = ['browser-session', 'resolving'] as const;
@@ -89,7 +90,8 @@ export const loginBrowserSession = async (input: LoginInput) => {
 /** Clears cookies inside an already-held transition without acquiring a nested lock. */
 export const logoutBrowserSessionUnlocked = (
   viewerId: string,
-  transitionCapability?: 'web-locks-v1'
+  transitionCapability?: 'web-locks-v1',
+  sessionTransition?: BrowserSessionTransitionScope
 ) => apiRequestNoContent(
   '/auth/browser/logout',
   {
@@ -99,6 +101,7 @@ export const logoutBrowserSessionUnlocked = (
       ? { 'X-Finitude-Session-Transition': transitionCapability }
       : undefined,
     accountViewer: viewerId,
+    sessionTransition,
     retryAuthentication: false
   }
 );
