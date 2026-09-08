@@ -1,5 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import type { Server, ServerResponse } from 'node:http';
+import { onResponseComplete } from '../infrastructure/responseCompletion';
 
 const requestLifecycles = new WeakMap<Request, ServerLifecycle>();
 
@@ -34,17 +35,10 @@ const observeResponse = (req: Request, res: ServerResponse) => {
   const state = workState(req);
   if (!state.responseObserved) {
     state.responseObserved = true;
-    const finished = () => {
+    onResponseComplete(res, () => {
       state.responseFinished = true;
-      res.off('finish', finished);
-      res.off('close', finished);
       notifyRequestCompletion(state);
-    };
-    if (res.writableFinished || res.destroyed) finished();
-    else {
-      res.once('finish', finished);
-      res.once('close', finished);
-    }
+    });
   }
   return state;
 };
@@ -114,13 +108,9 @@ export class ServerLifecycle {
       requestLifecycles.set(_req, this);
       observeResponse(_req, res);
       this.responses.add(res);
-      const release = () => {
+      onResponseComplete(res, () => {
         this.responses.delete(res);
-        res.off('close', release);
-        res.off('finish', release);
-      };
-      res.once('finish', release);
-      res.once('close', release);
+      });
       return next();
     }
     res.setHeader('Connection', 'close');

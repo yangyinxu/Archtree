@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Request, RequestHandler } from 'express';
+import { onResponseComplete } from '../infrastructure/responseCompletion';
 
 type RequestArea = 'auth' | 'content' | 'listener' | 'media' | 'other';
 const areas: RequestArea[] = ['auth', 'content', 'listener', 'media', 'other'];
@@ -29,12 +30,7 @@ export const createRequestDiagnostics = () => {
     const counter = counters[areaFor(req)];
     const startedAt = performance.now();
     counter.active += 1;
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      res.off('finish', finish);
-      res.off('close', finish);
+    onResponseComplete(res, () => {
       counter.active -= 1;
       counter.completed += 1;
       if (!res.writableFinished) counter.aborted += 1;
@@ -42,9 +38,7 @@ export const createRequestDiagnostics = () => {
       const duration = performance.now() - startedAt;
       const bucket = durationBoundsMs.findIndex(bound => duration <= bound);
       counter.durationBuckets[bucket < 0 ? durationBoundsMs.length : bucket] += 1;
-    };
-    res.once('finish', finish);
-    res.once('close', finish);
+    });
     next();
   };
   return {
