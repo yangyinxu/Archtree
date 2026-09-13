@@ -60,7 +60,8 @@ const parseRange = (header: string, size: number) => {
   return { start, end: Math.min(requestedEnd, size - 1) };
 };
 
-const fulfillMedia = async (
+/** Serves real browser fixtures with the same byte-range semantics required for seeking. */
+export const fulfillMedia = async (
   route: Route,
   media: Buffer,
   contentType: 'audio/wav' | 'video/webm'

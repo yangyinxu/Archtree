@@ -1,4 +1,5 @@
 import type { MediaSessionArtworkSource } from '../artwork/artworkUrls';
+import type { createRoomPlaybackController, RoomPlaybackAttachment, RoomPlaybackOptions } from './roomPlayback';
 
 /** Canonical metadata retained for every item in the one shared playback queue. */
 export interface PlayerQueueItem {
@@ -78,7 +79,9 @@ export interface PlayerAudio {
   readonly paused: boolean;
   readonly ended: boolean;
   readonly error: { code: number } | null;
-  readonly playbackRate: number;
+  playbackRate: number;
+  readonly readyState?: number;
+  readonly seeking?: boolean;
   preload?: string;
   poster?: string;
   playsInline?: boolean;
@@ -133,6 +136,8 @@ export interface CreatePlayerStoreOptions {
   initialRepeatMode?: PlayerRepeatMode;
   random?: () => number;
   onPlaybackError?: (event: PlayerPlaybackErrorEvent) => void;
+  /** Synthetic harness injection keeps room implementation outside the production bundle. */
+  roomPlaybackProbeFactory?: typeof createRoomPlaybackController;
 }
 
 /** Public commands intentionally contain no routing or activity-reporting dependency. */
@@ -164,6 +169,8 @@ export interface PlayerStore {
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
   toggleMute(): void;
+  /** Requires explicit test-harness opt-in; it creates neither a room nor a transport. */
+  attachRoomPlayback(options: RoomPlaybackOptions): RoomPlaybackAttachment;
   /** Attaches the one shared video element to a presentation-owned surface. */
   attachMediaElement(container: HTMLElement): () => void;
   destroy(): void;

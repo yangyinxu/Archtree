@@ -16,6 +16,31 @@ Implementation boundaries, API compatibility, runtime reliability, browser sessi
 recovery, and catalog reconciliation are documented in
 [`docs/architecture.md`](docs/architecture.md).
 
+## Shared playback feasibility
+
+The shared-playback work currently contains a Stage 1 laboratory prototype,
+not public room endpoints. `src/contracts/roomPlaybackPrototype.ts` validates
+synthetic playback inputs and `src/application/rooms/roomPlaybackPrototype.ts`
+models version-fenced commands and bounded in-memory receipts. It does not
+implement persisted rooms, authentication, signed mutation scopes, WebSocket
+delivery, media readiness or account cleanup. The application mounts no route
+for it. Do not substitute this authority for the later transactional repository.
+
+`contracts/social/prototype-v1/playback-trace.json` is the common transport trace
+for the Web, iOS and Android feasibility adapters. Its schema is provisional and
+must not be advertised as a released social-v1 API. Run the focused arbitration
+checks with `node --import tsx --test test/roomPlaybackPrototype.test.ts`; they
+also run in `npm test`. The staged scope and remaining target-environment gates
+are tracked in [the social implementation plan](docs/plans/social-and-shared-playback-plan.md).
+
+The Web spike injects `createRoomPlaybackController` into the existing player
+only from tests. Its factory is absent from the production player configuration
+and the controller is excluded from the production bundle. After `npm run build`,
+run its real-media and ordinary-player checks with
+`npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts playback-continuity.spec.ts`.
+These synthetic tests do not prove authenticated room delivery, physical output
+alignment, native fullscreen control provenance or background room participation.
+
 ## Code Documentation
 
 Classes, types, and functions should have concise comments describing their

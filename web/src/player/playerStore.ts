@@ -13,6 +13,7 @@ import { enqueueListenerTelemetry } from '../telemetry/client';
 import { classifyListenerRoute } from '../telemetry/routeClassifier';
 import { createMediaSessionAdapter } from './mediaSessionAdapter';
 import { canonicalOrder, copyQueue, currentCycleHistory, queueLaunchOrder, shuffledOrder } from './queueOrder';
+import type { createRoomPlaybackController } from './roomPlayback';
 
 const DEFAULT_SKIP_SECONDS = 10;
 const PREVIOUS_RESTART_SECONDS = 3;
@@ -141,6 +142,7 @@ export const createPlayerStore = (
   const mediaSurfaceHosts: HTMLElement[] = [];
   let mediaParkingHost: HTMLElement | null = null;
   let destroyed = false;
+  let room: ReturnType<typeof createRoomPlaybackController> | null = null;
 
   const recordNavigation = (index: number, direction: 'previous' | 'next') => {
     const adjacentHistoryPosition = direction === 'previous'
@@ -320,12 +322,20 @@ export const createPlayerStore = (
           error: playerError(code)
         });
       },
-      ended: () => { void handleEnded(target); }
+      ended: () => { void handleEnded(target); },
+      seeked: () => {
+        if (!snapshot.currentItem || destroyed) return;
+        updateSnapshot({ currentTime: readAudioTime(target) });
+      }
     };
 
     Object.entries(handlers).forEach(([event, handler]) => {
-      boundAudioListeners.set(event, handler);
-      target.addEventListener(event, handler);
+      const guarded = () => {
+        if (room && !room.observe(event, target)) return;
+        handler();
+      };
+      boundAudioListeners.set(event, guarded);
+      target.addEventListener(event, guarded);
     });
   };
 
@@ -376,7 +386,7 @@ export const createPlayerStore = (
       if (destroyed
         || attempt !== playAttemptGeneration
         || expectedSourceGeneration !== sourceGeneration) return;
-      updateSnapshot({ status: 'playing', isBuffering: false, error: null });
+      if (!room) updateSnapshot({ status: 'playing', isBuffering: false, error: null });
     } catch (failure) {
       if (destroyed
         || attempt !== playAttemptGeneration
@@ -511,6 +521,10 @@ export const createPlayerStore = (
 
   async function handleEnded(target: PlayerAudio): Promise<void> {
     if (!snapshot.currentItem || destroyed) return;
+    if (room) {
+      updateSnapshot({ status: 'ended', isBuffering: false, currentTime: readAudioTime(target) });
+      return;
+    }
     const endedGeneration = sourceGeneration;
     const endedItem = snapshot.currentItem;
     if (snapshot.repeatMode === 'one'
@@ -571,6 +585,7 @@ export const createPlayerStore = (
     launchOptions = {}
   ) => {
     if (destroyed) return;
+    if (room) throw new Error('Leave room playback before launching a local queue.');
     if (queue.length === 0) {
       clearQueue();
       return;
@@ -602,6 +617,31 @@ export const createPlayerStore = (
     );
   };
 
+  /** These media effects are shared by local transport and confirmed room application. */
+  const pauseMedia = () => {
+    playAttemptGeneration += 1;
+    try { audio?.pause(); } catch { /* A browser shim cannot prevent local suspension. */ }
+    if (snapshot.currentItem) updateSnapshot({ status: 'paused', isBuffering: false });
+  };
+
+  const seekMedia = (position: number) => {
+    if (destroyed || !audio || !snapshot.currentItem || !Number.isFinite(position)) return false;
+    const upperBound = snapshot.duration > 0 ? snapshot.duration : Number.MAX_SAFE_INTEGER;
+    try {
+      audio.currentTime = clamp(position, 0, upperBound);
+      updateSnapshot({ currentTime: audio.currentTime });
+      return true;
+    } catch { return false; }
+  };
+
+  const updateRoomQueue = (queue: readonly PlayerQueueItem[], index: number) => {
+    playOrder = canonicalOrder(queue.length);
+    playOrderPosition = index;
+    actualHistory = [index];
+    actualHistoryPosition = 0;
+    updateSnapshot({ queue, currentIndex: index, shuffleEnabled: false, repeatMode: 'off' });
+  };
+
   const store: PlayerStore = {
     getSnapshot: () => snapshot,
     getServerSnapshot: () => snapshot,
@@ -614,6 +654,7 @@ export const createPlayerStore = (
     launchAlbumQueue: launchQueue,
     launchStandalone: async (item, launchOptions = {}) => {
       if (destroyed) return;
+      if (room) throw new Error('Leave room playback before launching a local queue.');
       const ownedQueue = copyQueue([item]);
       playOrder = [0];
       playOrderPosition = 0;
@@ -632,6 +673,7 @@ export const createPlayerStore = (
     },
     play: async () => {
       if (destroyed || !snapshot.currentItem) return;
+      if (room) { room.intent({ type: 'play' }); return; }
       const target = ensureAudio();
       if (!target) return;
       if (snapshot.status === 'playing' && !target.paused) return;
@@ -663,27 +705,18 @@ export const createPlayerStore = (
     },
     pause: () => {
       if (destroyed || !snapshot.currentItem) return;
+      if (room) { room.intent({ type: 'pause' }); return; }
       if (snapshot.status === 'error' || snapshot.status === 'ended') return;
-      playAttemptGeneration += 1;
-      try {
-        audio?.pause();
-      } catch {
-        // The visible state can still pause even if a browser audio shim rejects the call.
-      }
-      updateSnapshot({ status: 'paused', isBuffering: false });
+      pauseMedia();
     },
-    previous: () => movePrevious(),
-    next: () => moveNext(),
+    previous: async () => room ? room.intent({ type: 'previous' }) : movePrevious(),
+    next: async () => room ? room.intent({ type: 'next' }) : moveNext(),
     seek: (time) => {
       if (destroyed || !audio || !snapshot.currentItem || !Number.isFinite(time)) return;
       const upperBound = snapshot.duration > 0 ? snapshot.duration : Number.MAX_SAFE_INTEGER;
       const position = clamp(time, 0, upperBound);
-      try {
-        audio.currentTime = position;
-        updateSnapshot({ currentTime: position });
-      } catch {
-        // Some streams reject seeking until metadata arrives; later attempts remain valid.
-      }
+      if (room) { room.intent({ type: 'seek', positionSeconds: position }); return; }
+      seekMedia(position);
     },
     skipBackward: (seconds = DEFAULT_SKIP_SECONDS) => {
       if (!Number.isFinite(seconds)) return;
@@ -694,7 +727,7 @@ export const createPlayerStore = (
       store.seek(snapshot.currentTime + Math.max(0, seconds));
     },
     toggleShuffle: () => {
-      if (destroyed) return;
+      if (destroyed || room) return;
       const shuffleEnabled = !snapshot.shuffleEnabled;
 
       if (snapshot.currentItem) {
@@ -714,7 +747,7 @@ export const createPlayerStore = (
       updateSnapshot({ shuffleEnabled });
     },
     cycleRepeatMode: () => {
-      if (destroyed) return;
+      if (destroyed || room) return;
       const repeatMode: PlayerRepeatMode = snapshot.repeatMode === 'off'
         ? 'all'
         : snapshot.repeatMode === 'all' ? 'one' : 'off';
@@ -744,6 +777,28 @@ export const createPlayerStore = (
       updateSnapshot({ muted });
     },
     toggleMute: () => store.setMuted(!snapshot.muted),
+    attachRoomPlayback: (roomOptions) => {
+      if (!options.roomPlaybackProbeFactory || destroyed) {
+        throw new Error('Room playback is available only in the opt-in feasibility harness.');
+      }
+      room?.attachment.detach();
+      pauseMedia();
+      clearQueue();
+      room = options.roomPlaybackProbeFactory({
+        media: () => audio,
+        sourceGeneration: () => sourceGeneration,
+        install: async (queue, index) => {
+          updateRoomQueue(queue, index);
+          await activateIndex(index, false, index);
+        },
+        updateQueue: updateRoomQueue,
+        play: () => attemptPlay(sourceGeneration),
+        pause: pauseMedia,
+        seek: seekMedia,
+        detach: () => { room = null; clearQueue(); }
+      }, roomOptions);
+      return room.attachment;
+    },
     attachMediaElement: (container) => {
       if (destroyed) return () => undefined;
       if (!mediaSurfaceHosts.includes(container)) mediaSurfaceHosts.push(container);
@@ -759,6 +814,7 @@ export const createPlayerStore = (
     },
     destroy: () => {
       if (destroyed) return;
+      room?.attachment.detach();
       destroyed = true;
       sourceGeneration += 1;
       playAttemptGeneration += 1;

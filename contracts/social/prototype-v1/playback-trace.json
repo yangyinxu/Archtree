@@ -1,0 +1,153 @@
+{
+  "fixtureVersion": 1,
+  "purpose": "Synthetic Stage 1 transport trace; not a released social API contract. Adapters resolve each fabricated mediaTrackId to local synthetic media.",
+  "snapshots": [
+    {
+      "name": "initial",
+      "snapshot": {
+        "protocolVersion": 1,
+        "roomId": "synthetic-room",
+        "epoch": 1,
+        "revision": 1,
+        "controlGeneration": 1,
+        "queueRevision": 1,
+        "playbackGeneration": 41,
+        "entryId": "entry-a",
+        "mediaTrackId": "000000000000000000000001",
+        "mediaRevision": "synthetic-revision-a",
+        "mediaType": "audio",
+        "durationMs": 2000,
+        "positionMs": 0,
+        "anchorServerTimeMs": 10000,
+        "state": "paused"
+      },
+      "expectedDisposition": "applied"
+    },
+    {
+      "name": "next-entry",
+      "snapshot": {
+        "protocolVersion": 1,
+        "roomId": "synthetic-room",
+        "epoch": 1,
+        "revision": 2,
+        "controlGeneration": 1,
+        "queueRevision": 1,
+        "playbackGeneration": 42,
+        "entryId": "entry-b",
+        "mediaTrackId": "000000000000000000000002",
+        "mediaRevision": "synthetic-revision-b",
+        "mediaType": "audio",
+        "durationMs": 2000,
+        "positionMs": 0,
+        "anchorServerTimeMs": 10000,
+        "state": "paused"
+      },
+      "expectedDisposition": "applied"
+    },
+    {
+      "name": "duplicate",
+      "snapshot": {
+        "protocolVersion": 1,
+        "roomId": "synthetic-room",
+        "epoch": 1,
+        "revision": 2,
+        "controlGeneration": 1,
+        "queueRevision": 1,
+        "playbackGeneration": 42,
+        "entryId": "entry-b",
+        "mediaTrackId": "000000000000000000000002",
+        "mediaRevision": "synthetic-revision-b",
+        "mediaType": "audio",
+        "durationMs": 2000,
+        "positionMs": 0,
+        "anchorServerTimeMs": 10000,
+        "state": "paused"
+      },
+      "expectedDisposition": "ignored"
+    },
+    {
+      "name": "membership-only",
+      "snapshot": {
+        "protocolVersion": 1,
+        "roomId": "synthetic-room",
+        "epoch": 1,
+        "revision": 3,
+        "controlGeneration": 1,
+        "queueRevision": 1,
+        "playbackGeneration": 42,
+        "entryId": "entry-b",
+        "mediaTrackId": "000000000000000000000002",
+        "mediaRevision": "synthetic-revision-b",
+        "mediaType": "audio",
+        "durationMs": 2000,
+        "positionMs": 0,
+        "anchorServerTimeMs": 10000,
+        "state": "paused"
+      },
+      "expectedDisposition": "applied"
+    },
+    {
+      "name": "stale",
+      "snapshot": {
+        "protocolVersion": 1,
+        "roomId": "synthetic-room",
+        "epoch": 1,
+        "revision": 1,
+        "controlGeneration": 1,
+        "queueRevision": 1,
+        "playbackGeneration": 41,
+        "entryId": "entry-a",
+        "mediaTrackId": "000000000000000000000001",
+        "mediaRevision": "synthetic-revision-a",
+        "mediaType": "audio",
+        "durationMs": 2000,
+        "positionMs": 0,
+        "anchorServerTimeMs": 10000,
+        "state": "paused"
+      },
+      "expectedDisposition": "ignored"
+    },
+    {
+      "name": "playing",
+      "snapshot": {
+        "protocolVersion": 1,
+        "roomId": "synthetic-room",
+        "epoch": 1,
+        "revision": 4,
+        "controlGeneration": 1,
+        "queueRevision": 1,
+        "playbackGeneration": 43,
+        "entryId": "entry-b",
+        "mediaTrackId": "000000000000000000000002",
+        "mediaRevision": "synthetic-revision-b",
+        "mediaType": "audio",
+        "durationMs": 2000,
+        "positionMs": 0,
+        "anchorServerTimeMs": 10000,
+        "state": "playing"
+      },
+      "expectedDisposition": "applied"
+    },
+    {
+      "name": "seek-paused",
+      "snapshot": {
+        "protocolVersion": 1,
+        "roomId": "synthetic-room",
+        "epoch": 1,
+        "revision": 5,
+        "controlGeneration": 1,
+        "queueRevision": 1,
+        "playbackGeneration": 44,
+        "entryId": "entry-b",
+        "mediaTrackId": "000000000000000000000002",
+        "mediaRevision": "synthetic-revision-b",
+        "mediaType": "audio",
+        "durationMs": 2000,
+        "positionMs": 500,
+        "anchorServerTimeMs": 10000,
+        "state": "paused"
+      },
+      "expectedDisposition": "applied"
+    }
+  ]
+}

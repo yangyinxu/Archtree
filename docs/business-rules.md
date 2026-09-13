@@ -3,6 +3,46 @@
 This document is the shared product-behavior reference for the Archtree backend
 and Finitude clients. Update it whenever an agreed business rule changes.
 
+## Shared Playback Permissions — Planned Feature
+
+These permissions are agreed product requirements for the planned shared-playback
+feature. Production rooms and their controls are not yet available to users.
+They do not change ordinary local playback or existing private Playlist access.
+
+- A room supports Host control and Everyone control. Only its current host can
+  change that mode while the room is open.
+- Host control allows only the host to change shared playback. Everyone control
+  allows each admitted participant, through that account's active playback
+  device, to play, pause, seek, move Previous/Next, or select an existing room
+  queue entry. Other devices observing the room do not gain control.
+- Shared playback permission does not grant room-management permission. Changing
+  the mode, inviting/removing members, editing queue membership/order, sharing a
+  selection into the room, transferring the host role, and ending the room remain
+  host-only operations.
+- Mode changes are server-confirmed and visible to every participant. They apply
+  to subsequent commands; they do not undo an already accepted playback operation
+  or restart the current media. Commands that rely on superseded permission state
+  cannot take effect after a mode change.
+- Volume, mute, and an explicitly device-local pause remain personal controls in
+  either mode. Shared Pause affects the room; a deliberate local pause is not
+  silently undone by another participant's shared playback command.
+- Concurrent Next actions based on the same current queue entry and playback
+  state advance the room at most once. A losing stale action synchronizes to
+  the confirmed state without automatically becoming another Next. A new
+  explicit action after observing the next entry may advance again.
+- Conflicting selections based on the same playback state accept at most one
+  transition. The first server-accepted selection becomes the shared choice;
+  the losing action refreshes without automatically overwriting it. Selecting
+  again after observing the new state is a new explicit action.
+- Applying shared state, retrying an already accepted action, or receiving a
+  resulting player callback does not create a new shared playback action.
+  Automatic advancement and explicit Next cannot both advance the same playback
+  occurrence. These rules apply in both permission modes.
+
+Host departure, reconnection timing, and transfer workflow remain proposed in
+[the social architecture](architecture.md#room-permissions-and-host-management)
+until their behavior is finalized for implementation.
+
 ## Saved Content and Library
 
 - Users can save and unsave Albums and MediaTracks.

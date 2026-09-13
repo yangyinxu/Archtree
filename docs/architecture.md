@@ -3,6 +3,729 @@
 This document describes implementation boundaries and recovery contracts. Product
 behavior remains defined in [business-rules.md](business-rules.md).
 
+## Social and shared playback architecture (proposed)
+
+Design baseline and review: 2026-09-13. This section is a target architecture, not an
+implemented API. The agreed two-mode permission requirement is recorded in
+[business rules](business-rules.md#shared-playback-permissions--planned-feature);
+other defaults and host-departure behavior below remain proposals. Implementation
+stages and unresolved product decisions live in
+[the social implementation plan](plans/social-and-shared-playback-plan.md).
+
+### Existing foundation and compatibility
+
+The repository already supplies Express/Node, transaction-capable MongoDB,
+account/session fences, ready-only catalog projections, and identity-bound S3
+media delivery. `src/server.ts` attaches HTTP handlers but no realtime gateway;
+the current package manifest has no Redis or WebSocket server dependency.
+The initial design keeps one application process and adds explicit modules.
+
+`src/routes/feedRoutes.ts` restricts publishing to administrators. A Feed Post
+author ID is attribution, not a social profile. Playlists are private and
+owner-only; avatar bytes are private. The separate Artist Follow plan describes
+a private catalog subscription, not a person-to-person relationship. None of
+these surfaces becomes social by changing its existing authorization guard.
+
+Audio and Video already share one MediaTrack identity and stream endpoint.
+Web uses `web/src/player/playerStore.ts`; iOS uses `AudioManager.swift` with
+its shared transport and video projection; Android uses `PlaybackController.kt`
+with its app-owned Media3 player. Shared playback adds an orchestration adapter
+to those owners. It does not create another media player. Local playback remains
+the default mode for clients that do not adopt the new versioned protocol.
+The initial review found that Web's transport exposed playback rate as read-only,
+iOS lacked scheduled-start/rate control, and Android connected MediaSession
+directly to its ExoPlayer and installed an automatically advancing queue. Stage 1
+adds isolated feasibility adapters at those seams; this does not enable room
+admission or establish production synchronization guarantees. Complete the
+three-client evidence and capability fallbacks before freezing the protocol.
+
+### Implemented feasibility boundary
+
+`src/contracts/roomPlaybackPrototype.ts` validates the provisional synthetic
+snapshot/command shape. `src/application/rooms/roomPlaybackPrototype.ts` implements
+a pure version-fenced transition function and a bounded in-memory authority for
+tests. Competing commands consume the same playback generation once; receipts
+deduplicate identical intent without returning historical room snapshots. The
+prototype models both permission modes and control-generation fencing.
+
+There is no production route, authentication boundary, signed mutation scope,
+database transaction, outbox, authority lease or preparation coordinator in this
+prototype. In-memory admission demonstrates deterministic arbitration, not
+durability or distributed concurrency safety. The later repository must preserve
+the original command preconditions across transaction retries.
+
+`contracts/social/prototype-v1/playback-trace.json` is the exact shared synthetic
+corpus for backend and three-client tests. Its duplicate, stale, membership-only,
+playing and seek frames exercise the existing player through opt-in adapters.
+Client adapter types are local normalized inputs, not a released wire protocol.
+The active plan records platform checks and remaining physical-device, clock,
+media-lifecycle and background-execution gates.
+
+### Scope and module boundaries
+
+Recommended first experience: opt-in social identity, mutually accepted friends,
+block controls, account-targeted invitations, and private rooms for 2–8 people.
+Ship an Audio room first, then enable Video on the same room protocol after
+device evidence. Public discovery, follower counts, user posts, comments, direct
+messages, collaborative Playlists, live broadcasts, and voice/video calls are
+separate later product decisions. A room does not require a public social feed.
+
+```mermaid
+flowchart LR
+  C[Web / iOS / Android] --> H[Authenticated HTTP API]
+  C <--> G[Realtime gateway]
+  H --> S[Social identity / relationships / invitations]
+  H --> R[Room command application]
+  G --> R
+  S --> M[(MongoDB)]
+  R --> M
+  R --> F[After-commit fanout]
+  F --> G
+  M --> O[Outbox dispatcher]
+  O --> G
+  R --> V[Ready catalog resolver]
+  C --> P[Existing media stream endpoint]
+  P --> B[(Existing S3 lifecycle)]
+```
+
+All boxes except clients, MongoDB, and S3 are initially modules in Archtree.
+HTTP owns durable commands and snapshot reads; WebSocket pushes current room
+snapshots, clock samples, and bounded presence/readiness reports. Both invoke
+the same authorization and room application services. v1 has one command ingress,
+not competing HTTP and WebSocket mutation implementations. Reconsider WebSocket
+commands only if measured HTTP overhead matters; preserve the same command
+envelope and application handler. Audio/video bytes never traverse the gateway.
+
+| Module | Responsibility | Boundary |
+| --- | --- | --- |
+| Social identity | Explicit social alias and discoverability, allowlisted viewer-dependent projection | Never project the raw User model, email, private avatar, saves, or activity |
+| Relationships | Requests, accept/remove, bilateral block checks | Person relationships remain separate from private Artist Follow |
+| Invitations | Recipient-bound, expiring, revocable room admission | Knowing a room ID or invite ID grants no access |
+| Rooms | Membership, host role, queue, authoritative timeline, revision | Room roles grant no catalog/admin rights |
+| Realtime | Authorized delivery, reconnect, ephemeral connection state | Socket connection is neither durable membership nor proof of playback |
+| Notifications | Durable in-app invitation outcomes and read state | No email/push dependency in v1; recheck access when opening |
+| Safety | Block, host removal, invitation throttles, operational abuse handling | Applies to HTTP, subscriptions, replay, notifications, and admission |
+| Player adapter | Translate room state into existing transport operations | System controls and queue advancement go through the same mode boundary |
+
+Suggested code seams are `src/contracts/socialV1.ts`, `src/application/social/`,
+`src/application/rooms/`, `src/repositories/social/`, and `src/realtime/`.
+These are target seams; only the isolated room arbitration prototype exists so
+far. Transport adapters must not contain independent business rules.
+
+### Identity, relationships, and access
+
+Use a separate opt-in social profile with a new opaque social ID mapped internally
+to the existing account. Start with a listener-chosen alias and generated icon.
+Do not derive social initials from email or expose the existing private avatar.
+Exact social-handle lookup is opt-in, authenticated, bounded, and rate-limited;
+it reveals only social ID, alias, and generated icon, even to a non-friend. This
+minimal discovery card is distinct from profile access granted by friendship or
+active room membership. Pending requests have their own allowlisted alias-card
+projection; sending a request cannot unlock additional recipient fields. Do not search registration
+identifiers or implement email/contact discovery. Account IDs remain internal;
+client member/relationship references use social IDs and membership IDs.
+
+Turning discoverability off prevents new lookup but preserves existing friends.
+Deactivating the social profile cancels requests/invitations, removes friendships,
+leaves or ends rooms, and revokes social subscriptions before hiding the profile.
+Retain owner-private blocks until explicit unblock or account deletion; reactivation
+does not restore friends, invitations, or membership. Rename, deactivation, and
+deletion must define handle reservation/reuse in Stage 1 so cached handle text
+can never substitute for the immutable social ID when accepting an invitation.
+
+Recommended relationship state machine: `none -> pending -> accepted -> none`.
+Decline/cancel removes pending access. Crossing requests do not auto-accept;
+acceptance must be explicit. One normalized unordered account pair is unique;
+each party's directional block state is independent. Unblock restores no prior
+request, friendship, invitation, or membership. Blocking atomically cancels
+pending requests/invitations, removes friendship, and denies future interaction.
+
+For the small-room v1, any blocked pair is forbidden from co-membership. Reject
+admission without revealing which member blocked whom. If members block while
+already together, remove the blocked member when the blocker hosts the room;
+otherwise remove the blocker, including when the blocked person is host. Apply
+the room change in the same serialized operation as the block, and close affected
+subscriptions. This is a proposed policy requiring product acceptance.
+
+An invitation targets one account and one room, expires after a proposed 24 hours,
+and is consumed atomically with admission. Accept checks active account, current
+friendship with inviter, inviter's invitation permission, blocks against every
+member, room state, capacity, and expiry. Replayed acceptance returns the original
+result status; any private projection is freshly authorized. Removed membership
+is never resurrected by replay. The room host invites in v1. Friendship removal
+revokes unused invitations but does not silently end
+existing membership; explicit leave, kick, block, or room end does that.
+Invitation previews expose only the inviter's consented discovery card, expiry,
+and invitation status; membership lists, queue and current media require admission.
+
+Proposed limits: 500 friends, 50 pending incoming/outgoing requests per account,
+20 outstanding invitations per host, one joined active room per account, eight
+members per room, and 100 queue entries. Enforce limits transactionally; revise
+them only with measured capacity and UX evidence. Apply both sender and recipient
+abuse controls so one account cannot flood another through repeated operations.
+
+### Room permissions and host management
+
+Rooms support `hostOnly` and `everyone`; the proposed creation default is
+`hostOnly`. Only the current host can change mode, and the server-confirmed mode
+is visible to every participant. The setting applies to shared transport, not
+room administration:
+
+| Action | Host control | Everyone control |
+| --- | --- | --- |
+| Shared Play/Pause/seek/Previous/Next/select existing queue entry | Host's active controller | Every admitted participant's active controller |
+| Change mode, invite/kick, add/remove/reorder/share queue items, transfer host, end room | Host only | Host only |
+| Volume, mute, explicit Pause on this device, local resync, leave | Each participant for themselves | Each participant for themselves |
+| Observe from a secondary device | Read-only | Read-only |
+
+Persist `playbackControlMode` and a monotonic `controlGeneration`. A real mode
+change or host transfer increments that generation and room revision. Commands
+check both the expected control generation and current role/mode in the same
+transaction as the playback mutation. Concurrent controls and a mode change
+commit in a definite order: a previously committed action remains valid, while
+a later stale command is rejected without automatic replay. Toggling back to
+Everyone never revives an old command. A same-mode no-op does not bump versions.
+All members' seek gestures submit only the final position on release; simultaneous
+commands based on one playback generation yield one winner and explicit stale
+results, not repeated automatic seeks. Retain per-member and per-room rate bounds.
+
+Changing mode alone preserves the active timeline and an already accepted
+preparation. Server completion of that recorded intent remains fenced to its
+preparation/playback identity; it is not permission to admit another stale member
+command. Pending controls are cleared when permissions change. Shared controls,
+system controls and fullscreen controls must show the same effective permission.
+Explicit local pause remains a separate action in both modes and requires local
+resume/resync before that device participates again.
+
+The proposed host exit UI has two distinct actions:
+
+- **Transfer and leave:** choose a current participant with a live controller;
+  that participant explicitly accepts a short-lived offer. Atomically install
+  the new host and remove the old host's membership/participation slot. A rejected,
+  expired or failed transfer does not silently remove the old host or close the
+  room. A remaining lone member may become host; no second guest is required.
+- **End room for everyone:** close the room and detach every member. When no
+  eligible recipient exists, this is the available host-exit action. A plain
+  host-leave API cannot disguise this consequence as a guest leave.
+
+An offer is bound to the current host/control generation, target membership and
+controller generations, proposed leave-after-transfer action and server expiry
+(initially 30 seconds). Cancel/replace offers explicitly; acceptance rechecks
+host authority, target presence/session, blocks, account state and room state.
+Removal, rejoin, mode change or controller takeover invalidates a stale offer.
+Uncertain acceptance uses its original mutation scope/command ID for outcome
+resolution. A competing End room is serialized with acceptance and cannot close
+a room after the sender has lost its host role.
+
+Successful transfer preserves playback mode, queue and an already running media
+timeline, cancels old-host invitations, and broadcasts the new host. If preparation
+is still pending, cancel it under a new playback generation and pause; the new
+host explicitly resumes with a fresh readiness round. The previous host never
+regains the role merely by reconnecting. There is no automatic host promotion in
+v1; absence handling below applies equally to both permission modes.
+
+### Persistence and atomic boundaries
+
+| Proposed collection | Main data and required constraints |
+| --- | --- |
+| `socialProfiles` | Unique account ID, unique normalized social handle, separate unique social ID, visibility revision |
+| `socialRelationships` | Unique canonical pair, request initiator/status, directional blocks, revision; indexes for either participant |
+| `socialInvitations` | One unique room-recipient row, invitation generation, inviter, logical expiry/state; reissue advances generation and invalidates prior acceptance |
+| `socialRooms` | Host, playback control mode/generation, optional transfer offer, bounded memberships/queue, timeline/preparation, authority epoch, room/queue/playback versions, controller generations, host-absence deadline/suspension, expiry |
+| `socialRoomParticipation` | Unique account ID pointing to active room; updated atomically with membership to enforce one-room limit |
+| `socialMutations` | Unique actor/mutation-scope/command ID, operation and canonical request digest, result status, retention deadline |
+| `socialOutbox` | Unique aggregate ID/epoch/revision/event kind; invalidation or notification reference, delivery attempt state; no retained room snapshot |
+| `socialNotifications` | Unique recipient/event ID, allowlisted invitation reference, read state, expiry |
+| `socialRealtimeTickets` | Unique hashed single-use ticket, account/session binding, consumed state, logical expiry |
+| `socialAuthority` | One deployment-wide v1 room-writer lease, monotonic fencing epoch, owner nonce and lease deadline |
+
+Keep small room membership and queue state in one bounded aggregate. Do not embed
+unbounded relationships, rooms, or notifications into `users`. Create and verify
+required unique indexes through the existing additive index catalog before flags
+can enable writes. TTL indexes reclaim expired data but never decide access;
+every request checks logical expiry itself. One room-recipient invitation row
+avoids a time-dependent partial unique index, which the current required-index
+verifier would reject. Old invitation generations survive only in bounded receipts.
+
+Commands fence the active account, relevant relationships/catalog references, and
+applicable room versions, then commit state + idempotency receipt + outbox record
+in one MongoDB transaction. Block/admission races must write the same relationship
+and room fences, including initially absent relationship pairs; snapshot reads
+alone cannot prevent write skew. Use deterministic fence ordering and bounded
+transaction retries. Only committed state is broadcast, outside transaction
+callbacks that the driver may retry.
+Unknown commit outcomes retain the same key for explicit same-intent retry. Key
+reuse with a different body is rejected. Deduplicate before checking a retry's
+now-stale expected revision, but recheck current visibility before returning a
+stored result. Never replay private payloads to a removed member.
+
+Every durable command also carries an immutable server-issued, authenticated mutation
+scope bound to its account and a server-set expiry, initially 24 hours. Its
+signature and expiry are checked on every attempt, even after receipts are gone.
+The scope plus client-generated command ID identifies intent. Expired scopes
+cannot execute; they permit only authorized outcome lookup while a receipt remains.
+Clients must not refresh a scope and silently replay an uncertain old intent as
+new. Retain receipts through scope expiry; bound issuance, command rates and
+outstanding uncertain outcomes. This avoids treating an ancient purged UUID as
+a brand-new mutation. Scope tokens are credentials and must not enter logs/URLs.
+
+Immediately after commit, wake in-process fanout for the affected room. Normal
+delivery does not wait for a polling interval. The durable outbox is the recovery
+path with bounded polling, backoff, claim expiry, and at-least-once processing;
+enqueueing a socket message is not proof that its recipient received it.
+Coalesce room invalidations to the latest committed snapshot. Recheck current
+account/session/membership visibility and project each recipient at send time;
+discard queued projections when their access generation changes. Notification
+workers also recheck access and deduplicate by recipient/event ID.
+
+An acknowledgement confirms durable commit, not playback by everyone. A crash
+between fanout and delivery marking may duplicate delivery; one after commit but
+before fanout is recovered from the outbox. Store no historical room/member
+payload for replay. MongoDB change streams may later wake the dispatcher but
+cannot replace persisted recovery or a current authorized snapshot.
+
+### Room protocol and ordering
+
+Proposed endpoints, all private under `/api/social/v1`:
+
+- `GET/PATCH /me/profile`; exact `GET /profiles?handle=...` lookup.
+- `POST /friend-requests`; explicit accept/decline/cancel; idempotent friend
+  removal and directional block/unblock resources.
+- `POST /rooms`; `GET /rooms/:id`; `POST /rooms/:id/commands` for shared transport
+  under the current mode; host-only mode/queue changes, invitations, kick,
+  transfer offers and end; target-only offer acceptance; and each member's own
+  leave action (with the explicit host-exit semantics above).
+- `POST /invitations/:id/accept`; notification list and read-state mutations.
+- `POST /mutation-scopes`; account-scoped outcome lookup for uncertain commands.
+- `GET /rooms/:id/playback` for a validated, revision-pinned media descriptor.
+- `POST /realtime-tickets`; authenticated bootstrap for `/api/social/v1/realtime`.
+
+Freeze exact methods, errors, bounds, and fixtures in Stage 1 before implementation.
+Durable domain mutations use the scope/command ID above; bounded authenticated
+scope/ticket issuance is bootstrap and does not recursively require a scope.
+Room transport commands carry authority epoch, membership/controller generation,
+expected control generation, expected playback generation and expected current
+queue-entry ID. Relative Previous/Next and queue edits also check the queue
+revision whose order the user observed. Server transactions
+still CAS the aggregate revision, but a heartbeat or unrelated member join does
+not invalidate an authorized participant's Pause intent. Each committed visible state change
+advances room revision. Safety actions such as leave/block/session revocation
+do not require a fresh displayed room revision. Leave/kick/transfer fence exact
+membership incarnation; a delayed kick cannot remove someone who later rejoined.
+Transfer requires consent bound to the proposed host's membership generation.
+Existing listener-v1 DTOs gain no social discriminators.
+
+### Concurrent commands and feedback prevention
+
+Capture the confirmed current entry and playback/control/queue versions at the
+user-action boundary (seek gesture start or button/system-action activation).
+Freeze that command envelope through asynchronous dispatch, retries and conflict
+handling. A MongoDB transaction retry may refresh internal database reads but
+must never substitute newer expected versions or reinterpret Next against a new
+entry. The server conditionally commits the transition with its receipt and
+outbox notice; the first commit wins for that playback generation.
+
+For a queue A, B, C with A current at playback generation 41:
+
+| Request | Server result |
+| --- | --- |
+| Participant 1: Next, expected entry A / generation 41 | Commit B in preparation at generation 42 |
+| Participant 2: Next, expected entry A / generation 41 | Stale conflict, no playback write; resolve current authorized snapshot |
+| Retry participant 1's original scope/command ID | Return its committed outcome status; no new transition |
+| Fresh user action after observing B / generation 42 | May advance to C if all current guards still pass |
+
+Both initial requests have distinct command IDs: idempotency alone cannot merge
+them. The expected-state condition provides the one-winner behavior. A stale
+request receives a controlled conflict such as `409 playback_state_changed`,
+clears its pending UI and adopts current state. It never automatically sends a
+new Next with updated versions. Queue reordering yields the corresponding stale
+queue outcome rather than silently choosing a different successor.
+
+Use two structurally separate client paths:
+
+- `submitUserIntent`: invoked only by an explicit permitted UI/system action;
+  creates one immutable command ID and envelope. One action delivered through
+  multiple app handlers must still create one intent, not two commands.
+- `applyRoomSnapshot`: sets the absolute authoritative entry, source, target
+  position and state on the existing player. It never calls the command-submitting
+  Next/Play/seek handlers. The originator applies its own server snapshot through
+  this same path; ignoring only self-originated messages would not stop peers
+  from echoing each other.
+
+Readiness, progress, seeking/seeked, play/pause, buffering, item-change and ended
+callbacks are observations. They may update local state or send bounded fenced
+readiness/status hints, but never create shared transport commands. Keep source/
+playback/application generations on asynchronous callbacks so late effects of an
+old snapshot cannot affect a newer one. A short synchronous `isApplyingRemote`
+boolean is insufficient because callbacks can arrive after it resets. Where a
+native control exposes only an ambiguous state change, report divergence and
+require explicit resync rather than infer a new user command from that callback.
+
+Repeated equal/older snapshots are no-ops for transport as well as the UI; a new
+membership-only room revision must not reload media or restart playback. Applying
+a newer absolute snapshot may perform necessary bounded local correction but
+cannot produce a network command. A server end timer and a manual Next compete
+on the same playback occurrence; old client ended hints cannot advance the new
+entry. At the end boundary the server resolves the current confirmed queue order,
+and any transaction retry still preserves the timer's original playback identity.
+An optional observed command ID helps resolve pending UI, not authorize replays.
+
+### Room snapshots and controller ownership
+
+Snapshots contain `protocolVersion`, `roomId`, `epoch`, `revision`, `serverTimeMs`,
+`playbackControlMode`, `controlGeneration`, current host membership, host-absence
+deadline/suspension, allowlisted members/roles and membership generations,
+queue revision, ordered
+`queueEntryId`/`mediaTrackId` pairs, and a timeline
+`{playbackGeneration, entryId, mediaRevision, durationMs, state, positionMs, anchorServerTimeMs, rate}`.
+The timeline is null before selection. An active preparation appears in full as
+`{preparationId, playbackGeneration, entryId, mediaRevision, targetPositionMs, deadlineServerTimeMs, cohortMembershipIds}`;
+it is null after cancellation/scheduling. The recipient-private `self` projection
+supplies its membership/controller/access generations and permission/capability
+state. A reconnecting client must be able to construct readiness solely from the
+current snapshot plus its freshly resolved media descriptor, without an earlier
+event. Clients cannot report readiness against a mismatched descriptor generation.
+Only the current host and selected target receive the transfer offer's private
+action projection; a full snapshot does not expose offer credentials to others.
+Queue-entry identity distinguishes repeated playback occurrences. A media
+revision is an opaque identity for the exact ready representation, never an S3
+key. A distinct social-v1 playback descriptor supplies that revision, validated
+numeric duration/seekability, media kind, and a version-pinned public stream URL;
+old public listener DTOs and legacy streaming requests keep their contract.
+
+v1 sends one complete room snapshot per state update, with a proposed 64 KiB
+encoded cap enforced alongside the eight-member/100-entry bounds. It does not
+send fragmented deltas or replay historical snapshots. Queue entries contain
+bounded IDs/state; public artwork/titles load separately. Coalesced snapshots
+may skip revisions because they are complete. Clients use one reducer for both
+HTTP and WebSocket responses, ignoring older/equal revisions within an epoch.
+After an acknowledged subscription, buffer bounded snapshots while fetching the
+initial HTTP snapshot, then apply only newer states. Server-issued monotonically
+increasing authority epochs and a local connection generation prevent old HTTP
+responses or sockets from restoring a retired timeline. On a newer epoch, pause
+and rebootstrap through the current authorized subscription before applying it.
+An unsupported protocol/required capability produces an explicit unavailable
+state and detaches room control; repeated snapshot fetches cannot fix it.
+
+Presence/readiness reports use their own sequence and membership/controller/
+preparation fences; heartbeats neither advance durable room revision nor write
+per-second progress to MongoDB. Profile/alias changes that affect a room snapshot
+advance its room revision through a room invalidation transaction. Heartbeat
+responses include current durable revision to expose a missed final update. A
+polling fallback can read authorized snapshots at a bounded, backoff-controlled
+rate while the UI reports reconnecting; it does not advertise synchronized
+playback, send readiness, or enable room transport commands. WebSocket recovery
+requires a fresh subscription and readiness handshake.
+
+One active controller device per account/room owns local readiness and the shared
+commands its account is currently allowed to issue; another device may observe.
+Explicit device takeover increments a
+generation so the prior device cannot continue controlling. Multiple tabs do
+not become additional members. Observers do not play the room stream or report
+ready. A server/worker authority lease is separate from the human host role.
+Even a one-instance deployment can overlap old/new processes during restart.
+v1 therefore has one Mongo-backed deployment-wide room authority lease with a
+monotonic epoch allocated only by that authority record; lease expiry uses
+MongoDB/server-authoritative time, never a caller-supplied clock. Only its holder
+admits realtime participation or commits
+transport/preparation/automatic-advance commands. Each such write atomically
+fences the live lease and relevant room generation. Loss of renewal stops that
+authority; takeover pauses recovered rooms before a new epoch can play.
+Non-holders report temporary room unavailability rather than using sticky
+sessions as ownership. Deny-only safety cleanup (block/revoke/delete) remains
+available, atomically invalidating affected membership/playback generations.
+Per-room leases/sharding are a later measured scaling step, not required in v1.
+
+### Synchronization and client behavior
+
+For a playing timeline, compute
+`targetMs = clamp(positionMs + max(0, estimatedServerNowMs - anchorServerTimeMs) * rate, 0, durationMs)`.
+Before a future anchor, the client waits at `positionMs`; paused state never
+advances. Obtain server-clock offset and uncertainty from repeated ping samples,
+favor low-RTT samples, and advance the estimate with the client's monotonic clock.
+Recalibrate after resume/output-route change, track RTT and offset uncertainty,
+and treat an uncertain estimate as unsynchronized. Never trust the host device
+clock as room authority. On process restart/clock discontinuity, pause affected
+rooms, allocate a new epoch through the singleton authority, and resynchronize instead
+of claiming that an uncertain timeline continued exactly.
+
+Permitted Play/select/seek and every entry change, including shared Next and natural
+advancement, enter the same persisted preparation round with a unique
+`preparationId`, playback generation, exact media revision and target position.
+Reports contain those identities plus membership/controller generation and
+an increasing report sequence; stale or wrong-source readiness is ignored.
+Ready means the source is validated, a seek completed, and the transport can
+attempt playback, not merely that a socket exists. Pause/Next/new seek, controller
+takeover, media invalidation, and epoch changes cancel prior preparation/timers.
+
+Freeze the readiness cohort to connected, participating controllers at preparation
+creation; deliberate local pause excludes any participant, including the host.
+Joining/rejoining guests catch up without enlarging that barrier. Removed members
+no longer delay it. The host's controller must be present for administration,
+but its personal player need not be ready for everyone else to play. Schedule
+when the remaining cohort is ready and contains at least one ready participant.
+Three seconds is a proposed preparation ceiling, not a fixed delay: at the
+deadline, start with ready participants or remain paused if none is ready.
+Joining/slow guests do not extend that deadline. A host who pauses only their
+device stays host; other permitted controls and natural advancement remain
+available, and shared commands never silently resume that device.
+Commit the future start anchor before publishing it. Choose its lead from recent
+high-percentile RTT, clock uncertainty, and a scheduling margin; 150–750 ms is
+an initial tuning range, not a guarantee. If required lead exceeds that bound,
+show degraded synchronization instead of claiming readiness. UI feedback can be
+immediate while confirmed playback waits for the anchor. A late recipient seeks
+to the current authoritative target rather than starting from the old position.
+Optional next-entry metadata/media prefetch must fit existing media admission
+budgets and reuse the existing player; v1 does not promise gapless transitions.
+
+Initial tuning candidates: ignore drift below 150 ms. Use a brief 0.98–1.02 rate
+adjustment only where the transport supports it and the estimated time to reach
+tolerance fits a five-second correction deadline; otherwise seek. A 600 ms error
+must not be assigned to a 2% correction and then claimed fixed five seconds later.
+Restore normal rate on correction completion, pause, entry change, or room exit.
+Bound seek retries and add hysteresis; persistent failure stays unsynchronized.
+Unsupported rate correction uses the same bounded seek fallback. Video,
+Bluetooth, AirPlay/Cast, background suspension, and device output latency require
+separate evidence; matching player positions
+does not promise sample-accurate sound from speakers in the same room.
+
+Clients use a `local | room` mode adapter. While in room mode, local natural-end,
+queue navigation, Repeat/Shuffle, media-session controls, fullscreen controls,
+and transport callbacks cannot independently advance or rewrite the room queue.
+The server advances once at the authoritative end boundary; timers and duplicate
+client ended reports are fenced to playback generation, exact media revision,
+and current authority epoch. Ended reports are hints, not permission to shorten
+a track. At the final entry, remain ended; v1 room Repeat/Shuffle are off.
+Authorized participants submit shared commands according to the current control
+mode. Every participant may mute/adjust volume, explicitly pause on their device
+and show unsynchronized state, resync, or leave. A deliberate local pause stays paused until that listener
+explicitly resumes/resynchronizes; later room events cannot override it.
+Platforms whose native controls cannot be intercepted must detect divergence
+and report/resync it rather than imply room authority.
+
+Every playback launch from Home, Search, Album, Library, or Playlist also crosses
+this adapter. Ordinary Play while in a room offers explicit Leave and play locally;
+host Share selection to room is a separate action. No launch helper may silently
+replace the active room queue or accidentally publish a private selection.
+
+Joining explicitly confirms sharing the alias and replacing the active queue
+with the room projection. There remains one executable queue/player; any previous
+local queue is an inert recovery snapshot. Leaving or removal detaches all room
+events and offers an explicit return to local playback without auto-resuming an
+old queue. Increment the local player/account generation before detach so late
+snapshots cannot replace the new local queue. Observer-device logout disconnects
+only that session. Controller-session logout/revocation invalidates its controller
+generation and triggers absence handling; it does not let an observer end the
+room. Explicit Leave and logout-all/deletion remove account-wide participation
+(and end a hosted room unless transfer completed). Clear social caches on every
+local account exit. An already-playing public Web stream may continue locally
+under the existing logout rule, with no remote control or social disclosure.
+
+Room commands never write another member's Recently Played. Proposed activity
+policy: a member's explicit join-and-play or explicit item selection writes that
+MediaTrack once only after actual local playback starts; passive commands,
+resync, reconnect, and automatic advancement write nothing. Deduplicate against
+the local join/play intent and account generation. Promote this exception into
+business rules before enabling it.
+
+Room queues copy selected ready MediaTrack IDs into a distinct room aggregate;
+they expose no source Playlist ID/name/ownership. Sharing a selection requires
+an explicit action. Room queue edits cannot change a private Playlist. v1 uses
+online streams even when native Audio downloads exist, avoiding unverified
+representation mismatches. This is an explicit proposed exception to the current
+business rule that playback always prefers a valid completed local Audio asset;
+promote a room-mode exception with native implementation before enabling it.
+Ordinary local playback retains its existing download preference.
+
+Advertise supported media kinds per controller generation. A Video queue selection
+requires support from every admitted playing controller; an incompatible new
+controller remains an observer until an explicit compatible entry/room is chosen.
+Revalidate on takeover/reconnect and before automatic advancement. Turning off
+Video pauses/ends affected entries explicitly; it never invents an Audio fallback.
+
+### Media correctness before synchronized playback
+
+Current `AudioTrack.duration` and listener-v1 `duration` are display strings,
+not authoritative numeric clocks. Extract and validate finite positive
+`durationMs` and seekability from the exact stored representation, and bind them
+to an opaque server-issued media revision. Backfill legacy media through bounded,
+read-only media inspection plus fenced metadata writes; this must not alter bytes,
+replace assets, or change ordinary playback visibility. Unknown-duration or
+unseekable media remains usable under existing local rules but is ineligible for
+v1 rooms. Never trust a member's reported duration to drive automatic advancement.
+
+The social playback descriptor returns a same-origin stream URL carrying an
+opaque expected revision (not a credential or object key), suitable for Web,
+AVPlayer, and Media3 without custom request headers. On every HEAD/GET/Range,
+validate current readiness and exact active revision before opening the object;
+reject mismatches without returning replacement bytes. Existing If-Range behavior
+may return a full latest body and therefore is not a revision fence. Verify the
+new query/response behavior through proxies and every native media loader while
+keeping versionless stream semantics intact. Room membership conveys no media
+access beyond the existing ready/public catalog contract.
+
+Media replacement/deletion must persist an invalidation notice in its publication
+or deletion lifecycle, invalidate preparation, pause the current entry, and mark
+removed future entries unavailable. Include room reference cleanup/reconciliation
+and missed-notice recovery. Periodic current-source checks provide a bounded
+backstop if delivery fails. Clients discard their old room buffer and resolve a
+new descriptor before resuming. Requests already admitted may have buffered old
+bytes; this design cannot retract downloaded content or promise instantaneous
+output revocation. New requests must never silently mix revisions. A live stream
+has a different clock/DVR model and is outside on-demand v1 rooms.
+
+### Disconnection, revocation, and safety
+
+Proposed room states: `open -> closing -> closed`; timeline state is separate.
+Use an initial ten-second heartbeat interval and mark presence absent after
+30 seconds; server liveness deadlines do not depend on a client clock. Membership
+is durable until leave/removal/end/expiry. After control-channel loss, label the
+client reconnecting immediately and pause shared synchronization after that
+grace period, offering explicit local continuation. Rejoin fetches current state
+and never replays old transport commands as new intent.
+
+If the host's active controller disconnects, retain its role during a 30-second
+grace measured from last verified controller liveness (do not start a second
+grace after presence expiry). Cancel pending preparation; the current committed
+timeline may continue through that grace, but new Play/seek/select/Next and natural
+advancement cannot start a preparation while the host is absent. Shared Pause
+remains available to currently authorized controllers. An observer's socket does
+not establish host-controller liveness.
+
+At the deadline, the server pauses and persists a host-absent suspension, fences
+timers, and rejects attempts to resume in either control mode. Everyone control
+does not bypass that suspension. A host that returns must authenticate, reclaim
+its controller through the normal generation fence, and synchronize; the paused
+room resumes only through a subsequent permitted explicit Play. If host absence
+reaches five minutes, close the room even if guests are still connected. No
+automatic promotion is performed. A successful explicit transfer before departure
+lets the room continue under its new host.
+
+Host logout-all, social deactivation or account deletion closes the room unless
+transfer already committed. A single controller-session logout uses absence
+handling; an observer-session logout only detaches that session. The host's
+intentional room exit uses Transfer and leave or End room for everyone, including
+when ordinary browse Play requests local playback. Rooms with no live controller
+also close after five minutes and all rooms have a proposed 24-hour maximum life.
+Closure/expiry immediately denies access, cancels invitations/preparation, and
+releases participation slots through idempotent bounded cleanup. A stale slot
+cannot permanently prevent joining another room: admission rechecks its old room
+and repairs a terminal reference transactionally. Retained closed-room receipts
+never grant access. Recovered expired rooms cannot be reopened by stale clients.
+
+Authenticate Web tickets through existing cookie/current-viewer and origin/CSRF
+checks; native clients use current Bearer sessions. Social v1 requires a live,
+revocable `authSessions` record: reject sessionless legacy JWTs even if an older
+endpoint accepts them. Issue single-use tickets with a proposed 30-second
+lifetime, session/viewer/generation binding, and no
+tokens in URLs. Browser upgrade admission checks Origin and strict socket limits;
+the first frame redeems the ticket within five seconds before any subscription
+or data is allowed. Persist hashed ticket redemption state with logical expiry
+and atomic one-use consumption. Reauthorize commands, subscriptions, snapshots,
+and periodic liveness against account/session/membership
+state; close immediately on known revocation and bound missed-revocation exposure
+to ten seconds through server-driven revalidation. Auth/database failure expires
+the access lease and stops private delivery; it must not extend cached authority.
+Client-heartbeat silence cannot suppress the server check. Do not rely only on
+token expiry or socket admission.
+
+Use bounded frames, per-account/room command rates, outstanding command limits,
+and per-socket send queues. Coalesce presence/timeline hints; disconnect slow
+consumers with snapshot recovery when their budget is exceeded. Do not drop
+durable state silently. Logs/metrics use bounded outcome categories and latency
+buckets, not aliases, room IDs, member IDs, titles, invitation/ticket contents,
+or per-user listening history. Render aliases as text and reject unknown fields.
+
+### Lifecycle, retention, and operations
+
+Proposed defaults: notifications expire in 30 days; mutation scopes last 24 hours,
+and terminal receipts remain until at least one hour after their scope expiry.
+Closed-room payloads expire 24 hours after closure, once membership/reference
+cleanup completes; processed outbox invalidations expire after 24 hours. Room
+recovery always reads current state, so no historical event replay window exists.
+Expired scopes return expiry instead of re-executing even after receipt deletion.
+Pending outbox work and uncertain mutations are not blindly TTL-deleted: reconcile
+them under bounded retry/backlog budgets, surface unresolved operations, and refuse
+new work before backlog exhaustion. Cleanup remains available while admission is
+disabled. Notification expiry does not extend invitation or profile visibility.
+Presence is ephemeral and is not a listening-history table. Expired invitations
+retain only bounded receipt evidence until retry retention ends. Final handle
+reuse and abuse-evidence retention policy must be settled before launch.
+
+Account deletion must extend `accountDeletionService.ts` before any social write
+is enabled. Preserve existing avatar/provenance preconditions. Serialize social
+writers against the same active-account fence; revoke tickets, close hosted
+rooms, remove profiles/participation/memberships/relationships/invitations/
+notifications/tickets (including references embedded in retained closed rooms),
+and scrub identity-bearing receipts/outbox payloads before final user deletion.
+If bounded cleanup cannot fit one transaction, persist an explicit deletion
+operation and set an account deletion state only after existing preconditions
+pass. Current `touchActiveAccount` checks existence, so authentication, private
+writers, avatar lifecycle writers and shared-catalog provenance writers must adopt
+that deletion-state fence and keep preconditions true throughout asynchronous
+cleanup can safely run. Account-owned data is unavailable while deletion proceeds;
+return an explicit pending outcome, never success before completion. Reconcile
+and resume idempotently after crashes. The canonical behavior change needs promotion
+with that implementation. Do not delete shared catalog or private Playlists as
+a side effect of leaving/deleting a room. No social S3 assets exist in v1;
+future shared avatar/media uploads require their own ownership/visibility and
+create/replace/delete/reconciliation contract.
+
+Start with the current deployment and Mongo-backed recovery; introduce neither
+Redis nor a dedicated realtime service solely for this design. Media egress grows
+roughly as concurrent viewers times bitrate: eight 5 Mbit/s videos are about
+40 Mbit/s before overhead, a sizing example rather than measured capacity.
+Room presence limits do not prove media capacity. Same-NAT guests also share
+existing per-IP stream limits; test this explicitly before enabling eight seats.
+
+Add separate limits for sockets, active rooms, outbox backlog, and room work so
+it cannot starve catalog/auth/media. Extend startup/drain to reject upgrades,
+notify reconnect, drain committed work, explicitly close upgraded sockets, and
+recover rooms after restart. Verify load-balancer/proxy upgrade support and idle
+timeouts on the actual deployment. HTTP shutdown behavior alone is insufficient.
+
+Only measured contention justifies extracting realtime workers and introducing
+Redis for shared presence/fanout. MongoDB remains authoritative; shared rate
+limits, routed room ownership and per-room fencing replace the v1 singleton
+before active replicas are introduced. Redis Pub/Sub can lose disconnected-
+subscriber messages, so it cannot replace durable state and snapshot recovery.
+Separate media CDN/HLS work needs its own readiness, replacement, revocation,
+Range, and client contract. Add WebRTC/SFU only for an explicitly requested
+microphone/camera capability, with separate permissions and moderation.
+
+Feature flags separate social admission, room admission, Audio sync, and Video
+sync. Rollback disables new joins/commands safely, ends or pauses rooms with a
+clear client state, and retains leave/block/deletion/reconciliation. Never leave
+connected clients applying invisible room state after a flag is disabled.
+
+### External constraints consulted
+
+- [MDN autoplay guidance](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay):
+  script-triggered media may require user interaction; admission/readiness must
+  represent that state instead of promising automatic playback.
+- [MDN WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/index.html):
+  the classic WebSocket interface does not provide automatic backpressure;
+  application queues and slow-consumer recovery need explicit bounds.
+- [Redis Pub/Sub semantics](https://redis.io/docs/latest/develop/interact/pubsub/):
+  at-most-once delivery motivates retaining durable state and reconnect recovery.
+- [MongoDB change streams](https://www.mongodb.com/docs/manual/changeStreams/):
+  resumable delivery has prerequisites; a current snapshot remains the recovery
+  path when event history cannot be resumed.
+- [MongoDB TTL indexes](https://www.mongodb.com/docs/manual/core/index-ttl/):
+  deletion is asynchronous, so ticket/invitation/scope expiry is enforced by reads
+  and mutations independently of eventual storage reclamation.
+- [MongoDB atomic conditional writes](https://www.mongodb.com/docs/manual/core/write-operations-atomicity/):
+  expected current values belong in the update condition; the room's generation
+  fence prevents two concurrent commands from consuming the same playback state.
+- [Apple scheduled AVPlayer rate](https://developer.apple.com/documentation/avfoundation/avplayer/setrate(_:time:athosttime:)):
+  host-time synchronization has player prerequisites; the transport spike must
+  validate readiness and buffering configuration instead of assuming parity
+  with browser timers.
+
+These sources support transport constraints, not the proposed product defaults
+or synchronization targets. No infrastructure or feature was deployed by this
+design work.
+
 ## Catalog application and presentation boundaries
 
 The canonical product contract remains [business-rules.md](business-rules.md).
