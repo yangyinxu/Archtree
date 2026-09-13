@@ -5,6 +5,7 @@ import {
     AccountReferenceUnavailableError,
     touchActiveAccount
 } from './accountReferenceFenceService';
+import { deleteSocialAccountData } from './socialAccountLifecycleService';
 
 export type AccountDeletionResult =
     | { status: 'deleted' }
@@ -18,6 +19,8 @@ export interface AccountDeletionDependencies {
     beforeAccountFence?: (session: ClientSession) => Promise<void>;
     /** Test-only coordination point after this transaction owns the account fence. */
     afterAccountFence?: (session: ClientSession) => Promise<void>;
+    /** Test-only failure point after social cleanup, before final personal/account removal. */
+    afterSocialCleanup?: (session: ClientSession) => Promise<void>;
 }
 
 class AccountDeletionBlockedError extends Error {
@@ -107,6 +110,9 @@ export const deleteListenerAccountData = async (
                 if (privateImageAsset) {
                     throw new AccountDeletionBlockedError('avatarCleanupPending');
                 }
+
+                await deleteSocialAccountData(canonicalUserId, session);
+                await dependencies.afterSocialCleanup?.(session);
 
                 for (const [collectionName, ownerField] of personalCollections) {
                     await db.collection(collectionName).deleteMany(

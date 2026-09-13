@@ -16,6 +16,38 @@ Implementation boundaries, API compatibility, runtime reliability, browser sessi
 recovery, and catalog reconciliation are documented in
 [`docs/architecture.md`](docs/architecture.md).
 
+## Social backend
+
+The transactional identity/friendship API is mounted at `/api/social/v1`.
+`FINITUDE_SOCIAL_ENABLED=true` explicitly enables profile creation/reactivation,
+profile edits, new requests and acceptance; it defaults to false in all
+environments. Reads, deny-only discovery opt-out, removal, cancellation,
+block/unblock, deactivation and outcome lookup remain available while admission
+is disabled. Account deletion always performs social cleanup.
+
+The API requires a revocable authenticated session, current Web viewer and the
+existing same-origin cookie mutation checks. JSON bodies are limited to 4 KiB.
+The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
+scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
+must never be logged or placed in URLs. Key rotation invalidates old scopes and
+cursors; clients must not automatically resubmit an uncertain command under a
+new scope after rotation. No additional dependency or external delivery service
+is needed. Startup verifies the `required-indexes-v2-social` constraints before
+admission; these are additive schema changes even when the feature is disabled.
+
+See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
+for exact routes, envelopes, limits, retention and recovery behavior. Narrow
+checks are `node --import tsx --test test/socialContract.test.ts test/socialRoutes.test.ts`
+and `node --import tsx --test --test-concurrency=1 test/socialLifecycle.integration.ts test/socialAccountLifecycle.integration.ts test/socialAuth.integration.ts`.
+The integration harness starts an isolated local MongoDB replica set; it does
+not connect to the configured application database. Full gates remain `npm test`,
+`npm run build` and `npm run test:integration`.
+
+This backend stage provides no social screens, room admission, media synchronization
+or notification worker. Its bounded outbox records current invalidation versions
+for the later realtime stage. Production rollout remains disabled until explicitly
+configured and verified in the deployment environment.
+
 ## Shared playback feasibility
 
 The shared-playback work currently contains a Stage 1 laboratory prototype,

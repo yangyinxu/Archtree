@@ -66,15 +66,18 @@ changing dependencies or the lockfile; verification was rerun afterward. The
 dedicated Android test emulator used a read-only disposable overlay and has been
 shut down. No production account, database, media object or deployment changed.
 
-Still required to finish Stage 1: freeze the complete social-v1 wire contract and
-product defaults, include the lifecycle/capability fixtures, and resolve the
-target-device evidence. These local adapters consume normalized trusted test
+The social identity/relationship portion of social-v1 is now frozen in
+`src/contracts/socialV1.ts`, with product rules promoted alongside Stage 2.
+Still required to finish Stage 1: freeze the room/playback wire contract, include
+the remaining lifecycle/capability fixtures, and resolve target-device evidence.
+The player adapters consume normalized trusted test
 inputs; they are not substitutes for viewer authorization, controller admission,
 clock calibration, revision-pinned media or a persisted readiness coordinator.
 
-Complete the bounded Web/iOS/Android technical spike against synthetic room state
-and real test media, before building the full social graph or freezing the wire
-contract. Prove the existing player can prepare/seek, report actual start, apply
+Complete the remaining Web/iOS/Android technical spike evidence against synthetic
+room state and real test media before freezing the room wire contract. These
+player gates do not block the independent identity/relationship backend. Prove
+the existing player can prepare/seek, report actual start, apply
 scheduled state, suppress autonomous advancement, intercept system/fullscreen
 and browse-launch controls, and preserve deliberate local pause. Check rate
 correction/fallback and background/foreground behavior on each platform; the
@@ -115,7 +118,7 @@ ordinary playback's source preference.
 | Room exit | Detach control; offer local continuation without auto-resuming old queue; ordinary browse Play explicitly exits room |
 | Native source | Proposed room-only online-stream exception; ordinary playback still prefers valid Audio downloads |
 | Opt-out | Discovery off preserves friends; social deactivation removes access/relationships but retains private blocks |
-| Retention/limits | Architecture defaults; settle handle reservation/reuse and abuse-evidence retention before launch |
+| Retention/limits | Social identity/relationship limits and 30-day deleted-handle reservation are implemented; room/invitation retention remains proposed |
 | Later scope | Video after device QA; user posts, chat, voice/camera and public rooms separately |
 
 **Exit gate:** three-client feasibility evidence and unsupported-capability paths,
@@ -126,9 +129,11 @@ in parallel with non-overlapping file ownership.
 
 ## Stage 2 — Social identity, relationships, and safety foundation
 
-**Status: Not started**
+**Status: Complete**
 
-Depends on Stage 1. Implement opt-in discovery/profile lifecycle, friendship
+Depends on Stage 1's social identity/relationship contract; the independent
+player device gates do not block this backend-only stage. Implement opt-in
+discovery/profile lifecycle, friendship
 requests, block/unblock and scoped in-app outcomes. Add verified unique indexes,
 transactional caps, immutable expiring mutation scopes, receipts, outbox and
 account deletion cleanup before enabling writes. If deletion becomes asynchronous,
@@ -136,6 +141,37 @@ extend account/auth/private, avatar and shared-provenance writer fences before
 using a deleting state; initial deletion preconditions must remain true throughout.
 Room invitations and membership transactions belong entirely to Stage 3; there
 is no partially working room invitation UI in this stage.
+
+Implementation uses the existing synchronous account-deletion transaction, with
+bounded relationships and receipts. No new deleting-account state or S3 lifecycle
+is introduced. Handles are immutable while owned and reserved without their former
+owner identifier for 30 days after account deletion. Pair revisions use durable
+account-held clocks, so
+purging an expired pair tombstone cannot revive a stale acceptance. One payload-free
+outbox row per account coalesces invalidations; realtime delivery remains Stage 3.
+`FINITUDE_SOCIAL_ENABLED` defaults to false in every environment. Safety and outcome
+routes remain available when admission is disabled. Frozen synthetic wire vectors
+are in `contracts/social/v1/identity-and-relationships.json`; native social UI and
+DTO adoption remain later stages.
+
+Verification on 2026-09-13:
+
+- `npm test`: 425 backend and 305 Web tests passed.
+- `npm run build`: passed, including frontend bundle budgets.
+- `npm run test:integration`: all 268 tests passed against isolated local MongoDB
+  replica sets, including 38 social lifecycle, 11 social account cleanup and 8
+  real HTTP/auth cases.
+- After fixing block queries to use the required account index,
+  `node --import tsx --test test/socialLifecycle.integration.ts` passed all 39
+  cases. The added actual-query profiler check examined one document and one
+  index key for both block listing and capacity with 1,000 unrelated edges.
+  `npm test` and `npm run build` were also rerun successfully after this fix.
+- `npm run test:e2e --workspace @archtree/finitude-web -- session-recovery.spec.ts playback-continuity.spec.ts`:
+  all 12 cases passed across Chromium, Firefox and WebKit.
+- `git diff --check`: passed. No dependency, native client or deployed data changes.
+
+These gates cover the implemented social backend. Production/proxy verification,
+real-account client adoption and all durable room/realtime gates remain open.
 
 **Exit gate:** cross-account/guessing tests, request-accept/block/deactivate/delete
 races, unknown commits, scope expiry after receipt deletion and notification
@@ -163,6 +199,27 @@ increments, each verified before enabling the next:
    preparation generations, adaptive anchors, clock sampling, drain and recovery.
    Preserve original expected entry/playback/queue/control versions through
    database callback retries; do not refresh an old Next into a new intent.
+
+Read-only implementation audit identified the next seams:
+
+- All Audio/Video uploads and replacements converge at `uploadMediaObject` in
+  `audioStorageService.ts`. Reserve analysis with pending storage and promote
+  revision, duration, eligibility and private S3 validators atomically with the
+  active representation. Metadata-only edits and cleanup retries preserve it.
+- Metadata duration and HTTP byte ranges do not establish seekability. Add a
+  bounded finite-file/seek-structure probe and actual client seek readiness;
+  unknown analysis preserves ordinary playback but cannot admit a room entry.
+  No media-probe deployment dependency currently exists.
+- Extend the unified MediaTrack HEAD/GET route with a strict optional revision
+  fence and recorded object validators. Pin GET after HEAD, including If-Range
+  fallback; preserve the versionless path and legacy Audio aliases.
+- Extract reusable active-session/account fences and status-only receipt execution
+  before adding room transactions. Block, deactivation and account deletion must
+  enlist graph and room cleanup in one transaction. Timer work needs a distinct
+  authority-backed system context, not an impersonated user session.
+- Connect the common session-revocation boundary and server drain lifecycle before
+  admitting room controllers or upgraded sockets. Keep account invalidations and
+  room aggregate outbox state explicit and separately recoverable.
 
 **Exit gate:** two protocol clients converge after duplicate/coalesced/dropped
 snapshots, HTTP/WebSocket response inversion, commit-before-fanout crash,
@@ -313,11 +370,11 @@ Use the [Listener release matrix](../testing/finitude-web-release-matrix.md)
 for release-facing changes. `git diff --check` applies to every stage.
 New room/load fixture commands must exist before being listed as runnable.
 
-The initial architecture review changed documentation only. Stage 1 now changes
-executable test seams, so its arbitration, player, build and relevant real-media
-checks must pass before handoff. Actual MongoDB transaction, authorization,
-WebSocket delivery and lifecycle gates remain pending until those implementations
-exist; passing the in-memory prototype cannot satisfy them.
+The initial architecture review changed documentation only. Stage 1's executable
+test seams have passed local arbitration/player checks, with device gates still
+open. Stage 2 has passed the social transaction, authorization and lifecycle gates
+listed above. Room MongoDB arbitration, WebSocket delivery and room lifecycle gates
+remain pending; passing the in-memory prototype cannot satisfy them.
 
 ## Plan lifecycle
 

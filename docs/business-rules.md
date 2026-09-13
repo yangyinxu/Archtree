@@ -3,6 +3,57 @@
 This document is the shared product-behavior reference for the Archtree backend
 and Finitude clients. Update it whenever an agreed business rule changes.
 
+## Social Identity and Friendships
+
+- Social participation is opt-in and separate from the private account profile.
+  The versioned backend is disabled for new participation by default until
+  explicitly enabled. Existing listener APIs and private avatar access do not
+  change, and client social screens require their own adoption stage.
+- A social profile has a separately generated opaque ID, an explicit nickname
+  of 1–50 Unicode characters, and a case-insensitive handle of 3–24 ASCII letters,
+  digits or underscores beginning with a letter. The handle cannot change during
+  the account's lifetime; the nickname and discoverability can change.
+- Authenticated exact-handle lookup returns only the opted-in handle, nickname,
+  opaque social ID and generated-icon seed. Missing, undiscoverable and blocked
+  results are indistinguishable. Email, account IDs, private avatars, saves and
+  activity are never projected into social cards.
+- Friendship requires an explicit request and recipient acceptance. Crossing
+  requests do not automatically become friends. Only the sender may cancel a
+  pending request and only the recipient may accept or decline it. Either friend
+  may remove the relationship. Changes apply to the observed relationship
+  revision; a stale action never applies to a later request incarnation.
+- A listener may block another social identity in either direction. Blocking
+  removes friendship and pending requests atomically. Both directions remain
+  independent, and unblocking restores no relationship. A private block list
+  exposes only the owner's blocked opaque IDs and mutation revisions; it does
+  not unlock the blocked person's current profile.
+- Turning discovery off preserves existing friends and pending requests.
+  Deactivation hides the profile, cancels requests and removes friendships, while
+  retaining the listener's identity, handle and private blocks. Reactivation
+  restores none of those removed relationships. A new request after removal uses
+  a fresh, authorized relationship-state read.
+- The first backend release permits at most 500 friends, 50 combined incoming and
+  outgoing pending requests, 1,000 owned blocks and 2,048 retained relationship
+  pairs per account. Existing-pair safety operations remain possible at the pair
+  limit. New requests also have sender and recipient abuse limits.
+- Every durable social action uses its original server-issued mutation scope and
+  command ID. Identical retries return a status-only outcome and never restore
+  revoked access. Reusing the identity with a different action fails. Expired
+  scopes cannot execute, even after receipt cleanup; an uncertain result must not
+  be silently resubmitted with a fresh scope.
+- Account deletion atomically removes social identity and both-sided
+  relationships with its existing private-account cleanup. A deleted handle is
+  reserved for 30 days without retaining its former account/social ID, then may
+  be reused with a new opaque identity. Existing avatar and shared-provenance
+  deletion blockers remain unchanged and preserve social state on failure.
+- Disabling new social participation preserves reads, discovery opt-out without
+  changing the handle/nickname, explicit cancellation, removal, block/unblock,
+  deactivation, outcome lookup and account cleanup. Admission attempts cannot
+  consume the reserved receipt capacity for safety actions and final deactivation;
+  short request-rate limits still apply.
+  This foundation adds no room membership, public Feed, collaborative Playlist,
+  chat, push/email delivery or S3-backed social avatar.
+
 ## Shared Playback Permissions — Planned Feature
 
 These permissions are agreed product requirements for the planned shared-playback

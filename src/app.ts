@@ -12,6 +12,7 @@ import listenerRoutes from './routes/listenerRoutes';
 import { createLocalizationRouter } from './routes/localizationRoutes';
 import videoRoutes from './routes/videoRoutes';
 import narutoMobileRoutes from './routes/narutoMobileRoutes';
+import { createSocialRouter } from './routes/socialRoutes';
 import {
   attachOptionalAuth,
   requireAdmin,
@@ -246,6 +247,9 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
 
   // Authenticate paid Naruto requests before accepting their bounded JSON bodies.
   app.use('/naruto-mobile/api/v1', narutoMobileRoutes);
+
+  // Social authentication and its smaller JSON limit precede the general parser.
+  app.use('/api/social/v1', createSocialRouter());
 
   // Protect and bound anonymous diagnostics before the general JSON parser can
   // consume a larger request. The listener router owns the final controller.

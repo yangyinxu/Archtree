@@ -5,6 +5,8 @@ export const databaseIndexes: Array<{
     collection: string;
     keys: IndexSpecification;
     options?: CreateIndexesOptions;
+    /** Required nonunique indexes bound transactional cleanup and provision its collections. */
+    required?: boolean;
   }> = [
     { collection: 'pages', keys: { slug: 1 }, options: { unique: true } },
     { collection: 'users', keys: { email: 1 }, options: { unique: true } },
@@ -39,6 +41,20 @@ export const databaseIndexes: Array<{
       keys: { expiresAt: 1 },
       options: { expireAfterSeconds: 0 }
     },
+    { collection: 'socialProfiles', keys: { accountId: 1 }, options: { unique: true } },
+    { collection: 'socialProfiles', keys: { handle: 1 }, options: { unique: true } },
+    { collection: 'socialRelationships', keys: { accountIds: 1 }, required: true },
+    { collection: 'socialRelationships', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    {
+      collection: 'socialMutations', keys: { accountId: 1, scopeId: 1, commandId: 1 },
+      options: { unique: true }
+    },
+    { collection: 'socialMutations', keys: { accountId: 1, expiresAt: 1 } },
+    { collection: 'socialMutations', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'socialOutbox', keys: { accountId: 1 }, options: { unique: true } },
+    { collection: 'socialBudgets', keys: { accountId: 1 }, options: { unique: true } },
+    { collection: 'socialHandles', keys: { accountId: 1 }, required: true },
+    { collection: 'socialHandles', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'contentWorkflowOperations', keys: { adminUserId: 1, updatedAt: -1 } },
     {
@@ -67,8 +83,8 @@ export const databaseIndexes: Array<{
     { collection: 'posts', keys: { createdAt: -1 } }
   ];
 
-export const requiredIndexRevision = 'required-indexes-v1';
-const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true);
+export const requiredIndexRevision = 'required-indexes-v2-social';
+const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */
 export class DatabaseIndexInitializationError extends Error {
@@ -89,12 +105,14 @@ export class DatabaseCollectionInitializationError extends Error {
 const indexId = (index: typeof databaseIndexes[number]) =>
   `${index.collection}:${Object.keys(index.keys).join(',')}`;
 
-/** Accepts only the complete unique constraint, never a sparse or partial substitute. */
+/** Accepts complete constraints and cleanup indexes, never sparse or partial substitutes. */
 const matchesRequiredIndex = (actual: Document, expected: typeof databaseIndexes[number]) =>
   JSON.stringify(actual.key) === JSON.stringify(expected.keys)
-  && actual.unique === true
+  && (expected.options?.unique === true ? actual.unique === true : !actual.unique)
   && !actual.sparse
   && !actual.partialFilterExpression
+  && !actual.hidden
+  && actual.expireAfterSeconds === expected.options?.expireAfterSeconds
   && (!actual.collation || actual.collation.locale === 'simple');
 
 /** Reads bounded schema metadata without inspecting or repairing account records. */
@@ -139,7 +157,7 @@ export const initializeDatabaseIndexes = async (db: Db): Promise<void> => {
         definition.keys, { ...definition.options, maxTimeMS: 120_000 }
       );
     } catch {
-      if (definition.options?.unique) {
+      if (definition.options?.unique || definition.required) {
         throw new DatabaseIndexInitializationError(indexId(definition));
       }
       console.warn(JSON.stringify({ category: 'optional_index_unavailable', indexId: indexId(definition) }));

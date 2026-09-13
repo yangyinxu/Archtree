@@ -3,10 +3,134 @@
 This document describes implementation boundaries and recovery contracts. Product
 behavior remains defined in [business-rules.md](business-rules.md).
 
+## Social identity and relationship API
+
+The Stage 2 backend is implemented in `src/application/social/socialService.ts`,
+`src/contracts/socialV1.ts` and `src/routes/socialRoutes.ts`. This is additive to
+listener-v1 and private account APIs. `FINITUDE_SOCIAL_ENABLED` defaults to false;
+setting it to exactly `true` enables admission. Disabling it retains reads and
+safety actions, including changing an existing profile to undiscoverable without
+changing its handle/alias or losing friends. No room endpoint or delivery worker
+is enabled by this flag.
+
+### Routes and projections
+
+All routes below are relative to `/api/social/v1`. They require a current revocable
+session; native Bearer and current-viewer-bound browser cookie requests use the
+existing authentication and same-origin policies. The router authenticates before
+its strict 4 KiB JSON parser. It returns private/no-store responses and never raw
+database documents. Unknown JSON/query fields and repeated query values fail.
+
+| Method and path | Input | Response |
+| --- | --- | --- |
+| `POST /mutation-scopes` | Empty JSON object | `{scopeToken, expiresAt}` |
+| `POST /mutation-outcomes` | `{scopeToken, commandId}` | `{outcome: SocialOutcome or null}`; expired signed scopes may query retained outcomes |
+| `GET /me/profile` | No query | `{profile: SocialOwnProfile or null}` |
+| `PATCH /me/profile` | Mutation identity plus `handle`, `alias`, `discoverable`, `expectedRevision` | `SocialOutcome`; creates with revision 0 or updates/reactivates the observed revision |
+| `POST /me/deactivate` | Mutation identity | `SocialOutcome` |
+| `GET /profiles?handle=...` | Exact normalized handle | `{profile: SocialCard or null}`; hidden/missing/bilaterally blocked are identical |
+| `GET /relationships?kind=...` | `kind`: friends/incoming/outgoing/blocks; optional limit 1–50 (default 20), signed cursor | `{items, nextCursor}`; no total count |
+| `GET /relationships/:socialId` | No query | `{relationship: {socialId,state,revision} or null}`; state is none/incoming/outgoing/friends/own blocked |
+| `POST /friend-requests` | Mutation identity plus `targetSocialId`, `expectedRevision` | `SocialOutcome` |
+| `POST /relationships/:socialId/:action` | Mutation identity and observed `expectedRevision`; block omits revision | `SocialOutcome`; action is accept/decline/cancel/remove/block/unblock |
+
+A mutation identity is `{scopeToken, commandId}`. Command IDs contain 16–80 ASCII
+letters, digits, underscores or hyphens. The server normalizes a handle to lower
+case, trims/NFC-normalizes aliases, rejects control/format characters, and checks
+all fields before capturing immutable intent. Scope tokens are authenticated,
+account-bound, expire after 24 hours and are never accepted in a query string.
+They are domain-separated from both access tokens and list cursors. A signing-key
+rotation invalidates scopes/cursors rather than weakening verification.
+
+`SocialCard` contains exactly `socialId`, `handle`, `alias`, and `iconSeed`.
+`SocialOwnProfile` additionally contains `active`, `discoverable`, and `revision`.
+List rows contain `socialId`, a permitted `profile` card or null, and the
+relationship `revision`. Block-list cards are always null: retaining a private
+block reference never grants current profile access. A peer's private block is
+not disclosed by pair-state or unblock precondition errors. Existing friends and
+pending-request participants may read their relationship despite discovery opt-out;
+an unrelated hidden or inactive target returns null.
+
+Completed mutation attempts return HTTP 200 with
+`{commandId, outcome: applied|noop|rejected, code?, replayed}`. A rejected domain
+outcome is durable and must be handled explicitly. The social router's errors use
+HTTP 400/401/404/409/410/413/415/429/503 for invalid schema, session, missing route,
+idempotency conflict, expired scope, body/type, admission budget or infrastructure
+failures, with generic `{code,message}` bodies. Shared authentication, viewer,
+Origin, TLS and concurrency guards retain their existing HTTP status and error
+envelopes, which may contain only `message` (including 403 and 426). Clients must
+handle the status even when a social error code is absent. A successful HTTP
+response alone does not mean that the requested relationship was applied.
+
+After cancel/decline/remove/unblock, the pair may remain as a positive-revision
+`none` tombstone. Before an explicit new request, read the authorized pair-state
+endpoint and capture its revision; do not guess 0 or automatically rebase a failed
+command. Revision 0 denotes a currently absent pair. These numbers can skip: they
+are mutation preconditions, not item counts or continuous client event sequences.
+Cursor signatures bind the viewer and list kind for 15 minutes. Each page freshly
+projects visible rows in opaque social-ID order; it is not a retained list snapshot.
+
+### Transactions, budgets and lifecycle
+
+Social reads/writes verify the actor's account-bound, unrevoked and unexpired
+`authSessions` row inside their transaction. A conditional session-row increment
+serializes with revocation. Involved account rows are fenced in sorted order before
+reading the final domain state. Each write commits the domain state, status-only
+receipt and payload-free invalidation together. Production transaction bodies
+perform no external dispatches. Known-aborted transient conflicts have at most three
+attempts with short backoff; a commit with an unknown result returns
+`mutation_outcome_unknown` and is never automatically rerun.
+
+Receipts are keyed by account, signed scope ID and command ID; a canonical digest
+detects changed intent. Identical retries are deduplicated before stale revision
+checks and return only the recorded status, never old profile/relationship data.
+Explicit same-identity retry resolves an uncertain commit. Receipt expiry is one
+hour after scope expiry. Expiry is checked logically, even if TTL has not run or
+the receipt was already removed. A failed outcome lookup does not authorize a
+new-scope replay.
+
+Durable budgets are 24 scopes/day, 30 new mutation attempts/minute and 120 reads/minute
+per account, plus 100 newly received requests/day. Profile deactivation cannot reset
+these counters. IP throttling and mutation concurrency limits provide additional
+request protection. Retained receipts permit 1,000 admission attempts plus 128
+safety receipts and a final reserved deactivation receipt; admission exhaustion
+therefore cannot consume the privacy-exit reserve. Retries consume no new receipt.
+Short request-rate limits still apply to safety operations.
+
+Each canonical pair stores both account/social IDs, independent directional
+blocks, request direction, state and revision. Friends/pending/blocks/pair bounds
+are checked under both account fences. Unblocked `none` tombstones have a 25-hour
+expiry. Durable per-account relationship clocks survive their cleanup, ensuring
+a recreated pair never reuses a previous request revision. Those clocks also
+advance during deactivation. They are internal fields, not public profile data.
+
+The social outbox is one coalesced row per account: account ID, invalidation
+revision and update time. It retains no peer, alias or relationship payload and
+has no TTL that could erase pending recovery work. Stage 3 will add reauthorized
+delivery from these current-state markers. Scope receipts likewise contain no
+peer reference or private projection, so deleting a target cannot leave cached
+identity payload in another account's receipt.
+
+Account deletion keeps the existing synchronous transaction and all avatar/shared
+provenance preconditions. `socialAccountLifecycleService.ts` removes the deleted
+account's profile, both-sided relationships, receipts, budget and outbox, fences
+existing peers before their invalidation, and removes the owner identifier from
+the 30-day handle reservation. Concurrent peer deletion cannot recreate orphaned
+outbox data. A failure rolls back the entire cleanup; no S3 object is touched.
+Deactivation retains the profile/handle, blocks, receipts and clocks so later
+reactivation cannot restore an old intent or relationship.
+
+Startup migration `required-indexes-v2-social` adds mandatory unique constraints
+and required nonunique cleanup indexes. A sparse, partial, hidden, wrong-key or
+wrong-uniqueness substitute is rejected. TTL is opportunistic reclamation and is
+never an authorization or admission decision. See the active plan for actual
+verification and the remaining client/room rollout stages.
+
 ## Social and shared playback architecture (proposed)
 
 Design baseline and review: 2026-09-13. This section is a target architecture, not an
-implemented API. The agreed two-mode permission requirement is recorded in
+implemented room API. The social identity/relationship foundation above is now
+implemented separately. The agreed two-mode permission requirement is recorded in
 [business rules](business-rules.md#shared-playback-permissions--planned-feature);
 other defaults and host-departure behavior below remain proposals. Implementation
 stages and unresolved product decisions live in
@@ -107,10 +231,11 @@ envelope and application handler. Audio/video bytes never traverse the gateway.
 | Safety | Block, host removal, invitation throttles, operational abuse handling | Applies to HTTP, subscriptions, replay, notifications, and admission |
 | Player adapter | Translate room state into existing transport operations | System controls and queue advancement go through the same mode boundary |
 
-Suggested code seams are `src/contracts/socialV1.ts`, `src/application/social/`,
+Code seams are `src/contracts/socialV1.ts`, `src/application/social/`,
 `src/application/rooms/`, `src/repositories/social/`, and `src/realtime/`.
-These are target seams; only the isolated room arbitration prototype exists so
-far. Transport adapters must not contain independent business rules.
+Social contracts, application services and repositories are implemented. Rooms
+currently have only the isolated arbitration prototype; realtime remains a target
+seam. Transport adapters must not contain independent business rules.
 
 ### Identity, relationships, and access
 
@@ -118,7 +243,7 @@ Use a separate opt-in social profile with a new opaque social ID mapped internal
 to the existing account. Start with a listener-chosen alias and generated icon.
 Do not derive social initials from email or expose the existing private avatar.
 Exact social-handle lookup is opt-in, authenticated, bounded, and rate-limited;
-it reveals only social ID, alias, and generated icon, even to a non-friend. This
+it reveals only social ID, handle, alias, and generated icon, even to a non-friend. This
 minimal discovery card is distinct from profile access granted by friendship or
 active room membership. Pending requests have their own allowlisted alias-card
 projection; sending a request cannot unlock additional recipient fields. Do not search registration
@@ -129,9 +254,11 @@ Turning discoverability off prevents new lookup but preserves existing friends.
 Deactivating the social profile cancels requests/invitations, removes friendships,
 leaves or ends rooms, and revokes social subscriptions before hiding the profile.
 Retain owner-private blocks until explicit unblock or account deletion; reactivation
-does not restore friends, invitations, or membership. Rename, deactivation, and
-deletion must define handle reservation/reuse in Stage 1 so cached handle text
-can never substitute for the immutable social ID when accepting an invitation.
+does not restore friends, invitations, or membership. The implemented identity
+contract above fixes handles for the account's lifetime and reserves a deleted
+handle without its former owner ID for 30 days. Cached handle text can never
+substitute for the immutable social ID when accepting an invitation. Room and
+invitation cleanup remains part of their implementation stage.
 
 Recommended relationship state machine: `none -> pending -> accepted -> none`.
 Decline/cancel removes pending access. Crossing requests do not auto-accept;
@@ -158,8 +285,9 @@ existing membership; explicit leave, kick, block, or room end does that.
 Invitation previews expose only the inviter's consented discovery card, expiry,
 and invitation status; membership lists, queue and current media require admission.
 
-Proposed limits: 500 friends, 50 pending incoming/outgoing requests per account,
-20 outstanding invitations per host, one joined active room per account, eight
+The implemented social limits include 500 friends and 50 combined incoming and
+outgoing pending requests per account. Proposed room limits are 20 outstanding
+invitations per host, one joined active room per account, eight
 members per room, and 100 queue entries. Enforce limits transactionally; revise
 them only with measured capacity and UX evidence. Apply both sender and recipient
 abuse controls so one account cannot flood another through repeated operations.
@@ -234,7 +362,8 @@ v1; absence handling below applies equally to both permission modes.
 | `socialRooms` | Host, playback control mode/generation, optional transfer offer, bounded memberships/queue, timeline/preparation, authority epoch, room/queue/playback versions, controller generations, host-absence deadline/suspension, expiry |
 | `socialRoomParticipation` | Unique account ID pointing to active room; updated atomically with membership to enforce one-room limit |
 | `socialMutations` | Unique actor/mutation-scope/command ID, operation and canonical request digest, result status, retention deadline |
-| `socialOutbox` | Unique aggregate ID/epoch/revision/event kind; invalidation or notification reference, delivery attempt state; no retained room snapshot |
+| `socialOutbox` (implemented) | One coalesced account-keyed invalidation revision, with no peer or historical payload |
+| `socialRoomOutbox` (proposed) | Explicit room aggregate/epoch/revision/event kind and delivery attempt state; no retained room snapshot; separate from account-keyed social cleanup |
 | `socialNotifications` | Unique recipient/event ID, allowlisted invitation reference, read state, expiry |
 | `socialRealtimeTickets` | Unique hashed single-use ticket, account/session binding, consumed state, logical expiry |
 | `socialAuthority` | One deployment-wide v1 room-writer lease, monotonic fencing epoch, owner nonce and lease deadline |

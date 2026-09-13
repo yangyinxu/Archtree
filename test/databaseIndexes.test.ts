@@ -80,6 +80,31 @@ test('mandatory index failure prevents migration success without disclosing data
   assert.deepEqual(fake.receipts, []);
 });
 
+test('essential social cleanup indexes must exist before startup can complete', async () => {
+  for (const collection of ['socialRelationships', 'socialHandles']) {
+    const fake = databaseDouble();
+    fake.fail(collection);
+    await assert.rejects(initializeDatabaseIndexes(fake.db), DatabaseIndexInitializationError);
+    assert.deepEqual(fake.receipts, []);
+  }
+});
+
+test('social cleanup indexes reject unique, sparse, partial, hidden and expiring substitutes', async () => {
+  for (const altered of [
+    { unique: true }, { sparse: true }, { partialFilterExpression: { active: true } },
+    { hidden: true }, { expireAfterSeconds: 0 }, { collation: { locale: 'en' } }
+  ]) {
+    const fake = databaseDouble();
+    await initializeDatabaseIndexes(fake.db);
+    Object.assign(fake.metadata.get('socialRelationships')![0], altered);
+    await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /socialRelationships:accountIds/);
+  }
+  const fake = databaseDouble();
+  await initializeDatabaseIndexes(fake.db);
+  fake.metadata.set('socialHandles', []);
+  await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /socialHandles:accountId/);
+});
+
 test('nonunique, sparse, partial, and incompatible collation constraints fail verification', async () => {
   for (const altered of [
     { unique: false }, { sparse: true }, { partialFilterExpression: { active: true } },

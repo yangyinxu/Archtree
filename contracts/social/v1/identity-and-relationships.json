@@ -1,0 +1,89 @@
+{
+  "fixtureVersion": 1,
+  "protocol": "social-v1-identity",
+  "purpose": "Synthetic parser and client adoption vectors; scopeToken is not an authenticated credential.",
+  "profileWrite": {
+    "scopeToken": "synthetic-signed-scope-token",
+    "commandId": "synthetic-command-01",
+    "action": "profile",
+    "expectedRevision": 0,
+    "handle": "Alice_123",
+    "alias": "  Café  ",
+    "discoverable": false
+  },
+  "normalizedProfileWrite": {
+    "scopeToken": "synthetic-signed-scope-token",
+    "commandId": "synthetic-command-01",
+    "action": "profile",
+    "expectedRevision": 0,
+    "handle": "alice_123",
+    "alias": "Café",
+    "discoverable": false
+  },
+  "relationshipWrites": [
+    {
+      "scopeToken": "synthetic-signed-scope-token",
+      "commandId": "synthetic-command-01",
+      "action": "request",
+      "targetSocialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedRevision": 7
+    },
+    {
+      "scopeToken": "synthetic-signed-scope-token",
+      "commandId": "synthetic-command-01",
+      "action": "accept",
+      "targetSocialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedRevision": 7
+    },
+    {
+      "scopeToken": "synthetic-signed-scope-token",
+      "commandId": "synthetic-command-01",
+      "action": "decline",
+      "targetSocialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedRevision": 7
+    },
+    {
+      "scopeToken": "synthetic-signed-scope-token",
+      "commandId": "synthetic-command-01",
+      "action": "cancel",
+      "targetSocialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedRevision": 7
+    },
+    {
+      "scopeToken": "synthetic-signed-scope-token",
+      "commandId": "synthetic-command-01",
+      "action": "remove",
+      "targetSocialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedRevision": 7
+    },
+    {
+      "scopeToken": "synthetic-signed-scope-token",
+      "commandId": "synthetic-command-01",
+      "action": "unblock",
+      "targetSocialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expectedRevision": 7
+    }
+  ],
+  "blockWrite": {
+    "scopeToken": "synthetic-signed-scope-token",
+    "commandId": "synthetic-command-01",
+    "action": "block",
+    "targetSocialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "deactivateWrite": {
+    "scopeToken": "synthetic-signed-scope-token",
+    "commandId": "synthetic-command-01",
+    "action": "deactivate"
+  },
+  "card": {
+    "socialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "handle": "alice_123",
+    "alias": "Café",
+    "iconSeed": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "noneRelationship": {
+    "socialId": "s_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "state": "none",
+    "revision": 17
+  }
+}
