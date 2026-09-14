@@ -6,6 +6,7 @@ import { Artwork } from './Artwork';
 import styles from './ContentCard.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { LazyShareMusicButton } from '../features/social/LazyShareMusicButton';
+import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
 
 
 export interface ContentCardProps {
@@ -87,7 +88,10 @@ export const ContentCard = ({
           {body}
         </Link>
       )}
-      {item.contentType !== 'artist' && <span className={styles.shareAction}><LazyShareMusicButton contentType={item.contentType} contentId={item.id} title={title} /></span>}
+      {item.contentType !== 'artist' && <span className={styles.shareAction}>
+        {item.contentType === 'audioTrack' && item.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={item.id} title={title} />}
+        <LazyShareMusicButton contentType={item.contentType} contentId={item.id} title={title} />
+      </span>}
     </article>
   );
 };

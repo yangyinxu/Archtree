@@ -12,7 +12,7 @@ vi.mock('./GlobalListeningPublisher', () => ({ GlobalListeningPublisher: () => n
 vi.mock('../../api/social', () => ({ getSocialProfile: mocks.profile }));
 vi.mock('../../api/rooms', () => ({ getRoomInvitations: mocks.invitations,
   getRoomCapabilities: async () => ({ socialEnabled: true, roomsEnabled: true }) }));
-vi.mock('./roomSession', () => ({ roomSession: { ensure: mocks.ensure, stop: mocks.stop, getSnapshot: mocks.state } }));
+vi.mock('./roomSession', () => ({ useRoomSession: mocks.state, roomSession: { ensure: mocks.ensure, stop: mocks.stop, getSnapshot: mocks.state } }));
 
 const profile = { socialId: 'social-alice', handle: 'alice', alias: 'Alice', iconSeed: 'alice', active: true, discoverable: true, revision: 1 };
 const invitation = (): RoomInvitation => ({ invitationId: 'invitation-a', generation: 1,
@@ -27,7 +27,7 @@ const show = (viewerId: string | null = 'viewer-a') => {
 };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.profile.mockResolvedValue({ profile }); mocks.invitations.mockResolvedValue({ invitations: [] });
-  mocks.state.mockReturnValue({ viewerId: 'viewer-a', room: roomFixture() });
+  mocks.state.mockReturnValue({ viewerId: 'viewer-a', room: roomFixture(), connected: true, locallyPaused: false });
 });
 
 test('signed-out listeners neither see the reminder nor request private social data', () => {

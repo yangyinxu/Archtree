@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseRoomCommand, parseRoomHeartbeat, parseRoomReady } from '../src/contracts/roomV1';
+import { normalizeRoomMediaQuery, parseRoomCommand, parseRoomHeartbeat, parseRoomReady } from '../src/contracts/roomV1';
 
 const identity = { scopeToken: 'synthetic-scope-for-room-contract', commandId: 'synthetic-command-0001' };
 const control = { ...identity, roomId: 'r_example', memberId: 'm_example', expectedEpoch: 1,
     controllerGeneration: 1, expectedControlGeneration: 2, expectedPlaybackGeneration: 3,
     expectedQueueRevision: 1, expectedEntryId: 'e_first' };
+
+test('room media queries accept bounded Unicode literal text and reject coercion or controls', () => {
+    assert.equal(normalizeRoomMediaQuery(undefined), '');
+    assert.equal(normalizeRoomMediaQuery('  Quiet [A].*  '), 'Quiet [A].*');
+    assert.equal(normalizeRoomMediaQuery('🎵'.repeat(100)), '🎵'.repeat(100));
+    for (const value of [null, 1, ['song'], { q: 'song' }, 'a'.repeat(101), 'song\n', '\u0000song', 'song\u0085']) {
+        assert.equal(normalizeRoomMediaQuery(value), null);
+    }
+});
 
 test('room commands freeze the original queue and transport expectations before asynchronous work', () => {
     const ids = ['1'.repeat(24), '2'.repeat(24)];

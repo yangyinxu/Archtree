@@ -6,6 +6,7 @@ import { browserSessionQuery, browserSessionResolvingQuery } from '../../api/ses
 import { getSocialProfile } from '../../api/social';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { roomSession } from './roomSession';
+import { GlobalActiveRoom } from './GlobalActiveRoom';
 import { useRoomInvitationConnection, useRoomInvitations } from './roomInvitationQueries';
 import styles from '../../app/AppShell.module.css';
 
@@ -31,7 +32,7 @@ const ViewerInvitations = ({ viewerId }: { viewerId: string }) => {
   useEffect(() => {
     if (profile.data && !profile.data.profile?.active) roomSession.stop();
   }, [profile.data]);
-  return profile.data?.profile?.active && !profile.isError ? <><PendingInvitations viewerId={viewerId} /><Suspense fallback={null}><GlobalListeningPublisher viewerId={viewerId} /></Suspense></> : null;
+  return profile.data?.profile?.active && !profile.isError ? <><GlobalActiveRoom viewerId={viewerId} /><PendingInvitations viewerId={viewerId} /><Suspense fallback={null}><GlobalListeningPublisher viewerId={viewerId} /></Suspense></> : null;
 };
 
 /** Lives inside the session privacy barrier and never takes a playback action on receipt. */

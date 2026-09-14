@@ -8,7 +8,7 @@
   position: absolute;
   top: .25rem;
   right: .25rem;
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
   background: var(--color-surface);
 }
 

@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router';
 import type { AlbumSummary, ArtistSummary, AudioTrackSummary } from '../api/contentSchemas';
 import { Artwork } from './Artwork';
 import { ContentCard, defaultContentCardArtworkSizes } from './ContentCard';
+import { ContentListRow } from './ContentListRow';
 import { PageSection } from './PageSection';
 
 const artist: ArtistSummary = {
@@ -404,4 +405,18 @@ test('section presentations describe the rendered card and list artwork widths',
     </MemoryRouter>
   );
   expect(container.querySelector('img')).toHaveAttribute('sizes', '3.15rem');
+});
+
+test('room actions are separate from catalog playback and excluded for Video and unavailable Library rows', async () => {
+  const onPlay = vi.fn();
+  const view = render(<MemoryRouter><ContentCard item={audioTrack} onPlay={onPlay} /></MemoryRouter>);
+  const action = await screen.findByRole('button', { name: `Listen together: ${audioTrack.title}` });
+  expect(action.closest('article')?.querySelector('button button')).toBeNull();
+  expect(onPlay).not.toHaveBeenCalled();
+  view.rerender(<MemoryRouter><ContentCard item={{ ...audioTrack, mediaType: 'video' }} onPlay={onPlay} /></MemoryRouter>);
+  expect(screen.queryByRole('button', { name: /^Listen together:/ })).not.toBeInTheDocument();
+  view.rerender(<MemoryRouter><ul><ContentListRow item={audioTrack} shareable={false} /></ul></MemoryRouter>);
+  expect(screen.queryByRole('button', { name: /^Listen together:/ })).not.toBeInTheDocument();
+  view.rerender(<MemoryRouter><ul><ContentListRow item={audioTrack} /></ul></MemoryRouter>);
+  expect(await screen.findByRole('button', { name: `Listen together: ${audioTrack.title}` })).toBeVisible();
 });

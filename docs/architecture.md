@@ -248,7 +248,8 @@ unverified device and rollout gates.
 
 `src/contracts/roomV1.ts` freezes the runtime wire contract; the earlier
 `roomPlaybackPrototype.ts` remains a test feasibility model. Finitude Web's
-`/finitude/social` route uses `web/src/api/rooms.ts`, `roomSession.ts`, and the
+`/finitude/social` route uses `web/src/api/rooms.ts`, optional discovery reads in
+`web/src/api/roomMedia.ts`, `roomSession.ts`, and the
 existing player through its lazily loaded room adapter. Native adapters still
 use synthetic DEBUG fixtures and do not consume this API yet.
 
@@ -263,6 +264,8 @@ are capped at 16 KiB; social identity bodies remain capped at 4 KiB.
 | `GET /capabilities` | `socialEnabled`, `roomsEnabled`; room admission requires both flags |
 | `GET /rooms/current`, `GET /rooms/:roomId` | `{ room: snapshot or null }`, always freshly authorized |
 | `GET /room-media` | `{ items }`, at most 100 eligible pinned Audio descriptors |
+| `GET /room-media/search?q=&cursor=&limit=` | `{ items, nextCursor }`, title substring search; default 20/max 50 eligible pinned Audio descriptors per page |
+| `GET /room-media/:mediaTrackId` | `{ item: descriptor or null }`; current active social profile required; missing and ineligible tracks are indistinguishable |
 | `GET /room-invitations` | `{ invitations }`, up to 20 current authorized invitations with inviter card, incarnation and expiry; a bounded preview, not an exact total |
 | `GET /room-invitations/:invitationId` | `{ invitation: invitation or null }`, original recipient only; unavailable, expired, replaced, revoked and wrong-account links are indistinguishable |
 | `GET /rooms/:roomId/invitations` | Current host/controller only; `{ invitations }` containing only `invitationId`, `generation`, `recipientSocialId`, `expiresAtMs` for pending links |
@@ -270,6 +273,14 @@ are capped at 16 KiB; social identity bodies remain capped at 4 KiB.
 | `POST /room-commands` | Strict command with original `scopeToken` and `commandId`; status-only social outcome |
 | `POST /realtime-tickets` | `{ clientId }`; returns an opaque single-use 30-second ticket |
 | WebSocket `/realtime` | Same-origin upgrade, subprotocols `archtree-room-v1` and ticket; only the protocol name is negotiated |
+
+Room media search trims the query, limits it to 100 Unicode characters and
+rejects control characters. Title matching treats regex syntax literally.
+Descending-ID keyset cursors are signed, account/query bound and expire after
+15 minutes. Each page resolves at most 200 candidates; a partial or empty page
+may still provide `nextCursor` so older eligible tracks remain reachable. Reads
+never analyze or mutate media. The original bounded `/room-media` response stays
+available for older Web clients; current pickers use search and pagination.
 
 Tickets never appear in URLs and only their SHA-256 digest is persisted. Issue
 and redemption transactionally fence the live account/session. At most five

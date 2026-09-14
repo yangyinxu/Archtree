@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
-import { ROOM_LIMITS, isRoomClientId, isRoomIdentifier, parseRoomCommand, parseRoomHeartbeat, parseRoomReady,
+import { ROOM_LIMITS, ROOM_MEDIA_DISCOVERY_LIMITS, normalizeRoomMediaQuery, isRoomClientId, isRoomIdentifier, parseRoomCommand, parseRoomHeartbeat, parseRoomReady,
     type RoomActor, type RoomApi, type RoomCommand, type RoomHeartbeat, type RoomInvitation, type RoomMediaDescriptor,
     type RoomCommunity, type RoomReadyReport, type RoomSnapshot } from '../../contracts/roomV1';
 import { SOCIAL_LIMITS, SocialError, exactSocialKeys, type SocialOutcome } from '../../contracts/socialV1';
@@ -13,7 +13,7 @@ import { assertRoomAuthority } from '../../realtime/roomAuthority';
 import { notifyRoomChanges } from '../../realtime/roomEvents';
 import type { SocialBudgetDocument, SocialProfileDocument, SocialReceiptDocument, SocialRelationshipDocument } from '../../repositories/social/socialDocuments';
 import type { RoomDocument, RoomInvitationDocument, RoomMemberDocument, RoomParticipationDocument, RoomQueueEntryDocument } from '../../repositories/social/roomDocuments';
-import { readSocialToken } from '../social/socialTokens';
+import { readSocialToken, signSocialToken } from '../social/socialTokens';
 import { SOCIAL_TRANSACTION_ATTEMPTS, waitForSocialTransactionRetry } from '../social/socialTransactionRetry';
 import { suppressRoomListening } from '../social/listeningLifecycle';
 import { appendRoomEvent, closeRoom, deleteRoomInvitations, incrementRoomVersion, invalidateInvitationAccounts, pauseRoom, persistRoom, removeRoomMember, roomPositionAt } from './roomLifecycle';
@@ -58,6 +58,10 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
     const host = (room: RoomDocument) => room.members.find(member => member.membershipId === room.hostMembershipId);
     const hostPresent = (room: RoomDocument) => Boolean(host(room) && connected(host(room)!));
     const safeRoom = (room: RoomDocument | null): room is RoomDocument => Boolean(room && room.state === 'open' && room.expiresAt.getTime() > now());
+    /** Discovery projects only the ready resolver's public descriptor, never its database evidence. */
+    const mediaDescriptor = (value: RoomMediaDescriptor): RoomMediaDescriptor => ({ mediaTrackId: value.mediaTrackId,
+        title: [...value.title].slice(0, 160).join(''), mediaRevision: value.mediaRevision, durationMs: value.durationMs,
+        streamUrl: value.streamUrl, mediaType: value.mediaType });
 
     /** Session and sorted account writes serialize admission with revocation, block and account deletion. */
     const transaction = async <T>(actor: RoomActor | null, work: (session: ClientSession) => Promise<T>,
@@ -567,6 +571,51 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                     if (result.length === 50) break;
                 }
                 return result;
+            });
+        },
+        async searchMedia(actor, input) {
+            if (!input || typeof input !== 'object' || Array.isArray(input)
+                || !Object.keys(input).every(key => ['query', 'cursor', 'limit'].includes(key))) return fail('invalid_request', 400);
+            const query = normalizeRoomMediaQuery(input.query), limit = input.limit === undefined ? ROOM_MEDIA_DISCOVERY_LIMITS.page : input.limit;
+            const cursor = input.cursor;
+            if (query === null || !Number.isSafeInteger(limit) || limit < 1 || limit > ROOM_MEDIA_DISCOVERY_LIMITS.maximumPage
+                || cursor !== undefined && (typeof cursor !== 'string' || !cursor.length || Buffer.byteLength(cursor) > ROOM_MEDIA_DISCOVERY_LIMITS.cursorBytes)) return fail('invalid_request', 400);
+            return transaction(actor, async session => {
+                await profile(actor.userId, session);
+                let afterId: string | undefined;
+                const queryHash = hash(query);
+                if (cursor !== undefined) {
+                    const parsed = readSocialToken(cursor, secret());
+                    if (!exactSocialKeys(parsed, ['audience', 'accountId', 'queryHash', 'afterId', 'expiresAt'])
+                        || parsed.audience !== 'room-media-search-v1' || parsed.accountId !== actor.userId || parsed.queryHash !== queryHash
+                        || typeof parsed.afterId !== 'string' || !/^[a-f0-9]{24}$/.test(parsed.afterId)
+                        || !Number.isSafeInteger(parsed.expiresAt) || Number(parsed.expiresAt) <= now()) return fail('cursor_invalid', 400);
+                    afterId = parsed.afterId;
+                }
+                const candidates = await db().collection('audioTracks').find({ ...readyAudioStorageFilter,
+                    'mediaRepresentation.seekable': true, 'mediaRepresentation.format': 'wav-pcm',
+                    _id: { $type: 'objectId', ...(afterId ? { $lt: new ObjectId(afterId) } : {}) },
+                    ...(query ? { title: { $regex: query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } } : {})
+                }, { session, projection: { _id: 1 } }).sort({ _id: -1 }).limit(ROOM_MEDIA_DISCOVERY_LIMITS.candidates + 1).maxTimeMS(2_000).toArray();
+                const items: RoomMediaDescriptor[] = [];
+                let scanned = 0;
+                // A cursor advances past rejected representations too; a sparse page cannot strand older media.
+                for (const candidate of candidates.slice(0, ROOM_MEDIA_DISCOVERY_LIMITS.candidates)) {
+                    const value = await resolveMedia(candidate._id.toString(), session); scanned++;
+                    if (value) items.push(mediaDescriptor(value));
+                    if (items.length === limit) break;
+                }
+                const last = candidates[scanned - 1];
+                return { items, nextCursor: last && scanned < candidates.length ? signSocialToken({ audience: 'room-media-search-v1',
+                    accountId: actor.userId, queryHash, afterId: last._id.toString(), expiresAt: now() + ROOM_MEDIA_DISCOVERY_LIMITS.cursorMs }, secret()) : null };
+            });
+        },
+        async mediaTrack(actor, mediaTrackId) {
+            if (typeof mediaTrackId !== 'string' || !/^[a-f0-9]{24}$/.test(mediaTrackId)) return fail('invalid_request', 400);
+            return transaction(actor, async session => {
+                await profile(actor.userId, session);
+                const value = await resolveMedia(mediaTrackId, session);
+                return value ? mediaDescriptor(value) : null;
             });
         },
         async mutate(actor, input) {

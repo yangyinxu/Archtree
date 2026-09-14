@@ -2,7 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 const suites = [{ name: 'rooms', port: 4175 }, { name: 'invitations', port: 4176 },
   { name: 'song-requests', port: 4177 }, { name: 'music-shares', port: 4178 },
-  { name: 'room-interactions', port: 4179 }, { name: 'listening-status', port: 4180 }] as const;
+  { name: 'room-interactions', port: 4179 }, { name: 'listening-status', port: 4180 },
+  { name: 'catalog-room', port: 4181 }] as const;
 
 /** Opt-in Mongo/S3/WS gate uses real production routes and separate synthetic accounts. */
 export default defineConfig({
