@@ -62,7 +62,7 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
         : playing && room.self.canControl && <button className={styles.secondary} disabled={!allowed} onClick={() => roomSession.control('pause')}>{t('room.shared_pause')}</button>)}
     </div>
     {player.error && <p className={styles.error}>{t('room.start_failed')}</p>}
-    <div className={styles.actions}>
+    <div className={`${styles.actions} ${styles.roomSettings}`}>
       <label className={styles.field}>{t('room.permissions')}<select value={room.controlMode} disabled={!host || !allowed || room.status !== 'open'} onChange={event => roomSession.control('setControlMode', event.target.value)}>
         <option value="hostOnly">{t('room.host_only')}</option><option value="everyone">{t('room.everyone')}</option>
       </select></label>

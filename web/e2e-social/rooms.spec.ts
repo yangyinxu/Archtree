@@ -14,6 +14,35 @@ const playing = async (page: Page) => {
   await expect.poll(async () => (await media(page)).filter(value => !value.paused && value.ready >= 2).length).toBe(1);
 };
 
+/** Checks the actual controls at desktop and mobile widths without changing room state. */
+const roomSettingsGeometry = async (page: Page) => {
+  const original = page.viewportSize()!;
+  const panel = roomPanel(page);
+  const select = panel.getByRole('combobox', { name: 'Playback control' });
+  const end = panel.getByRole('button', { name: 'End room', exact: true });
+  try {
+    for (const [name, viewport] of [['desktop', original], ['320', { width: 320, height: 800 }]] as const) {
+      await page.setViewportSize(viewport);
+      await expect.poll(async () => {
+        const [field, button, bounds] = await Promise.all([select.boundingBox(), end.boundingBox(), panel.evaluate(element => {
+          const rect = element.getBoundingClientRect(); const style = getComputedStyle(element);
+          return { left: rect.left + parseFloat(style.paddingLeft), right: rect.right - parseFloat(style.paddingRight),
+            viewport: document.documentElement.clientWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth };
+        })]);
+        if (!field || !button) return false;
+        const aligned = Math.abs(field.y + field.height - button.y - button.height) <= 1;
+        const wrapped = name === '320' && button.y >= field.y + field.height - 1;
+        return (aligned || wrapped) && Math.abs(field.height - button.height) <= 1
+          && [field, button].every(box => box.x >= bounds.left - 1 && box.x + box.width <= bounds.right + 1)
+          && Math.max(bounds.document, bounds.body) <= bounds.viewport + 1;
+      }, { message: `${name}: room settings align or wrap within the viewport` }).toBe(true);
+      const path = test.info().outputPath(`room-settings-${name}.png`);
+      await select.locator('..').locator('..').screenshot({ path, animations: 'disabled' });
+      await test.info().attach(`room-settings-${name}`, { path, contentType: 'image/png' });
+    }
+  } finally { await page.setViewportSize(original); }
+};
+
 /** A disposable normal browser avoids Playwright's focus emulation, so real tab visibility is observable. */
 const nativeTabBrowser = async () => {
   const profile = await mkdtemp(join(tmpdir(), 'archtree-social-native-tabs-'));
@@ -168,6 +197,7 @@ test('real social route continues background audio, arbitrates gestures, recover
       for (const title of ['First Light', 'Across the Water', 'Home Again']) await a.getByRole('checkbox', { name: new RegExp(title) }).check();
       await a.getByRole('button', { name: 'Start a room', exact: true }).click();
       await expect(a.getByRole('button', { name: 'End room', exact: true })).toBeVisible();
+      await roomSettingsGeometry(alice);
       const invitedAt = Date.now();
       await a.getByRole('button', { name: 'Invite', exact: true }).click();
       await expect(b.getByRole('button', { name: 'Join room', exact: true })).toBeVisible({ timeout: 5000 });

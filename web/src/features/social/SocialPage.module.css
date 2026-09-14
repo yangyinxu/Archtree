@@ -13,6 +13,9 @@
 .check { display: flex; align-items: start; gap: .6rem; margin: 1rem 0; font-size: .86rem; color: var(--color-text-muted); }
 .check input { accent-color: var(--color-accent); margin-top: .2rem; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: 1rem; }
+.roomSettings { align-items: flex-end; }
+.roomSettings .field { margin-top: 0; max-width: 100%; }
+.roomSettings > button { min-height: 2.8rem; }
 .button, .secondary, .danger { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; border-radius: 999px; min-height: 2.65rem; padding: .5rem 1rem; font-weight: 650; font-size: .83rem; text-decoration: none; }
 .button { color: var(--color-on-accent); background: var(--color-accent); border: 1px solid var(--color-accent); }
 .secondary { color: var(--color-text); background: transparent; border: 1px solid var(--color-border-strong); }
