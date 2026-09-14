@@ -3742,6 +3742,333 @@
         "name": "string"
       }
     },
+    "room.accept_transfer": {
+      "description": "Shared listening interface: accept transfer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.cancel_transfer": {
+      "description": "Shared listening interface: cancel transfer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.choose_music": {
+      "description": "Shared listening interface: choose music.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.close": {
+      "description": "Shared listening interface: close.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.connected": {
+      "description": "Shared listening interface: connected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.connecting": {
+      "description": "Shared listening interface: connecting.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.create": {
+      "description": "Shared listening interface: create.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.disconnected": {
+      "description": "Shared listening interface: disconnected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.empty": {
+      "description": "Shared listening interface: empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.end": {
+      "description": "Shared listening interface: end.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.end_confirm": {
+      "description": "Shared listening interface: end confirm.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.ended": {
+      "description": "Shared listening interface: ended.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.everyone": {
+      "description": "Shared listening interface: everyone.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.guest": {
+      "description": "Shared listening interface: guest.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.host": {
+      "description": "Shared listening interface: host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.host_only": {
+      "description": "Shared listening interface: host only.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.incoming_invite": {
+      "description": "Shared listening interface: incoming invite.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.invitations": {
+      "description": "Shared listening interface: invitations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invite": {
+      "description": "Shared listening interface: invite.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invite_friends": {
+      "description": "Shared listening interface: invite friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.join": {
+      "description": "Shared listening interface: join.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.kick": {
+      "description": "Shared listening interface: kick.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.leave": {
+      "description": "Shared listening interface: leave.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.local_pause": {
+      "description": "Shared listening interface: local pause.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.locally_paused": {
+      "description": "Shared listening interface: locally paused.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.members": {
+      "description": "Shared listening interface: members.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.no_media": {
+      "description": "Shared listening interface: no media.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.not_ready": {
+      "description": "Shared listening interface: not ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.observing": {
+      "description": "Shared listening interface: observing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.permissions": {
+      "description": "Shared listening interface: permissions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.position": {
+      "description": "Shared listening interface: position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "duration": "string",
+        "elapsed": "string"
+      }
+    },
+    "room.preparing": {
+      "description": "Shared listening interface: preparing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue": {
+      "description": "Shared listening interface: queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.ready": {
+      "description": "Shared listening interface: ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.reconnect": {
+      "description": "Shared listening interface: reconnect.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.resync": {
+      "description": "Shared listening interface: resync.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.seek": {
+      "description": "Shared listening interface: seek.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.selected": {
+      "description": "Shared listening interface: selected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.shared_pause": {
+      "description": "Shared listening interface: shared pause.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.shared_play": {
+      "description": "Shared listening interface: shared play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.start_failed": {
+      "description": "Shared listening interface: start failed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.suspended": {
+      "description": "Shared listening interface: suspended.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.take_control": {
+      "description": "Shared listening interface: take control.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.title": {
+      "description": "Shared listening interface: title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.transfer": {
+      "description": "Shared listening interface: transfer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.transfer_pending": {
+      "description": "Shared listening interface: transfer pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "route.announcement.page": {
       "description": "Live-region announcement after a client-side route change.",
       "delivery": [
@@ -4221,6 +4548,295 @@
     },
     "shell.skip_to_main": {
       "description": "Keyboard skip-link label for moving to routed content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.accept": {
+      "description": "Social listener interface: accept.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.alias": {
+      "description": "Social listener interface: alias.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.block": {
+      "description": "Social listener interface: block.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.blocked_profile": {
+      "description": "Social listener interface: blocked profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.blocks": {
+      "description": "Social listener interface: blocks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.cancel_request": {
+      "description": "Social listener interface: cancel request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.check_outcome": {
+      "description": "Social listener interface: check outcome.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.create_profile": {
+      "description": "Social listener interface: create profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.deactivate": {
+      "description": "Social listener interface: deactivate.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.deactivate_confirm": {
+      "description": "Social listener interface: deactivate confirm.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.decline": {
+      "description": "Social listener interface: decline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.description": {
+      "description": "Social listener interface: description.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.discoverable": {
+      "description": "Social listener interface: discoverable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.empty": {
+      "description": "Social listener interface: empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.error": {
+      "description": "Social listener interface: error.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.find": {
+      "description": "Social listener interface: find.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.find_hint": {
+      "description": "Social listener interface: find hint.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.friends": {
+      "description": "Social listener interface: friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle": {
+      "description": "Social listener interface: handle.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.identity": {
+      "description": "Social listener interface: identity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.identity_hint": {
+      "description": "Social listener interface: identity hint.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.inactive": {
+      "description": "Social listener interface: inactive.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.incoming": {
+      "description": "Social listener interface: incoming.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.loading": {
+      "description": "Social listener interface: loading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.lookup": {
+      "description": "Social listener interface: lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.nav": {
+      "description": "Social listener interface: nav.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.not_found": {
+      "description": "Social listener interface: not found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.outgoing": {
+      "description": "Social listener interface: outgoing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.reactivate": {
+      "description": "Social listener interface: reactivate.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.refresh": {
+      "description": "Social listener interface: refresh.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.remove": {
+      "description": "Social listener interface: remove.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.request": {
+      "description": "Social listener interface: request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.retry_same": {
+      "description": "Social listener interface: retry same.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.save_profile": {
+      "description": "Social listener interface: save profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.sign_in": {
+      "description": "Social listener interface: sign in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.signed_in": {
+      "description": "Social listener interface: signed in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "social.stale": {
+      "description": "Social listener interface: stale.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.title": {
+      "description": "Social listener interface: title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.unblock": {
+      "description": "Social listener interface: unblock.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.unknown": {
+      "description": "Social listener interface: unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.updated": {
+      "description": "Social listener interface: updated.",
       "delivery": [
         "runtime"
       ],

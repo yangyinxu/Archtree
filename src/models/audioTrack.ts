@@ -19,6 +19,7 @@ import { touchActiveAccount } from '../services/accountReferenceFenceService';
 import { updateReadyAudioTrackAndAlbum } from '../services/albumTrackLinkService';
 import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
 import type { SoundtrackVideoAsset } from './soundtrackVideoAsset';
+import type { MediaRepresentation } from './mediaRepresentation';
 import {
     activeMediaObjectKeyForTrack,
     type MediaType
@@ -87,6 +88,8 @@ export class AudioTrack {
     /** Active media kind; missing on legacy rows means Audio unless migration evidence says otherwise. */
     mediaType?: MediaType;
     s3Key?: string;
+    /** Exact object metadata; duration display text is never a synchronized playback clock. */
+    mediaRepresentation?: MediaRepresentation | null;
     uploadStatus: AudioUploadStatus;
     uploadUpdatedAt: Date;
     uploadError?: string | null;
@@ -94,11 +97,15 @@ export class AudioTrack {
     publicationUpdatedAt: Date;
     publicationError?: string | null;
     pendingS3Key?: string | null;
+    pendingS3VersionId?: string | null;
+    /** Unknown PUT outcomes require explicit version reconciliation, never key-only cleanup. */
+    pendingUploadOutcomeUnknown?: boolean | null;
     pendingMediaType?: MediaType | null;
     pendingUploadStatus?: 'pending' | 'failed' | null;
     pendingUploadUpdatedAt?: Date;
     pendingUploadError?: string | null;
     storageCleanupS3Key?: string | null;
+    storageCleanupS3VersionId?: string | null;
     storageCleanupMediaType?: MediaType | null;
     storageCleanupStatus?: 'pending' | 'deleteFailed' | null;
     storageCleanupUpdatedAt?: Date;

@@ -79,6 +79,14 @@ export class ServerLifecycle {
   private work = new Set<Promise<unknown>>();
   private idleWaiters = new Set<() => void>();
   private workAdmissionClosed = false;
+  private drainListeners = new Set<() => void>();
+
+  /** Realtime gateways stop upgrade/timer admission and close owned sockets before HTTP drain. */
+  onDrain(listener: () => void) {
+    if (this.draining) listener();
+    else this.drainListeners.add(listener);
+    return () => { this.drainListeners.delete(listener); };
+  }
 
   /** Tracks business completion independently of HTTP connection lifetime. */
   track<T>(operation: () => T | Promise<T>): Promise<T> {
@@ -123,6 +131,8 @@ export class ServerLifecycle {
   stop(server: Server, closeDatabase: () => Promise<void>, graceMs: number, cleanupMs: number) {
     if (this.shutdown) return this.shutdown;
     this.draining = true;
+    for (const listener of this.drainListeners) listener();
+    this.drainListeners.clear();
     for (const response of this.responses) {
       response.shouldKeepAlive = false;
       if (!response.headersSent) response.setHeader('Connection', 'close');

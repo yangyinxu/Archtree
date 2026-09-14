@@ -461,6 +461,7 @@ test('audio replacement uploads a versioned key, attaches it, then deletes the p
     assert.deepEqual(calls, [
         'update:pending',
         `put:${replacementKey}`,
+        'update:undefined',
         'update:ready',
         `delete:${originalKey}`,
         'update:null'
@@ -480,7 +481,7 @@ test('audio replacement checks final attachment and removes an unattached upload
                 state = { ...state, ...update };
                 return { matchedCount: 1 };
             }
-            if (updateCount === 2) return { matchedCount: 0 };
+            if (update.uploadStatus === 'ready') return { matchedCount: 0 };
             state = { ...state, ...update };
             return { matchedCount: 1 };
         },
@@ -496,8 +497,8 @@ test('audio replacement checks final attachment and removes an unattached upload
     assert.equal(state.s3Key, originalKey);
 });
 
-test('audio upload failures report whether replacement-object cleanup is pending', async () => {
-    for (const cleanupFails of [false, true]) {
+test('definite upload rejection releases its reservation while unknown PUT outcomes retain reconciliation evidence', async () => {
+    for (const outcomeUnknown of [false, true]) {
         let state: any = { s3Key: originalKey, uploadStatus: 'ready' };
         const dependencies: AudioUploadDependencies = {
             findTrack: async () => ({ ...state }),
@@ -510,17 +511,24 @@ test('audio upload failures report whether replacement-object cleanup is pending
                 state = { ...state, ...update };
                 return { matchedCount: 1 };
             },
-            putObject: async () => { throw new Error('simulated put failure'); },
-            deleteObject: async () => {
-                if (cleanupFails) throw new Error('simulated cleanup failure');
-            }
+            putObject: async () => { throw outcomeUnknown ? new Error('simulated network failure') :
+                Object.assign(new Error('simulated rejected upload'), { $metadata: { httpStatusCode: 403 } }); },
+            deleteObject: async () => { assert.fail('Key-only deletion cannot prove an unknown object version was removed.'); }
         };
 
         await assert.rejects(
             uploadAudioObject(trackId, uploadFile, 'owner', undefined, dependencies),
-            (error: any) => error?.code === 'audio_upload_failed'
-                && error?.cleanupPending === cleanupFails
+            (error: any) => error?.code === (outcomeUnknown ? 'audio_upload_outcome_unknown' : 'audio_upload_failed')
+                && error?.cleanupPending === outcomeUnknown
         );
+        assert.equal(state.pendingUploadOutcomeUnknown, outcomeUnknown);
+        assert.equal(state.pendingS3Key, outcomeUnknown ? replacementKey : null);
+        if (outcomeUnknown) {
+            await assert.rejects(uploadAudioObject(trackId, uploadFile, 'owner', undefined, dependencies),
+                (error: any) => error?.code === 'audio_upload_outcome_unknown');
+            await assert.rejects(deleteAudioObjectAndTrack(trackId, { findTrack: async () => state }),
+                (error: any) => error?.code === 'audio_upload_outcome_unknown');
+        }
     }
 });
 
@@ -529,13 +537,13 @@ test('audio attachment preserves reconciliation evidence when confirmation is un
     let updateCount = 0;
     const dependencies: AudioUploadDependencies = {
         findTrack: async () => {
-            if (updateCount >= 2) throw new Error('confirmation unavailable');
+            if (updateCount >= 3) throw new Error('confirmation unavailable');
             return { ...state };
         },
         createObjectKey: () => replacementKey,
         updateTrackWhere: async (_id, _expected, update) => {
             updateCount += 1;
-            if (updateCount === 2) throw new Error('database response lost');
+            if (update.uploadStatus === 'ready') throw new Error('database response lost');
             state = { ...state, ...update };
             return { matchedCount: 1 };
         },
@@ -562,7 +570,7 @@ test('audio replacement keeps a committed attachment when the final database res
         updateTrackWhere: async (_id, _expected, update) => {
             updateCount += 1;
             state = { ...state, ...update };
-            if (updateCount === 2) throw new Error('database response lost');
+            if (update.uploadStatus === 'ready') throw new Error('database response lost');
             return { matchedCount: 1 };
         },
         putObject: async () => undefined,
@@ -600,4 +608,51 @@ test('audio replacement does not clear cleanup evidence after a delete fence win
     assert.equal(result.cleanupPending, true);
     assert.equal(state.uploadStatus, 'deleting');
     assert.equal(state.storageCleanupS3Key, originalKey);
+});
+
+test('known S3 versions survive detached cleanup failure and retries delete those exact versions', async () => {
+    let state: any = { s3Key: originalKey, uploadStatus: 'ready',
+        mediaRepresentation: { objectKey: originalKey, versionId: 'old-version' } };
+    const deletions: Array<[string, string | null | undefined]> = [];
+    let failOldCleanup = true;
+    const dependencies: AudioUploadDependencies = {
+        findTrack: async () => ({ ...state }), createObjectKey: () => replacementKey,
+        updateTrackWhere: async (_id, _expected, update) => { state = { ...state, ...update }; return { matchedCount: 1 }; },
+        putObject: async () => ({ ETag: '"new-bytes"', VersionId: 'new-version' }),
+        deleteObject: async (key, versionId) => {
+            deletions.push([key, versionId]);
+            if (key === originalKey && failOldCleanup) throw new Error('Unavailable old version.');
+        }
+    };
+    const first = await uploadAudioObject(trackId, uploadFile, 'owner', undefined, dependencies);
+    assert.equal(first.cleanupPending, true);
+    assert.equal(state.mediaRepresentation.versionId, 'new-version');
+    assert.equal(state.storageCleanupS3VersionId, 'old-version');
+    assert.equal(state.pendingS3VersionId, null);
+    failOldCleanup = false;
+    dependencies.createObjectKey = () => nextReplacementKey;
+    dependencies.putObject = async () => ({ ETag: '"third-bytes"', VersionId: 'third-version' });
+    await uploadAudioObject(trackId, uploadFile, 'owner', undefined, dependencies);
+    assert.deepEqual(deletions, [[originalKey, 'old-version'], [originalKey, 'old-version'], [replacementKey, 'new-version']]);
+    assert.equal(state.storageCleanupS3VersionId, null);
+});
+
+test('failed promotion retains the uploaded exact version when its cleanup fails', async () => {
+    let state: any = { s3Key: originalKey, uploadStatus: 'ready' };
+    const versions: Array<string | null | undefined> = [];
+    const dependencies: AudioUploadDependencies = {
+        findTrack: async () => ({ ...state }), createObjectKey: () => replacementKey,
+        updateTrackWhere: async (_id, _expected, update) => {
+            if (update.uploadStatus === 'ready') throw new Error('Promotion failed.');
+            state = { ...state, ...update }; return { matchedCount: 1 };
+        },
+        putObject: async () => ({ ETag: '"pending-bytes"', VersionId: 'pending-version' }),
+        deleteObject: async (_key, versionId) => { versions.push(versionId); throw new Error('Cleanup failed.'); }
+    };
+    await assert.rejects(uploadAudioObject(trackId, uploadFile, 'owner', undefined, dependencies));
+    assert.deepEqual(versions, ['pending-version']);
+    assert.equal(state.pendingS3Key, replacementKey);
+    assert.equal(state.pendingS3VersionId, 'pending-version');
+    assert.equal(state.pendingUploadOutcomeUnknown, false);
+    assert.equal(state.s3Key, originalKey);
 });

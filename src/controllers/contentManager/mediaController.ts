@@ -286,6 +286,13 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
                 : `${mediaType === 'video' ? 'Video' : 'Audio'} MediaTrack created successfully.`
         );
     } catch (error) {
+        if (error instanceof AudioStorageLifecycleError) {
+            return redirectWithMessage(res, error.outcomeUnknown
+                ? 'MediaTrack recorded, but the upload outcome could not be confirmed. Storage reconciliation is required before retrying.'
+                : error.cleanupPending
+                    ? 'MediaTrack upload failed. Its storage evidence remains recorded for cleanup and reconciliation.'
+                    : 'MediaTrack upload failed. The recorded upload can be retried.');
+        }
         return next(error);
     }
 };

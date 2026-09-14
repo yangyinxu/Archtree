@@ -79,9 +79,45 @@ const setup = (audio = new RoomAudio()) => {
 
 afterEach(() => vi.useRealTimers());
 
-test('production singleton construction cannot opt into room playback through public UI commands', () => {
+test('ordinary player construction requires an explicit room controller to attach', () => {
   const store = createPlayerStore({ mediaSession: null });
-  expect(() => store.attachRoomPlayback({ onIntent: vi.fn() })).toThrow('opt-in feasibility');
+  expect(() => store.attachRoomPlayback({ onIntent: vi.fn() })).toThrow('authorized room controller');
+  store.destroy();
+});
+
+test('preparation completion keeps its generation and starts only at the future server anchor', async () => {
+  vi.useFakeTimers();
+  const { audio, room, store, onIntent } = setup();
+  const preparing = { ...frame(0), status: 'preparing' as const, playbackAllowed: false };
+  await room.apply(preparing); audio.ready(); await Promise.resolve();
+  expect(audio.playCalls).toBe(0);
+  expect(await room.apply({ ...preparing, revision: 2, status: 'playing', playbackAllowed: true, anchorMonotonicMs: 10_350 })).toBe(true);
+  await vi.advanceTimersByTimeAsync(349);
+  expect(audio.playCalls).toBe(0);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(audio.playCalls).toBe(1);
+  expect(audio.loadCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('late-join readiness prepares the current position without playing before server confirmation', async () => {
+  vi.useFakeTimers();
+  const { audio, room, store, onIntent, onObservation } = setup();
+  const playing = { ...frame(0), status: 'playing' as const, playbackAllowed: false };
+  await room.apply(playing); audio.ready(); await Promise.resolve();
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }));
+  expect(audio.playCalls).toBe(0);
+  await room.apply({ ...playing, revision: 2, playbackAllowed: true });
+  expect(audio.playCalls).toBe(1);
+  room.pauseLocally();
+  await room.apply({ ...playing, revision: 3, playbackAllowed: false });
+  await room.resync();
+  expect(audio.playCalls).toBe(1);
+  await room.apply({ ...playing, revision: 4, playbackAllowed: true });
+  expect(audio.playCalls).toBe(2);
+  expect(audio.loadCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
   store.destroy();
 });
 
@@ -271,6 +307,20 @@ test('same-source callbacks cannot report a new occurrence started before its se
   audio.seeking = false; audio.emit('seeked');
   expect(onObservation.mock.calls.some(([value]) => value.type === 'actual-start' && value.playbackEpoch === 60)).toBe(true);
   expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('drift correction cannot overwrite an unfinished readiness seek', async () => {
+  vi.useFakeTimers();
+  const { room, audio, store, onObservation } = setup();
+  await room.apply(frame(5)); audio.ready();
+  audio.seeking = true;
+  await room.apply({ ...frame(5), revision: 8, playbackEpoch: 60, positionSeconds: 1, anchorMonotonicMs: 10_000, playbackAllowed: false });
+  expect(room.correct(1.4)).toBe('none');
+  expect(audio.currentTime).toBe(1);
+  audio.seeking = false; audio.emit('seeked');
+  expect(onObservation.mock.calls.some(([value]) => value.type === 'unsupported-seek')).toBe(false);
+  expect(onObservation.mock.calls.some(([value]) => value.type === 'ready' && value.playbackEpoch === 60)).toBe(true);
   store.destroy();
 });
 

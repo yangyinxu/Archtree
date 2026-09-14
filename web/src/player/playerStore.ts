@@ -777,14 +777,14 @@ export const createPlayerStore = (
       updateSnapshot({ muted });
     },
     toggleMute: () => store.setMuted(!snapshot.muted),
-    attachRoomPlayback: (roomOptions) => {
-      if (!options.roomPlaybackProbeFactory || destroyed) {
-        throw new Error('Room playback is available only in the opt-in feasibility harness.');
+    attachRoomPlayback: (roomOptions, controllerFactory = options.roomPlaybackProbeFactory) => {
+      if (!controllerFactory || destroyed) {
+        throw new Error('Room playback requires an authorized room controller.');
       }
       room?.attachment.detach();
       pauseMedia();
       clearQueue();
-      room = options.roomPlaybackProbeFactory({
+      room = controllerFactory({
         media: () => audio,
         sourceGeneration: () => sourceGeneration,
         install: async (queue, index) => {

@@ -26,7 +26,8 @@ import styles from './AppShell.module.css';
 const destinations: Array<{ labelKey: MessageKey; path: string; icon: IconName }> = [
   { labelKey: 'shell.nav.home', path: '/', icon: 'home' },
   { labelKey: 'shell.nav.search', path: '/search', icon: 'search' },
-  { labelKey: 'shell.nav.library', path: '/library', icon: 'library' }
+  { labelKey: 'shell.nav.library', path: '/library', icon: 'library' },
+  { labelKey: 'social.nav', path: '/social', icon: 'account' }
 ];
 
 const PlaylistSidebar = lazy(() => import('../features/playlists/PlaylistSidebar'));

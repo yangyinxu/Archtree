@@ -6,6 +6,7 @@ import {
     touchActiveAccount
 } from './accountReferenceFenceService';
 import { deleteSocialAccountData } from './socialAccountLifecycleService';
+import { notifyRoomChanges } from '../realtime/roomEvents';
 
 export type AccountDeletionResult =
     | { status: 'deleted' }
@@ -135,6 +136,7 @@ export const deleteListenerAccountData = async (
                     throw new AccountDeletionBlockedError('avatarAttached');
                 }
             });
+            notifyRoomChanges();
             return { status: 'deleted' };
         } catch (error) {
             if (error instanceof AccountDeletionBlockedError) {

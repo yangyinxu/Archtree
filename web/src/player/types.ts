@@ -169,8 +169,8 @@ export interface PlayerStore {
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
   toggleMute(): void;
-  /** Requires explicit test-harness opt-in; it creates neither a room nor a transport. */
-  attachRoomPlayback(options: RoomPlaybackOptions): RoomPlaybackAttachment;
+  /** The authorized room runtime supplies its lazy controller; the store creates no room or transport. */
+  attachRoomPlayback(options: RoomPlaybackOptions, controllerFactory?: typeof createRoomPlaybackController): RoomPlaybackAttachment;
   /** Attaches the one shared video element to a presentation-owned surface. */
   attachMediaElement(container: HTMLElement): () => void;
   destroy(): void;

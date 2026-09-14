@@ -240,9 +240,14 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
         });
     } catch (error) {
         console.log(error);
-        return res.status(500).json({
-            message: 'Failed to create and upload the Audio MediaTrack. The upload attempt remains recorded for reconciliation.',
-            audioTrackId
+        const outcomeUnknown = (error as any)?.outcomeUnknown === true;
+        return res.status(outcomeUnknown ? 503 : 500).json({
+            message: outcomeUnknown
+                ? 'Audio MediaTrack recorded, but the upload outcome could not be confirmed. Storage reconciliation is required before retrying.'
+                : 'Failed to create and upload the Audio MediaTrack. The upload attempt remains recorded for reconciliation.',
+            audioTrackId,
+            outcomeUnknown,
+            cleanupPending: Boolean((error as any)?.cleanupPending)
         });
     }
 };

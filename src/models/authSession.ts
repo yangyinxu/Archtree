@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import { revokeSessionsWithRoomCleanup } from '../services/sessionRoomLifecycleService';
 
 export interface AuthSessionDocument {
     _id: ObjectId;
@@ -89,80 +90,27 @@ class AuthSession {
     }
 
     static async revokeByRefreshTokenHash(refreshTokenHash: string) {
-        const db = getDb();
-        return db!.collection<AuthSessionDocument>('authSessions').updateOne(
-            {
-                $or: [
-                    { refreshTokenHash },
-                    { previousRefreshTokenHash: refreshTokenHash }
-                ],
-                revokedAt: { $exists: false }
-            },
-            {
-                $set: {
-                    revokedAt: new Date(),
-                    updatedAt: new Date()
-                }
-            }
-        );
+        return revokeSessionsWithRoomCleanup({
+            $or: [{ refreshTokenHash }, { previousRefreshTokenHash: refreshTokenHash }],
+            revokedAt: { $exists: false }
+        }, 'session');
     }
 
     static async revokeById(userId: string, sessionId: string) {
-        if (!ObjectId.isValid(sessionId)) {
-            return null;
-        }
-
-        const db = getDb();
-        return db!.collection<AuthSessionDocument>('authSessions').updateOne(
-            {
-                _id: new ObjectId(sessionId),
-                userId,
-                revokedAt: { $exists: false }
-            },
-            {
-                $set: {
-                    revokedAt: new Date(),
-                    updatedAt: new Date()
-                }
-            }
-        );
+        if (!ObjectId.isValid(sessionId)) return null;
+        return revokeSessionsWithRoomCleanup({ _id: new ObjectId(sessionId), userId,
+            revokedAt: { $exists: false } }, 'session', userId);
     }
 
     static async revokeAll(userId: string) {
-        const db = getDb();
-        return db!.collection<AuthSessionDocument>('authSessions').updateMany(
-            {
-                userId,
-                revokedAt: { $exists: false }
-            },
-            {
-                $set: {
-                    revokedAt: new Date(),
-                    updatedAt: new Date()
-                }
-            }
-        );
+        return revokeSessionsWithRoomCleanup({ userId, revokedAt: { $exists: false } }, 'logoutAll', userId);
     }
 
-    /** Revokes every other device while preserving the session that changed credentials. */
+    /** A credential change preserves the current session and its room controller. */
     static async revokeAllExcept(userId: string, sessionId: string) {
-        if (!ObjectId.isValid(sessionId)) {
-            return null;
-        }
-        const now = new Date();
-        return getDb()!.collection<AuthSessionDocument>('authSessions').updateMany(
-            {
-                userId,
-                _id: { $ne: new ObjectId(sessionId) },
-                revokedAt: { $exists: false }
-            },
-            {
-                $set: {
-                    revokedAt: now,
-                    updatedAt: now
-                }
-            }
-        );
+        if (!ObjectId.isValid(sessionId)) return null;
+        return revokeSessionsWithRoomCleanup({ userId, _id: { $ne: new ObjectId(sessionId) },
+            revokedAt: { $exists: false } }, 'otherSessions', userId, sessionId);
     }
 
     /** Lists active sessions without ever exposing refresh-token hashes. */

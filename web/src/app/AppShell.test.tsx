@@ -208,6 +208,12 @@ test('announces an unknown nested address as not found', async () => {
   expect(document.title).toBe('Page not found · Finitude');
 });
 
+test('announces the Social route with its product title', async () => {
+  renderRoute('/social');
+  expect(await screen.findByText('Listen together page')).toBeInTheDocument();
+  expect(document.title).toBe('Listen together · Finitude');
+});
+
 test('logs in through the browser session endpoint and returns Home', async () => {
   const user = userEvent.setup();
   const fetchMock = vi.fn(async (path: string) => new Response(JSON.stringify(

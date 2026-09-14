@@ -3,6 +3,7 @@ import { ClientSession, ObjectId } from 'mongodb';
 import { SOCIAL_LIMITS } from '../contracts/socialV1';
 import { getDb } from '../infrastructure/database';
 import type { SocialOutboxDocument, SocialRelationshipDocument } from '../repositories/social/socialDocuments';
+import { applyRoomSafety } from '../application/rooms/roomLifecycle';
 
 /**
  * Removes social identity in the account-deletion transaction after its existing
@@ -16,6 +17,7 @@ export const deleteSocialAccountData = async (
 ): Promise<void> => {
     if (!session.inTransaction()) throw new Error('Social account cleanup requires its account-deletion transaction.');
     const db = getDb()!;
+    await applyRoomSafety({ kind: 'delete', accountId }, session, now.getTime());
     const relationships = await db.collection<SocialRelationshipDocument>('socialRelationships')
         .find({ accountIds: accountId }, { session, projection: { accountIds: 1 } })
         .limit(SOCIAL_LIMITS.edges + 1).toArray();
@@ -39,6 +41,7 @@ export const deleteSocialAccountData = async (
     for (const collection of ['socialProfiles', 'socialMutations', 'socialBudgets', 'socialOutbox']) {
         await db.collection(collection).deleteMany({ accountId }, { session });
     }
+    await db.collection('socialRealtimeTickets').deleteMany({ accountId }, { session });
     // The temporary reservation keeps only the handle and deadline, never its former owner.
     await db.collection('socialHandles').updateMany(
         { accountId },

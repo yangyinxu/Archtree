@@ -5,6 +5,7 @@ import { connectToDatabase, disconnectFromDatabase } from './infrastructure/data
 import { accessTokenDurationSeconds } from './services/authSessionService';
 import { installShutdownHandlers, ServerLifecycle } from './services/serverLifecycleService';
 import { recordStartupFailureStage, type StartupStage } from './infrastructure/startupDiagnostics';
+import { installRoomGateway } from './realtime/roomGateway';
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -22,7 +23,12 @@ export interface ServerDependencies {
 
 /** Resolves only after listening, and releases infrastructure on every startup failure. */
 export const startServer = async (dependencies: ServerDependencies = {}): Promise<Server> => {
-  const closeDatabase = dependencies.closeDatabase ?? disconnectFromDatabase;
+  const disconnectDatabase = dependencies.closeDatabase ?? disconnectFromDatabase;
+  let gateway: ReturnType<typeof installRoomGateway> | undefined;
+  const closeDatabase = async () => {
+    gateway?.stop();
+    try { await gateway?.release(); } finally { await disconnectDatabase(); }
+  };
   const lifecycle = new ServerLifecycle();
   const server = new Server();
   const cleanupMs = () => Math.min(30_000, positiveInteger(process.env.SERVER_SHUTDOWN_CLEANUP_MS, 5_000));
@@ -32,6 +38,7 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
     stage = 'application';
     const app = (dependencies.createApplication ?? createApp)({ lifecycle });
     server.on('request', app);
+    if (process.env.FINITUDE_ROOMS_ENABLED === 'true') gateway = installRoomGateway(server, lifecycle);
     stage = 'listener_configuration';
     const port = dependencies.port ?? Number(process.env.PORT || process.env.port || 8080);
     if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('PORT must be a valid TCP port.');

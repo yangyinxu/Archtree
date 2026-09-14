@@ -194,6 +194,21 @@ test('audio reconciliation reports storage-ready pending and failed publication 
     ]);
 });
 
+test('audio reconciliation preserves known S3 versions and explicitly identifies unconfirmed upload outcomes', () => {
+    const id = '507f1f77bcf86cd799439011';
+    const [result] = findIncompleteAudioTracks([{
+        _id: id, s3Key: id, uploadStatus: 'ready', mediaRepresentation: { objectKey: id, versionId: 'active-version' },
+        pendingS3Key: `audio/${id}/507f1f77bcf86cd799439012`, pendingUploadStatus: 'failed',
+        pendingS3VersionId: null, pendingUploadOutcomeUnknown: true,
+        storageCleanupS3Key: `audio/${id}/507f1f77bcf86cd799439013`, storageCleanupStatus: 'deleteFailed',
+        storageCleanupS3VersionId: 'cleanup-version'
+    }], new Set([id]));
+    assert.equal(result.s3VersionId, 'active-version');
+    assert.equal(result.pendingS3VersionId, null);
+    assert.equal(result.pendingUploadOutcomeUnknown, true);
+    assert.equal(result.storageCleanupS3VersionId, 'cleanup-version');
+});
+
 test('image reconciliation audits cover art and private avatars without mutating either', async () => {
     const coverAttached = '507f1f77bcf86cd799439011';
     const avatarMissing = '507f1f77bcf86cd799439012';

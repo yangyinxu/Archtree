@@ -7,8 +7,10 @@ import { DatabaseTopologyUnavailableError, verifyDatabaseTransactionTopology } f
 import { startServer } from '../src/server';
 
 test('real replica-set startup is ready and supports an actual committed transaction', async () => {
+  const before = process.listenerCount('SIGINT');
   const harness = await startMongoReplicaSet('archtree-topology-replica-set');
   try {
+    assert.equal(process.listenerCount('SIGINT'), before + 1);
     await verifyDatabaseTransactionTopology(getDb()!);
     assert.equal(await checkDatabaseReadiness(), true);
     await getDb()!.createCollection('syntheticTopologyProbe');
@@ -20,6 +22,18 @@ test('real replica-set startup is ready and supports an actual committed transac
     } finally { await session.endSession(); }
     assert.equal(await getDb()!.collection('syntheticTopologyProbe').countDocuments(), 1);
   } finally { await harness.stop(); }
+  assert.equal(process.listenerCount('SIGINT'), before);
+});
+
+test('a containing server can exclusively own signals until it explicitly closes MongoDB', async () => {
+  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+  const before = signals.map(signal => process.listenerCount(signal));
+  const harness = await startMongoReplicaSet('archtree-topology-owned-signals', { registerSignalHandlers: false });
+  try {
+    assert.equal(await checkDatabaseReadiness(), true);
+    assert.deepEqual(signals.map(signal => process.listenerCount(signal)), before);
+  } finally { await harness.stop(); }
+  assert.deepEqual(signals.map(signal => process.listenerCount(signal)), before);
 });
 
 test('real standalone startup is rejected before the application or index writes become available', async () => {

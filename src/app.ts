@@ -1,4 +1,5 @@
 import express, { Application, NextFunction, Request, Response } from 'express';
+import { configuredTrustProxyHops } from './config/trustProxy';
 import bodyParser from 'body-parser';
 import fs from 'fs';
 import path from 'path';
@@ -13,6 +14,7 @@ import { createLocalizationRouter } from './routes/localizationRoutes';
 import videoRoutes from './routes/videoRoutes';
 import narutoMobileRoutes from './routes/narutoMobileRoutes';
 import { createSocialRouter } from './routes/socialRoutes';
+import { createRoomRouter } from './routes/roomRoutes';
 import {
   attachOptionalAuth,
   requireAdmin,
@@ -214,11 +216,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   const lifecycle = options.lifecycle ?? new ServerLifecycle();
   const diagnostics = createRequestDiagnostics();
   app.disable('x-powered-by');
-  const defaultProxyHops = 1;
-  const configuredProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? defaultProxyHops);
-  app.set('trust proxy', Number.isFinite(configuredProxyHops) && configuredProxyHops >= 0
-    ? Math.floor(configuredProxyHops)
-    : defaultProxyHops);
+  app.set('trust proxy', configuredTrustProxyHops());
 
   app.use(applySecurityHeaders);
   app.use(diagnostics.observe);
@@ -230,7 +228,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST, PUT, PATCH, DELETE');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match, X-Finitude-Account-Viewer'
+      'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match, X-Finitude-Account-Viewer, X-Finitude-Room-Client'
     );
     res.setHeader(
       'Access-Control-Expose-Headers',
@@ -249,6 +247,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/naruto-mobile/api/v1', narutoMobileRoutes);
 
   // Social authentication and its smaller JSON limit precede the general parser.
+  app.use('/api/social/v1', createRoomRouter());
   app.use('/api/social/v1', createSocialRouter());
 
   // Protect and bound anonymous diagnostics before the general JSON parser can

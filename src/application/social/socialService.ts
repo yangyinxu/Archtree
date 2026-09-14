@@ -13,6 +13,8 @@ import type {
     SocialReceiptDocument, SocialRelationshipDocument
 } from '../../repositories/social/socialDocuments';
 import { readSocialToken, signSocialToken } from './socialTokens';
+import { applyRoomSafety, roomSafetyAccountIds } from '../rooms/roomLifecycle';
+import { notifyRoomChanges } from '../../realtime/roomEvents';
 
 export interface SocialServiceOptions {
     now?: () => number;
@@ -344,7 +346,7 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
             const id = hash(JSON.stringify([actor.userId, originalScope.id, command.commandId]));
             const digest = hash(JSON.stringify(Object.keys(command).filter(key => key !== 'scopeToken').sort()
                 .map(key => [key, command[key as keyof SocialCommand]])));
-            return transaction(actor, async session => {
+            const result = await transaction(actor, async session => {
                 const currentScope = scope(actor, command.scopeToken);
                 const receipt = await receipts().findOne({ _id: id }, { session });
                 if (receipt) {
@@ -375,6 +377,15 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 }
                 if (operation) {
                     await operation.write();
+                    if (operation.outcome === 'applied') {
+                        if (command.action === 'deactivate' || command.action === 'profile') {
+                            await applyRoomSafety({ kind: command.action, accountId: actor.userId }, session, now());
+                        } else if (command.action === 'block' || command.action === 'remove') {
+                            const target = await profiles().findOne({ _id: command.targetSocialId }, { session });
+                            if (target) await applyRoomSafety({ kind: command.action === 'block' ? 'block' : 'removeFriend',
+                                accountId: actor.userId, targetAccountId: target.accountId }, session, now());
+                        }
+                    }
                     await invalidate(operation.affected, session);
                 }
                 await budgets().updateOne({ _id: actor.userId }, { $set: { accountId: actor.userId, commandMinute: minute, commands: count + 1 } }, { upsert: true, session });
@@ -383,18 +394,22 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                     expiresAt: new Date(currentScope.expiresAt + SOCIAL_LIMITS.receiptGraceMs) }, { session });
                 return { ...result, replayed: false };
             }, true, async session => {
+                const roomAccounts = ['deactivate', 'profile', 'block', 'remove'].includes(command.action)
+                    ? await roomSafetyAccountIds(actor.userId, session) : [];
                 if (command.action === 'deactivate') {
                     const edges = await relationships().find({ accountIds: actor.userId }, { session, projection: { accountIds: 1 } })
                         .limit(SOCIAL_LIMITS.edges + 1).toArray();
                     if (edges.length > SOCIAL_LIMITS.edges) throw new SocialError(503, 'social_unavailable');
-                    return edges.flatMap(edge => edge.accountIds);
+                    return [...roomAccounts, ...edges.flatMap(edge => edge.accountIds)];
                 }
                 if ('targetSocialId' in command) {
                     const target = await profiles().findOne({ _id: command.targetSocialId }, { session, projection: { accountId: 1 } });
-                    return target ? [target.accountId] : [];
+                    return [...roomAccounts, ...(target ? [target.accountId] : [])];
                 }
-                return [];
+                return roomAccounts;
             });
+            if (result.outcome === 'applied' && !result.replayed) notifyRoomChanges();
+            return result;
         },
         async outcome(actor, identity: SocialMutationIdentity) {
             if (!exactSocialKeys(identity, ['scopeToken', 'commandId']) || typeof identity.scopeToken !== 'string'

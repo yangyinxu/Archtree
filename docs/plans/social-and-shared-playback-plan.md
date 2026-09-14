@@ -5,10 +5,44 @@ social foundation for Archtree and Finitude, with future listening and watching 
 authorize a production rollout. The proposed architecture is maintained in
 [architecture.md](../architecture.md#social-and-shared-playback-architecture-proposed);
 accepted product behavior remains in [business-rules.md](../business-rules.md).
-The user has agreed that rooms support Host control and Everyone control,
-switchable only by the current host. That requirement is recorded in the planned
-feature section of the business rules; default mode and departure flow below
-remain architecture recommendations until implementation scope is finalized.
+Room behavior is now recorded in the active Shared Playback Rooms business
+rules. The current authorized goal is a complete local two-account Chrome Audio
+demonstration through the real product UI, database, WebSocket and existing player.
+Native UI, shared Video and production rollout remain separate later stages.
+
+## Current Web delivery checkpoint
+
+**Status: Complete**
+
+The initial Stage 1 notes below retain historical prototype evidence. Web now has
+formal social/room routes, a durable room authority and real media integration;
+iOS and Android retain their DEBUG-only feasibility adapters.
+
+- Implemented: transactional room arbitration, one-use realtime tickets,
+  account/session/media revocation, single-authority fencing, real pinned Audio
+  streaming, formal social UI, existing-player attachment, both modes, host
+  transfer and local resync.
+- Current validation: `npm test` passes 442 backend and 342 Web cases;
+  `npm run build` passes with unchanged asset budgets. The full integration run
+  passes 333 cases, with subsequent focused gateway, realtime, topology and
+  cleanup checks covering final changes. Nine actual-player cases pass across
+  Chromium, Firefox and WebKit. Manual Chrome covers login, profiles, friendship,
+  invitations, both modes, real shared playback, personal pause/resync, transfer
+  and End room. The real two-account automated regression passes against the
+  actual routes, MongoDB, loopback storage and WebSocket: both concurrent control
+  races accept one transition without echo, personal pause/resync is preserved,
+  observer reload/takeover works, transfer preserves playback and End clears both
+  clients. The route also passes the existing accessibility blocker policy.
+  Final gateway checks pass nine cases, including real contention, authorization
+  revocation, exact-report retries and bounded lease-validated timer recovery;
+  five real realtime cases and the cleanup/topology regressions pass.
+- Demonstration uses only owned disposable MongoDB/S3 resources and synthetic
+  accounts/music via `npm run demo:social`. No deployment or production data is
+  involved. Native localization fallbacks are synchronized, without native room UI.
+
+This completes the authorized local Web Audio demonstration. The larger plan is
+retained because native adoption, Video, production capacity/proxy verification
+and the remaining cross-platform release gates below are not complete.
 
 ## Stage 0 — Repository baseline and architecture
 
@@ -28,12 +62,12 @@ remain architecture recommendations until implementation scope is finalized.
 **Status: In progress**
 
 Implementation began with a transport-independent arbitration prototype, shared
-synthetic fixtures and isolated Web/iOS/Android adapter work. These modules remain
-unreachable from production room UI or routes until the durable authorization,
-media and recovery stages exist. Device evidence and the final protocol freeze
-remain required before this stage can be marked complete.
+synthetic fixtures and isolated Web/iOS/Android adapter work. Web now integrates
+its adapter with production room routes and the frozen `roomV1.ts` contract.
+Native adapters remain DEBUG-only; physical-device evidence and native wire
+adoption remain required before this cross-platform stage can be marked complete.
 
-Implemented and locally reviewed in this stage:
+Historical prototype implementation and local review:
 
 - Strict provisional snapshot/command validation, complete allowlisted queue
   identity, pure concurrent-command arbitration, both control modes and bounded
@@ -66,16 +100,16 @@ changing dependencies or the lockfile; verification was rerun afterward. The
 dedicated Android test emulator used a read-only disposable overlay and has been
 shut down. No production account, database, media object or deployment changed.
 
-The social identity/relationship portion of social-v1 is now frozen in
-`src/contracts/socialV1.ts`, with product rules promoted alongside Stage 2.
-Still required to finish Stage 1: freeze the room/playback wire contract, include
-the remaining lifecycle/capability fixtures, and resolve target-device evidence.
-The player adapters consume normalized trusted test
-inputs; they are not substitutes for viewer authorization, controller admission,
-clock calibration, revision-pinned media or a persisted readiness coordinator.
+The social identity/relationship and initial Audio room contracts are now frozen
+in `src/contracts/socialV1.ts` and `src/contracts/roomV1.ts`, with active product
+rules promoted alongside implementation. Web integrates viewer authorization,
+controller admission, clock calibration, revision-pinned media and persisted
+readiness. The native prototypes still consume normalized trusted test inputs.
+Remaining Stage 1 work is native lifecycle/capability fixture adoption and
+target-device evidence.
 
-Complete the remaining Web/iOS/Android technical spike evidence against synthetic
-room state and real test media before freezing the room wire contract. These
+Complete the remaining native technical spike evidence against synthetic
+room state and real test media before native room adoption. These
 player gates do not block the independent identity/relationship backend. Prove
 the existing player can prepare/seek, report actual start, apply
 scheduled state, suppress autonomous advancement, intercept system/fullscreen
@@ -90,7 +124,7 @@ but cannot count as a successful capability. Define foreground support as the
 baseline and graceful background detach/resync when continuous execution has not
 been demonstrated.
 
-Then freeze social-v1 DTOs, errors, encoded-size bounds, mutation scopes, version
+The frozen Web contracts define DTOs, errors, encoded-size bounds, mutation scopes, version
 semantics, preparation protocol, numeric duration/seekability, revision-pinned
 streaming and synthetic fixtures. Use one corpus across all clients. Update
 business rules alongside the implementation of each new behavior. The streaming
@@ -114,11 +148,11 @@ ordinary playback's source preference.
 | Host exit | Explicit Transfer and leave with recipient acceptance, or End room for everyone; transfer keeps mode/queue/running playback; pending preparation pauses |
 | Host failure | 30-second grace, then enforced suspension in both modes; five-minute absence closes the room; no automatic promotion or resume |
 | Slow client | Preparation ends early when ready, capped at three seconds; proceed with ready participants or stay paused if none is ready; host-controller presence is required, host-player readiness is not |
-| History | Explicit local join/play intent after actual start only; remote changes do not write history |
-| Room exit | Detach control; offer local continuation without auto-resuming old queue; ordinary browse Play explicitly exits room |
+| History | Initial Web room playback does not write Recently Played; future history requires explicit local intent and actual start |
+| Room exit | Detach control and clear the room queue without restoring/resuming the previous queue; browse playback cannot silently replace room playback |
 | Native source | Proposed room-only online-stream exception; ordinary playback still prefers valid Audio downloads |
 | Opt-out | Discovery off preserves friends; social deactivation removes access/relationships but retains private blocks |
-| Retention/limits | Social identity/relationship limits and 30-day deleted-handle reservation are implemented; room/invitation retention remains proposed |
+| Retention/limits | Social limits and 30-day deleted-handle reservation are implemented; rooms/invitations expire after 24 hours and room participation is cleaned before aggregate TTL |
 | Later scope | Video after device QA; user posts, chat, voice/camera and public rooms separately |
 
 **Exit gate:** three-client feasibility evidence and unsupported-capability paths,
@@ -179,7 +213,15 @@ privacy pass. A delayed outcome cannot restore revoked visibility or friendship.
 
 ## Stage 3 — Durable rooms, pinned media, and realtime recovery
 
-**Status: Not started**
+**Status: In progress**
+
+The user authorized continuing through a complete Chrome demonstration on
+2026-09-13. The current delivery boundary includes Stage 3 and the actual Web
+product flow in Stage 4: two synthetic accounts, friendship, invitation/join,
+real Audio playback, both control modes, concurrent controls and host transfer/end.
+It does not substitute an API debug page for the product. Work is split between
+media lifecycle, durable rooms and Web integration, with shared contracts,
+realtime transport, verification and demonstration coordinated centrally.
 
 Depends on Stage 2 and frozen protocol. Implement the backend as three bounded
 increments, each verified before enabling the next:
@@ -232,7 +274,7 @@ including when the driver reruns the losing transaction callback.
 
 ## Stage 4 — Audio room vertical slice on Web
 
-**Status: Not started**
+**Status: In progress**
 
 Depends on Stage 3. Integrate room mode with the existing player, browse-launch
 helpers and all system/transport controls. Build friend discovery/request controls,

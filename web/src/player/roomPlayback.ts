@@ -1,7 +1,7 @@
 import { copyQueue } from './queueOrder';
 import type { PlayerAudio, PlayerQueueItem } from './types';
 
-/** Local adapter input for a synthetic spike, deliberately not a production wire DTO. */
+/** Validated room state translated to the existing player's local monotonic clock. */
 export interface RoomPlaybackState {
   readonly roomId: string;
   readonly epoch: number;
@@ -10,13 +10,15 @@ export interface RoomPlaybackState {
   readonly playbackEpoch: number;
   readonly controlEpoch: number;
   readonly queueRevision: number;
-  /** Presentation safety only; the eventual server must independently authorize every intent. */
+  /** Presentation state only; the server independently authorizes every intent. */
   readonly canControl: boolean;
+  /** A room member must confirm readiness before this device may follow a playing timeline. */
+  readonly playbackAllowed?: boolean;
   readonly entryIds: readonly string[];
   readonly queue: readonly PlayerQueueItem[];
   readonly currentEntryId: string;
   readonly positionSeconds: number;
-  readonly status: 'playing' | 'paused';
+  readonly status: 'preparing' | 'playing' | 'paused' | 'ended';
   /** A server anchor must first be translated to this device's monotonic clock. */
   readonly anchorMonotonicMs: number;
 }
@@ -49,7 +51,7 @@ export interface RoomPlaybackOptions {
   onIntent(intent: RoomPlaybackIntent): void;
   onObservation?(observation: RoomPlaybackObservation): void;
   now?: () => number;
-  /** Foreground-only spike: hidden documents suspend locally until explicit resync. */
+  /** Hidden documents suspend locally until explicit resync. */
   visibility?: Pick<Document, 'hidden' | 'addEventListener' | 'removeEventListener'> | null;
 }
 
@@ -166,7 +168,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     }
     if (seekPending || target.seeking || (target.readyState ?? 0) < 3) return;
     report('ready');
-    if (localPaused || state.status === 'paused') {
+    if (localPaused || state.playbackAllowed === false || state.status !== 'playing') {
       port.pause();
       return;
     }
@@ -214,7 +216,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         .every((value) => Number.isSafeInteger(value) && value > 0)
         || !finiteNonnegative(incoming.positionSeconds) || !finiteNonnegative(incoming.anchorMonotonicMs)
         || typeof incoming.canControl !== 'boolean'
-        || !['playing', 'paused'].includes(incoming.status)
+        || (incoming.playbackAllowed !== undefined && typeof incoming.playbackAllowed !== 'boolean')
+        || !['preparing', 'playing', 'paused', 'ended'].includes(incoming.status)
         || incoming.queue.length < 1 || incoming.queue.length > 100
         || incoming.entryIds.length !== incoming.queue.length
         || incoming.entryIds.some((id) => typeof id !== 'string' || !id)
@@ -226,20 +229,22 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         || incoming.queueRevision < previous.queueRevision)) return false;
       const previousIndex = previous?.entryIds.indexOf(previous.currentEntryId) ?? -1;
       const incomingItem = incoming.queue[incoming.entryIds.indexOf(incoming.currentEntryId)];
+      const preparationCompleted = previous?.status === 'preparing' && ['playing', 'paused'].includes(incoming.status);
       if (previous && incoming.playbackEpoch === previous.playbackEpoch && (
         incoming.currentEntryId !== previous.currentEntryId || incoming.mediaRevision !== previous.mediaRevision
         || incomingItem.id !== previous.queue[previousIndex].id
         || incomingItem.streamUrl !== previous.queue[previousIndex].streamUrl
         || incomingItem.mediaType !== previous.queue[previousIndex].mediaType
         || incoming.positionSeconds !== previous.positionSeconds
-        || incoming.anchorMonotonicMs !== previous.anchorMonotonicMs || incoming.status !== previous.status
+        || (!preparationCompleted && (incoming.anchorMonotonicMs !== previous.anchorMonotonicMs || incoming.status !== previous.status))
       )) return false;
       state = Object.freeze({ ...incoming, entryIds: Object.freeze([...incoming.entryIds]), queue: copyQueue(incoming.queue) });
       const index = state.entryIds.indexOf(state.currentEntryId);
       const sourceChanged = !previous || previous.currentEntryId !== state.currentEntryId
         || previous.mediaRevision !== state.mediaRevision
         || previous.queue[previousIndex]?.streamUrl !== state.queue[index].streamUrl;
-      const timelineChanged = sourceChanged || previous?.playbackEpoch !== state.playbackEpoch;
+      const timelineChanged = sourceChanged || previous?.playbackEpoch !== state.playbackEpoch || preparationCompleted
+        || previous?.playbackAllowed !== state.playbackAllowed;
       if (!sourceChanged) port.updateQueue(state.queue, index);
       if (!timelineChanged) return true; // Membership/control-only revisions cannot reload or restart media.
       cancelEffects();
@@ -275,6 +280,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     correct(positionSeconds) {
       const target = port.media();
       if (!state || !target || detached || localPaused || !matchesSource(target)
+        || state.status !== 'playing' || state.playbackAllowed === false || !playRequested || target.paused
+        || needsSeek || seekPending || seekFailed || target.seeking
         || !finiteNonnegative(positionSeconds) || (target.readyState ?? 0) < 3) return 'none';
       const drift = positionSeconds - target.currentTime;
       clearTimeout(correction);
@@ -288,7 +295,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
           target.playbackRate = rate;
           if (Math.abs(target.playbackRate - rate) > 0.001) throw new Error('Rate rejected');
           correction = setTimeout(() => {
-            if (detached || effect !== expectedEffect || !matchesSource(target)) return;
+            if (detached || effect !== expectedEffect || !matchesSource(target) || target.seeking || target.paused) return;
             resetRate();
             const expected = positionSeconds + (now() - correctionStart) / 1000;
             if (Math.abs(expected - target.currentTime) > 0.15) port.seek(Math.min(expected, target.duration));
@@ -326,7 +333,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     observe(event: string, target: PlayerAudio): boolean {
       if (!matchesSource(target)) return event === 'volumechange';
       if (event === 'play' || event === 'playing') {
-        if (localPaused || !playRequested || needsSeek || seekPending || seekFailed || target.seeking
+        if (localPaused || state?.playbackAllowed === false || !playRequested || needsSeek || seekPending || seekFailed || target.seeking
           || state?.status !== 'playing' || now() < state.anchorMonotonicMs) {
           port.pause();
           return false;

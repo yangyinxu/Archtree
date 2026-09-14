@@ -120,7 +120,7 @@ outbox data. A failure rolls back the entire cleanup; no S3 object is touched.
 Deactivation retains the profile/handle, blocks, receipts and clocks so later
 reactivation cannot restore an old intent or relationship.
 
-Startup migration `required-indexes-v2-social` adds mandatory unique constraints
+Startup migration `required-indexes-v3-rooms` adds mandatory unique constraints
 and required nonunique cleanup indexes. A sparse, partial, hidden, wrong-key or
 wrong-uniqueness substitute is rejected. TTL is opportunistic reclamation and is
 never an authorization or admission decision. See the active plan for actual
@@ -128,21 +128,129 @@ verification and the remaining client/room rollout stages.
 
 ## Social and shared playback architecture (proposed)
 
-Design baseline and review: 2026-09-13. This section is a target architecture, not an
-implemented room API. The social identity/relationship foundation above is now
-implemented separately. The agreed two-mode permission requirement is recorded in
-[business rules](business-rules.md#shared-playback-permissions--planned-feature);
-other defaults and host-departure behavior below remain proposals. Implementation
-stages and unresolved product decisions live in
-[the social implementation plan](plans/social-and-shared-playback-plan.md).
+The architecture below includes later native, Video and deployment stages.
+The current implemented Web Audio slice is defined by the following contract and
+[canonical business rules](business-rules.md#shared-playback-rooms); remaining
+proposals must not be read as already delivered capabilities. The active
+[implementation plan](plans/social-and-shared-playback-plan.md) retains the
+unverified device and rollout gates.
+
+### Implemented Audio room API
+
+`src/contracts/roomV1.ts` freezes the runtime wire contract; the earlier
+`roomPlaybackPrototype.ts` remains a test feasibility model. Finitude Web's
+`/finitude/social` route uses `web/src/api/rooms.ts`, `roomSession.ts`, and the
+existing player through its lazily loaded room adapter. Native adapters still
+use synthetic DEBUG fixtures and do not consume this API yet.
+
+All endpoints are private, require a live revocable session and current Web
+account viewer, reject extra query/body fields, and return allowlisted DTOs.
+Cookie writes retain the existing same-origin JSON protections. Room HTTP bodies
+are capped at 16 KiB; social identity bodies remain capped at 4 KiB.
+`X-Finitude-Room-Client` identifies a fresh tab lifetime, not authorization.
+
+| Endpoint under `/api/social/v1` | Contract |
+| --- | --- |
+| `GET /capabilities` | `socialEnabled`, `roomsEnabled`; room admission requires both flags |
+| `GET /rooms/current`, `GET /rooms/:roomId` | `{ room: snapshot or null }`, always freshly authorized |
+| `GET /room-media` | `{ items }`, at most 100 eligible pinned Audio descriptors |
+| `GET /room-invitations` | `{ invitations }`, inviter card and invitation incarnation only |
+| `POST /room-commands` | Strict command with original `scopeToken` and `commandId`; status-only social outcome |
+| `POST /realtime-tickets` | `{ clientId }`; returns an opaque single-use 30-second ticket |
+| WebSocket `/realtime` | Same-origin upgrade, subprotocols `archtree-room-v1` and ticket; only the protocol name is negotiated |
+
+Tickets never appear in URLs and only their SHA-256 digest is persisted. Issue
+and redemption transactionally fence the live account/session. At most five
+pending tickets per account are retained. Expiry is checked logically before
+any TTL reclamation. The gateway reauthorizes complete state after every committed
+invalidation and periodically every five seconds to recover a lost final wakeup.
+Outboxes store only invalidation versions, never historical private room payloads.
+
+Client frames are `ping` with `clientTimeMs` and an optional exact membership /
+controller / local-pause heartbeat, or `ready` with an exact readiness report.
+Server frames are `subscribed` (protocol, server time, initial room), `snapshot`
+(complete current room or null), `pong` and `socialChanged`. Clients never submit
+transport commands through WebSocket, and snapshots never generate commands.
+Frames are capped at 2 KiB inbound and 64 KiB outbound, reports at 120/minute,
+per-connection pending work at eight and output buffering at 128 KiB. The initial
+gateway caps 256 connections, 32 per IP and four per account, with 32 pending
+upgrades. These are admission bounds, not measured production capacity.
+Transient snapshot-read contention receives at most three fresh authorized reads
+with bounded backoff. It does not retry playback commands or deliver a cached
+projection. Revoked access and lost authority close immediately; exhausted
+availability repair closes with retryable WebSocket code 1013.
+Known-aborted heartbeat/readiness reports use the same bounded retry while keeping
+their original occurrence and sequence; uncertain commits are never replayed.
+Stale controller reports refresh authorized state. A timer sweep may defer two
+consecutive availability failures only after freshly validating the lease; the
+third failure closes connections. Each later tick captures its own observation.
+
+Create takes an explicit ordered `mediaTrackIds` selection. Other actions are
+`acceptInvitation`, `declineInvitation`, `leave`, `end`, `takeControl`, `invite`,
+`kick`, `offerTransfer`, `acceptTransfer`, `cancelTransfer`, `setControlMode`,
+`play`, `pause`, `seek`, `next`, `previous` and `select`. Shared transport captures
+room epoch, membership/controller generation, control generation, playback
+generation, queue revision and current entry. Its immutable identity and observed
+versions survive an explicit same-intent retry. A losing command never rebases
+itself onto a newer playback occurrence. Queue edits after creation are deferred.
+
+A complete snapshot includes authority/room/control/queue/playback versions,
+version-pinned entries, authoritative timeline, preparation cohort, member cards
+and self controller permissions. `serverTimeMs` is an observation; timeline anchors
+are absolute server time. Web calibrates its monotonic clock with ping RTT,
+preserves the converted anchor on unrelated membership revisions, applies a
+350 ms scheduled lead after preparation and performs bounded drift correction.
+Actual speaker/output alignment remains a target-environment measurement.
+
+Preparation lasts at most three seconds. Readiness fences exact room epoch,
+member/controller, preparation ID, playback generation, entry and media revision
+plus a monotonically increasing report sequence. Preparation completion preserves
+that playback generation. Reserved `preparationId: "current"` reports a late or
+resynchronizing player's readiness only when no preparation is active and the
+exact timeline is playing/paused; it does not restart or move the timeline. The
+local player remains silent until its own readiness acknowledgement is visible.
+Local pause, disconnect, takeover and revoked controller sessions clear readiness.
+
+`socialRooms` is a bounded aggregate (eight members, 100 entries, 100 active rooms
+per deployment). An account-keyed participation row enforces one active room.
+MongoDB transactions arbitrate commands, receipts, graph/account fences, source
+reference touches, membership, readiness and timers. A deployment-wide 10-second
+MongoDB authority lease renews every three seconds; every authority mutation
+conditionally writes its live owner/epoch fence using MongoDB time. Takeover
+increments the epoch and pauses recovered playback. Safety removal never needs a
+leader. This initial deployment requires traffic to reach the lease holder;
+per-room routing, distributed fanout and sharding are future capacity work.
+
+Host-only is the default, invites last 24 hours, transfers last 30 seconds,
+host grace is 30 seconds and host absence closes after five minutes. A sweep
+runs every 250 ms, validates stored session/source state and logically expires
+24-hour rooms before releasing participation. Closed rooms have member/queue
+identities scrubbed transactionally and expire after 24 hours. Invitation TTL
+reclaims expired offers, and room-outbox hints expire after 24 hours. No TTL may
+delete an active aggregate before its participation cleanup.
+
+Media analysis accepts complete PCM16 WAV, mono/stereo 8–48 kHz, with a finite
+verified duration no greater than 24 hours. A private representation records
+opaque revision, duration, seek eligibility and S3 validators, atomically promoted
+with the active object. Public descriptors contain only ID/title/duration/revision
+and `/content/mediaTrack/stream/:id?revision=mr_...`. Revision-fenced HEAD/GET pin
+ETag/VersionId, recheck the ready representation after storage I/O and reject
+stale bytes. Replacing/deleting a source marks old room entries unavailable in
+the source transaction. Versionless ordinary streaming retains its contract.
+
+Web room playback does not write Recently Played in this slice. Joining replaces
+the executable queue through the existing player; leave/removal detaches the room
+and clears the queue without restoring or resuming an earlier queue. Browse playback cannot silently
+replace a joined room. Native background operation, downloaded-source preference,
+Video capability negotiation, broader audio decoders, queue editing, push
+notifications and deployment load evidence remain later stages.
 
 ### Existing foundation and compatibility
 
 The repository already supplies Express/Node, transaction-capable MongoDB,
 account/session fences, ready-only catalog projections, and identity-bound S3
-media delivery. `src/server.ts` attaches HTTP handlers but no realtime gateway;
-the current package manifest has no Redis or WebSocket server dependency.
-The initial design keeps one application process and adds explicit modules.
+media delivery. `src/server.ts` attaches the optional authenticated WebSocket gateway using `ws`;
+Redis is not required for the initial single-authority implementation.
 
 `src/routes/feedRoutes.ts` restricts publishing to administrators. A Feed Post
 author ID is attribution, not a social profile. Playlists are private and
@@ -233,9 +341,10 @@ envelope and application handler. Audio/video bytes never traverse the gateway.
 
 Code seams are `src/contracts/socialV1.ts`, `src/application/social/`,
 `src/application/rooms/`, `src/repositories/social/`, and `src/realtime/`.
-Social contracts, application services and repositories are implemented. Rooms
-currently have only the isolated arbitration prototype; realtime remains a target
-seam. Transport adapters must not contain independent business rules.
+Social and Audio room contracts, transactional application services, repositories
+and the authenticated realtime gateway are implemented. The isolated arbitration
+prototype remains a feasibility fixture alongside the production room service.
+Transport adapters must not contain independent business rules.
 
 ### Identity, relationships, and access
 
@@ -257,8 +366,7 @@ Retain owner-private blocks until explicit unblock or account deletion; reactiva
 does not restore friends, invitations, or membership. The implemented identity
 contract above fixes handles for the account's lifetime and reserves a deleted
 handle without its former owner ID for 30 days. Cached handle text can never
-substitute for the immutable social ID when accepting an invitation. Room and
-invitation cleanup remains part of their implementation stage.
+substitute for the immutable social ID when accepting an invitation. Room and invitation cleanup now shares the account/social transaction.
 
 Recommended relationship state machine: `none -> pending -> accepted -> none`.
 Decline/cancel removes pending access. Crossing requests do not auto-accept;
@@ -272,7 +380,7 @@ admission without revealing which member blocked whom. If members block while
 already together, remove the blocked member when the blocker hosts the room;
 otherwise remove the blocker, including when the blocked person is host. Apply
 the room change in the same serialized operation as the block, and close affected
-subscriptions. This is a proposed policy requiring product acceptance.
+subscriptions. This is the implemented small-room policy.
 
 An invitation targets one account and one room, expires after a proposed 24 hours,
 and is consumed atomically with admission. Accept checks active account, current

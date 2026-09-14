@@ -8,7 +8,8 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - Social participation is opt-in and separate from the private account profile.
   The versioned backend is disabled for new participation by default until
   explicitly enabled. Existing listener APIs and private avatar access do not
-  change, and client social screens require their own adoption stage.
+  change. Finitude Web provides an explicitly enabled social screen; native
+  adoption remains a separate stage.
 - A social profile has a separately generated opaque ID, an explicit nickname
   of 1–50 Unicode characters, and a case-insensitive handle of 3–24 ASCII letters,
   digits or underscores beginning with a letter. The handle cannot change during
@@ -51,25 +52,27 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   deactivation, outcome lookup and account cleanup. Admission attempts cannot
   consume the reserved receipt capacity for safety actions and final deactivation;
   short request-rate limits still apply.
-  This foundation adds no room membership, public Feed, collaborative Playlist,
-  chat, push/email delivery or S3-backed social avatar.
+  Social participation adds no public Feed, collaborative Playlist, chat,
+  push/email delivery or S3-backed social avatar.
 
-## Shared Playback Permissions — Planned Feature
+## Shared Playback Rooms
 
-These permissions are agreed product requirements for the planned shared-playback
-feature. Production rooms and their controls are not yet available to users.
-They do not change ordinary local playback or existing private Playlist access.
+The initial implementation supports explicitly enabled Audio rooms in Finitude
+Web. Production rollout, native room screens and shared Video playback remain
+separate verification and delivery stages. Ordinary local playback and private
+Playlist access retain their existing rules.
 
 - A room supports Host control and Everyone control. Only its current host can
-  change that mode while the room is open.
+  change that mode while the room is open. New rooms start with Host control.
 - Host control allows only the host to change shared playback. Everyone control
   allows each admitted participant, through that account's active playback
   device, to play, pause, seek, move Previous/Next, or select an existing room
   queue entry. Other devices observing the room do not gain control.
 - Shared playback permission does not grant room-management permission. Changing
-  the mode, inviting/removing members, editing queue membership/order, sharing a
-  selection into the room, transferring the host role, and ending the room remain
-  host-only operations.
+  the mode, inviting/removing members, choosing the initial queue, transferring
+  the host role, and ending the room remain host-only operations. This initial
+  slice copies an explicit selection into an independent queue; editing its
+  membership/order after creation is not exposed.
 - Mode changes are server-confirmed and visible to every participant. They apply
   to subsequent commands; they do not undo an already accepted playback operation
   or restart the current media. Commands that rely on superseded permission state
@@ -90,9 +93,56 @@ They do not change ordinary local playback or existing private Playlist access.
   Automatic advancement and explicit Next cannot both advance the same playback
   occurrence. These rules apply in both permission modes.
 
-Host departure, reconnection timing, and transfer workflow remain proposed in
-[the social architecture](architecture.md#room-permissions-and-host-management)
-until their behavior is finalized for implementation.
+- A room has at most eight members and 100 queue entries. An account joins at
+  most one active room and has one playing controller. Other tabs/devices are
+  observers until the user explicitly chooses Use this device. Refreshing or
+  duplicating a tab cannot silently take over the existing controller.
+- The host invites existing friends to a specific room. Invitations expire after
+  24 hours, expose only the inviter's social card before acceptance, and require
+  current friendship, capacity and block checks at admission. Removing friendship
+  cancels unused invitations but preserves an already admitted membership.
+- A blocked pair cannot share a room. If the blocker hosts, remove the blocked
+  member; otherwise remove the blocker. Deactivation and account deletion remove
+  participation, ending a hosted room. These changes take effect atomically.
+- The host can End room for everyone or offer Transfer and leave to a connected
+  participant. The selected controller must accept within 30 seconds. Acceptance
+  transfers the role and removes the old host atomically, preserving the mode,
+  queue and running timeline; an in-progress preparation is cancelled and paused.
+  There is no automatic host promotion.
+- Host absence is measured from the last confirmed controller heartbeat,
+  with a 30-second grace period. Both control modes suspend
+  after that grace, and five minutes of host absence ends the room. Reconnection
+  never automatically resumes a suspended timeline: the host explicitly starts it; personal audio resumes only through
+  explicit resync and readiness. Every room expires after 24 hours.
+- Revoking the playing controller's session disconnects that controller and
+  triggers absence handling. Revoking an observer session cannot remove another
+  device's membership. Changing a password preserves a room controller on the
+  retained current session; sign out everywhere and password reset remove
+  participation and end a hosted room.
+- Shared playback uses the existing single player with an online representation
+  pinned to the selected media version. Only finite Audio whose duration and
+  seekability have been verified is eligible. Existing unanalyzed media remains
+  available for ordinary playback. Native download preference is unchanged until
+  native room adoption explicitly supports the pinned-source contract.
+- Preparing a play, seek or selection waits up to three seconds for the connected
+  playing cohort. Ready participants start on the shared schedule; unready or late
+  participants remain silent until their own player reports readiness for the
+  exact current occurrence. If nobody is ready, playback stays paused. A slow
+  participant does not repeatedly pause the whole room.
+- Local pause survives subsequent room events. Resync is an explicit action.
+  Lost realtime authority detaches local room playback until a fresh authorized
+  connection and explicit resync; periodic reads during recovery do not allow
+  offline room control. A server authority change pauses the recovered timeline.
+  Leaving, removal or room closure clears the room player and queue without
+  restoring or resuming an earlier local queue.
+- A media replacement or deletion invalidates its old room representation and
+  pauses it if current. Queue positions retain their identity; unavailable items
+  cannot be selected or automatically started. No room action mutates a source
+  Playlist or another member's Recently Played. This initial Web room mode does
+  not record room playback in Recently Played.
+
+The wire protocol and operational bounds are documented in
+[the room API contract](architecture.md#implemented-audio-room-api).
 
 ## Saved Content and Library
 

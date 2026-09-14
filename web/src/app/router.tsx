@@ -23,6 +23,7 @@ const PlaylistDetailPage = lazy(() => import('../features/playlists/PlaylistDeta
 const PlaylistFeatureGate = lazy(() => import('../features/playlists/PlaylistFeatureGate').then(({ PlaylistFeatureGate }) => ({ default: PlaylistFeatureGate })));
 const PlaylistIndexPage = lazy(() => import('../features/playlists/PlaylistIndexPage').then(({ PlaylistIndexPage }) => ({ default: PlaylistIndexPage })));
 const SearchPage = lazy(() => import('../features/search/SearchPage').then(({ SearchPage }) => ({ default: SearchPage })));
+const SocialPage = lazy(() => import('../features/social/SocialPage').then(({ SocialPage }) => ({ default: SocialPage })));
 
 /** Provides an announced route placeholder while a page-specific bundle loads. */
 const RouteLoadingPage = () => {
@@ -53,6 +54,7 @@ export const appRoutes: RouteObject[] = [
       { index: true, element: loadRoute(<HomePage />), errorElement: <RouteErrorPage /> },
       { path: 'search', element: loadRoute(<SearchPage />), errorElement: <RouteErrorPage /> },
       { path: 'library', element: loadRoute(<LibraryPage />), errorElement: <RouteErrorPage /> },
+      { path: 'social', element: loadRoute(<SocialPage />), errorElement: <RouteErrorPage /> },
       { path: 'playlists', element: loadRoute(<PlaylistFeatureGate><PlaylistIndexPage /></PlaylistFeatureGate>), errorElement: <RouteErrorPage /> },
       { path: 'playlists/:playlistId', element: loadRoute(<PlaylistFeatureGate><PlaylistDetailPage /></PlaylistFeatureGate>), errorElement: <RouteErrorPage /> },
       { path: 'albums/:albumId', element: loadRoute(<AlbumPage />), errorElement: <RouteErrorPage /> },

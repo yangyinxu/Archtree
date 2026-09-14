@@ -31,8 +31,7 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. No additional dependency or external delivery service
-is needed. Startup verifies the `required-indexes-v2-social` constraints before
+new scope after rotation. Startup verifies the `required-indexes-v3-rooms` constraints before
 admission; these are additive schema changes even when the feature is disabled.
 
 See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
@@ -43,35 +42,70 @@ The integration harness starts an isolated local MongoDB replica set; it does
 not connect to the configured application database. Full gates remain `npm test`,
 `npm run build` and `npm run test:integration`.
 
-This backend stage provides no social screens, room admission, media synchronization
-or notification worker. Its bounded outbox records current invalidation versions
-for the later realtime stage. Production rollout remains disabled until explicitly
-configured and verified in the deployment environment.
+## Listening rooms and local demonstration
 
-## Shared playback feasibility
+Finitude Web exposes **Together** at `/finitude/social`: opt-in identity, exact
+handle lookup, friend requests, invitations, queue selection, shared transport,
+Host/Everyone permissions, local pause/resync and accepted host transfer. It uses
+the existing player. Enable both `FINITUDE_SOCIAL_ENABLED=true` and
+`FINITUDE_ROOMS_ENABLED=true`; both default to false. Leave/end/decline and account
+cleanup remain available when new room admission is disabled. Native room UI and
+shared Video are not enabled by this slice.
 
-The shared-playback work currently contains a Stage 1 laboratory prototype,
-not public room endpoints. `src/contracts/roomPlaybackPrototype.ts` validates
-synthetic playback inputs and `src/application/rooms/roomPlaybackPrototype.ts`
-models version-fenced commands and bounded in-memory receipts. It does not
-implement persisted rooms, authentication, signed mutation scopes, WebSocket
-delivery, media readiness or account cleanup. The application mounts no route
-for it. Do not substitute this authority for the later transactional repository.
+For a disposable local demonstration, run `npm run build` then
+`npm run demo:social`. Node 24 and the same trusted local `mongod` used by the
+integration suite are required. The command starts its own MongoDB replica set
+and loopback S3-compatible HTTP fixture, seeds three original synthesized WAV
+tracks, and prints two `/finitude/social` URLs. Open both in Chrome. The separate
+`127.0.0.1` and `localhost` origins keep the two normal cookie logins independent.
+Use the synthetic accounts `alice@example.test` and `bob@example.test`, each with
+password `Social-demo-only-2026!`. This password belongs only to this disposable
+fixture; the command refuses production mode and does not use the application
+MongoDB database or S3 bucket. Stop the command with Ctrl-C to clean up its owned
+resources; restart creates fresh accounts and rooms.
 
-`contracts/social/prototype-v1/playback-trace.json` is the common transport trace
-for the Web, iOS and Android feasibility adapters. Its schema is provisional and
-must not be advertised as a released social-v1 API. Run the focused arbitration
-checks with `node --import tsx --test test/roomPlaybackPrototype.test.ts`; they
-also run in `npm test`. The staged scope and remaining target-environment gates
-are tracked in [the social implementation plan](docs/plans/social-and-shared-playback-plan.md).
+Create an identity in each tab, use exact handle lookup to send/accept a friend
+request, select tracks and create a room, then invite and join from the other tab.
+Host control is the default. Choose Everyone to let both active controllers seek
+or choose a track. Pause on this device stays local; Resync returns that player to
+the current room. Transfer and leave requires the recipient to accept; End room
+closes it for every member. A refreshed tab observes until Use this device is
+selected. Browser autoplay refusal is surfaced with explicit resync rather than
+reported as successful playback.
 
-The Web spike injects `createRoomPlaybackController` into the existing player
-only from tests. Its factory is absent from the production player configuration
-and the controller is excluded from the production bundle. After `npm run build`,
-run its real-media and ordinary-player checks with
-`npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts playback-continuity.spec.ts`.
-These synthetic tests do not prove authenticated room delivery, physical output
-alignment, native fullscreen control provenance or background room participation.
+The implemented [room API](docs/architecture.md#implemented-audio-room-api) uses
+HTTP for version-fenced commands and complete authorized WebSocket snapshots for
+delivery. The server uses pinned `ws` with compression disabled; no Redis or
+external messaging service is required for this bounded single-authority slice.
+The proxy must forward Upgrade/Connection and WebSocket subprotocol headers,
+preserve the same-origin Host/protocol contract, and allow more than the five
+second heartbeat interval. Configure `TRUST_PROXY_HOPS` for the actual proxy
+chain. Production requires HTTPS/WSS. Only the live MongoDB lease holder admits
+realtime connections and scheduling; verify routing, lease recovery and capacity
+in the deployment before enabling it.
+
+New uploads receive a private representation record tied to the exact object.
+The initial room analyzer verifies complete PCM16 WAV files (mono or stereo,
+8–48 kHz, finite duration up to 24 hours). MP3, Video, old unanalyzed uploads and
+incomplete analysis remain outside room selection; ordinary playback is intact.
+Room URLs pin an opaque media revision and HEAD/GET validate the same stored S3
+ETag/version. S3 permissions must cover `GetObjectVersion` and
+`DeleteObjectVersion` when version IDs are present. Fresh PUTs use a unique
+identity-bound key and `If-None-Match: *`, preventing an SDK retry from silently
+creating another version. A lost PUT response retains its pending key and
+unknown-outcome flag for explicit version reconciliation; retry/delete cannot
+erase that evidence. Known pending, active and detached versions are deleted by
+exact VersionId. The latest-key inventory is not a full version-history
+reconciliation tool.
+
+Run `npm test`, `npm run build`, `npm run test:integration`, and
+`npm run test:e2e:social --workspace @archtree/finitude-web` for the real
+MongoDB/S3/WebSocket browser flow. Keep the ordinary listener E2E gate for playback
+continuity, navigation and accessibility changes. The legacy
+`contracts/social/prototype-v1/playback-trace.json` remains a feasibility fixture
+for native DEBUG adapters, not the room wire contract. Native devices, background
+participation, shared Video and deployment performance remain tracked in
+[the social implementation plan](docs/plans/social-and-shared-playback-plan.md).
 
 ## Code Documentation
 
@@ -93,6 +127,7 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run doctor`: check Node 24 and the isolated MongoDB test executable
 - `npm run doctor:release`: also require the Linux/Bash release environment
 - `npm run dev`: start development server
+- `npm run demo:social`: start the isolated two-account Audio room demonstration
 - `npm run dev:web`: start the listener Vite server at `/finitude/`; run the
   Express development server separately so API requests can be proxied
 - `npm start`: start production-mode server
@@ -181,6 +216,10 @@ Required variables:
 - `BROWSER_ALLOWED_ORIGINS`: optional comma-separated additional exact origins
   for cookie-authenticated browser mutations; same-origin requests are always
   accepted
+- `FINITUDE_SOCIAL_ENABLED`: set to `true` to enable social profile/friend admission; defaults to `false`
+- `FINITUDE_ROOMS_ENABLED`: set to `true` alongside social enablement to admit
+  Audio rooms and realtime connections; defaults to `false`. Disabling pauses
+  shared playback and closes realtime connections while preserving safety exits.
 - `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in

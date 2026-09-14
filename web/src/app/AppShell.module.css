@@ -473,7 +473,7 @@
     display: grid;
     grid-column: 1;
     grid-row: 4;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     min-height: var(--mobile-nav-height);
     padding:
       0.25rem

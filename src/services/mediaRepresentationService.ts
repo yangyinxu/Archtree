@@ -1,0 +1,154 @@
+import { randomBytes } from 'node:crypto';
+import { open } from 'node:fs/promises';
+import { ObjectId, type ClientSession } from 'mongodb';
+import { getDb } from '../infrastructure/database';
+import type { MediaRepresentation, RoomAudioRepresentation } from '../models/mediaRepresentation';
+import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../utils/mediaStorageKey';
+import { normalizeUtf8Text } from '../utils/textEncoding';
+
+export const isMediaRepresentationRevision = (value: unknown): value is string => (
+    typeof value === 'string' && /^mr_[0-9a-f]{32}$/.test(value)
+);
+
+/** Only bounded, fully framed PCM16 WAV is currently proven suitable for room seeking. */
+export const inspectRoomAudioUpload = async (
+    file: Express.Multer.File
+): Promise<{ durationMs: number; format: 'wav-pcm' } | null> => {
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+        if (!Number.isSafeInteger(file.size) || file.size < 44 || file.size > 0xffffffff) return null;
+        if (file.path) {
+            handle = await open(file.path, 'r');
+            if ((await handle.stat()).size !== file.size) return null;
+        } else if (!Buffer.isBuffer(file.buffer) || file.buffer.length !== file.size) return null;
+        const read = async (offset: number, length: number) => {
+            if (offset < 0 || length < 0 || offset + length > file.size) throw new Error('Invalid WAV bounds.');
+            if (!handle) return file.buffer.subarray(offset, offset + length);
+            const buffer = Buffer.alloc(length);
+            const result = await handle.read(buffer, 0, length, offset);
+            if (result.bytesRead !== length) throw new Error('Truncated WAV.');
+            return buffer;
+        };
+        const header = await read(0, 12);
+        if (header.toString('ascii', 0, 4) !== 'RIFF'
+            || header.toString('ascii', 8, 12) !== 'WAVE'
+            || header.readUInt32LE(4) + 8 !== file.size) return null;
+        let offset = 12;
+        let byteRate: number | undefined;
+        let blockAlign: number | undefined;
+        let dataSize: number | undefined;
+        // Skipping payloads keeps inspection memory/IO bounded even for large audio uploads.
+        for (let chunks = 0; offset < file.size && chunks < 64; chunks += 1) {
+            const chunk = await read(offset, 8);
+            const kind = chunk.toString('ascii', 0, 4);
+            const size = chunk.readUInt32LE(4);
+            const next = offset + 8 + size + (size % 2);
+            if (next > file.size) return null;
+            if (kind === 'fmt ') {
+                if (byteRate !== undefined || (size !== 16 && size !== 18)) return null;
+                const format = await read(offset + 8, size);
+                const channels = format.readUInt16LE(2);
+                const sampleRate = format.readUInt32LE(4);
+                blockAlign = format.readUInt16LE(12);
+                byteRate = format.readUInt32LE(8);
+                if (format.readUInt16LE(0) !== 1 || ![1, 2].includes(channels)
+                    || sampleRate < 8000 || sampleRate > 48000
+                    || format.readUInt16LE(14) !== 16 || blockAlign !== channels * 2
+                    || byteRate !== sampleRate * blockAlign
+                    || (size === 18 && format.readUInt16LE(16) !== 0)) return null;
+            } else if (kind === 'data') {
+                if (dataSize !== undefined || !byteRate || !blockAlign || size === 0 || size % blockAlign !== 0) return null;
+                dataSize = size;
+            }
+            offset = next;
+        }
+        if (offset !== file.size || !dataSize || !byteRate) return null;
+        const durationMs = Math.round(dataSize / byteRate * 1000);
+        return Number.isSafeInteger(durationMs) && durationMs > 0
+            ? { durationMs, format: 'wav-pcm' } : null;
+    } catch {
+        // Unsupported or malformed input retains ordinary playback behavior, but cannot enter a room.
+        return null;
+    } finally {
+        await handle?.close();
+    }
+};
+
+/** Generates a fresh identity before upload; validators are attached only after S3 succeeds. */
+export const prepareMediaRepresentation = async (
+    file: Express.Multer.File,
+    objectKey: string,
+    mediaType: 'audio' | 'video'
+): Promise<MediaRepresentation> => {
+    const inspected = mediaType === 'audio' ? await inspectRoomAudioUpload(file) : null;
+    return {
+        revision: `mr_${randomBytes(16).toString('hex')}`,
+        objectKey,
+        byteLength: file.size,
+        durationMs: inspected?.durationMs ?? null,
+        seekable: inspected !== null,
+        format: inspected?.format ?? 'unsupported',
+        etag: null,
+        versionId: null
+    };
+};
+
+/** Validates private representation evidence before it can pin a storage request. */
+export const storedMediaRepresentationForTrack = (track: any): MediaRepresentation | null => {
+    const value = track?.mediaRepresentation as MediaRepresentation | undefined;
+    if (!value || !isMediaRepresentationRevision(value.revision)
+        || value.objectKey !== activeMediaObjectKeyForTrack(track)
+        || !Number.isSafeInteger(value.byteLength) || value.byteLength <= 0
+        || typeof value.etag !== 'string' || !/^"[^"\r\n]{1,200}"$/.test(value.etag)
+        || (value.versionId !== null && (typeof value.versionId !== 'string' || !value.versionId
+            || value.versionId.length > 1024 || /[\r\n]/.test(value.versionId)))) return null;
+    return value;
+};
+
+/** Treat storage metadata as untrusted, including historical or manually edited database rows. */
+export const roomAudioRepresentationForTrack = (track: any): RoomAudioRepresentation | null => {
+    const id = String(track?._id ?? '');
+    const value = storedMediaRepresentationForTrack(track);
+    if (!/^[0-9a-f]{24}$/.test(id) || track.uploadStatus !== 'ready'
+        || (track.publicationStatus != null && track.publicationStatus !== 'ready')
+        || activeMediaTypeForTrack(track) !== 'audio' || !value
+        || value.seekable !== true || value.format !== 'wav-pcm'
+        || !Number.isSafeInteger(value.durationMs) || value.durationMs! <= 0 || value.durationMs! > 86_400_000
+        || value.byteLength < 44) return null;
+    return {
+        mediaTrackId: id,
+        title: normalizeUtf8Text(typeof track.title === 'string' ? track.title : '').trim().slice(0, 300) || 'Audio',
+        mediaRevision: value.revision,
+        durationMs: value.durationMs!,
+        streamUrl: `/content/mediaTrack/stream/${id}?revision=${value.revision}`,
+        mediaType: 'Audio'
+    };
+};
+
+/** Reads only the currently published exact representation, optionally in the room transaction. */
+export const resolveRoomAudioRepresentation = async (
+    mediaTrackId: string,
+    session?: ClientSession
+): Promise<RoomAudioRepresentation | null> => {
+    if (!/^[0-9a-f]{24}$/.test(mediaTrackId)) return null;
+    const track = await getDb()!.collection('audioTracks').findOne({
+        _id: ObjectId.createFromHexString(mediaTrackId), ...readyAudioStorageFilter
+    }, { session });
+    return roomAudioRepresentationForTrack(track);
+};
+
+/** Writes the same track as replacement/deletion, making room admission serialize with its lifecycle. */
+export const touchRoomAudioRepresentation = async (
+    mediaTrackId: string,
+    expectedRevision: string,
+    session: ClientSession
+): Promise<RoomAudioRepresentation | null> => {
+    if (!/^[0-9a-f]{24}$/.test(mediaTrackId) || !isMediaRepresentationRevision(expectedRevision)) return null;
+    const result = await getDb()!.collection('audioTracks').findOneAndUpdate({
+        _id: ObjectId.createFromHexString(mediaTrackId),
+        ...readyAudioStorageFilter,
+        'mediaRepresentation.revision': expectedRevision
+    }, { $inc: { contentReferenceRevision: 1 } }, { session, returnDocument: 'after' });
+    return roomAudioRepresentationForTrack(result.value);
+};
