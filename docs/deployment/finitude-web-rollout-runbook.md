@@ -30,11 +30,12 @@ canonical in [`../business-rules.md`](../business-rules.md).
 ## 1. Prepare and identify the candidate
 
 The release workflow runs unit/component tests, Mongo-backed lifecycle
-integration tests, production builds, the three-engine browser/axe gate, and
-artifact staging before retaining a commit-named rollback bundle. Integration
-coverage is required for the account, Playlist, transaction, S3, and content-
-reference lifecycle; do not infer it from unit or browser results. For a local
-artifact verification run:
+integration tests, production builds, the real social browser scenarios, the
+three-engine browser/axe gate, and artifact staging before retaining a
+commit-named rollback bundle. Integration coverage is required for the account,
+Playlist, transaction, S3, and content-reference lifecycle; do not infer it from
+unit or browser results. For a local artifact verification run in a provisioned
+Linux environment:
 
 ```bash
 npm ci
@@ -42,11 +43,20 @@ npm test
 npm run test:integration
 npm run build
 npm run typecheck:e2e --workspace @archtree/finitude-web
+CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web
 CI=1 npm run test:e2e --workspace @archtree/finitude-web -- \
   --update-snapshots=none
 git diff --check
 npm run stage:eb-artifact
 ```
+
+CI installs Xvfb for the social suite's headed background-tab checks and a
+PulseAudio null sink for Firefox. All social Chromium launches disable hardware
+audio output. The seven isolated social scenarios cover rooms, invitations,
+song requests, music shares, room interactions, listening status, and catalog
+room entry. They run before the ordinary browser/visual gate; their traces and
+failure screenshots remain under the retained `web/test-results` evidence even
+when a later Linux visual assertion fails.
 
 Local staging requires a clean committed worktree so `RELEASE.json` cannot
 misidentify uncommitted bytes. CI supplies the immutable source identity
