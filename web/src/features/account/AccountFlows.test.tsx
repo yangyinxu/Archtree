@@ -42,6 +42,8 @@ const renderAccountRoutes = (
         <Routes>
           <Route path="/" element={<h1>Home</h1>} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/social/invitations/:invitationId" element={<h1>Invitation destination</h1>} />
+          <Route path="/social/invitations" element={<h1>Invitation list destination</h1>} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -55,6 +57,32 @@ const renderAccountRoutes = (
   );
   return { queryClient, ...result };
 };
+
+test('a reloaded invitation login continues to its safe detail only after successful authentication', async () => {
+  const user = userEvent.setup();
+  const currentSession = { user: { id: 'listener-1', email: 'listener@example.com', role: 'user', displayName: 'Quiet Listener',
+    avatarRevision: 0, avatar: null, emailVerified: true, authenticationMethods: ['password'] } };
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    if (path === '/auth/browser/capabilities') return jsonResponse(capabilities);
+    if (path === '/auth/browser/login') return jsonResponse(currentSession);
+    throw new Error(`Unexpected request ${path}`);
+  }));
+  renderAccountRoutes('/login?returnTo=%2Fsocial%2Finvitations%2Fi_abc-123');
+  await user.type(screen.getByLabelText('Email or username'), 'listener@example.com');
+  await user.type(screen.getByLabelText('Password'), 'a private password');
+  expect(screen.queryByRole('heading', { name: 'Invitation destination' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Log in' }));
+  expect(await screen.findByRole('heading', { name: 'Invitation destination' })).toBeVisible();
+});
+
+test('an already signed-in viewer explicitly continues to the invitation without automatic navigation', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(capabilities)));
+  renderAccountRoutes('/login?returnTo=%2Fsocial%2Finvitations%2Fi_abc-123', { user: { id: 'listener-1', displayName: 'Quiet Listener' } });
+  expect(screen.queryByRole('heading', { name: 'Invitation destination' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Continue to room invitations' }));
+  expect(screen.getByRole('heading', { name: 'Invitation destination' })).toBeVisible();
+});
 
 test('registers then carries the email privately into verification', async () => {
   const user = userEvent.setup();

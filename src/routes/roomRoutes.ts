@@ -17,7 +17,7 @@ const actor = (req: Request, clientId = req.get('X-Finitude-Room-Client')): Room
 /** Room endpoints precede the smaller social parser and return only current authorized projections. */
 export const createRoomRouter = (api: RoomApi = createRoomService()) => {
     const router = express.Router();
-    router.use((req, _res, next) => /^\/(rooms(?:\/|$)|room-commands$|room-invitations$|room-media$|realtime-tickets$|capabilities$)/.test(req.path) ? next() : next('router'));
+    router.use((req, _res, next) => /^\/(rooms(?:\/|$)|room-commands$|room-invitations(?:\/|$)|room-media$|realtime-tickets$|capabilities$)/.test(req.path) ? next() : next('router'));
     router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); res.vary('Cookie'); res.vary('Authorization');
         res.vary('X-Finitude-Account-Viewer'); res.vary('X-Finitude-Room-Client'); next(); });
     router.use(requireSecureAuthTransport, rateLimit('room-http', 180, 60_000), requireAuth, requireCurrentAccountViewer);
@@ -35,7 +35,15 @@ export const createRoomRouter = (api: RoomApi = createRoomService()) => {
         if (!isRoomIdentifier(req.params.roomId)) throw invalid();
         res.json({ room: await api.room(actor(req), req.params.roomId) });
     }));
+    router.get('/rooms/:roomId/invitations', asyncHandler(async (req, res) => {
+        if (!isRoomIdentifier(req.params.roomId)) throw invalid();
+        res.json({ invitations: await api.outgoingInvitations(actor(req), req.params.roomId) });
+    }));
     router.get('/room-invitations', asyncHandler(async (req, res) => { res.json({ invitations: await api.invitations(actor(req)) }); }));
+    router.get('/room-invitations/:invitationId', asyncHandler(async (req, res) => {
+        if (!isRoomIdentifier(req.params.invitationId)) throw invalid();
+        res.json({ invitation: await api.invitation(actor(req), req.params.invitationId) });
+    }));
     router.get('/room-media', asyncHandler(async (req, res) => { res.json({ items: await api.eligibleMedia(actor(req)) }); }));
     router.post('/room-commands', asyncHandler(async (req, res) => {
         const command = parseRoomCommand(req.body);

@@ -145,6 +145,120 @@ test('invitation DTO hides room and membership before acceptance; stale invitati
     assert.equal(await api.currentRoom(guest.actor), null);
 });
 
+test('invitation links are recipient-bound reads and outgoing metadata requires the current host controller', async () => {
+    const { host, guest } = await pair(); const recipient = await person('recipient'); const outsider = await person('outsider');
+    await friendship(host, recipient); const value = await invite(host, recipient); const room = await snapshot(host);
+    const receiptCount = await database().collection('socialMutations').countDocuments({});
+    assert.deepEqual(await api.invitation(recipient.actor, value.invitationId), value);
+    for (const actor of [host.actor, guest.actor, outsider.actor]) {
+        assert.equal(await api.invitation(actor, value.invitationId), null);
+        assert.equal(await api.invitation(actor, 'i_missing'), null);
+    }
+    assert.deepEqual(await api.outgoingInvitations(host.actor, room.roomId), [{ invitationId: value.invitationId,
+        generation: value.generation, recipientSocialId: recipient.profile.socialId, expiresAtMs: value.expiresAtMs }]);
+    await assert.rejects(api.outgoingInvitations(guest.actor, room.roomId), isError('room_forbidden'));
+    await assert.rejects(api.outgoingInvitations({ ...host.actor, clientId: randomUUID() }, room.roomId), isError('room_forbidden'));
+    await assert.rejects(api.outgoingInvitations(outsider.actor, room.roomId), isError('room_unavailable'));
+    assert.equal(await api.currentRoom(recipient.actor), null);
+    assert.equal((await snapshot(host)).revision, room.revision);
+    assert.equal(await database().collection('socialMutations').countDocuments({}), receiptCount);
+    const observer = { ...host, actor: { ...host.actor, clientId: randomUUID() } };
+    await api.mutate(observer.actor, command(observer, { action: 'takeControl', ...memberBody(room) }));
+    await assert.rejects(api.outgoingInvitations(host.actor, room.roomId), isError('room_forbidden'));
+    assert.equal((await api.outgoingInvitations(observer.actor, room.roomId)).length, 1);
+});
+
+test('invitation link replacement, logical expiry and disabled participation preserve read-only semantics', async () => {
+    const host = await person('host'); const guest = await person('guest'); await friendship(host, guest); const room = await create(host);
+    const original = await invite(host, guest); const replacement = await invite(host, guest);
+    assert.equal(await api.invitation(guest.actor, original.invitationId), null);
+    assert.deepEqual(await api.invitation(guest.actor, replacement.invitationId), replacement);
+    enabled = false;
+    assert.deepEqual(await api.invitation(guest.actor, replacement.invitationId), replacement);
+    assert.equal((await api.outgoingInvitations(host.actor, room.roomId))[0].invitationId, replacement.invitationId);
+    await database().collection('socialInvitations').updateOne({ invitationId: replacement.invitationId }, { $set: { expiresAt: new Date(now) } });
+    assert.equal(await api.invitation(guest.actor, replacement.invitationId), null);
+    assert.deepEqual(await api.outgoingInvitations(host.actor, room.roomId), []);
+    assert.equal(await database().collection('socialInvitations').countDocuments({}), 1, 'Logical expiry must not depend on TTL deletion.');
+});
+
+test('invitation detail and preview share lifecycle filtering before the bounded preview fills', async () => {
+    const host = await person('host'); const guest = await person('guest'); await friendship(host, guest); const room = await create(host);
+    const value = await invite(host, guest);
+    const source = await database().collection('socialInvitations').findOne({ invitationId: value.invitationId }); assert.ok(source);
+    await database().collection('socialInvitations').insertMany(Array.from({ length: ROOM_LIMITS.invitations }, (_, index) => ({ ...source,
+        _id: new ObjectId(), invitationId: `i_stale_${index}`, roomId: `r_closed_${index}`, createdAt: new Date(now + index + 1) })));
+    assert.deepEqual(await api.invitations(guest.actor), [value]);
+    assert.equal(await api.invitation(guest.actor, 'i_stale_0'), null);
+    await roomDocuments().updateOne({ _id: room.roomId }, { $set: { hostMembershipId: 'm_replaced_host' } });
+    assert.equal(await api.invitation(guest.actor, value.invitationId), null);
+    assert.deepEqual(await api.invitations(guest.actor), []);
+});
+
+for (const action of ['accept', 'decline', 'end', 'removeFriend', 'block', 'deactivate', 'delete'] as const) {
+    test(`invitation link becomes unavailable after committed ${action}`, async () => {
+        const host = await person('host'); const guest = await person('guest'); await friendship(host, guest); const room = await create(host);
+        const value = await invite(host, guest);
+        if (action === 'accept' || action === 'decline') {
+            await api.mutate(guest.actor, command(guest, { action: action === 'accept' ? 'acceptInvitation' : 'declineInvitation',
+                invitationId: value.invitationId, generation: value.generation }));
+        } else if (action === 'end') await api.mutate(host.actor, command(host, { action: 'end', ...memberBody(room) }));
+        else if (action === 'delete') assert.equal((await deleteListenerAccountData(host.actor.userId)).status, 'deleted');
+        else if (action === 'deactivate') await social.mutate(host.actor, { ...identity(host.scope), action: 'deactivate' });
+        else if (action === 'block') await social.mutate(guest.actor, { ...identity(guest.scope), action: 'block', targetSocialId: host.profile.socialId });
+        else {
+            const relationship = await social.relationship(host.actor, guest.profile.socialId); assert.ok(relationship);
+            await social.mutate(host.actor, { ...identity(host.scope), action: 'remove', targetSocialId: guest.profile.socialId, expectedRevision: relationship.revision });
+        }
+        assert.equal(await api.invitation(guest.actor, value.invitationId), null);
+        assert.deepEqual(await api.invitations(guest.actor), []);
+    });
+}
+
+test('invitation link reads retain actual session fences and hide inactive recipients', async () => {
+    const host = await person('host'); const guest = await person('guest'); await friendship(host, guest); const room = await create(host);
+    const value = await invite(host, guest);
+    await database().collection('socialProfiles').updateOne({ _id: guest.profile.socialId }, { $set: { active: false } });
+    assert.equal(await api.invitation(guest.actor, value.invitationId), null);
+    assert.deepEqual(await api.outgoingInvitations(host.actor, room.roomId), []);
+    await AuthSession.revokeById(guest.actor.userId, guest.actor.sessionId);
+    await assert.rejects(api.invitation(guest.actor, value.invitationId), isError('social_session_required'));
+    await assert.rejects(api.invitation(host.actor, '../rooms/current'), isError('invalid_request'));
+    await assert.rejects(api.outgoingInvitations(host.actor, 'r_room?account=other'), isError('invalid_request'));
+});
+
+test('retained invitation rows cannot expose a closed room, inactive sender or revoked friendship', async () => {
+    const host = await person('host'); const guest = await person('guest'); await friendship(host, guest); const room = await create(host);
+    const value = await invite(host, guest);
+    const unavailable = async () => {
+        assert.equal(await api.invitation(guest.actor, value.invitationId), null);
+        assert.deepEqual(await api.invitations(guest.actor), []);
+    };
+    await roomDocuments().updateOne({ _id: room.roomId }, { $set: { state: 'closed' } }); await unavailable();
+    await roomDocuments().updateOne({ _id: room.roomId }, { $set: { state: 'open', expiresAt: new Date(now) } }); await unavailable();
+    await roomDocuments().updateOne({ _id: room.roomId }, { $set: { expiresAt: new Date(now + 60_000) } });
+    await database().collection('socialProfiles').updateOne({ _id: host.profile.socialId }, { $set: { active: false } }); await unavailable();
+    await database().collection('socialProfiles').updateOne({ _id: host.profile.socialId }, { $set: { active: true } });
+    const accountIds = [host.actor.userId, guest.actor.userId].sort();
+    await database().collection('socialRelationships').updateOne({ accountIds }, { $set: { state: 'none' } }); await unavailable();
+    assert.deepEqual(await api.outgoingInvitations(host.actor, room.roomId), []);
+});
+
+test('a recipient in another room can inspect and decline without leaving or joining automatically', async () => {
+    const host = await person('host'); const guest = await person('guest'); await friendship(host, guest); await create(host);
+    const ownRoom = await create(guest); const value = await invite(host, guest);
+    assert.deepEqual(await api.invitation(guest.actor, value.invitationId), value);
+    assert.equal((await snapshot(guest)).roomId, ownRoom.roomId);
+    const acceptance = command(guest, { action: 'acceptInvitation', invitationId: value.invitationId, generation: value.generation });
+    assert.equal((await api.mutate(guest.actor, acceptance)).code, 'already_in_room');
+    assert.equal((await api.mutate(guest.actor, acceptance)).replayed, true);
+    assert.deepEqual(await api.invitation(guest.actor, value.invitationId), value);
+    await api.mutate(guest.actor, command(guest, { action: 'declineInvitation', invitationId: value.invitationId, generation: value.generation }));
+    assert.equal(await api.invitation(guest.actor, value.invitationId), null);
+    assert.equal((await snapshot(guest)).roomId, ownRoom.roomId);
+    assert.equal((await snapshot(guest)).revision, ownRoom.revision);
+});
+
 test('two concurrent room creations retain exactly one account participation', async () => {
     const host = await person('host');
     const results = await Promise.all([1, 2].map(() => api.mutate(host.actor, command(host, { action: 'create', mediaTrackIds: [media[0].mediaTrackId] }))));

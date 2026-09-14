@@ -11,9 +11,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
-import { browserSessionQuery } from '../api/session';
 import { listenerCapabilitiesQuery } from '../api/listenerCapabilities';
-import { Avatar } from '../components/Avatar';
 import { Icon, type IconName } from '../components/Icon';
 import { SearchQueryProvider, useSearchQuery } from '../features/search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
@@ -44,6 +42,10 @@ const PlayerBar = lazy(() => import('../components/PlayerBar').then((module) => 
   default: module.PlayerBar
 })));
 const VideoTheater = lazy(() => import('../components/VideoTheater'));
+const GlobalRoomInvitations = lazy(() => import('../features/social/GlobalRoomInvitations').then(module => ({
+  default: module.GlobalRoomInvitations
+})));
+const AccountEntry = lazy(() => import('./AccountEntry').then(module => ({ default: module.AccountEntry })));
 
 /** Activates the shell skip link without changing the routed URL. */
 const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -142,27 +144,6 @@ const TopSearch = () => {
   );
 };
 
-const AccountEntry = () => {
-  const session = useQuery(browserSessionQuery());
-  const user = session.data?.user;
-  const { t } = useLocalization();
-  const label = user?.displayName.trim()
-    || user?.email
-    || (session.isPending ? t('shell.account.checking') : t('shell.account.log_in'));
-
-  return (
-    <Link className={styles.account} to={user ? '/account' : '/login'} aria-label={label}>
-      <Avatar
-        avatar={user?.avatar}
-        displayName={user?.displayName}
-        email={user?.email}
-        viewerId={user?.id}
-      />
-      <span>{label}</span>
-    </Link>
-  );
-};
-
 /** Keeps navigation, route content, and the single player mounted together. */
 const AppShellContent = () => {
   const navigate = useNavigate();
@@ -221,7 +202,10 @@ const AppShellContent = () => {
         <Suspense fallback={null}>
           <LanguageSelector placement="mobile" />
         </Suspense>
-        <AccountEntry />
+        <div className={styles.accountActions}>
+          <Suspense fallback={null}><GlobalRoomInvitations /></Suspense>
+          <Suspense fallback={<span className={styles.accountLoading} aria-hidden="true" />}><AccountEntry /></Suspense>
+        </div>
       </header>
 
       <aside className={styles.sidebar} aria-label={t('shell.sidebar.label')} id="library-sidebar">

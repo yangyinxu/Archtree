@@ -11,6 +11,7 @@ import type {
 } from '../../src/api/playlists';
 import type { BrowserSession } from '../../src/api/schemas';
 import { collectionPageFixture, homeFixture } from '../fixtures/catalog';
+import { installNonSocialProfileRoute } from './apiRoutes';
 import { filterLibraryFixture } from '../fixtures/library';
 import {
   privateArtistPage,
@@ -59,6 +60,7 @@ export const installPrivateListenerRoutes = async (
     json(route, status, payload, session.user.id);
 
   await page.route('**/auth/browser/session', (route) => json(route, 200, session));
+  await installNonSocialProfileRoute(page, () => session.user.id);
   await page.route('**/api/listener/v1/home', (route) => privateJson(route, 200, home));
   await page.route('**/api/listener/v1/pages/home/items/*', (route) => {
     const pageItemId = new URL(route.request().url()).pathname.split('/').at(-1);

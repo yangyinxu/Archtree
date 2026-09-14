@@ -41,9 +41,12 @@ export const roomSnapshotSchema = z.object({
 });
 export const roomInvitationSchema = z.object({ invitationId: identifier, generation: positive,
   inviter: socialCardSchema, expiresAtMs: millis }).strict();
+export const roomOutgoingInvitationSchema = z.object({ invitationId: identifier, generation: positive,
+  recipientSocialId: socialCardSchema.shape.socialId, expiresAtMs: millis }).strict();
 export type RoomSnapshot = z.infer<typeof roomSnapshotSchema>;
 export type RoomMedia = z.infer<typeof roomMediaSchema>;
 export type RoomInvitation = z.infer<typeof roomInvitationSchema>;
+export type RoomOutgoingInvitation = z.infer<typeof roomOutgoingInvitationSchema>;
 export type { RoomCommand, RoomHeartbeat, RoomReadyReport };
 export type RoomAction = RoomCommand extends infer C ? C extends RoomCommand ? Omit<C, 'scopeToken' | 'commandId'> : never : never;
 
@@ -57,6 +60,9 @@ export const roomClientId = () => {
 const options = (viewerId: string) => ({ accountViewer: viewerId, headers: { 'X-Finitude-Room-Client': roomClientId() } });
 export const getCurrentRoom = (viewerId: string) => socialReadRequest(`${base}/rooms/current`, z.object({ room: roomSnapshotSchema.nullable() }).strict(), options(viewerId));
 export const getRoomInvitations = (viewerId: string, signal?: AbortSignal) => socialReadRequest(`${base}/room-invitations`, z.object({ invitations: z.array(roomInvitationSchema).max(20) }).strict(), { ...options(viewerId), signal });
+export const getRoomInvitation = (viewerId: string, invitationId: string, signal?: AbortSignal) => socialReadRequest(`${base}/room-invitations/${encodeURIComponent(identifier.parse(invitationId))}`, z.object({ invitation: roomInvitationSchema.nullable() }).strict(), { ...options(viewerId), signal });
+export const getOutgoingRoomInvitations = (viewerId: string, roomId: string, signal?: AbortSignal) => socialReadRequest(`${base}/rooms/${encodeURIComponent(identifier.parse(roomId))}/invitations`, z.object({ invitations: z.array(roomOutgoingInvitationSchema).max(20) }).strict(), { ...options(viewerId), signal });
+export const getRoomCapabilities = (viewerId: string, signal?: AbortSignal) => socialReadRequest(`${base}/capabilities`, z.object({ socialEnabled: z.boolean(), roomsEnabled: z.boolean() }).strict(), { ...options(viewerId), signal });
 export const getRoomMedia = (viewerId: string, signal?: AbortSignal) => socialReadRequest(`${base}/room-media`, z.object({ items: z.array(roomMediaSchema).max(100) }).strict(), { ...options(viewerId), signal });
 export const prepareRoomCommand = async (viewerId: string, action: RoomAction): Promise<RoomCommand> => {
   const captured = { ...action, ...('mediaTrackIds' in action ? { mediaTrackIds: [...action.mediaTrackIds] } : {}) };

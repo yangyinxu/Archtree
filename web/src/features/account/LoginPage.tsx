@@ -15,7 +15,8 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import styles from './AccountSurfaces.module.css';
 import { AuthFormFeedback, noticeFromRouteState } from './AuthFormSupport';
 
-const safeDestination = (state: unknown, query: string) => {
+/** Permits known internal destinations; invitation identifiers never grant redirect authority. */
+export const safeLoginDestination = (state: unknown, query: string) => {
   const fromState = state && typeof state === 'object' && 'from' in state
     ? (state as { from?: unknown }).from
     : undefined;
@@ -28,6 +29,8 @@ const safeDestination = (state: unknown, query: string) => {
     || candidate.startsWith('/content/manage?')
     || candidate.startsWith('/content/manage/')) return candidate;
   const listenerPath = candidate.replace(/^\/finitude(?=\/|$)/, '') || '/';
+  if (/^\/social(?:\/invitations(?:\/[A-Za-z0-9_-]{1,80})?)?$/.test(listenerPath)
+    && !/\s/.test(listenerPath)) return listenerPath;
   const allowedListenerPath = /^\/(?:$|search(?:[/?#]|$)|library(?:[/?#]|$)|playlists(?:[/?#]|$)|albums\/(?:[^/?#]+)(?:[?#]|$)|artists\/(?:[^/?#]+)(?:[?#]|$)|account(?:[/?#]|$))/.test(listenerPath);
   return allowedListenerPath ? listenerPath : '/';
 };
@@ -56,7 +59,7 @@ export const LoginPage = () => {
     // Navigation follows the authoritative session query, so a stale login
     // response cannot redirect a tab that has already reconciled to another viewer.
     if (!login.isSuccess || !loggedInViewer || session.data?.user.id !== loggedInViewer) return;
-    const destination = safeDestination(location.state, location.search);
+    const destination = safeLoginDestination(location.state, location.search);
     if (destination === '/content/manage' || destination.startsWith('/content/manage/')) {
       window.location.assign(destination);
     } else {
@@ -72,6 +75,8 @@ export const LoginPage = () => {
   ]);
 
   if (session.data) {
+    const destination = safeLoginDestination(location.state, location.search);
+    const continueInvitation = destination === '/social/invitations' || destination.startsWith('/social/invitations/');
     return (
       <div className={styles.page}>
         <section className={styles.panel}>
@@ -79,6 +84,7 @@ export const LoginPage = () => {
             <span className={styles.panelIcon}><Icon name="account" /></span>
             <h1 className={styles.panelTitle}>{t('auth.login.already_listening', { name: session.data.user.displayName || session.data.user.email })}</h1>
             <div className={styles.actions}>
+              {continueInvitation && <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => navigate(destination, { replace: true })}>{t('room.invitation_continue')}</button>}
               <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => navigate('/')}>{t('account.common.return_home')}</button>
             </div>
           </div>

@@ -3,7 +3,11 @@ import { createServer } from 'node:http';
 import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { runDisposableRuntime } from '../../../test/support/disposableRuntime';
+
+const port = Number(process.env.FINITUDE_SOCIAL_E2E_PORT ?? 4175);
+if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error('Invalid isolated social fixture port.');
 
 // This process never connects to a developer database or external object store.
 for (const key of Object.keys(process.env)) {
@@ -16,11 +20,12 @@ Object.assign(process.env, {
 });
 const [{ ObjectId }, { default: bcrypt }, { createApp }, { getDb }, { getS3 }, { uploadAudioObject },
   { installRoomGateway }, { ServerLifecycle }, { startMongoReplicaSet },
-  { startLocalS3 }, { createPcmWav, wavUploadFile }] = await Promise.all([
+  { startLocalS3 }, { createPcmWav, wavUploadFile }, { createSocialService }, { default: AuthSession }, { Page }] = await Promise.all([
   import('mongodb'), import('bcryptjs'), import('../../../src/app'), import('../../../src/infrastructure/database'),
   import('../../../src/infrastructure/s3'), import('../../../src/services/audioStorageService'),
   import('../../../src/realtime/roomGateway'), import('../../../src/services/serverLifecycleService'),
-  import('../../../test/support/mongoReplicaSet'), import('../../../test/support/localS3'), import('../../../test/support/pcmWav')
+  import('../../../test/support/mongoReplicaSet'), import('../../../test/support/localS3'), import('../../../test/support/pcmWav'),
+  import('../../../src/application/social/socialService'), import('../../../src/models/authSession'), import('../../../src/models/page')
 ]);
 await runDisposableRuntime(async resources => {
   await resources.own(startMongoReplicaSet('archtree-social-real-browser', { registerSignalHandlers: false }), mongo => mongo.stop());
@@ -30,11 +35,37 @@ await runDisposableRuntime(async resources => {
   await resources.own(getS3(), client => client.destroy());
   const password = await bcrypt.hash('Social-real-browser-2026!', 10);
   const curator = new ObjectId();
+  const listeners = ['listener_one', 'listener_two', 'invitation_host', 'invitation_guest', 'invitation_other']
+    .map(username => ({ _id: new ObjectId(), username,
+      email: `${username}@example.test`, displayName: username, password, role: 'user', emailVerified: true }));
   await getDb()!.collection('users').insertMany([
-    ...['listener_one', 'listener_two'].map(username => ({ _id: new ObjectId(), username,
-      email: `${username}@example.test`, displayName: username, password, role: 'user', emailVerified: true })),
+    ...listeners,
     { _id: curator, username: 'fixture_curator', email: 'fixture_curator@example.test', password: 'unused-fixture', role: 'admin', emailVerified: true }
   ]);
+  await Page.upsertBySlug('home', 'Home', curator.toHexString());
+  // Separate invitation-test accounts avoid resets and let the recipient begin on Home with existing friendships.
+  const social = createSocialService();
+  const invitationPeople = await Promise.all(listeners.filter(value => value.username.startsWith('invitation_')).map(async value => {
+    const userId = value._id.toHexString();
+    const sessionId = await AuthSession.create(userId, `unused-fixture-${randomUUID()}`, new Date(Date.now() + 3_600_000));
+    const actor = { userId, sessionId };
+    const scope = await social.issueScope(actor);
+    const created = await social.mutate(actor, { scopeToken: scope.scopeToken, commandId: randomUUID(), action: 'profile', expectedRevision: 0,
+      handle: value.username, alias: value.username.replace('invitation_', 'Invitation '), discoverable: true });
+    const profile = await social.ownProfile(actor);
+    if (created.outcome !== 'applied' || !profile) throw new Error('Invitation fixture profile could not be created.');
+    return { actor, scope, profile };
+  }));
+  const guest = invitationPeople.find(value => value.profile.handle === 'invitation_guest')!;
+  for (const host of invitationPeople.filter(value => value !== guest)) {
+    const requested = await social.mutate(host.actor, { scopeToken: host.scope.scopeToken, commandId: randomUUID(), action: 'request',
+      targetSocialId: guest.profile.socialId, expectedRevision: 0 });
+    const relation = await social.relationship(guest.actor, host.profile.socialId);
+    if (requested.outcome !== 'applied' || !relation) throw new Error('Invitation fixture request could not be created.');
+    const accepted = await social.mutate(guest.actor, { scopeToken: guest.scope.scopeToken, commandId: randomUUID(), action: 'accept',
+      targetSocialId: host.profile.socialId, expectedRevision: relation.revision });
+    if (accepted.outcome !== 'applied') throw new Error('Invitation fixture friendship could not be created.');
+  }
   for (const [index, title] of ['First Light', 'Across the Water', 'Home Again'].entries()) {
     const id = new ObjectId();
     await getDb()!.collection('audioTracks').insertOne({ _id: id, title, trackNumber: index + 1, artistIds: [],
@@ -53,7 +84,7 @@ await runDisposableRuntime(async resources => {
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(4175, '127.0.0.1', () => { server.off('error', reject); resolve(); });
+    server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve(); });
   });
-  console.log('Isolated social browser fixture ready at http://127.0.0.1:4175/finitude/social');
+  console.log(`Isolated social browser fixture ready at http://127.0.0.1:${port}/finitude/social`);
 }).catch(() => { console.error('The isolated social browser fixture could not start.'); process.exitCode = 1; });

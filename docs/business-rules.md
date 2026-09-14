@@ -101,6 +101,23 @@ Playlist access retain their existing rules.
   24 hours, expose only the inviter's social card before acceptance, and require
   current friendship, capacity and block checks at admission. Removing friendship
   cancels unused invitations but preserves an already admitted membership.
+- Finitude Web shows a global, silent reminder for current pending room
+  invitations, including while browsing outside Together or participating in a
+  different room. The indicator means an invitation still needs a response; it
+  is not an unread-history count and viewing it does not dismiss the invitation.
+  Accepted, declined, replaced, expired or revoked invitations cease to appear.
+  Reminders add no notification sound, system notification, email or push delivery.
+- The host can copy a link to an existing pending invitation for its selected
+  friend. Each link identifies that invitation only and grants no access by
+  possession. A recipient who is signed out can sign in and continue to the
+  invitation; before acceptance only its inviter's social card and expiry are
+  visible. Other accounts and unavailable invitations receive the same unavailable
+  result. Sending a replacement invitation invalidates its earlier link.
+- Opening a reminder or invitation link never accepts it, starts playback,
+  takes over another device, or leaves an existing room. Joining still requires
+  an explicit action and the current admission checks. A listener already in a
+  room can inspect or decline another invitation and must explicitly leave or
+  end the current room before joining the other one.
 - A blocked pair cannot share a room. If the blocker hosts, remove the blocked
   member; otherwise remove the blocker. Deactivation and account deletion remove
   participation, ending a hosted room. These changes take effect atomically.

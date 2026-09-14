@@ -3863,8 +3863,117 @@
         "alias": "string"
       }
     },
+    "room.invitation_continue": {
+      "description": "Room invitation interface: invitation continue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_copied": {
+      "description": "Room invitation interface: invitation copied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_copy": {
+      "description": "Room invitation interface: invitation copy.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_copy_manual": {
+      "description": "Room invitation interface: invitation copy manual.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_existing_room": {
+      "description": "Room invitation interface: invitation existing room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_expires": {
+      "description": "Room invitation interface: invitation expires.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "time": "string"
+      }
+    },
+    "room.invitation_link": {
+      "description": "Room invitation interface: invitation link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_pending": {
+      "description": "Room invitation interface: invitation pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_profile_needed": {
+      "description": "Room invitation interface: invitation profile needed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_recipient_only": {
+      "description": "Room invitation interface: invitation recipient only.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.invitation_sign_in": {
+      "description": "Room invitation interface: invitation sign in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_unavailable": {
+      "description": "Room invitation interface: invitation unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.invitations": {
       "description": "Shared listening interface: invitations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitations_disabled": {
+      "description": "Room invitation interface: invitations disabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitations_empty": {
+      "description": "Room invitation interface: invitations empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitations_pending": {
+      "description": "Room invitation interface: invitations pending.",
       "delivery": [
         "runtime"
       ],

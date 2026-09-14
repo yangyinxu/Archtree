@@ -32,6 +32,7 @@ export const createRoomSession = () => {
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let opening = false;
+  let realtimeEnabled = true;
   let generation = 0;
   let transportGeneration = 0;
   let suspended = false;
@@ -61,7 +62,7 @@ export const createRoomSession = () => {
     detachPlayer(); emit({ connected: false, locallyPaused: Boolean(state.room), error: 'room.disconnected' });
   };
   const connectionFresh = () => {
-    if (!current() || suspended || !state.connected) return false;
+    if (!current() || !realtimeEnabled || suspended || !state.connected) return false;
     if (performance.now() - lastPong <= 15_000 && Date.now() - lastPongWallTime <= 15_000) return true;
     disconnect(); void connect(); return false;
   };
@@ -169,7 +170,7 @@ export const createRoomSession = () => {
     }
   };
   const connect = async () => {
-    if (!current() || suspended || opening || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+    if (!current() || !realtimeEnabled || suspended || opening || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
     opening = true;
     const version = generation;
     const transport = ++transportGeneration;
@@ -190,6 +191,8 @@ export const createRoomSession = () => {
           offset = message.serverTimeMs - performance.now(); bestRoundTrip = Infinity; lastPong = performance.now();
           lastPongWallTime = Date.now();
           emit({ connected: true, error: null }); acceptSnapshot(message.room, true); ping();
+          // Refresh invitations that changed between the first HTTP read and this subscription, or during an outage.
+          refreshSocial('social');
           setTimeout(() => { if (connection === socket) ping(); }, 120);
           setTimeout(() => { if (connection === socket) ping(); }, 350);
         } else if (message.type === 'snapshot') acceptSnapshot(message.room, true);
@@ -295,17 +298,24 @@ export const createRoomSession = () => {
   return {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    ensure(viewerId: string, onSocialChanged: (kind: 'social' | 'rooms') => void) {
+    ensure(viewerId: string, onSocialChanged: (kind: 'social' | 'rooms') => void, options?: { realtimeEnabled: boolean }) {
       refreshSocial = onSocialChanged;
-      if (state.viewerId === viewerId && current()) return;
-      stop(); guard = captureAccountOperation(viewerId); emit({ viewerId });
+      const enabled = options?.realtimeEnabled ?? true;
+      if (state.viewerId === viewerId && current()) {
+        if (realtimeEnabled !== enabled) {
+          realtimeEnabled = enabled;
+          if (enabled) { void refresh(); void connect(); } else disconnect();
+        }
+        return;
+      }
+      stop(); realtimeEnabled = enabled; guard = captureAccountOperation(viewerId); emit({ viewerId });
       document.addEventListener('freeze', onSuspend); document.addEventListener('resume', onResume);
       document.addEventListener('visibilitychange', onVisibilityChange);
       window.addEventListener('pagehide', onSuspend); window.addEventListener('pageshow', onResume);
       void refresh(); void connect();
       heartbeat = setInterval(() => {
         if (!current()) { stop(); return; }
-        if (suspended) return;
+        if (suspended || !realtimeEnabled) return;
         if (state.connected) {
           if (connectionFresh()) ping();
         } else { void refresh(); void connect(); }

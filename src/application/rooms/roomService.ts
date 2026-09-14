@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
 import { ROOM_LIMITS, isRoomClientId, isRoomIdentifier, parseRoomCommand, parseRoomHeartbeat, parseRoomReady,
-    type RoomActor, type RoomApi, type RoomCommand, type RoomHeartbeat, type RoomMediaDescriptor,
+    type RoomActor, type RoomApi, type RoomCommand, type RoomHeartbeat, type RoomInvitation, type RoomMediaDescriptor,
     type RoomReadyReport, type RoomSnapshot } from '../../contracts/roomV1';
 import { SOCIAL_LIMITS, SocialError, exactSocialKeys, type SocialOutcome } from '../../contracts/socialV1';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
@@ -111,6 +111,19 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
     const friends = async (a: string, b: string, session: ClientSession) => {
         const edge = await db().collection<SocialRelationshipDocument>('socialRelationships').findOne({ _id: pairId(a, b) }, { session });
         return edge?.state === 'accepted' && edge.blockedBy.length === 0;
+    };
+    /** List, link detail and host metadata resolve the same current lifecycle without retaining historical cards. */
+    const availableInvitation = async (value: RoomInvitationDocument | null, session: ClientSession, knownRoom?: RoomDocument) => {
+        if (!value || value.state !== 'pending' || value.expiresAt.getTime() <= now()) return null;
+        const room = knownRoom ?? await rooms().findOne({ _id: value.roomId }, { session });
+        if (!safeRoom(room) || room._id !== value.roomId || host(room)?.accountId !== value.senderAccountId) return null;
+        const sender = await profiles().findOne({ accountId: value.senderAccountId, active: true }, { session });
+        const recipient = await profiles().findOne({ accountId: value.recipientAccountId, active: true }, { session });
+        if (!sender || !recipient || !await friends(value.recipientAccountId, value.senderAccountId, session)) return null;
+        const invitation: RoomInvitation = { invitationId: value.invitationId, generation: value.generation,
+            expiresAtMs: value.expiresAt.getTime(),
+            inviter: { socialId: sender._id, handle: sender.handle, alias: sender.alias, iconSeed: sender._id } };
+        return { invitation, recipientSocialId: recipient._id };
     };
     const noBlocks = async (accountId: string, room: RoomDocument, session: ClientSession) => {
         for (const member of room.members) {
@@ -386,15 +399,40 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         async invitations(actor) {
             return transaction(actor, async session => {
                 await profile(actor.userId, session);
+                // Filter before filling the preview, while bounding legacy/stale evidence by total admission capacity.
                 const values = await invitations().find({ recipientAccountId: actor.userId, state: 'pending', expiresAt: { $gt: new Date(now()) } }, { session })
-                    .sort({ createdAt: -1 }).limit(ROOM_LIMITS.invitations).toArray();
+                    .sort({ createdAt: -1, invitationId: -1 }).limit(ROOM_LIMITS.activeRooms * ROOM_LIMITS.invitations).toArray();
+                const result: RoomInvitation[] = [];
+                for (const value of values) {
+                    const available = await availableInvitation(value, session);
+                    if (available) result.push(available.invitation);
+                    if (result.length === ROOM_LIMITS.invitations) break;
+                }
+                return result;
+            });
+        },
+        async invitation(actor, invitationId) {
+            if (!isRoomIdentifier(invitationId)) return fail('invalid_request', 400);
+            return transaction(actor, async session => {
+                const value = await invitations().findOne({ invitationId, recipientAccountId: actor.userId }, { session });
+                return (await availableInvitation(value, session))?.invitation ?? null;
+            });
+        },
+        async outgoingInvitations(actor, roomId) {
+            if (!isRoomIdentifier(roomId)) return fail('invalid_request', 400);
+            return transaction(actor, async session => {
+                const room = await rooms().findOne({ _id: roomId }, { session });
+                if (!safeRoom(room)) return fail('room_unavailable', 404);
+                const own = member(room, actor);
+                if (own.membershipId !== room.hostMembershipId || !controls(own, actor)) return fail('room_forbidden', 403);
+                await profile(actor.userId, session);
+                const values = await invitations().find({ roomId, senderAccountId: actor.userId, state: 'pending', expiresAt: { $gt: new Date(now()) } }, { session })
+                    .sort({ createdAt: -1, invitationId: -1 }).limit(ROOM_LIMITS.invitations).toArray();
                 const result = [];
                 for (const value of values) {
-                    const room = await rooms().findOne({ _id: value.roomId }, { session });
-                    const sender = await profiles().findOne({ accountId: value.senderAccountId, active: true }, { session });
-                    if (!safeRoom(room) || !sender || host(room)?.accountId !== sender.accountId || !await friends(actor.userId, sender.accountId, session)) continue;
-                    result.push({ invitationId: value.invitationId, generation: value.generation, expiresAtMs: value.expiresAt.getTime(),
-                        inviter: { socialId: sender._id, handle: sender.handle, alias: sender.alias, iconSeed: sender._id } });
+                    const available = await availableInvitation(value, session, room);
+                    if (available) result.push({ invitationId: available.invitation.invitationId, generation: available.invitation.generation,
+                        recipientSocialId: available.recipientSocialId, expiresAtMs: available.invitation.expiresAtMs });
                 }
                 return result;
             });

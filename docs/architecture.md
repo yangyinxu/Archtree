@@ -154,7 +154,9 @@ are capped at 16 KiB; social identity bodies remain capped at 4 KiB.
 | `GET /capabilities` | `socialEnabled`, `roomsEnabled`; room admission requires both flags |
 | `GET /rooms/current`, `GET /rooms/:roomId` | `{ room: snapshot or null }`, always freshly authorized |
 | `GET /room-media` | `{ items }`, at most 100 eligible pinned Audio descriptors |
-| `GET /room-invitations` | `{ invitations }`, inviter card and invitation incarnation only |
+| `GET /room-invitations` | `{ invitations }`, up to 20 current authorized invitations with inviter card, incarnation and expiry; a bounded preview, not an exact total |
+| `GET /room-invitations/:invitationId` | `{ invitation: invitation or null }`, original recipient only; unavailable, expired, replaced, revoked and wrong-account links are indistinguishable |
+| `GET /rooms/:roomId/invitations` | Current host/controller only; `{ invitations }` containing only `invitationId`, `generation`, `recipientSocialId`, `expiresAtMs` for pending links |
 | `POST /room-commands` | Strict command with original `scopeToken` and `commandId`; status-only social outcome |
 | `POST /realtime-tickets` | `{ clientId }`; returns an opaque single-use 30-second ticket |
 | WebSocket `/realtime` | Same-origin upgrade, subprotocols `archtree-room-v1` and ticket; only the protocol name is negotiated |
@@ -165,6 +167,24 @@ pending tickets per account are retained. Expiry is checked logically before
 any TTL reclamation. The gateway reauthorizes complete state after every committed
 invalidation and periodically every five seconds to recover a lost final wakeup.
 Outboxes store only invalidation versions, never historical private room payloads.
+
+Invitation list, detail and outgoing projections share current room, host,
+profile, friendship and logical-expiry checks. Recipient previews filter before
+filling 20 results, with candidate scanning bounded by total room admission
+capacity. Detail lookup is independently recipient-scoped, so an older valid
+link does not depend on appearing in that preview. Copying a link performs no
+mutation: the host reads current outgoing metadata after the original status-only
+invite outcome. Reinviting mints a new invitation ID, and old receipts do not
+recover a historical URL. Acceptance still uses the original scope/command ID and
+the freshly read invitation generation.
+
+The lazy Web global invitation entry shares the room-session singleton with room
+pages. It refreshes on a fresh subscription, `socialChanged`, explicit mutation
+settlement, focus and a 15-second fallback. Local expiry timers handle TTL deletes
+that produce no outbox bump. Queries and deferred UI callbacks remain scoped to
+the current account epoch, and the existing session privacy barrier hides them
+during identity transitions. This is a pending-action indicator, not a durable
+notification inbox or read-status model.
 
 Client frames are `ping` with `clientTimeMs` and an optional exact membership /
 controller / local-pause heartbeat, or `ready` with an exact readiness report.

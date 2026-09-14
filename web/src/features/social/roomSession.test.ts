@@ -89,6 +89,31 @@ test('socket authentication keeps the single-use ticket out of the URL and readi
   expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
 });
 
+test('global consumers reuse one transport and subscription refreshes invitations missed during connection', async () => {
+  const first = vi.fn(); const global = vi.fn();
+  roomSession.ensure('viewer-1', first);
+  roomSession.ensure('viewer-1', global);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(Socket.instances).toHaveLength(1);
+  Socket.instances[0].receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_000_000, room: null });
+  expect(global).toHaveBeenCalledExactlyOnceWith('social');
+  Socket.instances[0].receive({ type: 'socialChanged' });
+  expect(global).toHaveBeenCalledTimes(2);
+  expect(first).not.toHaveBeenCalled();
+  expect(mocks.attach).not.toHaveBeenCalled(); expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+});
+
+test('disabled rooms allow an explicit invitation decline without background ticket attempts', async () => {
+  roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: false });
+  await vi.advanceTimersByTimeAsync(16_000);
+  expect(mocks.getRealtimeTicket).not.toHaveBeenCalled(); expect(Socket.instances).toHaveLength(0);
+  await roomSession.run({ action: 'declineInvitation', invitationId: 'invitation-a', generation: 2 });
+  expect(mocks.sendRoomCommand).toHaveBeenCalledExactlyOnceWith('viewer-1', expect.objectContaining({ action: 'declineInvitation', generation: 2 }));
+  roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: true });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(Socket.instances).toHaveLength(1);
+});
+
 test('late join uses current-timeline readiness and gates playback until own readiness is confirmed', async () => {
   const room = roomFixture(); room.preparation = null; room.timeline!.state = 'playing';
   const socket = await connected(room);

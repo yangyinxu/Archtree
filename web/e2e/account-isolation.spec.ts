@@ -200,6 +200,11 @@ test('an A tab cannot consume or mutate B data and both tabs reconcile to B', as
       return;
     }
 
+    if (path === '/api/social/v1/me/profile' && request.method() === 'GET' && !url.search) {
+      await privateJson(route, activeViewer, { profile: null });
+      return;
+    }
+
     if (path === '/api/listener/v1/library') {
       await privateJson(route, activeViewer, libraryFor(activeViewer));
       return;

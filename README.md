@@ -78,6 +78,28 @@ closes it for every member. A refreshed tab observes until Use this device is
 selected. Browser autoplay refusal is surfaced with explicit resync rather than
 reported as successful playback.
 
+Active social profiles have a **Room invitations** bell throughout the Web
+listener. Its dot means there are pending invitations, not an unread-history
+count; opening the list does not clear it. The list is also available at
+`/finitude/social/invitations`, including while the listener is in another room.
+After inviting a friend, the host's active controller can choose **Copy invitation
+link** beside that friend. A read-only URL field provides a manual fallback if
+clipboard access is unavailable. The URL points to
+`/finitude/social/invitations/:invitationId` and works only for that invitation's
+recipient. Login preserves this destination across reloads. Opening the link
+never joins, changes rooms or starts playback; the recipient explicitly joins or
+declines. Replaced, expired and revoked invitations, and links opened by a
+different account, show the same unavailable state. These are Web links; native
+invitation handling remains a later delivery stage.
+
+The global entry reuses the existing account-scoped realtime connection and
+refreshes invitation reads after subscription/reconnection. Invitations also
+refresh every 15 seconds while the page is active and on focus; local expiry
+removes stale reminders even when MongoDB TTL cleanup sends no invalidation.
+Disabled room capabilities suppress background ticket retries while keeping
+explicit safety actions available. No notification sound or push permission is
+requested.
+
 The implemented [room API](docs/architecture.md#implemented-audio-room-api) uses
 HTTP for version-fenced commands and complete authorized WebSocket snapshots for
 delivery. The server uses pinned `ws` with compression disabled; no Redis or
@@ -105,8 +127,10 @@ reconciliation tool.
 
 Run `npm test`, `npm run build`, `npm run test:integration`, and
 `npm run test:e2e:social --workspace @archtree/finitude-web` for the real
-MongoDB/S3/WebSocket browser flow. Keep the ordinary listener E2E gate for playback
-continuity, navigation and accessibility changes. The social E2E uses a disposable
+MongoDB/S3/WebSocket browser flows. The room and invitation scenarios each own a
+disposable server, database and object store, including a separate rate-limit
+window. Keep the ordinary listener E2E gate for playback continuity, navigation
+and accessibility changes. The social E2E uses a disposable
 headed Chromium profile to verify real background tab visibility; run it in a
 desktop session, or use `xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web`
 on Linux with Xvfb installed. All automated Chromium launches, including this

@@ -40,6 +40,22 @@ const jsonResponse = (
   body: JSON.stringify(payload)
 });
 
+/** Ordinary signed-in fixtures have no social profile; authorize against their declared session, never the request header. */
+export const installNonSocialProfileRoute = async (page: Page, currentViewer: () => string | null) => {
+  await page.route('**/api/social/v1/me/profile', async route => {
+    const request = route.request();
+    if (request.method() !== 'GET' || new URL(request.url()).search) return route.fallback();
+    const viewerId = currentViewer();
+    if (!viewerId) return jsonResponse(route, 401, { message: 'Unauthorized' });
+    if (request.headers()['x-finitude-account-viewer'] !== viewerId) {
+      return jsonResponse(route, 409, { code: 'account_viewer_mismatch', message: 'The active account changed.' });
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8',
+      headers: { 'Cache-Control': 'private, no-store', 'X-Finitude-Account-Viewer': viewerId },
+      body: JSON.stringify({ profile: null }) });
+  });
+};
+
 const parseRange = (header: string, size: number) => {
   const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
   if (!match || (!match[1] && !match[2])) return null;
@@ -145,6 +161,10 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
     fixture.calls.push(call);
 
     if (call.method === 'GET' && call.pathname === '/auth/browser/session') {
+      await jsonResponse(route, 401, { message: 'Unauthorized' });
+      return;
+    }
+    if (call.method === 'GET' && call.pathname === '/api/social/v1/me/profile' && !call.search) {
       await jsonResponse(route, 401, { message: 'Unauthorized' });
       return;
     }

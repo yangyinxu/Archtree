@@ -39,6 +39,10 @@ export interface RoomSnapshot {
 export interface RoomInvitation {
     invitationId: string; generation: number; inviter: SocialCard; expiresAtMs: number;
 }
+/** Host-only link metadata identifies the selected recipient without exposing their private account. */
+export interface RoomOutgoingInvitation {
+    invitationId: string; generation: number; recipientSocialId: string; expiresAtMs: number;
+}
 /** Membership incarnation fences deny-only actions without requiring a fresh room revision. */
 export interface RoomMemberCommand extends SocialMutationIdentity { roomId: string; memberId: string }
 export interface RoomControlCommand extends RoomMemberCommand {
@@ -70,6 +74,8 @@ export interface RoomApi {
     currentRoom(actor: RoomActor): Promise<RoomSnapshot | null>;
     room(actor: RoomActor, roomId: string): Promise<RoomSnapshot | null>;
     invitations(actor: RoomActor): Promise<RoomInvitation[]>;
+    invitation(actor: RoomActor, invitationId: string): Promise<RoomInvitation | null>;
+    outgoingInvitations(actor: RoomActor, roomId: string): Promise<RoomOutgoingInvitation[]>;
     eligibleMedia(actor: RoomActor): Promise<RoomMediaDescriptor[]>;
     mutate(actor: RoomActor, command: RoomCommand): Promise<SocialOutcome>;
     heartbeat(actor: RoomActor, report: RoomHeartbeat): Promise<void>;

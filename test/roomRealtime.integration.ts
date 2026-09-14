@@ -11,7 +11,7 @@ import { createSession } from '../src/services/authSessionService';
 import { uploadAudioObject } from '../src/services/audioStorageService';
 import { createSocialService } from '../src/application/social/socialService';
 import { createRoomService } from '../src/application/rooms/roomService';
-import type { RoomCommand, RoomSnapshot } from '../src/contracts/roomV1';
+import type { RoomCommand, RoomInvitation, RoomOutgoingInvitation, RoomSnapshot } from '../src/contracts/roomV1';
 import type { SocialScope, SocialOutcome } from '../src/contracts/socialV1';
 import { roomAuthority } from '../src/realtime/roomAuthority';
 import { installRoomGateway } from '../src/realtime/roomGateway';
@@ -138,6 +138,43 @@ const joinedPair = async () => {
     await waitFor(async () => (await current(b))!.members.every(member => member.connected));
     return { a, b, sa, sb };
 };
+
+test('real invitation HTTP reads enforce recipient, current controller, viewer and strict route boundaries', async () => {
+    const host = await account(); const guest = await account(); const outsider = await account(); await friends(host, guest);
+    await submit(host, { action: 'create', mediaTrackIds: mediaIds });
+    const room = (await current(host))!;
+    await submit(host, { action: 'invite', roomId: room.roomId, memberId: room.self.memberId, targetSocialId: guest.profile.socialId });
+    const outgoing = (await request<{ invitations: RoomOutgoingInvitation[] }>(host, `/rooms/${room.roomId}/invitations`)).invitations;
+    assert.equal(outgoing.length, 1); assert.equal(outgoing[0].recipientSocialId, guest.profile.socialId);
+    assert.deepEqual(Object.keys(outgoing[0]).sort(), ['expiresAtMs', 'generation', 'invitationId', 'recipientSocialId']);
+    const path = `/room-invitations/${outgoing[0].invitationId}`;
+    const value = (await request<{ invitation: RoomInvitation | null }>(guest, path)).invitation; assert.ok(value);
+    assert.deepEqual(Object.keys(value).sort(), ['expiresAtMs', 'generation', 'invitationId', 'inviter']);
+    assert.equal((await request<{ invitation: RoomInvitation | null }>(host, path)).invitation, null);
+    assert.equal((await request<{ invitation: RoomInvitation | null }>(outsider, path)).invitation, null);
+    assert.equal(await current(guest), null, 'Reading a link must not admit the recipient.');
+    const raw = (who: Account | null, target: string, headers: Record<string, string> = {}) => fetch(`${base}/api/social/v1${target}`, {
+        headers: { ...(who ? { Authorization: `Bearer ${who.token}`, 'X-Finitude-Room-Client': who.clientId } : {}), ...headers }
+    });
+    assert.equal((await raw(null, path)).status, 401);
+    const browserHeaders = { Cookie: `session_token=${guest.token}`, 'X-Finitude-Room-Client': guest.clientId,
+        'X-Finitude-Account-Viewer': guest.userId };
+    assert.equal((await raw(null, path, { ...browserHeaders, 'X-Finitude-Account-Viewer': outsider.userId })).status, 409);
+    assert.equal((await raw(guest, path, { 'X-Finitude-Room-Client': 'short' })).status, 400);
+    for (const suffix of ['?unknown=1', '?generation=1&generation=2']) assert.equal((await raw(guest, path + suffix)).status, 400);
+    assert.equal((await raw(guest, '/room-invitations/invalid%20id')).status, 400);
+    assert.equal((await raw(host, `/rooms/${room.roomId}/invitations`, { 'X-Finitude-Room-Client': randomUUID() })).status, 403);
+    assert.equal((await raw(guest, `/rooms/${room.roomId}/invitations`)).status, 404);
+    const privateResponse = await raw(null, path, browserHeaders);
+    assert.ok(privateResponse.headers.get('cache-control')?.split(',').map(value => value.trim()).includes('no-store'));
+    assert.ok(privateResponse.headers.get('vary')?.includes('X-Finitude-Account-Viewer'));
+    assert.equal(privateResponse.headers.get('X-Finitude-Account-Viewer'), guest.userId);
+    await submit(guest, { action: 'declineInvitation', invitationId: value.invitationId, generation: value.generation });
+    assert.equal((await request<{ invitation: RoomInvitation | null }>(guest, path)).invitation, null);
+    assert.deepEqual((await request<{ invitations: RoomOutgoingInvitation[] }>(host, `/rooms/${room.roomId}/invitations`)).invitations, []);
+    await AuthSession.revokeById(guest.userId, guest.sessionId);
+    assert.equal((await raw(guest, path)).status, 401);
+});
 
 test('real HTTP and WebSocket room flow protects host control and commits distinct concurrent Next only once', async () => {
     const { a, b, sa, sb } = await joinedPair();

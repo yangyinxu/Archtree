@@ -47,6 +47,8 @@
 .seek { width: 100%; accent-color: var(--color-accent); margin-top: 1.2rem; }
 .queue { margin-top: 1.5rem; max-height: 18rem; overflow: auto; }
 .selected { color: var(--color-accent-bright); }
+.invitationRow { flex-wrap: wrap; }
+.invitationCopy { max-width: 100%; min-width: 0; }
 @container (max-width: 42rem) { .grid { grid-template-columns: 1fr; } }
 @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .page { padding: 1.5rem 1rem; } .hero { align-items: start; flex-direction: column; } .panel { padding: 1rem; } .row { flex-wrap: wrap; } .rowActions { padding-left: 3.6rem; width: 100%; justify-content: start; } }

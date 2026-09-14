@@ -11,7 +11,9 @@ vi.mock('./roomSession', () => ({ roomSession: { run: mocks.run, control: mocks.
   useRoomSession: () => ({ viewerId: 'viewer-1', room: mocks.room, connected: mocks.connected, locallyPaused: mocks.locallyPaused, busy: false, error: null, uncertain: null }) }));
 vi.mock('../../player', () => ({ usePlayer: () => ({ currentItem: null, currentTime: 0, error: mocks.playerError ? 'blocked' : null }) }));
 vi.mock('../../api/rooms', async original => ({ ...await original<typeof import('../../api/rooms')>(),
-  getRoomInvitations: async () => ({ invitations: [] }), getRoomMedia: async () => ({ items: [] }) }));
+  getRoomInvitations: async () => ({ invitations: [] }), getRoomMedia: async () => ({ items: [] }),
+  getRoomCapabilities: async () => ({ socialEnabled: true, roomsEnabled: true }),
+  getOutgoingRoomInvitations: async () => ({ invitations: [] }) }));
 vi.mock('../../api/social', () => ({ getSocialPage: async () => ({ items: [], nextCursor: null }) }));
 
 const show = () => {

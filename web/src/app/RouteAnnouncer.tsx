@@ -10,6 +10,7 @@ const titleKeyFor = (pathname: string): MessageKey => {
   }
   if (pathname === '/library') return 'route.title.library';
   if (pathname === '/social') return 'social.title';
+  if (/^\/social\/invitations(?:\/[^/]+)?$/.test(pathname)) return 'room.invitations';
   if (pathname === '/playlists') return 'route.title.playlists';
   if (/^\/playlists\/[^/]+$/.test(pathname)) return 'route.title.playlist';
   if (/^\/albums\/[^/]+$/.test(pathname)) return 'route.title.album';

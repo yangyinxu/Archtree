@@ -191,7 +191,11 @@
   color: var(--color-text-muted);
 }
 
+.accountActions { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; min-width: 0; }
+.accountLoading { display: block; height: 2.5rem; width: 2.5rem; }
+
 .account {
+  min-width: 0;
   align-items: center;
   border-radius: 999px;
   color: var(--color-text);
@@ -210,6 +214,9 @@
 .account:hover {
   background: var(--color-surface-hover);
 }
+
+.account.invitationEntry { flex: 0 0 auto; height: 2.5rem; justify-content: center; padding: 0; position: relative; width: 2.5rem; }
+.invitationDot { background: var(--color-accent); border: 2px solid var(--color-canvas); border-radius: 50%; height: .7rem; position: absolute; right: .15rem; top: .15rem; width: .7rem; }
 
 .account > span:last-child {
   overflow: hidden;
