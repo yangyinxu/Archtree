@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { apiRequest } from './client';
 import { socialReadRequest } from './socialReadRequest';
 import { captureAccountOperation, isAccountOperationCurrent } from './accountEpoch';
+import type { MusicShareAction } from '../../../src/contracts/socialMusicV1';
+import type { ListeningAction } from '../../../src/contracts/listeningV1';
 
 const base = '/api/social/v1';
 export { socialIdSchema, socialRevisionSchema, socialCardSchema, socialProfileSchema, socialPageSchema, socialOutcomeSchema } from './socialSchemas';
@@ -15,7 +17,8 @@ export type SocialListKind = 'friends' | 'incoming' | 'outgoing' | 'blocks';
 export type SocialAction = { action: 'profile'; handle: string; alias: string; discoverable: boolean; expectedRevision: number }
   | { action: 'deactivate' }
   | { action: 'block'; targetSocialId: string }
-  | { action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove' | 'unblock'; targetSocialId: string; expectedRevision: number };
+  | { action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove' | 'unblock'; targetSocialId: string; expectedRevision: number }
+  | MusicShareAction | ListeningAction;
 export type SocialCommand = SocialAction & { readonly scopeToken: string; readonly commandId: string };
 
 export const getSocialProfile = (viewerId: string, signal?: AbortSignal) =>
@@ -59,6 +62,15 @@ export const sendSocialCommand = (viewerId: string, command: SocialCommand) => {
   let method = 'POST';
   let body: Record<string, unknown> = input;
   if (action === 'profile') { path = '/me/profile'; method = 'PATCH'; }
+  else if (action === 'setListeningSharing') { path = '/me/listening'; method = 'PATCH'; }
+  else if (action === 'claimListening') path = '/listening-publications/claim';
+  else if (action === 'shareMusic') path = '/music-shares';
+  else if (action === 'dismissMusicShare' || action === 'withdrawMusicShare') {
+    if (!('shareId' in input) || !/^ms_[a-f0-9]{32}$/.test(input.shareId)) throw new Error('Invalid share identity.');
+    path = `/music-shares/${input.shareId}/${action === 'dismissMusicShare' ? 'dismiss' : 'withdraw'}`;
+    const { shareId: _share, ...remaining } = input;
+    body = remaining;
+  }
   else if (action === 'request') path = '/friend-requests';
   else if ('targetSocialId' in input) {
     path = `/relationships/${socialIdSchema.parse(input.targetSocialId)}/${action}`;

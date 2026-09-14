@@ -4,6 +4,8 @@ import { applyRoomSafety, roomSafetyAccountIds } from '../application/rooms/room
 import { notifyRoomChanges } from '../realtime/roomEvents';
 import type { RoomDocument } from '../repositories/social/roomDocuments';
 import { ROOM_LIMITS } from '../contracts/roomV1';
+import type { ListeningPublicationDocument } from '../repositories/social/listeningDocuments';
+import { retireListeningPublication } from '../application/social/listeningLifecycle';
 
 /** Session revocation and controller removal share one transaction across every login/logout/reset path. */
 export const revokeSessionsWithRoomCleanup = async (
@@ -20,6 +22,10 @@ export const revokeSessionsWithRoomCleanup = async (
             const userId = accountId ?? existing?.userId;
             if (!userId || typeof userId !== 'string' || !/^[a-f0-9]{24}$/.test(userId)) return;
             const now = new Date();
+            const publication = await db.collection<ListeningPublicationDocument>('socialListeningPublications').findOne({ _id: userId }, { session });
+            const revokedPublisher = publication && (kind === 'logoutAll' || await db.collection('authSessions').findOne({
+                $and: [filter, { _id: new ObjectId(publication.sessionId) }]
+            }, { session, projection: { _id: 1 } }));
             let controllerSessions = kind === 'session' && existing ? [String(existing._id)] : [];
             if (kind === 'otherSessions') {
                 if (!preservedSessionId) throw new Error('Other-session revocation requires the preserved session.');
@@ -37,6 +43,7 @@ export const revokeSessionsWithRoomCleanup = async (
                 { $set: { revokedAt: now, updatedAt: now } }, { session });
             result = { acknowledged: updated.acknowledged === true,
                 matchedCount: Number(updated.matchedCount ?? 0), modifiedCount: Number(updated.modifiedCount ?? 0) };
+            if (publication && revokedPublisher) await retireListeningPublication(publication, session, now.getTime());
             const ids = [...new Set([userId, ...await roomSafetyAccountIds(userId, session)])].sort();
             await db.collection('users').updateMany({ _id: { $in: ids.map(id => new ObjectId(id)) } },
                 { $inc: { listenerMutationRevision: 1 } }, { session });

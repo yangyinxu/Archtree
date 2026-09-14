@@ -1,14 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { roomFixture } from '../../test/roomFixture';
-import type { RoomSnapshot } from '../../api/rooms';
+import type { RoomCommand, RoomSnapshot } from '../../api/rooms';
 import { RoomsPanel } from './RoomsPanel';
 
 const mocks = vi.hoisted(() => ({ room: null as RoomSnapshot | null, run: vi.fn(), control: vi.fn(), ensure: vi.fn(),
-  resync: vi.fn(), pauseLocally: vi.fn(), connected: true, locallyPaused: false, playerError: false }));
+  resync: vi.fn(), pauseLocally: vi.fn(), retry: vi.fn(), checkOutcome: vi.fn(), uncertain: null as RoomCommand | null,
+  connected: true, locallyPaused: false, playerError: false }));
 vi.mock('./roomSession', () => ({ roomSession: { run: mocks.run, control: mocks.control, ensure: mocks.ensure,
-  resync: mocks.resync, pauseLocally: mocks.pauseLocally },
-  useRoomSession: () => ({ viewerId: 'viewer-1', room: mocks.room, connected: mocks.connected, locallyPaused: mocks.locallyPaused, busy: false, error: null, uncertain: null }) }));
+  resync: mocks.resync, pauseLocally: mocks.pauseLocally, retry: mocks.retry, checkOutcome: mocks.checkOutcome },
+  useRoomSession: () => ({ viewerId: 'viewer-1', room: mocks.room, connected: mocks.connected, locallyPaused: mocks.locallyPaused, busy: false, error: null, uncertain: mocks.uncertain }) }));
+vi.mock('./RoomSongRequests', () => ({ RoomSongRequests: ({ room }: { room: RoomSnapshot }) => <section aria-label="Song requests">{room.roomId}</section> }));
 vi.mock('../../player', () => ({ usePlayer: () => ({ currentItem: null, currentTime: 0, error: mocks.playerError ? 'blocked' : null }) }));
 vi.mock('../../api/rooms', async original => ({ ...await original<typeof import('../../api/rooms')>(),
   getRoomInvitations: async () => ({ invitations: [] }), getRoomMedia: async () => ({ items: [] }),
@@ -24,7 +26,20 @@ const show = () => {
   const rendered = render(content());
   return () => rendered.rerender(content());
 };
-beforeEach(() => { mocks.room = roomFixture(); mocks.connected = true; mocks.locallyPaused = false; mocks.playerError = false; vi.clearAllMocks(); });
+beforeEach(() => { mocks.room = roomFixture(); mocks.connected = true; mocks.locallyPaused = false; mocks.playerError = false; mocks.uncertain = null; vi.clearAllMocks(); });
+
+test('the existing active room exposes its lazy song request panel without initiating a command', async () => {
+  show(); expect(await screen.findByRole('region', { name: 'Song requests' })).toHaveTextContent('room-a');
+  expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled();
+});
+
+test('reconnection may clear a status message but cannot hide uncertain mutation recovery', () => {
+  mocks.uncertain = { action: 'dismissSongRequest', roomId: 'room-a', memberId: 'member-a', requestId: 'request-a',
+    commandId: 'original-command-123', scopeToken: 'original-scope-123' }; show();
+  fireEvent.click(screen.getByRole('button', { name: 'Check outcome' })); expect(mocks.checkOutcome).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry this action' })); expect(mocks.retry).toHaveBeenCalledOnce();
+  expect(mocks.run).not.toHaveBeenCalled();
+});
 
 test('dragging the seek bar retains the playback precondition seen at gesture start', () => {
   const rerender = show();

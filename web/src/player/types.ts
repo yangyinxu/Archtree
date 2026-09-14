@@ -1,5 +1,5 @@
 import type { MediaSessionArtworkSource } from '../artwork/artworkUrls';
-import type { createRoomPlaybackController, RoomPlaybackAttachment, RoomPlaybackOptions } from './roomPlayback';
+import type { createRoomPlaybackController, RoomPlaybackAttachment, RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
 
 /** Canonical metadata retained for every item in the one shared playback queue. */
 export interface PlayerQueueItem {
@@ -140,11 +140,23 @@ export interface CreatePlayerStoreOptions {
   roomPlaybackProbeFactory?: typeof createRoomPlaybackController;
 }
 
+/** Optional raw observations stay outside rendering state; consumers must validate actual native playback. */
+export interface PlayerPlaybackEvent {
+  type: string;
+  media: PlayerAudio | null;
+  item: PlayerQueueItem | null;
+  sourceGeneration: number;
+  room: RoomPlaybackState | null;
+}
+
 /** Public commands intentionally contain no routing or activity-reporting dependency. */
 export interface PlayerStore {
   getSnapshot(): PlayerSnapshot;
   getServerSnapshot(): PlayerSnapshot;
   subscribe(listener: () => void): () => void;
+  subscribePlaybackEvents(listener: (event: PlayerPlaybackEvent) => void): () => void;
+  /** Explicit gesture marker; remote effects and natural advancement never call this method. */
+  notePlaybackIntent(): void;
   launchQueue(
     queue: readonly PlayerQueueItem[],
     initialIndex: number,

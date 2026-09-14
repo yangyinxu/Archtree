@@ -16,11 +16,19 @@ import { readSocialToken, signSocialToken } from './socialTokens';
 import { applyRoomSafety, roomSafetyAccountIds } from '../rooms/roomLifecycle';
 import { notifyRoomChanges } from '../../realtime/roomEvents';
 import { SOCIAL_TRANSACTION_ATTEMPTS, waitForSocialTransactionRetry } from './socialTransactionRetry';
+import { createMusicShareService, type ResolveMusicShareContent } from './musicShareService';
+import { deleteMusicShares, invalidateMusicShareAccounts, musicShareAccountIds } from './socialShareLifecycle';
+import { createListeningService } from './listeningService';
+import { clearListeningAccount } from './listeningLifecycle';
+import { LISTENING_LIMITS, parseListeningReport } from '../../contracts/listeningV1';
 
 export interface SocialServiceOptions {
     now?: () => number;
     enabled?: () => boolean;
     secret?: () => string;
+    resolveMusicShareContent?: ResolveMusicShareContent;
+    resolveListeningContent?: ResolveMusicShareContent;
+    listeningRoomsEnabled?: () => boolean;
     /** Isolated transaction-race hooks; the application never supplies these. */
     beforeAccountFence?: (actor: SocialActor, session: ClientSession) => Promise<void>;
     afterAccountFence?: (actor: SocialActor, session: ClientSession) => Promise<void>;
@@ -50,6 +58,8 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
     const now = options.now ?? Date.now;
     const secret = options.secret ?? getJwtSecret;
     const enabled = options.enabled ?? (() => process.env.FINITUDE_SOCIAL_ENABLED === 'true');
+    const music = createMusicShareService({ now, secret, resolveContent: options.resolveMusicShareContent });
+    const listening = createListeningService({ now, enabled, resolveContent: options.resolveListeningContent, roomsEnabled: options.listeningRoomsEnabled });
     const db = () => { const value = getDb(); if (!value) throw new SocialError(503, 'social_unavailable'); return value; };
     const profiles = () => db().collection<SocialProfileDocument>('socialProfiles');
     const relationships = () => db().collection<SocialRelationshipDocument>('socialRelationships');
@@ -148,6 +158,8 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
 
     /** Validation is separate from writes, so a rejected receipt cannot commit partial domain changes. */
     const plan = async (actor: SocialActor, command: SocialCommand, session: ClientSession): Promise<MutationPlan> => {
+        if (command.action === 'setListeningSharing' || command.action === 'claimListening') return listening.plan(actor, command, session);
+        if ('shareId' in command || command.action === 'shareMusic') return music.plan(actor, command, session);
         const current = await profiles().findOne({ accountId: actor.userId }, { session });
         if (command.action === 'profile') {
             if ((current?.revision ?? 0) !== command.expectedRevision) throw new SocialError(409, 'profile_revision_changed');
@@ -264,6 +276,18 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
 
     const api: SocialApi = {
         admissionEnabled: enabled,
+        ownListening: actor => readTransaction(actor, session => listening.own(actor, session)),
+        reportListening: (actor, input) => {
+            const report = parseListeningReport(input);
+            if (!report) throw new SocialError(400, 'invalid_request');
+            return transaction(actor, session => listening.report(actor, report, session), true);
+        },
+        listeningStatuses: (actor, socialIds) => {
+            if (!Array.isArray(socialIds) || !socialIds.length || socialIds.length > LISTENING_LIMITS.query
+                || !socialIds.every(isSocialId) || new Set(socialIds).size !== socialIds.length) throw new SocialError(400, 'invalid_request');
+            const captured = [...socialIds];
+            return readTransaction(actor, session => listening.statuses(actor, captured, session));
+        },
         async issueScope(actor) {
             const id = randomBytes(16).toString('hex');
             return transaction(actor, async session => {
@@ -340,6 +364,9 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 return { socialId: targetSocialId, state, revision: edge?.revision ?? 0 };
             });
         },
+        async musicShares(actor, direction, limit, cursor) {
+            return readTransaction(actor, session => music.list(actor, direction, limit, cursor, session));
+        },
         async mutate(actor, input) {
             const command = parseSocialCommand(input);
             if (!command) throw new SocialError(400, 'invalid_request');
@@ -357,9 +384,11 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 const own = command.action === 'profile' ? await profiles().findOne({ accountId: actor.userId }, { session }) : null;
                 const privacyOnlyProfile = command.action === 'profile' && own?.active === true && command.discoverable === false
                     && own.handle === command.handle && own.alias === command.alias;
-                if (!enabled() && ['profile', 'request', 'accept'].includes(command.action) && !privacyOnlyProfile) throw new SocialError(503, 'social_disabled');
+                if (!enabled() && (['profile', 'request', 'accept', 'shareMusic', 'claimListening'].includes(command.action)
+                    || (command.action === 'setListeningSharing' && command.enabled)) && !privacyOnlyProfile) throw new SocialError(503, 'social_disabled');
                 await receipts().deleteMany({ accountId: actor.userId, expiresAt: { $lte: new Date(now()) } }, { session });
-                const safety = privacyOnlyProfile || ['block', 'unblock', 'deactivate', 'remove', 'decline', 'cancel'].includes(command.action);
+                const safety = privacyOnlyProfile || (command.action === 'setListeningSharing' && !command.enabled)
+                    || ['block', 'unblock', 'deactivate', 'remove', 'decline', 'cancel', 'dismissMusicShare', 'withdrawMusicShare'].includes(command.action);
                 // Admission cannot consume privacy-exit capacity; the final slot is reserved for deactivation.
                 const receiptLimit = SOCIAL_LIMITS.receipts + (safety ? SOCIAL_LIMITS.safetyReceipts : 0) + (command.action === 'deactivate' ? 1 : 0);
                 if (await receipts().countDocuments({ accountId: actor.userId }, { session, limit: receiptLimit }) >= receiptLimit) throw new SocialError(429, 'social_limit');
@@ -381,10 +410,16 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                     if (operation.outcome === 'applied') {
                         if (command.action === 'deactivate' || command.action === 'profile') {
                             await applyRoomSafety({ kind: command.action, accountId: actor.userId }, session, now());
+                            if (command.action === 'deactivate') {
+                                await deleteMusicShares({ accountIds: actor.userId }, session, now());
+                                await clearListeningAccount(actor.userId, session, now());
+                            }
+                            else await invalidateMusicShareAccounts(await musicShareAccountIds({ accountIds: actor.userId }, session, now()), session, now());
                         } else if (command.action === 'block' || command.action === 'remove') {
                             const target = await profiles().findOne({ _id: command.targetSocialId }, { session });
                             if (target) await applyRoomSafety({ kind: command.action === 'block' ? 'block' : 'removeFriend',
                                 accountId: actor.userId, targetAccountId: target.accountId }, session, now());
+                            if (target) await deleteMusicShares({ accountIds: { $all: [actor.userId, target.accountId] } }, session, now());
                         }
                     }
                     await invalidate(operation.affected, session);
@@ -397,19 +432,22 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
             }, true, async session => {
                 const roomAccounts = ['deactivate', 'profile', 'block', 'remove'].includes(command.action)
                     ? await roomSafetyAccountIds(actor.userId, session) : [];
+                const shareAccounts = ['deactivate', 'profile'].includes(command.action)
+                    ? await musicShareAccountIds({ accountIds: actor.userId }, session, now())
+                    : 'shareId' in command ? await musicShareAccountIds({ _id: command.shareId, accountIds: actor.userId }, session, now()) : [];
                 if (command.action === 'deactivate') {
                     const edges = await relationships().find({ accountIds: actor.userId }, { session, projection: { accountIds: 1 } })
                         .limit(SOCIAL_LIMITS.edges + 1).toArray();
                     if (edges.length > SOCIAL_LIMITS.edges) throw new SocialError(503, 'social_unavailable');
-                    return [...roomAccounts, ...edges.flatMap(edge => edge.accountIds)];
+                    return [...roomAccounts, ...shareAccounts, ...edges.flatMap(edge => edge.accountIds)];
                 }
                 if ('targetSocialId' in command) {
                     const target = await profiles().findOne({ _id: command.targetSocialId }, { session, projection: { accountId: 1 } });
                     return [...roomAccounts, ...(target ? [target.accountId] : [])];
                 }
-                return roomAccounts;
+                return [...roomAccounts, ...shareAccounts];
             });
-            if (result.outcome === 'applied' && !result.replayed) notifyRoomChanges();
+            if (result.outcome === 'applied' && !result.replayed && command.action !== 'setListeningSharing' && command.action !== 'claimListening') notifyRoomChanges();
             return result;
         },
         async outcome(actor, identity: SocialMutationIdentity) {

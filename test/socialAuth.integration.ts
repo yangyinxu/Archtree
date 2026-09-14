@@ -6,6 +6,8 @@ import { ObjectId } from 'mongodb';
 
 import { createApp } from '../src/app';
 import type { SocialOwnProfile, SocialRelationshipView, SocialScope } from '../src/contracts/socialV1';
+import type { MusicSharePage } from '../src/contracts/socialMusicV1';
+import type { FriendListeningStatus, ListeningReport, ListeningReportResult, OwnListeningState } from '../src/contracts/listeningV1';
 import { getDb } from '../src/infrastructure/database';
 import { resetRateLimitWindowsForTests } from '../src/middleware/requestProtectionMiddleware';
 import AuthSession from '../src/models/authSession';
@@ -79,13 +81,144 @@ const relationship = async (who: Account, socialId: string) =>
 /** Guards transport rejection with persisted state, not an in-memory service-call counter. */
 const socialState = async (accountIds: string[]) => {
     const state: Record<string, unknown[]> = {};
-    for (const name of ['socialProfiles', 'socialMutations', 'socialBudgets', 'socialOutbox', 'socialHandles']) {
+    for (const name of ['socialProfiles', 'socialMutations', 'socialBudgets', 'socialOutbox', 'socialHandles',
+        'socialListeningStates', 'socialListeningPublications']) {
         state[name] = await getDb()!.collection(name).find({ accountId: { $in: accountIds } }).sort({ _id: 1 }).toArray();
     }
     state.socialRelationships = await getDb()!.collection('socialRelationships')
         .find({ accountIds: { $in: accountIds } }).sort({ _id: 1 }).toArray();
     return state;
 };
+
+const ownListening = async (who: Account) => (await json<{ listening: OwnListeningState }>(await request(who, '/me/listening'))).listening;
+const listeningStatuses = async (who: Account, socialIds: string[]) =>
+    (await json<{ items: FriendListeningStatus[] }>(await request(who, '/listening-status/query', { socialIds }))).items;
+const readyListeningAudio = async (title: string) => {
+    const id = new ObjectId();
+    await getDb()!.collection('audioTracks').insertOne({ _id: id, title, s3Key: id.toHexString(), mediaType: 'audio',
+        uploadStatus: 'ready', publicationStatus: 'ready' });
+    return id.toHexString();
+};
+const listeningFriends = async (publisher: Account, friend: Account) => {
+    const from = await profileFor(publisher); const to = await profileFor(friend);
+    await json(await request(publisher, '/friend-requests', { ...identity(from.scope), targetSocialId: to.socialId, expectedRevision: 0 }));
+    await json(await request(friend, `/relationships/${from.socialId}/accept`, {
+        ...identity(to.scope), expectedRevision: (await relationship(friend, from.socialId))!.revision }));
+    return { from, to };
+};
+
+/** A claim's original command ID is its private publication identity; the owner clock supplies the next fence. */
+const claimListening = async (who: Account, scope: SocialScope, clientId: string) => {
+    const current = await ownListening(who);
+    const command = { ...identity(scope), clientId, expectedPreferenceRevision: current.revision,
+        expectedPublisherRevision: current.publisherRevision };
+    const result = await json<{ outcome: string }>(await request(who, '/listening-publications/claim', command));
+    assert.equal(result.outcome, 'applied');
+    return { clientId, publicationId: command.commandId, expectedPreferenceRevision: current.revision,
+        expectedPublisherRevision: current.publisherRevision + 1 };
+};
+type ListeningClaim = Awaited<ReturnType<typeof claimListening>>;
+const playingReport = (claim: ListeningClaim, mediaTrackId: string, suffix = 'original'): ListeningReport => ({ ...claim,
+    sequence: 1, state: 'playing', observedAtMs: Date.now(), playback: { sourceId: `http-listening-source-${suffix}`,
+        occurrenceId: `http-listening-occurrence-${suffix}`, mediaTrackId, positionMs: 1000, room: null } });
+
+test('real listening HTTP defaults off and exposes only opted-in current friend Audio after explicit reporting', async () => {
+    const publisher = await account(); const friend = await account(); const outsider = await account();
+    const { from } = await listeningFriends(publisher, friend); await profileFor(outsider);
+    const mediaTrackId = await readyListeningAudio('Public listening Audio');
+    const initial = await ownListening(publisher);
+    assert.deepEqual({ ...initial, serverTimeMs: 0 }, { enabled: false, revision: 0, publisherRevision: 0, serverTimeMs: 0 });
+    assert.deepEqual(await listeningStatuses(friend, [from.socialId]), []);
+    await json(await request(publisher, '/me/listening', { ...identity(from.scope), enabled: true, expectedRevision: initial.revision }, 'PATCH'));
+    const enabled = await ownListening(publisher); assert.equal(enabled.enabled, true); assert.equal(enabled.revision, 1);
+    const claim = await claimListening(publisher, from.scope, 'http-listening-device-original');
+    assert.deepEqual(await listeningStatuses(friend, [from.socialId]), []);
+    const report = playingReport(claim, mediaTrackId);
+    const accepted = await json<ListeningReportResult>(await request(publisher, '/listening-publications/report', report));
+    assert.equal(accepted.accepted, true); assert.ok(accepted.expiresAtMs! > accepted.serverTimeMs);
+    const visible = await listeningStatuses(friend, [from.socialId]);
+    assert.equal(visible.length, 1);
+    assert.deepEqual(Object.keys(visible[0]).sort(), ['expiresAtMs', 'peer', 'track']);
+    assert.deepEqual(Object.keys(visible[0].peer).sort(), ['alias', 'handle', 'iconSeed', 'socialId']);
+    assert.deepEqual(Object.keys(visible[0].track).sort(), ['artistNames', 'artworkUrl', 'contentType', 'id', 'title']);
+    assert.equal(visible[0].track.title, 'Public listening Audio'); assert.equal(visible[0].track.contentType, 'audioTrack');
+    const encoded = JSON.stringify(visible);
+    for (const privateValue of [publisher.userId, publisher.sessionId, friend.userId, friend.sessionId, claim.clientId, claim.publicationId])
+        assert.equal(encoded.includes(privateValue), false);
+    assert.doesNotMatch(encoded, /positionMs|roomId|occurrenceId|sourceId|sessionId|lastSeen|s3Key|streamUrl/);
+    assert.deepEqual(await listeningStatuses(outsider, [from.socialId]), []);
+    if (report.state !== 'playing') throw new Error('Fixture must be playing.');
+    const stopped = await json<ListeningReportResult>(await request(publisher, '/listening-publications/report', {
+        ...claim, sequence: 2, state: 'stopped', playbackSequence: 1, occurrenceId: report.playback.occurrenceId }));
+    assert.equal(stopped.accepted, true);
+    assert.deepEqual(await listeningStatuses(friend, [from.socialId]), []);
+    await json(await request(publisher, '/me/listening', { ...identity(from.scope), enabled: false, expectedRevision: enabled.revision }, 'PATCH'));
+    assert.equal((await ownListening(publisher)).enabled, false);
+    assert.equal(await getDb()!.collection('socialListeningPublications').countDocuments({ accountId: publisher.userId }), 0);
+});
+
+test('real sessions fence listening publisher replacement so old stops and revoked sessions cannot hide or recreate the winner', async () => {
+    const publisher = await account(); const friend = await account();
+    const { from } = await listeningFriends(publisher, friend);
+    await json(await request(publisher, '/me/listening', { ...identity(from.scope), enabled: true, expectedRevision: 0 }, 'PATCH'));
+    const firstClaim = await claimListening(publisher, from.scope, 'http-listening-device-first');
+    const first = playingReport(firstClaim, await readyListeningAudio('First publisher Audio'), 'first');
+    assert.equal((await json<ListeningReportResult>(await request(publisher, '/listening-publications/report', first))).accepted, true);
+    const nextSession = await createSession({ _id: publisher.id, email: publisher.email, role: 'user' });
+    const replacement = { ...publisher, token: nextSession.accessToken, sessionId: nextSession.sessionId };
+    const secondClaim = await claimListening(replacement, await scopeFor(replacement), 'http-listening-device-second');
+    const second = playingReport(secondClaim, await readyListeningAudio('Second publisher Audio'), 'second');
+    assert.equal((await json<ListeningReportResult>(await request(replacement, '/listening-publications/report', second))).accepted, true);
+    if (first.state !== 'playing') throw new Error('Fixture must be playing.');
+    assert.equal((await json<ListeningReportResult>(await request(publisher, '/listening-publications/report', {
+        ...firstClaim, sequence: 2, state: 'stopped', playbackSequence: 1, occurrenceId: first.playback.occurrenceId }))).accepted, false);
+    assert.equal((await listeningStatuses(friend, [from.socialId]))[0].track.title, 'Second publisher Audio');
+    await AuthSession.revokeById(publisher.userId, publisher.sessionId);
+    assert.equal((await request(publisher, '/listening-publications/report', first)).status, 401);
+    assert.equal((await listeningStatuses(friend, [from.socialId]))[0].track.title, 'Second publisher Audio');
+    await AuthSession.revokeById(replacement.userId, replacement.sessionId);
+    assert.deepEqual(await listeningStatuses(friend, [from.socialId]), []);
+    assert.equal((await request(replacement, '/me/listening')).status, 401);
+    assert.equal((await request(replacement, '/listening-publications/report', second)).status, 401);
+});
+
+test('real listening cookies require origin and current viewer before any body, publication or preference work', async () => {
+    const owner = await account(); const other = await account(); const profile = await profileFor(owner);
+    const origin = new URL(base).origin;
+    const cookie = { Cookie: `session_token=${owner.token}`, 'X-Finitude-Account-Viewer': owner.userId, 'Content-Type': 'application/json' };
+    const report = playingReport({ clientId: 'http-listening-device-cookie', publicationId: 'http-listening-publication-cookie',
+        expectedPreferenceRevision: 1, expectedPublisherRevision: 1 }, new ObjectId().toHexString());
+    const original = await socialState([owner.userId, other.userId]);
+    const bodies = [
+        { path: '/me/listening', method: 'PATCH', body: { ...identity(profile.scope), enabled: true, expectedRevision: 0 } },
+        { path: '/listening-publications/claim', method: 'POST', body: { ...identity(profile.scope), clientId: report.clientId,
+            expectedPreferenceRevision: 1, expectedPublisherRevision: 0 } },
+        { path: '/listening-publications/report', method: 'POST', body: report },
+        { path: '/listening-status/query', method: 'POST', body: { socialIds: [profile.socialId] } }
+    ];
+    for (const { path, method, body } of bodies) {
+        for (const untrusted of [undefined, 'https://untrusted.example.test']) {
+            const response = await fetch(`${base}${path}`, { method, headers: { ...cookie, ...(untrusted ? { Origin: untrusted } : {}) }, body: JSON.stringify(body) });
+            assert.equal(response.status, 403);
+        }
+        const stale = await fetch(`${base}${path}`, { method, headers: { ...cookie, Origin: origin,
+            'X-Finitude-Account-Viewer': other.userId }, body: `{"private":"${'x'.repeat(8_000)}` });
+        assert.equal(stale.status, 409);
+        const anonymous = await fetch(`${base}${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        assert.equal(anonymous.status, 401);
+    }
+    assert.equal((await request(owner, '/me/listening', { ...identity(profile.scope), enabled: true, expectedRevision: 0, accountId: other.userId }, 'PATCH')).status, 400);
+    assert.equal((await request(owner, '/listening-publications/report', { ...report, accountId: other.userId })).status, 400);
+    assert.equal((await request(owner, '/listening-status/query', { socialIds: [profile.socialId], accountId: other.userId })).status, 400);
+    assert.equal((await request(owner, '/listening-publications/report', { ...report, extra: 'x'.repeat(8_000) })).status, 413);
+    assert.deepEqual(await socialState([owner.userId, other.userId]), original);
+    const allowed = await fetch(`${base}/me/listening`, { method: 'PATCH', headers: { ...cookie, Origin: origin },
+        body: JSON.stringify({ ...identity(profile.scope), enabled: true, expectedRevision: 0 }) });
+    assert.equal(allowed.status, 200); assert.equal(allowed.headers.get('Cache-Control'), 'private, no-store');
+    const read = await fetch(`${base}/me/listening`, { headers: cookie });
+    assert.equal(read.status, 200); assert.equal(read.headers.get('X-Finitude-Account-Viewer'), owner.userId);
+    assert.equal((await json<{ listening: OwnListeningState }>(read)).listening.enabled, true);
+});
 
 test('real bearer sessions permit social work and revocation, expiry, ownership mismatch and account removal deny it', async () => {
     const owner = await account();
@@ -108,6 +241,37 @@ test('real bearer sessions permit social work and revocation, expiry, ownership 
     const mismatchedToken = jwt.sign({ userId: other.userId, email: other.email, tokenType: 'access',
         sessionId: owner.sessionId }, process.env.JWT_SECRET!, { expiresIn: 60 });
     assert.equal((await request({ ...other, token: mismatchedToken }, '/me/profile')).status, 401);
+});
+
+test('real music-share HTTP is account-fenced, friendship-scoped and passive until an explicit owner mutation', async () => {
+    const sender = await account(); const recipient = await account(); const outsider = await account();
+    const from = await profileFor(sender); const to = await profileFor(recipient); await profileFor(outsider);
+    await json(await request(sender, '/friend-requests', { ...identity(from.scope), targetSocialId: to.socialId, expectedRevision: 0 }));
+    await json(await request(recipient, `/relationships/${from.socialId}/accept`, { ...identity(to.scope), expectedRevision: (await relationship(recipient, from.socialId))!.revision }));
+    const contentId = new ObjectId();
+    await getDb()!.collection('audioTracks').insertOne({ _id: contentId, title: 'Explicitly shared public track', s3Key: contentId.toHexString(),
+        mediaType: 'audio', uploadStatus: 'ready', publicationStatus: 'ready' });
+    const intent = { ...identity(from.scope), targetSocialId: to.socialId, expectedRevision: (await relationship(sender, to.socialId))!.revision,
+        contentType: 'audioTrack', contentId: contentId.toHexString() };
+    const outcome = await json<{ outcome: string }>(await request(sender, '/music-shares', intent)); assert.equal(outcome.outcome, 'applied');
+    const received = await json<MusicSharePage>(await request(recipient, '/music-shares?direction=incoming'));
+    assert.equal(received.items.length, 1); assert.equal(received.items[0].peer.socialId, from.socialId);
+    assert.equal(received.items[0].content?.title, 'Explicitly shared public track');
+    assert.deepEqual((await json<MusicSharePage>(await request(outsider, '/music-shares?direction=incoming'))).items, []);
+    for (const privateId of [sender.userId, recipient.userId, sender.sessionId, recipient.sessionId]) assert.equal(JSON.stringify(received).includes(privateId), false);
+    const cookie = { Cookie: `session_token=${recipient.token}`, 'X-Finitude-Account-Viewer': recipient.userId };
+    const path = `${base}/music-shares?direction=incoming`;
+    assert.equal((await fetch(path)).status, 401);
+    assert.equal((await fetch(path, { headers: { ...cookie, 'X-Finitude-Account-Viewer': sender.userId } })).status, 409);
+    const privateResponse = await fetch(path, { headers: cookie }); assert.equal(privateResponse.status, 200);
+    assert.equal(privateResponse.headers.get('Cache-Control'), 'private, no-store');
+    const dismissPath = `${base}/music-shares/${received.items[0].shareId}/dismiss`;
+    assert.equal((await fetch(dismissPath, { method: 'POST', headers: { ...cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(identity(to.scope)) })).status, 403);
+    assert.equal((await json<MusicSharePage>(await request(recipient, '/music-shares?direction=incoming'))).items.length, 1);
+    await json(await request(recipient, `/music-shares/${received.items[0].shareId}/dismiss`, identity(to.scope)));
+    assert.deepEqual((await json<MusicSharePage>(await request(sender, '/music-shares?direction=outgoing'))).items, []);
+    await AuthSession.revokeById(recipient.userId, recipient.sessionId);
+    assert.equal((await request(recipient, '/music-shares?direction=incoming')).status, 401);
 });
 
 test('real cookie authentication enforces current viewer and same-origin proof before private mutation work', async () => {
@@ -163,6 +327,10 @@ test('legacy JWTs cannot smuggle an arbitrary, revoked, expired or another accou
             const response = await request({ ...owner, token }, '/mutation-scopes', {});
             const result = await json<{ code: string }>(response, 401);
             assert.equal(result.code, sessionId ? 'social_session_required' : 'session_required');
+            for (const [path, body] of [['/me/listening', undefined], ['/listening-status/query', { socialIds: [`s_${'a'.repeat(32)}`] }]] as const) {
+                const rejected = await json<{ code: string }>(await request({ ...owner, token }, path, body), 401);
+                assert.equal(rejected.code, sessionId ? 'social_session_required' : 'session_required');
+            }
         }
     } finally { process.env.ALLOW_LEGACY_AUTH_TOKENS = 'false'; }
     assert.deepEqual(await socialState([owner.userId]), original);

@@ -2300,6 +2300,306 @@
       ],
       "variables": {}
     },
+    "listening.claim": {
+      "description": "Friend listening status: Share from this device",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.confirm": {
+      "description": "Friend listening status: Create paused room and invite",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.confirm_copy": {
+      "description": "Friend listening status: Create a paused room with {title}, then invite {alias}. Playback starts only when you choose.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string",
+        "title": "string"
+      }
+    },
+    "listening.confirm_title": {
+      "description": "Friend listening status: Listen together with {alias}?",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "listening.create_invite": {
+      "description": "Friend listening status: Create a room and invite",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.created": {
+      "description": "Friend listening status: The room is ready. Send the invitation to finish.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.disable": {
+      "description": "Friend listening status: Turn off listening sharing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.empty": {
+      "description": "Friend listening status: No friends are sharing fresh listening right now.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.enable": {
+      "description": "Friend listening status: Enable listening sharing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.existing_room": {
+      "description": "Friend listening status: Open Together to manage your current room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.hint": {
+      "description": "Friend listening status: Friends can see your current Audio while it is actually playing. Sharing is off by default.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.idle": {
+      "description": "Friend listening status: Nothing is being shared from this device.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.invite": {
+      "description": "Friend listening status: Invite to my room",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.lost": {
+      "description": "Friend listening status: Sharing stopped. Choose this device to share again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.now": {
+      "description": "Friend listening status: {alias} is listening",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "listening.other_device": {
+      "description": "Friend listening status: Choose this device to share what you listen to here.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.owned": {
+      "description": "Friend listening status: This device can share actual playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.refresh": {
+      "description": "Friend listening status: Refresh listening status",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.sharing": {
+      "description": "Friend listening status: Share what I’m listening to",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.title": {
+      "description": "Friend listening status: Listening with friends",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.choose_friend": {
+      "description": "Friend music sharing: Choose a friend",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.description": {
+      "description": "Friend music sharing: Music from friends, ready whenever you are. Nothing plays or saves until you choose.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.dismiss": {
+      "description": "Friend music sharing: Dismiss share",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.empty_received": {
+      "description": "Friend music sharing: No received music shares.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.empty_sent": {
+      "description": "Friend music sharing: No sent music shares.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.from": {
+      "description": "Friend music sharing: From {alias}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "music_shares.invite_back": {
+      "description": "Friend music sharing: Invite to my room",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.limit": {
+      "description": "Music share capacity or daily admission limit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.no_friends": {
+      "description": "Friend music sharing: Add a friend in Together to share music.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.open_together": {
+      "description": "Friend music sharing: Open Together",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.received": {
+      "description": "Friend music sharing: Received",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.room_playback": {
+      "description": "Friend music sharing: Leave your current room in Together before playing this music on your own.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.send": {
+      "description": "Friend music sharing: Send share",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.sent": {
+      "description": "Friend music sharing: Sent",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.share": {
+      "description": "Friend music sharing: Share with a friend",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.share_title": {
+      "description": "Friend music sharing: Share {title}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "music_shares.sign_in": {
+      "description": "Friend music sharing: Log in to view and share music with friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.title": {
+      "description": "Friend music sharing: Music shares",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.to": {
+      "description": "Friend music sharing: To {alias}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "music_shares.unavailable": {
+      "description": "Friend music sharing: This music is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.withdraw": {
+      "description": "Friend music sharing: Withdraw share",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "now_playing.current_label": {
       "description": "Accessible label for the current MediaTrack detail region.",
       "delivery": [
@@ -3749,6 +4049,80 @@
       ],
       "variables": {}
     },
+    "room.activity_auto_next": {
+      "description": "Room interactions: The room advanced to the next song.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_empty": {
+      "description": "Room interactions: No recent room activity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_hint": {
+      "description": "Room interactions: Reactions and recent actions disappear after 30 seconds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_host_changed": {
+      "description": "Room interactions: {alias} became the host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.activity_joined": {
+      "description": "Room interactions: {alias} joined the room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.activity_mode_changed": {
+      "description": "Room interactions: {alias} changed playback control.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.activity_reaction": {
+      "description": "Room interactions: {alias} reacted {emoji}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string",
+        "emoji": "string"
+      }
+    },
+    "room.activity_title": {
+      "description": "Room interactions: Room activity",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_track_changed": {
+      "description": "Room interactions: {alias} changed the song.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
     "room.cancel_transfer": {
       "description": "Shared listening interface: cancel transfer.",
       "delivery": [
@@ -4087,6 +4461,89 @@
       ],
       "variables": {}
     },
+    "room.queue_current_hint": {
+      "description": "To remove the current song, select another song first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_full": {
+      "description": "The room queue is full.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_move_down": {
+      "description": "Move {title} later",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room.queue_move_up": {
+      "description": "Move {title} earlier",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room.queue_remove": {
+      "description": "Remove {title} from queue",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room.react_clap": {
+      "description": "Room interactions: Send applause",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.react_fire": {
+      "description": "Room interactions: Send fire",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.react_heart": {
+      "description": "Room interactions: Send heart",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.react_music": {
+      "description": "Room interactions: Send music",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.react_smile": {
+      "description": "Room interactions: Send smile",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.reaction_limit": {
+      "description": "Room interactions: Please wait before sending another reaction.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.ready": {
       "description": "Shared listening interface: ready.",
       "delivery": [
@@ -4096,6 +4553,85 @@
     },
     "room.reconnect": {
       "description": "Shared listening interface: reconnect.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_accept": {
+      "description": "Add to queue",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_dismiss": {
+      "description": "Dismiss",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_limit": {
+      "description": "You can have up to five pending song requests.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_room_limit": {
+      "description": "Explains the shared room song request limit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_song": {
+      "description": "Request song",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_track": {
+      "description": "Choose a song",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_withdraw": {
+      "description": "Withdraw request",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.requested_by": {
+      "description": "Requested by {alias}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.requests_empty": {
+      "description": "No pending song requests.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.requests_hint": {
+      "description": "Anyone in the room can request a song. The host adds requests to the queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.requests_title": {
+      "description": "Song requests",
       "delivery": [
         "runtime"
       ],

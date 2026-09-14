@@ -25,6 +25,7 @@ export const useSocialActions = (viewerId: string) => {
     let command = retry;
     try {
       command ??= await prepareSocialCommand(viewerId, action!);
+      if (!isAccountOperationCurrent(guard)) return;
       const outcome = await sendSocialCommand(viewerId, command);
       if (isAccountOperationCurrent(guard)) await settle(outcome);
     } catch (error) {

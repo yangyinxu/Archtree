@@ -75,3 +75,24 @@ test('social parser rejects missing, unknown and malformed identity fields', () 
     assert.equal(exactSocialKeys(Object.create({ a: 1 }), ['a']), false);
     assert.equal(exactSocialKeys(JSON.parse('{"__proto__":{"role":"admin"}}'), []), false);
 });
+
+test('music shares capture exact catalog identity and observed friendship without arbitrary messages', () => {
+    const input = { ...identity, action: 'shareMusic', targetSocialId: socialId, expectedRevision: 2,
+        contentType: 'audioTrack', contentId: 'a'.repeat(24) };
+    for (const contentType of ['audioTrack', 'album']) {
+        const parsed = parseSocialCommand({ ...input, contentType });
+        assert.deepEqual(parsed, { ...input, contentType });
+        assert.ok(Object.isFrozen(parsed));
+    }
+    for (const delta of [{ expectedRevision: 0 }, { expectedRevision: '2' }, { contentType: 'playlist' },
+        { contentId: 'https://example.invalid/music' }, { contentId: 'A'.repeat(24) },
+        { message: 'private text' }, { recipientAccountId: 'private-account' }]) {
+        assert.equal(parseSocialCommand({ ...input, ...delta }), null);
+    }
+    for (const action of ['dismissMusicShare', 'withdrawMusicShare']) {
+        const command = { ...identity, action, shareId: `ms_${'b'.repeat(32)}` };
+        assert.deepEqual(parseSocialCommand(command), command);
+        assert.equal(parseSocialCommand({ ...command, shareId: 'b'.repeat(24) }), null);
+        assert.equal(parseSocialCommand({ ...command, targetSocialId: socialId }), null);
+    }
+});

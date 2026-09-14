@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { roomClientId } from './roomClientId';
+export { roomClientId } from './roomClientId';
 import type { RoomCommand, RoomReadyReport, RoomHeartbeat } from '../../../src/contracts/roomV1';
 import { apiRequest } from './client';
 import { socialReadRequest } from './socialReadRequest';
@@ -50,13 +52,6 @@ export type RoomOutgoingInvitation = z.infer<typeof roomOutgoingInvitationSchema
 export type { RoomCommand, RoomHeartbeat, RoomReadyReport };
 export type RoomAction = RoomCommand extends infer C ? C extends RoomCommand ? Omit<C, 'scopeToken' | 'commandId'> : never : never;
 
-let clientId: string | undefined;
-/** A fresh document cannot inherit the controller identity copied by Duplicate Tab. */
-export const roomClientId = () => {
-  if (clientId) return clientId;
-  clientId = crypto.randomUUID();
-  return clientId;
-};
 const options = (viewerId: string) => ({ accountViewer: viewerId, headers: { 'X-Finitude-Room-Client': roomClientId() } });
 export const getCurrentRoom = (viewerId: string) => socialReadRequest(`${base}/rooms/current`, z.object({ room: roomSnapshotSchema.nullable() }).strict(), options(viewerId));
 export const getRoomInvitations = (viewerId: string, signal?: AbortSignal) => socialReadRequest(`${base}/room-invitations`, z.object({ invitations: z.array(roomInvitationSchema).max(20) }).strict(), { ...options(viewerId), signal });
@@ -65,7 +60,8 @@ export const getOutgoingRoomInvitations = (viewerId: string, roomId: string, sig
 export const getRoomCapabilities = (viewerId: string, signal?: AbortSignal) => socialReadRequest(`${base}/capabilities`, z.object({ socialEnabled: z.boolean(), roomsEnabled: z.boolean() }).strict(), { ...options(viewerId), signal });
 export const getRoomMedia = (viewerId: string, signal?: AbortSignal) => socialReadRequest(`${base}/room-media`, z.object({ items: z.array(roomMediaSchema).max(100) }).strict(), { ...options(viewerId), signal });
 export const prepareRoomCommand = async (viewerId: string, action: RoomAction): Promise<RoomCommand> => {
-  const captured = { ...action, ...('mediaTrackIds' in action ? { mediaTrackIds: [...action.mediaTrackIds] } : {}) };
+  const captured = { ...action, ...('mediaTrackIds' in action ? { mediaTrackIds: Object.freeze([...action.mediaTrackIds]) } : {}),
+    ...('entryIds' in action ? { entryIds: Object.freeze([...action.entryIds]) } : {}) };
   const { prepareMutationIdentity } = await import('./social');
   return Object.freeze({ ...captured, ...await prepareMutationIdentity(viewerId) }) as RoomCommand;
 };

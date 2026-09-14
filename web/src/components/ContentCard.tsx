@@ -5,6 +5,7 @@ import { contentByline, type AudioTrackSummary, type ContentSummary } from '../a
 import { Artwork } from './Artwork';
 import styles from './ContentCard.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
+import { LazyShareMusicButton } from '../features/social/LazyShareMusicButton';
 
 
 export interface ContentCardProps {
@@ -86,6 +87,7 @@ export const ContentCard = ({
           {body}
         </Link>
       )}
+      {item.contentType !== 'artist' && <span className={styles.shareAction}><LazyShareMusicButton contentType={item.contentType} contentId={item.id} title={title} /></span>}
     </article>
   );
 };

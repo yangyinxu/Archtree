@@ -70,6 +70,115 @@ are mutation preconditions, not item counts or continuous client event sequences
 Cursor signatures bind the viewer and list kind for 15 minutes. Each page freshly
 projects visible rows in opaque social-ID order; it is not a retained list snapshot.
 
+### Direct music share API
+
+`src/contracts/socialMusicV1.ts` defines a separate private projection. These
+routes reuse social-v1 authentication, viewer fencing, 4 KiB JSON limits,
+mutation scopes, status-only receipts and payload-free `socialChanged` delivery.
+
+| Endpoint under `/api/social/v1` | Contract |
+| --- | --- |
+| `GET /music-shares?direction=incoming\|outgoing&limit=20&cursor=...` | `{ items, nextCursor }`; default page 20, maximum 50; signed cursor binds account, direction and descending creation time/share identity for 15 minutes |
+| `POST /music-shares` | Original mutation identity, `targetSocialId`, observed friendship `expectedRevision`, `contentType: audioTrack\|album` and catalog `contentId` |
+| `POST /music-shares/:shareId/dismiss` | Original mutation identity; only the recipient removes this share incarnation |
+| `POST /music-shares/:shareId/withdraw` | Original mutation identity; only the sender removes this share incarnation |
+
+Items contain only opaque `shareId`, the peer's current social card, catalog
+type/identity, creation/expiry timestamps, and current allowlisted content
+(`id`, `contentType`, `title`, `artworkUrl`, `artistNames`) or null. No stream URL,
+account ID, saved state, read/play receipt or historical identity is retained.
+Reads recheck both active profiles, current friendship, blocking and ready
+catalog visibility. Replacements resolve current catalog identity. Deleted or
+non-ready content returns null until indexed idempotent cleanup removes its rows.
+
+The `socialMusicShares` collection bounds each account to 100 live incoming and
+100 live outgoing rows, with a durable 50-new-incoming/day budget and 30-day
+logical expiry. Current duplicate sender/recipient/content shares are noops.
+Account fences serialize quota, friendship and catalog-reference admission with
+the existing transaction executor. Removal/block/deactivation/account deletion
+clear the affected bounded rows and invalidate surviving peers. Catalog deletion
+reclaims indexed references in bounded retryable batches before final metadata
+removal. TTL only reclaims expired rows and never grants visibility.
+
+Web's lazy `/finitude/social/shares` route and share dialog use the existing player
+and private Save API. Their shared operation session retains an uncertain command
+across route/dialog changes, blocks a new share until explicit recovery, and
+fences late callbacks to the captured account epoch. Acknowledged writes remain
+acknowledged even if the subsequent list refresh fails.
+
+### Friend listening status API
+
+`src/contracts/listeningV1.ts` adds an independent opt-in Audio projection under
+the same live session, current viewer, exact JSON and cookie protections.
+
+| Endpoint under `/api/social/v1` | Contract |
+| --- | --- |
+| `GET /me/listening` | `{ listening: { enabled, revision, publisherRevision, serverTimeMs } }`; absent preference is off at revision 0 |
+| `PATCH /me/listening` | Original social mutation identity, `enabled`, observed `expectedRevision` |
+| `POST /listening-publications/claim` | Original social mutation identity, document `clientId`, `expectedPreferenceRevision`, `expectedPublisherRevision`; status-only receipt, no public playback |
+| `POST /listening-publications/report` | Exact publisher identity, expected preference/publisher versions and increasing `sequence`; `playing` carries `observedAtMs` and captured playback; `stopped` carries its captured `occurrenceId` and `playbackSequence` |
+| `POST /listening-status/query` | `{ socialIds }`, 1–50 unique already-observed opaque IDs; `{ items }` contains only current friend cards, ready Audio metadata and expiry |
+
+The durable `socialListeningStates` account row keeps the preference and publisher
+clock. One `socialListeningPublications` row per account holds the current session,
+document client, claim command ID, sequences, loaded-source fingerprint, playback
+occurrence and expiring display. A claim advances the clock and publishes nothing.
+Reports update an existing exact lease and never upsert. TTL can reclaim the
+publication without removing the durable clock or allowing an old receipt/report
+to recreate it. The claim's `commandId` is its private publication identity.
+
+Playing reports include `sourceId`, `occurrenceId`, `mediaTrackId`, `positionMs`
+and nullable room evidence (`roomId`, epoch, member/controller, playback generation,
+entry and pinned media revision). The per-document client matches the room client.
+Ordinary Audio uses the current ready source without requiring room WAV analysis.
+The source ID survives pause/buffering recovery; a new actual run changes the
+occurrence. Same-source resumes retain the source fingerprint, preventing an old
+loaded source from rebinding to replaced media inside its lease. Room reads and
+reports also verify current authority, admission, controller, readiness and the
+exact playing timeline. These private fields never enter friend projections.
+
+Native `playing` establishes source-matched proof; only fresh advancing native
+media time can renew it. An observer remounted during continuing Audio can also
+recover after a new explicit gesture and two fresh, advancing, source-matched
+native observations. A source change retires that recovery gesture. The lazy
+observer does not trust UI status, readiness or the `play()` promise.
+Client monotonic observations are mapped to server time from
+owner reads. Delayed responses cannot rewind the established clock estimate;
+preference and publisher revisions are still applied, and clock advances recheck
+the existing lease expiry. Reports more than five seconds old or two seconds ahead are rejected;
+expiry is bounded by observation time plus 25 seconds. Same-occurrence renewals
+extend at most every ten seconds; valid early/nonadvancing reports may acknowledge
+their sequence while retaining the previous expiry. The playing-report budget is
+60 per account per minute; captured safety stops remain available after that
+budget is exhausted. Existing IP/session protections still apply.
+
+The visible 20-friend page polls every five seconds, reuses the account publisher's
+monotonic server clock, expires rows locally and hides failed reads. Changing pages
+replaces the queried set. Claims and reports do not fan out generic social invalidations. Current
+friendship, active profiles, opt-in, unblocked relationships, publishing session
+and ready source are rechecked on each read. Source replacement is an immediate
+visibility/renewal barrier; indexed cleanup before final source deletion uses
+bounded batches rather than an unbounded publication update in the source
+transaction. Session revocation includes ordinary publishers that never joined
+a room. Opt-out/deactivation invalidate publication and retain clocks; final
+account deletion removes both private records. Disabled social admission hides
+status while preserving setting reads and safety cleanup.
+
+The Web account singleton retains uncertain preference/claim identities across
+route changes. A new explicit gesture freshly verifies the publisher; automatic
+progress, reconnect and polling cannot reclaim another device's ownership. Stops
+capture their original lease, sequence and occurrence. Account transitions
+synchronously detach observations, and late callbacks cannot publish for a new
+viewer. Creating a paused room and inviting a friend are separate explicit,
+recoverable mutations with no automatic playback.
+
+A stop records the sequence of the playing report it cancels, below its own
+sequence. This lets a stop arriving before that playing report suppress both the
+pending occurrence and older display, without allowing a delayed old-occurrence
+stop to clear newer playback. A room member's confirmed local pause/disconnection
+also clears its matching publication and blocks the retired actual occurrence;
+readiness recovery alone cannot restore that display.
+
 ### Transactions, budgets and lifecycle
 
 Social reads/writes verify the actor's account-bound, unrevoked and unexpired
@@ -106,7 +215,7 @@ advance during deactivation. They are internal fields, not public profile data.
 
 The social outbox is one coalesced row per account: account ID, invalidation
 revision and update time. It retains no peer, alias or relationship payload and
-has no TTL that could erase pending recovery work. Stage 3 will add reauthorized
+has no TTL that could erase pending recovery work. The room gateway reauthorizes
 delivery from these current-state markers. Scope receipts likewise contain no
 peer reference or private projection, so deleting a target cannot leave cached
 identity payload in another account's receipt.
@@ -120,7 +229,7 @@ outbox data. A failure rolls back the entire cleanup; no S3 object is touched.
 Deactivation retains the profile/handle, blocks, receipts and clocks so later
 reactivation cannot restore an old intent or relationship.
 
-Startup migration `required-indexes-v3-rooms` adds mandatory unique constraints
+Startup migration `required-indexes-v4-social-participation` adds mandatory unique constraints
 and required nonunique cleanup indexes. A sparse, partial, hidden, wrong-key or
 wrong-uniqueness substitute is rejected. TTL is opportunistic reclamation and is
 never an authorization or admission decision. See the active plan for actual
@@ -157,6 +266,7 @@ are capped at 16 KiB; social identity bodies remain capped at 4 KiB.
 | `GET /room-invitations` | `{ invitations }`, up to 20 current authorized invitations with inviter card, incarnation and expiry; a bounded preview, not an exact total |
 | `GET /room-invitations/:invitationId` | `{ invitation: invitation or null }`, original recipient only; unavailable, expired, replaced, revoked and wrong-account links are indistinguishable |
 | `GET /rooms/:roomId/invitations` | Current host/controller only; `{ invitations }` containing only `invitationId`, `generation`, `recipientSocialId`, `expiresAtMs` for pending links |
+| `GET /rooms/:roomId/community` | Current members only; `{ community }` with room/epoch/revision, up to 20 pending song requests, current-member queue attribution and up to 20 unexpired activity events within 64 KiB |
 | `POST /room-commands` | Strict command with original `scopeToken` and `commandId`; status-only social outcome |
 | `POST /realtime-tickets` | `{ clientId }`; returns an opaque single-use 30-second ticket |
 | WebSocket `/realtime` | Same-origin upgrade, subprotocols `archtree-room-v1` and ticket; only the protocol name is negotiated |
@@ -186,6 +296,31 @@ the current account epoch, and the existing session privacy barrier hides them
 during identity transitions. This is a pending-action indicator, not a durable
 notification inbox or read-status model.
 
+Community reads preserve the strict room-v1 playback snapshot and WebSocket
+schemas. Song requests retain a bounded pending member incarnation and pinned
+media identity within the room aggregate. Acceptance revalidates that exact
+representation and appends one queue occurrence. Host queue edits carry the
+observed epoch, controller, permission, playback and queue versions; stale edits
+fail without becoming new commands. Editing another entry preserves the current
+timeline and readiness barrier. Community changes advance the existing room
+revision/outbox; the visible community query coalesces snapshot-driven refreshes
+without reloading unrelated social lists. Explicit community commands also
+invalidate only that account's community queries. Member removal clears requests
+and attribution; media invalidation includes request-only references through the
+required `socialRooms.songRequests.mediaTrackId` index.
+
+The `react` member command carries `expectedEpoch` and one token from
+`heart`, `clap`, `fire`, `smile`, `music`. It uses ordinary admission and immutable
+receipts, independent of controller/playback permissions. Durable account and
+room counters enforce 12 and 60 accepted reactions per minute. Internal activity
+records retain only an event identity, fixed kind/reaction, membership incarnation
+and 30-second expiry. Read projection resolves current social cards, omits departed
+actors and trims the oldest events to preserve the existing response byte bound.
+Only automatic track advancement uses a null actor. Event append never changes
+playback, control or queue generations. Initial/reconnected clients seed existing
+event IDs without repeating live announcements; local timers enforce expiry even
+when no room revision changes.
+
 Client frames are `ping` with `clientTimeMs` and an optional exact membership /
 controller / local-pause heartbeat, or `ready` with an exact readiness report.
 Server frames are `subscribed` (protocol, server time, initial room), `snapshot`
@@ -208,11 +343,13 @@ third failure closes connections. Each later tick captures its own observation.
 Create takes an explicit ordered `mediaTrackIds` selection. Other actions are
 `acceptInvitation`, `declineInvitation`, `leave`, `end`, `takeControl`, `invite`,
 `kick`, `offerTransfer`, `acceptTransfer`, `cancelTransfer`, `setControlMode`,
-`play`, `pause`, `seek`, `next`, `previous` and `select`. Shared transport captures
+`requestSong`, `dismissSongRequest`, `acceptSongRequest`, `removeQueueEntry`,
+`reorderQueue`, `react`, `play`, `pause`, `seek`, `next`, `previous` and `select`. Shared transport captures
 room epoch, membership/controller generation, control generation, playback
 generation, queue revision and current entry. Its immutable identity and observed
 versions survive an explicit same-intent retry. A losing command never rebases
-itself onto a newer playback occurrence. Queue edits after creation are deferred.
+itself onto a newer playback occurrence. Host queue edits use the same observed
+queue/playback preconditions and preserve the currently playing occurrence.
 
 A complete snapshot includes authority/room/control/queue/playback versions,
 version-pinned entries, authoritative timeline, preparation cohort, member cards
@@ -449,7 +586,8 @@ room administration:
 | Shared Play/Pause/seek/Previous/Next/select existing queue entry | Host's active controller | Every admitted participant's active controller |
 | Change mode, invite/kick, add/remove/reorder/share queue items, transfer host, end room | Host only | Host only |
 | Volume, mute, explicit Pause on this device, local resync, leave | Each participant for themselves | Each participant for themselves |
-| Observe from a secondary device | Read-only | Read-only |
+| Recommend Audio, withdraw one's own recommendation, send a fixed reaction | Every admitted member, including observers | Every admitted member, including observers |
+| Observe playback from a secondary device | Read-only playback | Read-only playback |
 
 Persist `playbackControlMode` and a monotonic `controlGeneration`. A real mode
 change or host transfer increments that generation and room revision. Commands

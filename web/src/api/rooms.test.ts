@@ -1,7 +1,7 @@
 import { roomFixture } from '../test/roomFixture';
 import { advanceAccountEpoch } from './accountEpoch';
 import { getCurrentRoom, getOutgoingRoomInvitations, getRoomCapabilities, getRoomInvitation, roomClientId,
-  roomInvitationSchema, roomOutgoingInvitationSchema, roomSnapshotSchema, sendRoomCommand } from './rooms';
+  roomInvitationSchema, roomOutgoingInvitationSchema, roomSnapshotSchema, sendRoomCommand, prepareRoomCommand, roomControlPreconditions } from './rooms';
 
 beforeEach(() => advanceAccountEpoch());
 
@@ -82,4 +82,22 @@ test('invitation reads reject another account, unsafe identifiers and canceled n
 test('capabilities reject unknown fields instead of accepting an expanded private response', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply({ socialEnabled: true, roomsEnabled: true, privateFlag: true })));
   await expect(getRoomCapabilities('viewer-1')).rejects.toMatchObject({ kind: 'invalid-response' });
+});
+
+test('a delayed mutation scope cannot replace the originally observed queue order', async () => {
+  const social = await import('./social');
+  type Identity = Awaited<ReturnType<typeof social.prepareMutationIdentity>>;
+  let complete!: (identity: Identity) => void;
+  const identity = new Promise<Identity>(resolve => { complete = resolve; });
+  const scope = vi.spyOn(social, 'prepareMutationIdentity').mockReturnValue(identity);
+  try {
+    const entryIds = ['entry-a', 'entry-b'];
+    const pending = prepareRoomCommand('viewer-1', { action: 'reorderQueue', ...roomControlPreconditions(roomFixture()), entryIds });
+    entryIds.reverse();
+    complete({ scopeToken: 'synthetic-scope-for-queue', commandId: crypto.randomUUID() });
+    const command = await pending;
+    expect(command.action).toBe('reorderQueue');
+    expect(command).toMatchObject({ entryIds: ['entry-a', 'entry-b'] });
+    expect(Object.isFrozen((command as Extract<typeof command, { action: 'reorderQueue' }>).entryIds)).toBe(true);
+  } finally { scope.mockRestore(); }
 });

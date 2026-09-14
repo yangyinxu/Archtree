@@ -11,6 +11,7 @@ import styles from './SocialPage.module.css';
 
 const seconds = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
 const CopyInvitationLink = lazy(() => import('./CopyInvitationLink').then(module => ({ default: module.CopyInvitationLink })));
+const RoomSongRequests = lazy(() => import('./RoomSongRequests').then(module => ({ default: module.RoomSongRequests })));
 
 const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }) => {
   const { t } = useLocalization();
@@ -101,10 +102,7 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
               : <button className={styles.secondary} disabled={disabled || outgoing.isPending || outgoing.isError} onClick={() => roomSession.run({ action: 'invite', ...member, targetSocialId: friend.socialId })}>{t('room.invite')}</button>}
           </li>;
         })}</ul>{friends.hasNextPage && <button className={styles.secondary} disabled={friends.isFetchingNextPage} onClick={() => friends.fetchNextPage()}>{t('common.action.load_more')}</button>}</>}
-    </section><section><h3>{t('room.queue')}</h3><ol className={`${styles.list} ${styles.queue}`}>{room.queue.map((entry, index) => <li className={styles.row} key={entry.entryId}>
-      <span className={styles.muted}>{index + 1}</span><div className={styles.rowContent}><strong className={entry.entryId === current?.entryId ? styles.selected : undefined}>{entry.title}</strong><span>{seconds(entry.durationMs / 1000)}</span></div>
-      <button className={styles.secondary} aria-label={`${t('room.shared_play')} ${entry.title}`} disabled={!allowed} onClick={() => roomSession.control('select', entry.entryId)}><Icon name="play" /></button>
-    </li>)}</ol></section></div>
+    </section><div className={styles.stack}><Suspense fallback={<p role="status">{t('social.loading')}</p>}><RoomSongRequests key={`${viewerId}:${room.roomId}:${room.epoch}:${room.self.memberId}`} viewerId={viewerId} room={room} /></Suspense></div></div>
   </>;
 };
 
@@ -119,7 +117,7 @@ export const RoomsPanel = ({ viewerId, profile }: { viewerId: string; profile: S
   const room = state.viewerId === viewerId ? state.room : null;
   const busy = state.busy || Boolean(state.uncertain);
   return <section className={`${styles.panel} ${styles.roomPanel}`} aria-label={t('room.title')}>
-    {state.error && <div className={styles.error} role="status">{t(state.error)}
+    {(state.error || state.uncertain) && <div className={styles.error} role="status">{t(state.error ?? 'social.unknown')}
       {!state.connected && <div className={styles.actions}><button className={styles.secondary} onClick={() => roomSession.reconnect()}>{t('room.reconnect')}</button></div>}
       {state.uncertain && <div className={styles.actions}><button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.checkOutcome()}>{t('social.check_outcome')}</button><button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.retry()}>{t('social.retry_same')}</button></div>}
     </div>}

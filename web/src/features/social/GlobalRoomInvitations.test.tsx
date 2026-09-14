@@ -5,12 +5,14 @@ import { browserSessionQueryKey, browserSessionResolvingQueryKey } from '../../a
 import { advanceAccountEpoch } from '../../api/accountEpoch';
 import type { RoomInvitation } from '../../api/rooms';
 import { GlobalRoomInvitations } from './GlobalRoomInvitations';
+import { roomFixture } from '../../test/roomFixture';
 
-const mocks = vi.hoisted(() => ({ invitations: vi.fn(), profile: vi.fn(), ensure: vi.fn(), stop: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invitations: vi.fn(), profile: vi.fn(), ensure: vi.fn(), stop: vi.fn(), state: vi.fn() }));
+vi.mock('./GlobalListeningPublisher', () => ({ GlobalListeningPublisher: () => null }));
 vi.mock('../../api/social', () => ({ getSocialProfile: mocks.profile }));
 vi.mock('../../api/rooms', () => ({ getRoomInvitations: mocks.invitations,
   getRoomCapabilities: async () => ({ socialEnabled: true, roomsEnabled: true }) }));
-vi.mock('./roomSession', () => ({ roomSession: { ensure: mocks.ensure, stop: mocks.stop } }));
+vi.mock('./roomSession', () => ({ roomSession: { ensure: mocks.ensure, stop: mocks.stop, getSnapshot: mocks.state } }));
 
 const profile = { socialId: 'social-alice', handle: 'alice', alias: 'Alice', iconSeed: 'alice', active: true, discoverable: true, revision: 1 };
 const invitation = (): RoomInvitation => ({ invitationId: 'invitation-a', generation: 1,
@@ -25,6 +27,7 @@ const show = (viewerId: string | null = 'viewer-a') => {
 };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.profile.mockResolvedValue({ profile }); mocks.invitations.mockResolvedValue({ invitations: [] });
+  mocks.state.mockReturnValue({ viewerId: 'viewer-a', room: roomFixture() });
 });
 
 test('signed-out listeners neither see the reminder nor request private social data', () => {
@@ -51,6 +54,45 @@ test('expiry removes the pending marker without waiting for a socket event or se
   await screen.findByRole('link', { name: 'Room invitations: pending invitation' });
   await screen.findByRole('link', { name: 'Room invitations' });
   expect(mocks.invitations).toHaveBeenCalledTimes(1);
+});
+
+test('shared social wakeups refresh community data only for the current account', async () => {
+  const { client } = show();
+  await screen.findByRole('link', { name: 'Room invitations' });
+  await waitFor(() => expect(mocks.ensure).toHaveBeenCalled());
+  const current = ['social', 'viewer-a', 'room-community', 'room-a', 1, 'member-a'];
+  const other = ['social', 'viewer-b', 'room-community', 'room-b'];
+  client.setQueryData(current, { marker: 'current' });
+  client.setQueryData(other, { marker: 'other' });
+  act(() => mocks.ensure.mock.calls.at(-1)![1]('social'));
+  expect(client.getQueryState(current)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(other)?.isInvalidated).toBe(false);
+});
+
+test('room-only gestures invalidate community without refetching profiles, friendships, shares or invitations', async () => {
+  const { client } = show(); await screen.findByRole('link', { name: 'Room invitations' });
+  await waitFor(() => expect(mocks.ensure).toHaveBeenCalled());
+  const keys = ['room-community', 'relationships', 'music-shares'].map(kind => ['social', 'viewer-a', kind, 'room-a', 1, 'member-a']);
+  const other = ['social', 'viewer-b', 'room-community', 'other-room'];
+  for (const key of [...keys, other]) client.setQueryData(key, { marker: true });
+  await act(async () => { mocks.ensure.mock.calls.at(-1)![1]('community'); });
+  expect(client.getQueryState(keys[0])?.isInvalidated).toBe(true);
+  for (const key of [...keys.slice(1), other]) expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+  expect(mocks.profile).toHaveBeenCalledTimes(1); expect(mocks.invitations).toHaveBeenCalledTimes(1);
+});
+
+test('retired room observers cannot refetch outgoing invitations or community before React unmounts them', async () => {
+  const { client } = show(); await screen.findByRole('link', { name: 'Room invitations' });
+  await waitFor(() => expect(mocks.ensure).toHaveBeenCalled());
+  const keys = [['social', 'viewer-a', 'room-community', 'room-a', 1, 'member-a'],
+    ['social', 'viewer-a', 'room-outgoing-invitations', 'room-a']];
+  for (const key of keys) client.setQueryData(key, { marker: true });
+  mocks.state.mockReturnValue({ viewerId: 'viewer-a', room: null });
+  act(() => mocks.ensure.mock.calls.at(-1)![1]('rooms'));
+  for (const key of keys) expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+  mocks.state.mockReturnValue({ viewerId: 'viewer-a', room: roomFixture() });
+  act(() => mocks.ensure.mock.calls.at(-1)![1]('rooms'));
+  for (const key of keys) expect(client.getQueryState(key)?.isInvalidated).toBe(true);
 });
 
 test('resolving identity hides the reminder and a delayed previous-account invitation cannot light the new badge', async () => {

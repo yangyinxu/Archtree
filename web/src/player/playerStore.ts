@@ -4,6 +4,7 @@ import type {
   PlayerErrorCode,
   PlayerErrorState,
   PlayerPlaybackErrorStage,
+  PlayerPlaybackEvent,
   PlayerQueueItem,
   PlayerRepeatMode,
   PlayerSnapshot,
@@ -13,7 +14,7 @@ import { enqueueListenerTelemetry } from '../telemetry/client';
 import { classifyListenerRoute } from '../telemetry/routeClassifier';
 import { createMediaSessionAdapter } from './mediaSessionAdapter';
 import { canonicalOrder, copyQueue, currentCycleHistory, queueLaunchOrder, shuffledOrder } from './queueOrder';
-import type { createRoomPlaybackController } from './roomPlayback';
+import type { createRoomPlaybackController, RoomPlaybackState } from './roomPlayback';
 
 const DEFAULT_SKIP_SECONDS = 10;
 const PREVIOUS_RESTART_SECONDS = 3;
@@ -117,6 +118,7 @@ export const createPlayerStore = (
   const mediaSession = createMediaSessionAdapter(options);
   const random = options.random ?? Math.random;
   const listeners = new Set<() => void>();
+  const playbackListeners = new Set<(event: PlayerPlaybackEvent) => void>();
   const boundAudioListeners = new Map<string, () => void>();
   const startingVolume = clamp(
     Number.isFinite(options.initialVolume) ? options.initialVolume ?? 1 : 1,
@@ -143,6 +145,15 @@ export const createPlayerStore = (
   let mediaParkingHost: HTMLElement | null = null;
   let destroyed = false;
   let room: ReturnType<typeof createRoomPlaybackController> | null = null;
+  let observedRoom: RoomPlaybackState | null = null;
+
+  const observePlayback = (type: string, media = audio) => {
+    if (destroyed) return;
+    const event = { type, media, item: snapshot.currentItem, sourceGeneration, room: observedRoom };
+    for (const listener of playbackListeners) {
+      try { listener(event); } catch { /* Optional observers cannot change playback behavior. */ }
+    }
+  };
 
   const recordNavigation = (index: number, direction: 'previous' | 'next') => {
     const adjacentHistoryPosition = direction === 'previous'
@@ -323,6 +334,7 @@ export const createPlayerStore = (
         });
       },
       ended: () => { void handleEnded(target); },
+      seeking: () => undefined,
       seeked: () => {
         if (!snapshot.currentItem || destroyed) return;
         updateSnapshot({ currentTime: readAudioTime(target) });
@@ -332,6 +344,7 @@ export const createPlayerStore = (
     Object.entries(handlers).forEach(([event, handler]) => {
       const guarded = () => {
         if (room && !room.observe(event, target)) return;
+        observePlayback(event, target);
         handler();
       };
       boundAudioListeners.set(event, guarded);
@@ -392,6 +405,7 @@ export const createPlayerStore = (
         || attempt !== playAttemptGeneration
         || expectedSourceGeneration !== sourceGeneration) return;
       const code = classifyPlaybackFailure(failure);
+      observePlayback('error');
       reportPlaybackError('play_call', code);
       updateSnapshot({
         status: code === 'autoplayBlocked' ? 'paused' : 'error',
@@ -408,6 +422,8 @@ export const createPlayerStore = (
     navigationDirection: 'previous' | 'next' | null = null
   ): Promise<void> => {
     if (destroyed || index < 0 || index >= snapshot.queue.length) return;
+
+    observePlayback('sourcechange');
 
     playOrderPosition = orderPosition;
     if (navigationDirection) recordNavigation(index, navigationDirection);
@@ -552,6 +568,7 @@ export const createPlayerStore = (
   }
 
   const clearQueue = () => {
+    observePlayback('sourcechange');
     sourceGeneration += 1;
     playAttemptGeneration += 1;
     playOrder = [];
@@ -590,6 +607,7 @@ export const createPlayerStore = (
       clearQueue();
       return;
     }
+    if (launchOptions.autoplay ?? true) store.notePlaybackIntent();
 
     const ownedQueue = copyQueue(queue);
     const boundedIndex = clamp(
@@ -619,6 +637,7 @@ export const createPlayerStore = (
 
   /** These media effects are shared by local transport and confirmed room application. */
   const pauseMedia = () => {
+    observePlayback('pause');
     playAttemptGeneration += 1;
     try { audio?.pause(); } catch { /* A browser shim cannot prevent local suspension. */ }
     if (snapshot.currentItem) updateSnapshot({ status: 'paused', isBuffering: false });
@@ -628,6 +647,7 @@ export const createPlayerStore = (
     if (destroyed || !audio || !snapshot.currentItem || !Number.isFinite(position)) return false;
     const upperBound = snapshot.duration > 0 ? snapshot.duration : Number.MAX_SAFE_INTEGER;
     try {
+      observePlayback('seeking');
       audio.currentTime = clamp(position, 0, upperBound);
       updateSnapshot({ currentTime: audio.currentTime });
       return true;
@@ -650,11 +670,18 @@ export const createPlayerStore = (
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    subscribePlaybackEvents: listener => {
+      if (destroyed) return () => undefined;
+      playbackListeners.add(listener);
+      return () => { playbackListeners.delete(listener); };
+    },
+    notePlaybackIntent: () => observePlayback('intent'),
     launchQueue,
     launchAlbumQueue: launchQueue,
     launchStandalone: async (item, launchOptions = {}) => {
       if (destroyed) return;
       if (room) throw new Error('Leave room playback before launching a local queue.');
+      if (launchOptions.autoplay ?? true) store.notePlaybackIntent();
       const ownedQueue = copyQueue([item]);
       playOrder = [0];
       playOrderPosition = 0;
@@ -674,6 +701,7 @@ export const createPlayerStore = (
     play: async () => {
       if (destroyed || !snapshot.currentItem) return;
       if (room) { room.intent({ type: 'play' }); return; }
+      store.notePlaybackIntent();
       const target = ensureAudio();
       if (!target) return;
       if (snapshot.status === 'playing' && !target.paused) return;
@@ -709,13 +737,14 @@ export const createPlayerStore = (
       if (snapshot.status === 'error' || snapshot.status === 'ended') return;
       pauseMedia();
     },
-    previous: async () => room ? room.intent({ type: 'previous' }) : movePrevious(),
-    next: async () => room ? room.intent({ type: 'next' }) : moveNext(),
+    previous: async () => { if (room) return room.intent({ type: 'previous' }); store.notePlaybackIntent(); return movePrevious(); },
+    next: async () => { if (room) return room.intent({ type: 'next' }); store.notePlaybackIntent(); return moveNext(); },
     seek: (time) => {
       if (destroyed || !audio || !snapshot.currentItem || !Number.isFinite(time)) return;
       const upperBound = snapshot.duration > 0 ? snapshot.duration : Number.MAX_SAFE_INTEGER;
       const position = clamp(time, 0, upperBound);
       if (room) { room.intent({ type: 'seek', positionSeconds: position }); return; }
+      store.notePlaybackIntent();
       seekMedia(position);
     },
     skipBackward: (seconds = DEFAULT_SKIP_SECONDS) => {
@@ -795,9 +824,19 @@ export const createPlayerStore = (
         play: () => attemptPlay(sourceGeneration),
         pause: pauseMedia,
         seek: seekMedia,
-        detach: () => { room = null; clearQueue(); }
+        detach: () => { clearQueue(); room = null; observedRoom = null; }
       }, roomOptions);
-      return room.attachment;
+      const attachment = room.attachment;
+      return { ...attachment, apply: async state => {
+        const previous = observedRoom;
+        if (previous && state.revision <= previous.revision) return attachment.apply(state);
+        if (observedRoom && (observedRoom.roomId !== state.roomId || observedRoom.epoch !== state.epoch
+          || observedRoom.playbackEpoch !== state.playbackEpoch || observedRoom.currentEntryId !== state.currentEntryId)) observePlayback('sourcechange');
+        observedRoom = state;
+        const accepted = await attachment.apply(state);
+        if (!accepted && observedRoom === state) observedRoom = previous;
+        return accepted;
+      } };
     },
     attachMediaElement: (container) => {
       if (destroyed) return () => undefined;
@@ -814,6 +853,7 @@ export const createPlayerStore = (
     },
     destroy: () => {
       if (destroyed) return;
+      observePlayback('sourcechange');
       room?.attachment.detach();
       destroyed = true;
       sourceGeneration += 1;
@@ -847,6 +887,7 @@ export const createPlayerStore = (
       mediaSession.destroy();
 
       listeners.clear();
+      playbackListeners.clear();
       boundAudioListeners.clear();
       mediaSurfaceHosts.splice(0);
       audio = null;

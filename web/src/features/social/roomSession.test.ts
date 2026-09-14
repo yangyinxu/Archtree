@@ -6,13 +6,13 @@ import type { RoomSnapshot } from '../../api/rooms';
 
 const mocks = vi.hoisted(() => ({
   getCurrentRoom: vi.fn(), getRealtimeTicket: vi.fn(), sendRoomCommand: vi.fn(), prepareRoomCommand: vi.fn(), getSocialOutcome: vi.fn(),
-  attach: vi.fn(), apply: vi.fn(), detach: vi.fn(), pause: vi.fn(), resync: vi.fn(), correct: vi.fn()
+  attach: vi.fn(), apply: vi.fn(), detach: vi.fn(), pause: vi.fn(), resync: vi.fn(), correct: vi.fn(), playbackIntent: vi.fn()
 }));
 vi.mock('../../api/rooms', async importOriginal => ({ ...await importOriginal<typeof import('../../api/rooms')>(),
   getCurrentRoom: mocks.getCurrentRoom, getRealtimeTicket: mocks.getRealtimeTicket,
   prepareRoomCommand: mocks.prepareRoomCommand, sendRoomCommand: mocks.sendRoomCommand }));
 vi.mock('../../api/social', async importOriginal => ({ ...await importOriginal<typeof import('../../api/social')>(), getSocialOutcome: mocks.getSocialOutcome }));
-vi.mock('../../player', () => ({ playerStore: { attachRoomPlayback: mocks.attach } }));
+vi.mock('../../player', () => ({ playerStore: { attachRoomPlayback: mocks.attach, notePlaybackIntent: mocks.playbackIntent } }));
 import { roomSession } from './roomSession';
 
 class Socket {
@@ -103,6 +103,54 @@ test('global consumers reuse one transport and subscription refreshes invitation
   expect(mocks.attach).not.toHaveBeenCalled(); expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
 });
 
+test('snapshot/readiness/reaction callbacks never claim listening ownership while explicit play and resync mark their intent', async () => {
+  const room = pausedRoom(); const socket = await connected(room);
+  options.onObservation?.({ type: 'actual-start', entryId: 'entry-a', playbackEpoch: 1, positionSeconds: 0, monotonicMs: 0 });
+  socket.receive({ type: 'snapshot', room: { ...room, revision: 2 } });
+  await roomSession.run({ action: 'react', roomId: room.roomId, memberId: room.self.memberId, expectedEpoch: room.epoch, reaction: 'heart' });
+  expect(mocks.playbackIntent).not.toHaveBeenCalled();
+  await roomSession.control('play');
+  expect(mocks.playbackIntent).toHaveBeenCalledTimes(1);
+  await roomSession.resync(); expect(mocks.playbackIntent).toHaveBeenCalledTimes(2);
+});
+
+test('an observer reaction is an explicit community intent and cannot emit playback commands or refetch social lists', async () => {
+  const room = roomFixture(); room.self.isController = false; room.self.canControl = false;
+  await connected(room); const refresh = vi.fn(); roomSession.ensure('viewer-1', refresh);
+  const before = JSON.stringify(room);
+  await roomSession.run({ action: 'react', roomId: room.roomId, memberId: room.self.memberId, expectedEpoch: room.epoch, reaction: 'heart' });
+  expect(mocks.sendRoomCommand).toHaveBeenCalledExactlyOnceWith('viewer-1', expect.objectContaining({ action: 'react', reaction: 'heart' }));
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('community');
+  expect(mocks.attach).not.toHaveBeenCalled();
+  expect(JSON.stringify(roomSession.getSnapshot().room)).toBe(before);
+});
+
+test('reaction quota rejections retain no resend intent and explain the temporary limit', async () => {
+  await connected();
+  mocks.sendRoomCommand.mockResolvedValueOnce({ commandId: 'immutable-command-123', outcome: 'rejected', code: 'room_reaction_limit', replayed: false });
+  const room = roomSession.getSnapshot().room!;
+  await roomSession.run({ action: 'react', roomId: room.roomId, memberId: room.self.memberId, expectedEpoch: room.epoch, reaction: 'clap' });
+  expect(roomSession.getSnapshot()).toMatchObject({ error: 'room.reaction_limit', uncertain: null, busy: false });
+});
+
+test('ending a room retires membership before invalidating its active query observers', async () => {
+  const room = pausedRoom(); await connected(room);
+  const observed: (RoomSnapshot | null)[] = [];
+  roomSession.ensure('viewer-1', () => observed.push(roomSession.getSnapshot().room));
+  mocks.getCurrentRoom.mockResolvedValue({ room: null });
+  await roomSession.run({ action: 'end', roomId: room.roomId, memberId: room.self.memberId });
+  expect(observed).toEqual([null]);
+});
+
+test('a failed post-End reconciliation cannot invalidate the retained former room', async () => {
+  const room = pausedRoom(); await connected(room);
+  const invalidation = vi.fn(); roomSession.ensure('viewer-1', invalidation);
+  mocks.getCurrentRoom.mockRejectedValueOnce(new ApiError('Read unavailable.', 'network'));
+  await roomSession.run({ action: 'end', roomId: room.roomId, memberId: room.self.memberId });
+  expect(invalidation).not.toHaveBeenCalled();
+  expect(roomSession.getSnapshot()).toMatchObject({ uncertain: null, error: 'social.error', busy: false });
+});
+
 test('disabled rooms allow an explicit invitation decline without background ticket attempts', async () => {
   roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: false });
   await vi.advanceTimersByTimeAsync(16_000);
@@ -112,6 +160,15 @@ test('disabled rooms allow an explicit invitation decline without background tic
   roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: true });
   await vi.advanceTimersByTimeAsync(0);
   expect(Socket.instances).toHaveLength(1);
+});
+
+test('a song request can be explicitly withdrawn without live transport while new requests remain blocked', async () => {
+  roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: false });
+  await vi.advanceTimersByTimeAsync(0);
+  await roomSession.run({ action: 'requestSong', roomId: 'room-a', memberId: 'member-a', expectedEpoch: 1, mediaTrackId: '1'.repeat(24) });
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  await roomSession.run({ action: 'dismissSongRequest', roomId: 'room-a', memberId: 'member-a', requestId: 'request-a' });
+  expect(mocks.sendRoomCommand).toHaveBeenCalledExactlyOnceWith('viewer-1', expect.objectContaining({ action: 'dismissSongRequest', requestId: 'request-a' }));
 });
 
 test('late join uses current-timeline readiness and gates playback until own readiness is confirmed', async () => {

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { Bell } from 'lucide-react';
@@ -8,6 +8,8 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import { roomSession } from './roomSession';
 import { useRoomInvitationConnection, useRoomInvitations } from './roomInvitationQueries';
 import styles from '../../app/AppShell.module.css';
+
+const GlobalListeningPublisher = lazy(() => import('./GlobalListeningPublisher').then(module => ({ default: module.GlobalListeningPublisher })));
 
 const PendingInvitations = ({ viewerId }: { viewerId: string }) => {
   const { t } = useLocalization();
@@ -29,7 +31,7 @@ const ViewerInvitations = ({ viewerId }: { viewerId: string }) => {
   useEffect(() => {
     if (profile.data && !profile.data.profile?.active) roomSession.stop();
   }, [profile.data]);
-  return profile.data?.profile?.active && !profile.isError ? <PendingInvitations viewerId={viewerId} /> : null;
+  return profile.data?.profile?.active && !profile.isError ? <><PendingInvitations viewerId={viewerId} /><Suspense fallback={null}><GlobalListeningPublisher viewerId={viewerId} /></Suspense></> : null;
 };
 
 /** Lives inside the session privacy barrier and never takes a playback action on receipt. */

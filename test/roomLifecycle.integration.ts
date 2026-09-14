@@ -120,6 +120,515 @@ const transaction = async (work: (session: ClientSession) => Promise<unknown>) =
     try { await session.withTransaction(() => work(session)); } finally { await session.endSession(); }
 };
 
+/** Recommendations deliberately need no active-controller or playback-generation fields. */
+const requestSong = async (who: Person, index = 0, target = api) => {
+    const state = await snapshot(who, target);
+    return target.mutate(who.actor, command(who, { action: 'requestSong', ...memberBody(state), expectedEpoch: state.epoch,
+        mediaTrackId: media[index].mediaTrackId }));
+};
+const community = async (who: Person, target = api) => target.community(who.actor, (await snapshot(who, target)).roomId);
+const outboxRevision = async (who: Person) => (await database().collection('socialOutbox').findOne({ _id: who.actor.userId }))?.revision ?? 0;
+
+/** Reactions are admitted-member intents, including a tab that does not own playback control. */
+const reaction = async (who: Person, target = api, value = 'heart') => {
+    const state = await snapshot(who, target);
+    return target.mutate(who.actor, command(who, { action: 'react', ...memberBody(state), expectedEpoch: state.epoch, reaction: value }));
+};
+
+test('observer reactions are status-only, fenced, and never change playback or broadcast generic social invalidations', async () => {
+    const { host, guest } = await pair(); const outsider = await person('outsider');
+    const observer = { ...guest, actor: { ...guest.actor, clientId: randomUUID() } };
+    await connect(guest, await snapshot(guest), true);
+    await api.mutate(host.actor, control(host, await snapshot(host), 'play'));
+    const before = await snapshot(host); const state = await snapshot(observer);
+    const stored = (await roomDocuments().findOne({ _id: before.roomId }))!;
+    const outboxes = await Promise.all([outboxRevision(host), outboxRevision(guest)]);
+    const intent = command(observer, { action: 'react', ...memberBody(state), expectedEpoch: state.epoch, reaction: 'heart' });
+    const outcomes = await Promise.all([api.mutate(observer.actor, intent), api.mutate(observer.actor, intent)]);
+    assert.ok(outcomes.every(value => value.outcome === 'applied')); assert.equal(outcomes.filter(value => value.replayed).length, 1);
+    assert.deepEqual(Object.keys(outcomes[0]).sort(), ['commandId', 'outcome', 'replayed']);
+    const value = await community(host); const event = value.events.at(-1)!;
+    assert.equal(value.events.filter(entry => entry.kind === 'reaction').length, 1);
+    assert.deepEqual(Object.keys(event).sort(), ['actor', 'createdAtMs', 'eventId', 'expiresAtMs', 'kind', 'reaction']);
+    assert.equal(event.kind, 'reaction'); assert.equal(event.reaction, 'heart'); assert.equal(event.actor?.socialId, guest.profile.socialId);
+    assert.equal(event.expiresAtMs - event.createdAtMs, ROOM_LIMITS.eventMs);
+    const after = await snapshot(host); const persisted = (await roomDocuments().findOne({ _id: before.roomId }))!;
+    assert.deepEqual({ ...after, revision: before.revision }, before);
+    assert.deepEqual(persisted.members, stored.members); assert.deepEqual(persisted.preparation, stored.preparation);
+    assert.equal(persisted.reactions, 1);
+    assert.equal((await database().collection('socialBudgets').findOne({ _id: guest.actor.userId }))?.roomReactions, 1);
+    assert.deepEqual(await Promise.all([outboxRevision(host), outboxRevision(guest)]), outboxes);
+    assert.equal((await api.mutate(observer.actor, { ...intent, commandId: randomUUID(), expectedEpoch: state.epoch + 1 } as RoomCommand)).code, 'stale_epoch');
+    assert.equal((await api.mutate(outsider.actor, { ...intent, ...identity(outsider.scope) })).code, 'room_unavailable');
+    await connect(guest, await snapshot(guest)); await ready(host, await snapshot(host));
+    assert.deepEqual((await community(host)).events, value.events);
+    for (const who of [host, guest]) for (const privateId of [who.actor.userId, who.actor.sessionId, who.actor.clientId, (await snapshot(who)).self.memberId]) {
+        assert.equal(JSON.stringify(value).includes(privateId), false);
+    }
+});
+
+test('reaction admission rejects revoked sessions, stale member incarnations, disabled and suspended rooms without consuming reaction quota', async () => {
+    const { host, guest } = await pair(); const before = await snapshot(guest);
+    const intent = command(guest, { action: 'react', ...memberBody(before), expectedEpoch: before.epoch, reaction: 'fire' });
+    enabled = false; await assert.rejects(api.mutate(guest.actor, intent), isError('rooms_disabled')); enabled = true;
+    await roomDocuments().updateOne({ _id: before.roomId }, { $set: { hostSuspended: true } });
+    assert.equal((await api.mutate(guest.actor, intent)).code, 'host_absent');
+    await roomDocuments().updateOne({ _id: before.roomId }, { $set: { hostSuspended: false } });
+    assert.equal((await api.mutate(guest.actor, intent)).replayed, true);
+    await api.mutate(guest.actor, command(guest, { action: 'leave', ...memberBody(before) })); await join(host, guest);
+    assert.equal((await api.mutate(guest.actor, { ...intent, commandId: randomUUID() })).code, 'room_unavailable');
+    const fresh = command(guest, { action: 'react', ...memberBody(await snapshot(guest)), expectedEpoch: before.epoch, reaction: 'fire' });
+    await AuthSession.revokeById(guest.actor.userId, guest.actor.sessionId);
+    await assert.rejects(api.mutate(guest.actor, fresh), isError('social_session_required'));
+    assert.equal((await database().collection('socialBudgets').findOne({ _id: guest.actor.userId }))?.roomReactions, undefined);
+    assert.equal((await community(host)).events.filter(event => event.kind === 'reaction').length, 0);
+});
+
+test('concurrent last-account reactions spend exactly one remaining slot and rejoining does not reset the durable limit', async () => {
+    const { host, guest } = await pair();
+    for (let index = 0; index < ROOM_LIMITS.reactionsPerAccountMinute - 1; index += 1) assert.equal((await reaction(guest)).outcome, 'applied');
+    const state = await snapshot(guest);
+    const intents = Array.from({ length: 2 }, () => command(guest, { action: 'react', ...memberBody(state), expectedEpoch: state.epoch, reaction: 'clap' }));
+    const outcomes = await Promise.all(intents.map(intent => api.mutate(guest.actor, intent)));
+    assert.equal(outcomes.filter(value => value.outcome === 'applied').length, 1);
+    assert.equal(outcomes.filter(value => value.code === 'room_reaction_limit').length, 1);
+    const rejected = intents[outcomes.findIndex(value => value.outcome === 'rejected')];
+    assert.equal((await api.mutate(guest.actor, rejected)).replayed, true);
+    assert.equal((await database().collection('socialBudgets').findOne({ _id: guest.actor.userId }))?.roomReactions, ROOM_LIMITS.reactionsPerAccountMinute);
+    await api.mutate(guest.actor, command(guest, { action: 'leave', ...memberBody(state) })); await join(host, guest);
+    assert.equal((await reaction({ ...guest, actor: { ...guest.actor, clientId: randomUUID() } })).code, 'room_reaction_limit');
+    assert.equal((await community(host)).events.filter(event => event.kind === 'reaction').length, 0);
+    now = (Math.floor(now / 60_000) + 1) * 60_000;
+    assert.equal((await reaction(guest)).outcome, 'applied');
+    assert.equal((await database().collection('socialBudgets').findOne({ _id: guest.actor.userId }))?.roomReactions, 1);
+});
+
+test('room reaction quota arbitrates different accounts transactionally without charging the rejected account', async () => {
+    const { host, guest } = await pair(); const state = await snapshot(host);
+    await roomDocuments().updateOne({ _id: state.roomId }, { $set: { reactionMinute: Math.floor(now / 60_000), reactions: ROOM_LIMITS.reactionsPerRoomMinute - 1 } });
+    const outcomes = await Promise.all([reaction(host), reaction(guest)]);
+    assert.equal(outcomes.filter(value => value.outcome === 'applied').length, 1);
+    assert.equal(outcomes.filter(value => value.code === 'room_reaction_limit').length, 1);
+    assert.equal((await roomDocuments().findOne({ _id: state.roomId }))?.reactions, ROOM_LIMITS.reactionsPerRoomMinute);
+    const budgets = await database().collection('socialBudgets').find({ _id: { $in: [host.actor.userId, guest.actor.userId] } }).toArray();
+    assert.equal(budgets.reduce((sum, budget) => sum + (budget.roomReactions ?? 0), 0), 1);
+    assert.equal((await community(host)).events.filter(event => event.kind === 'reaction').length, 1);
+});
+
+test('uncertain reaction commits retain one event and one quota charge for exact same-intent recovery', async () => {
+    const { host, guest } = await pair(); const state = await snapshot(guest); let commits = 0;
+    const intent = command(guest, { action: 'react', ...memberBody(state), expectedEpoch: state.epoch, reaction: 'music' });
+    const uncertain = service({ beforeCommit: async session => {
+        commits += 1; await session.commitTransaction();
+        const error = new MongoServerError({ message: 'synthetic lost reaction acknowledgement' });
+        error.addErrorLabel('UnknownTransactionCommitResult'); error.addErrorLabel('TransientTransactionError'); throw error;
+    } });
+    await assert.rejects(uncertain.mutate(guest.actor, intent), isError('mutation_outcome_unknown'));
+    assert.equal(commits, 1);
+    const before = await community(host);
+    assert.equal(before.events.filter(event => event.kind === 'reaction').length, 1);
+    assert.equal((await social.outcome(guest.actor, { scopeToken: intent.scopeToken, commandId: intent.commandId }))!.outcome, 'applied');
+    assert.equal((await api.mutate(guest.actor, intent)).replayed, true); assert.deepEqual(await community(host), before);
+    assert.equal((await database().collection('socialBudgets').findOne({ _id: guest.actor.userId }))?.roomReactions, 1);
+});
+
+test('accepted activity hooks omit noops, rejections, readiness and reconnects, and label only different queue occurrences as song changes', async () => {
+    const { host, guest } = await pair();
+    assert.deepEqual((await community(host)).events.map(event => [event.kind, event.actor?.socialId]), [
+        ['joined', host.profile.socialId], ['joined', guest.profile.socialId]
+    ]);
+    await api.mutate(host.actor, control(host, await snapshot(host), 'setControlMode', { mode: 'hostOnly' }));
+    await api.mutate(guest.actor, control(guest, await snapshot(guest), 'next'));
+    await playPair(host, guest);
+    await api.disconnected(guest.actor); await connect(guest, await snapshot(guest));
+    assert.equal((await community(host)).events.length, 2);
+    const mode = control(host, await snapshot(host), 'setControlMode', { mode: 'everyone' });
+    assert.equal((await api.mutate(host.actor, mode)).outcome, 'applied'); await api.mutate(host.actor, mode);
+    const before = await snapshot(guest);
+    const next = control(guest, before, 'next'); const sameEntry = control(host, await snapshot(host), 'select', { targetEntryId: before.timeline!.entryId });
+    assert.equal((await api.mutate(guest.actor, next)).outcome, 'applied'); await api.mutate(guest.actor, next);
+    assert.equal((await api.mutate(host.actor, sameEntry)).code, 'stale_playback');
+    const current = await snapshot(host);
+    await api.mutate(host.actor, control(host, current, 'select', { targetEntryId: current.timeline!.entryId }));
+    const events = (await community(host)).events;
+    assert.deepEqual(events.map(event => event.kind), ['joined', 'joined', 'modeChanged', 'trackChanged']);
+    assert.equal(events.at(-1)?.actor?.socialId, guest.profile.socialId);
+});
+
+test('activity retains at most the newest twenty notices and expires logically before sweep without altering playback generations', async () => {
+    const { host, guest } = await pair();
+    for (let index = 0; index < 12; index += 1) { await reaction(host); await reaction(guest); }
+    const before = await snapshot(host); const value = await community(host);
+    assert.equal(value.events.length, ROOM_LIMITS.events); assert.ok(value.events.every(event => event.kind === 'reaction'));
+    assert.equal(new Set(value.events.map(event => event.eventId)).size, ROOM_LIMITS.events);
+    assert.equal((await roomDocuments().findOne({ _id: before.roomId }))?.events?.length, ROOM_LIMITS.events);
+    now += ROOM_LIMITS.eventMs;
+    assert.deepEqual((await community(host)).events, []);
+    await connect(host, await snapshot(host)); await connect(guest, await snapshot(guest));
+    const connected = await snapshot(host); await api.sweep();
+    const after = await snapshot(host);
+    assert.deepEqual({ ...after, revision: connected.revision }, connected);
+    assert.deepEqual((await roomDocuments().findOne({ _id: before.roomId }))?.events, []);
+    const settled = await snapshot(host); await api.sweep(); assert.deepEqual(await snapshot(host), settled);
+});
+
+test('an aborted reaction transaction retains neither an event nor reaction quota and permits explicit same-intent retry', async () => {
+    const { host, guest } = await pair(); const state = await snapshot(guest);
+    const intent = command(guest, { action: 'react', ...memberBody(state), expectedEpoch: state.epoch, reaction: 'smile' });
+    const before = await community(host);
+    const aborted = service({ beforeCommit: async () => { throw new Error('synthetic before-commit failure'); } });
+    await assert.rejects(aborted.mutate(guest.actor, intent), isError('room_unavailable'));
+    assert.deepEqual(await community(host), before);
+    assert.equal((await database().collection('socialBudgets').findOne({ _id: guest.actor.userId }))?.roomReactions, undefined);
+    assert.equal(await social.outcome(guest.actor, { scopeToken: intent.scopeToken, commandId: intent.commandId }), null);
+    assert.equal((await api.mutate(guest.actor, intent)).outcome, 'applied');
+    assert.equal((await community(host)).events.filter(event => event.kind === 'reaction').length, 1);
+});
+
+test('Unicode event projection trims oldest optional notices before reducing readable requests or queue credits', async () => {
+    const host = await person('host'.padEnd(24, 'x')); const guest = await person('guest'.padEnd(24, 'x'));
+    await friendship(host, guest); await create(host); await join(host, guest); const members = [host, guest];
+    for (const name of ['third', 'fourth']) { const added = await person(name.padEnd(24, 'x')); await friendship(host, added); await join(host, added); members.push(added); }
+    for (const who of members) {
+        const profile = (await social.ownProfile(who.actor))!;
+        assert.equal((await social.mutate(who.actor, { ...identity(who.scope), action: 'profile', expectedRevision: profile.revision,
+            handle: profile.handle, alias: '🎵'.repeat(50), discoverable: true })).outcome, 'applied');
+    }
+    const state = await snapshot(host); const stored = (await roomDocuments().findOne({ _id: state.roomId }))!;
+    stored.queue = Array.from({ length: ROOM_LIMITS.queue }, (_, index) => ({ ...stored.queue[0], entryId: index === 0 ? stored.queue[0].entryId : randomUUID() }));
+    stored.songRequests = Array.from({ length: ROOM_LIMITS.songRequests }, (_, index) => ({ requestId: randomUUID(),
+        requesterMembershipId: stored.members[Math.floor(index / ROOM_LIMITS.songRequestsPerMember)].membershipId,
+        mediaTrackId: new ObjectId().toHexString(), mediaRevision: media[0].mediaRevision, title: '🎵'.repeat(160), createdAt: new Date(now) }));
+    await database().collection('audioTracks').insertMany(stored.songRequests.map(request => ({ _id: new ObjectId(request.mediaTrackId),
+        uploadStatus: 'ready', publicationStatus: 'ready', roomFixture: { ...media[0], mediaTrackId: request.mediaTrackId } })));
+    stored.events = [];
+    await roomDocuments().replaceOne({ _id: state.roomId }, stored);
+    let required;
+    // Keep the fixture inside the same encoded-byte budget while filling it close to capacity.
+    for (let length = 160; length >= 0; length -= 1) {
+        await roomDocuments().updateOne({ _id: state.roomId }, { $set: { songRequests: stored.songRequests.map(value => ({ ...value, title: '🎵'.repeat(length) || 'Audio' })) } });
+        try { required = await api.community(host.actor, state.roomId); } catch (error) {
+            if (!isError('room_snapshot_too_large')(error)) throw error;
+            continue;
+        }
+        if (Buffer.byteLength(JSON.stringify(required)) <= ROOM_LIMITS.snapshotBytes - 1_000) break;
+    }
+    assert.ok(required); assert.ok(Buffer.byteLength(JSON.stringify(required)) > ROOM_LIMITS.snapshotBytes - 2_000);
+    for (let index = 0; index < 10; index += 1) { assert.equal((await reaction(host)).outcome, 'applied'); assert.equal((await reaction(guest)).outcome, 'applied'); }
+    const visible = await api.community(host.actor, state.roomId);
+    const internal = (await roomDocuments().findOne({ _id: state.roomId }))!.events!;
+    assert.equal(internal.length, ROOM_LIMITS.events); assert.ok(visible.events.length > 0 && visible.events.length < ROOM_LIMITS.events);
+    assert.deepEqual(visible.requests, required.requests); assert.deepEqual(visible.queueCredits, required.queueCredits);
+    assert.deepEqual(visible.events.map(event => event.eventId), internal.slice(-visible.events.length).map(event => event.eventId));
+    assert.ok(Buffer.byteLength(JSON.stringify(visible)) <= ROOM_LIMITS.snapshotBytes);
+});
+
+test('observer recommendations have current attribution, duplicate suppression and status-only recovery without changing playback', async () => {
+    const { host, guest } = await pair(); const outsider = await person('outsider');
+    const observer = { ...guest, actor: { ...guest.actor, clientId: randomUUID() } };
+    const before = await snapshot(host); const state = await snapshot(observer);
+    const original = command(observer, { action: 'requestSong', ...memberBody(state), expectedEpoch: state.epoch, mediaTrackId: media[1].mediaTrackId });
+    const revisions = await Promise.all([outboxRevision(host), outboxRevision(guest)]);
+    assert.equal((await api.mutate(observer.actor, original)).outcome, 'applied');
+    const value = await community(host);
+    assert.equal(value.requests.length, 1); assert.equal(value.requests[0].requestedBy.socialId, guest.profile.socialId);
+    assert.ok(value.queueCredits.every(credit => credit.requestedBy?.socialId === host.profile.socialId));
+    assert.deepEqual(Object.keys(value.requests[0]).sort(), ['createdAtMs', 'mediaTrackId', 'requestId', 'requestedBy', 'title']);
+    assert.deepEqual(Object.keys(value).sort(), ['epoch', 'events', 'queueCredits', 'requests', 'revision', 'roomId']);
+    for (const who of [host, guest]) for (const privateId of [who.actor.userId, who.actor.sessionId, who.actor.clientId]) assert.equal(JSON.stringify(value).includes(privateId), false);
+    assert.equal((await api.mutate(observer.actor, original)).replayed, true);
+    assert.equal((await requestSong(observer, 1)).outcome, 'noop');
+    assert.equal((await community(host)).requests.length, 1);
+    assert.deepEqual(await Promise.all([outboxRevision(host), outboxRevision(guest)]), revisions);
+    const after = await snapshot(host);
+    assert.deepEqual(after.timeline, before.timeline); assert.deepEqual(after.queue, before.queue); assert.equal(after.queueRevision, before.queueRevision);
+    await assert.rejects(api.community(outsider.actor, state.roomId), isError('room_unavailable'));
+    await assert.rejects(api.community(outsider.actor, 'missing'), isError('room_unavailable'));
+    await assert.rejects(api.mutate(observer.actor, { ...original, mediaTrackId: media[2].mediaTrackId } as RoomCommand), isError('idempotency_conflict'));
+});
+
+test('host queue edits preserve preparation and local pause while enforcing every observed version', async () => {
+    const { host, guest } = await pair(); await connect(guest, await snapshot(guest), true);
+    await requestSong(guest, 1); const request = (await community(host)).requests[0];
+    await api.mutate(host.actor, control(host, await snapshot(host), 'play'));
+    const before = await snapshot(host); const stored = await roomDocuments().findOne({ _id: before.roomId });
+    const accept = control(host, before, 'acceptSongRequest', { requestId: request.requestId });
+    assert.equal((await api.mutate(guest.actor, control(guest, await snapshot(guest), 'acceptSongRequest', { requestId: request.requestId }))).code, 'room_forbidden');
+    assert.equal((await api.mutate({ ...host.actor, clientId: randomUUID() }, { ...accept, commandId: randomUUID() })).code, 'stale_controller');
+    assert.equal((await api.mutate(host.actor, accept)).outcome, 'applied');
+    const appended = await snapshot(host);
+    assert.equal(appended.queue.length, before.queue.length + 1); assert.equal(appended.queueRevision, before.queueRevision + 1);
+    assert.deepEqual(appended.preparation, before.preparation); assert.deepEqual(appended.timeline, before.timeline);
+    assert.equal((await community(host)).requests.length, 0);
+    assert.equal((await community(host)).queueCredits.at(-1)?.requestedBy?.socialId, guest.profile.socialId);
+    assert.deepEqual((await roomDocuments().findOne({ _id: before.roomId }))?.members, stored?.members);
+    assert.equal((await api.mutate(host.actor, accept)).replayed, true);
+    const stale = control(host, before, 'reorderQueue', { entryIds: [...appended.queue].reverse().map(entry => entry.entryId) });
+    assert.equal((await api.mutate(host.actor, stale)).code, 'stale_queue');
+    assert.equal((await api.mutate(host.actor, control(host, appended, 'removeQueueEntry', { targetEntryId: appended.timeline!.entryId }))).code, 'current_entry_required');
+    assert.equal((await api.mutate(host.actor, control(host, appended, 'reorderQueue', { entryIds: appended.queue.slice(1).map(entry => entry.entryId) }))).code, 'queue_entries_changed');
+    const reorderedIds = [...appended.queue].reverse().map(entry => entry.entryId);
+    assert.equal((await api.mutate(host.actor, control(host, appended, 'reorderQueue', { entryIds: reorderedIds }))).outcome, 'applied');
+    const reordered = await snapshot(host);
+    assert.deepEqual(reordered.queue.map(entry => entry.entryId), reorderedIds); assert.deepEqual(reordered.preparation, before.preparation);
+    assert.equal((await api.mutate(host.actor, control(host, reordered, 'removeQueueEntry', { targetEntryId: reordered.queue[0].entryId }))).outcome, 'applied');
+    const removed = await snapshot(host); assert.deepEqual(removed.timeline, before.timeline); assert.deepEqual(removed.preparation, before.preparation);
+    assert.equal(removed.queue.length, before.queue.length);
+    assert.equal((await api.mutate(host.actor, control(host, removed, 'reorderQueue', { entryIds: removed.queue.map(entry => entry.entryId),
+        expectedPlaybackGeneration: removed.timeline!.playbackGeneration + 1 }))).code, 'stale_playback');
+    assert.equal((await api.mutate(host.actor, control(host, removed, 'reorderQueue', { entryIds: removed.queue.map(entry => entry.entryId),
+        expectedControlGeneration: removed.controlGeneration + 1 }))).code, 'stale_permission');
+    await ready(host, removed); const playing = await snapshot(host);
+    assert.equal(playing.timeline!.state, 'playing');
+    assert.equal((await api.mutate(host.actor, control(host, playing, 'reorderQueue', { entryIds: [...playing.queue].reverse().map(entry => entry.entryId) }))).outcome, 'applied');
+    assert.deepEqual((await snapshot(host)).timeline, playing.timeline);
+});
+
+test('recommendation withdrawal is a feature-disabled safety operation with member-incarnation ownership', async () => {
+    const { host, guest } = await pair(); await requestSong(guest); await requestSong(host, 1);
+    const requests = (await community(host)).requests; const guestRequest = requests.find(value => value.requestedBy.socialId === guest.profile.socialId)!;
+    const hostRequest = requests.find(value => value.requestedBy.socialId === host.profile.socialId)!;
+    const observer = { ...guest, actor: { ...guest.actor, clientId: randomUUID() } };
+    const dismiss = (who: Person, state: RoomSnapshot, requestId: string) => command(who, { ...memberBody(state), action: 'dismissSongRequest', requestId });
+    assert.equal((await api.mutate(observer.actor, dismiss(observer, await snapshot(observer), hostRequest.requestId))).code, 'room_forbidden');
+    const hostObserver = { ...host, actor: { ...host.actor, clientId: randomUUID() } };
+    assert.equal((await api.mutate(hostObserver.actor, dismiss(hostObserver, await snapshot(hostObserver), guestRequest.requestId))).code, 'room_forbidden');
+    enabled = false;
+    await assert.rejects(requestSong(guest, 2), isError('rooms_disabled'));
+    await assert.rejects(api.mutate(host.actor, control(host, await snapshot(host), 'acceptSongRequest', { requestId: guestRequest.requestId })), isError('rooms_disabled'));
+    assert.equal((await api.mutate(observer.actor, dismiss(observer, await snapshot(observer), guestRequest.requestId))).outcome, 'applied');
+    assert.equal((await api.mutate(host.actor, dismiss(host, await snapshot(host), hostRequest.requestId))).outcome, 'applied');
+    assert.deepEqual((await community(host)).requests, []);
+});
+
+test('recommendations enforce per-member and room capacities without duplicate or rejected invalidations', async () => {
+    const host = await person('host'); await create(host);
+    for (let index = media.length; index < 6; index += 1) {
+        const id = new ObjectId();
+        const roomFixture = { ...media[0], mediaTrackId: id.toHexString(), title: `Additional audio ${index}` };
+        media.push(roomFixture);
+        await database().collection('audioTracks').insertOne({ _id: id, uploadStatus: 'ready', publicationStatus: 'ready', roomFixture });
+    }
+    for (let index = 0; index < ROOM_LIMITS.songRequestsPerMember; index += 1) assert.equal((await requestSong(host, index)).outcome, 'applied');
+    const revision = await outboxRevision(host);
+    assert.equal((await requestSong(host, 0)).outcome, 'noop');
+    assert.equal((await requestSong(host, 5)).code, 'room_request_capacity');
+    assert.equal(await outboxRevision(host), revision);
+    for (let index = 0; index < 3; index += 1) {
+        const guest = await person(`guest_${index}`); await friendship(host, guest); await join(host, guest);
+        for (let mediaIndex = 0; mediaIndex < 5; mediaIndex += 1) assert.equal((await requestSong(guest, mediaIndex)).outcome, 'applied');
+    }
+    assert.equal((await community(host)).requests.length, ROOM_LIMITS.songRequests);
+    const extra = await person('extra'); await friendship(host, extra); await join(host, extra);
+    const before = await community(host);
+    assert.equal((await requestSong(extra)).code, 'room_request_capacity');
+    assert.deepEqual(await community(host), before);
+});
+
+for (const rival of ['acceptSongRequest', 'reorderQueue', 'next'] as const) {
+    test(`concurrent acceptance and ${rival} commit one observed queue edit without replaying the loser`, async () => {
+        const { host, guest } = await pair(); await requestSong(guest, 1); await requestSong(guest, 2);
+        const requests = (await community(host)).requests; const before = await snapshot(host);
+        const first = control(host, before, 'acceptSongRequest', { requestId: requests[0].requestId });
+        const second = rival === 'acceptSongRequest' ? control(host, before, rival, { requestId: requests[1].requestId })
+            : rival === 'reorderQueue' ? control(host, before, rival, { entryIds: [...before.queue].reverse().map(entry => entry.entryId) })
+                : control(host, before, rival);
+        const outcomes = await Promise.all([api.mutate(host.actor, first), api.mutate(host.actor, second)]);
+        assert.equal(outcomes.filter(value => value.outcome === 'applied').length, 1);
+        assert.equal(outcomes.filter(value => value.outcome === 'rejected' && ['stale_queue', 'stale_playback'].includes(value.code ?? '')).length, 1);
+        const after = await snapshot(host);
+        const loser = outcomes[0].outcome === 'rejected' ? first : second;
+        assert.equal((await api.mutate(host.actor, loser)).replayed, true);
+        assert.deepEqual(await snapshot(host), after);
+        assert.ok((await community(host)).requests.length >= 1);
+    });
+}
+
+for (const action of ['leave', 'kick', 'block', 'deactivate', 'delete'] as const) {
+    test(`${action} removes pending recommendations and attribution atomically without deleting accepted queue entries`, async () => {
+        const { host, guest } = await pair(); await requestSong(guest, 1);
+        assert.equal((await reaction(guest)).outcome, 'applied');
+        await api.mutate(host.actor, control(host, await snapshot(host), 'acceptSongRequest', { requestId: (await community(host)).requests[0].requestId }));
+        await requestSong(guest, 2); const before = await snapshot(host); const previousMember = (await snapshot(guest)).self.memberId;
+        if (action === 'leave') await api.mutate(guest.actor, command(guest, { ...memberBody(await snapshot(guest)), action }));
+        else if (action === 'kick') await api.mutate(host.actor, command(host, { ...memberBody(before), action, targetMemberId: previousMember }));
+        else if (action === 'block') await social.mutate(host.actor, { ...identity(host.scope), action, targetSocialId: guest.profile.socialId });
+        else if (action === 'deactivate') await social.mutate(guest.actor, { ...identity(guest.scope), action });
+        else {
+            await assert.rejects(deleteListenerAccountData(guest.actor.userId, { afterSocialCleanup: async () => { throw new Error('synthetic recommendation rollback'); } }), /synthetic recommendation rollback/);
+            assert.equal((await community(host)).requests.length, 1);
+            assert.equal((await community(host)).queueCredits.at(-1)?.requestedBy?.socialId, guest.profile.socialId);
+            assert.equal((await deleteListenerAccountData(guest.actor.userId)).status, 'deleted');
+        }
+        const after = await snapshot(host); const visible = await community(host);
+        assert.deepEqual(after.queue, before.queue); assert.deepEqual(after.timeline, before.timeline);
+        assert.deepEqual(visible.requests, []); assert.equal(visible.queueCredits.at(-1)?.requestedBy, null);
+        const persisted = await roomDocuments().findOne({ _id: before.roomId });
+        assert.equal(JSON.stringify(persisted).includes(previousMember), false);
+        if (action === 'leave') {
+            await join(host, guest);
+            assert.notEqual((await snapshot(guest)).self.memberId, previousMember);
+            assert.equal((await community(host)).queueCredits.at(-1)?.requestedBy, null);
+        }
+    });
+}
+
+test('host transfer clears the departed host recommendations and credits while End clears the entire community', async () => {
+    const { host, guest } = await pair(); await requestSong(host, 1); await requestSong(guest, 2);
+    const before = await snapshot(host); const guestBefore = await snapshot(guest);
+    await api.mutate(host.actor, command(host, { ...memberBody(before), action: 'offerTransfer', expectedControlGeneration: before.controlGeneration,
+        targetMemberId: guestBefore.self.memberId, targetControllerGeneration: guestBefore.self.controllerGeneration }));
+    const offer = (await snapshot(guest)).transferOffer!;
+    await api.mutate(guest.actor, command(guest, { ...memberBody(guestBefore), action: 'acceptTransfer', offerId: offer.offerId }));
+    const value = await community(guest);
+    assert.equal(value.requests.length, 1); assert.equal(value.requests[0].requestedBy.socialId, guest.profile.socialId);
+    assert.ok(value.queueCredits.every(credit => credit.requestedBy === null));
+    assert.ok(value.events.every(event => event.actor?.socialId !== host.profile.socialId));
+    assert.equal(value.events.at(-1)?.kind, 'hostChanged'); assert.equal(value.events.at(-1)?.actor?.socialId, guest.profile.socialId);
+    const after = await snapshot(guest);
+    await api.mutate(guest.actor, command(guest, { ...memberBody(after), action: 'end' }));
+    const persisted = await roomDocuments().findOne({ _id: after.roomId });
+    assert.deepEqual(persisted?.songRequests, []); assert.deepEqual(persisted?.queue, []); assert.deepEqual(persisted?.events, []);
+    await assert.rejects(api.community(guest.actor, after.roomId), isError('room_unavailable'));
+});
+
+test('request-only media invalidation is transactional, clears pending recommendations, and preserves the queue timeline', async () => {
+    const { host, guest } = await pair(); const id = new ObjectId();
+    const roomFixture = { ...media[0], mediaTrackId: id.toHexString(), title: 'Request-only audio' }; media.push(roomFixture);
+    await database().collection('audioTracks').insertOne({ _id: id, uploadStatus: 'ready', publicationStatus: 'ready', roomFixture });
+    await requestSong(guest, 3); const before = await snapshot(host); const visible = await community(host); const revision = await outboxRevision(host);
+    await assert.rejects(transaction(async session => {
+        await invalidateRoomsForMedia(id.toHexString(), session, now); throw new Error('synthetic media rollback');
+    }), /synthetic media rollback/);
+    assert.deepEqual(await community(host), visible); assert.equal(await outboxRevision(host), revision);
+    await transaction(async session => {
+        await database().collection('audioTracks').updateOne({ _id: id }, { $set: { uploadStatus: 'deleting' } }, { session });
+        await invalidateRoomsForMedia(id.toHexString(), session, now);
+    });
+    assert.deepEqual((await community(host)).requests, []); assert.equal(await outboxRevision(host), revision);
+    const after = await snapshot(host);
+    assert.deepEqual(after.timeline, before.timeline); assert.deepEqual(after.queue, before.queue); assert.equal(after.queueRevision, before.queueRevision);
+    assert.equal((await api.mutate(host.actor, control(host, after, 'acceptSongRequest', { requestId: visible.requests[0].requestId }))).code, 'room_request_unavailable');
+});
+
+test('acceptance rechecks the pinned media revision and never substitutes replacement bytes', async () => {
+    const { host, guest } = await pair(); await requestSong(guest, 1);
+    const value = await community(host); const before = await snapshot(host); const revision = await outboxRevision(host);
+    await database().collection('audioTracks').updateOne({ _id: new ObjectId(media[1].mediaTrackId) }, { $set: { 'roomFixture.mediaRevision': 'mr_replaced' } });
+    const intent = control(host, before, 'acceptSongRequest', { requestId: value.requests[0].requestId });
+    assert.equal((await api.mutate(host.actor, intent)).code, 'room_media_unavailable');
+    assert.deepEqual(await snapshot(host), before); assert.deepEqual((await community(host)).requests, []);
+    assert.equal(await outboxRevision(host), revision);
+    assert.equal((await api.mutate(host.actor, intent)).replayed, true);
+});
+
+test('a captured natural-end timer cannot reinterpret a later queue reorder', async () => {
+    const host = await person('host'); await create(host);
+    await api.mutate(host.actor, control(host, await snapshot(host), 'play')); await ready(host, await snapshot(host));
+    const before = await snapshot(host); now += media[0].durationMs + ROOM_LIMITS.startLeadMs;
+    let scheduled = false;
+    const timer = service({ beforeSweepRoom: async () => {
+        if (scheduled) return; scheduled = true;
+        assert.equal((await api.mutate(host.actor, control(host, before, 'reorderQueue', {
+            entryIds: [before.queue[0].entryId, before.queue[2].entryId, before.queue[1].entryId] }))).outcome, 'applied');
+    } });
+    await timer.sweep();
+    assert.equal((await snapshot(host)).timeline!.entryId, before.timeline!.entryId);
+    assert.equal((await community(host)).events.filter(event => event.kind === 'trackChanged').length, 0);
+    await api.sweep(); assert.equal((await snapshot(host)).timeline!.entryId, before.queue[2].entryId);
+    const advanced = (await community(host)).events.filter(event => event.kind === 'trackChanged');
+    assert.equal(advanced.length, 1); assert.equal(advanced[0].actor, null);
+    await api.sweep(); assert.equal((await community(host)).events.filter(event => event.kind === 'trackChanged').length, 1);
+});
+
+test('Everyone playback permission never grants queue moderation and recommendation epochs remain fenced', async () => {
+    const { host, guest } = await pair(); await requestSong(guest);
+    await api.mutate(host.actor, control(host, await snapshot(host), 'setControlMode', { mode: 'everyone' }));
+    const state = await snapshot(guest); const request = (await community(guest)).requests[0];
+    for (const [action, extra] of [
+        ['acceptSongRequest', { requestId: request.requestId }],
+        ['removeQueueEntry', { targetEntryId: state.queue[1].entryId }],
+        ['reorderQueue', { entryIds: [...state.queue].reverse().map(entry => entry.entryId) }]
+    ] as const) assert.equal((await api.mutate(guest.actor, control(guest, state, action, extra))).code, 'room_forbidden');
+    assert.equal((await api.mutate(guest.actor, command(guest, { ...memberBody(state), action: 'requestSong',
+        expectedEpoch: state.epoch + 1, mediaTrackId: media[1].mediaTrackId }))).code, 'stale_epoch');
+    assert.equal((await requestSong(guest, 1)).outcome, 'applied');
+    assert.equal((await community(guest)).requests.length, 2);
+});
+
+test('full queues retain recommendations on rejection and current-only queues cannot be emptied', async () => {
+    const { host, guest } = await pair(); await requestSong(guest, 1);
+    const before = await snapshot(host); const request = (await community(host)).requests[0];
+    const stored = (await roomDocuments().findOne({ _id: before.roomId }))!;
+    stored.queue = [stored.queue[0], ...Array.from({ length: ROOM_LIMITS.queue - 1 }, () => ({ ...stored.queue[1], entryId: randomUUID() }))];
+    await roomDocuments().replaceOne({ _id: before.roomId }, stored);
+    const state = await snapshot(host); const revision = await outboxRevision(host);
+    assert.equal((await api.mutate(host.actor, control(host, state, 'acceptSongRequest', { requestId: request.requestId }))).code, 'room_queue_capacity');
+    assert.equal((await community(host)).requests.length, 1); assert.equal(await outboxRevision(host), revision);
+    assert.equal((await snapshot(host)).queue.length, ROOM_LIMITS.queue);
+    await roomDocuments().updateOne({ _id: before.roomId }, { $set: { queue: [stored.queue[0]] } });
+    const one = await snapshot(host);
+    assert.equal((await api.mutate(host.actor, control(host, one, 'removeQueueEntry', { targetEntryId: one.queue[0].entryId }))).code, 'current_entry_required');
+    assert.equal((await snapshot(host)).queue.length, 1);
+});
+
+test('recommendation acceptance retains its original identity after an uncertain commit and appends once', async () => {
+    const { host, guest } = await pair(); await requestSong(guest, 1); const request = (await community(host)).requests[0];
+    const before = await snapshot(host); const intent = control(host, before, 'acceptSongRequest', { requestId: request.requestId });
+    let attempts = 0;
+    const uncertain = service({ afterCommit: async () => { attempts += 1; throw new Error('synthetic acknowledgement loss'); } });
+    await assert.rejects(uncertain.mutate(host.actor, intent), isError('mutation_outcome_unknown'));
+    assert.equal(attempts, 1); assert.equal((await snapshot(host)).queue.length, before.queue.length + 1);
+    assert.deepEqual(await social.outcome(host.actor, { scopeToken: intent.scopeToken, commandId: intent.commandId }),
+        { commandId: intent.commandId, outcome: 'applied', replayed: true });
+    assert.equal((await api.mutate(host.actor, intent)).replayed, true);
+    assert.equal((await snapshot(host)).queue.length, before.queue.length + 1); assert.deepEqual((await community(host)).requests, []);
+});
+
+test('media deletion winning a recommendation admission race leaves no pending request or partial community change', async () => {
+    const { host, guest } = await pair(); let removed = false;
+    const racing = service({ beforeAccountFence: async () => {
+        if (removed) return; removed = true;
+        await transaction(async session => {
+            await database().collection('audioTracks').updateOne({ _id: new ObjectId(media[1].mediaTrackId) }, { $set: { uploadStatus: 'deleting' } }, { session });
+            await invalidateRoomsForMedia(media[1].mediaTrackId, session, now);
+        });
+    } });
+    assert.equal((await requestSong(guest, 1, racing)).code, 'room_media_unavailable');
+    assert.deepEqual((await community(host)).requests, []);
+});
+
+test('community resolves current aliases after profile changes and keeps admitted requests after friendship removal', async () => {
+    const { host, guest } = await pair(); await requestSong(guest, 1);
+    await api.mutate(host.actor, control(host, await snapshot(host), 'acceptSongRequest', { requestId: (await community(host)).requests[0].requestId }));
+    await requestSong(guest, 2); const before = await snapshot(host); const revision = await outboxRevision(host);
+    const profile = (await social.ownProfile(guest.actor))!;
+    assert.equal((await social.mutate(guest.actor, { ...identity(guest.scope), action: 'profile', expectedRevision: profile.revision,
+        handle: profile.handle, alias: 'New current alias', discoverable: false })).outcome, 'applied');
+    const updated = await community(host);
+    assert.equal(updated.requests[0].requestedBy.alias, 'New current alias');
+    assert.equal(updated.queueCredits.at(-1)?.requestedBy?.alias, 'New current alias');
+    assert.equal(await outboxRevision(host), revision); assert.deepEqual((await snapshot(host)).timeline, before.timeline);
+    assert.ok(updated.revision > before.revision);
+    assert.equal(updated.events.find(event => event.actor?.socialId === guest.profile.socialId)?.actor?.alias, 'New current alias');
+    const relationship = (await social.relationship(host.actor, guest.profile.socialId))!;
+    await social.mutate(host.actor, { ...identity(host.scope), action: 'remove', targetSocialId: guest.profile.socialId, expectedRevision: relationship.revision });
+    assert.equal((await community(host)).requests.length, 1);
+});
+
+test('recommendation titles are bounded at capture and oversized community evidence fails closed', async () => {
+    const { host, guest } = await pair();
+    await database().collection('audioTracks').updateOne({ _id: new ObjectId(media[1].mediaTrackId) }, { $set: { 'roomFixture.title': '🎵'.repeat(400) } });
+    await requestSong(guest, 1); const value = await community(host);
+    assert.equal([...value.requests[0].title].length, 160);
+    const persisted = (await roomDocuments().findOne({ _id: value.roomId }))!;
+    assert.equal([...persisted.songRequests![0].title].length, 160);
+    await roomDocuments().updateOne({ _id: value.roomId }, { $set: { 'songRequests.0.title': 'x'.repeat(ROOM_LIMITS.snapshotBytes) } });
+    await assert.rejects(api.community(host.actor, value.roomId), isError('room_snapshot_too_large'));
+    await roomDocuments().updateOne({ _id: value.roomId }, { $set: { songRequests: Array.from({ length: ROOM_LIMITS.songRequests + 1 }, () => persisted.songRequests![0]) } });
+    await assert.rejects(api.community(host.actor, value.roomId), isError('room_snapshot_too_large'));
+});
+
 test('real friend invite admission is private, bounded, and separated from the local queue', async () => {
     const { host, guest } = await pair(); const outsider = await person('outsider');
     const state = await snapshot(host);

@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
 import type { RoomSnapshot } from '../src/api/rooms';
 import { expectNoUnownedAxeViolations } from '../e2e/support/accessibility';
 
@@ -94,12 +94,36 @@ test('global invitations reach Home and recipient links preserve explicit login,
   const contexts: Awaited<ReturnType<typeof browser.newContext>>[] = [];
   const hosts: Page[] = [];
   const failures: Array<{ path: string; status: number }> = [];
+  const ends: Array<{ roomId: string; startedAt: number; applied: boolean }> = [];
+  const retiringReads: Array<{ failure: typeof failures[number]; roomId: string; startedAt: number; respondedAt: number; body: unknown }> = [];
+  const inspections: Promise<void>[] = [];
+  const pendingRoomReads = new Set<Request>();
   let completed = false;
   const newPage = async () => {
     const context = await browser.newContext({ baseURL, reducedMotion: 'reduce' }); contexts.push(context);
+    context.on('request', request => {
+      if (request.method() === 'GET' && /^\/api\/social\/v1\/rooms\/r_[A-Za-z0-9_-]+\/(?:community|invitations)$/.test(new URL(request.url()).pathname)) pendingRoomReads.add(request);
+    });
+    context.on('requestfinished', request => pendingRoomReads.delete(request));
+    context.on('requestfailed', request => pendingRoomReads.delete(request));
     context.on('response', response => {
       const path = new URL(response.url()).pathname;
-      if (path.startsWith('/api/social/') && response.status() >= 400) failures.push({ path, status: response.status() });
+      const request = response.request(), startedAt = request.timing().startTime, respondedAt = Date.now();
+      if (request.method() === 'POST' && path === '/api/social/v1/room-commands') {
+        const command = request.postDataJSON();
+        if (command.action === 'end') {
+          const end = { roomId: String(command.roomId), startedAt, applied: false }; ends.push(end);
+          inspections.push(response.json().then(body => { end.applied = response.status() === 200 && body.outcome === 'applied'; }).catch(() => undefined));
+        }
+      }
+      if (path.startsWith('/api/social/') && response.status() >= 400) {
+        const failure = { path, status: response.status() }; failures.push(failure);
+        const roomRead = /^\/api\/social\/v1\/rooms\/(r_[A-Za-z0-9_-]+)\/(?:community|invitations)$/.exec(path);
+        if (response.status() === 404 && request.method() === 'GET' && roomRead) {
+          const read = { failure, roomId: roomRead[1], startedAt, respondedAt, body: undefined as unknown }; retiringReads.push(read);
+          inspections.push(response.json().then(body => { read.body = body; }).catch(() => undefined));
+        }
+      }
     });
     return context.newPage();
   };
@@ -189,6 +213,22 @@ test('global invitations reach Home and recipient links preserve explicit login,
     expect(inspectedRoom.actions).toEqual(['declineInvitation']);
     for (const page of hosts) await endHostedRoom(page);
     await expect.poll(joinedRoom.current).toBeNull();
+    await expect(roomPanel(joinedGuest).getByRole('button', { name: 'Start a room', exact: true })).toBeVisible();
+    await expect.poll(() => pendingRoomReads.size, { message: 'Every retiring room read finished or failed before its response is classified' }).toBe(0);
+    await Promise.all(inspections);
+    const expectedRetirements: Array<{ path: string; startedBeforeEndMs: number; respondedAfterEndMs: number }> = [];
+    for (const read of retiringReads) {
+      const end = ends.find(value => value.roomId === read.roomId && value.applied && value.startedAt > 0
+        && read.startedAt > 0 && read.startedAt < value.startedAt && read.respondedAt >= value.startedAt);
+      if (!end) continue;
+      // An admitted read can lose to a later End transaction. Only this exact empty denial is expected;
+      // reads started after End and every other status/envelope remain strict unexpected failures.
+      expect(read.body).toEqual({ code: 'room_unavailable', message: 'The social request could not be completed.' });
+      expectedRetirements.push({ path: read.failure.path, startedBeforeEndMs: end.startedAt - read.startedAt,
+        respondedAfterEndMs: read.respondedAt - end.startedAt });
+      failures.splice(failures.indexOf(read.failure), 1);
+    }
+    if (expectedRetirements.length) console.log(`Expected in-flight room retirement denials: ${JSON.stringify(expectedRetirements)}`);
     expect(failures).toEqual([]);
     completed = true;
   } finally {

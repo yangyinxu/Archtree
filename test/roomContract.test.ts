@@ -38,6 +38,24 @@ test('deny-only member actions bind the membership incarnation without stale pla
     assert.equal(parseRoomCommand({ ...identity, action: 'leave', roomId: 'r_room' }), null);
 });
 
+test('song requests separate membership actions from immutable version-fenced queue moderation', () => {
+    const member = { ...identity, roomId: 'r_room', memberId: 'm_member' };
+    assert.ok(parseRoomCommand({ ...member, action: 'requestSong', expectedEpoch: 1, mediaTrackId: '1'.repeat(24) }));
+    assert.ok(parseRoomCommand({ ...member, action: 'dismissSongRequest', requestId: 's_request' }));
+    assert.equal(parseRoomCommand({ ...member, action: 'requestSong', mediaTrackId: '1'.repeat(24) }), null);
+    assert.equal(parseRoomCommand({ ...member, action: 'acceptSongRequest', requestId: 's_request' }), null);
+    const entries = ['e_first', 'e_second'];
+    const parsed = parseRoomCommand({ ...control, action: 'reorderQueue', entryIds: entries });
+    entries.reverse();
+    assert.ok(parsed?.action === 'reorderQueue');
+    assert.deepEqual(parsed.entryIds, ['e_first', 'e_second']);
+    assert.ok(Object.isFrozen(parsed.entryIds));
+    for (const entryIds of [[], ['e_first', 'e_first'], ['../private'], Array(101).fill('e_first')]) {
+        assert.equal(parseRoomCommand({ ...control, action: 'reorderQueue', entryIds }), null);
+    }
+    assert.equal(parseRoomCommand({ ...control, action: 'removeQueueEntry', targetEntryId: 'e_second', requestedBy: 'spoof' }), null);
+});
+
 test('readiness reports require exact media/preparation and controller generations, while heartbeat has no playback command', () => {
     const report = { roomId: 'r_room', memberId: 'm_member', controllerGeneration: 1, expectedEpoch: 1,
         preparationId: 'p_first', playbackGeneration: 4, entryId: 'e_entry', mediaRevision: 'mr_media', sequence: 1, ready: true };
@@ -46,4 +64,20 @@ test('readiness reports require exact media/preparation and controller generatio
     assert.equal(parseRoomReady({ ...report, action: 'next' }), null);
     assert.ok(parseRoomHeartbeat({ roomId: 'r_room', memberId: 'm_member', controllerGeneration: 1, locallyPaused: true }));
     assert.equal(parseRoomHeartbeat({ roomId: 'r_room', memberId: 'm_member', controllerGeneration: 1, locallyPaused: 'false' }), null);
+});
+
+test('reactions are fixed member gestures with a captured epoch and no playback or arbitrary text fields', () => {
+    const member = { ...identity, roomId: 'r_room', memberId: 'm_member', expectedEpoch: 1, action: 'react' };
+    for (const reaction of ['heart', 'clap', 'fire', 'smile', 'music']) {
+        const command = parseRoomCommand({ ...member, reaction });
+        assert.deepEqual(command, { ...member, reaction });
+        assert.ok(Object.isFrozen(command));
+    }
+    for (const reaction of ['❤️', 'chat text', '', null, { text: 'music' }]) {
+        assert.equal(parseRoomCommand({ ...member, reaction }), null);
+    }
+    for (const delta of [{ expectedEpoch: 0 }, { expectedEpoch: '1' }, { actor: 'spoof' },
+        { message: 'arbitrary text' }, { positionMs: 1000 }, { controllerGeneration: 1 }]) {
+        assert.equal(parseRoomCommand({ ...member, reaction: 'heart', ...delta }), null);
+    }
 });

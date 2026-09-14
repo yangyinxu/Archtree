@@ -1,3 +1,5 @@
+import type { RoomCommunityEvent, RoomReaction } from '../../contracts/roomV1';
+
 /** Durable private room membership; account/session identities never leave the projection boundary. */
 export interface RoomMemberDocument {
     membershipId: string;
@@ -25,6 +27,27 @@ export interface RoomQueueEntryDocument {
     streamUrl: string;
     mediaType: 'Audio';
     unavailable?: boolean;
+    requesterMembershipId?: string;
+}
+
+/** Pending recommendations belong to a member incarnation and an exact eligible media revision. */
+export interface RoomSongRequestDocument {
+    requestId: string;
+    requesterMembershipId: string;
+    mediaTrackId: string;
+    mediaRevision: string;
+    title: string;
+    createdAt: Date;
+}
+
+/** Short notices retain only the current member incarnation, never historical profile data. */
+export interface RoomEventDocument {
+    eventId: string;
+    kind: RoomCommunityEvent['kind'];
+    actorMembershipId: string | null;
+    reaction: RoomReaction | null;
+    createdAt: Date;
+    expiresAt: Date;
 }
 
 /** A persisted readiness barrier is recoverable without retaining historical socket events. */
@@ -61,6 +84,12 @@ export interface RoomDocument {
     playbackGeneration: number;
     members: RoomMemberDocument[];
     queue: RoomQueueEntryDocument[];
+    songRequests?: RoomSongRequestDocument[];
+    events?: RoomEventDocument[];
+    reactionMinute?: number;
+    reactions?: number;
+    /** Serializes current-listening reports with room pause/controller changes without changing public versions. */
+    listeningPublicationFence?: number;
     timeline: { entryId: string; state: 'paused' | 'preparing' | 'playing' | 'ended'; positionMs: number; anchorServerTimeMs: number };
     preparation: RoomPreparationDocument | null;
     transfer: RoomTransferDocument | null;

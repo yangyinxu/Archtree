@@ -130,13 +130,13 @@ export const ModalDialog = ({
         role="dialog"
         tabIndex={-1}
       >
-        <header className={styles.header}>
+        <div className={styles.header}>
           <div>
             {kicker && <p className={styles.kicker}>{kicker}</p>}
             <h2 id={titleId}>{title}</h2>
             {description && <p className={styles.description} id={descriptionId}>{description}</p>}
           </div>
-        </header>
+        </div>
         {children}
       </section>
     </div>

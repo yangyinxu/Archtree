@@ -9,6 +9,8 @@ import { useSocialActions } from './useSocialActions';
 import styles from './SocialPage.module.css';
 
 const tabs = ['friends', 'incoming', 'outgoing', 'blocks'] as const;
+const ListeningSharingSettings = lazy(() => import('./ListeningSharingSettings').then(module => ({ default: module.ListeningSharingSettings })));
+const FriendsListening = lazy(() => import('./FriendsListening').then(module => ({ default: module.FriendsListening })));
 const RoomsPanel = lazy(() => import('./RoomsPanel').then(module => ({ default: module.RoomsPanel })));
 /** Generated public identity uses only the explicitly chosen social alias. */
 export const SocialAvatar = ({ profile }: { profile: SocialCard | null }) => <span className={styles.avatar} aria-hidden="true">
@@ -104,7 +106,7 @@ const SocialSpace = ({ viewerId }: { viewerId: string }) => {
   }, [profile.data]);
   return <>
     <div className={styles.hero}><div><p className={styles.eyebrow}>Finitude · {t('social.nav')}</p><h1>{t('social.title')}</h1><p className={styles.description}>{t('social.description')}</p></div>
-      <button className={styles.secondary} onClick={() => actions.refresh()}>{t('social.refresh')}</button></div>
+      <div className={styles.actions}><Link className={styles.secondary} to="/social/shares">{t('music_shares.title')}</Link><button className={styles.secondary} onClick={() => actions.refresh()}>{t('social.refresh')}</button></div></div>
     {actions.message && <div className={actions.uncertain ? styles.error : styles.status} role="status">{t(actions.message)}
       {actions.uncertain && <div className={styles.actions}><button className={styles.secondary} disabled={actions.busy} onClick={actions.check}>{t('social.check_outcome')}</button><button className={styles.secondary} disabled={actions.busy} onClick={actions.retry}>{t('social.retry_same')}</button></div>}
     </div>}
@@ -112,6 +114,7 @@ const SocialSpace = ({ viewerId }: { viewerId: string }) => {
     {profile.isPending ? <p role="status">{t('social.loading')}</p> : profile.data && <div className={styles.grid}>
       {profile.data.profile?.active && <Suspense fallback={<section className={styles.panel} role="status">{t('social.loading')}</section>}><RoomsPanel viewerId={viewerId} profile={profile.data.profile} /></Suspense>}
       <div className={styles.stack}><Relationships viewerId={viewerId} actions={actions} /><FriendLookup viewerId={viewerId} enabled={profile.data.profile?.active ?? false} actions={actions} /></div>
+      {profile.data.profile?.active && !profile.isError && <Suspense fallback={null}><ListeningSharingSettings viewerId={viewerId} /><FriendsListening viewerId={viewerId} /></Suspense>}
       <IdentityForm key={profile.data.profile?.revision ?? 0} profile={profile.data.profile} actions={actions} />
     </div>}
   </>;

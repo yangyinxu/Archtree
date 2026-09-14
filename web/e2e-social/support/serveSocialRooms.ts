@@ -66,12 +66,19 @@ await runDisposableRuntime(async resources => {
       targetSocialId: host.profile.socialId, expectedRevision: relation.revision });
     if (accepted.outcome !== 'applied') throw new Error('Invitation fixture friendship could not be created.');
   }
+  const trackIds: string[] = [];
   for (const [index, title] of ['First Light', 'Across the Water', 'Home Again'].entries()) {
     const id = new ObjectId();
     await getDb()!.collection('audioTracks').insertOne({ _id: id, title, trackNumber: index + 1, artistIds: [],
       duration: '2:00', s3Key: id.toHexString(), mediaType: 'audio', uploadStatus: 'pending', publicationStatus: 'ready',
       createdBy: curator.toHexString(), createdAt: new Date() });
     await uploadAudioObject(id.toHexString(), wavUploadFile(createPcmWav(120_000)), curator.toHexString());
+    trackIds.push(id.toHexString());
+  }
+  if (process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'music-shares') {
+    // Actual Album publication fences and orders the uploaded tracks; other scenarios retain their original catalog.
+    const [{ Album }, { SimpleDate }] = await Promise.all([import('../../../src/models/album'), import('../../../src/models/simpleDate')]);
+    await new Album('Shared Horizons', '', trackIds as [string], new SimpleDate(2026, 9, 14), curator.toHexString()).save();
   }
   const lifecycle = new ServerLifecycle();
   const listenerDistPath = await resources.own(mkdtemp(join(tmpdir(), 'archtree-social-e2e-dist-')),

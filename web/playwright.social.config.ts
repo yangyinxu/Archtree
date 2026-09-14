@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const suites = [{ name: 'rooms', port: 4175 }, { name: 'invitations', port: 4176 }] as const;
+const suites = [{ name: 'rooms', port: 4175 }, { name: 'invitations', port: 4176 },
+  { name: 'song-requests', port: 4177 }, { name: 'music-shares', port: 4178 },
+  { name: 'room-interactions', port: 4179 }, { name: 'listening-status', port: 4180 }] as const;
 
 /** Opt-in Mongo/S3/WS gate uses real production routes and separate synthetic accounts. */
 export default defineConfig({
@@ -10,8 +12,8 @@ export default defineConfig({
     // Muting alone can still open an audio device and trigger Bluetooth headphone switching.
     launchOptions: { args: ['--disable-audio-output'] } },
   // Each scenario owns a process and stores, including its real IP-rate window; no production limit is reset or relaxed.
-  webServer: suites.map(({ port }) => ({ command: 'npx --no-install tsx e2e-social/support/serveSocialRooms.ts',
-    env: { FINITUDE_SOCIAL_E2E_PORT: String(port) },
+  webServer: suites.map(({ name, port }) => ({ command: 'npx --no-install tsx e2e-social/support/serveSocialRooms.ts',
+    env: { FINITUDE_SOCIAL_E2E_PORT: String(port), FINITUDE_SOCIAL_E2E_SCENARIO: name },
     url: `http://127.0.0.1:${port}/finitude/social`, reuseExistingServer: false, timeout: 60_000 })),
   projects: suites.map(({ name, port }) => ({ name: `chromium-${name}`, testMatch: `${name}.spec.ts`,
     use: { ...devices['Desktop Chrome'], baseURL: `http://127.0.0.1:${port}` } }))

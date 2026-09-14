@@ -55,9 +55,19 @@ export const databaseIndexes: Array<{
     { collection: 'socialBudgets', keys: { accountId: 1 }, options: { unique: true } },
     { collection: 'socialHandles', keys: { accountId: 1 }, required: true },
     { collection: 'socialHandles', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'socialMusicShares', keys: { senderAccountId: 1, createdAt: -1, _id: -1 }, required: true },
+    { collection: 'socialMusicShares', keys: { recipientAccountId: 1, createdAt: -1, _id: -1 }, required: true },
+    { collection: 'socialMusicShares', keys: { accountIds: 1 }, required: true },
+    { collection: 'socialMusicShares', keys: { contentType: 1, contentId: 1, _id: 1 }, required: true },
+    { collection: 'socialMusicShares', keys: { senderAccountId: 1, recipientAccountId: 1, contentType: 1, contentId: 1 }, required: true },
+    { collection: 'socialMusicShares', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'socialListeningStates', keys: { accountId: 1 }, options: { unique: true } },
+    { collection: 'socialListeningPublications', keys: { 'playback.mediaTrackId': 1, _id: 1 }, required: true },
+    { collection: 'socialListeningPublications', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'socialRooms', keys: { state: 1, expiresAt: 1 }, required: true },
     { collection: 'socialRooms', keys: { 'members.accountId': 1 }, required: true },
     { collection: 'socialRooms', keys: { 'queue.mediaTrackId': 1 }, required: true },
+    { collection: 'socialRooms', keys: { 'songRequests.mediaTrackId': 1 }, required: true },
     { collection: 'socialRooms', keys: { closedAt: 1 }, options: { expireAfterSeconds: 86_400 } },
     { collection: 'socialRoomParticipation', keys: { roomId: 1 }, required: true },
     { collection: 'socialInvitations', keys: { invitationId: 1 }, options: { unique: true } },
@@ -98,7 +108,7 @@ export const databaseIndexes: Array<{
     { collection: 'posts', keys: { createdAt: -1 } }
   ];
 
-export const requiredIndexRevision = 'required-indexes-v3-rooms';
+export const requiredIndexRevision = 'required-indexes-v4-social-participation';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */

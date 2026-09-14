@@ -1,13 +1,13 @@
 import { safeLoginDestination } from './LoginPage';
 
-test.each(['/social', '/social/invitations', '/social/invitations/i_abc-123', '/finitude/social/invitations/i_abc-123'])('preserves the narrow internal social continuation %s across login reloads', candidate => {
+test.each(['/social', '/social/shares', '/finitude/social/shares', '/social/invitations', '/social/invitations/i_abc-123', '/finitude/social/invitations/i_abc-123'])('preserves the narrow internal social continuation %s across login reloads', candidate => {
   expect(safeLoginDestination(undefined, `?returnTo=${encodeURIComponent(candidate)}`)).toBe(candidate.replace(/^\/finitude/, ''));
 });
 
 test.each(['https://evil.example', '//evil.example', '/\\evil.example', '/social/invitations/../account',
   '/social/invitations/%2F%2Fevil.example', '/social/invitations/id?next=https://evil.example',
   '/social/invitations/id#fragment', '/social/invitations/id\n', '/social/invitations/abc/extra',
-  `/social/invitations/${'a'.repeat(81)}`, '/finitude//evil.example', '/social/unknown'])('rejects unsafe or unrecognized invitation continuation %s', candidate => {
+  `/social/invitations/${'a'.repeat(81)}`, '/finitude//evil.example', '/social/unknown', '/social/shares/extra', '/social/shares?next=evil'])('rejects unsafe or unrecognized invitation continuation %s', candidate => {
   expect(safeLoginDestination(undefined, `?returnTo=${encodeURIComponent(candidate)}`)).toBe('/');
 });
 

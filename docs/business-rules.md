@@ -55,6 +55,81 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   Social participation adds no public Feed, collaborative Playlist, chat,
   push/email delivery or S3-backed social avatar.
 
+## Direct Music Shares
+
+- An active social profile can explicitly share a ready MediaTrack or Album with
+  a current friend. Sharing uses the observed friendship revision. Private
+  Playlists, account activity and arbitrary messages or external URLs are not
+  shared. Recipients can return later; simultaneous presence is unnecessary.
+- Received and Sent lists are private to their respective account and show the
+  other person's current social card. They are not a public feed, unread-history
+  count, or read/play receipt. Sharing, opening a card and viewing its list never
+  automatically play, save, join or create a room.
+- Play and Save remain explicit personal actions under the ordinary catalog and
+  player rules. An Album play resolves its complete current playable order.
+  Another room is never left implicitly. Inviting the sender back uses current
+  host/controller permissions and existing friendship and room admission checks.
+- Each account may retain up to 100 incoming and 100 outgoing shares for 30 days,
+  with at most 50 new incoming shares per day. Repeating a still-active share of
+  the same content to the same friend creates no duplicate or new notification.
+  The recipient can dismiss a card; its sender can withdraw it. Both remove that
+  share, and an old action cannot affect a later share incarnation.
+- Current friendship, active profiles and no block are required on every read.
+  Removing friendship, blocking, deactivation or account deletion clears affected
+  shares. Reconnecting friendship never restores them. Turning discoverability
+  off preserves current shares. Disabling social admission preserves authorized
+  reads, dismiss/withdraw and outcome recovery while preventing new sends.
+- Shares retain catalog identity rather than copied media bytes or versioned
+  playback URLs. Replacement resolves the current ready content. Deleting or
+  non-ready content exposes no former title/artwork; an unavailable card can be
+  dismissed while idempotent content-reference cleanup removes the share.
+
+## Friend Listening Status
+
+- Sharing current listening is off by default and requires an explicit preference
+  change by an active social profile. It supports ordinary and shared-room Audio;
+  Video, readiness, play intent and historical activity never establish status.
+  Turning discoverability off preserves this independent preference. Deactivation
+  resets it to off; reactivation does not restore it.
+- Only current friends with active social profiles and no block can see a fresh
+  status. It exposes the current ready Audio and chosen social identity, without
+  playback position, room/device/session identity, last-seen data or history.
+  Friend status refreshes while its panel is visible and disappears when stale or
+  unreadable. Removing friendship or blocking removes visibility immediately at
+  the server, independently of continued room membership.
+- A new explicit playback or sharing gesture may claim the account's publishing
+  device against its observed publisher revision. That claim publishes nothing
+  until the device reports actual playback. Automatic advancement, reconnecting,
+  polling and old callbacks cannot take over from a newer device. Delayed reports
+  and stops affect only their captured publisher and playback occurrence.
+- Actual advancing playback renews the short status at most once per ten seconds.
+  Observations must be fresh, and status expires within 25 seconds of the latest
+  accepted observation. Pause, buffering, seeking, end, errors, source changes,
+  freeze and account transitions stop local publication. Fresh actual progress
+  may restore a still-owned lease; an expired or replaced lease needs a new
+  explicit gesture. Merely hiding an Audio tab does not stop fresh playback.
+- Room reports additionally require the exact admitted playing controller and
+  current ready timeline occurrence. Ordinary Audio does not require room-format
+  analysis. Reads and renewals recheck the current ready source; replacing or
+  removing that source invalidates its earlier publication. A loaded source keeps
+  its identity across buffering and resumes so old bytes cannot silently rebind
+  within the same publishing lease.
+- Opt-out clears publication atomically while preserving its version fence.
+  Revocation clears only the matching publishing session; retaining the current
+  session during a password change preserves its eligible publication. Account
+  deletion removes the preference and publication with existing account cleanup.
+  Ephemeral publication records expire; their durable owner clock prevents a
+  delayed report from recreating expired state. Safety stops and opt-out retain
+  access when new participation or playing-report capacity is unavailable.
+  Disabling social participation suppresses listening status while preserving
+  private setting reads, opt-out and captured safety stops.
+- Inviting a listening friend is explicit and follows existing room permissions.
+  A current host can invite into its room. With no room, an explicit confirmation
+  may create a paused room using eligible Audio and then invite the friend.
+  Creation and invitation have separate recoverable outcomes; invitation failure
+  leaves that room available. No status view creates, leaves or joins a room,
+  starts playback, or sends an invitation automatically.
+
 ## Shared Playback Rooms
 
 The initial implementation supports explicitly enabled Audio rooms in Finitude
@@ -70,13 +145,42 @@ Playlist access retain their existing rules.
   queue entry. Other devices observing the room do not gain control.
 - Shared playback permission does not grant room-management permission. Changing
   the mode, inviting/removing members, choosing the initial queue, transferring
-  the host role, and ending the room remain host-only operations. This initial
-  slice copies an explicit selection into an independent queue; editing its
-  membership/order after creation is not exposed.
+  the host role, and ending the room remain host-only operations. The initial
+  selection and subsequent accepted recommendations belong to an independent
+  room queue; no change mutates a member's private Playlist.
+- Every admitted member can recommend eligible Audio, independently of Host or
+  Everyone playback control and without taking over a playing device. Each member
+  may have five pending recommendations, within a room-wide limit of 20. Repeating
+  the same pending recommendation by that member does not create another copy.
+- The active host controller can accept or dismiss a recommendation, remove a
+  queued entry, or reorder the queue. Members may withdraw their own pending
+  recommendations. Acceptance appends one occurrence with requester attribution;
+  it never starts playback. Queue edits require the observed queue and playback
+  versions; concurrent stale edits do not silently overwrite the winner.
+- Appending, reordering, or removing another queued entry preserves the current
+  timeline, readiness preparation and each device's local pause. The current
+  entry cannot be removed directly; select another entry first. A room retains
+  at least one entry. Pending recommendations disappear when their member leaves
+  or their media is replaced/deleted. Attribution resolves current admitted social
+  profiles only and is cleared on departure; it is not historical identity data.
 - Mode changes are server-confirmed and visible to every participant. They apply
   to subsequent commands; they do not undo an already accepted playback operation
   or restart the current media. Commands that rely on superseded permission state
   cannot take effect after a mode change.
+- Every admitted member, including an observing device, may explicitly send a
+  heart, clap, fire, smile or music reaction. Reactions are independent of playback
+  permission and accept no arbitrary text. Accepted reactions are limited to 12
+  per account and 60 per room per minute; reconnecting or rejoining does not reset
+  the account allowance. Replaying the same command adds no reaction or quota use.
+- Brief room activity shows confirmed joins, song changes, host changes, control
+  mode changes and reactions. It retains at most 20 events for 30 seconds, subject
+  to bounded projection size. Automatic advancement is identified as a system
+  action; readiness, reconnects, rejected/noop commands and heartbeat traffic do
+  not become human activity. Events never issue playback commands or change
+  playback/control/queue generations by themselves.
+- Activity resolves only current admitted social cards. A departing member's
+  events disappear and room closure clears every event. Initial load and reconnect
+  may show still-current events but never replay their announcements as new.
 - Volume, mute, and an explicitly device-local pause remain personal controls in
   either mode. Shared Pause affects the room; a deliberate local pause is not
   silently undone by another participant's shared playback command.

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
 import { ROOM_LIMITS, isRoomClientId, isRoomIdentifier, parseRoomCommand, parseRoomHeartbeat, parseRoomReady,
     type RoomActor, type RoomApi, type RoomCommand, type RoomHeartbeat, type RoomInvitation, type RoomMediaDescriptor,
-    type RoomReadyReport, type RoomSnapshot } from '../../contracts/roomV1';
+    type RoomCommunity, type RoomReadyReport, type RoomSnapshot } from '../../contracts/roomV1';
 import { SOCIAL_LIMITS, SocialError, exactSocialKeys, type SocialOutcome } from '../../contracts/socialV1';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { touchActiveAccount, AccountReferenceUnavailableError } from '../../services/accountReferenceFenceService';
@@ -15,7 +15,8 @@ import type { SocialBudgetDocument, SocialProfileDocument, SocialReceiptDocument
 import type { RoomDocument, RoomInvitationDocument, RoomMemberDocument, RoomParticipationDocument, RoomQueueEntryDocument } from '../../repositories/social/roomDocuments';
 import { readSocialToken } from '../social/socialTokens';
 import { SOCIAL_TRANSACTION_ATTEMPTS, waitForSocialTransactionRetry } from '../social/socialTransactionRetry';
-import { closeRoom, deleteRoomInvitations, incrementRoomVersion, invalidateInvitationAccounts, pauseRoom, persistRoom, removeRoomMember, roomPositionAt } from './roomLifecycle';
+import { suppressRoomListening } from '../social/listeningLifecycle';
+import { appendRoomEvent, closeRoom, deleteRoomInvitations, incrementRoomVersion, invalidateInvitationAccounts, pauseRoom, persistRoom, removeRoomMember, roomPositionAt } from './roomLifecycle';
 
 export interface RoomServiceOptions {
     now?: () => number;
@@ -146,10 +147,10 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         if (safeRoom(room) && room.members.some(value => value.accountId === accountId && value.membershipId === slot.membershipId)) return fail('already_in_room');
         await slots().deleteOne({ _id: accountId, roomId: slot.roomId, membershipId: slot.membershipId }, { session });
     };
-    const queueEntry = async (id: string, session: ClientSession): Promise<RoomQueueEntryDocument> => {
-        const value = await resolveMedia(id, session);
+    const queueEntry = async (id: string, session: ClientSession, expectedRevision?: string): Promise<RoomQueueEntryDocument> => {
+        const value = expectedRevision ? await touchMedia(id, expectedRevision, session) : await resolveMedia(id, session);
         if (!value || !Number.isSafeInteger(value.durationMs) || value.durationMs < 1 || value.durationMs > 86_400_000) return fail('room_media_unavailable', 404);
-        if (!await touchMedia(id, value.mediaRevision, session)) return fail('room_media_unavailable', 404);
+        if (!expectedRevision && !await touchMedia(id, value.mediaRevision, session)) return fail('room_media_unavailable', 404);
         return { ...value, title: [...value.title].slice(0, 160).join(''), entryId: identifier('e') };
     };
     const verifyEntry = async (entry: RoomQueueEntryDocument, session: ClientSession) => {
@@ -204,6 +205,41 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         return result;
     };
 
+    /** Attribution is resolved from current membership and active cards, never copied historical profiles. */
+    const communityProjection = async (room: RoomDocument, actor: RoomActor, session: ClientSession): Promise<RoomCommunity> => {
+        member(room, actor);
+        if ((room.songRequests?.length ?? 0) > ROOM_LIMITS.songRequests || room.queue.length > ROOM_LIMITS.queue) return fail('room_snapshot_too_large', 503);
+        const rows = await profiles().find({ accountId: { $in: room.members.map(value => value.accountId) }, active: true }, { session }).toArray();
+        const cardFor = (membershipId: string | undefined) => {
+            const current = room.members.find(value => value.membershipId === membershipId);
+            const social = current && rows.find(value => value.accountId === current.accountId && value._id === current.socialId);
+            return social ? { socialId: social._id, handle: social.handle, alias: social.alias, iconSeed: social._id } : null;
+        };
+        const requests: RoomCommunity['requests'] = [];
+        for (const request of room.songRequests ?? []) {
+            const requestedBy = cardFor(request.requesterMembershipId);
+            if (!requestedBy) continue;
+            const media = await resolveMedia(request.mediaTrackId, session);
+            if (!media || media.mediaRevision !== request.mediaRevision) continue;
+            requests.push({ requestId: request.requestId, mediaTrackId: request.mediaTrackId, title: request.title,
+                requestedBy, createdAtMs: request.createdAt.getTime() });
+        }
+        const result: RoomCommunity = { roomId: room._id, epoch: room.epoch, revision: room.revision, requests,
+            queueCredits: room.queue.map(entry => ({ entryId: entry.entryId, requestedBy: cardFor(entry.requesterMembershipId) })), events: [] };
+        if (Buffer.byteLength(JSON.stringify(result)) > ROOM_LIMITS.snapshotBytes) return fail('room_snapshot_too_large', 503);
+        // Required requests and credits keep their budget. Optional notices retain the newest
+        // contiguous suffix that fits, measured as encoded bytes rather than character count.
+        for (const event of (room.events ?? []).slice(-ROOM_LIMITS.events).reverse()) {
+            if (event.expiresAt.getTime() <= now()) continue;
+            const actorCard = event.actorMembershipId === null ? null : cardFor(event.actorMembershipId);
+            if (event.actorMembershipId !== null && !actorCard) continue;
+            result.events.unshift({ eventId: event.eventId, kind: event.kind, actor: actorCard, reaction: event.reaction,
+                createdAtMs: event.createdAt.getTime(), expiresAtMs: event.expiresAt.getTime() });
+            if (Buffer.byteLength(JSON.stringify(result)) > ROOM_LIMITS.snapshotBytes) { result.events.shift(); break; }
+        }
+        return result;
+    };
+
     const plan = async (actor: RoomActor, command: RoomCommand, session: ClientSession, epoch: number | null): Promise<Planned> => {
         const own = await profile(actor.userId, session);
         if (command.action === 'create') {
@@ -212,10 +248,12 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             const queue: RoomQueueEntryDocument[] = [];
             for (const id of command.mediaTrackIds) queue.push(await queueEntry(id, session));
             const first = newMember(actor, own._id);
+            for (const entry of queue) entry.requesterMembershipId = first.membershipId;
             const room: RoomDocument = { _id: identifier('r'), state: 'open', epoch: epoch!, revision: 1, hostMembershipId: first.membershipId,
-                controlMode: 'hostOnly', controlGeneration: 1, queueRevision: 1, playbackGeneration: 1, members: [first], queue,
+                controlMode: 'hostOnly', controlGeneration: 1, queueRevision: 1, playbackGeneration: 1, members: [first], queue, songRequests: [],
                 timeline: { entryId: queue[0].entryId, state: 'paused', positionMs: 0, anchorServerTimeMs: now() }, preparation: null,
                 transfer: null, hostAbsentSince: null, hostSuspended: false, createdAt: new Date(now()), expiresAt: new Date(now() + ROOM_LIMITS.invitationMs) };
+            appendRoomEvent(room, 'joined', first.membershipId, now());
             await projection(room, actor, session);
             return { outcome: 'applied', write: async () => {
                 await rooms().insertOne(room, { session });
@@ -235,6 +273,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             await cleanSlot(actor.userId, session);
             const added = newMember(actor, own._id);
             room.members.push(added);
+            appendRoomEvent(room, 'joined', added.membershipId, now());
             await projection(room, actor, session);
             return { outcome: 'applied', write: async () => {
                 await slots().insertOne({ _id: actor.userId, roomId: room._id, membershipId: added.membershipId }, { session });
@@ -249,6 +288,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         const isHost = me.membershipId === room.hostMembershipId;
         for (const version of [room.revision, room.playbackGeneration, room.controlGeneration, room.queueRevision]) incrementRoomVersion(version);
         const changed = (write: () => Promise<void> = () => persistRoom(room, session, now())): Planned => ({ outcome: 'applied', write });
+        const communityChanged = (): Planned => changed();
         if (command.action === 'leave') {
             if (isHost) return fail('host_exit_required');
             return changed(() => removeRoomMember(room, me.membershipId, session, now()));
@@ -263,9 +303,45 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             if (!room.members.some(value => value.membershipId === command.targetMemberId)) return noop();
             return changed(() => removeRoomMember(room, command.targetMemberId, session, now()));
         }
+        if (command.action === 'dismissSongRequest') {
+            const request = (room.songRequests ?? []).find(value => value.requestId === command.requestId);
+            if (!request) return noop();
+            if (request.requesterMembershipId !== me.membershipId && (!isHost || !controls(me, actor))) return fail('room_forbidden', 403);
+            room.songRequests = room.songRequests!.filter(value => value.requestId !== command.requestId);
+            return communityChanged();
+        }
         if (epoch !== null && room.epoch !== epoch) return fail('stale_epoch');
+        if (command.action === 'react') {
+            if (command.expectedEpoch !== room.epoch) return fail('stale_epoch');
+            if (room.hostSuspended) return fail('host_absent');
+            const minute = Math.floor(now() / 60_000);
+            const budget = await budgets().findOne({ _id: actor.userId }, { session });
+            const accountCount = budget?.roomReactionMinute === minute ? budget.roomReactions ?? 0 : 0;
+            const roomCount = room.reactionMinute === minute ? room.reactions ?? 0 : 0;
+            if (!Number.isSafeInteger(accountCount) || accountCount < 0 || !Number.isSafeInteger(roomCount) || roomCount < 0) return fail('room_unavailable', 503);
+            if (accountCount >= ROOM_LIMITS.reactionsPerAccountMinute || roomCount >= ROOM_LIMITS.reactionsPerRoomMinute) return fail('room_reaction_limit', 429);
+            room.reactionMinute = minute; room.reactions = roomCount + 1;
+            appendRoomEvent(room, 'reaction', me.membershipId, now(), command.reaction);
+            return changed(async () => {
+                await budgets().updateOne({ _id: actor.userId }, { $set: { accountId: actor.userId,
+                    roomReactionMinute: minute, roomReactions: accountCount + 1 } }, { upsert: true, session });
+                await persistRoom(room, session, now());
+            });
+        }
+        if (command.action === 'requestSong') {
+            if (command.expectedEpoch !== room.epoch) return fail('stale_epoch');
+            const pending = room.songRequests ?? [];
+            if (pending.some(value => value.requesterMembershipId === me.membershipId && value.mediaTrackId === command.mediaTrackId)) return noop();
+            if (pending.length >= ROOM_LIMITS.songRequests
+                || pending.filter(value => value.requesterMembershipId === me.membershipId).length >= ROOM_LIMITS.songRequestsPerMember) return fail('room_request_capacity', 429);
+            const entry = await queueEntry(command.mediaTrackId, session);
+            room.songRequests = [...pending, { requestId: identifier('q'), requesterMembershipId: me.membershipId,
+                mediaTrackId: entry.mediaTrackId, mediaRevision: entry.mediaRevision, title: entry.title, createdAt: new Date(now()) }];
+            return communityChanged();
+        }
         if (command.action === 'takeControl') {
             if (controls(me, actor)) return noop();
+            const previousController = { ...me };
             me.controllerSessionId = actor.sessionId; me.controllerClientId = actor.clientId;
             me.controllerGeneration = incrementRoomVersion(me.controllerGeneration); me.lastSeenAt = new Date(now());
             me.connectionPresent = false; me.locallyPaused = false; me.readyPlaybackGeneration = undefined;
@@ -273,7 +349,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             room.transfer = null;
             if (room.preparation) pauseRoom(room, now());
             if (isHost) room.hostAbsentSince = new Date(now());
-            return changed();
+            return changed(async () => { await suppressRoomListening(room._id, previousController, session); await persistRoom(room, session, now()); });
         }
         if (!controls(me, actor)) return fail('stale_controller');
         if (command.action === 'invite') {
@@ -317,6 +393,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             room.hostMembershipId = me.membershipId; room.controlGeneration = incrementRoomVersion(room.controlGeneration);
             room.transfer = null; room.hostAbsentSince = null;
             if (room.preparation) pauseRoom(room, now());
+            appendRoomEvent(room, 'hostChanged', me.membershipId, now());
             return changed(async () => {
                 await deleteRoomInvitations({ roomId: room._id, senderAccountId: previousHost.accountId }, session, now());
                 await removeRoomMember(room, previousHost.membershipId, session, now());
@@ -330,7 +407,35 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             if (!isHost) return fail('room_forbidden', 403);
             if (command.mode === room.controlMode) return noop();
             room.controlMode = command.mode; room.controlGeneration = incrementRoomVersion(room.controlGeneration); room.transfer = null;
+            appendRoomEvent(room, 'modeChanged', me.membershipId, now());
             return changed();
+        }
+        if (command.action === 'acceptSongRequest' || command.action === 'removeQueueEntry' || command.action === 'reorderQueue') {
+            if (!isHost) return fail('room_forbidden', 403);
+            if (command.expectedPlaybackGeneration !== room.playbackGeneration || command.expectedEntryId !== room.timeline.entryId) return fail('stale_playback');
+            if (command.expectedQueueRevision !== room.queueRevision) return fail('stale_queue');
+            if (command.action === 'acceptSongRequest') {
+                const request = (room.songRequests ?? []).find(value => value.requestId === command.requestId);
+                if (!request || !room.members.some(value => value.membershipId === request.requesterMembershipId)) return fail('room_request_unavailable', 404);
+                if (room.queue.length >= ROOM_LIMITS.queue) return fail('room_queue_capacity', 429);
+                const entry = await queueEntry(request.mediaTrackId, session, request.mediaRevision);
+                entry.requesterMembershipId = request.requesterMembershipId;
+                room.queue.push(entry);
+                room.songRequests = room.songRequests!.filter(value => value.requestId !== request.requestId);
+            } else if (command.action === 'removeQueueEntry') {
+                if (command.targetEntryId === room.timeline.entryId) return fail('current_entry_required');
+                if (!room.queue.some(value => value.entryId === command.targetEntryId)) return fail('entry_unavailable');
+                if (room.queue.length <= 1) return fail('room_queue_empty');
+                room.queue = room.queue.filter(value => value.entryId !== command.targetEntryId);
+            } else {
+                if (command.entryIds.length !== room.queue.length || command.entryIds.some(id => !room.queue.some(value => value.entryId === id))) return fail('queue_entries_changed');
+                if (command.entryIds.every((id, index) => id === room.queue[index].entryId)) return noop();
+                const entries = new Map(room.queue.map(value => [value.entryId, value]));
+                room.queue = command.entryIds.map(id => entries.get(id)!);
+            }
+            room.queueRevision = incrementRoomVersion(room.queueRevision);
+            await projection(room, actor, session);
+            return communityChanged();
         }
         if (!isHost && room.controlMode !== 'everyone') return fail('room_forbidden', 403);
         if (command.expectedPlaybackGeneration !== room.playbackGeneration || command.expectedEntryId !== room.timeline.entryId) return fail('stale_playback');
@@ -357,7 +462,9 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             if (room.timeline.state === 'playing') return noop();
             if (position >= target.durationMs) position = 0;
         }
-        await verifyEntry(target, session); prepare(room, target, position); return changed();
+        await verifyEntry(target, session);
+        if (target.entryId !== room.timeline.entryId) appendRoomEvent(room, 'trackChanged', me.membershipId, now());
+        prepare(room, target, position); return changed();
     };
 
     const affectedAccounts = async (command: RoomCommand, session: ClientSession) => {
@@ -394,6 +501,16 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 const room = await rooms().findOne({ _id: roomId }, { session });
                 if (!safeRoom(room) || !room.members.some(value => value.accountId === actor.userId)) return null;
                 await profile(actor.userId, session); return projection(room, actor, session);
+            });
+        },
+        async community(actor, roomId) {
+            if (!isRoomIdentifier(roomId)) return fail('invalid_request', 400);
+            return transaction(actor, async session => {
+                const room = await rooms().findOne({ _id: roomId }, { session });
+                if (!safeRoom(room)) return fail('room_unavailable', 404);
+                member(room, actor);
+                await profile(actor.userId, session);
+                return communityProjection(room, actor, session);
             });
         },
         async invitations(actor) {
@@ -457,7 +574,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             const original = scope(actor, command.scopeToken);
             const receiptId = hash(JSON.stringify([actor.userId, original.id, command.commandId]));
             const digest = hash(JSON.stringify(['room-v1', Object.keys(command).filter(key => key !== 'scopeToken').sort().map(key => [key, command[key as keyof RoomCommand]])]));
-            const safety = ['leave', 'end', 'kick', 'declineInvitation', 'cancelTransfer', 'pause'].includes(command.action);
+            const safety = ['leave', 'end', 'kick', 'declineInvitation', 'cancelTransfer', 'pause', 'dismissSongRequest'].includes(command.action);
             const result = await transaction(actor, async session => {
                 const currentScope = scope(actor, command.scopeToken);
                 const receipt = await receipts().findOne({ _id: receiptId }, { session });
@@ -498,6 +615,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 visible = !wasConnected || me.locallyPaused !== report.locallyPaused;
                 if (room.epoch !== epoch) { room.epoch = epoch; pauseRoom(room, now()); visible = true; }
                 me.lastSeenAt = new Date(now()); me.connectionPresent = true; me.locallyPaused = report.locallyPaused;
+                if (report.locallyPaused) await suppressRoomListening(room._id, me, session);
                 if (report.locallyPaused && me.readyPlaybackGeneration != null) { me.readyPlaybackGeneration = undefined; visible = true; }
                 if (me.membershipId === room.hostMembershipId && room.hostAbsentSince) { room.hostAbsentSince = null; visible = true; }
                 if (room.preparation && finishPreparation(room)) visible = true;
@@ -551,6 +669,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 const me = member(room, actor); if (!controls(me, actor) || !me.connectionPresent) return;
                 me.connectionPresent = false;
                 me.readyPlaybackGeneration = undefined;
+                await suppressRoomListening(room._id, me, session);
                 if (me.membershipId === room.hostMembershipId) {
                     room.hostAbsentSince = me.lastSeenAt;
                     if (room.preparation) pauseRoom(room, now());
@@ -562,8 +681,8 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         async sweep() {
             // Capture a timer's observed playback identity before retries: a losing timer
             // must never reinterpret a newly committed user selection as its own target.
-            const candidates = await rooms().find({ state: 'open' }).project<Pick<RoomDocument, '_id' | 'epoch' | 'playbackGeneration' | 'timeline'>>(
-                { _id: 1, epoch: 1, playbackGeneration: 1, timeline: 1 }).limit(ROOM_LIMITS.activeRooms + 1).toArray();
+            const candidates = await rooms().find({ state: 'open' }).project<Pick<RoomDocument, '_id' | 'epoch' | 'playbackGeneration' | 'queueRevision' | 'timeline'>>(
+                { _id: 1, epoch: 1, playbackGeneration: 1, queueRevision: 1, timeline: 1 }).limit(ROOM_LIMITS.activeRooms + 1).toArray();
             if (candidates.length > ROOM_LIMITS.activeRooms) return fail('room_capacity', 503);
             let visible = false;
             for (const candidate of candidates) {
@@ -573,6 +692,8 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 const room = await rooms().findOne({ _id: candidate._id }, { session }); if (!room || room.state !== 'open') return;
                 if (room.expiresAt.getTime() <= now()) { await closeRoom(room, session, now()); visible = true; return; }
                 let changed = false;
+                const recentEvents = (room.events ?? []).filter(event => event.expiresAt.getTime() > now());
+                if (recentEvents.length !== (room.events?.length ?? 0)) { room.events = recentEvents; changed = true; }
                 if (room.epoch !== epoch) { room.epoch = epoch; pauseRoom(room, now()); changed = true; }
                 if (!enabled() && room.timeline.state !== 'paused') { pauseRoom(room, now()); changed = true; }
                 for (const value of room.members) {
@@ -599,12 +720,14 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 }
                 if (room.preparation && finishPreparation(room)) changed = true;
                 if (enabled() && room.epoch === candidate.epoch && room.playbackGeneration === candidate.playbackGeneration
+                    && room.queueRevision === candidate.queueRevision
                     && room.timeline.entryId === candidate.timeline.entryId && candidate.timeline.state === 'playing'
                     && room.timeline.state === 'playing' && current && roomPositionAt(room, now()) >= current.durationMs && hostPresent(room)) {
                     const next = room.queue[room.queue.indexOf(current) + 1];
                     if (next && !next.unavailable) {
                         const media = await touchMedia(next.mediaTrackId, next.mediaRevision, session);
-                        if (media) prepare(room, next, 0); else { next.unavailable = true; pauseRoom(room, now()); }
+                        if (media) { appendRoomEvent(room, 'trackChanged', null, now()); prepare(room, next, 0); }
+                        else { next.unavailable = true; pauseRoom(room, now()); }
                     } else { pauseRoom(room, now()); room.timeline.state = 'ended'; }
                     changed = true;
                 }

@@ -4,6 +4,8 @@ import { SOCIAL_LIMITS } from '../contracts/socialV1';
 import { getDb } from '../infrastructure/database';
 import type { SocialOutboxDocument, SocialRelationshipDocument } from '../repositories/social/socialDocuments';
 import { applyRoomSafety } from '../application/rooms/roomLifecycle';
+import { deleteMusicShares } from '../application/social/socialShareLifecycle';
+import { clearListeningAccount } from '../application/social/listeningLifecycle';
 
 /**
  * Removes social identity in the account-deletion transaction after its existing
@@ -17,6 +19,8 @@ export const deleteSocialAccountData = async (
 ): Promise<void> => {
     if (!session.inTransaction()) throw new Error('Social account cleanup requires its account-deletion transaction.');
     const db = getDb()!;
+    await clearListeningAccount(accountId, session, now.getTime(), true);
+    await deleteMusicShares({ accountIds: accountId }, session, now.getTime());
     await applyRoomSafety({ kind: 'delete', accountId }, session, now.getTime());
     const relationships = await db.collection<SocialRelationshipDocument>('socialRelationships')
         .find({ accountIds: accountId }, { session, projection: { accountIds: 1 } })

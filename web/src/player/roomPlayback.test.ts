@@ -3,6 +3,7 @@ import { createPlayerStore } from './playerStore';
 import type { PlayerAudio, PlayerMediaSession, PlayerMediaSessionAction, PlayerMediaSessionActionDetails, PlayerQueueItem } from './types';
 import type { RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
 import { createRoomPlaybackController } from './roomPlayback';
+import { createActualPlaybackObserver, type ActualPlaybackObservation } from './actualPlayback';
 
 /** Explicit browser state controls distinguish metadata, seek completion, and actual start. */
 class RoomAudio implements PlayerAudio {
@@ -90,6 +91,28 @@ test('ordinary player construction requires an explicit room controller to attac
   const store = createPlayerStore({ mediaSession: null });
   expect(() => store.attachRoomPlayback({ onIntent: vi.fn() })).toThrow('authorized room controller');
   store.destroy();
+});
+
+test('room listening observations require actual ready playback and retain occurrence through queue-only snapshots', async () => {
+  const { audio, room, store, onIntent } = setup();
+  const observations: ActualPlaybackObservation[] = [];
+  const stop = createActualPlaybackObserver(store, event => observations.push(event), { now: () => 10000 + performance.now() });
+  const preparing = { ...frame(0), status: 'preparing' as const, playbackAllowed: false, anchorMonotonicMs: 10000 };
+  await room.apply(preparing); audio.ready();
+  expect(observations).toEqual([]);
+  const playing = { ...preparing, revision: 2, status: 'playing' as const, playbackAllowed: true };
+  await room.apply(playing);
+  const first = observations.find(event => 'sample' in event);
+  expect(first).toMatchObject({ type: 'playing', sample: { intentId: 0, mediaTrackId: queue[0].id,
+    room: { roomId: preparing.roomId, epoch: preparing.epoch, playbackEpoch: preparing.playbackEpoch, entryId: preparing.currentEntryId } } });
+  await room.apply({ ...playing, revision: 3, queueRevision: 2 });
+  expect(observations.filter(event => event.type === 'stopped')).toEqual([]);
+  await room.apply({ ...playing, revision: 1, currentEntryId: 'entry-b' });
+  audio.currentTime += .5; audio.emit('timeupdate');
+  expect(observations.at(-1)).toMatchObject({ type: 'progress', sample: { room: { entryId: preparing.currentEntryId } } });
+  expect(onIntent).not.toHaveBeenCalled();
+  room.pauseLocally(); expect(observations.at(-1)?.type).toBe('stopped');
+  stop(); store.destroy();
 });
 
 test('preparation completion keeps its generation and starts only at the future server anchor', async () => {
@@ -535,6 +558,29 @@ test('newer revisions cannot roll generations backward or change a timeline with
   expect(store.getSnapshot().queue[0].id).toBe(queue[2].id);
   expect(audio.loadCalls).toBe(loads);
   expect(audio.playCalls).toBe(plays);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test.each([false, true])('accepted song requests and queue edits preserve playback and local pause=%s without echo', async locallyPaused => {
+  const { room, store, audio, onIntent } = setup();
+  const initial = { ...frame(5), queueRevision: 3 };
+  await room.apply(initial); audio.ready(); await Promise.resolve();
+  if (locallyPaused) room.pauseLocally();
+  const before = { loads: audio.loadCalls, plays: audio.playCalls, currentTime: audio.currentTime,
+    currentItem: store.getSnapshot().currentItem?.id, paused: audio.paused };
+  const added = { ...queue[2], id: '000000000000000000000004', title: 'd', streamUrl: '/synthetic/d.wav' };
+  const entries = [...queue, added];
+  const ids = ['entry-a', 'entry-b', 'entry-c', 'entry-d'];
+  expect(await room.apply({ ...initial, revision: 10, queueRevision: 4, queue: entries, entryIds: ids })).toBe(true);
+  expect(await room.apply({ ...initial, revision: 11, queueRevision: 5,
+    queue: [...entries].reverse(), entryIds: [...ids].reverse() })).toBe(true);
+  const keep = ids.map((id, index) => ({ id, item: entries[index] })).filter(value => value.id !== 'entry-a');
+  expect(initial.currentEntryId).not.toBe('entry-a');
+  expect(await room.apply({ ...initial, revision: 12, queueRevision: 6,
+    queue: keep.map(value => value.item), entryIds: keep.map(value => value.id) })).toBe(true);
+  expect({ loads: audio.loadCalls, plays: audio.playCalls, currentTime: audio.currentTime,
+    currentItem: store.getSnapshot().currentItem?.id, paused: audio.paused }).toEqual(before);
   expect(onIntent).not.toHaveBeenCalled();
   store.destroy();
 });

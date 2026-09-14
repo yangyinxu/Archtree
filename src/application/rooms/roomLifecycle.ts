@@ -1,11 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import { ObjectId, type ClientSession, type Filter } from 'mongodb';
-import { ROOM_LIMITS } from '../../contracts/roomV1';
+import { ROOM_LIMITS, type RoomCommunityEvent, type RoomReaction } from '../../contracts/roomV1';
 import { SocialError } from '../../contracts/socialV1';
 import { getDb } from '../../infrastructure/database';
 import type { RoomDocument, RoomInvitationDocument, RoomOutboxDocument } from '../../repositories/social/roomDocuments';
 import type { SocialOutboxDocument } from '../../repositories/social/socialDocuments';
+import { suppressRoomListening } from '../social/listeningLifecycle';
 
-/** Invitation recipients need a private refresh signal even before they become room members. */
+/** Invitations publish only private, coalesced account refresh signals. */
 export const invalidateInvitationAccounts = async (accountIds: string[], session: ClientSession, now: number): Promise<void> => {
     if (!session.inTransaction()) throw new Error('Invitation invalidation requires a transaction.');
     const outbox = getDb()!.collection<SocialOutboxDocument>('socialOutbox');
@@ -45,6 +47,15 @@ export const pauseRoom = (room: RoomDocument, now: number): void => {
     room.playbackGeneration = incrementRoomVersion(room.playbackGeneration);
 };
 
+/** Notices are appended by accepted action branches, never by generic persistence or delivery. */
+export const appendRoomEvent = (room: RoomDocument, kind: RoomCommunityEvent['kind'], actorMembershipId: string | null,
+    now: number, reaction: RoomReaction | null = null): void => {
+    room.events = [...(room.events ?? []).filter(event => event.expiresAt.getTime() > now
+        && (event.actorMembershipId === null || room.members.some(member => member.membershipId === event.actorMembershipId))),
+    { eventId: `ev_${randomBytes(16).toString('hex')}`, kind, actorMembershipId, reaction,
+        createdAt: new Date(now), expiresAt: new Date(now + ROOM_LIMITS.eventMs) }].slice(-ROOM_LIMITS.events);
+};
+
 /** Persists one complete state and an invalidation without retaining a private historical snapshot. */
 export const persistRoom = async (room: RoomDocument, session: ClientSession, now: number): Promise<void> => {
     if (!session.inTransaction()) throw new Error('Room persistence requires a transaction.');
@@ -61,10 +72,11 @@ export const closeRoom = async (room: RoomDocument, session: ClientSession, now:
     if (room.state === 'closed') return;
     const db = getDb()!;
     await db.collection('socialRoomParticipation').deleteMany({ roomId: room._id }, { session });
+    for (const member of room.members) await suppressRoomListening(room._id, member, session);
     await deleteRoomInvitations({ roomId: room._id }, session, now);
     pauseRoom(room, now);
     room.state = 'closed'; room.closedAt = new Date(now);
-    room.members = []; room.queue = []; room.transfer = null;
+    room.members = []; room.queue = []; room.songRequests = []; room.events = []; room.transfer = null;
     room.hostMembershipId = ''; room.hostAbsentSince = null;
     room.timeline = { entryId: '', state: 'ended', positionMs: 0, anchorServerTimeMs: now };
     await persistRoom(room, session, now);
@@ -75,8 +87,12 @@ export const removeRoomMember = async (room: RoomDocument, memberId: string, ses
     const member = room.members.find(value => value.membershipId === memberId);
     if (!member) return;
     if (room.hostMembershipId === memberId) return closeRoom(room, session, now);
+    await suppressRoomListening(room._id, member, session);
     await getDb()!.collection('socialRoomParticipation').deleteOne({ _id: member.accountId, roomId: room._id, membershipId: memberId }, { session });
     room.members = room.members.filter(value => value.membershipId !== memberId);
+    room.songRequests = (room.songRequests ?? []).filter(value => value.requesterMembershipId !== memberId);
+    room.events = (room.events ?? []).filter(value => value.actorMembershipId !== memberId);
+    for (const entry of room.queue) if (entry.requesterMembershipId === memberId) delete entry.requesterMembershipId;
     if (room.transfer?.targetMembershipId === memberId) room.transfer = null;
     if (room.preparation) room.preparation.cohort = room.preparation.cohort.filter(value => value.membershipId !== memberId);
     await persistRoom(room, session, now);
@@ -141,12 +157,17 @@ export const applyRoomSafety = async (change: RoomSafetyChange, session: ClientS
 export const invalidateRoomsForMedia = async (mediaTrackId: string, session: ClientSession, now = Date.now()): Promise<void> => {
     if (!session.inTransaction()) throw new Error('Room media invalidation requires a transaction.');
     const rooms = await getDb()!.collection<RoomDocument>('socialRooms')
-        .find({ state: 'open', 'queue.mediaTrackId': mediaTrackId }, { session }).limit(ROOM_LIMITS.activeRooms + 1).toArray();
+        .find({ state: 'open', $or: [{ 'queue.mediaTrackId': mediaTrackId }, { 'songRequests.mediaTrackId': mediaTrackId }] }, { session })
+        .limit(ROOM_LIMITS.activeRooms + 1).toArray();
     if (rooms.length > ROOM_LIMITS.activeRooms) throw new SocialError(503, 'room_unavailable');
     for (const room of rooms) {
-        room.queue.forEach(entry => { if (entry.mediaTrackId === mediaTrackId) entry.unavailable = true; });
-        if (room.queue.some(entry => entry.entryId === room.timeline.entryId && entry.mediaTrackId === mediaTrackId)) pauseRoom(room, now);
-        room.queueRevision = incrementRoomVersion(room.queueRevision);
+        const queued = room.queue.some(entry => entry.mediaTrackId === mediaTrackId);
+        room.songRequests = (room.songRequests ?? []).filter(request => request.mediaTrackId !== mediaTrackId);
+        if (queued) {
+            room.queue.forEach(entry => { if (entry.mediaTrackId === mediaTrackId) entry.unavailable = true; });
+            if (room.queue.some(entry => entry.entryId === room.timeline.entryId && entry.mediaTrackId === mediaTrackId)) pauseRoom(room, now);
+            room.queueRevision = incrementRoomVersion(room.queueRevision);
+        }
         await persistRoom(room, session, now);
     }
 };

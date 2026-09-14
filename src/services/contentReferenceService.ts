@@ -6,6 +6,8 @@ import { readyArtistLifecycleFilter } from './artistReferenceFenceService';
 import { readyAlbumLifecycleFilter } from './albumReferenceFenceService';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { readyOrganizationLifecycleFilter } from './organizationReferenceFenceService';
+import { cleanupMusicSharesForContent } from '../application/social/socialShareLifecycle';
+import { cleanupListeningForContent } from '../application/social/listeningLifecycle';
 
 export type ContentReferenceType = 'artist' | 'album' | 'audioTrack';
 type ValidatedContentReferenceType = ContentReferenceType | 'organization';
@@ -217,6 +219,8 @@ export const cleanupDeletedContentReferences = async (
         );
     } else {
         const contentType = type;
+        if (contentType === 'audioTrack') operations.push(cleanupListeningForContent(canonicalContentId));
+        operations.push(cleanupMusicSharesForContent(contentType, canonicalContentId));
         const matchingItem = {
             contentType,
             contentId: { $in: referenceIds }

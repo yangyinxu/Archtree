@@ -20,10 +20,11 @@ recovery, and catalog reconciliation are documented in
 
 The transactional identity/friendship API is mounted at `/api/social/v1`.
 `FINITUDE_SOCIAL_ENABLED=true` explicitly enables profile creation/reactivation,
-profile edits, new requests and acceptance; it defaults to false in all
-environments. Reads, deny-only discovery opt-out, removal, cancellation,
-block/unblock, deactivation and outcome lookup remain available while admission
-is disabled. Account deletion always performs social cleanup.
+profile edits, new requests, acceptance, music sharing and listening publication;
+it defaults to false in all environments. Disabling admission hides listening
+status. Other reads, deny-only discovery opt-out, removal, cancellation,
+block/unblock, deactivation, share dismissal/withdrawal, listening opt-out/stops
+and outcome lookup remain available. Account deletion always performs social cleanup.
 
 The API requires a revocable authenticated session, current Web viewer and the
 existing same-origin cookie mutation checks. JSON bodies are limited to 4 KiB.
@@ -31,7 +32,7 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. Startup verifies the `required-indexes-v3-rooms` constraints before
+new scope after rotation. Startup verifies the `required-indexes-v4-social-participation` constraints before
 admission; these are additive schema changes even when the feature is disabled.
 
 See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
@@ -41,6 +42,22 @@ and `node --import tsx --test --test-concurrency=1 test/socialLifecycle.integrat
 The integration harness starts an isolated local MongoDB replica set; it does
 not connect to the configured application database. Full gates remain `npm test`,
 `npm run build` and `npm run test:integration`.
+
+Use **Share with a friend** on a track or Album to select an existing friend.
+**Together → Music shares** (`/finitude/social/shares`) shows private Received and
+Sent lists. A share lasts up to 30 days; repeating the same active share does not
+create another card. Play, Save and room invitations are explicit actions.
+Received cards can be dismissed and Sent cards withdrawn. Removing friendship or
+blocking clears the pair's shares. The same page remains available after login.
+
+In **Together**, **Share what I’m listening to** is off by default. Enable it to
+share fresh actual Audio playback with current friends, from both ordinary and
+room playback. **Share from this device** explicitly chooses the publishing
+device. **Listening with friends** refreshes while visible; status expires within
+25 seconds without fresh progress and stops on pause, buffering or opt-out.
+Viewing a status does not play anything. Invite a friend into a room you host,
+or explicitly confirm creation of a paused room with eligible Audio before
+sending the invitation. If invitation fails, the created room remains available.
 
 ## Listening rooms and local demonstration
 
@@ -77,6 +94,21 @@ the main button to listen again. Transfer and leave requires the recipient to ac
 closes it for every member. A refreshed tab observes until Use this device is
 selected. Browser autoplay refusal is surfaced with explicit resync rather than
 reported as successful playback.
+
+In **Song requests**, any admitted member can recommend an eligible Audio track,
+including an observer device and guests in Host control. The host's active
+controller adds requests to the queue or dismisses them; members can withdraw
+their own pending requests. The host can move queued songs earlier/later and
+remove a song after selecting another current entry. Appending and reordering
+preserve playback and local pause. Requester attribution reflects current room
+members only. There are at most five pending requests per member and 20 per room.
+
+**Room activity** offers five fixed emoji reactions to every admitted member,
+including observing devices. It shows brief confirmed join, song, host and
+control-mode changes. Events expire after 30 seconds and are cleared when their
+member departs or the room ends. Reactions do not change playback; repeated
+commands are deduplicated. The per-account limit is 12 reactions per minute,
+within a room-wide limit of 60.
 
 Active social profiles have a **Room invitations** bell throughout the Web
 listener. Its dot means there are pending invitations, not an unread-history
@@ -127,7 +159,7 @@ reconciliation tool.
 
 Run `npm test`, `npm run build`, `npm run test:integration`, and
 `npm run test:e2e:social --workspace @archtree/finitude-web` for the real
-MongoDB/S3/WebSocket browser flows. The room and invitation scenarios each own a
+MongoDB/S3/WebSocket browser flows. Each social scenario owns a
 disposable server, database and object store, including a separate rate-limit
 window. Keep the ordinary listener E2E gate for playback continuity, navigation
 and accessibility changes. The social E2E uses a disposable
@@ -265,7 +297,8 @@ Required variables:
 - `BROWSER_ALLOWED_ORIGINS`: optional comma-separated additional exact origins
   for cookie-authenticated browser mutations; same-origin requests are always
   accepted
-- `FINITUDE_SOCIAL_ENABLED`: set to `true` to enable social profile/friend admission; defaults to `false`
+- `FINITUDE_SOCIAL_ENABLED`: set to `true` to enable social profile/friend admission,
+  music sharing and opt-in listening publication; defaults to `false`
 - `FINITUDE_ROOMS_ENABLED`: set to `true` alongside social enablement to admit
   Audio rooms and realtime connections; defaults to `false`. Disabling pauses
   shared playback and closes realtime connections while preserving safety exits.

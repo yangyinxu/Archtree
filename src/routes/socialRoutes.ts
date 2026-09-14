@@ -4,6 +4,8 @@ import {
     exactSocialKeys, isSocialId, normalizeSocialHandle, parseSocialCommand, SOCIAL_LIMITS,
     SocialActor, SocialApi, SocialCard, SocialError, SocialListKind, SocialOutcome
 } from '../contracts/socialV1';
+import { MUSIC_SHARE_LIMITS, type MusicShareDirection } from '../contracts/socialMusicV1';
+import { LISTENING_LIMITS, parseListeningReport } from '../contracts/listeningV1';
 import {
     AuthenticatedRequest, requireAuth, requireCurrentAccountViewer
 } from '../middleware/authMiddleware';
@@ -87,6 +89,28 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
             ...card(profile), active: profile.active, discoverable: profile.discoverable, revision: profile.revision
         } });
     }));
+    router.get('/me/listening', asyncHandler(async (req, res) => {
+        noQuery(req);
+        const value = await api.ownListening(actor(req));
+        res.json({ listening: { enabled: value.enabled, revision: value.revision,
+            publisherRevision: value.publisherRevision, serverTimeMs: value.serverTimeMs } });
+    }));
+    router.post('/listening-publications/report', asyncHandler(async (req, res) => {
+        noQuery(req);
+        const report = parseListeningReport(req.body); if (!report) throw invalid();
+        const value = await api.reportListening(actor(req), report);
+        res.json({ accepted: value.accepted, serverTimeMs: value.serverTimeMs, expiresAtMs: value.expiresAtMs });
+    }));
+    router.post('/listening-status/query', asyncHandler(async (req, res) => {
+        noQuery(req);
+        if (!exactSocialKeys(req.body, ['socialIds']) || !Array.isArray(req.body.socialIds) || !req.body.socialIds.length
+            || req.body.socialIds.length > LISTENING_LIMITS.query || !req.body.socialIds.every(isSocialId)
+            || new Set(req.body.socialIds).size !== req.body.socialIds.length) throw invalid();
+        const values = await api.listeningStatuses(actor(req), [...req.body.socialIds]);
+        res.json({ items: values.map(value => ({ peer: card(value.peer), expiresAtMs: value.expiresAtMs,
+            track: { id: value.track.id, contentType: value.track.contentType, title: value.track.title,
+                artworkUrl: value.track.artworkUrl, artistNames: value.track.artistNames } })) });
+    }));
     router.get('/profiles', asyncHandler(async (req, res) => {
         if (!exactSocialKeys(req.query, ['handle'])) throw invalid();
         const handle = normalizeSocialHandle(req.query.handle);
@@ -117,20 +141,40 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
             socialId: relationship.socialId, state: relationship.state, revision: relationship.revision
         } });
     }));
+    router.get('/music-shares', asyncHandler(async (req, res) => {
+        if (!Object.keys(req.query).every(key => ['direction', 'limit', 'cursor'].includes(key))
+            || typeof req.query.direction !== 'string' || !['incoming', 'outgoing'].includes(req.query.direction)) throw invalid();
+        const rawLimit = req.query.limit;
+        if (rawLimit !== undefined && (typeof rawLimit !== 'string' || !/^[1-9]\d*$/.test(rawLimit))) throw invalid();
+        const limit = rawLimit === undefined ? MUSIC_SHARE_LIMITS.page : Number(rawLimit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > MUSIC_SHARE_LIMITS.maximumPage) throw invalid();
+        const cursor = req.query.cursor;
+        if (cursor !== undefined && (typeof cursor !== 'string' || !cursor.length || Buffer.byteLength(cursor) > 512 || !/^[A-Za-z0-9_.-]+$/.test(cursor))) throw invalid();
+        const page = await api.musicShares(actor(req), req.query.direction as MusicShareDirection, limit, cursor as string | undefined);
+        res.json({ items: page.items.map(value => ({ shareId: value.shareId, peer: card(value.peer), contentType: value.contentType,
+            contentId: value.contentId, createdAtMs: value.createdAtMs, expiresAtMs: value.expiresAtMs,
+            content: value.content === null ? null : { id: value.content.id, contentType: value.content.contentType,
+                title: value.content.title, artworkUrl: value.content.artworkUrl, artistNames: value.content.artistNames } })), nextCursor: page.nextCursor });
+    }));
 
-    const mutate = (action: string, keys: string[], targetFromPath = false) => async (req: Request, res: Response) => {
+    const mutate = (action: string, keys: string[], targetFromPath = false, shareFromPath = false) => async (req: Request, res: Response) => {
         noQuery(req);
         if (!exactSocialKeys(req.body, ['scopeToken', 'commandId', ...keys])) throw invalid();
         const command = parseSocialCommand({
-            ...req.body, action, ...(targetFromPath ? { targetSocialId: req.params.socialId } : {})
+            ...req.body, action, ...(targetFromPath ? { targetSocialId: req.params.socialId } : {}), ...(shareFromPath ? { shareId: req.params.shareId } : {})
         });
         if (!command) throw invalid();
         // A durable rejected receipt is still a successful outcome response. Transport errors stay non-2xx.
         res.status(200).json(outcome(await api.mutate(actor(req), command)));
     };
     router.patch('/me/profile', asyncHandler(mutate('profile', ['handle', 'alias', 'discoverable', 'expectedRevision'])));
+    router.patch('/me/listening', asyncHandler(mutate('setListeningSharing', ['enabled', 'expectedRevision'])));
+    router.post('/listening-publications/claim', asyncHandler(mutate('claimListening', ['clientId', 'expectedPreferenceRevision', 'expectedPublisherRevision'])));
     router.post('/me/deactivate', asyncHandler(mutate('deactivate', [])));
     router.post('/friend-requests', asyncHandler(mutate('request', ['targetSocialId', 'expectedRevision'])));
+    router.post('/music-shares', asyncHandler(mutate('shareMusic', ['targetSocialId', 'expectedRevision', 'contentType', 'contentId'])));
+    router.post('/music-shares/:shareId/dismiss', asyncHandler(mutate('dismissMusicShare', [], false, true)));
+    router.post('/music-shares/:shareId/withdraw', asyncHandler(mutate('withdrawMusicShare', [], false, true)));
     for (const action of ['accept', 'decline', 'cancel', 'remove', 'block', 'unblock']) {
         router.post(`/relationships/:socialId/${action}`,
             asyncHandler(mutate(action, action === 'block' ? [] : ['expectedRevision'], true)));

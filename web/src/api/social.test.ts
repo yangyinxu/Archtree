@@ -51,3 +51,39 @@ test('a response for a different account cannot populate social state', async ()
   })));
   await expect(getSocialProfile('viewer-1')).rejects.toMatchObject({ code: 'account_viewer_mismatch' });
 });
+
+test('listening preference and explicit publisher claims use immutable social receipts and their dedicated routes', async () => {
+  const identity = { scopeToken: 'synthetic-signed-scope-token', commandId: 'synthetic-command-01' };
+  const fetcher = vi.fn().mockImplementation(async () => reply({ commandId: identity.commandId, outcome: 'applied', replayed: false }));
+  vi.stubGlobal('fetch', fetcher);
+  await sendSocialCommand('viewer-1', { ...identity, action: 'setListeningSharing', enabled: false, expectedRevision: 2 });
+  expect(fetcher.mock.calls[0][0]).toBe('/api/social/v1/me/listening');
+  expect(fetcher.mock.calls[0][1].method).toBe('PATCH');
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ ...identity, enabled: false, expectedRevision: 2 });
+  await sendSocialCommand('viewer-1', { ...identity, action: 'claimListening', clientId: 'synthetic-client-01', expectedPreferenceRevision: 3, expectedPublisherRevision: 4 });
+  expect(fetcher.mock.calls[1][0]).toBe('/api/social/v1/listening-publications/claim');
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ ...identity, clientId: 'synthetic-client-01', expectedPreferenceRevision: 3, expectedPublisherRevision: 4 });
+});
+
+test.each(['audioTrack', 'album'] as const)('music sharing sends only the captured %s reference and friendship precondition', async contentType => {
+  const fetcher = vi.fn().mockResolvedValue(reply({ commandId: 'synthetic-command-01', outcome: 'applied', replayed: false }));
+  vi.stubGlobal('fetch', fetcher);
+  const command = { action: 'shareMusic' as const, contentType, contentId: 'a'.repeat(24), targetSocialId: profile.socialId,
+    expectedRevision: 2, scopeToken: 'synthetic-signed-scope-token', commandId: 'synthetic-command-01' };
+  await sendSocialCommand('viewer-1', command);
+  expect(fetcher.mock.calls[0][0]).toBe('/api/social/v1/music-shares');
+  const { action: _action, ...body } = command;
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual(body);
+});
+
+test.each([['dismissMusicShare', 'dismiss'], ['withdrawMusicShare', 'withdraw']] as const)('%s addresses the exact share incarnation with identity-only JSON', async (action, path) => {
+  const fetcher = vi.fn().mockResolvedValue(reply({ commandId: 'synthetic-command-01', outcome: 'applied', replayed: false }));
+  vi.stubGlobal('fetch', fetcher);
+  const identity = { scopeToken: 'synthetic-signed-scope-token', commandId: 'synthetic-command-01' };
+  const shareId = `ms_${'b'.repeat(32)}`;
+  await sendSocialCommand('viewer-1', { action, shareId, ...identity });
+  expect(fetcher.mock.calls[0][0]).toBe(`/api/social/v1/music-shares/${shareId}/${path}`);
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual(identity);
+  expect(() => sendSocialCommand('viewer-1', { action, shareId: '../other', ...identity })).toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

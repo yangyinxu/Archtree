@@ -39,6 +39,10 @@ export const createRoomRouter = (api: RoomApi = createRoomService()) => {
         if (!isRoomIdentifier(req.params.roomId)) throw invalid();
         res.json({ invitations: await api.outgoingInvitations(actor(req), req.params.roomId) });
     }));
+    router.get('/rooms/:roomId/community', asyncHandler(async (req, res) => {
+        if (!isRoomIdentifier(req.params.roomId)) throw invalid();
+        res.json({ community: await api.community(actor(req), req.params.roomId) });
+    }));
     router.get('/room-invitations', asyncHandler(async (req, res) => { res.json({ invitations: await api.invitations(actor(req)) }); }));
     router.get('/room-invitations/:invitationId', asyncHandler(async (req, res) => {
         if (!isRoomIdentifier(req.params.invitationId)) throw invalid();

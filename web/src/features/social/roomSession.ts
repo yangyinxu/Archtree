@@ -28,7 +28,7 @@ export const createRoomSession = () => {
   let socket: WebSocket | undefined;
   let attachment: RoomPlaybackAttachment | undefined;
   let attachedIdentity = '';
-  let refreshSocial: (kind: 'social' | 'rooms') => void = () => undefined;
+  let refreshSocial: (kind: 'social' | 'rooms' | 'community') => void = () => undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let opening = false;
@@ -143,8 +143,13 @@ export const createRoomSession = () => {
     const observed = snapshotVersion;
     try {
       const result = await getCurrentRoom(state.viewerId);
-      if (version === generation && current() && snapshotVersion === observed) acceptSnapshot(result.room, true);
-    } catch { if (version === generation && current() && snapshotVersion === observed) emit({ error: 'social.error' }); }
+      if (version !== generation || !current()) return false;
+      if (snapshotVersion === observed) acceptSnapshot(result.room, true);
+      return true;
+    } catch {
+      if (version === generation && current() && snapshotVersion === observed) emit({ error: 'social.error' });
+      return false;
+    }
   };
   const ping = (correctPlayback = true, acknowledged?: (confirmed: boolean) => void) => {
     const room = state.room;
@@ -214,16 +219,22 @@ export const createRoomSession = () => {
     } catch { if (version === generation && transport === transportGeneration && current()) emit({ connected: false, error: 'room.disconnected' }); }
     finally { if (version === generation && transport === transportGeneration) opening = false; }
   };
-  const settle = async (outcome: { outcome: string }) => {
-    emit({ uncertain: null, error: outcome.outcome === 'rejected' ? 'social.stale' : null });
-    refreshSocial('rooms');
-    await refresh();
+  const settle = async (outcome: { outcome: string; code?: string }, action?: RoomAction['action']) => {
+    const version = generation;
+    emit({ uncertain: null, error: outcome.outcome === 'rejected'
+      ? outcome.code === 'room_reaction_limit' ? 'room.reaction_limit' : 'social.stale' : null });
+    // Retire ended memberships before active query observers can refetch their former room.
+    const reconciled = await refresh();
+    if (!reconciled || version !== generation || !current()) return;
+    // Frequent room-only gestures must not refetch every invitation and friendship surface.
+    refreshSocial(['react', 'requestSong', 'dismissSongRequest', 'acceptSongRequest', 'removeQueueEntry', 'reorderQueue'].includes(action ?? '') ? 'community' : 'rooms');
     if (state.connected) ping();
   };
   const run = async (action?: RoomAction, retry?: RoomCommand) => {
     if (!current() || state.busy || (state.uncertain && !retry)) return;
-    const needsConnection = !['leave', 'end', 'declineInvitation'].includes((retry ?? action)!.action);
+    const needsConnection = !['leave', 'end', 'declineInvitation', 'dismissSongRequest'].includes((retry ?? action)!.action);
     if (needsConnection && !connectionFresh()) return;
+    if (!retry && ['create', 'acceptInvitation', 'takeControl', 'play', 'next', 'previous', 'seek', 'select'].includes(action!.action)) playerStore.notePlaybackIntent?.();
     const version = generation;
     const transport = transportGeneration;
     const resumeWasPaused = !retry && action?.action === 'play' && state.locallyPaused;
@@ -253,7 +264,7 @@ export const createRoomSession = () => {
       if (!retry && action?.action === 'play' && (!playStillCurrent() || !connectionFresh())) return;
       dispatched = true;
       const outcome = await sendRoomCommand(state.viewerId, command);
-      if (version === generation && current()) await settle(outcome);
+      if (version === generation && current()) await settle(outcome, command.action);
     } catch (error) {
       if (version !== generation || !current()) return;
       const unknown = command && isUncertainSocialFailure(error);
@@ -271,6 +282,7 @@ export const createRoomSession = () => {
   };
   const resync = async () => {
     if (!connectionFresh() || state.busy || state.uncertain || !state.room?.self.isController || state.room.status !== 'open') return;
+    playerStore.notePlaybackIntent?.();
     emit({ locallyPaused: false, error: null }); ping(); await attachment?.resync();
   };
   const controlIntent = (action: RoomAction) => {
@@ -298,7 +310,7 @@ export const createRoomSession = () => {
   return {
     getSnapshot: () => state,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    ensure(viewerId: string, onSocialChanged: (kind: 'social' | 'rooms') => void, options?: { realtimeEnabled: boolean }) {
+    ensure(viewerId: string, onSocialChanged: (kind: 'social' | 'rooms' | 'community') => void, options?: { realtimeEnabled: boolean }) {
       refreshSocial = onSocialChanged;
       const enabled = options?.realtimeEnabled ?? true;
       if (state.viewerId === viewerId && current()) {
@@ -337,11 +349,12 @@ export const createRoomSession = () => {
     retry: () => state.uncertain ? run(undefined, state.uncertain) : Promise.resolve(),
     async checkOutcome() {
       if (!state.uncertain || state.busy) return;
+      const action = state.uncertain.action;
       const version = generation; emit({ busy: true });
       try {
         const { getSocialOutcome } = await import('../../api/social');
         const result = await getSocialOutcome(state.viewerId, state.uncertain);
-        if (version === generation && current() && result.outcome) await settle(result.outcome);
+        if (version === generation && current() && result.outcome) await settle(result.outcome, action);
       } catch { if (version === generation && current()) emit({ error: 'social.unknown' }); }
       finally { if (version === generation) emit({ busy: false }); }
     }

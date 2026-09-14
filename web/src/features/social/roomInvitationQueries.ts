@@ -1,26 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRoomCapabilities, getRoomInvitations } from '../../api/rooms';
 import { roomSession } from './roomSession';
-
-/** Removes logically expired invitations even when TTL cleanup emits no realtime invalidation. */
-export const useInvitationNow = (expiresAtMs?: number) => {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const update = () => setNow(Date.now());
-    update();
-    const timer = expiresAtMs === undefined ? setInterval(update, 1000)
-      : setTimeout(update, Math.max(1, Math.min(2_147_483_647, expiresAtMs - Date.now() + 1)));
-    window.addEventListener('focus', update);
-    document.addEventListener('visibilitychange', update);
-    return () => {
-      clearTimeout(timer); clearInterval(timer);
-      window.removeEventListener('focus', update);
-      document.removeEventListener('visibilitychange', update);
-    };
-  }, [expiresAtMs]);
-  return now;
-};
+import { useInvitationNow } from './useInvitationNow';
+export { useInvitationNow } from './useInvitationNow';
 
 /** The shared, account-scoped preview backs both the global reminder and room surfaces. */
 export const useRoomInvitations = (viewerId: string) => {
@@ -48,9 +31,17 @@ export const useRoomInvitationConnection = (viewerId: string) => {
   useEffect(() => {
     if (!capabilities.data) return;
     roomSession.ensure(viewerId, kind => {
+      const state = roomSession.getSnapshot();
+      const room = state.viewerId === viewerId ? state.room : null;
       void client.invalidateQueries({ queryKey: ['social', viewerId], predicate: query => {
         const key = String(query.queryKey[2]);
-        return key === 'room-invitations' || key === 'room-invitation' || key === 'room-outgoing-invitations'
+        // React may not have unmounted the former room yet when the authoritative singleton changes.
+        if (key === 'room-community') return Boolean(room && room.status !== 'ended' && room.roomId === query.queryKey[3]
+          && room.epoch === query.queryKey[4] && room.self.memberId === query.queryKey[5]);
+        if (kind === 'community') return false;
+        if (key === 'room-outgoing-invitations') return Boolean(room && room.status === 'open' && room.roomId === query.queryKey[3]
+          && room.self.isController && room.hostMemberId === room.self.memberId);
+        return key === 'room-invitations' || key === 'room-invitation'
           || kind === 'social' && !key.startsWith('room-');
       } });
     }, { realtimeEnabled: capabilities.data.roomsEnabled });

@@ -81,7 +81,7 @@ test('mandatory index failure prevents migration success without disclosing data
 });
 
 test('essential social cleanup indexes must exist before startup can complete', async () => {
-  for (const collection of ['socialRelationships', 'socialHandles']) {
+  for (const collection of ['socialRelationships', 'socialHandles', 'socialMusicShares', 'socialListeningPublications']) {
     const fake = databaseDouble();
     fake.fail(collection);
     await assert.rejects(initializeDatabaseIndexes(fake.db), DatabaseIndexInitializationError);

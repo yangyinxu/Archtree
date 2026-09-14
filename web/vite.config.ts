@@ -22,6 +22,7 @@ export default defineConfig({
           return id.endsWith('/web/src/features/social/SocialPage.module.css')
             || id.endsWith('/web/src/api/socialSchemas.ts')
             || id.endsWith('/web/src/api/socialReadRequest.ts')
+            || id.endsWith('/web/src/api/roomClientId.ts')
             || id.endsWith('/web/src/api/socialFailure.ts') ? 'social-shared' : undefined;
         }
       }

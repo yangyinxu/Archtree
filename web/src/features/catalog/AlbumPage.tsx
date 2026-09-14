@@ -16,6 +16,7 @@ import styles from './CatalogPages.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { playerStore } from '../../player';
+import { LazyShareMusicButton } from '../social/LazyShareMusicButton';
 
 const creditRoleKeys: Record<string, MessageKey> = {
   primary: 'catalog.credit.primary',
@@ -137,6 +138,7 @@ export const AlbumPage = () => {
           </div>
         </div>
         <div className={`${styles.actions} ${styles.albumActions}`}>
+          <LazyShareMusicButton contentType="album" contentId={album.id} title={album.title} />
           <button
             aria-label={t('common.action.play')}
             className={styles.playButton}
@@ -235,6 +237,7 @@ export const AlbumPage = () => {
                     <span className={styles.duration}>{track.duration || ''}</span>
                   </button>
                   <span className={styles.trackTrailing}>
+                    <LazyShareMusicButton contentType="audioTrack" contentId={track.id} title={title} />
                     <AddTrackToPlaylistButton
                       accountPending={session.isPending}
                       accountUnavailable={session.isError}

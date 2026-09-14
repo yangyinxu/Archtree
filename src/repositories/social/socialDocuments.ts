@@ -24,6 +24,9 @@ export interface SocialBudgetDocument {
     commandMinute?: number; commands?: number; incomingDay?: number; incoming?: number;
     relationshipRevision?: number;
     readMinute?: number; reads?: number;
+    musicIncomingDay?: number; musicIncoming?: number;
+    roomReactionMinute?: number; roomReactions?: number;
+    listeningReportMinute?: number; listeningReports?: number;
 }
 /** Active handles have an owner; deletion leaves only the handle and its reservation deadline. */
 export interface SocialHandleDocument { _id: string; accountId?: string; expiresAt?: Date }

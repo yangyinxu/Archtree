@@ -29,7 +29,7 @@ export const safeLoginDestination = (state: unknown, query: string) => {
     || candidate.startsWith('/content/manage?')
     || candidate.startsWith('/content/manage/')) return candidate;
   const listenerPath = candidate.replace(/^\/finitude(?=\/|$)/, '') || '/';
-  if (/^\/social(?:\/invitations(?:\/[A-Za-z0-9_-]{1,80})?)?$/.test(listenerPath)
+  if (/^\/social(?:\/shares|\/invitations(?:\/[A-Za-z0-9_-]{1,80})?)?$/.test(listenerPath)
     && !/\s/.test(listenerPath)) return listenerPath;
   const allowedListenerPath = /^\/(?:$|search(?:[/?#]|$)|library(?:[/?#]|$)|playlists(?:[/?#]|$)|albums\/(?:[^/?#]+)(?:[?#]|$)|artists\/(?:[^/?#]+)(?:[?#]|$)|account(?:[/?#]|$))/.test(listenerPath);
   return allowedListenerPath ? listenerPath : '/';
