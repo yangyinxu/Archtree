@@ -33,14 +33,18 @@ export const createRoomSession = () => {
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let opening = false;
   let generation = 0;
+  let transportGeneration = 0;
+  let suspended = false;
   let snapshotVersion = 0;
   let readySequence = 0;
   let offset = 0;
   let bestRoundTrip = Infinity;
   let lastPong = 0;
+  let lastPongWallTime = 0;
   let lastHeartbeat = -Infinity;
   let lastHeartbeatIdentity = '';
   let clockPings = new Set<number>();
+  const pendingPongs = new Map<number, (confirmed: boolean) => void>();
   let anchor: { key: string; milliseconds: number; positionSeconds: number } | undefined;
   const emit = (change: Partial<RoomSessionState>) => {
     state = { ...state, ...change };
@@ -48,6 +52,19 @@ export const createRoomSession = () => {
   };
   const current = () => Boolean(state.viewerId && isAccountOperationCurrent(guard, state.viewerId));
   const detachPlayer = () => { attachment?.detach(); attachment = undefined; attachedIdentity = ''; anchor = undefined; };
+  // Losing browser execution invalidates transport authority, not an in-flight command's identity.
+  const disconnect = () => {
+    transportGeneration += 1; snapshotVersion += 1; opening = false; clearTimeout(retryTimer);
+    const previous = socket; socket = undefined; previous?.close();
+    for (const complete of pendingPongs.values()) complete(false);
+    clockPings.clear(); lastHeartbeatIdentity = ''; lastHeartbeat = -Infinity;
+    detachPlayer(); emit({ connected: false, locallyPaused: Boolean(state.room), error: 'room.disconnected' });
+  };
+  const connectionFresh = () => {
+    if (!current() || suspended || !state.connected) return false;
+    if (performance.now() - lastPong <= 15_000 && Date.now() - lastPongWallTime <= 15_000) return true;
+    disconnect(); void connect(); return false;
+  };
   const send = (message: unknown) => {
     if (!current() || !socket || socket.readyState !== WebSocket.OPEN) return false;
     socket.send(JSON.stringify(message)); return true;
@@ -69,11 +86,13 @@ export const createRoomSession = () => {
   };
   const transportIntent = (intent: RoomPlaybackIntent) => {
     const room = state.room;
-    if (!room || !state.connected || !room.self.canControl || !room.self.isController) return;
+    if (!room || !connectionFresh() || !room.self.isController) return;
+    if (intent.type === 'play' && (!room.self.canControl || room.timeline?.state === 'playing')) { void resync(); return; }
+    if (!room.self.canControl) return;
     const expected = { roomId: intent.expectedRoomId, memberId: room.self.memberId, controllerGeneration: room.self.controllerGeneration,
       expectedEpoch: intent.expectedEpoch, expectedEntryId: intent.expectedEntryId, expectedPlaybackGeneration: intent.expectedPlaybackEpoch,
       expectedControlGeneration: intent.expectedControlEpoch, expectedQueueRevision: intent.expectedQueueRevision };
-    void run(intent.type === 'seek' ? { ...expected, action: 'seek', positionMs: Math.round(intent.positionSeconds * 1000) }
+    void controlIntent(intent.type === 'seek' ? { ...expected, action: 'seek', positionMs: Math.round(intent.positionSeconds * 1000) }
       : intent.type === 'select' ? { ...expected, action: 'select', targetEntryId: intent.entryId }
         : { ...expected, action: intent.type });
   };
@@ -124,32 +143,39 @@ export const createRoomSession = () => {
     try {
       const result = await getCurrentRoom(state.viewerId);
       if (version === generation && current() && snapshotVersion === observed) acceptSnapshot(result.room, true);
-    } catch { if (version === generation && current()) emit({ error: 'social.error' }); }
+    } catch { if (version === generation && current() && snapshotVersion === observed) emit({ error: 'social.error' }); }
   };
-  const ping = (correctPlayback = true) => {
+  const ping = (correctPlayback = true, acknowledged?: (confirmed: boolean) => void) => {
     const room = state.room;
-    const clientTimeMs = performance.now();
+    let clientTimeMs = performance.now();
+    while (clockPings.has(clientTimeMs)) clientTimeMs += .001;
     clockPings.add(clientTimeMs);
     if (clockPings.size > 12) clockPings.delete(clockPings.values().next().value!);
     const identity = room && room.self.isController ? `${room.roomId}:${room.self.memberId}:${room.self.controllerGeneration}:${state.locallyPaused}` : '';
-    const includeHeartbeat = identity && (identity !== lastHeartbeatIdentity || clientTimeMs - lastHeartbeat >= 4000);
+    const includeHeartbeat = identity && (acknowledged || identity !== lastHeartbeatIdentity || clientTimeMs - lastHeartbeat >= 4000);
     if (includeHeartbeat) { lastHeartbeatIdentity = identity; lastHeartbeat = clientTimeMs; }
-    send({ type: 'ping', clientTimeMs, heartbeat: includeHeartbeat && room ? {
+    if (acknowledged) {
+      const timeout = setTimeout(() => pendingPongs.get(clientTimeMs)?.(false), 3000);
+      pendingPongs.set(clientTimeMs, confirmed => { clearTimeout(timeout); pendingPongs.delete(clientTimeMs); acknowledged(confirmed); });
+    }
+    const sent = send({ type: 'ping', clientTimeMs, heartbeat: includeHeartbeat && room ? {
       roomId: room.roomId, memberId: room.self.memberId, controllerGeneration: room.self.controllerGeneration,
       locallyPaused: state.locallyPaused
     } : null });
+    if (!sent) pendingPongs.get(clientTimeMs)?.(false);
     if (correctPlayback && room?.timeline?.state === 'playing' && !state.locallyPaused && state.connected) {
       const target = Math.min(room.timeline.durationMs, room.timeline.positionMs + Math.max(0, performance.now() + offset - room.timeline.anchorServerTimeMs));
       attachment?.correct(target / 1000);
     }
   };
   const connect = async () => {
-    if (!current() || opening || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+    if (!current() || suspended || opening || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
     opening = true;
     const version = generation;
+    const transport = ++transportGeneration;
     try {
       const { ticket } = await getRealtimeTicket(state.viewerId);
-      if (version !== generation || !current()) return;
+      if (version !== generation || transport !== transportGeneration || !current()) return;
       const endpoint = new URL('/api/social/v1/realtime', location.href);
       endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
       const connection = new WebSocket(endpoint, ['archtree-room-v1', ticket]);
@@ -162,6 +188,7 @@ export const createRoomSession = () => {
         const message = parsed.data;
         if (message.type === 'subscribed') {
           offset = message.serverTimeMs - performance.now(); bestRoundTrip = Infinity; lastPong = performance.now();
+          lastPongWallTime = Date.now();
           emit({ connected: true, error: null }); acceptSnapshot(message.room, true); ping();
           setTimeout(() => { if (connection === socket) ping(); }, 120);
           setTimeout(() => { if (connection === socket) ping(); }, 350);
@@ -170,17 +197,19 @@ export const createRoomSession = () => {
         else if (clockPings.delete(message.clientTimeMs)) {
           const received = performance.now(); const rtt = received - message.clientTimeMs;
           lastPong = received;
+          lastPongWallTime = Date.now();
+          pendingPongs.get(message.clientTimeMs)?.(true);
           if (rtt >= 0 && rtt < bestRoundTrip) { bestRoundTrip = rtt; offset = message.serverTimeMs - (message.clientTimeMs + received) / 2; }
         }
       };
       connection.onclose = () => {
         if (connection !== socket) return;
-        socket = undefined; detachPlayer(); emit({ connected: false, locallyPaused: Boolean(state.room), error: 'room.disconnected' });
+        disconnect();
         if (current()) retryTimer = setTimeout(() => { void connect(); }, 3000);
       };
       connection.onerror = () => { connection.close(); };
-    } catch { if (version === generation && current()) emit({ connected: false, error: 'room.disconnected' }); }
-    finally { if (version === generation) opening = false; }
+    } catch { if (version === generation && transport === transportGeneration && current()) emit({ connected: false, error: 'room.disconnected' }); }
+    finally { if (version === generation && transport === transportGeneration) opening = false; }
   };
   const settle = async (outcome: { outcome: string }) => {
     emit({ uncertain: null, error: outcome.outcome === 'rejected' ? 'social.stale' : null });
@@ -190,24 +219,77 @@ export const createRoomSession = () => {
   };
   const run = async (action?: RoomAction, retry?: RoomCommand) => {
     if (!current() || state.busy || (state.uncertain && !retry)) return;
-    if (!state.connected && action && !['leave', 'end', 'declineInvitation'].includes(action.action)) return;
+    const needsConnection = !['leave', 'end', 'declineInvitation'].includes((retry ?? action)!.action);
+    if (needsConnection && !connectionFresh()) return;
     const version = generation;
+    const transport = transportGeneration;
+    const resumeWasPaused = !retry && action?.action === 'play' && state.locallyPaused;
+    let dispatched = false;
     emit({ busy: true, error: null });
     let command = retry;
+    const playStillCurrent = () => current() && version === generation && transport === transportGeneration
+      && !state.locallyPaused && state.room?.self.isController && state.room.self.canControl
+      && Object.entries(roomControlPreconditions(state.room)).every(([key, value]) => Reflect.get(action!, key) === value);
     try {
+      if (!retry && action?.action === 'play') {
+        emit({ locallyPaused: false });
+        // A pong acknowledges the heartbeat transaction. HTTP Play must not overtake
+        // that transaction and exclude its own newly resumed device from preparation.
+        const confirmed = await new Promise<boolean>(resolve => ping(false, resolve));
+        if (version !== generation || !current()) return;
+        if (!confirmed || !connectionFresh()) {
+          if (state.connected) { disconnect(); void connect(); }
+          return;
+        }
+        if (!playStillCurrent()) { emit({ error: 'social.stale' }); return; }
+        void attachment?.resync();
+      }
       command ??= await prepareRoomCommand(state.viewerId, action!);
       if (version !== generation || !current()) return;
+      if (needsConnection && (transport !== transportGeneration || !connectionFresh())) return;
+      if (!retry && action?.action === 'play' && (!playStillCurrent() || !connectionFresh())) return;
+      dispatched = true;
       const outcome = await sendRoomCommand(state.viewerId, command);
       if (version === generation && current()) await settle(outcome);
     } catch (error) {
       if (version !== generation || !current()) return;
       const unknown = command && isUncertainSocialFailure(error);
       emit({ uncertain: unknown ? command! : null, error: unknown ? 'social.unknown' : 'social.error' });
-    } finally { if (version === generation) emit({ busy: false }); }
+    } finally {
+      if (version === generation) {
+        // An aborted personal resume must not leave the UI/heartbeat unpaused while
+        // the adapter still respects the original local pause.
+        if (!dispatched && resumeWasPaused && state.room?.roomId === action!.roomId) {
+          emit({ locallyPaused: true }); attachment?.pauseLocally(); ping(); reportReady(false);
+        }
+        emit({ busy: false });
+      }
+    }
   };
+  const resync = async () => {
+    if (!connectionFresh() || state.busy || state.uncertain || !state.room?.self.isController || state.room.status !== 'open') return;
+    emit({ locallyPaused: false, error: null }); ping(); await attachment?.resync();
+  };
+  const controlIntent = (action: RoomAction) => {
+    if (state.busy || state.uncertain || !connectionFresh()) return Promise.resolve();
+    // The immutable action survives local readiness and heartbeat acknowledgement.
+    return run(action);
+  };
+  const onSuspend = () => { if (current()) { suspended = true; disconnect(); } };
+  const onResume = () => {
+    if (!current()) return;
+    suspended = false;
+    if (state.connected) { if (connectionFresh()) ping(); }
+    else void connect();
+  };
+  const onVisibilityChange = () => { if (!document.hidden) onResume(); };
   const stop = () => {
-    generation += 1; opening = false; clearInterval(heartbeat); clearTimeout(retryTimer);
+    generation += 1; transportGeneration += 1; suspended = false; opening = false; clearInterval(heartbeat); clearTimeout(retryTimer);
+    document.removeEventListener('freeze', onSuspend); document.removeEventListener('resume', onResume);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.removeEventListener('pagehide', onSuspend); window.removeEventListener('pageshow', onResume);
     const previous = socket; socket = undefined; previous?.close(); detachPlayer();
+    for (const complete of pendingPongs.values()) complete(false);
     clockPings = new Set(); lastHeartbeatIdentity = ''; lastHeartbeat = -Infinity; state = initialState; for (const listener of listeners) listener();
   };
   return {
@@ -217,27 +299,31 @@ export const createRoomSession = () => {
       refreshSocial = onSocialChanged;
       if (state.viewerId === viewerId && current()) return;
       stop(); guard = captureAccountOperation(viewerId); emit({ viewerId });
+      document.addEventListener('freeze', onSuspend); document.addEventListener('resume', onResume);
+      document.addEventListener('visibilitychange', onVisibilityChange);
+      window.addEventListener('pagehide', onSuspend); window.addEventListener('pageshow', onResume);
       void refresh(); void connect();
       heartbeat = setInterval(() => {
         if (!current()) { stop(); return; }
+        if (suspended) return;
         if (state.connected) {
-          if (performance.now() - lastPong > 15_000) socket?.close();
-          else ping();
+          if (connectionFresh()) ping();
         } else { void refresh(); void connect(); }
       }, 5000);
     },
     run, refresh, reconnect: connect, stop,
     control(action: 'play' | 'pause' | 'next' | 'previous' | 'seek' | 'select' | 'setControlMode', value?: number | string) {
       const room = state.room;
-      if (!room?.timeline || !state.connected || !room.self.canControl || !room.self.isController) return Promise.resolve();
+      if (!room?.timeline || !connectionFresh() || !room.self.canControl || !room.self.isController) return Promise.resolve();
+      if (action === 'play' && room.timeline.state === 'playing') return resync();
       const expected = roomControlPreconditions(room);
-      return run(action === 'seek' ? { ...expected, action, positionMs: Math.round(Number(value)) }
+      return controlIntent(action === 'seek' ? { ...expected, action, positionMs: Math.round(Number(value)) }
         : action === 'select' ? { ...expected, action, targetEntryId: String(value) }
           : action === 'setControlMode' ? { ...expected, action, mode: value as 'hostOnly' | 'everyone' }
             : { ...expected, action });
     },
     pauseLocally() { emit({ locallyPaused: true }); attachment?.pauseLocally(); ping(); reportReady(false); },
-    async resync() { if (!state.connected) return; emit({ locallyPaused: false, error: null }); ping(); await attachment?.resync(); },
+    resync,
     retry: () => state.uncertain ? run(undefined, state.uncertain) : Promise.resolve(),
     async checkOutcome() {
       if (!state.uncertain || state.busy) return;

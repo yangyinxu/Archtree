@@ -7,7 +7,7 @@ import {
     SOCIAL_LIMITS, SocialError, type SocialActor, type SocialApi,
     type SocialCommand, type SocialScope
 } from '../src/contracts/socialV1';
-import { getDb } from '../src/infrastructure/database';
+import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import AuthSession from '../src/models/authSession';
 import type { SocialReceiptDocument, SocialRelationshipDocument } from '../src/repositories/social/socialDocuments';
 import { MongoReplicaSetHarness, startMongoReplicaSet } from './support/mongoReplicaSet';
@@ -351,7 +351,7 @@ test('transaction rollback leaves no profile, handle, receipt, or notification i
     assert.equal((await service.mutate(alice, mutation)).outcome, 'applied');
 });
 
-test('a real Mongo transaction callback retry preserves the captured intent and stores one receipt', async () => {
+test('five known-aborted Mongo retries preserve the captured intent and store one receipt', async () => {
     const alice = await member('alice');
     const bob = await member('bobby');
     const mutation = command(alice.scope, { action: 'request', targetSocialId: bob.profile.socialId, expectedRevision: 0 });
@@ -359,29 +359,74 @@ test('a real Mongo transaction callback retry preserves the captured intent and 
     const retrying = createSocialService({ now: () => now, enabled: () => true, secret: () => secret,
         beforeCommit: async () => {
             callbacks += 1;
-            if (callbacks === 1) {
+            if (callbacks <= 5) {
                 // A caller changing its object cannot rebase intent captured before the first transaction.
-                if ('expectedRevision' in mutation) mutation.expectedRevision = 999;
+                if (callbacks === 1 && 'expectedRevision' in mutation) mutation.expectedRevision = 999;
                 const failure = new MongoServerError({ message: 'synthetic transient transaction failure', code: 112 });
                 failure.addErrorLabel('TransientTransactionError');
                 throw failure;
             }
         } });
     assert.equal((await retrying.mutate(alice.actor, mutation)).outcome, 'applied');
-    assert.equal(callbacks, 2);
+    assert.equal(callbacks, 6);
     assert.equal(await getDb()!.collection('socialMutations').countDocuments({ commandId: mutation.commandId }), 1);
     assert.equal((await service.list(alice.actor, 'outgoing', 20)).items[0].revision, 1);
+});
+
+test('persistent known-aborted social contention exhausts six attempts without partial state', async () => {
+    const alice = await actor('alice');
+    const scope = await service.issueScope(alice);
+    let attempts = 0;
+    const failing = createSocialService({ now: () => now, enabled: () => true, secret: () => secret,
+        beforeCommit: async () => {
+            attempts += 1;
+            const error = new MongoServerError({ message: 'synthetic persistent social contention', code: 112 });
+            error.addErrorLabel('TransientTransactionError'); throw error;
+        } });
+    const mutation = command(scope, { action: 'profile', expectedRevision: 0, handle: 'alice', alias: 'Alice', discoverable: true });
+    await assert.rejects(failing.mutate(alice, mutation), error => error instanceof SocialError && error.code === 'social_unavailable');
+    assert.equal(attempts, 6);
+    for (const name of ['socialProfiles', 'socialHandles', 'socialMutations', 'socialOutbox']) {
+        assert.equal(await getDb()!.collection(name).countDocuments({}), 0, name);
+    }
+    assert.equal((await service.mutate(alice, mutation)).outcome, 'applied');
+});
+
+test('profile and relationship reads recover after a real account-session write lock outlasts short retries', async () => {
+    const alice = await member('alice'); const bob = await member('bobby'); await friendship(alice, bob);
+    const session = getDatabaseClient().startSession();
+    let release: ReturnType<typeof setTimeout> | undefined;
+    try {
+        session.startTransaction();
+        await getDb()!.collection('authSessions').updateOne({ _id: new ObjectId(alice.actor.sessionId) },
+            { $inc: { socialMutationRevision: 1 } }, { session });
+        const unlocked = new Promise<void>((resolve, reject) => {
+            release = setTimeout(() => { session.abortTransaction().then(resolve, reject); }, 350);
+        });
+        const [profile, relation] = await Promise.all([
+            service.ownProfile(alice.actor), service.relationship(alice.actor, bob.profile.socialId), unlocked
+        ]);
+        assert.equal(profile?.socialId, alice.profile.socialId);
+        assert.equal(relation?.state, 'friends');
+    } finally {
+        clearTimeout(release);
+        if (session.inTransaction()) await session.abortTransaction();
+        await session.endSession();
+    }
 });
 
 test('lost acknowledgement after commit is recovered by explicit same-command retry', async () => {
     const alice = await member('alice');
     const bob = await member('bobby');
-    const uncertain = new Error('synthetic acknowledgement loss');
+    const uncertain = new MongoServerError({ message: 'synthetic acknowledgement loss', code: 112 });
+    uncertain.addErrorLabel('TransientTransactionError');
+    let attempts = 0;
     const failing = createSocialService({ now: () => now, enabled: () => true, secret: () => secret,
-        afterCommit: async () => { throw uncertain; } });
+        afterCommit: async () => { attempts += 1; throw uncertain; } });
     const mutation = command(alice.scope, { action: 'request', targetSocialId: bob.profile.socialId, expectedRevision: 0 });
     await assert.rejects(failing.mutate(alice.actor, mutation),
         error => error instanceof SocialError && error.code === 'mutation_outcome_unknown');
+    assert.equal(attempts, 1);
     assert.equal((await service.outcome(alice.actor, mutationIdentity(mutation)))?.outcome, 'applied');
     assert.equal((await service.mutate(alice.actor, mutation)).replayed, true);
     assert.equal((await service.list(alice.actor, 'outgoing', 20)).items[0].revision, 1);
@@ -811,6 +856,7 @@ test('an unknown Mongo commit result never re-executes and recovers the committe
             await session.commitTransaction();
             const failure = new MongoServerError({ message: 'synthetic lost commit acknowledgement', code: 91 });
             failure.addErrorLabel('UnknownTransactionCommitResult');
+            failure.addErrorLabel('TransientTransactionError');
             throw failure;
         } });
     const mutation = command(alice.scope, { action: 'request', targetSocialId: bob.profile.socialId, expectedRevision: 0 });

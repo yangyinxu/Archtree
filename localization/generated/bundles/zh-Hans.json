@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-Mrmi6mb9KaI3mySNCR7SJSHSo9WAkxAWcjpKPzOE7Ks",
+  "revision": "sha256-m6pEkU4DzgCuXY_HwLitFGXtZduDavodHsIkD2humW0",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.back_login": "返回登录",
@@ -528,7 +528,7 @@
     "room.connected": "已连接",
     "room.connecting": "正在连接…",
     "room.create": "创建房间",
-    "room.disconnected": "连接已断开，重新连接后才能恢复播放。",
+    "room.disconnected": "连接已断开。重新连接后，点击播放按钮恢复聆听。",
     "room.empty": "创建房间，选择几首歌，邀请好友一起听。",
     "room.end": "结束房间",
     "room.end_confirm": "结束房间，让所有人退出？",
@@ -556,6 +556,7 @@
     "room.queue": "房间队列",
     "room.ready": "已就绪",
     "room.reconnect": "重新连接",
+    "room.resume_and_play": "恢复聆听并全员播放",
     "room.resync": "同步聆听",
     "room.seek": "房间播放进度",
     "room.selected": "已选择",
@@ -567,6 +568,7 @@
     "room.title": "一起听房间",
     "room.transfer": "转让房主并离开",
     "room.transfer_pending": "等待接受。转让成功后，原房主将离开房间。",
+    "room.waiting_for_host": "等待房主开始播放。",
     "route.announcement.page": "{title}页面",
     "route.error.copy": "返回首页并继续探索。",
     "route.error.eyebrow": "聆听仍在继续",

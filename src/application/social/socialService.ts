@@ -15,6 +15,7 @@ import type {
 import { readSocialToken, signSocialToken } from './socialTokens';
 import { applyRoomSafety, roomSafetyAccountIds } from '../rooms/roomLifecycle';
 import { notifyRoomChanges } from '../../realtime/roomEvents';
+import { SOCIAL_TRANSACTION_ATTEMPTS, waitForSocialTransactionRetry } from './socialTransactionRetry';
 
 export interface SocialServiceOptions {
     now?: () => number;
@@ -57,11 +58,11 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
     const handles = () => db().collection<SocialHandleDocument>('socialHandles');
     const outbox = () => db().collection<SocialOutboxDocument>('socialOutbox');
 
-    /** At most three known-aborted retries; an uncertain commit is never automatically replayed. */
+    /** Bounded known-aborted retries preserve the original intent; uncertain commits are never replayed. */
     const transaction = async <T>(actor: SocialActor, work: (session: ClientSession) => Promise<T>, hooks = false,
         additionalAccounts?: (session: ClientSession) => Promise<string[]>): Promise<T> => {
         if (!objectId(actor.userId) || !objectId(actor.sessionId)) throw new SocialError(401, 'social_session_required');
-        for (let attempt = 0; attempt < 3; attempt += 1) {
+        for (let attempt = 0; attempt < SOCIAL_TRANSACTION_ATTEMPTS; attempt += 1) {
             const session = getDatabaseClient().startSession();
             let committed = false;
             try {
@@ -87,8 +88,8 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 if (committed || mongo.hasErrorLabel?.('UnknownTransactionCommitResult')) throw new SocialError(503, 'mutation_outcome_unknown');
                 if (error instanceof SocialError) throw error;
                 if (error instanceof AccountReferenceUnavailableError) throw new SocialError(401, 'account_unavailable');
-                if (attempt < 2 && (mongo.hasErrorLabel?.('TransientTransactionError') || mongo.code === 11000)) {
-                    await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 20 + Math.floor(Math.random() * 20)));
+                if (attempt + 1 < SOCIAL_TRANSACTION_ATTEMPTS && (mongo.hasErrorLabel?.('TransientTransactionError') || mongo.code === 11000)) {
+                    await waitForSocialTransactionRetry(attempt);
                     continue;
                 }
                 throw new SocialError(503, 'social_unavailable');

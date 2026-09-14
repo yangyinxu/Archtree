@@ -28,7 +28,7 @@ export type RoomPlaybackAction =
   | { readonly type: 'seek'; readonly positionSeconds: number }
   | { readonly type: 'select'; readonly entryId: string };
 
-/** The expected state is copied at the user gesture; callers must never rebase it. */
+/** Gesture state is never rebased; Play without shared permission requests personal readiness only. */
 export type RoomPlaybackIntent = RoomPlaybackAction & {
   readonly expectedRoomId: string;
   readonly expectedEpoch: number;
@@ -51,8 +51,10 @@ export interface RoomPlaybackOptions {
   onIntent(intent: RoomPlaybackIntent): void;
   onObservation?(observation: RoomPlaybackObservation): void;
   now?: () => number;
-  /** Hidden documents suspend locally until explicit resync. */
+  /** Hidden Audio can keep following the room; other media require a visible document. */
   visibility?: Pick<Document, 'hidden' | 'addEventListener' | 'removeEventListener'> | null;
+  /** Page departure suspends playback even when the browser permits background Audio. */
+  pageLifecycle?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> | null;
 }
 
 /** Local pause survives every remote state; detach pauses and never restores an old queue. */
@@ -192,7 +194,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   };
 
   const intent = (action: RoomPlaybackAction): boolean => {
-    if (!state || detached || !state.canControl) return false;
+    if (!state || detached || (!state.canControl && action.type !== 'play')) return false;
     if (action.type === 'select' && !state.entryIds.includes(action.entryId)) return false;
     if (action.type === 'seek' && !finiteNonnegative(action.positionSeconds)) return false;
     options.onIntent(Object.freeze({ ...action,
@@ -239,6 +241,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         || (!preparationCompleted && (incoming.anchorMonotonicMs !== previous.anchorMonotonicMs || incoming.status !== previous.status))
       )) return false;
       state = Object.freeze({ ...incoming, entryIds: Object.freeze([...incoming.entryIds]), queue: copyQueue(incoming.queue) });
+      if (hiddenNonAudio()) suspend();
       const index = state.entryIds.indexOf(state.currentEntryId);
       const sourceChanged = !previous || previous.currentEntryId !== state.currentEntryId
         || previous.mediaRevision !== state.mediaRevision
@@ -253,9 +256,11 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
       seekFailed = false;
       port.pause();
       const expectedEffect = effect;
+      const expectedPlaybackEpoch = state.playbackEpoch;
       if (sourceChanged) await port.install(state.queue, index);
+      // Suspension cancels a start, but a later explicit resync still needs the installed source.
+      if (!detached && state.playbackEpoch === expectedPlaybackEpoch) source = port.sourceGeneration();
       if (detached || effect !== expectedEffect) return true;
-      source = port.sourceGeneration();
       await reconcile();
       return true;
     },
@@ -268,7 +273,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     },
     async resync() {
       if (detached) return;
-      if (visibility?.hidden) return;
+      if (hiddenNonAudio()) return;
       localPaused = false;
       cancelEffects();
       needsSeek = true;
@@ -309,6 +314,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
       if (detached) return;
       detached = true;
       visibility?.removeEventListener('visibilitychange', onVisibilityChange);
+      visibility?.removeEventListener('freeze', suspend);
+      pageLifecycle?.removeEventListener('pagehide', suspend);
       cancelEffects();
       port.pause();
       port.detach();
@@ -318,13 +325,22 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   const visibility = options.visibility === undefined
     ? typeof document === 'undefined' ? null : document
     : options.visibility;
-  const onVisibilityChange = () => {
-    if (!visibility?.hidden || detached) return;
+  const pageLifecycle = options.pageLifecycle === undefined
+    ? typeof window === 'undefined' ? null : window
+    : options.pageLifecycle;
+  const hiddenNonAudio = () => Boolean(state && visibility?.hidden
+    && state.queue[state.entryIds.indexOf(state.currentEntryId)]?.mediaType !== 'audio');
+  const suspend = () => {
+    if (detached || localPaused) return;
     attachment.pauseLocally();
     report('suspended');
   };
+  const onVisibilityChange = () => {
+    if (hiddenNonAudio()) suspend();
+  };
   visibility?.addEventListener('visibilitychange', onVisibilityChange);
-  if (visibility?.hidden) localPaused = true;
+  visibility?.addEventListener('freeze', suspend);
+  pageLifecycle?.addEventListener('pagehide', suspend);
 
   return {
     attachment,

@@ -14,35 +14,49 @@ Native UI, shared Video and production rollout remain separate later stages.
 
 **Status: Complete**
 
-The initial Stage 1 notes below retain historical prototype evidence. Web now has
-formal social/room routes, a durable room authority and real media integration;
-iOS and Android retain their DEBUG-only feasibility adapters.
+The initial visible-tab demonstration missed ordinary tab switching and personal
+playback recovery. This checkpoint was reopened and the following stages are now
+complete:
 
-- Implemented: transactional room arbitration, one-use realtime tickets,
-  account/session/media revocation, single-authority fencing, real pinned Audio
-  streaming, formal social UI, existing-player attachment, both modes, host
-  transfer and local resync.
-- Current validation: `npm test` passes 442 backend and 342 Web cases;
-  `npm run build` passes with unchanged asset budgets. The full integration run
-  passes 333 cases, with subsequent focused gateway, realtime, topology and
-  cleanup checks covering final changes. Nine actual-player cases pass across
-  Chromium, Firefox and WebKit. Manual Chrome covers login, profiles, friendship,
-  invitations, both modes, real shared playback, personal pause/resync, transfer
-  and End room. The real two-account automated regression passes against the
-  actual routes, MongoDB, loopback storage and WebSocket: both concurrent control
-  races accept one transition without echo, personal pause/resync is preserved,
-  observer reload/takeover works, transfer preserves playback and End clears both
-  clients. The route also passes the existing accessibility blocker policy.
-  Final gateway checks pass nine cases, including real contention, authorization
-  revocation, exact-report retries and bounded lease-validated timer recovery;
-  five real realtime cases and the cleanup/topology regressions pass.
-- Demonstration uses only owned disposable MongoDB/S3 resources and synthetic
-  accounts/music via `npm run demo:social`. No deployment or production data is
-  involved. Native localization fallbacks are synchronized, without native room UI.
+- Audio visibility and execution suspension — Complete: hidden Audio follows fresh
+  authorized room state. Freeze/pagehide invalidates the transport; wakeup checks
+  monotonic and wall-clock freshness and preserves explicit personal pause.
+- Explicit playback recovery — Complete: the primary action resumes only this
+  device when the room is playing, or resumes participation and starts shared
+  playback when authorized. The caller's heartbeat acknowledgement precedes Play;
+  original preconditions remain fixed and stale/cancelled gestures cannot rebase.
+  Host-control guests can ready themselves while waiting for the host.
+- Transaction contention recovery — Complete: confirmed aborted transactions use
+  bounded jittered backoff; unknown commits retain exact command identity without
+  automatic replay. Real MongoDB tests cover contention, exhaustion and commit loss.
+- Ordinary-browser acceptance — Complete: real hidden Chromium tabs keep Audio
+  playing and follow shared Pause/Play. Actual freeze/resume reconnects but remains
+  locally paused until one explicit primary action. The complete two-account flow
+  covers both permission modes, concurrent Next/selection, observer takeover,
+  host transfer, End, and the existing accessibility blocker policy.
 
-This completes the authorized local Web Audio demonstration. The larger plan is
-retained because native adoption, Video, production capacity/proxy verification
-and the remaining cross-platform release gates below are not complete.
+Current validation:
+
+- `npm test`: 442 backend and 386 Web tests passed.
+- `npm run build`: passed with unchanged asset budgets.
+- `npm run test:integration`: 345 tests passed, none skipped.
+- `npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts playback-continuity.spec.ts`:
+  nine real-player cases passed across Chromium, Firefox and WebKit.
+- `npm run test:e2e:social --workspace @archtree/finitude-web`: the full real
+  MongoDB/storage/WebSocket browser flow passed, including actual tab hiding and
+  freezing. `npm run typecheck:e2e --workspace @archtree/finitude-web` passed.
+- Manual Chrome verification used fresh synthetic accounts on the final built
+  application, real media and the normal product UI. One Resume and play for
+  everyone click restarted both players. The retained room is in Everyone control
+  with both primary Play buttons enabled and both media elements ready.
+- Localization generation/native fallback synchronization and `git diff --check`
+  passed. Native fallbacks changed without native room UI or playback changes.
+
+The local demonstration uses only disposable MongoDB/storage resources and
+synthetic accounts/music via `npm run demo:social`; no production data or rollout
+is involved. The larger plan remains because native adoption, shared Video,
+production capacity/proxy verification and the cross-platform release gates below
+are not complete. iOS and Android retain their DEBUG-only feasibility adapters.
 
 ## Stage 0 — Repository baseline and architecture
 

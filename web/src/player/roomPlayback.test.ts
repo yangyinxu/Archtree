@@ -1,7 +1,7 @@
 import trace from '../../../contracts/social/prototype-v1/playback-trace.json';
 import { createPlayerStore } from './playerStore';
 import type { PlayerAudio, PlayerMediaSession, PlayerMediaSessionAction, PlayerMediaSessionActionDetails, PlayerQueueItem } from './types';
-import type { RoomPlaybackState } from './roomPlayback';
+import type { RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
 import { createRoomPlaybackController } from './roomPlayback';
 
 /** Explicit browser state controls distinguish metadata, seek completion, and actual start. */
@@ -63,7 +63,7 @@ const frame = (index: number): RoomPlaybackState => {
   };
 };
 
-const setup = (audio = new RoomAudio()) => {
+const setup = (audio = new RoomAudio(), options: Partial<RoomPlaybackOptions> = {}) => {
   const onIntent = vi.fn();
   const onObservation = vi.fn();
   const factory = vi.fn(() => audio);
@@ -73,8 +73,15 @@ const setup = (audio = new RoomAudio()) => {
     setActionHandler: (action, callback) => { if (callback) actions.set(action, callback); }
   };
   const store = createPlayerStore({ audioFactory: factory, roomPlaybackProbeFactory: createRoomPlaybackController, mediaSession });
-  const room = store.attachRoomPlayback({ onIntent, onObservation, now: () => 10000 + performance.now() });
+  const room = store.attachRoomPlayback({ onIntent, onObservation, now: () => 10000 + performance.now(), ...options });
   return { audio, onIntent, onObservation, factory, store, room, actions };
+};
+
+/** Visibility changes and page suspension are separate browser lifecycle signals. */
+const setupLifecycle = (hidden = false) => {
+  const visibility = Object.assign(new EventTarget(), { hidden });
+  const pageLifecycle = new EventTarget();
+  return { ...setup(undefined, { visibility, pageLifecycle }), visibility, pageLifecycle };
 };
 
 afterEach(() => vi.useRealTimers());
@@ -364,38 +371,148 @@ test('a completed but inaccurate seek reports unsupported instead of readiness o
   store.destroy();
 });
 
-test('hidden documents suspend locally and returning to foreground requires explicit resync', async () => {
-  const audio = new RoomAudio();
-  const store = createPlayerStore({ roomPlaybackProbeFactory: createRoomPlaybackController, audioFactory: () => audio, mediaSession: null });
-  const visibility = new EventTarget() as EventTarget & { hidden: boolean };
-  visibility.hidden = false;
-  const room = store.attachRoomPlayback({ onIntent: vi.fn(), now: () => 10000, visibility });
+test.each(['playing', 'paused'] as const)('hiding an Audio room preserves its %s state without changing readiness', async status => {
+  const { audio, room, store, visibility, onIntent, onObservation } = setupLifecycle();
+  await room.apply({ ...frame(5), status }); audio.ready();
+  const plays = audio.playCalls;
+  const observations = onObservation.mock.calls.length;
+  visibility.hidden = true; visibility.dispatchEvent(new Event('visibilitychange'));
+  expect(audio.paused).toBe(status === 'paused');
+  expect(audio.playCalls).toBe(plays);
+  expect(onObservation).toHaveBeenCalledTimes(observations);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('an initially hidden Audio room follows remote play and source changes on the existing player', async () => {
+  const { audio, room, store, factory, onIntent, onObservation } = setupLifecycle(true);
+  await room.apply(frame(0)); audio.ready();
+  expect(audio.paused).toBe(true);
   await room.apply(frame(5)); audio.ready();
+  expect(audio.paused).toBe(false);
+  await room.apply({ ...frame(5), revision: 8, playbackEpoch: 45, currentEntryId: 'entry-c', mediaRevision: 'c' });
+  audio.ready();
+  expect(store.getSnapshot().currentItem?.id).toBe(queue[2].id);
+  expect(audio.paused).toBe(false);
+  expect(audio.playCalls).toBe(2);
+  expect(factory).toHaveBeenCalledTimes(1);
+  expect(onObservation.mock.calls.some(([value]) => value.type === 'suspended')).toBe(false);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('hidden Audio preserves deliberate local pause through remote changes and foreground return', async () => {
+  const { audio, room, store, visibility, onIntent } = setupLifecycle();
+  await room.apply(frame(5)); audio.ready();
+  room.pauseLocally();
+  visibility.hidden = true; visibility.dispatchEvent(new Event('visibilitychange'));
+  await room.apply({ ...frame(5), revision: 8, playbackEpoch: 45, currentEntryId: 'entry-c', mediaRevision: 'c' });
+  audio.ready();
+  visibility.hidden = false; visibility.dispatchEvent(new Event('visibilitychange'));
+  expect(audio.paused).toBe(true);
+  expect(audio.playCalls).toBe(1);
+  await room.resync();
+  expect(audio.paused).toBe(false);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('hidden Video stays conservative and foreground return requires explicit resync', async () => {
+  const { audio, room, store, visibility, onObservation, onIntent } = setupLifecycle();
+  await room.apply({ ...frame(5), queue: queue.map(item => ({ ...item, mediaType: 'video' })) }); audio.ready();
   visibility.hidden = true; visibility.dispatchEvent(new Event('visibilitychange'));
   expect(audio.paused).toBe(true);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'suspended' }));
   await room.resync();
   expect(audio.paused).toBe(true);
   visibility.hidden = false; visibility.dispatchEvent(new Event('visibilitychange'));
   expect(audio.paused).toBe(true);
   await room.resync();
   expect(audio.paused).toBe(false);
+  expect(onIntent).not.toHaveBeenCalled();
   store.destroy();
 });
 
-test('a read-only participant can follow confirmed playback while UI and system controls emit no intents', async () => {
+test('installing Video into an already hidden room cannot start it', async () => {
+  const { audio, room, store, onObservation } = setupLifecycle(true);
+  await room.apply({ ...frame(5), queue: queue.map(item => ({ ...item, mediaType: 'video' })) }); audio.ready();
+  expect(audio.playCalls).toBe(0);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'suspended' }));
+  await room.resync();
+  expect(audio.playCalls).toBe(0);
+  store.destroy();
+});
+
+test.each(['freeze', 'pagehide'])('%s cancels pending Audio start and requires explicit resync after return', async event => {
+  vi.useFakeTimers();
+  const { audio, room, store, visibility, pageLifecycle, onObservation, onIntent } = setupLifecycle();
+  await room.apply({ ...frame(5), anchorMonotonicMs: 12000 }); audio.ready();
+  (event === 'freeze' ? visibility : pageLifecycle).dispatchEvent(new Event(event));
+  await vi.advanceTimersByTimeAsync(2500);
+  expect(audio.playCalls).toBe(0);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'suspended' }));
+  visibility.dispatchEvent(new Event('resume'));
+  pageLifecycle.dispatchEvent(new Event('pageshow'));
+  expect(audio.playCalls).toBe(0);
+  await room.resync();
+  expect(audio.paused).toBe(false);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('freeze during source installation stays paused but explicit resync can ready the installed source', async () => {
+  const { audio, room, store, visibility, onIntent } = setupLifecycle();
+  const installing = room.apply(frame(5));
+  visibility.dispatchEvent(new Event('freeze'));
+  await installing; audio.ready();
+  expect(audio.paused).toBe(true);
+  visibility.dispatchEvent(new Event('resume'));
+  await room.resync();
+  expect(audio.paused).toBe(false);
+  expect(audio.loadCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('detach removes visibility and page lifecycle listeners and prevents later playback', async () => {
+  const { audio, room, store, visibility, pageLifecycle, onObservation, onIntent } = setupLifecycle();
+  const removeVisibility = vi.spyOn(visibility, 'removeEventListener');
+  const removePage = vi.spyOn(pageLifecycle, 'removeEventListener');
+  await room.apply(frame(5)); audio.ready();
+  room.detach();
+  const observations = onObservation.mock.calls.length;
+  expect(removeVisibility.mock.calls.map(([event]) => event)).toEqual(['visibilitychange', 'freeze']);
+  expect(removePage.mock.calls.map(([event]) => event)).toEqual(['pagehide']);
+  visibility.hidden = true; visibility.dispatchEvent(new Event('visibilitychange'));
+  visibility.dispatchEvent(new Event('freeze')); pageLifecycle.dispatchEvent(new Event('pagehide'));
+  await room.resync();
+  expect(audio.paused).toBe(true);
+  expect(onObservation).toHaveBeenCalledTimes(observations);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test.each(['ui', 'mediaSession'])('guest %s Play requests personal readiness while other shared controls remain blocked', async gesture => {
   const { room, store, audio, onIntent, actions } = setup();
   await room.apply({ ...frame(5), canControl: false }); audio.ready();
   expect(store.getSnapshot().status).toBe('playing');
+  expect(onIntent).not.toHaveBeenCalled();
+  room.pauseLocally();
+  if (gesture === 'ui') await store.play();
+  else actions.get('play')?.({});
+  expect(onIntent).toHaveBeenCalledTimes(1);
+  expect(onIntent.mock.calls[0][0]).toMatchObject({ type: 'play', expectedControlEpoch: 1 });
+  expect(audio.paused).toBe(true); // The session interprets the gesture; the adapter cannot grant readiness.
   expect(await store.next()).toBe(false);
   expect(await store.previous()).toBe(false);
-  await store.play(); store.pause(); store.seek(1);
+  store.pause(); store.seek(1);
   actions.get('nexttrack')?.({}); actions.get('pause')?.({}); actions.get('seekto')?.({ seekTime: 1 });
   expect(room.select('entry-a')).toBe(false);
-  expect(onIntent).not.toHaveBeenCalled();
+  expect(onIntent).toHaveBeenCalledTimes(1);
   await room.apply({ ...frame(5), revision: 8, controlEpoch: 2, canControl: true });
   expect(await store.next()).toBe(true);
-  expect(onIntent).toHaveBeenCalledTimes(1);
-  expect(onIntent.mock.calls[0][0].expectedControlEpoch).toBe(2);
+  expect(onIntent).toHaveBeenCalledTimes(2);
+  expect(onIntent.mock.calls[1][0].expectedControlEpoch).toBe(2);
   store.destroy();
 });
 

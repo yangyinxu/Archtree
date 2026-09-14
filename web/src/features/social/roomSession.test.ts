@@ -20,12 +20,19 @@ class Socket {
   static CONNECTING = 0;
   static instances: Socket[] = [];
   readyState = 0;
+  autoPong = true;
   sent: Record<string, any>[] = [];
   onmessage?: (event: { data: string }) => void;
   onclose?: () => void;
   onerror?: () => void;
   constructor(readonly url: URL, readonly protocols: string[]) { Socket.instances.push(this); }
-  send(value: string) { this.sent.push(JSON.parse(value)); }
+  send(value: string) {
+    const message = JSON.parse(value); this.sent.push(message);
+    if (this.autoPong && message.type === 'ping') void Promise.resolve().then(() => this.acknowledge(message));
+  }
+  acknowledge(message: Record<string, any>) {
+    this.receive({ type: 'pong', clientTimeMs: message.clientTimeMs, serverTimeMs: 1_000_000 + message.clientTimeMs });
+  }
   close() { this.readyState = 3; this.onclose?.(); }
   receive(value: unknown) { this.readyState = 1; this.onmessage?.({ data: JSON.stringify(value) }); }
 }
@@ -45,7 +52,7 @@ beforeEach(() => {
     return { apply: mocks.apply, pauseLocally: mocks.pause, detach: mocks.detach, resync: mocks.resync, correct: mocks.correct };
   });
 });
-afterEach(() => { roomSession.stop(); vi.useRealTimers(); });
+afterEach(() => { roomSession.stop(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 const connected = async (room: RoomSnapshot | null = roomFixture()) => {
   roomSession.ensure('viewer-1', vi.fn());
   await vi.advanceTimersByTimeAsync(0);
@@ -55,6 +62,18 @@ const connected = async (room: RoomSnapshot | null = roomFixture()) => {
   await vi.dynamicImportSettled();
   return socket;
 };
+const pausedRoom = () => {
+  const room = roomFixture(); room.preparation = null; room.timeline!.state = 'paused'; return room;
+};
+/** Holds one real asynchronous boundary without advancing unrelated timers. */
+const deferred = <Value>() => {
+  let resolve!: (value: Value) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<Value>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+const playIntent = () => ({ type: 'play' as const, expectedRoomId: 'room-a', expectedEpoch: 1,
+  expectedEntryId: 'entry-a', expectedPlaybackEpoch: 1, expectedControlEpoch: 1, expectedQueueRevision: 1 });
 
 test('socket authentication keeps the single-use ticket out of the URL and readiness never emits a command', async () => {
   const socket = await connected();
@@ -183,4 +202,280 @@ test('a slow WebSocket handshake is not replaced by another ticket every heartbe
   await vi.advanceTimersByTimeAsync(10_000);
   expect(Socket.instances).toHaveLength(1);
   expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(1);
+});
+
+test('one-click Play confirms its resumed heartbeat before preparing or sending the original command', async () => {
+  const socket = await connected(pausedRoom());
+  roomSession.pauseLocally(); socket.autoPong = false; socket.sent = [];
+  const playing = roomSession.control('play');
+  expect(roomSession.getSnapshot()).toMatchObject({ busy: true, locallyPaused: false });
+  expect(socket.sent[0]).toMatchObject({ type: 'ping', heartbeat: { locallyPaused: false } });
+  expect(mocks.resync).not.toHaveBeenCalled();
+  expect(mocks.prepareRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  socket.acknowledge(socket.sent[0]);
+  await playing;
+  expect(mocks.resync).toHaveBeenCalledOnce();
+  expect(mocks.sendRoomCommand).toHaveBeenCalledOnce();
+  expect(mocks.sendRoomCommand.mock.calls[0][1]).toMatchObject({ action: 'play', expectedEntryId: 'entry-a',
+    expectedPlaybackGeneration: 1, expectedControlGeneration: 1, expectedQueueRevision: 1, controllerGeneration: 1 });
+  expect(roomSession.getSnapshot().busy).toBe(false);
+});
+
+test.each(['queue', 'control', 'controller', 'playback'] as const)('a changed %s while Play waits for heartbeat cannot rebase or dispatch the gesture', async change => {
+  const room = pausedRoom(); const socket = await connected(room); socket.autoPong = false;
+  roomSession.pauseLocally();
+  const playing = roomSession.control('play');
+  const resumeHeartbeat = socket.sent.at(-1)!;
+  const updated = structuredClone(room); updated.revision += 1;
+  if (change === 'queue') updated.queueRevision += 1;
+  if (change === 'control') updated.controlGeneration += 1;
+  if (change === 'controller') {
+    updated.self.controllerGeneration += 1;
+    updated.members[0].controllerGeneration += 1;
+  }
+  if (change === 'playback') updated.timeline!.playbackGeneration += 1;
+  socket.receive({ type: 'snapshot', room: updated });
+  socket.acknowledge(resumeHeartbeat); await playing;
+  expect(roomSession.getSnapshot().error).toBe('social.stale');
+  expect(roomSession.getSnapshot().locallyPaused).toBe(true);
+  expect(mocks.prepareRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.resync).not.toHaveBeenCalled();
+});
+
+test('a membership-only revision during Play readiness retains the observed control preconditions', async () => {
+  const room = pausedRoom(); const socket = await connected(room); socket.autoPong = false;
+  const playing = roomSession.control('play'); const resumeHeartbeat = socket.sent.at(-1)!;
+  socket.receive({ type: 'snapshot', room: { ...room, revision: 2, members: room.members.map(member => ({ ...member, ready: true })) } });
+  socket.acknowledge(resumeHeartbeat); await playing;
+  expect(mocks.sendRoomCommand).toHaveBeenCalledOnce();
+  expect(mocks.sendRoomCommand.mock.calls[0][1]).toMatchObject({ expectedPlaybackGeneration: 1, expectedControlGeneration: 1,
+    expectedQueueRevision: 1, controllerGeneration: 1, expectedEntryId: 'entry-a' });
+});
+
+test('local Pause during the heartbeat wait cancels Play without starting local media or sending a command', async () => {
+  const socket = await connected(pausedRoom()); socket.autoPong = false;
+  const playing = roomSession.control('play'); const resumeHeartbeat = socket.sent.at(-1)!;
+  roomSession.pauseLocally(); socket.acknowledge(resumeHeartbeat); await playing;
+  expect(roomSession.getSnapshot()).toMatchObject({ locallyPaused: true, busy: false });
+  expect(mocks.resync).not.toHaveBeenCalled();
+  expect(mocks.prepareRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+});
+
+test.each(['local-pause', 'freeze', 'control-change'] as const)('%s while the Play scope is pending cancels continuation without replacing its preconditions', async interruption => {
+  const room = pausedRoom(); const socket = await connected(room);
+  roomSession.pauseLocally();
+  const scope = deferred<Record<string, unknown>>(); mocks.prepareRoomCommand.mockReturnValueOnce(scope.promise);
+  const playing = roomSession.control('play'); await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.prepareRoomCommand).toHaveBeenCalledOnce();
+  const captured = { ...mocks.prepareRoomCommand.mock.calls[0][1] };
+  if (interruption === 'local-pause') roomSession.pauseLocally();
+  else if (interruption === 'freeze') document.dispatchEvent(new Event('freeze'));
+  else socket.receive({ type: 'snapshot', room: { ...room, revision: 2, controlGeneration: 2 } });
+  scope.resolve({ ...captured, commandId: 'held-command', scopeToken: 'held-scope' }); await playing;
+  expect(mocks.prepareRoomCommand).toHaveBeenCalledOnce();
+  expect(mocks.prepareRoomCommand.mock.calls[0][1]).toEqual(captured);
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  expect(roomSession.getSnapshot().busy).toBe(false);
+  expect(roomSession.getSnapshot().locallyPaused).toBe(true);
+});
+
+test('scope rejection before Play dispatch restores the original device pause and leaves recovery available', async () => {
+  const socket = await connected(pausedRoom()); roomSession.pauseLocally();
+  mocks.prepareRoomCommand.mockRejectedValueOnce(new ApiError('Scope quota', 'http', 429, 'social_limit'));
+  await roomSession.control('play');
+  expect(roomSession.getSnapshot()).toMatchObject({ locallyPaused: true, busy: false, uncertain: null });
+  expect(socket.sent.at(-1)).toMatchObject({ type: 'ready', report: { ready: false } });
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.pause).toHaveBeenCalledTimes(2);
+});
+
+test('a Next scope completing after freeze cannot dispatch or automatically resume after fresh authentication', async () => {
+  const room = pausedRoom(); await connected(room);
+  const scope = deferred<Record<string, unknown>>(); mocks.prepareRoomCommand.mockReturnValueOnce(scope.promise);
+  const next = roomSession.control('next'); await vi.advanceTimersByTimeAsync(0);
+  const captured = { ...mocks.prepareRoomCommand.mock.calls[0][1] };
+  document.dispatchEvent(new Event('freeze'));
+  scope.resolve({ ...captured, commandId: 'held-next', scopeToken: 'held-scope' }); await next;
+  document.dispatchEvent(new Event('resume')); await vi.advanceTimersByTimeAsync(0);
+  Socket.instances[1].receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_000_000, room });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.prepareRoomCommand).toHaveBeenCalledOnce();
+  expect(roomSession.getSnapshot()).toMatchObject({ busy: false, locallyPaused: true, uncertain: null });
+});
+
+test('a second Play during readiness is ignored and the first gesture sends exactly one command', async () => {
+  const socket = await connected(pausedRoom()); socket.autoPong = false;
+  const first = roomSession.control('play'); const resumeHeartbeat = socket.sent.at(-1)!;
+  const second = roomSession.control('play');
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  socket.acknowledge(resumeHeartbeat); await Promise.all([first, second]);
+  expect(mocks.resync).toHaveBeenCalledOnce();
+  expect(mocks.prepareRoomCommand).toHaveBeenCalledOnce();
+  expect(mocks.sendRoomCommand).toHaveBeenCalledOnce();
+});
+
+test('missing heartbeat acknowledgement times out without dispatching Play or hanging the busy state', async () => {
+  const socket = await connected(pausedRoom()); socket.autoPong = false;
+  const playing = roomSession.control('play');
+  await vi.advanceTimersByTimeAsync(3000); await playing;
+  expect(roomSession.getSnapshot()).toMatchObject({ busy: false, connected: false, locallyPaused: true });
+  expect(mocks.prepareRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.detach).toHaveBeenCalledOnce();
+});
+
+test.each(['paused', 'playing'] as const)('guest global Play on a %s room resumes this device without a shared command', async status => {
+  const room = pausedRoom(); room.timeline!.state = status; room.controlMode = 'hostOnly';
+  room.self.canControl = false; room.members[0].role = 'guest'; room.hostMemberId = 'another-host';
+  await connected(room); roomSession.pauseLocally();
+  options.onIntent(playIntent()); await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot().locallyPaused).toBe(false);
+  expect(mocks.resync).toHaveBeenCalledOnce();
+  expect(mocks.prepareRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+});
+
+test('authorized global Play on an already-playing timeline is only personal resync', async () => {
+  const room = pausedRoom(); room.timeline!.state = 'playing'; await connected(room); roomSession.pauseLocally();
+  options.onIntent(playIntent()); await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot().locallyPaused).toBe(false);
+  expect(mocks.resync).toHaveBeenCalledOnce();
+  expect(mocks.prepareRoomCommand).not.toHaveBeenCalled();
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+});
+
+test.each(['freeze', 'pagehide'] as const)('%s revokes authority even when already locally paused, and return authenticates without resuming', async event => {
+  const room = pausedRoom(); const socket = await connected(room); roomSession.pauseLocally();
+  (event === 'freeze' ? document : window).dispatchEvent(new Event(event));
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: false, locallyPaused: true });
+  expect(mocks.detach).toHaveBeenCalledOnce();
+  socket.receive({ type: 'snapshot', room: { ...room, revision: 5 } });
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(Socket.instances).toHaveLength(1);
+  expect(roomSession.getSnapshot().room?.revision).toBe(1);
+  (event === 'freeze' ? document : window).dispatchEvent(new Event(event === 'freeze' ? 'resume' : 'pageshow'));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+  const resumed = Socket.instances[1];
+  expect(roomSession.getSnapshot().connected).toBe(false);
+  resumed.receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_005_000, room });
+  await vi.dynamicImportSettled();
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: true, locallyPaused: true });
+  expect(mocks.attach).toHaveBeenCalledTimes(2);
+  expect(mocks.pause).toHaveBeenCalledTimes(2);
+  expect(mocks.resync).not.toHaveBeenCalled();
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+});
+
+test('a ticket issued before freeze cannot open a socket after its transport authority is invalidated', async () => {
+  const ticket = deferred<{ ticket: string; expiresAt: string }>(); mocks.getRealtimeTicket.mockReturnValueOnce(ticket.promise);
+  roomSession.ensure('viewer-1', vi.fn()); await vi.advanceTimersByTimeAsync(0);
+  document.dispatchEvent(new Event('freeze'));
+  ticket.resolve({ ticket: 'stale-ticket-must-not-open', expiresAt: new Date(Date.now() + 30_000).toISOString() });
+  await vi.advanceTimersByTimeAsync(0); expect(Socket.instances).toHaveLength(0);
+  document.dispatchEvent(new Event('resume')); await vi.advanceTimersByTimeAsync(0);
+  expect(Socket.instances).toHaveLength(1);
+  expect(Socket.instances[0].protocols).toEqual(['archtree-room-v1', 'single-use-ticket']);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+});
+
+test('a room read started before pagehide cannot resurrect room access after suspension', async () => {
+  await connected(null);
+  const read = deferred<{ room: RoomSnapshot }>(); mocks.getCurrentRoom.mockReturnValueOnce(read.promise);
+  const refresh = roomSession.refresh(); window.dispatchEvent(new Event('pagehide'));
+  read.resolve({ room: roomFixture() }); await refresh;
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: false, room: null });
+  expect(mocks.attach).not.toHaveBeenCalled();
+});
+
+test('a stale room read failure cannot replace a fresh authorized connection with an old error', async () => {
+  const room = pausedRoom(); await connected(room);
+  const read = deferred<never>(); mocks.getCurrentRoom.mockReturnValueOnce(read.promise);
+  const refresh = roomSession.refresh(); document.dispatchEvent(new Event('freeze'));
+  document.dispatchEvent(new Event('resume')); await vi.advanceTimersByTimeAsync(0);
+  Socket.instances[1].receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_000_000, room });
+  read.reject(new ApiError('Old read failed', 'network')); await refresh;
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: true, error: null, locallyPaused: true });
+});
+
+test('frames and close callbacks from an old socket cannot replace fresh authenticated room state', async () => {
+  const previous = await connected(); document.dispatchEvent(new Event('freeze'));
+  document.dispatchEvent(new Event('resume')); await vi.advanceTimersByTimeAsync(0);
+  const resumed = Socket.instances[1];
+  resumed.receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_000_000, room: null });
+  previous.receive({ type: 'snapshot', room: { ...roomFixture(), revision: 99 } }); previous.close();
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: true, room: null });
+  expect(mocks.attach).toHaveBeenCalledOnce();
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+});
+
+test('foreground return detects stale wall time even when the monotonic clock did not advance', async () => {
+  await connected();
+  const monotonic = performance.now(); vi.setSystemTime(Date.now() + 16_000);
+  expect(performance.now()).toBe(monotonic);
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: false, locallyPaused: true });
+  expect(mocks.detach).toHaveBeenCalledOnce();
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+  expect(mocks.resync).not.toHaveBeenCalled();
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+});
+
+test('freeze preserves an in-flight uncertain mutation identity without automatically replaying it after return', async () => {
+  const room = pausedRoom(); await connected(room);
+  const response = deferred<never>(); mocks.sendRoomCommand.mockReturnValueOnce(response.promise);
+  const mutation = roomSession.control('next'); await vi.advanceTimersByTimeAsync(0);
+  const original = mocks.sendRoomCommand.mock.calls[0][1];
+  document.dispatchEvent(new Event('freeze'));
+  response.reject(new ApiError('Commit response lost', 'network')); await mutation;
+  expect(roomSession.getSnapshot()).toMatchObject({ busy: false, connected: false, uncertain: original });
+  await vi.advanceTimersByTimeAsync(5000);
+  document.dispatchEvent(new Event('resume')); await vi.advanceTimersByTimeAsync(0);
+  Socket.instances[1].receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_005_000, room });
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(roomSession.getSnapshot().uncertain).toEqual(original);
+  expect(mocks.sendRoomCommand).toHaveBeenCalledOnce();
+  expect(mocks.prepareRoomCommand).toHaveBeenCalledOnce();
+  expect(mocks.resync).not.toHaveBeenCalled();
+});
+
+test('an uncertain playback retry stays pending offline and uses its original identity only after fresh authorization', async () => {
+  const room = pausedRoom(); await connected(room);
+  mocks.sendRoomCommand.mockRejectedValueOnce(new ApiError('Unknown result', 'network'));
+  await roomSession.control('next'); const original = mocks.sendRoomCommand.mock.calls[0][1];
+  document.dispatchEvent(new Event('freeze')); await roomSession.retry();
+  expect(mocks.sendRoomCommand).toHaveBeenCalledOnce();
+  expect(roomSession.getSnapshot().uncertain).toEqual(original);
+  document.dispatchEvent(new Event('resume')); await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot().connected).toBe(false);
+  await roomSession.retry(); expect(mocks.sendRoomCommand).toHaveBeenCalledOnce();
+  Socket.instances[1].receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_000_000, room });
+  await roomSession.retry();
+  expect(mocks.sendRoomCommand).toHaveBeenCalledTimes(2);
+  expect(mocks.sendRoomCommand.mock.calls[1][1]).toEqual(original);
+  expect(mocks.prepareRoomCommand).toHaveBeenCalledOnce();
+});
+
+test.each(['leave', 'end', 'declineInvitation'] as const)('%s remains available without live playback authority', async action => {
+  await connected(); document.dispatchEvent(new Event('freeze'));
+  await roomSession.run(action === 'declineInvitation' ? { action, invitationId: 'invite-a', generation: 1 }
+    : { action, roomId: 'room-a', memberId: 'member-a' });
+  expect(mocks.sendRoomCommand).toHaveBeenCalledOnce();
+  expect(mocks.sendRoomCommand.mock.calls[0][1].action).toBe(action);
+  expect(roomSession.getSnapshot().connected).toBe(false);
+});
+
+test('an uncertain End retry remains available offline with the same command identity', async () => {
+  await connected(); mocks.sendRoomCommand.mockRejectedValueOnce(new ApiError('End response lost', 'network'));
+  await roomSession.run({ action: 'end', roomId: 'room-a', memberId: 'member-a' });
+  const original = mocks.sendRoomCommand.mock.calls[0][1];
+  document.dispatchEvent(new Event('freeze')); await roomSession.retry();
+  expect(mocks.sendRoomCommand).toHaveBeenCalledTimes(2);
+  expect(mocks.sendRoomCommand.mock.calls[1][1]).toEqual(original);
+  expect(mocks.prepareRoomCommand).toHaveBeenCalledOnce();
 });

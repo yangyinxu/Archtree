@@ -14,6 +14,7 @@ import { notifyRoomChanges } from '../../realtime/roomEvents';
 import type { SocialBudgetDocument, SocialProfileDocument, SocialReceiptDocument, SocialRelationshipDocument } from '../../repositories/social/socialDocuments';
 import type { RoomDocument, RoomInvitationDocument, RoomMemberDocument, RoomParticipationDocument, RoomQueueEntryDocument } from '../../repositories/social/roomDocuments';
 import { readSocialToken } from '../social/socialTokens';
+import { SOCIAL_TRANSACTION_ATTEMPTS, waitForSocialTransactionRetry } from '../social/socialTransactionRetry';
 import { closeRoom, deleteRoomInvitations, incrementRoomVersion, invalidateInvitationAccounts, pauseRoom, persistRoom, removeRoomMember, roomPositionAt } from './roomLifecycle';
 
 export interface RoomServiceOptions {
@@ -61,7 +62,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
     const transaction = async <T>(actor: RoomActor | null, work: (session: ClientSession) => Promise<T>,
         accounts?: (session: ClientSession) => Promise<string[]>, hooks = false): Promise<T> => {
         if (actor && (!/^[a-f0-9]{24}$/.test(actor.userId) || !/^[a-f0-9]{24}$/.test(actor.sessionId) || !isRoomClientId(actor.clientId))) return fail('social_session_required', 401);
-        for (let attempt = 0; attempt < 3; attempt += 1) {
+        for (let attempt = 0; attempt < SOCIAL_TRANSACTION_ATTEMPTS; attempt += 1) {
             const session = getDatabaseClient().startSession();
             let committed = false;
             try {
@@ -85,8 +86,8 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 if (committed || mongo.hasErrorLabel?.('UnknownTransactionCommitResult')) return fail('mutation_outcome_unknown', 503);
                 if (error instanceof SocialError) throw error;
                 if (error instanceof AccountReferenceUnavailableError) return fail('account_unavailable', 401);
-                if (attempt < 2 && (mongo.code === 11000 || mongo.hasErrorLabel?.('TransientTransactionError'))) {
-                    await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1))); continue;
+                if (attempt + 1 < SOCIAL_TRANSACTION_ATTEMPTS && (mongo.code === 11000 || mongo.hasErrorLabel?.('TransientTransactionError'))) {
+                    await waitForSocialTransactionRetry(attempt); continue;
                 }
                 return fail('room_unavailable', 503);
             } finally { await session.endSession(); }

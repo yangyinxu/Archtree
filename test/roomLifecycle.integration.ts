@@ -342,7 +342,8 @@ test('unknown committed outcomes retain same-key evidence without automatically 
     const intent = control(host, state, 'next'); let commits = 0;
     const uncertain = service({ beforeCommit: async session => {
         commits += 1; await session.commitTransaction();
-        const error = new MongoServerError({ message: 'synthetic lost commit acknowledgement' }); error.addErrorLabel('UnknownTransactionCommitResult'); throw error;
+        const error = new MongoServerError({ message: 'synthetic lost commit acknowledgement' });
+        error.addErrorLabel('UnknownTransactionCommitResult'); error.addErrorLabel('TransientTransactionError'); throw error;
     } });
     await assert.rejects(uncertain.mutate(host.actor, intent), isError('mutation_outcome_unknown'));
     assert.equal(commits, 1); assert.equal((await snapshot(host)).timeline?.entryId, state.queue[1].entryId);
@@ -350,6 +351,60 @@ test('unknown committed outcomes retain same-key evidence without automatically 
         { commandId: intent.commandId, outcome: 'applied', replayed: true });
     assert.equal((await api.mutate(host.actor, intent)).replayed, true);
     await assert.rejects(api.mutate(host.actor, { ...intent, action: 'previous' } as RoomCommand), isError('idempotency_conflict'));
+});
+
+test('five known-aborted room retries preserve the original selection and commit exactly once', async () => {
+    const host = await person('host'); await create(host); const before = await snapshot(host);
+    const intent = control(host, before, 'select', { targetEntryId: before.queue[1].entryId });
+    const original = structuredClone(intent);
+    let attempts = 0;
+    const retrying = service({ beforeCommit: async () => {
+        attempts += 1;
+        if (attempts <= 5) {
+            if (attempts === 1 && 'targetEntryId' in intent) intent.targetEntryId = before.queue[2].entryId;
+            const error = new MongoServerError({ message: 'synthetic room contention', code: 112 });
+            error.addErrorLabel('TransientTransactionError'); throw error;
+        }
+    } });
+    assert.equal((await retrying.mutate(host.actor, intent)).outcome, 'applied');
+    assert.equal(attempts, 6);
+    const after = await snapshot(host);
+    assert.equal(after.timeline?.entryId, before.queue[1].entryId);
+    assert.equal(after.timeline?.playbackGeneration, before.timeline!.playbackGeneration + 1);
+    assert.equal(await database().collection('socialMutations').countDocuments({ commandId: original.commandId }), 1);
+    assert.equal((await api.mutate(host.actor, original)).replayed, true);
+});
+
+test('persistent known-aborted room contention exhausts six attempts without changing state or receipts', async () => {
+    const host = await person('host'); await create(host); const before = await snapshot(host);
+    const intent = control(host, before, 'next');
+    let attempts = 0;
+    const failing = service({ beforeCommit: async () => {
+        attempts += 1;
+        const error = new MongoServerError({ message: 'synthetic persistent room contention', code: 112 });
+        error.addErrorLabel('TransientTransactionError'); throw error;
+    } });
+    await assert.rejects(failing.mutate(host.actor, intent), isError('room_unavailable'));
+    assert.equal(attempts, 6);
+    assert.deepEqual(await snapshot(host), before);
+    assert.equal(await database().collection('socialMutations').countDocuments({ commandId: intent.commandId }), 0);
+    assert.equal((await api.mutate(host.actor, intent)).outcome, 'applied');
+});
+
+test('a transient label after a room commit cannot replay the already committed action', async () => {
+    const host = await person('host'); await create(host); const before = await snapshot(host);
+    const intent = control(host, before, 'next');
+    let attempts = 0;
+    const uncertain = service({ afterCommit: async () => {
+        attempts += 1;
+        const error = new MongoServerError({ message: 'synthetic post-commit transient label', code: 112 });
+        error.addErrorLabel('TransientTransactionError'); throw error;
+    } });
+    await assert.rejects(uncertain.mutate(host.actor, intent), isError('mutation_outcome_unknown'));
+    assert.equal(attempts, 1);
+    assert.equal((await snapshot(host)).timeline?.playbackGeneration, before.timeline!.playbackGeneration + 1);
+    assert.equal(await database().collection('socialMutations').countDocuments({ commandId: intent.commandId }), 1);
+    assert.equal((await api.mutate(host.actor, intent)).replayed, true);
 });
 
 test('scope expiry never reapplies a command; retained social outcome remains available after expiry', async () => {

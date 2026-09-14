@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-Mb5aVfbK9XiKLeoc_niXjvOPqJo3__9DFawP75MOylk",
+  "revision": "sha256-VyTp2hkHavXlevftpYr80n5D15fd_DqEasVzBOTove4",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.back_login": "Back to Log in",
@@ -528,7 +528,7 @@
     "room.connected": "Connected",
     "room.connecting": "Connecting…",
     "room.create": "Start a room",
-    "room.disconnected": "Connection lost. Playback is paused until you reconnect.",
+    "room.disconnected": "Connection lost. After reconnecting, use the play button to listen again.",
     "room.empty": "Start a room, choose a few songs, and invite your friends.",
     "room.end": "End room",
     "room.end_confirm": "End this room for everyone?",
@@ -556,6 +556,7 @@
     "room.queue": "Room queue",
     "room.ready": "Ready",
     "room.reconnect": "Reconnect",
+    "room.resume_and_play": "Resume and play for everyone",
     "room.resync": "Listen along",
     "room.seek": "Room playback position",
     "room.selected": "Selected",
@@ -567,6 +568,7 @@
     "room.title": "Listening room",
     "room.transfer": "Transfer and leave",
     "room.transfer_pending": "Waiting for acceptance. The current host leaves when the transfer is accepted.",
+    "room.waiting_for_host": "Waiting for the host to start playback.",
     "route.announcement.page": "{title} page",
     "route.error.copy": "Return Home and keep exploring from there.",
     "route.error.eyebrow": "Listening continues",

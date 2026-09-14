@@ -3992,6 +3992,13 @@
       ],
       "variables": {}
     },
+    "room.resume_and_play": {
+      "description": "Shared listening interface: resume and play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.resync": {
       "description": "Shared listening interface: resync.",
       "delivery": [
@@ -4064,6 +4071,13 @@
     },
     "room.transfer_pending": {
       "description": "Shared listening interface: transfer pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.waiting_for_host": {
+      "description": "Shared listening interface: waiting for host.",
       "delivery": [
         "runtime"
       ],

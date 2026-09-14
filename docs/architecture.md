@@ -241,9 +241,26 @@ the source transaction. Versionless ordinary streaming retains its contract.
 Web room playback does not write Recently Played in this slice. Joining replaces
 the executable queue through the existing player; leave/removal detaches the room
 and clears the queue without restoring or resuming an earlier queue. Browse playback cannot silently
-replace a joined room. Native background operation, downloaded-source preference,
+replace a joined room. Hidden Web Audio tabs continue using fresh authorized
+snapshots; visibility alone is not a local pause. Document freeze or pagehide
+invalidates the transport incarnation and detaches playback. Resume/pageshow
+obtains fresh authorization, while a visibility return also checks both monotonic
+and wall-clock pong age against the 15-second freshness bound. Personal resumption
+remains explicit. A local Play gesture captures its original command preconditions,
+clears the caller's local pause, and waits for the matching heartbeat pong before
+sending shared Play, so the HTTP command cannot overtake cohort admission. New
+local pause, account/controller/transport changes, or superseded preconditions
+cancel that pending gesture; temporary suspension retains uncertain command keys.
+Host-control guest Play only resumes personal readiness. Native background operation, downloaded-source preference,
 Video capability negotiation, broader audio decoders, queue editing, push
 notifications and deployment load evidence remain later stages.
+
+Social and room database transactions allow six total attempts for confirmed
+transient aborts or duplicate-key contention. Five waits use 50/100/200/400/600 ms
+plus 0–49 ms jitter each (at most 1,595 ms of intentional backoff, excluding
+transaction execution). The parsed command and its expected versions stay fixed.
+Unknown commit results and post-commit failures are never automatically replayed;
+the client retains the original command for explicit outcome checking or retry.
 
 ### Existing foundation and compatibility
 

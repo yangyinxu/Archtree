@@ -29,6 +29,12 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
   const member = { roomId: room.roomId, memberId: room.self.memberId };
   const allowed = state.connected && room.self.isController && room.self.canControl
     && (room.status === 'open' || host && room.status === 'suspended') && !state.busy && !state.uncertain;
+  const needsLocalResume = state.locallyPaused || Boolean(player.error);
+  const playing = room.timeline?.state === 'playing';
+  const resumeOnly = needsLocalResume && (playing || !room.self.canControl);
+  const localAllowed = state.connected && room.self.isController && room.status === 'open' && !state.busy && !state.uncertain;
+  const primaryLabel = resumeOnly ? 'room.resync' : playing ? 'room.shared_pause'
+    : needsLocalResume ? 'room.resume_and_play' : 'room.shared_play';
   const current = room.queue.find(entry => entry.entryId === room.timeline?.entryId);
   const elapsed = player.currentItem?.id === current?.mediaTrackId ? player.currentTime : (room.timeline?.positionMs ?? 0) / 1000;
   const duration = (room.timeline?.durationMs ?? 0) / 1000;
@@ -40,6 +46,7 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
     {room.status !== 'open' && <p className={styles.status}>{t(room.status === 'ended' ? 'room.ended' : 'room.suspended')}</p>}
     {!room.self.isController && <div className={styles.status}>{t('room.observing')}<div className={styles.actions}><button className={styles.button} disabled={!state.connected || state.busy} onClick={() => roomSession.run({ action: 'takeControl', ...member })}>{t('room.take_control')}</button></div></div>}
     <div className={styles.nowPlaying}><div className={styles.artwork}><Icon name="brand" /></div><div><strong>{current?.title ?? t('room.title')}</strong><p className={styles.muted}>{room.timeline?.state === 'preparing' ? t('room.preparing') : state.locallyPaused ? t('room.locally_paused') : t('room.position', { elapsed: seconds(elapsed), duration: seconds(duration) })}</p></div></div>
+    {!room.self.canControl && !playing && room.status === 'open' && <p className={styles.status}>{t('room.waiting_for_host')}</p>}
     <input className={styles.seek} aria-label={t('room.seek')} type="range" min={0} max={Math.max(duration, 1)} step={.1}
       value={seek ?? Math.min(elapsed, duration)} disabled={!allowed}
       onPointerDown={captureSeek} onKeyDown={captureSeek}
@@ -48,9 +55,11 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
       onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) commitSeek(); }} />
     <div className={styles.actions}>
       <button className={styles.secondary} aria-label={t('player.action.previous')} disabled={!allowed} onClick={() => roomSession.control('previous')}><Icon name="previous" /></button>
-      <button className={styles.button} disabled={!allowed} onClick={() => roomSession.control(room.timeline?.state === 'playing' ? 'pause' : 'play')}><Icon name={room.timeline?.state === 'playing' ? 'pause' : 'play'} />{t(room.timeline?.state === 'playing' ? 'room.shared_pause' : 'room.shared_play')}</button>
+      <button className={styles.button} disabled={resumeOnly ? !localAllowed : !allowed} onClick={() => resumeOnly ? roomSession.resync() : roomSession.control(playing ? 'pause' : 'play')}><Icon name={playing && !resumeOnly ? 'pause' : 'play'} />{t(primaryLabel)}</button>
       <button className={styles.secondary} aria-label={t('player.action.next')} disabled={!allowed} onClick={() => roomSession.control('next')}><Icon name="next" /></button>
-      {room.self.isController && <button className={styles.secondary} disabled={!state.connected} onClick={() => state.locallyPaused || player.error ? roomSession.resync() : roomSession.pauseLocally()}>{t(state.locallyPaused || player.error ? 'room.resync' : 'room.local_pause')}</button>}
+      {room.self.isController && (!needsLocalResume
+        ? <button className={styles.secondary} disabled={!state.connected} onClick={() => roomSession.pauseLocally()}>{t('room.local_pause')}</button>
+        : playing && room.self.canControl && <button className={styles.secondary} disabled={!allowed} onClick={() => roomSession.control('pause')}>{t('room.shared_pause')}</button>)}
     </div>
     {player.error && <p className={styles.error}>{t('room.start_failed')}</p>}
     <div className={styles.actions}>

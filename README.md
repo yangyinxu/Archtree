@@ -67,8 +67,13 @@ resources; restart creates fresh accounts and rooms.
 Create an identity in each tab, use exact handle lookup to send/accept a friend
 request, select tracks and create a room, then invite and join from the other tab.
 Host control is the default. Choose Everyone to let both active controllers seek
-or choose a track. Pause on this device stays local; Resync returns that player to
-the current room. Transfer and leave requires the recipient to accept; End room
+or choose a track. Pause only for me stays local. The main button becomes Listen
+along when the room is playing, or Resume and play for everyone when the room is
+paused and you can control it. A guest in Host control can resume locally and
+wait for the host. Switching tabs keeps Audio playing while the browser and
+realtime connection remain active. Actual page freezing, sleep with stale
+connectivity, or connection loss pauses local playback; after reconnection use
+the main button to listen again. Transfer and leave requires the recipient to accept; End room
 closes it for every member. A refreshed tab observes until Use this device is
 selected. Browser autoplay refusal is surfaced with explicit resync rather than
 reported as successful playback.
@@ -101,10 +106,13 @@ reconciliation tool.
 Run `npm test`, `npm run build`, `npm run test:integration`, and
 `npm run test:e2e:social --workspace @archtree/finitude-web` for the real
 MongoDB/S3/WebSocket browser flow. Keep the ordinary listener E2E gate for playback
-continuity, navigation and accessibility changes. The legacy
+continuity, navigation and accessibility changes. The social E2E uses a disposable
+headed Chromium profile to verify real background tab visibility; run it in a
+desktop session, or use `xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web`
+on Linux with Xvfb installed. The legacy
 `contracts/social/prototype-v1/playback-trace.json` remains a feasibility fixture
-for native DEBUG adapters, not the room wire contract. Native devices, background
-participation, shared Video and deployment performance remain tracked in
+for native DEBUG adapters, not the room wire contract. Native devices and native
+background participation, shared Video and deployment performance remain tracked in
 [the social implementation plan](docs/plans/social-and-shared-playback-plan.md).
 
 ## Code Documentation

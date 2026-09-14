@@ -130,6 +130,15 @@ Playlist access retain their existing rules.
   exact current occurrence. If nobody is ready, playback stays paused. A slow
   participant does not repeatedly pause the whole room.
 - Local pause survives subsequent room events. Resync is an explicit action.
+  The Web primary playback action resumes only this device when the room is
+  already playing. When the room is paused and the caller can control playback,
+  that action resumes the caller's participation and starts shared playback;
+  other participants' deliberate local pauses remain unchanged. Host-control
+  guests can become ready locally but must wait for the host to start the room.
+  Merely switching Web Audio tabs does not pause participation while the browser
+  continues media execution and the authorized realtime connection stays fresh.
+  Actual browser freeze/page departure or stale authority pauses the device;
+  waking or reconnecting does not silently resume it or replay a shared action.
   Lost realtime authority detaches local room playback until a fresh authorized
   connection and explicit resync; periodic reads during recovery do not allow
   offline room control. A server authority change pauses the recovered timeline.
