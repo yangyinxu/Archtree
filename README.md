@@ -109,7 +109,24 @@ MongoDB/S3/WebSocket browser flow. Keep the ordinary listener E2E gate for playb
 continuity, navigation and accessibility changes. The social E2E uses a disposable
 headed Chromium profile to verify real background tab visibility; run it in a
 desktop session, or use `xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web`
-on Linux with Xvfb installed. The legacy
+on Linux with Xvfb installed. All automated Chromium launches, including this
+headed profile, use `--disable-audio-output` to route playback through Chromium's
+fake audio output stream. This avoids opening the developer's audio output device
+and triggering automatic Bluetooth headphone switching; muting alone can still
+open that device. Media decoding, playback clocks, element volume/mute state and
+background-tab behavior remain under test. These checks do not verify audible
+output or physical headphone routing.
+
+On macOS, the ordinary listener E2E configuration defaults to Chromium only and
+prints a notice that Firefox/WebKit were excluded: their headless modes do not
+provide verified isolation from hardware audio output. Run the full three-browser
+matrix in an isolated Linux CI environment without host audio passthrough. To
+deliberately allow hardware audio on a Mac, use
+`FINITUDE_E2E_ALLOW_HARDWARE_AUDIO=1 npm run test:e2e`; this can take over connected
+headphones. Report excluded browser projects as not run, not as passed. Other
+platforms retain their existing three-browser matrix.
+
+The legacy
 `contracts/social/prototype-v1/playback-trace.json` remains a feasibility fixture
 for native DEBUG adapters, not the room wire contract. Native devices and native
 background participation, shared Video and deployment performance remain tracked in

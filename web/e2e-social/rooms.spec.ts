@@ -46,8 +46,9 @@ const roomSettingsGeometry = async (page: Page) => {
 /** A disposable normal browser avoids Playwright's focus emulation, so real tab visibility is observable. */
 const nativeTabBrowser = async () => {
   const profile = await mkdtemp(join(tmpdir(), 'archtree-social-native-tabs-'));
+  // This direct launch bypasses Playwright config. Keep real decoding/visibility with a hardware-free output sink.
   const browserProcess = spawn(chromium.executablePath(), ['--user-data-dir=' + profile, '--remote-debugging-port=0',
-    '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
+    '--no-first-run', '--no-default-browser-check', '--disable-audio-output', 'about:blank'], { stdio: 'ignore' });
   let launchError: Error | undefined; let browser: Browser | undefined;
   const exited = new Promise<void>(resolve => {
     browserProcess.once('exit', () => resolve());
