@@ -90,34 +90,37 @@ const login = async (page: Page, name: string, alias: string, baseURL: string) =
   await expect(identity.getByRole('button', { name: 'Save profile' })).toBeVisible();
 };
 
-/** Holds only dispatch timing; both original UI commands still execute on the actual server. */
-const raceCommands = async (first: Page, second: Page, firstGesture: () => Promise<void>, secondGesture: () => Promise<void>) => {
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const captured: Array<Record<string, unknown>> = [];
-  const outcomes: Array<{ status: number; outcome?: string; code?: string }> = [];
-  const route = async (request: Route) => {
-    captured.push(request.request().postDataJSON());
-    if (captured.length === 2) release();
-    await gate;
-    const response = await request.fetch();
-    const body = await response.json();
-    outcomes.push({ status: response.status(), outcome: body.outcome, code: body.code });
-    await request.fulfill({ response });
-  };
+/** Keep interception for the context lifetime: toggling it during polling can strand unrelated Chromium reads. */
+const installCommandRace = async (first: Page, second: Page) => {
+  let intercept: ((request: Route) => Promise<void>) | undefined;
+  const route = (request: Route) => intercept ? intercept(request) : request.continue();
   await first.route('**/api/social/v1/room-commands', route);
   await second.route('**/api/social/v1/room-commands', route);
-  try {
-    await Promise.all([firstGesture(), secondGesture()]);
-    await expect.poll(() => outcomes.length).toBe(2);
-    expect(captured[0].expectedPlaybackGeneration).toBe(captured[1].expectedPlaybackGeneration);
-    expect(captured[0].expectedEntryId).toBe(captured[1].expectedEntryId);
-    expect(outcomes.map(value => value.outcome).sort(), JSON.stringify(outcomes)).toEqual(['applied', 'rejected']);
-  } finally {
-    release();
-    await first.unroute('**/api/social/v1/room-commands', route);
-    await second.unroute('**/api/social/v1/room-commands', route);
-  }
+  return async (firstGesture: () => Promise<void>, secondGesture: () => Promise<void>) => {
+    expect(intercept).toBeUndefined();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const captured: Array<Record<string, unknown>> = [];
+    const outcomes: Array<{ status: number; outcome?: string; code?: string }> = [];
+    // Only dispatch timing is held; both original UI commands still execute on the actual server.
+    intercept = async request => {
+      captured.push(request.request().postDataJSON());
+      if (captured.length === 2) release();
+      await gate;
+      const response = await request.fetch();
+      const body = await response.json();
+      await request.fulfill({ response });
+      outcomes.push({ status: response.status(), outcome: body.outcome, code: body.code });
+    };
+    try {
+      await Promise.all([firstGesture(), secondGesture()]);
+      await expect.poll(() => outcomes.length).toBe(2);
+      expect(captured).toHaveLength(2);
+      expect(captured[0].expectedPlaybackGeneration).toBe(captured[1].expectedPlaybackGeneration);
+      expect(captured[0].expectedEntryId).toBe(captured[1].expectedEntryId);
+      expect(outcomes.map(value => value.outcome).sort(), JSON.stringify(outcomes)).toEqual(['applied', 'rejected']);
+    } finally { release(); intercept = undefined; }
+  };
 };
 
 test('real social route continues background audio, arbitrates gestures, recovers locally and transfers the host', async ({ browser, baseURL }) => {
@@ -127,6 +130,7 @@ test('real social route continues background audio, arbitrates gestures, recover
     aliceContext = await browser.newContext({ baseURL, reducedMotion: 'reduce' });
     const contexts = [aliceContext, native.context];
     const [alice, bob] = await Promise.all(contexts.map(context => context.newPage()));
+    const raceCommands = await installCommandRace(alice, bob);
     await Promise.all([observeTransportCloses(alice), observeTransportCloses(bob)]);
     const aliceRoom = snapshots(alice); const bobRoom = snapshots(bob);
     const commands: string[] = [];
@@ -214,12 +218,12 @@ test('real social route continues background audio, arbitrates gestures, recover
       phase = 'concurrent-commands';
       await expect(b.getByRole('button', { name: 'Next', exact: true })).toBeEnabled();
       const generation = aliceRoom()!.timeline!.playbackGeneration;
-      await raceCommands(alice, bob, () => a.getByRole('button', { name: 'Next', exact: true }).click(), () => b.getByRole('button', { name: 'Next', exact: true }).click());
+      await raceCommands(() => a.getByRole('button', { name: 'Next', exact: true }).click(), () => b.getByRole('button', { name: 'Next', exact: true }).click());
       await expect.poll(() => aliceRoom()?.timeline?.playbackGeneration).toBe(generation + 1);
       await expect.poll(() => bobRoom()?.timeline?.entryId).toBe(aliceRoom()!.queue[1].entryId);
       await Promise.all([playing(alice), playing(bob)]);
       const nextGeneration = aliceRoom()!.timeline!.playbackGeneration;
-      await raceCommands(alice, bob,
+      await raceCommands(
         () => a.getByRole('button', { name: 'Play for everyone First Light', exact: true }).click(),
         () => b.getByRole('button', { name: 'Play for everyone Home Again', exact: true }).click());
       await expect.poll(() => aliceRoom()?.timeline?.playbackGeneration).toBe(nextGeneration + 1);
