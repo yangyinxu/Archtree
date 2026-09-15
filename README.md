@@ -184,6 +184,12 @@ open that device. Media decoding, playback clocks, element volume/mute state and
 background-tab behavior remain under test. These checks do not verify audible
 output or physical headphone routing.
 
+In isolated Linux CI (`CI=true` or `CI=1`), the native-tab fixture matches
+Playwright's default `--no-sandbox` launch option; other local launches keep the
+browser sandbox. This changes no host sandbox or AppArmor settings. Native
+startup failures report exit/signal status and at most 4 KiB of startup stderr;
+collection stops when the debugging connection is established, before login.
+
 On macOS, the ordinary listener E2E configuration defaults to Chromium only and
 prints a notice that Firefox/WebKit were excluded: their headless modes do not
 provide verified isolation from hardware audio output. Run the full three-browser

@@ -54,9 +54,10 @@ CI installs Xvfb for the social suite's headed background-tab checks and a
 PulseAudio null sink for Firefox. All social Chromium launches disable hardware
 audio output. The seven isolated social scenarios cover rooms, invitations,
 song requests, music shares, room interactions, listening status, and catalog
-room entry. They run before the ordinary browser/visual gate; their traces and
-failure screenshots remain under the retained `web/test-results` evidence even
-when a later Linux visual assertion fails.
+room entry. Once the browser environment is ready, the ordinary browser/visual
+gate runs even if a social assertion failed so both suites retain diagnostic
+evidence. Both gates must pass before artifact staging. Their traces and failure
+screenshots remain under the retained `web/test-results` evidence.
 
 Local staging requires a clean committed worktree so `RELEASE.json` cannot
 misidentify uncommitted bytes. CI supplies the immutable source identity

@@ -1,8 +1,5 @@
-import { chromium, expect, test, type Browser, type BrowserContext, type Page, type Route } from '@playwright/test';
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
+import { nativeSocialBrowser } from './support/nativeSocialBrowser';
 import type { RoomSnapshot } from '../src/api/rooms';
 import { expectNoUnownedAxeViolations } from '../e2e/support/accessibility';
 
@@ -41,43 +38,6 @@ const roomSettingsGeometry = async (page: Page) => {
       await test.info().attach(`room-settings-${name}`, { path, contentType: 'image/png' });
     }
   } finally { await page.setViewportSize(original); }
-};
-
-/** A disposable normal browser avoids Playwright's focus emulation, so real tab visibility is observable. */
-const nativeTabBrowser = async () => {
-  const profile = await mkdtemp(join(tmpdir(), 'archtree-social-native-tabs-'));
-  // This direct launch bypasses Playwright config. Keep real decoding/visibility with a hardware-free output sink.
-  const browserProcess = spawn(chromium.executablePath(), ['--user-data-dir=' + profile, '--remote-debugging-port=0',
-    '--no-first-run', '--no-default-browser-check', '--disable-audio-output', 'about:blank'], { stdio: 'ignore' });
-  let launchError: Error | undefined; let browser: Browser | undefined;
-  const exited = new Promise<void>(resolve => {
-    browserProcess.once('exit', () => resolve());
-    browserProcess.once('error', error => { launchError = error; resolve(); });
-  });
-  let closing: Promise<void> | undefined;
-  const close = () => closing ??= (async () => {
-    try { await browser?.close(); }
-    finally {
-      if (browserProcess.exitCode === null && browserProcess.signalCode === null) {
-        browserProcess.kill('SIGTERM');
-        const force = setTimeout(() => { browserProcess.kill('SIGKILL'); }, 3000);
-        await exited; clearTimeout(force);
-      }
-      await rm(profile, { recursive: true, force: true });
-    }
-  })();
-  try {
-    let port = '';
-    await expect.poll(async () => {
-      if (launchError) throw launchError;
-      if (browserProcess.exitCode !== null) throw new Error('Native test browser exited before accepting connections.');
-      port = await readFile(join(profile, 'DevToolsActivePort'), 'utf8').then(value => value.split('\n')[0]).catch(() => '');
-      return /^\d+$/.test(port);
-    }).toBe(true);
-    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { noDefaults: true });
-    const context = browser.contexts()[0]; context.setDefaultTimeout(10_000);
-    return { context, close };
-  } catch (error) { await close(); throw error; }
 };
 
 /** Retains native close diagnostics without changing socket arguments or transport behavior. */
@@ -161,7 +121,7 @@ const raceCommands = async (first: Page, second: Page, firstGesture: () => Promi
 };
 
 test('real social route continues background audio, arbitrates gestures, recovers locally and transfers the host', async ({ browser, baseURL }) => {
-  const native = await nativeTabBrowser();
+  const native = await nativeSocialBrowser();
   let aliceContext: BrowserContext | undefined;
   try {
     aliceContext = await browser.newContext({ baseURL, reducedMotion: 'reduce' });
