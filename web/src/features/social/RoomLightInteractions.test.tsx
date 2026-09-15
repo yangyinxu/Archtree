@@ -61,6 +61,58 @@ test('initial notices seed silently and only genuinely new live IDs are announce
   expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled();
 });
 
+test('live activity arriving before its roster waits for that revision and announces once', () => {
+  const guest = mocks.state.room!.members.pop()!;
+  const view = show(); const joined = { ...community([event('joined', 'joined')]), revision: 2 };
+  view.update(joined, 2);
+  expect(within(list()).queryByRole('listitem')).not.toBeInTheDocument(); expect(status()).toBeEmptyDOMElement();
+  mocks.state.room = { ...mocks.state.room!, revision: 2, members: [...mocks.state.room!.members, guest] };
+  view.update();
+  expect(status()).toHaveTextContent('Bob joined the room.');
+  const capture = new MutationObserver(() => undefined); capture.observe(status(), { childList: true, characterData: true, subtree: true });
+  view.update({ ...joined, revision: 3 }, 3);
+  mocks.state.room = { ...mocks.state.room!, revision: 3 }; view.update();
+  expect(status()).toHaveTextContent('Bob joined the room.'); expect(capture.takeRecords()).toHaveLength(0); capture.disconnect();
+  expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled();
+});
+
+test.each(['initial', 'reconnect'])('%s activity arriving before its roster remains a silent baseline', phase => {
+  const guest = mocks.state.room!.members.pop()!;
+  const joined = { ...community([event('baseline', 'joined')]), revision: 2 };
+  const view = show(phase === 'initial' ? joined : community());
+  if (phase === 'reconnect') {
+    mocks.state.connected = false; view.update();
+    mocks.state.connected = true; view.update();
+    view.update(joined, 2);
+  }
+  mocks.state.room = { ...mocks.state.room!, revision: 2, members: [...mocks.state.room!.members, guest] }; view.update();
+  expect(within(list()).getByText('Bob joined the room.')).toBeVisible(); expect(status()).toBeEmptyDOMElement();
+  view.update({ ...joined, events: [...joined.events, event('live')] }, 3);
+  expect(status()).toHaveTextContent('Bob reacted ❤️'); expect(status()).not.toHaveTextContent('joined');
+});
+
+test('a deferred event discarded by a newer departure roster cannot announce on a later rejoin', () => {
+  const guest = mocks.state.room!.members.find(member => member.socialId === actor.socialId)!;
+  const view = show(); const pending = { ...community([event('pending')]), revision: 2 };
+  view.update(pending, 2); expect(status()).toBeEmptyDOMElement();
+  mocks.state.room = { ...mocks.state.room!, revision: 3, members: mocks.state.room!.members.filter(member => member !== guest) }; view.update();
+  expect(within(list()).queryByRole('listitem')).not.toBeInTheDocument(); expect(status()).toBeEmptyDOMElement();
+  mocks.state.room = { ...mocks.state.room!, revision: 4, members: [...mocks.state.room!.members, { ...guest, memberId: 'member-rejoined' }] }; view.update();
+  expect(status()).toBeEmptyDOMElement();
+});
+
+test.each(['rejoin', 'rename'])('an old announcement stays retired when %s restores the same social card', change => {
+  const guest = mocks.state.room!.members.find(member => member.socialId === actor.socialId)!;
+  const view = show(); view.update(community([event('announced')]), 2);
+  expect(status()).toHaveTextContent('Bob reacted ❤️');
+  mocks.state.room = { ...mocks.state.room!, members: mocks.state.room!.members.flatMap(member => member !== guest
+    ? [member] : change === 'rejoin' ? [] : [{ ...member, alias: 'New Bob' }]) }; view.update();
+  expect(status()).toBeEmptyDOMElement();
+  mocks.state.room = { ...mocks.state.room!, members: [mocks.state.room!.members[0],
+    { ...guest, memberId: change === 'rejoin' ? 'member-rejoined' : guest.memberId }] }; view.update();
+  expect(status()).toBeEmptyDOMElement();
+});
+
 test('offline and first reconnect response never replay retained or missed events as new announcements', () => {
   const old = event('old', 'joined'); const view = show(community([old]));
   const next = event('next'); view.update(community([old, next]), 2); expect(status()).toHaveTextContent('Bob reacted ❤️');

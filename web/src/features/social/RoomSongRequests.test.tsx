@@ -225,6 +225,8 @@ test('song requests and activity consume one membership-scoped query without rea
   }); });
   expect(await screen.findByText('No pending song requests.')).toBeVisible();
   expect(screen.getByRole('list', { name: 'Room activity' })).toHaveTextContent('Bob reacted ❤️');
+  expect(screen.getByRole('status', { name: 'Room activity' })).toBeEmptyDOMElement();
+  mocks.state.room = { ...mocks.state.room!, revision: 2 }; view.rerender();
   expect(screen.getByRole('status', { name: 'Room activity' })).toHaveTextContent('Bob reacted ❤️');
   expect(mocks.community).toHaveBeenCalledTimes(1); expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled();
 });
