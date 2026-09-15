@@ -40,7 +40,7 @@ test('searches explicitly and retains removable selections across pages and sear
   mocks.search.mockImplementation(async (_viewer, input) => input.query ? { items: [track(3, 'Old favorite')], nextCursor: null }
     : input.cursor ? { items: [track(2)], nextCursor: null } : { items: [track(1)], nextCursor: 'second-page' });
   show({ multiple: true });
-  expect(await screen.findByText(/Rooms currently support verified WAV audio/)).toBeVisible();
+  expect(await screen.findByText(/Rooms support verified WAV, MP3 and AAC-LC M4A audio/)).toBeVisible();
   fireEvent.click(await screen.findByRole('checkbox', { name: 'Song 1 3:05' }));
   expect(mocks.changed).toHaveBeenLastCalledWith([track(1)]);
   fireEvent.click(screen.getByRole('button', { name: 'Load more' }));

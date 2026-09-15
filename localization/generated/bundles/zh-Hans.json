@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-BjxnNOSui8p8GOhGzzatoyghW7BjFCR54mIbeQqEg1g",
+  "revision": "sha256-cP7LSeECmmvN2D3rMsKo-9bahzOTXNICwtT_FQ29tLo",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.back_login": "返回登录",
@@ -631,7 +631,7 @@
     "room.leave": "退出房间",
     "room.local_pause": "仅自己暂停",
     "room.locally_paused": "此设备已暂停",
-    "room.media_eligibility": "房间目前支持经过验证的 WAV 音频，其他歌曲仍可单独收听。",
+    "room.media_eligibility": "房间支持经过验证的 WAV、MP3 和 AAC-LC M4A 音频，其他歌曲仍可单独收听。",
     "room.media_no_results": "没有找到与“{query}”匹配的可一起听歌曲。",
     "room.media_pending": "已提交点歌",
     "room.media_remove": "从选择中移除《{title}》",

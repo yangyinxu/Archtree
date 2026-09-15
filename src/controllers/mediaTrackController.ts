@@ -6,6 +6,7 @@ import { getS3 } from '../infrastructure/s3';
 import { AudioTrack } from '../models/audioTrack';
 import {
     isMediaRepresentationRevision,
+    roomAudioRepresentationForTrack,
     storedMediaRepresentationForTrack
 } from '../services/mediaRepresentationService';
 import {
@@ -89,7 +90,10 @@ export const resolveReadyMediaTrackAsset = async (
         status: 'ready' as const,
         track,
         mediaType,
-        contentType: activeMediaContentTypeForTrack(track),
+        // A verified pinned source determines its type even when an old upload declared a misleading MIME.
+        contentType: pinned && roomAudioRepresentationForTrack(track)
+            ? ({ 'wav-pcm': 'audio/wav', mp3: 'audio/mpeg', 'm4a-aac': 'audio/mp4' } as Record<string, string>)[pinned.format]
+            : activeMediaContentTypeForTrack(track),
         params,
         metadata,
         pinned

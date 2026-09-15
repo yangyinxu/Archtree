@@ -627,7 +627,7 @@
   "room.leave": "Leave room",
   "room.local_pause": "Pause only for me",
   "room.locally_paused": "Paused on this device",
-  "room.media_eligibility": "Rooms currently support verified WAV audio. Other songs remain available for personal listening.",
+  "room.media_eligibility": "Rooms support verified WAV, MP3 and AAC-LC M4A audio. Other songs remain available for personal listening.",
   "room.media_no_results": "No room-ready songs matched “{query}”.",
   "room.media_pending": "Already requested",
   "room.media_remove": "Remove {title} from selection",

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { assertLinuxRuntime, assertNodeRuntime } from '../scripts/check-runtime.mjs';
+import { assertLinuxRuntime, assertNodeRuntime, assertRoomAudioRuntime } from '../scripts/check-runtime.mjs';
 
 test('runtime preflight rejects unsupported Node majors with an actionable message', () => {
   assert.doesNotThrow(() => assertNodeRuntime('24.20.0'));
@@ -40,4 +40,14 @@ test('startup environment assignments work without shell-specific syntax', () =>
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), ['develop', '5']);
+});
+
+
+test('room audio preflight requires real codec capabilities and hides unsafe binary diagnostics', () => {
+  assert.match(assertRoomAudioRuntime(), /[0-9]/);
+  assert.throws(() => assertRoomAudioRuntime('relative/secret-decoder'), error => {
+    assert.match(error.message, /Room audio decoder is unavailable/);
+    assert.doesNotMatch(error.message, /secret-decoder/);
+    return true;
+  });
 });

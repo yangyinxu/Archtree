@@ -7,8 +7,8 @@
     "web"
   ],
   "scripts": {
-    "doctor": "node scripts/check-runtime.mjs --mongo",
-    "doctor:release": "node scripts/check-runtime.mjs --mongo --linux",
+    "doctor": "node scripts/check-runtime.mjs --mongo --room-audio",
+    "doctor:release": "node scripts/check-runtime.mjs --mongo --linux --room-audio",
     "prebuild": "node scripts/check-runtime.mjs",
     "build": "npm run localization:check && npm run build:server && npm run build:web",
     "build:server": "tsc --noEmit",
@@ -26,6 +26,7 @@
     "localization:check": "node scripts/build-localizations.mjs --check",
     "localization:generate": "node scripts/build-localizations.mjs",
     "localization:sync-native": "node scripts/sync-native-localizations.mjs",
+    "analyze:room-audio": "tsx scripts/analyze-room-audio.ts",
     "migrate:catalog-credits": "tsx scripts/migrate-catalog-credits.ts",
     "stage:eb-artifact": "node scripts/check-runtime.mjs --linux && node scripts/stage-eb-artifact.mjs",
     "start": "cross-env NODE_ENV=production tsx src/app.ts",

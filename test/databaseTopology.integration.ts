@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MongoClient } from 'mongodb';
 import { startMongoReplicaSet, startMongoTestDatabase } from './support/mongoReplicaSet';
-import { checkDatabaseReadiness, getDatabaseClient, getDb } from '../src/infrastructure/database';
+import { checkDatabaseReadiness, connectToDatabase, disconnectFromDatabase, getDatabaseClient, getDb } from '../src/infrastructure/database';
 import { DatabaseTopologyUnavailableError, verifyDatabaseTransactionTopology } from '../src/infrastructure/databaseTopology';
 import { startServer } from '../src/server';
 
@@ -54,6 +54,29 @@ test('real standalone startup is rejected before the application or index writes
     try {
       await client.connect();
       assert.deepEqual(await client.db(process.env.DB_NAME).listCollections().toArray(), []);
+    } finally { await client.close(); }
+  } finally { await harness.stop(); }
+});
+
+
+test('read-only operational connection verifies constraints without creating missing indexes or collections', async () => {
+  const harness = await startMongoReplicaSet('archtree-topology-read-only');
+  try {
+    const database = getDb()!;
+    const users = database.collection('users');
+    const indexes = await users.listIndexes().toArray();
+    const index = indexes.find(value => value.name !== '_id_' && value.unique === true)!;
+    assert.ok(index);
+    await users.dropIndex(index.name!);
+    const client = new MongoClient(process.env.DB_CONN_STRING!);
+    await client.connect();
+    try {
+      const observer = client.db(process.env.DB_NAME);
+      const before = await observer.listCollections().toArray();
+      await disconnectFromDatabase();
+      await assert.rejects(connectToDatabase({ initializeIndexes: false, logReady: false }));
+      assert.deepEqual(await observer.listCollections().toArray(), before);
+      assert.equal((await observer.collection('users').listIndexes().toArray()).some(value => value.name === index.name), false);
     } finally { await client.close(); }
   } finally { await harness.stop(); }
 });

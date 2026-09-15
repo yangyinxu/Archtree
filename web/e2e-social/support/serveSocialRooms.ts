@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
-import { cp, mkdtemp, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -67,7 +67,8 @@ await runDisposableRuntime(async resources => {
     if (accepted.outcome !== 'applied') throw new Error('Invitation fixture friendship could not be created.');
   }
   const trackIds: string[] = [];
-  const titles = ['First Light', 'Across the Water', 'Home Again'];
+  const compressedAudio = process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'audio-formats';
+  const titles = compressedAudio ? ['MP3 Horizon', 'AAC Horizon', 'VBR MP3 Horizon'] : ['First Light', 'Across the Water', 'Home Again'];
   if (process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'catalog-room') {
     titles.push(...Array.from({ length: 22 }, (_, index) => `Archive song ${String(index + 1).padStart(2, '0')}`));
   }
@@ -76,7 +77,16 @@ await runDisposableRuntime(async resources => {
     await getDb()!.collection('audioTracks').insertOne({ _id: id, title, trackNumber: index + 1, artistIds: [],
       duration: '2:00', s3Key: id.toHexString(), mediaType: 'audio', uploadStatus: 'pending', publicationStatus: 'ready',
       createdBy: curator.toHexString(), createdAt: new Date() });
-    await uploadAudioObject(id.toHexString(), wavUploadFile(createPcmWav(120_000)), curator.toHexString());
+    // The dedicated format gate publishes the original compressed bytes through the same storage lifecycle as uploads.
+    let upload = wavUploadFile(createPcmWav(120_000));
+    if (compressedAudio) {
+      const filename = ['room-tone.mp3', 'room-tone.m4a', 'room-tone-vbr.mp3'][index];
+      const buffer = await readFile(new URL(`../../../test/fixtures/room-audio/${filename}`, import.meta.url));
+      // An incorrect client MIME cannot override the AAC container verified from its actual bytes.
+      upload = { ...upload, originalname: filename, mimetype: filename.endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav',
+        buffer, size: buffer.length };
+    }
+    await uploadAudioObject(id.toHexString(), upload, curator.toHexString());
     trackIds.push(id.toHexString());
   }
   if (['music-shares', 'catalog-room'].includes(process.env.FINITUDE_SOCIAL_E2E_SCENARIO ?? '')) {

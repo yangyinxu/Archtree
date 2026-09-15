@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import * as contentController from '../../controllers/contentController';
 import * as pageController from '../../controllers/pageController';
 import { requireAdminForWeb, requireAuthForWeb } from '../../middleware/authMiddleware';
+import { getRoomAudioAnalysis, postRoomAudioAnalysis } from '../../controllers/contentManager/roomAudioAnalysisController';
 import {
     audioUpload,
     cleanupTemporaryUploads,
@@ -18,6 +19,7 @@ import {
 import {
     asyncHandler,
     attachRequestAbortSignal,
+    roomAudioAnalysisConcurrencyLimit,
     uploadConcurrencyLimit,
 } from '../../middleware/requestProtectionMiddleware';
 import { maxImageUploadMb } from '../../middleware/imageUpload';
@@ -32,6 +34,8 @@ router.use(requireAuthForWeb, requireAdminForWeb);
 
 router.get('/', asyncHandler(contentController.renderManagePageForWeb));
 router.get('/audio-tracks', asyncHandler(contentController.renderAudioTracksPageForWeb));
+router.get('/room-audio-analysis', asyncHandler(getRoomAudioAnalysis));
+router.post('/room-audio-analysis', roomAudioAnalysisConcurrencyLimit, attachRequestAbortSignal, asyncHandler(postRoomAudioAnalysis));
 router.get('/search', asyncHandler(contentController.searchContentWeb));
 router.get('/reference-search', asyncHandler(contentController.searchManagementReferencesWeb));
 router.post('/workflows/artist-release', uploadConcurrencyLimit, requireUploadSize((maxImageUploadMb * 2) + 1), artistReleaseImageUpload, asyncHandler(contentController.createArtistReleaseWorkflowWeb));

@@ -21,7 +21,7 @@ npm run build
 npm run test:integration
 ```
 
-`npm run doctor` checks the Node major and the isolated MongoDB daemon without
+`npm run doctor` checks the Node major, FFmpeg capabilities and the isolated MongoDB daemon without
 reading `.env`, printing credentials, or contacting an application database.
 `npm test`, `npm run build`, and the server test runners reject unsupported
 Node majors before loading application checks.
@@ -74,6 +74,44 @@ disabled. It checks the exit status, missing-variable list, and secret-safe log
 shape. `test/serverStartup.test.ts` covers successful listening, occupied ports,
 invalid ports, and application initialization failures.
 
+## Room audio analysis runtime
+
+Compressed room audio requires FFmpeg with AAC/MP3 decoders, MOV/MP3 demuxers and
+the null muxer, the PCM s16le encoder and file/pipe protocols. Use a maintained distribution package and verify its capabilities:
+
+```sh
+# macOS with Homebrew
+brew install ffmpeg
+# Ubuntu 24.04 (also installed by release CI)
+sudo apt-get update
+sudo apt-get install --yes ffmpeg
+npm run doctor
+```
+
+On Windows, install a trusted FFmpeg distribution linked by the
+[official FFmpeg download page](https://ffmpeg.org/download.html), add its bin
+directory to PATH or set `ROOM_AUDIO_FFMPEG_PATH` to the absolute `ffmpeg.exe` path.
+The override is an executable path, not a shell command. FFmpeg always reads a
+bounded local file and decodes to the null muxer; it never opens an audio device.
+See the [FFmpeg protocol controls](https://ffmpeg.org/ffmpeg-protocols.html) and
+[command options](https://ffmpeg.org/ffmpeg.html) used by the restricted decoder.
+
+Deployments must provision and patch this executable separately; the application
+archive does not bundle a workstation binary or the repository scripts. Use
+`npm run doctor` in a full Linux checkout with the test runtimes; a deployment
+host does not require a local MongoDB test daemon. To inspect only FFmpeg from a
+full checkout using the deployment's executable, run
+`node scripts/check-runtime.mjs --room-audio`. Then verify original MP3/M4A
+uploads and room preparation, play and seeking through the deployed app before
+rollout. Run the batch CLI from a full administrator checkout with explicit
+configuration; the deployed Content Manager page remains its in-app equivalent. Missing runtime makes compressed uploads
+ineligible with a retryable analysis reason while ordinary uploads/playback stay
+available. The analyzer tests intentionally require a real decoder; do not mark
+missing-decoder fixture checks as passed. Local checks preserve Chromium's
+`--disable-audio-output`; the compressed room scenario adds Firefox/WebKit hosts
+only on Linux with `CI=true` or `CI=1`, using isolated servers and the CI null
+audio sink. Local Firefox/WebKit execution remains excluded.
+
 ## Disposable MongoDB tests
 
 Install **MongoDB Community 8.0.12**, the version pinned in release CI, from the
@@ -106,7 +144,7 @@ explicitly; these hosts cannot verify Bash/systemd behavior or POSIX executable
 bits. Those tests retain their complete assertions and remain part of Linux CI.
 
 `npm run test:server:linux` runs the Linux suites explicitly and rejects other
-hosts. `npm run doctor:release` checks Linux, Bash, Node, and MongoDB. Deployment
+hosts. `npm run doctor:release` checks Linux, Bash, Node, MongoDB and FFmpeg. Deployment
 artifact staging also requires Linux so a Windows archive cannot be mistaken for
 a release bundle with verified executable permissions. Use Ubuntu 24.04 CI or a
 properly provisioned Ubuntu WSL environment for these gates; Git Bash alone does

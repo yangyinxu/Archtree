@@ -4547,7 +4547,7 @@
       "variables": {}
     },
     "room.media_eligibility": {
-      "description": "Rooms currently support verified WAV audio. Other songs remain available for personal listening.",
+      "description": "Rooms support verified WAV, MP3 and AAC-LC M4A audio. Other songs remain available for personal listening.",
       "delivery": [
         "runtime"
       ],

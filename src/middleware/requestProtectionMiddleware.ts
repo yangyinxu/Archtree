@@ -159,6 +159,10 @@ export const uploadConcurrencyLimit: RequestHandler = (req, res, next) =>
 /** Prevents telemetry uploads from occupying meaningful API capacity. */
 export const listenerTelemetryConcurrencyLimit = limitConcurrency('listener-telemetry', 2, 10);
 export const reconciliationConcurrencyLimit = limitConcurrency('reconciliation', 1, 1);
+/** Bounds existing-file download and analysis without consuming multipart upload capacity. */
+const roomAudioAnalysisLimiter = limitConcurrency('room-audio-analysis', 1, 1);
+export const roomAudioAnalysisConcurrencyLimit: RequestHandler = (req, res, next) =>
+    roomAudioAnalysisLimiter(req, res, next);
 
 const requestAbortControllers = new WeakMap<Request, AbortController>();
 

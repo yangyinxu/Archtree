@@ -495,7 +495,7 @@ export const uploadMediaObject = async (
         : uploadFile.mimetype || 'audio/mpeg';
     const replacementS3Key = upload.createObjectKey(audioTrackId, mediaType);
     validatedMediaObjectKey(replacementS3Key, audioTrackId, mediaType);
-    const mediaRepresentation = await prepareMediaRepresentation(uploadFile, replacementS3Key, mediaType);
+    const mediaRepresentation = await prepareMediaRepresentation(uploadFile, replacementS3Key, mediaType, abortSignal);
     const previousS3Key = track.s3Key
         ? validatedMediaObjectKey(track.s3Key, audioTrackId, currentMediaType)
         : undefined;
@@ -506,6 +506,8 @@ export const uploadMediaObject = async (
         {
             s3Key: track.s3Key,
             uploadStatus: track.uploadStatus,
+            // Analysis can discover a VersionId after this upload read. Never reserve using stale cleanup evidence.
+            mediaRepresentation: track.mediaRepresentation ?? null,
             pendingS3Key: null,
             storageCleanupS3Key: null
         },

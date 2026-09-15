@@ -1,3 +1,5 @@
+export const ROOM_AUDIO_ANALYSIS_VERSION = 2;
+
 /** Private evidence bound to one uploaded object; never serialize this storage record. */
 export interface MediaRepresentation {
     revision: string;
@@ -5,7 +7,9 @@ export interface MediaRepresentation {
     byteLength: number;
     durationMs: number | null;
     seekable: boolean;
-    format: 'wav-pcm' | 'unsupported';
+    format: 'wav-pcm' | 'mp3' | 'm4a-aac' | 'unsupported';
+    analysisVersion?: number;
+    analysisFailure?: 'decoder_unavailable' | 'analysis_timeout' | 'analysis_failed';
     etag: string | null;
     versionId: string | null;
 }

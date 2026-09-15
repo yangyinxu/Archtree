@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -61,4 +61,36 @@ test('exact representations use opaque fresh identities and eligibility requires
     const unsupported = await prepareMediaRepresentation(wavUploadFile(Buffer.from('mpeg bytes')), key, 'audio');
     assert.equal(unsupported.seekable, false); assert.equal(unsupported.durationMs, null);
     assert.equal((await prepareMediaRepresentation(wavUploadFile(), key, 'video')).seekable, false);
+});
+
+
+test('compressed uploads become eligible only with full validation version and exact upload validators', async () => {
+    const id = '507f1f77bcf86cd799439011';
+    for (const [fixture, format] of [['cbr.mp3', 'mp3'], ['aac-lc.m4a', 'm4a-aac']]) {
+        const bytes = await readFile(new URL(`./fixtures/room-audio/${fixture}`, import.meta.url));
+        const representation = await prepareMediaRepresentation(wavUploadFile(bytes), id, 'audio');
+        assert.equal(representation.format, format);
+        assert.equal(representation.analysisVersion, 2);
+        representation.etag = '"exact-bytes"';
+        const track = { _id: id, s3Key: id, mediaType: 'audio', uploadStatus: 'ready', mediaRepresentation: representation };
+        assert.equal(roomAudioRepresentationForTrack(track)?.durationMs, 2000);
+        assert.equal(roomAudioRepresentationForTrack({ ...track, mediaRepresentation: { ...representation, analysisVersion: undefined } }), null);
+    }
+});
+
+test('missing decoder preserves ordinary upload with retryable evidence while cancellation stops preparation', async () => {
+    const previous = process.env.ROOM_AUDIO_FFMPEG_PATH;
+    const bytes = await readFile(new URL('./fixtures/room-audio/cbr.mp3', import.meta.url));
+    try {
+        process.env.ROOM_AUDIO_FFMPEG_PATH = join(tmpdir(), 'archtree-missing-decoder');
+        const representation = await prepareMediaRepresentation(wavUploadFile(bytes), '507f1f77bcf86cd799439011', 'audio');
+        assert.equal(representation.seekable, false);
+        assert.equal(representation.durationMs, null);
+        assert.equal(representation.analysisFailure, 'decoder_unavailable');
+        const controller = new AbortController(); controller.abort();
+        await assert.rejects(prepareMediaRepresentation(wavUploadFile(bytes), '507f1f77bcf86cd799439011', 'audio', controller.signal), { name: 'AbortError' });
+    } finally {
+        if (previous === undefined) delete process.env.ROOM_AUDIO_FFMPEG_PATH;
+        else process.env.ROOM_AUDIO_FFMPEG_PATH = previous;
+    }
 });

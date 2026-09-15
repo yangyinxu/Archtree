@@ -627,7 +627,7 @@
   "room.leave": "退出房间",
   "room.local_pause": "仅自己暂停",
   "room.locally_paused": "此设备已暂停",
-  "room.media_eligibility": "房间目前支持经过验证的 WAV 音频，其他歌曲仍可单独收听。",
+  "room.media_eligibility": "房间支持经过验证的 WAV、MP3 和 AAC-LC M4A 音频，其他歌曲仍可单独收听。",
   "room.media_no_results": "没有找到与“{query}”匹配的可一起听歌曲。",
   "room.media_pending": "已提交点歌",
   "room.media_remove": "从选择中移除《{title}》",

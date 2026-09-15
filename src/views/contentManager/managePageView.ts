@@ -469,6 +469,7 @@ export const renderManagePage = (params: {
     <p class="muted">Open focused maintenance workspaces without competing with everyday catalog navigation.</p>
     <nav class="operations-tool-grid" aria-label="System operation destinations">
       <a class="operations-tool" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i><strong>MediaTrack operations</strong><span>Filter the global inventory and review publication or storage status.</span></a>
+      <a class="operations-tool" href="/content/manage/room-audio-analysis"><i class="ph ph-headphones" aria-hidden="true"></i><strong>Room audio analysis</strong><span>Analyze existing Audio for shared playback and resume interrupted attempts.</span></a>
       ${params.isAdmin ? '<a class="operations-tool" href="/admin/audio-storage/reconciliation"><i class="ph ph-database" aria-hidden="true"></i><strong>Audio storage audit</strong><span>Review reconciliation findings and explicitly confirm any remediation.</span></a><a class="operations-tool" href="/admin/image-storage/reconciliation"><i class="ph ph-image" aria-hidden="true"></i><strong>Image storage audit</strong><span>Inspect catalog artwork and avatar lifecycle discrepancies.</span></a>' : ''}
     </nav>
   </section>

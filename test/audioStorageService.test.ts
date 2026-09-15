@@ -656,3 +656,25 @@ test('failed promotion retains the uploaded exact version when its cleanup fails
     assert.equal(state.pendingUploadOutcomeUnknown, false);
     assert.equal(state.s3Key, originalKey);
 });
+
+
+test('replacement stops before PUT when analysis attached newer exact-version cleanup evidence after the initial read', async () => {
+    let state: any = { s3Key: originalKey, uploadStatus: 'ready' };
+    const evidence = { revision: `mr_${'1'.repeat(32)}`, objectKey: originalKey, versionId: 'discovered-version' };
+    const dependencies: AudioUploadDependencies = {
+        findTrack: async () => {
+            const observed = { ...state };
+            state = { ...state, mediaRepresentation: evidence };
+            return observed;
+        },
+        createObjectKey: () => replacementKey,
+        updateTrackWhere: async (_id, expected) => {
+            assert.equal(expected.mediaRepresentation, null);
+            return { matchedCount: 0 };
+        },
+        putObject: async () => { assert.fail('must not upload after losing cleanup evidence fence'); },
+        deleteObject: async () => { assert.fail('must not delete an unversioned old object'); }
+    };
+    await assert.rejects(uploadAudioObject(trackId, uploadFile, 'owner', undefined, dependencies));
+    assert.deepEqual(state.mediaRepresentation, evidence);
+});

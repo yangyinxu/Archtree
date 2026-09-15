@@ -28,12 +28,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install the MongoDB integration-test daemon
+      - name: Install the MongoDB test daemon and room audio decoder
         env:
           MONGODB_CI_VERSION: 8.0.12
         run: |
           sudo apt-get update
-          sudo apt-get install --yes curl gnupg
+          sudo apt-get install --yes curl gnupg ffmpeg
           curl -fsSL https://pgp.mongodb.com/server-8.0.asc \
             --output "${RUNNER_TEMP}/mongodb-server-8.0.asc"
           sudo gpg --batch --yes --dearmor \

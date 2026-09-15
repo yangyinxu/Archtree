@@ -14,7 +14,8 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 };
 
-export const connectToDatabase = async (): Promise<mongoDb.Db> => {
+/** Operational reads can verify existing constraints without implicitly creating collections or indexes. */
+export const connectToDatabase = async (options: { initializeIndexes?: boolean; logReady?: boolean } = {}): Promise<mongoDb.Db> => {
   let stage: StartupStage = 'configuration';
   let client: mongoDb.MongoClient | undefined;
   try {
@@ -36,11 +37,12 @@ export const connectToDatabase = async (): Promise<mongoDb.Db> => {
     stage = 'database_topology';
     await verifyDatabaseTransactionTopology(connectedDatabase);
     stage = 'database_initialization';
-    await initializeDatabaseIndexes(connectedDatabase);
+    if (options.initializeIndexes === false) await verifyRequiredDatabaseIndexes(connectedDatabase);
+    else await initializeDatabaseIndexes(connectedDatabase);
     databaseClient = client;
     database = connectedDatabase;
     readinessCheckedAt = Date.now();
-    console.log(JSON.stringify({ category: 'database_ready' }));
+    if (options.logReady !== false) console.log(JSON.stringify({ category: 'database_ready' }));
     return connectedDatabase;
   } catch (error) {
     await client?.close().catch(() => undefined);

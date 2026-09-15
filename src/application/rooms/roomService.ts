@@ -562,7 +562,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             return transaction(actor, async session => {
                 await profile(actor.userId, session);
                 const candidates = await db().collection('audioTracks').find({ ...readyAudioStorageFilter,
-                    'mediaRepresentation.seekable': true, 'mediaRepresentation.format': 'wav-pcm' },
+                    'mediaRepresentation.seekable': true, 'mediaRepresentation.format': { $in: ['wav-pcm', 'mp3', 'm4a-aac'] } },
                     { session, projection: { _id: 1 } }).sort({ _id: -1 }).limit(100).toArray();
                 const result: RoomMediaDescriptor[] = [];
                 for (const candidate of candidates) {
@@ -593,7 +593,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                     afterId = parsed.afterId;
                 }
                 const candidates = await db().collection('audioTracks').find({ ...readyAudioStorageFilter,
-                    'mediaRepresentation.seekable': true, 'mediaRepresentation.format': 'wav-pcm',
+                    'mediaRepresentation.seekable': true, 'mediaRepresentation.format': { $in: ['wav-pcm', 'mp3', 'm4a-aac'] },
                     _id: { $type: 'objectId', ...(afterId ? { $lt: new ObjectId(afterId) } : {}) },
                     ...(query ? { title: { $regex: query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } } : {})
                 }, { session, projection: { _id: 1 } }).sort({ _id: -1 }).limit(ROOM_MEDIA_DISCOVERY_LIMITS.candidates + 1).maxTimeMS(2_000).toArray();

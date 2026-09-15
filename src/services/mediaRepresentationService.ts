@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { open } from 'node:fs/promises';
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDb } from '../infrastructure/database';
-import type { MediaRepresentation, RoomAudioRepresentation } from '../models/mediaRepresentation';
+import { ROOM_AUDIO_ANALYSIS_VERSION, type MediaRepresentation, type RoomAudioRepresentation } from '../models/mediaRepresentation';
+import { inspectRoomAudioFile, RoomAudioInspectionError } from './roomAudioInspection';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../utils/mediaStorageKey';
 import { normalizeUtf8Text } from '../utils/textEncoding';
@@ -11,77 +11,25 @@ export const isMediaRepresentationRevision = (value: unknown): value is string =
     typeof value === 'string' && /^mr_[0-9a-f]{32}$/.test(value)
 );
 
-/** Only bounded, fully framed PCM16 WAV is currently proven suitable for room seeking. */
-export const inspectRoomAudioUpload = async (
-    file: Express.Multer.File
-): Promise<{ durationMs: number; format: 'wav-pcm' } | null> => {
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
-    try {
-        if (!Number.isSafeInteger(file.size) || file.size < 44 || file.size > 0xffffffff) return null;
-        if (file.path) {
-            handle = await open(file.path, 'r');
-            if ((await handle.stat()).size !== file.size) return null;
-        } else if (!Buffer.isBuffer(file.buffer) || file.buffer.length !== file.size) return null;
-        const read = async (offset: number, length: number) => {
-            if (offset < 0 || length < 0 || offset + length > file.size) throw new Error('Invalid WAV bounds.');
-            if (!handle) return file.buffer.subarray(offset, offset + length);
-            const buffer = Buffer.alloc(length);
-            const result = await handle.read(buffer, 0, length, offset);
-            if (result.bytesRead !== length) throw new Error('Truncated WAV.');
-            return buffer;
-        };
-        const header = await read(0, 12);
-        if (header.toString('ascii', 0, 4) !== 'RIFF'
-            || header.toString('ascii', 8, 12) !== 'WAVE'
-            || header.readUInt32LE(4) + 8 !== file.size) return null;
-        let offset = 12;
-        let byteRate: number | undefined;
-        let blockAlign: number | undefined;
-        let dataSize: number | undefined;
-        // Skipping payloads keeps inspection memory/IO bounded even for large audio uploads.
-        for (let chunks = 0; offset < file.size && chunks < 64; chunks += 1) {
-            const chunk = await read(offset, 8);
-            const kind = chunk.toString('ascii', 0, 4);
-            const size = chunk.readUInt32LE(4);
-            const next = offset + 8 + size + (size % 2);
-            if (next > file.size) return null;
-            if (kind === 'fmt ') {
-                if (byteRate !== undefined || (size !== 16 && size !== 18)) return null;
-                const format = await read(offset + 8, size);
-                const channels = format.readUInt16LE(2);
-                const sampleRate = format.readUInt32LE(4);
-                blockAlign = format.readUInt16LE(12);
-                byteRate = format.readUInt32LE(8);
-                if (format.readUInt16LE(0) !== 1 || ![1, 2].includes(channels)
-                    || sampleRate < 8000 || sampleRate > 48000
-                    || format.readUInt16LE(14) !== 16 || blockAlign !== channels * 2
-                    || byteRate !== sampleRate * blockAlign
-                    || (size === 18 && format.readUInt16LE(16) !== 0)) return null;
-            } else if (kind === 'data') {
-                if (dataSize !== undefined || !byteRate || !blockAlign || size === 0 || size % blockAlign !== 0) return null;
-                dataSize = size;
-            }
-            offset = next;
-        }
-        if (offset !== file.size || !dataSize || !byteRate) return null;
-        const durationMs = Math.round(dataSize / byteRate * 1000);
-        return Number.isSafeInteger(durationMs) && durationMs > 0
-            ? { durationMs, format: 'wav-pcm' } : null;
-    } catch {
-        // Unsupported or malformed input retains ordinary playback behavior, but cannot enter a room.
-        return null;
-    } finally {
-        await handle?.close();
-    }
-};
+/** Inspects bytes rather than extensions; operational failures are distinct from unsupported audio. */
+export const inspectRoomAudioUpload = inspectRoomAudioFile;
 
 /** Generates a fresh identity before upload; validators are attached only after S3 succeeds. */
 export const prepareMediaRepresentation = async (
     file: Express.Multer.File,
     objectKey: string,
-    mediaType: 'audio' | 'video'
+    mediaType: 'audio' | 'video',
+    signal?: AbortSignal
 ): Promise<MediaRepresentation> => {
-    const inspected = mediaType === 'audio' ? await inspectRoomAudioUpload(file) : null;
+    let inspected: Awaited<ReturnType<typeof inspectRoomAudioUpload>> = null;
+    let analysisFailure: MediaRepresentation['analysisFailure'];
+    try { inspected = mediaType === 'audio' ? await inspectRoomAudioUpload(file, { signal }) : null; }
+    catch (error) {
+        signal?.throwIfAborted();
+        if (!(error instanceof RoomAudioInspectionError)) throw error;
+        // A missing or busy decoder must not prevent ordinary uploads; explicit analysis can recover later.
+        analysisFailure = error.code;
+    }
     return {
         revision: `mr_${randomBytes(16).toString('hex')}`,
         objectKey,
@@ -90,7 +38,9 @@ export const prepareMediaRepresentation = async (
         seekable: inspected !== null,
         format: inspected?.format ?? 'unsupported',
         etag: null,
-        versionId: null
+        versionId: null,
+        analysisVersion: ROOM_AUDIO_ANALYSIS_VERSION,
+        ...(analysisFailure ? { analysisFailure } : {})
     };
 };
 
@@ -113,7 +63,8 @@ export const roomAudioRepresentationForTrack = (track: any): RoomAudioRepresenta
     if (!/^[0-9a-f]{24}$/.test(id) || track.uploadStatus !== 'ready'
         || (track.publicationStatus != null && track.publicationStatus !== 'ready')
         || activeMediaTypeForTrack(track) !== 'audio' || !value
-        || value.seekable !== true || value.format !== 'wav-pcm'
+        || value.seekable !== true || !['wav-pcm', 'mp3', 'm4a-aac'].includes(value.format)
+        || value.format !== 'wav-pcm' && value.analysisVersion !== ROOM_AUDIO_ANALYSIS_VERSION
         || !Number.isSafeInteger(value.durationMs) || value.durationMs! <= 0 || value.durationMs! > 86_400_000
         || value.byteLength < 44) return null;
     return {

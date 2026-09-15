@@ -5,7 +5,9 @@ import { EventEmitter } from 'node:events';
 import {
     resetRateLimitWindowsForTests,
     uploadRateLimit,
-    searchConcurrencyLimit
+    searchConcurrencyLimit,
+    roomAudioAnalysisConcurrencyLimit,
+    uploadConcurrencyLimit
 } from '../src/middleware/requestProtectionMiddleware';
 
 const responseCapture = () => {
@@ -54,6 +56,26 @@ test('account-owned upload mutations retain their hourly abuse-protection quota'
     assert.equal(rejected.capture.headers['RateLimit-Limit'], 20);
     assert.equal(rejected.capture.headers['RateLimit-Remaining'], 0);
     assert.equal(typeof rejected.capture.headers['RateLimit-Reset'], 'number');
+});
+
+test('analysis capacity bounds different administrators independently from upload capacity', () => {
+    const responses: EventEmitter[] = [];
+    const invoke = (ip: string, limiter = roomAudioAnalysisConcurrencyLimit) => {
+        const { capture, response } = responseCapture();
+        const events = Object.assign(new EventEmitter(), response);
+        responses.push(events);
+        let admitted = false;
+        limiter({ ip, socket: {} } as any, events as any, () => { admitted = true; });
+        return { admitted, capture, events };
+    };
+    try {
+        const analysis = invoke('analysis-admin-a');
+        assert.equal(analysis.admitted, true);
+        assert.equal(invoke('analysis-admin-b').capture.status, 429);
+        assert.equal(invoke('analysis-admin-a', uploadConcurrencyLimit).admitted, true);
+        analysis.events.emit('finish');
+        assert.equal(invoke('analysis-admin-b').admitted, true);
+    } finally { for (const response of responses) response.emit('close'); }
 });
 
 test('search has shared process and per-client bounds and releases finished capacity', () => {

@@ -155,10 +155,60 @@ realtime connections and scheduling; verify routing, lease recovery and capacity
 in the deployment before enabling it.
 
 New uploads receive a private representation record tied to the exact object.
-The initial room analyzer verifies complete PCM16 WAV files (mono or stereo,
-8–48 kHz, finite duration up to 24 hours). MP3, Video, old unanalyzed uploads and
-incomplete analysis remain outside room selection; ordinary playback is intact.
-Room URLs pin an opaque media revision and HEAD/GET validate the same stored S3
+The room analyzer verifies complete PCM16 WAV (mono/stereo, 8–48 kHz), MP3
+(MPEG Layer III, including verified Xing-indexed VBR), and self-contained, single-track AAC-LC
+M4A (mono/stereo, 8–48 kHz). Duration must be finite and at most 24 hours.
+Compressed inputs are capped at 512 MiB and require strict framing/sample tables
+plus full FFmpeg decoding to the null muxer. HE-AAC, encrypted/fragmented MP4,
+external references, Video and unverified audio remain outside room selection.
+Ordinary playback remains available if inspection fails or the decoder is absent.
+
+Install FFmpeg and run `npm run doctor` before compressed-media development or
+rollout. `ROOM_AUDIO_FFMPEG_PATH` may select an absolute executable path; otherwise
+`ffmpeg` is resolved on PATH. Each process permits at most two simultaneous
+single-threaded decodes, with a 60-second decode deadline. Operational decoder
+errors preserve retryable evidence; successful source metadata is never inferred
+from a filename, MIME type, display duration or a missing runtime. Provision the
+same decoder in the deployment environment before admitting compressed sources;
+local installation and CI provisioning do not install it on Elastic Beanstalk.
+See [runtime setup](docs/development-environment.md#room-audio-analysis-runtime).
+
+Administrators can open **Content Manager → Operations → Room audio analysis**
+at `/content/manage/room-audio-analysis`. GET lists 25 rows per page and never
+reads storage or starts analysis. POST explicitly analyzes/retries one source,
+rechecking the admin role and matching its opaque source revision and original
+attempt ID. A source-bound two-minute lease preserves interrupted/uncertain work;
+recovery is explicit. Storage/decode work has a 90-second deadline and a 512-MiB
+temporary-file limit; database calls retain the bounded driver timeouts and
+five-second server-operation limit. Late results cannot publish after lease
+expiry. A separate concurrency limit admits one analysis request at a time. It pins S3
+HEAD/GET by ETag/version, rechecks the source, and writes only analysis metadata.
+It never PUTs or DELETEs objects, replaces bytes, or changes an eligible revision.
+A concurrent upload/deletion wins its source fence; stale results cannot publish.
+
+From a full repository checkout on an administrator workstation, a bounded CLI
+lists a single page by default, without index or media writes:
+
+```sh
+npm run analyze:room-audio -- --admin-id=<admin-account-id> --limit=25
+npm run analyze:room-audio -- --admin-id=<admin-account-id> --limit=25 --apply --confirm=ANALYZE_ROOM_AUDIO
+```
+
+Use the returned `resumeAfter` with `--after=<track-id>` for explicit continuation.
+When `stopped=false` and the cursor is null, the scan is finished. When
+`stopped=true` and the cursor is null, restart without `--after` to recover the
+first unresolved item. A failed, busy, cancelled, stale or
+unknown item stops the batch before advancing past it. Completed items remain
+stored and are skipped on continuation. SIGINT/SIGTERM cancels the current item;
+retryable attempts retain their original ID. Inspect the current status before
+retrying an unknown outcome. This command needs the normal private database/S3
+configuration and an existing admin account. The Elastic Beanstalk bundle excludes
+repository scripts; use the deployed administrator page for in-app operations.
+Do not run the CLI against production
+until that catalog operation is explicitly authorized.
+
+Verified room response MIME types come from the inspected format rather than an
+upload declaration. Room URLs pin an opaque media revision and HEAD/GET validate the same stored S3
 ETag/version. S3 permissions must cover `GetObjectVersion` and
 `DeleteObjectVersion` when version IDs are present. Fresh PUTs use a unique
 identity-bound key and `If-None-Match: *`, preventing an SDK retry from silently
@@ -183,6 +233,14 @@ and triggering automatic Bluetooth headphone switching; muting alone can still
 open that device. Media decoding, playback clocks, element volume/mute state and
 background-tab behavior remain under test. These checks do not verify audible
 output or physical headphone routing.
+
+The compressed-media social scenario uploads original CBR MP3, Xing VBR MP3 and
+AAC-LC M4A fixtures through the production storage lifecycle. It checks pinned
+HEAD/Range responses, real decoding, readiness, seeking, cross-format advancement
+and absence of command echoes. In Linux CI (`CI=true` or `CI=1`), the same
+scenario also runs with Firefox and WebKit hosts, each paired with an isolated
+Chromium guest and its own server/database. These extra projects are never
+collected on macOS; browser-specific results remain separate from Chromium proof.
 
 In isolated Linux CI (`CI=true` or `CI=1`), the native-tab fixture matches
 Playwright's default `--no-sandbox` launch option; other local launches keep the

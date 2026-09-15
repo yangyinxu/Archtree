@@ -145,3 +145,19 @@ test('revision-pinned resolution requires exact recorded HEAD validators and rec
         assert.equal(reads, 2);
     }
 });
+
+
+test('pinned verified audio response type follows inspected bytes rather than spoofed upload MIME', async () => {
+    for (const [format, expected] of [['wav-pcm', 'audio/wav'], ['mp3', 'audio/mpeg'], ['m4a-aac', 'audio/mp4']]) {
+        const revision = `mr_${'a'.repeat(32)}`;
+        const representation = { revision, objectKey: trackId, byteLength: 4096, durationMs: 2000,
+            seekable: true, format, analysisVersion: 2, etag: '"verified"', versionId: 'exact-version' };
+        const track = readyTrack('audio', { contentType: 'audio/unknown', mediaRepresentation: representation });
+        const result = await resolveReadyMediaTrackAsset(trackId, signal, {
+            findReadyTrack: async () => track,
+            headObject: async () => ({ ContentLength: 4096, ETag: '"verified"', VersionId: 'exact-version' })
+        }, 'audio', revision);
+        assert.equal(result.status, 'ready');
+        if (result.status === 'ready') assert.equal(result.contentType, expected);
+    }
+});

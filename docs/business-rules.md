@@ -259,9 +259,22 @@ Playlist access retain their existing rules.
   participation and end a hosted room.
 - Shared playback uses the existing single player with an online representation
   pinned to the selected media version. Only finite Audio whose duration and
-  seekability have been verified is eligible. Existing unanalyzed media remains
-  available for ordinary playback. Native download preference is unchanged until
-  native room adoption explicitly supports the pinned-source contract.
+  seekability have been verified is eligible. Supported sources are complete
+  PCM16 WAV, MP3, and single-track unencrypted AAC-LC in M4A; compressed sources
+  require complete structure and decode validation. Unverified, unsupported or
+  failed analysis never prevents ordinary playback and never grants room
+  eligibility. Native download preference is unchanged until native room adoption
+  explicitly supports the pinned-source contract.
+- Administrators can explicitly analyze existing ready Audio without re-uploading
+  or changing its stored bytes. Viewing the analysis list never starts work.
+  Results belong to the exact source and cannot replace evidence for a changed,
+  replacing or deleting source. Already eligible sources keep their identity.
+  Failed, cancelled or interrupted attempts are explicitly retryable; a lost
+  result is recovered using the same attempt identity rather than automatically
+  submitting new work. Cancellation stops pending download and decode work;
+  a database write already dispatched is reconciled and may have committed.
+  Completed analysis remains durable. Unsupported input
+  has a terminal result; replacing that file creates a new analysis opportunity.
 - Preparing a play, seek or selection waits up to three seconds for the connected
   playing cohort. Ready participants start on the shared schedule; unready or late
   participants remain silent until their own player reports readiness for the
