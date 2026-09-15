@@ -1,6 +1,6 @@
 import { lazy, Suspense, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { getOutgoingRoomInvitations, getRoomMedia, roomControlPreconditions, type RoomSnapshot } from '../../api/rooms';
+import { getOutgoingRoomInvitations, roomControlPreconditions, type RoomMedia, type RoomSnapshot } from '../../api/rooms';
 import type { SocialProfile } from '../../api/social';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { usePlayer } from '../../player';
@@ -12,6 +12,21 @@ import styles from './SocialPage.module.css';
 const seconds = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
 const CopyInvitationLink = lazy(() => import('./CopyInvitationLink').then(module => ({ default: module.CopyInvitationLink })));
 const RoomSongRequests = lazy(() => import('./RoomSongRequests').then(module => ({ default: module.RoomSongRequests })));
+const RoomMediaPicker = lazy(() => import('./RoomMediaPicker').then(module => ({ default: module.RoomMediaPicker })));
+
+/** A creation draft is discarded on admission, and never becomes the user's personal player queue. */
+const RoomCreationPicker = ({ viewerId, disabled }: { viewerId: string; disabled: boolean }) => {
+  const { t } = useLocalization();
+  const [selected, setSelected] = useState<RoomMedia[]>([]);
+  return <>
+    <h3 style={{ marginTop: '1.4rem' }}>{t('room.choose_music')}</h3>
+    <Suspense fallback={<p role="status">{t('social.loading')}</p>}><RoomMediaPicker viewerId={viewerId} scopeKey="create"
+      selected={selected} onSelectionChange={setSelected} multiple disabled={disabled} /></Suspense>
+    <div className={styles.actions}><button className={styles.button} disabled={disabled || !selected.length} onClick={() => roomSession.run({
+      action: 'create', mediaTrackIds: selected.map(item => item.mediaTrackId)
+    })}><Icon name="play" />{t('room.create')}</button></div>
+  </>;
+};
 
 const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }) => {
   const { t } = useLocalization();
@@ -110,9 +125,7 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
 export const RoomsPanel = ({ viewerId, profile }: { viewerId: string; profile: SocialProfile }) => {
   const { t } = useLocalization();
   const state = useRoomSession();
-  const [selected, setSelected] = useState<string[]>([]);
   useRoomInvitationConnection(viewerId);
-  const media = useQuery({ queryKey: ['social', viewerId, 'room-media'], queryFn: ({ signal }) => getRoomMedia(viewerId, signal), retry: false });
   const invitations = useRoomInvitations(viewerId);
   const room = state.viewerId === viewerId ? state.room : null;
   const busy = state.busy || Boolean(state.uncertain);
@@ -129,13 +142,7 @@ export const RoomsPanel = ({ viewerId, profile }: { viewerId: string; profile: S
         <button className={styles.button} disabled={!state.connected || busy} onClick={() => roomSession.run({ action: 'acceptInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('room.join')}</button>
         <button className={styles.secondary} disabled={busy} onClick={() => roomSession.run({ action: 'declineInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('social.decline')}</button>
       </li>)}</ul></div> : null}
-      <h3 style={{ marginTop: '1.4rem' }}>{t('room.choose_music')}</h3>
-      {media.isPending ? <p role="status">{t('social.loading')}</p> : media.isError ? <p className={styles.error}>{t('social.error')}</p>
-        : !media.data.items.length ? <p className={styles.empty}>{t('room.no_media')}</p>
-          : <ul className={`${styles.list} ${styles.queue}`}>{media.data.items.map(item => <li key={item.mediaTrackId}>
-            <label className={styles.check}><input type="checkbox" checked={selected.includes(item.mediaTrackId)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.mediaTrackId] : previous.filter(id => id !== item.mediaTrackId))} /><span>{item.title} <span className={styles.muted}>· {seconds(item.durationMs / 1000)}</span></span></label>
-          </li>)}</ul>}
-      <div className={styles.actions}><button className={styles.button} disabled={!state.connected || busy || !selected.length} onClick={() => roomSession.run({ action: 'create', mediaTrackIds: selected })}><Icon name="play" />{t('room.create')}</button></div>
+      <RoomCreationPicker key={viewerId} viewerId={viewerId} disabled={!state.connected || busy} />
     </>}
   </section>;
 };

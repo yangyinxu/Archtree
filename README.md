@@ -103,6 +103,17 @@ remove a song after selecting another current entry. Appending and reordering
 preserve playback and local pause. Requester attribution reflects current room
 members only. There are at most five pending requests per member and 20 per room.
 
+Use **Listen together** beside an Audio track in Search, an Album, Library, or
+the player to request it for your current room. Confirmed requests show
+**Requested. Waiting for the host.** With no room, choose a friend and explicitly
+confirm a paused room plus invitation. If sending fails, use the existing room
+and receipt recovery instead of creating another room. Songs are checked for
+room eligibility before submission; ordinary playback still supports other
+formats. Together's song pickers support title search and **Load more**, retaining
+the initial queue selection across searches. The global room entry returns to
+controls and shows shared playback, local pause, observation or connection
+recovery without starting playback.
+
 **Room activity** offers five fixed emoji reactions to every admitted member,
 including observing devices. It shows brief confirmed join, song, host and
 control-mode changes. Events expire after 30 seconds and are cleared when their
@@ -172,6 +183,12 @@ and triggering automatic Bluetooth headphone switching; muting alone can still
 open that device. Media decoding, playback clocks, element volume/mute state and
 background-tab behavior remain under test. These checks do not verify audible
 output or physical headphone routing.
+
+In isolated Linux CI (`CI=true` or `CI=1`), the native-tab fixture matches
+Playwright's default `--no-sandbox` launch option; other local launches keep the
+browser sandbox. This changes no host sandbox or AppArmor settings. Native
+startup failures report exit/signal status and at most 4 KiB of startup stderr;
+collection stops when the debugging connection is established, before login.
 
 On macOS, the ordinary listener E2E configuration defaults to Chromium only and
 prints a notice that Firefox/WebKit were excluded: their headless modes do not

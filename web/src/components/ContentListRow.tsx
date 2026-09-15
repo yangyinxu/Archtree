@@ -6,6 +6,7 @@ import { Artwork } from './Artwork';
 import styles from './ContentListRow.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { LazyShareMusicButton } from '../features/social/LazyShareMusicButton';
+import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
 
 export interface ContentListRowProps {
   item: ContentSummary;
@@ -71,6 +72,7 @@ export const ContentListRow = ({ item, onPlay, trailing, shareable = true }: Con
         </Link>
       )}
       {(trailing || shareable && item.contentType !== 'artist') && <span className={styles.trailing}>{trailing}
+        {shareable && item.contentType === 'audioTrack' && item.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={item.id} title={title} />}
         {shareable && item.contentType !== 'artist' && <LazyShareMusicButton contentType={item.contentType} contentId={item.id} title={title} />}
       </span>}
     </li>

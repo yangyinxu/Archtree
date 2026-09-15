@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { roomFixture } from '../../test/roomFixture';
 import type { RoomCommand, RoomSnapshot } from '../../api/rooms';
 import { RoomsPanel } from './RoomsPanel';
 
 const mocks = vi.hoisted(() => ({ room: null as RoomSnapshot | null, run: vi.fn(), control: vi.fn(), ensure: vi.fn(),
+  media: vi.fn(),
   resync: vi.fn(), pauseLocally: vi.fn(), retry: vi.fn(), checkOutcome: vi.fn(), uncertain: null as RoomCommand | null,
   connected: true, locallyPaused: false, playerError: false }));
 vi.mock('./roomSession', () => ({ roomSession: { run: mocks.run, control: mocks.control, ensure: mocks.ensure,
@@ -13,20 +14,47 @@ vi.mock('./roomSession', () => ({ roomSession: { run: mocks.run, control: mocks.
 vi.mock('./RoomSongRequests', () => ({ RoomSongRequests: ({ room }: { room: RoomSnapshot }) => <section aria-label="Song requests">{room.roomId}</section> }));
 vi.mock('../../player', () => ({ usePlayer: () => ({ currentItem: null, currentTime: 0, error: mocks.playerError ? 'blocked' : null }) }));
 vi.mock('../../api/rooms', async original => ({ ...await original<typeof import('../../api/rooms')>(),
-  getRoomInvitations: async () => ({ invitations: [] }), getRoomMedia: async () => ({ items: [] }),
+  getRoomInvitations: async () => ({ invitations: [] }),
   getRoomCapabilities: async () => ({ socialEnabled: true, roomsEnabled: true }),
   getOutgoingRoomInvitations: async () => ({ invitations: [] }) }));
+vi.mock('../../api/roomMedia', () => ({ searchRoomMedia: mocks.media }));
 vi.mock('../../api/social', () => ({ getSocialPage: async () => ({ items: [], nextCursor: null }) }));
 
 const show = () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const content = () => <QueryClientProvider client={client}><RoomsPanel viewerId="viewer-1" profile={{
-    ...mocks.room!.members[0], active: true, discoverable: true, revision: 1
+    ...roomFixture().members[0], active: true, discoverable: true, revision: 1
   }} /></QueryClientProvider>;
   const rendered = render(content());
   return () => rendered.rerender(content());
 };
-beforeEach(() => { mocks.room = roomFixture(); mocks.connected = true; mocks.locallyPaused = false; mocks.playerError = false; mocks.uncertain = null; vi.clearAllMocks(); });
+beforeEach(() => { mocks.room = roomFixture(); mocks.connected = true; mocks.locallyPaused = false; mocks.playerError = false; mocks.uncertain = null; vi.clearAllMocks();
+  mocks.media.mockReset(); mocks.media.mockResolvedValue({ items: [], nextCursor: null }); });
+
+test('creation selects songs across search pages and sends only the explicit independent queue', async () => {
+  mocks.room = null;
+  const first = roomFixture().queue[0], second = { ...first, mediaTrackId: 'b'.repeat(24), title: 'An older favorite' };
+  mocks.media.mockImplementation(async (_viewer, input) => ({ items: [input.query ? second : first], nextCursor: null }));
+  show(); expect(mocks.run).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Quiet interval 0:30' }));
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search room-ready songs' }), { target: { value: 'older' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'An older favorite 0:30' }));
+  expect(screen.getByRole('list', { name: 'Selected songs (2)' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Start a room' }));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'create', mediaTrackIds: [first.mediaTrackId, second.mediaTrackId] });
+  expect(mocks.control).not.toHaveBeenCalled();
+});
+
+test('room admission retires the previous creation selection instead of restoring it after room exit', async () => {
+  mocks.room = null; mocks.media.mockResolvedValue({ items: [roomFixture().queue[0]], nextCursor: null });
+  const rerender = show(); fireEvent.click(await screen.findByRole('checkbox', { name: 'Quiet interval 0:30' }));
+  mocks.room = roomFixture(); rerender();
+  await screen.findByRole('region', { name: 'Song requests' });
+  mocks.room = null; rerender();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start a room' })).toBeDisabled());
+  expect(screen.queryByRole('list', { name: /Selected songs/ })).not.toBeInTheDocument();
+});
 
 test('the existing active room exposes its lazy song request panel without initiating a command', async () => {
   show(); expect(await screen.findByRole('region', { name: 'Song requests' })).toHaveTextContent('room-a');

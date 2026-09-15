@@ -67,7 +67,11 @@ await runDisposableRuntime(async resources => {
     if (accepted.outcome !== 'applied') throw new Error('Invitation fixture friendship could not be created.');
   }
   const trackIds: string[] = [];
-  for (const [index, title] of ['First Light', 'Across the Water', 'Home Again'].entries()) {
+  const titles = ['First Light', 'Across the Water', 'Home Again'];
+  if (process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'catalog-room') {
+    titles.push(...Array.from({ length: 22 }, (_, index) => `Archive song ${String(index + 1).padStart(2, '0')}`));
+  }
+  for (const [index, title] of titles.entries()) {
     const id = new ObjectId();
     await getDb()!.collection('audioTracks').insertOne({ _id: id, title, trackNumber: index + 1, artistIds: [],
       duration: '2:00', s3Key: id.toHexString(), mediaType: 'audio', uploadStatus: 'pending', publicationStatus: 'ready',
@@ -75,10 +79,10 @@ await runDisposableRuntime(async resources => {
     await uploadAudioObject(id.toHexString(), wavUploadFile(createPcmWav(120_000)), curator.toHexString());
     trackIds.push(id.toHexString());
   }
-  if (process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'music-shares') {
+  if (['music-shares', 'catalog-room'].includes(process.env.FINITUDE_SOCIAL_E2E_SCENARIO ?? '')) {
     // Actual Album publication fences and orders the uploaded tracks; other scenarios retain their original catalog.
     const [{ Album }, { SimpleDate }] = await Promise.all([import('../../../src/models/album'), import('../../../src/models/simpleDate')]);
-    await new Album('Shared Horizons', '', trackIds as [string], new SimpleDate(2026, 9, 14), curator.toHexString()).save();
+    await new Album('Shared Horizons', '', trackIds.slice(0, 3) as [string], new SimpleDate(2026, 9, 14), curator.toHexString()).save();
   }
   const lifecycle = new ServerLifecycle();
   const listenerDistPath = await resources.own(mkdtemp(join(tmpdir(), 'archtree-social-e2e-dist-')),
@@ -94,4 +98,4 @@ await runDisposableRuntime(async resources => {
     server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve(); });
   });
   console.log(`Isolated social browser fixture ready at http://127.0.0.1:${port}/finitude/social`);
-}).catch(() => { console.error('The isolated social browser fixture could not start.'); process.exitCode = 1; });
+}).catch(error => { console.error('The isolated social browser fixture could not start.', error instanceof Error ? error.message : 'Unknown fixture error.'); process.exitCode = 1; });

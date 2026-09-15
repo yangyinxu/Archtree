@@ -152,6 +152,23 @@ Playlist access retain their existing rules.
   Everyone playback control and without taking over a playing device. Each member
   may have five pending recommendations, within a room-wide limit of 20. Repeating
   the same pending recommendation by that member does not create another copy.
+- Web listeners can recommend a single Audio track from Search, Album, Library
+  or the current player to their current room. Eligibility is checked before the
+  action and again by the server. Pending feedback reflects the confirmed room
+  recommendation; opening an action never plays, submits or changes rooms.
+- Room music selection supports title search and pagination across eligible
+  tracks. Initial queue selections persist across searches and pages, up to the
+  existing 100-entry limit. Unsupported ordinary-playback formats remain usable
+  privately and are explained before a room action.
+- With no current room, an explicit song-and-friend confirmation creates a
+  paused room and then invites that friend. These are separate recoverable
+  commands. A changed room requires another explicit action; a failed invitation
+  preserves the created room. The current queue is never left implicitly.
+- An authorized active-room entry remains available across Web browsing routes
+  and returns to room controls or command recovery. Its status distinguishes
+  connection recovery, observing, local pause and shared playback state; merely
+  opening it never resumes playback or takes over a device. Account transitions
+  immediately hide the previous account's room information.
 - The active host controller can accept or dismiss a recommendation, remove a
   queued entry, or reorder the queue. Members may withdraw their own pending
   recommendations. Acceptance appends one occurrence with requester attribution;

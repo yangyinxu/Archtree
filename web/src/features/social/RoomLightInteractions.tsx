@@ -28,11 +28,14 @@ export const RoomLightInteractions = ({ viewerId, room, community, updatedAt }: 
   const nextExpiry = events.reduce((next, event) => event.expiresAtMs > Date.now() ? Math.min(next, event.expiresAtMs) : next, Infinity);
   const now = useInvitationNow(Number.isFinite(nextExpiry) ? nextExpiry : undefined);
   const profiles = new Map(room.members.map(member => [member.socialId, member]));
-  const profileKey = room.members.map(member => `${member.socialId}:${member.alias}`).join('|');
+  const profileKey = room.members.map(member => `${member.memberId}:${member.socialId}:${member.alias}`).join('|');
   const visible = events.filter(event => event.expiresAtMs > now && (!event.actor || profiles.has(event.actor.socialId))).slice(-20);
   const tracker = useRef({ identity, connected: state.connected, seeded: false, waitingAfter: -1, seen: new Map<string, number>() });
   const [announced, setAnnounced] = useState<{ identity: string; profiles: string; ids: string[] }>({ identity, profiles: profileKey, ids: [] });
   useEffect(() => {
+    // Retire the old announcement context even if a later rejoin or rename restores the same card.
+    setAnnounced(previous => previous.identity === identity && previous.profiles === profileKey
+      ? previous : { identity, profiles: profileKey, ids: [] });
     const previous = tracker.current;
     if (previous.identity !== identity) tracker.current = { identity, connected: state.connected, seeded: false, waitingAfter: -1, seen: new Map() };
     const current = tracker.current;
@@ -42,15 +45,18 @@ export const RoomLightInteractions = ({ viewerId, room, community, updatedAt }: 
     }
     for (const [id, expiry] of current.seen) if (expiry <= now) current.seen.delete(id);
     if (!valid) return;
-    const fresh = visible.filter(event => !current.seen.has(event.eventId));
-    for (const event of events) current.seen.set(event.eventId, event.expiresAtMs);
     // Cache displayed during reconnection is not a new live delivery. The first fresh response becomes its baseline.
     if (!state.connected || !current.seeded) {
+      for (const event of events) current.seen.set(event.eventId, event.expiresAtMs);
       if (state.connected && (current.waitingAfter < 0 || updatedAt !== current.waitingAfter)) current.seeded = true;
       return;
     }
+    // HTTP activity can precede its WS roster. Wait for that revision before consuming live event IDs.
+    if (room.revision < community.revision) return;
+    const fresh = visible.filter(event => !current.seen.has(event.eventId));
+    for (const event of events) current.seen.set(event.eventId, event.expiresAtMs);
     if (fresh.length) setAnnounced({ identity, profiles: profileKey, ids: fresh.map(event => event.eventId) });
-  }, [identity, state.connected, community, updatedAt, now, valid]);
+  }, [identity, state.connected, community, updatedAt, now, valid, room.revision, profileKey]);
   const describe = (event: RoomCommunityEvent) => event.actor
     ? event.kind === 'reaction' ? t('room.activity_reaction', { alias: profiles.get(event.actor.socialId)!.alias, emoji: emoji[event.reaction!] })
       : t(notice[event.kind], { alias: profiles.get(event.actor.socialId)!.alias })

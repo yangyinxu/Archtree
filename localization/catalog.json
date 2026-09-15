@@ -4042,6 +4042,85 @@
         "name": "string"
       }
     },
+    "room_track.action": {
+      "description": "Listen together",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.create_hint": {
+      "description": "Choose a friend. This creates a paused room for this song, then sends an invitation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.invited": {
+      "description": "Invitation sent. Open Together when you are ready to start listening.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.no_friends": {
+      "description": "Add a friend in Together to invite them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.opt_in": {
+      "description": "Set up your social profile in Together to listen with friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.request_hint": {
+      "description": "Recommend this song to your room. The host decides whether to add it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.room_changed": {
+      "description": "Your room changed. Review the current room before trying again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.sign_in": {
+      "description": "Sign in to request this song or invite a friend to listen together.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.title": {
+      "description": "Listen together: {title}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room_track.unsupported": {
+      "description": "This song is not available for shared rooms yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.waiting": {
+      "description": "Requested. Waiting for the host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.accept_transfer": {
       "description": "Shared listening interface: accept transfer.",
       "delivery": [
@@ -4195,6 +4274,71 @@
     },
     "room.ended": {
       "description": "Shared listening interface: ended.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_attention": {
+      "description": "Room action needs attention",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_local_pause": {
+      "description": "Room paused on this device",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_observing": {
+      "description": "Observing room",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_open": {
+      "description": "Open room: {status}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "status": "string"
+      }
+    },
+    "room.entry_paused": {
+      "description": "Room paused",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_playing": {
+      "description": "Room playing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_preparing": {
+      "description": "Room preparing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_reconnecting": {
+      "description": "Room reconnecting",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_suspended": {
+      "description": "Room suspended",
       "delivery": [
         "runtime"
       ],
@@ -4397,6 +4541,68 @@
     },
     "room.locally_paused": {
       "description": "Shared listening interface: locally paused.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_eligibility": {
+      "description": "Rooms currently support verified WAV audio. Other songs remain available for personal listening.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_no_results": {
+      "description": "No room-ready songs matched “{query}”.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
+    },
+    "room.media_pending": {
+      "description": "Already requested",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_remove": {
+      "description": "Remove {title} from selection",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room.media_results": {
+      "description": "Room-ready songs",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_search_label": {
+      "description": "Search room-ready songs",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_selected": {
+      "description": "Selected songs ({count})",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "room.media_selection_limit": {
+      "description": "You can choose up to 100 songs for a room.",
       "delivery": [
         "runtime"
       ],

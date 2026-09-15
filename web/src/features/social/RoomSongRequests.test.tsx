@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({ community: vi.fn(), media: vi.fn(), run: vi.fn
   state: { viewerId: 'viewer-1', room: null as RoomSnapshot | null, connected: true, locallyPaused: false,
     busy: false, error: null, uncertain: null as RoomCommand | null } }));
 vi.mock('../../api/roomCommunity', () => ({ getRoomCommunity: mocks.community }));
-vi.mock('../../api/rooms', async original => ({ ...await original<typeof import('../../api/rooms')>(), getRoomMedia: mocks.media }));
+vi.mock('../../api/roomMedia', () => ({ searchRoomMedia: mocks.media }));
 vi.mock('./roomSession', () => ({ roomSession: { getSnapshot: () => mocks.state, run: mocks.run, control: mocks.control },
   useRoomSession: () => mocks.state }));
 
@@ -37,15 +37,15 @@ const show = (value = mocks.state.room!) => {
   return { client, rerender(next = mocks.state.room!) { renderedRoom = next; view.rerender(content()); } };
 };
 const chooseSong = async () => {
-  const picker = await screen.findByRole('combobox', { name: 'Choose a song' });
+  const picker = await screen.findByRole('radio', { name: 'Fresh choice 0:30' });
   await waitFor(() => expect(picker).toBeEnabled());
-  fireEvent.change(picker, { target: { value: 'd'.repeat(24) } });
+  fireEvent.click(picker);
   return picker;
 };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.state = { viewerId: 'viewer-1', room: room(), connected: true, locallyPaused: false, busy: false, error: null, uncertain: null };
   mocks.community.mockResolvedValue({ community: community() });
-  mocks.media.mockResolvedValue({ items: [{ ...mocks.state.room!.queue[0], mediaTrackId: 'd'.repeat(24), title: 'Fresh choice' }] });
+  mocks.media.mockResolvedValue({ items: [{ ...mocks.state.room!.queue[0], mediaTrackId: 'd'.repeat(24), title: 'Fresh choice' }], nextCursor: null });
   mocks.run.mockResolvedValue(undefined);
 });
 
@@ -56,6 +56,20 @@ test.each([false, true])('Host-control guest (observer=%s) requests without acqu
   expect(mocks.control).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Play for everyone Quiet interval' })).toBeDisabled();
   expect(screen.queryByRole('button', { name: 'Add to queue' })).not.toBeInTheDocument();
+});
+
+test('a replacement membership discards the selected recommendation while preserving the authoritative queue', async () => {
+  asGuest(); const view = show(); await chooseSong();
+  expect(screen.getByRole('button', { name: 'Request song' })).toBeEnabled();
+  const previous = mocks.state.room!;
+  mocks.state.room = { ...previous, self: { ...previous.self, memberId: 'member-b-returned' },
+    members: previous.members.map(member => member.memberId === 'member-b' ? { ...member, memberId: 'member-b-returned' } : member) };
+  view.rerender();
+  await waitFor(() => expect(mocks.community).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('list', { name: /Selected songs/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Request song' })).toBeDisabled();
+  expect(within(screen.getByRole('region', { name: 'Room queue' })).getAllByRole('listitem')).toHaveLength(2);
+  expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled();
 });
 
 test('members withdraw only their own request and an observer host cannot moderate another member', async () => {
@@ -118,13 +132,13 @@ test('duplicate own requests and five pending requests cannot be submitted again
   asGuest(); const value = community(); value.requests[0].mediaTrackId = 'd'.repeat(24);
   mocks.community.mockResolvedValue({ community: value }); const view = show();
   await screen.findByText('A requested song');
-  expect(screen.getByRole('option', { name: 'Fresh choice' })).toBeDisabled();
-  fireEvent.change(screen.getByRole('combobox', { name: 'Choose a song' }), { target: { value: 'd'.repeat(24) } });
+  const pending = await screen.findByRole('radio', { name: 'Fresh choice 0:30 · Already requested' });
+  expect(pending).toBeDisabled(); fireEvent.click(pending);
   expect(screen.getByRole('button', { name: 'Request song' })).toBeDisabled();
   await act(async () => { view.client.setQueryData(['social', 'viewer-1', 'room-community', 'room-a', 1, 'member-b'], { community: { ...value,
     requests: Array.from({ length: 5 }, (_, index) => ({ ...value.requests[0], requestId: `request-${index}` })) } }); });
   expect(await screen.findByText('You can have up to five pending song requests.')).toBeVisible();
-  expect(screen.getByRole('combobox', { name: 'Choose a song' })).toBeDisabled();
+  expect(screen.getByRole('searchbox', { name: 'Search room-ready songs' })).toBeDisabled();
 });
 
 test('room-wide request capacity explains why a member with no own requests cannot submit', async () => {
@@ -132,7 +146,7 @@ test('room-wide request capacity explains why a member with no own requests cann
   mocks.community.mockResolvedValue({ community: value }); show();
   expect(await screen.findByText('The room can have up to 20 pending song requests.')).toBeVisible();
   expect(screen.queryByText('You can have up to five pending song requests.')).not.toBeInTheDocument();
-  expect(screen.getByRole('combobox', { name: 'Choose a song' })).toBeDisabled();
+  expect(screen.getByRole('searchbox', { name: 'Search room-ready songs' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Request song' })).toBeDisabled();
 });
 
@@ -211,6 +225,8 @@ test('song requests and activity consume one membership-scoped query without rea
   }); });
   expect(await screen.findByText('No pending song requests.')).toBeVisible();
   expect(screen.getByRole('list', { name: 'Room activity' })).toHaveTextContent('Bob reacted ❤️');
+  expect(screen.getByRole('status', { name: 'Room activity' })).toBeEmptyDOMElement();
+  mocks.state.room = { ...mocks.state.room!, revision: 2 }; view.rerender();
   expect(screen.getByRole('status', { name: 'Room activity' })).toHaveTextContent('Bob reacted ❤️');
   expect(mocks.community).toHaveBeenCalledTimes(1); expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled();
 });

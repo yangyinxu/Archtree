@@ -13,6 +13,18 @@ export interface RoomMediaDescriptor {
     mediaTrackId: string; title: string; mediaRevision: string; durationMs: number;
     streamUrl: string; mediaType: 'Audio';
 }
+/** Discovery stays separate from strict playback snapshots and scans only bounded candidate pages. */
+export const ROOM_MEDIA_DISCOVERY_LIMITS = Object.freeze({ queryCharacters: 100, page: 20, maximumPage: 50,
+    candidates: 200, cursorBytes: 1_024, cursorMs: 900_000 });
+export interface RoomMediaSearch { query?: string; cursor?: string; limit?: number }
+export interface RoomMediaPage { items: RoomMediaDescriptor[]; nextCursor: string | null }
+/** A literal title query may be empty, but control characters and oversized input are never accepted. */
+export const normalizeRoomMediaQuery = (value: unknown): string | null => {
+    if (value === undefined) return '';
+    return typeof value === 'string' && value.length <= ROOM_MEDIA_DISCOVERY_LIMITS.queryCharacters * 2
+        && [...value].length <= ROOM_MEDIA_DISCOVERY_LIMITS.queryCharacters
+        && !/[\u0000-\u001f\u007f-\u009f]/.test(value) ? value.trim() : null;
+};
 export interface RoomQueueEntry extends RoomMediaDescriptor { entryId: string }
 export interface RoomTimeline {
     playbackGeneration: number; entryId: string; mediaRevision: string; durationMs: number;
@@ -104,6 +116,8 @@ export interface RoomApi {
     outgoingInvitations(actor: RoomActor, roomId: string): Promise<RoomOutgoingInvitation[]>;
     community(actor: RoomActor, roomId: string): Promise<RoomCommunity>;
     eligibleMedia(actor: RoomActor): Promise<RoomMediaDescriptor[]>;
+    searchMedia(actor: RoomActor, input: RoomMediaSearch): Promise<RoomMediaPage>;
+    mediaTrack(actor: RoomActor, mediaTrackId: string): Promise<RoomMediaDescriptor | null>;
     mutate(actor: RoomActor, command: RoomCommand): Promise<SocialOutcome>;
     heartbeat(actor: RoomActor, report: RoomHeartbeat): Promise<void>;
     /** Gateway calls this only for the final, generation-current socket of this exact client. */

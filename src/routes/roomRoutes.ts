@@ -1,6 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { createRoomService } from '../application/rooms/roomService';
-import { isRoomClientId, isRoomIdentifier, parseRoomCommand, ROOM_LIMITS, type RoomActor, type RoomApi } from '../contracts/roomV1';
+import { isRoomClientId, isRoomIdentifier, normalizeRoomMediaQuery, parseRoomCommand, ROOM_LIMITS, ROOM_MEDIA_DISCOVERY_LIMITS, type RoomActor, type RoomApi } from '../contracts/roomV1';
 import { exactSocialKeys, SocialError } from '../contracts/socialV1';
 import { requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { asyncHandler, limitConcurrency, rateLimit, requireSecureAuthTransport } from '../middleware/requestProtectionMiddleware';
@@ -17,12 +17,14 @@ const actor = (req: Request, clientId = req.get('X-Finitude-Room-Client')): Room
 /** Room endpoints precede the smaller social parser and return only current authorized projections. */
 export const createRoomRouter = (api: RoomApi = createRoomService()) => {
     const router = express.Router();
-    router.use((req, _res, next) => /^\/(rooms(?:\/|$)|room-commands$|room-invitations(?:\/|$)|room-media$|realtime-tickets$|capabilities$)/.test(req.path) ? next() : next('router'));
+    router.use((req, _res, next) => /^\/(rooms(?:\/|$)|room-commands$|room-invitations(?:\/|$)|room-media(?:\/|$)|realtime-tickets$|capabilities$)/.test(req.path) ? next() : next('router'));
     router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); res.vary('Cookie'); res.vary('Authorization');
         res.vary('X-Finitude-Account-Viewer'); res.vary('X-Finitude-Room-Client'); next(); });
     router.use(requireSecureAuthTransport, rateLimit('room-http', 180, 60_000), requireAuth, requireCurrentAccountViewer);
     router.use((req, _res, next) => {
-        if (!exactSocialKeys(req.query, [])) return next(invalid());
+        if (!(req.method === 'GET' || req.method === 'HEAD') || !/^\/room-media\/search\/?$/.test(req.path)) {
+            if (!exactSocialKeys(req.query, [])) return next(invalid());
+        }
         if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
         if (!req.is('application/json')) return next(new SocialError(415, 'json_required'));
         next();
@@ -49,6 +51,19 @@ export const createRoomRouter = (api: RoomApi = createRoomService()) => {
         res.json({ invitation: await api.invitation(actor(req), req.params.invitationId) });
     }));
     router.get('/room-media', asyncHandler(async (req, res) => { res.json({ items: await api.eligibleMedia(actor(req)) }); }));
+    router.get('/room-media/search', asyncHandler(async (req, res) => {
+        if (!Object.keys(req.query).every(key => ['q', 'cursor', 'limit'].includes(key))) throw invalid();
+        const query = normalizeRoomMediaQuery(req.query.q), rawLimit = req.query.limit, cursor = req.query.cursor;
+        if (query === null || rawLimit !== undefined && (typeof rawLimit !== 'string' || !/^[1-9]\d*$/.test(rawLimit))
+            || cursor !== undefined && (typeof cursor !== 'string' || !cursor.length || Buffer.byteLength(cursor) > ROOM_MEDIA_DISCOVERY_LIMITS.cursorBytes)) throw invalid();
+        const limit = rawLimit === undefined ? ROOM_MEDIA_DISCOVERY_LIMITS.page : Number(rawLimit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > ROOM_MEDIA_DISCOVERY_LIMITS.maximumPage) throw invalid();
+        res.json(await api.searchMedia(actor(req), { query, cursor, limit }));
+    }));
+    router.get('/room-media/:mediaTrackId', asyncHandler(async (req, res) => {
+        if (!/^[a-f0-9]{24}$/.test(req.params.mediaTrackId)) throw invalid();
+        res.json({ item: await api.mediaTrack(actor(req), req.params.mediaTrackId) });
+    }));
     router.post('/room-commands', asyncHandler(async (req, res) => {
         const command = parseRoomCommand(req.body);
         if (!command) throw invalid();

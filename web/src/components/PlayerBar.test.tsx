@@ -1,5 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
+import { browserSessionQueryKey } from '../api/session';
 
 import { createPlayerStore } from '../player';
 import type { PlayerAudio, PlayerQueueItem, PlayerStore } from '../player';
@@ -298,4 +301,33 @@ test('exposes five state-driven desktop transport controls', async () => {
     .toHaveAttribute('aria-pressed', 'true');
   expect(screen.getByRole('slider', { name: 'Playback position' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Keyboard shortcuts' })).toBeEnabled();
+});
+
+test('a song dialog owns keyboard input without triggering playback or seeks', async () => {
+  setMobileViewport(false);
+  const { store } = await playerFixture();
+  render(<><PlayerBar store={store} /><section aria-modal="true" role="dialog" aria-label="Song actions" tabIndex={-1}>Choose a friend</section></>);
+  const before = store.getSnapshot();
+  const dialog = screen.getByRole('dialog', { name: 'Song actions' });
+  dialog.focus();
+  fireEvent.keyDown(dialog, { key: ' ' });
+  fireEvent.keyDown(dialog, { key: 'ArrowRight' });
+  fireEvent.keyDown(dialog, { key: 'ArrowLeft' });
+  expect(store.getSnapshot()).toMatchObject({ status: before.status, currentTime: before.currentTime });
+  expect(await screen.findByRole('button', { name: 'Listen together: Still Water' })).toBeVisible();
+});
+
+test('touches in a portaled room dialog cannot swipe the compact player underneath it', async () => {
+  setMobileViewport(true);
+  const { store } = await playerFixture();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(browserSessionQueryKey, null);
+  render(<QueryClientProvider client={client}><MemoryRouter><PlayerBar store={store} /></MemoryRouter></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Listen together: Still Water' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Listen together: Still Water' });
+  fireEvent.pointerDown(dialog, { pointerId: 1, pointerType: 'touch', clientX: 180, clientY: 80 });
+  fireEvent.pointerMove(dialog, { pointerId: 1, pointerType: 'touch', clientX: 60, clientY: 80 });
+  fireEvent.pointerUp(dialog, { pointerId: 1, pointerType: 'touch', clientX: 60, clientY: 80 });
+  expect(store.getSnapshot().currentItem?.id).toBe('track-1');
+  expect(document.querySelector('section[aria-label="Now playing"]')).not.toHaveAttribute('data-compact-dragging');
 });

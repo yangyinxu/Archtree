@@ -1,8 +1,5 @@
-import { chromium, expect, test, type Browser, type BrowserContext, type Page, type Route } from '@playwright/test';
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
+import { nativeSocialBrowser } from './support/nativeSocialBrowser';
 import type { RoomSnapshot } from '../src/api/rooms';
 import { expectNoUnownedAxeViolations } from '../e2e/support/accessibility';
 
@@ -41,43 +38,6 @@ const roomSettingsGeometry = async (page: Page) => {
       await test.info().attach(`room-settings-${name}`, { path, contentType: 'image/png' });
     }
   } finally { await page.setViewportSize(original); }
-};
-
-/** A disposable normal browser avoids Playwright's focus emulation, so real tab visibility is observable. */
-const nativeTabBrowser = async () => {
-  const profile = await mkdtemp(join(tmpdir(), 'archtree-social-native-tabs-'));
-  // This direct launch bypasses Playwright config. Keep real decoding/visibility with a hardware-free output sink.
-  const browserProcess = spawn(chromium.executablePath(), ['--user-data-dir=' + profile, '--remote-debugging-port=0',
-    '--no-first-run', '--no-default-browser-check', '--disable-audio-output', 'about:blank'], { stdio: 'ignore' });
-  let launchError: Error | undefined; let browser: Browser | undefined;
-  const exited = new Promise<void>(resolve => {
-    browserProcess.once('exit', () => resolve());
-    browserProcess.once('error', error => { launchError = error; resolve(); });
-  });
-  let closing: Promise<void> | undefined;
-  const close = () => closing ??= (async () => {
-    try { await browser?.close(); }
-    finally {
-      if (browserProcess.exitCode === null && browserProcess.signalCode === null) {
-        browserProcess.kill('SIGTERM');
-        const force = setTimeout(() => { browserProcess.kill('SIGKILL'); }, 3000);
-        await exited; clearTimeout(force);
-      }
-      await rm(profile, { recursive: true, force: true });
-    }
-  })();
-  try {
-    let port = '';
-    await expect.poll(async () => {
-      if (launchError) throw launchError;
-      if (browserProcess.exitCode !== null) throw new Error('Native test browser exited before accepting connections.');
-      port = await readFile(join(profile, 'DevToolsActivePort'), 'utf8').then(value => value.split('\n')[0]).catch(() => '');
-      return /^\d+$/.test(port);
-    }).toBe(true);
-    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { noDefaults: true });
-    const context = browser.contexts()[0]; context.setDefaultTimeout(10_000);
-    return { context, close };
-  } catch (error) { await close(); throw error; }
 };
 
 /** Retains native close diagnostics without changing socket arguments or transport behavior. */
@@ -130,43 +90,47 @@ const login = async (page: Page, name: string, alias: string, baseURL: string) =
   await expect(identity.getByRole('button', { name: 'Save profile' })).toBeVisible();
 };
 
-/** Holds only dispatch timing; both original UI commands still execute on the actual server. */
-const raceCommands = async (first: Page, second: Page, firstGesture: () => Promise<void>, secondGesture: () => Promise<void>) => {
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const captured: Array<Record<string, unknown>> = [];
-  const outcomes: Array<{ status: number; outcome?: string; code?: string }> = [];
-  const route = async (request: Route) => {
-    captured.push(request.request().postDataJSON());
-    if (captured.length === 2) release();
-    await gate;
-    const response = await request.fetch();
-    const body = await response.json();
-    outcomes.push({ status: response.status(), outcome: body.outcome, code: body.code });
-    await request.fulfill({ response });
-  };
+/** Keep interception for the context lifetime: toggling it during polling can strand unrelated Chromium reads. */
+const installCommandRace = async (first: Page, second: Page) => {
+  let intercept: ((request: Route) => Promise<void>) | undefined;
+  const route = (request: Route) => intercept ? intercept(request) : request.continue();
   await first.route('**/api/social/v1/room-commands', route);
   await second.route('**/api/social/v1/room-commands', route);
-  try {
-    await Promise.all([firstGesture(), secondGesture()]);
-    await expect.poll(() => outcomes.length).toBe(2);
-    expect(captured[0].expectedPlaybackGeneration).toBe(captured[1].expectedPlaybackGeneration);
-    expect(captured[0].expectedEntryId).toBe(captured[1].expectedEntryId);
-    expect(outcomes.map(value => value.outcome).sort(), JSON.stringify(outcomes)).toEqual(['applied', 'rejected']);
-  } finally {
-    release();
-    await first.unroute('**/api/social/v1/room-commands', route);
-    await second.unroute('**/api/social/v1/room-commands', route);
-  }
+  return async (firstGesture: () => Promise<void>, secondGesture: () => Promise<void>) => {
+    expect(intercept).toBeUndefined();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const captured: Array<Record<string, unknown>> = [];
+    const outcomes: Array<{ status: number; outcome?: string; code?: string }> = [];
+    // Only dispatch timing is held; both original UI commands still execute on the actual server.
+    intercept = async request => {
+      captured.push(request.request().postDataJSON());
+      if (captured.length === 2) release();
+      await gate;
+      const response = await request.fetch();
+      const body = await response.json();
+      await request.fulfill({ response });
+      outcomes.push({ status: response.status(), outcome: body.outcome, code: body.code });
+    };
+    try {
+      await Promise.all([firstGesture(), secondGesture()]);
+      await expect.poll(() => outcomes.length).toBe(2);
+      expect(captured).toHaveLength(2);
+      expect(captured[0].expectedPlaybackGeneration).toBe(captured[1].expectedPlaybackGeneration);
+      expect(captured[0].expectedEntryId).toBe(captured[1].expectedEntryId);
+      expect(outcomes.map(value => value.outcome).sort(), JSON.stringify(outcomes)).toEqual(['applied', 'rejected']);
+    } finally { release(); intercept = undefined; }
+  };
 };
 
 test('real social route continues background audio, arbitrates gestures, recovers locally and transfers the host', async ({ browser, baseURL }) => {
-  const native = await nativeTabBrowser();
+  const native = await nativeSocialBrowser();
   let aliceContext: BrowserContext | undefined;
   try {
     aliceContext = await browser.newContext({ baseURL, reducedMotion: 'reduce' });
     const contexts = [aliceContext, native.context];
     const [alice, bob] = await Promise.all(contexts.map(context => context.newPage()));
+    const raceCommands = await installCommandRace(alice, bob);
     await Promise.all([observeTransportCloses(alice), observeTransportCloses(bob)]);
     const aliceRoom = snapshots(alice); const bobRoom = snapshots(bob);
     const commands: string[] = [];
@@ -254,12 +218,12 @@ test('real social route continues background audio, arbitrates gestures, recover
       phase = 'concurrent-commands';
       await expect(b.getByRole('button', { name: 'Next', exact: true })).toBeEnabled();
       const generation = aliceRoom()!.timeline!.playbackGeneration;
-      await raceCommands(alice, bob, () => a.getByRole('button', { name: 'Next', exact: true }).click(), () => b.getByRole('button', { name: 'Next', exact: true }).click());
+      await raceCommands(() => a.getByRole('button', { name: 'Next', exact: true }).click(), () => b.getByRole('button', { name: 'Next', exact: true }).click());
       await expect.poll(() => aliceRoom()?.timeline?.playbackGeneration).toBe(generation + 1);
       await expect.poll(() => bobRoom()?.timeline?.entryId).toBe(aliceRoom()!.queue[1].entryId);
       await Promise.all([playing(alice), playing(bob)]);
       const nextGeneration = aliceRoom()!.timeline!.playbackGeneration;
-      await raceCommands(alice, bob,
+      await raceCommands(
         () => a.getByRole('button', { name: 'Play for everyone First Light', exact: true }).click(),
         () => b.getByRole('button', { name: 'Play for everyone Home Again', exact: true }).click());
       await expect.poll(() => aliceRoom()?.timeline?.playbackGeneration).toBe(nextGeneration + 1);

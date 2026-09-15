@@ -13,6 +13,7 @@ import { SaveButton } from '../../components/SaveButton';
 import { launchAlbumPlayback } from '../playback/launchPlayback';
 import { LazyAddTrackToPlaylistButton as AddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
 import styles from './CatalogPages.module.css';
+import { LazyRoomTrackButton } from '../social/LazyRoomTrackButton';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { playerStore } from '../../player';
@@ -237,6 +238,7 @@ export const AlbumPage = () => {
                     <span className={styles.duration}>{track.duration || ''}</span>
                   </button>
                   <span className={styles.trackTrailing}>
+                    {track.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={track.id} title={title} />}
                     <LazyShareMusicButton contentType="audioTrack" contentId={track.id} title={title} />
                     <AddTrackToPlaylistButton
                       accountPending={session.isPending}

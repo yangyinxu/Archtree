@@ -5,7 +5,7 @@ import { expectNoUnownedAxeViolations } from '../e2e/support/accessibility';
 const roomPanel = (page: Page) => page.getByRole('region', { name: 'Listening room', exact: true });
 const requests = (page: Page) => page.getByRole('region', { name: 'Song requests', exact: true });
 const queue = (page: Page) => page.getByRole('region', { name: 'Room queue', exact: true });
-const trackRow = (region: Locator, title: string) => region.getByRole('listitem').filter({
+const trackRow = (region: Locator, title: string) => region.locator(':scope > ul[aria-label="Song requests"], :scope > ol').getByRole('listitem').filter({
   has: region.page().getByText(title, { exact: true })
 });
 
@@ -77,7 +77,7 @@ const captureResponsive = async (page: Page, focus: Locator, name: string) => {
 };
 
 const requestSong = async (page: Page, title: string) => {
-  await requests(page).getByRole('combobox', { name: 'Choose a song', exact: true }).selectOption({ label: title });
+  await requests(page).getByRole('radio', { name: new RegExp(`^${title}`) }).check();
   await requests(page).getByRole('button', { name: 'Request song', exact: true }).click();
   await expect(trackRow(requests(page), title)).toBeVisible();
 };

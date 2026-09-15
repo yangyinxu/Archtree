@@ -1,6 +1,5 @@
 import { lazy, Suspense, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getRoomMedia, roomControlPreconditions, type RoomAction, type RoomSnapshot } from '../../api/rooms';
+import { roomControlPreconditions, type RoomAction, type RoomMedia, type RoomSnapshot } from '../../api/rooms';
 import { Icon } from '../../components/Icon';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { roomSession, useRoomSession } from './roomSession';
@@ -8,19 +7,20 @@ import { useRoomCommunity } from './useRoomCommunity';
 import styles from './SocialPage.module.css';
 
 const LightInteractions = lazy(() => import('./RoomLightInteractions').then(module => ({ default: module.RoomLightInteractions })));
+const RoomMediaPicker = lazy(() => import('./RoomMediaPicker').then(module => ({ default: module.RoomMediaPicker })));
 
 /** Recommendations and queue management never optimistically change the shared timeline. */
 export const RoomSongRequests = ({ viewerId, room }: { viewerId: string; room: RoomSnapshot }) => {
   const { t } = useLocalization();
   const state = useRoomSession();
-  const [selected, setSelected] = useState('');
+  const identity = `${viewerId}:${room.roomId}:${room.epoch}:${room.self.memberId}`;
+  const [draft, setDraft] = useState<{ identity: string; selected: RoomMedia[] }>({ identity, selected: [] });
+  const selected = draft.identity === identity ? draft.selected : [];
   const belongsToRoom = (current: ReturnType<typeof roomSession.getSnapshot>) => current.viewerId === viewerId
     && current.room?.roomId === room.roomId && current.room.epoch === room.epoch
     && current.room.self.memberId === room.self.memberId;
   const mine = belongsToRoom(state);
   const community = useRoomCommunity(viewerId, room, mine);
-  const media = useQuery({ queryKey: ['social', viewerId, 'room-media'],
-    queryFn: ({ signal }) => getRoomMedia(viewerId, signal), enabled: mine, retry: false });
   if (!mine) return null;
   const data = !community.isError && community.data?.community.epoch === room.epoch
     && community.data.community.roomId === room.roomId ? community.data.community : undefined;
@@ -34,10 +34,9 @@ export const RoomSongRequests = ({ viewerId, room }: { viewerId: string; room: R
   const canEdit = state.connected && room.status === 'open' && hostController && Boolean(room.timeline) && !busy;
   const canSelect = state.connected && room.self.isController && room.self.canControl
     && (room.status === 'open' || hostController && room.status === 'suspended') && !busy;
-  const availableMedia = !media.isError ? media.data?.items ?? [] : [];
   const canRequest = state.connected && room.status === 'open' && !busy && Boolean(data)
     && ownRequests.length < 5 && requests.length < 20;
-  const selectedAvailable = availableMedia.some(item => item.mediaTrackId === selected) && !pendingMedia.has(selected);
+  const selectedAvailable = selected.length === 1 && !pendingMedia.has(selected[0].mediaTrackId);
   const submit = (action: RoomAction) => {
     if (!belongsToRoom(roomSession.getSnapshot())) return;
     void roomSession.run(action);
@@ -57,22 +56,15 @@ export const RoomSongRequests = ({ viewerId, room }: { viewerId: string; room: R
       <h3>{t('room.requests_title')}</h3><p className={styles.muted}>{t('room.requests_hint')}</p>
       {community.isPending && <p role="status">{t('social.loading')}</p>}
       {community.isError && <p className={styles.error} role="alert">{t('social.error')} <button className={styles.secondary} onClick={() => community.refetch()}>{t('social.refresh')}</button></p>}
-      <form className={styles.stack} aria-label={t('room.request_song')} onSubmit={event => {
-        event.preventDefault();
-        if (canRequest && selectedAvailable) submit({ action: 'requestSong', ...member, expectedEpoch: room.epoch, mediaTrackId: selected });
-      }}>
-        <label className={styles.field}>{t('room.request_track')}<select value={selected} disabled={!canRequest || !availableMedia.length} onChange={event => setSelected(event.target.value)}>
-          <option value="">{t('room.request_track')}</option>
-          {availableMedia.map(item => <option key={item.mediaTrackId} value={item.mediaTrackId} disabled={pendingMedia.has(item.mediaTrackId)}>{item.title}</option>)}
-        </select></label>
-        <button className={styles.button} disabled={!canRequest || !selectedAvailable}>{t('room.request_song')}</button>
-      </form>
-      {media.isError ? <p role="alert">{t('social.error')} <button className={styles.secondary} onClick={() => media.refetch()}>{t('social.refresh')}</button></p>
-        : media.isPending ? <p role="status">{t('social.loading')}</p> : !availableMedia.length && <p className={styles.empty}>{t('room.no_media')}</p>}
+      <Suspense fallback={<p role="status">{t('social.loading')}</p>}><RoomMediaPicker key={identity} viewerId={viewerId} scopeKey={identity} selected={selected}
+        onSelectionChange={items => setDraft({ identity, selected: items })} disabled={!canRequest} disabledMediaIds={pendingMedia} /></Suspense>
+      <div className={styles.actions}><button className={styles.button} type="button" disabled={!canRequest || !selectedAvailable} onClick={() => {
+        if (canRequest && selectedAvailable) submit({ action: 'requestSong', ...member, expectedEpoch: room.epoch, mediaTrackId: selected[0].mediaTrackId });
+      }}>{t('room.request_song')}</button></div>
       {ownRequests.length >= 5 && <p className={styles.muted}>{t('room.request_limit')}</p>}
       {requests.length >= 20 && <p className={styles.muted}>{t('room.request_room_limit')}</p>}
       {data && !requests.length && <p className={styles.empty}>{t('room.requests_empty')}</p>}
-      <ul className={styles.list}>{requests.map(request => <li className={styles.row} key={request.requestId}>
+      <ul className={styles.list} aria-label={t('room.requests_title')}>{requests.map(request => <li className={styles.row} key={request.requestId}>
         <div className={styles.rowContent}><strong>{request.title}</strong><span>{t('room.requested_by', { alias: profiles.get(request.requestedBy.socialId)!.alias })}</span></div>
         <div className={styles.rowActions}>
           {hostController && <button className={styles.button} disabled={!canEdit || room.queue.length >= 100} onClick={() => submit({ action: 'acceptSongRequest', ...roomControlPreconditions(room), requestId: request.requestId })}>{t('room.request_accept')}</button>}
