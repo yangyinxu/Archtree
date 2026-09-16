@@ -3,15 +3,19 @@ export const roomGatewayFailureCategories = [
     'authorityAcquisition', 'sweep', 'refresh', 'report', 'disconnect'
 ] as const;
 export type RoomGatewayFailure = typeof roomGatewayFailureCategories[number];
-export type RoomGatewayAuthorityState = 'starting' | 'ready' | 'unavailable' | 'stopped';
-const authorityStates: readonly RoomGatewayAuthorityState[] = ['starting', 'ready', 'unavailable', 'stopped'];
+export type RoomGatewayAuthorityState = 'inactive' | 'starting' | 'ready' | 'unavailable' | 'stopped';
+const authorityStates: readonly RoomGatewayAuthorityState[] = ['inactive', 'starting', 'ready', 'unavailable', 'stopped'];
 
 /** Stores only five saturated counters, one state and one local successful-sweep timestamp. */
-export const createRoomGatewayMetrics = (now: () => number = Date.now) => {
+export const createRoomGatewayMetrics = (
+    now: () => number = Date.now,
+    isEnabled: () => boolean = () => process.env.FINITUDE_SOCIAL_ENABLED === 'true'
+        && process.env.FINITUDE_ROOMS_ENABLED === 'true'
+) => {
     const failures: Record<RoomGatewayFailure, number> = {
         authorityAcquisition: 0, sweep: 0, refresh: 0, report: 0, disconnect: 0
     };
-    let authorityState: RoomGatewayAuthorityState = 'starting';
+    let authorityState: RoomGatewayAuthorityState = 'inactive';
     let lastSuccessfulSweep: number | null = null;
     return {
         /** Counts failed operations, accepting no caller-defined labels or error payloads. */
@@ -32,6 +36,8 @@ export const createRoomGatewayMetrics = (now: () => number = Date.now) => {
             const age = lastSuccessfulSweep === null ? null : now() - lastSuccessfulSweep;
             return {
                 scope: 'process' as const,
+                // Rollout admission can be disabled while an installed gateway still owns its lease.
+                enabled: isEnabled() === true,
                 authorityState,
                 lastSuccessfulSweepAgeMs: age === null || !Number.isFinite(age)
                     ? null : Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(age))),

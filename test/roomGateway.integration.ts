@@ -101,7 +101,9 @@ test('either disabled rollout flag stops existing sockets and denies fresh upgra
         const gateway = await fixture();
         try {
             const admitted = gateway.connect('192.0.2.1'); assert.equal(await admitted.result, 101);
+            assert.equal(gateway.metrics.snapshot().enabled, true);
             process.env[flag] = 'false';
+            assert.equal(gateway.metrics.snapshot().enabled, false);
             assert.equal(await gateway.connect('192.0.2.2').result, 503);
             await waitFor(() => admitted.socket.readyState === WebSocket.CLOSED);
         } finally { process.env[flag] = 'true'; await gateway.stop(); }

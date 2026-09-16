@@ -4,9 +4,9 @@ import { createRoomGatewayMetrics, roomGatewayFailureCategories } from '../src/r
 
 test('room metrics expose fixed anonymous counters and a bounded successful-sweep age', () => {
     let now = 1_000;
-    const metrics = createRoomGatewayMetrics(() => now);
+    const metrics = createRoomGatewayMetrics(() => now, () => false);
     assert.deepEqual(metrics.snapshot(), {
-        scope: 'process', authorityState: 'starting', lastSuccessfulSweepAgeMs: null,
+        scope: 'process', enabled: false, authorityState: 'inactive', lastSuccessfulSweepAgeMs: null,
         failures: { authorityAcquisition: 0, sweep: 0, refresh: 0, report: 0, disconnect: 0 }
     });
     metrics.setAuthorityState('ready');
@@ -37,7 +37,7 @@ test('room metrics reject arbitrary labels and never retain identity or error da
     assert.doesNotMatch(JSON.stringify(metrics.snapshot()), /secret|userId|roomId|sessionId|error|stack|ticket|token/);
     metrics.recordFailure('__proto__' as never);
     metrics.recordFailure('constructor' as never);
-    assert.equal(metrics.snapshot().authorityState, 'starting');
+    assert.equal(metrics.snapshot().authorityState, 'inactive');
     assert.equal(Object.keys(metrics.snapshot().failures).length, 5);
 });
 
@@ -54,6 +54,21 @@ test('room counters saturate and snapshots and registries are independent', () =
     snapshot.failures.report = 0;
     snapshot.authorityState = 'stopped';
     assert.equal(metrics.snapshot().failures.report, Number.MAX_SAFE_INTEGER);
-    assert.equal(metrics.snapshot().authorityState, 'starting');
+    assert.equal(metrics.snapshot().authorityState, 'inactive');
     assert.equal(createRoomGatewayMetrics().snapshot().failures.report, 0);
+});
+
+
+test('rollout admission remains separate from an installed gateway authority state', () => {
+    let enabled = false;
+    const metrics = createRoomGatewayMetrics(Date.now, () => enabled);
+    assert.equal(metrics.snapshot().authorityState, 'inactive');
+    assert.equal(metrics.snapshot().enabled, false);
+    enabled = true;
+    metrics.setAuthorityState('starting');
+    assert.equal(metrics.snapshot().enabled, true);
+    metrics.setAuthorityState('ready');
+    enabled = false;
+    assert.equal(metrics.snapshot().enabled, false);
+    assert.equal(metrics.snapshot().authorityState, 'ready');
 });

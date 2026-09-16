@@ -261,9 +261,23 @@ test('optional room degradation is visible without changing database readiness',
     }
 });
 
-test('health defaults to the same room metrics registry as the production gateway', async () => {
-    const handler = createHealthController({ getDatabase: () => null });
-    const { response, state } = responseDouble();
-    await handler({} as Request, response);
-    assert.deepEqual(state.body.rooms, roomGatewayMetrics.snapshot());
+test('default health reports inactive rooms when no gateway was installed', async () => {
+    const previous = process.env.FINITUDE_ROOMS_ENABLED;
+    process.env.FINITUDE_ROOMS_ENABLED = 'false';
+    try {
+        const handler = createHealthController({
+            checkIndexes: async () => true,
+            getDatabase: stableDatabase({ command: async () => ({ ok: 1 }) })
+        });
+        const { response, state } = responseDouble();
+        await handler({} as Request, response);
+        assert.equal(state.statusCode, 200);
+        assert.deepEqual(state.body.rooms, roomGatewayMetrics.snapshot());
+        assert.equal(state.body.rooms.authorityState, 'inactive');
+        assert.equal(state.body.rooms.enabled, false);
+        assert.equal(state.body.rooms.lastSuccessfulSweepAgeMs, null);
+    } finally {
+        if (previous === undefined) delete process.env.FINITUDE_ROOMS_ENABLED;
+        else process.env.FINITUDE_ROOMS_ENABLED = previous;
+    }
 });
