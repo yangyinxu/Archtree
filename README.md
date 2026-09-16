@@ -412,6 +412,12 @@ Required variables:
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in
   production and enabled in non-production environments.
+- `CATALOG_SEARCH_INDEX_ENABLED`: defaults to `false`. Enable indexed substring
+  candidates only after all catalog writers are updated and the bounded
+  `backfill:catalog-search` command has completed for all four collections.
+  Disable before reverting to older writers; see
+  [the search rollout procedure](docs/architecture.md#substring-candidate-index-rollout)
+  for dry runs, checkpoints, compatibility limits, and rollback requirements.
 - Catalog Credit rollout switches are documented in
   [`docs/deployment/catalog-credit-rollout-runbook.md`](docs/deployment/catalog-credit-rollout-runbook.md):
   `CATALOG_CREDIT_WRITES_ENABLED`, `CATALOG_CREDIT_READS_ENABLED`,
@@ -641,6 +647,10 @@ admission and stream outcomes split across playback, download, artwork,
 avatar, and video. The shared 40/8 process/client ceiling reserves 16/2 slots
 from non-playback traffic so artwork-heavy pages cannot consume all audio or
 video playback capacity.
+The response also includes identity-free `rooms` diagnostics: current admission
+enablement, authority state, time since the last successful sweep, and five
+bounded failure counters. Room diagnostics do not change HTTP readiness; see
+[the health contract](docs/architecture.md#database-constraints-and-additive-migrations).
 
 ### Verify media Range behavior under bounded load
 

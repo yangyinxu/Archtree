@@ -1355,6 +1355,21 @@ process. No health request creates collections, builds indexes, starts a
 transaction, or changes data.
 A failed metadata read retains its diagnostic slot until all sibling reads settle.
 
+Both successful and unavailable health responses include a `rooms` snapshot
+with `scope: "process"`, `enabled`, `authorityState`,
+`lastSuccessfulSweepAgeMs`, and `failures`. `enabled` reflects both social and
+room rollout flags; authority state is independently `inactive` before gateway
+installation, `starting` during acquisition, `ready` while authority is held,
+`unavailable` after acquisition/lease failure, or `stopped` after shutdown.
+Disabling admission can leave an installed gateway holding its lease. The sweep
+age is null until a sweep succeeds, then a nonnegative millisecond age. Failure
+counters use only `authorityAcquisition`, `sweep`, `refresh`, `report`, and
+`disconnect`, saturate at `Number.MAX_SAFE_INTEGER`, and reset on process restart.
+No account/room/session identifiers, raw exceptions, URLs, or caller-defined
+labels enter these diagnostics. A room failure remains observable without
+marking unrelated HTTP catalog and account routes unready. Monitor successive
+snapshots per process; they are not durable or cluster-wide totals.
+
 One database health probe per application handler combines those checks and ping
 under a shared 1-second response deadline. Successful and failed results have a
 1-second cache, so repeated probes do not immediately retry an unavailable
