@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import type { RoomMedia, RoomSnapshot } from '../src/api/rooms';
 import { nativeSocialBrowser } from './support/nativeSocialBrowser';
 import { capturePulseAudioDiagnostics } from './support/pulseAudioDiagnostics';
+import { installMediaEventDiagnostics, readMediaEventDiagnostics } from './support/mediaEventDiagnostics';
 
 const panel = (page: Page) => page.getByRole('region', { name: 'Listening room', exact: true });
 const formats = [
@@ -95,9 +96,14 @@ const verifyPinnedBytes = async (request: APIRequestContext, baseURL: string, en
   }
 };
 
-const expectPlaying = async (page: Page, entry: RoomMedia, baseURL: string) => {
-  await expect.poll(async () => (await media(page)).filter(value => value.source === new URL(entry.streamUrl, baseURL).href
-    && !value.paused && !value.seeking && value.ready >= 3 && value.error === null).length).toBe(1);
+const expectPlaying = async (page: Page, entry: RoomMedia, baseURL: string, samples: SynchronizationObservation[]) => {
+  await expect.poll(async () => {
+    const values = await media(page);
+    samples.push(observeSample(values, entry, baseURL));
+    if (samples.length > 200) samples.shift();
+    return values.filter(value => value.source === new URL(entry.streamUrl, baseURL).href
+      && !value.paused && !value.seeking && value.ready >= 3 && value.error === null).length;
+  }).toBe(1);
   const values = await media(page);
   expect(values).toHaveLength(1);
   expect(Math.abs(values[0].duration * 1000 - entry.durationMs)).toBeLessThan(150);
@@ -114,6 +120,7 @@ type SynchronizationCheckpoint = {
   stage: 'initial-play' | 'next' | 'seek';
   title: string;
   status: 'observing' | 'passed' | 'failed';
+  readiness: { host: SynchronizationObservation[]; guest: SynchronizationObservation[] };
   samples: Array<{ host: SynchronizationObservation; guest: SynchronizationObservation }>;
   comparison?: {
     rawDriftMs: number;
@@ -125,24 +132,28 @@ type SynchronizationCheckpoint = {
   };
 };
 
+/** Strip source URLs from both preparation and continuous-playback samples. */
+const observeSample = (values: MediaSample[], entry: RoomMedia, baseURL: string): SynchronizationObservation => {
+  if (!values[0]) return { mediaCount: values.length, sourceMatches: false, value: null };
+  const { source, ...value } = values[0];
+  return { mediaCount: values.length, sourceMatches: source === new URL(entry.streamUrl, baseURL).href, value };
+};
+
 /** Observe continuous advancement; a decoder correction cannot count as elapsed playback. */
 const expectSynchronized = async (pages: [Page, Page], entry: RoomMedia, baseURL: string,
   stage: SynchronizationCheckpoint['stage'], diagnostics: SynchronizationCheckpoint[]) => {
-  const checkpoint: SynchronizationCheckpoint = { stage, title: entry.title, status: 'observing', samples: [] };
+  const checkpoint: SynchronizationCheckpoint = { stage, title: entry.title, status: 'observing',
+    readiness: { host: [], guest: [] }, samples: [] };
   diagnostics.push(checkpoint);
-  const observeSample = (values: MediaSample[]): SynchronizationObservation => {
-    if (!values[0]) return { mediaCount: values.length, sourceMatches: false, value: null };
-    const { source, ...value } = values[0];
-    return { mediaCount: values.length, sourceMatches: source === new URL(entry.streamUrl, baseURL).href, value };
-  };
   try {
-    await Promise.all(pages.map(page => expectPlaying(page, entry, baseURL)));
+    await Promise.all(pages.map((page, index) => expectPlaying(page, entry, baseURL,
+      index === 0 ? checkpoint.readiness.host : checkpoint.readiness.guest)));
     const windows: Array<{ first: MediaSample; previous: MediaSample } | undefined> = pages.map(() => undefined);
     let samples: MediaSample[] = [];
     await expect.poll(async () => {
       const latest = await Promise.all(pages.map(page => media(page)));
       // Keep failed checkpoints reviewable without retaining media URLs or an unbounded trace.
-      checkpoint.samples.push({ host: observeSample(latest[0]), guest: observeSample(latest[1]) });
+      checkpoint.samples.push({ host: observeSample(latest[0], entry, baseURL), guest: observeSample(latest[1], entry, baseURL) });
       if (checkpoint.samples.length > 100) checkpoint.samples.shift();
       samples = latest.map(values => values[0]);
       // Map before every so each participant's window advances even while the other is still preparing.
@@ -196,6 +207,7 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
   try {
     hostContext = await browser.newContext({ baseURL, reducedMotion: 'reduce' });
     const host = await hostContext.newPage(), guest = await native.context.newPage();
+    await Promise.all([installMediaEventDiagnostics(host), installMediaEventDiagnostics(guest)]);
     const hostState = observe(host), guestState = observe(guest);
     const driftEvidence: Array<Awaited<ReturnType<typeof expectSynchronized>>> = [];
     const synchronization: SynchronizationCheckpoint[] = [];
@@ -277,8 +289,10 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
         pulseAudio,
         drift: driftEvidence,
         synchronization,
-        host: { commands: hostState.commands, ready: hostState.ready, streams: hostState.streams, media: await media(host).catch(() => []) },
-        guest: { commands: guestState.commands, ready: guestState.ready, streams: guestState.streams, media: await media(guest).catch(() => []) }
+        host: { commands: hostState.commands, ready: hostState.ready, streams: hostState.streams,
+          media: await media(host).catch(() => []), mediaEvents: await readMediaEventDiagnostics(host).catch(() => []) },
+        guest: { commands: guestState.commands, ready: guestState.ready, streams: guestState.streams,
+          media: await media(guest).catch(() => []), mediaEvents: await readMediaEventDiagnostics(guest).catch(() => []) }
       }));
       await test.info().attach('compressed-audio-evidence', { contentType: 'application/json', path: evidencePath });
     }

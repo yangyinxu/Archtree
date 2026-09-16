@@ -245,16 +245,23 @@ Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
 It corrects startup drift after credible media-clock advancement. A corrective
 seek measures the clock time lost during that seek, separately from initial
-play startup. One additional seek per playback occurrence may compensate the
-measured delay; concurrent heartbeat corrections update the clock reference
+play startup. At most two additional seeks per playback occurrence may compensate
+the measured delay, within six seconds of the first compensation. The second
+allows one refinement when the first measured decoder delay changes; concurrent
+heartbeat corrections update the clock reference
 without interrupting that observation. Measurements expire after three seconds
 and accept only delays from zero to two seconds. Later ordinary heartbeat
 corrections can reuse the measured delay until the playback effect changes.
 All pending work is cancelled by local pause, authority loss, or source changes.
-A fully
-buffered Audio decoder that stays paused with only current-frame data after a
+A fully buffered Audio decoder that stays paused with only current-frame data after a
 completed seek gets at most one paused source reload per playback occurrence;
 readiness still requires future data, and local pause or leaving cancels recovery.
+For that recovered occurrence, drift corrections use explicit measured seeks
+instead of playback-rate changes, which can trigger additional decoder seeks.
+This may produce a brief jump for smaller drift, but avoids repeated rate
+transitions on a decoder that already needed recovery. A new occurrence resumes
+normal rate correction. Rate restoration never authorizes a seek from stale
+readiness or permission state.
 CI uploads `finitude-social-browser-evidence` immediately after these scenarios,
 before running the remaining MongoDB integration and ordinary browser gates.
 The isolated PulseAudio sink uses a requested 100 ms device-buffer budget

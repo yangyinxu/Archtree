@@ -214,10 +214,13 @@ test('a ping correction before natural playback owns convergence without treatin
   clock += 1_000;
   audio.currentTime = 7.03; audio.emit('timeupdate');
   expect(audio.currentTime).toBeCloseTo(9.97); // Authority 8.5 + the correction's measured 1.47 seconds of lost media time.
-  // The measured follow-up remains consumed across its own completion callbacks.
+  // A changed measured latency permits one final estimate, then no completion callback can replenish the budget.
   audio.emit('seeked'); audio.emit('playing');
   clock += 1_000; audio.currentTime = 10.07; audio.emit('timeupdate');
-  expect(audio.currentTime).toBe(10.07);
+  expect(audio.currentTime).toBeCloseTo(10.4);
+  audio.emit('seeked'); audio.emit('playing');
+  clock += 1_000; audio.currentTime = 10.5; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(10.5);
   expect(audio.playCalls).toBe(1);
   expect(onIntent).not.toHaveBeenCalled();
   store.destroy();

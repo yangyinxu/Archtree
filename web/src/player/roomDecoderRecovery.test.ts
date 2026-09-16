@@ -14,9 +14,10 @@ const setup = () => {
     target.currentTime = 0; target.readyState = 0;
   });
   const onIntent = vi.fn(), onObservation = vi.fn();
+  const seek = vi.fn((position: number) => { target.currentTime = position; return true; });
   const controller = createRoomPlaybackController({ media: () => target, sourceGeneration: () => source, install,
     updateQueue: vi.fn(), play: target.play, pause: target.pause,
-    seek: position => { target.currentTime = position; return true; }, detach: vi.fn() },
+    seek, detach: vi.fn() },
   { now: () => 10000 + performance.now(), onIntent, onObservation });
   const state: RoomPlaybackState = { roomId: 'room', epoch: 1, mediaRevision: 'mr_a', revision: 1,
     playbackEpoch: 1, controlEpoch: 1, queueRevision: 1, canControl: true, playbackAllowed: false,
@@ -27,7 +28,7 @@ const setup = () => {
     controller.observe('loadedmetadata', target);
     controller.observe('seeked', target);
   };
-  return { target, install, onIntent, onObservation, controller, room: controller.attachment, state, decoded };
+  return { target, install, seek, onIntent, onObservation, controller, room: controller.attachment, state, decoded };
 };
 
 beforeEach(() => vi.useFakeTimers());
@@ -153,5 +154,55 @@ test('an older pending reload cannot ready or reposition a replacement occurrenc
   expect(target.src).toBe('/replacement.mp3');
   expect(onObservation.mock.calls.filter(([event]) => event.type === 'ready').map(([event]) => event.playbackEpoch)).toEqual([2]);
   expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('successful decoder recovery uses controlled seek instead of soft rate only for that occurrence', async () => {
+  const { room, state, target, seek, decoded, onIntent } = setup();
+  await room.apply(state); decoded(2);
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  const playing = { ...state, revision: 2, status: 'playing' as const, playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() };
+  await room.apply(playing);
+  expect(room.correct(66.3)).toBe('seek');
+  expect(seek).toHaveBeenLastCalledWith(66.3);
+  expect(target.playbackRate).toBe(1);
+  await room.apply({ ...playing, revision: 3, playbackEpoch: 2 });
+  expect(room.correct(66.3)).toBe('rate');
+  expect(target.playbackRate).toBe(1.05);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['local pause', 'permission loss', 'detach'] as const)('%s blocks the recovered decoder fallback', async cancellation => {
+  const { room, state, target, seek, decoded, onIntent } = setup();
+  await room.apply(state); decoded(2);
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  const playing = { ...state, revision: 2, status: 'playing' as const, playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() };
+  await room.apply(playing);
+  if (cancellation === 'local pause') room.pauseLocally();
+  if (cancellation === 'permission loss') await room.apply({ ...playing, revision: 3, playbackAllowed: false });
+  if (cancellation === 'detach') room.detach();
+  const calls = seek.mock.calls.length;
+  target.paused = false;
+  expect(room.correct(66.3)).toBe('none');
+  expect(seek).toHaveBeenCalledTimes(calls);
+  expect(target.playbackRate).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a failed reload does not mark a decoder as requiring the recovered-rate fallback', async () => {
+  const { room, state, target, install, decoded } = setup();
+  await room.apply(state); decoded(2);
+  install.mockRejectedValueOnce(new Error('Source unavailable'));
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  await room.apply({ ...state, revision: 2, status: 'playing', playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() });
+  await room.resync();
+  expect(target.paused).toBe(false);
+  expect(room.correct(66.3)).toBe('rate');
+  expect(target.playbackRate).toBe(1.05);
   room.detach();
 });
