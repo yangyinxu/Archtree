@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type BrowserContext, type Page } 
 import { readFile, writeFile } from 'node:fs/promises';
 import type { RoomMedia, RoomSnapshot } from '../src/api/rooms';
 import { nativeSocialBrowser } from './support/nativeSocialBrowser';
+import { capturePulseAudioDiagnostics } from './support/pulseAudioDiagnostics';
 
 const panel = (page: Page) => page.getByRole('region', { name: 'Listening room', exact: true });
 const formats = [
@@ -158,6 +159,7 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
     const host = await hostContext.newPage(), guest = await native.context.newPage();
     const hostState = observe(host), guestState = observe(guest);
     const driftEvidence: Array<Awaited<ReturnType<typeof expectSynchronized>>> = [];
+    let pulseAudio: Awaited<ReturnType<typeof capturePulseAudioDiagnostics>> | undefined;
     try {
       await Promise.all([login(host, 'invitation_host', baseURL!), login(guest, 'invitation_guest', baseURL!)]);
       for (const format of formats) await panel(host).getByRole('checkbox', { name: new RegExp(`^${format.title}`) }).check();
@@ -219,6 +221,8 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
         expect(hostState.commands.slice(beforeSeek).map(value => value.action)).toEqual(['seek']);
         expect(guestState.commands).toHaveLength(guestInitial);
       }
+      // Capture successful playback before End room clears the media source; failures are captured below.
+      pulseAudio = await capturePulseAudioDiagnostics();
       host.once('dialog', dialog => dialog.accept());
       await panel(host).getByRole('button', { name: 'End room', exact: true }).click();
       await expect.poll(() => guestState.room()).toBeNull();
@@ -227,8 +231,10 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
       expect(guestState.commands).toHaveLength(guestInitial);
     } finally {
       const evidencePath = test.info().outputPath('compressed-audio-evidence.json');
+      pulseAudio ??= await capturePulseAudioDiagnostics();
       await writeFile(evidencePath, JSON.stringify({
         browsers: { host: browserName, guest: 'chromium' },
+        pulseAudio,
         drift: driftEvidence,
         host: { commands: hostState.commands, ready: hostState.ready, streams: hostState.streams, media: await media(host).catch(() => []) },
         guest: { commands: guestState.commands, ready: guestState.ready, streams: guestState.streams, media: await media(guest).catch(() => []) }

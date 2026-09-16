@@ -99,7 +99,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let seekTarget = 0;
   let seekFailed = false;
   let playRequested = false;
-  let firstProgressPosition: number | undefined;
+  let firstProgress: { position: number; monotonicMs: number; seeking: boolean } | undefined;
   const observed = new Set<string>();
 
   const report = (type: RoomPlaybackObservation['type']) => {
@@ -132,7 +132,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     correction = undefined;
     decoderRecovery = undefined;
     playRequested = false;
-    firstProgressPosition = undefined;
+    firstProgress = undefined;
     observed.clear();
     resetRate();
   };
@@ -157,6 +157,19 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   const correctionAllowed = (target: PlayerAudio) => Boolean(state && !detached && !localPaused && matchesSource(target)
     && state.status === 'playing' && state.playbackAllowed !== false && playRequested && !target.paused
     && !needsSeek && !seekPending && !seekFailed && !target.seeking && (target.readyState ?? 0) >= 3);
+
+  /** A correction writes media time; its resulting callbacks cannot prove the decoder has started advancing. */
+  const correctionSeek = (target: PlayerAudio, position: number) => {
+    const pending = firstProgress;
+    if (pending) pending.seeking = true;
+    const accepted = port.seek(position);
+    if (pending && firstProgress === pending) {
+      pending.position = target.currentTime;
+      pending.monotonicMs = now();
+      if (!accepted) pending.seeking = false;
+    }
+    return accepted;
+  };
 
   // Logical identity survives decoder reinstalls; physical source generations only fence in-flight work.
   const occurrence = () => state && JSON.stringify([state.roomId, state.epoch, state.currentEntryId, state.mediaRevision, state.playbackEpoch]);
@@ -254,7 +267,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     }
     if (playRequested || (!target.paused && !target.ended)) return;
     playRequested = true;
-    firstProgressPosition = target.currentTime;
+    firstProgress = { position: target.currentTime, monotonicMs: now(), seeking: false };
     await port.play();
   };
 
@@ -365,12 +378,12 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
             if (detached || effect !== expectedEffect || !matchesSource(target) || target.seeking || target.paused) return;
             resetRate();
             const expected = positionSeconds + (now() - correctionStart) / 1000;
-            if (Math.abs(expected - target.currentTime) > 0.15) port.seek(Math.min(expected, target.duration));
+            if (Math.abs(expected - target.currentTime) > 0.15) correctionSeek(target, Math.min(expected, target.duration));
           }, 4000);
           return 'rate';
         } catch { report('unsupported-rate'); }
       }
-      return port.seek(Math.min(positionSeconds, target.duration)) ? 'seek' : 'none';
+      return correctionSeek(target, Math.min(positionSeconds, target.duration)) ? 'seek' : 'none';
     },
     detach() {
       if (detached) return;
@@ -425,9 +438,10 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
       }
       if (event === 'pause') {
         if (!target.paused) return false;
-        firstProgressPosition = undefined;
+        firstProgress = undefined;
       }
       if (event === 'error' && !target.error) return false;
+      if (event === 'seeking' && target.seeking && firstProgress) firstProgress.seeking = true;
       if (event === 'seeked' && !target.seeking) {
         if (seekPending && Math.abs(target.currentTime - seekTarget) > 0.15) {
           seekFailed = true;
@@ -436,15 +450,28 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
           return false;
         }
         seekPending = false;
+        if (firstProgress?.seeking) {
+          firstProgress.position = target.currentTime;
+          firstProgress.monotonicMs = now();
+          firstProgress.seeking = false;
+        }
         report('seek-complete');
       }
       if (['loadedmetadata', 'canplay', 'seeked'].includes(event)) void reconcile();
-      if (event === 'timeupdate' && firstProgressPosition !== undefined && correctionAllowed(target)
+      if (event === 'timeupdate' && firstProgress && !firstProgress.seeking && correctionAllowed(target)
         && !target.ended && !target.error && state && now() >= state.anchorMonotonicMs
-        && finiteNonnegative(target.currentTime) && target.currentTime > firstProgressPosition + 0.02) {
-        // Ready/playing can precede decoder progress. Correct once after actual advancement, never rearm from seek callbacks.
-        firstProgressPosition = undefined;
-        attachment.correct(desiredPosition());
+        && finiteNonnegative(target.currentTime)) {
+        const elapsed = (now() - firstProgress.monotonicMs) / 1000;
+        const advanced = target.currentTime - firstProgress.position;
+        // Rebase an instantaneous or implausible jump so merely waiting cannot later turn that write into progress.
+        if (elapsed <= 0 || advanced < 0 || advanced > elapsed * Math.max(1, target.playbackRate ?? 1) + 0.05) {
+          firstProgress.position = target.currentTime;
+          firstProgress.monotonicMs = now();
+        } else if (advanced > 0.02) {
+          // Ready/playing can precede decoder progress. Consume before correction; seek callbacks never rearm it.
+          firstProgress = undefined;
+          attachment.correct(desiredPosition());
+        }
       }
       return true;
     }

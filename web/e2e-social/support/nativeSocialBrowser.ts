@@ -46,7 +46,8 @@ export const nativeSocialBrowser = async () => {
         const force = setTimeout(() => { child.kill('SIGKILL'); }, 3000);
         await exited; clearTimeout(force);
       }
-      await rm(profile, { recursive: true, force: true });
+      // Chromium helpers can briefly retain files after exit; persistent cleanup failures must still fail the test.
+      await rm(profile, { recursive: true, force: true, maxRetries: 4, retryDelay: 150 });
     }
   })();
   let phase = 'waiting for DevToolsActivePort';

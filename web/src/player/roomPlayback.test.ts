@@ -197,7 +197,50 @@ test('the first advancing media clock corrects a delayed start once without repl
   store.destroy();
 });
 
-test.each(['local pause', 'shared pause', 'permission loss', 'detach', 'native pause'] as const)(
+test('a ping correction before natural playback cannot consume the pending first-progress observation', async () => {
+  let clock = 10_000;
+  const { audio, room, store, onIntent } = setup(undefined, { now: () => clock });
+  audio.duration = 120;
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true,
+    positionSeconds: 5, anchorMonotonicMs: clock });
+  audio.ready();
+  clock += 2_000;
+  expect(room.correct(7)).toBe('seek');
+  audio.emit('timeupdate'); // The assigned position may be observable before native seeking callbacks.
+  audio.seeking = true; audio.emit('seeking');
+  clock += 500;
+  audio.seeking = false; audio.emit('seeked'); audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(7);
+  clock += 1_000;
+  audio.currentTime = 7.03; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(8.5);
+  // The actual first-progress correction remains consumed across its own completion callbacks.
+  audio.emit('seeked'); audio.emit('playing');
+  clock += 1_000; audio.currentTime = 8.6; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(8.6);
+  expect(audio.playCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('an instantaneous media-position jump is rebased before accepting credible first progress', async () => {
+  let clock = 10_000;
+  const { audio, room, store, onIntent } = setup(undefined, { now: () => clock });
+  audio.duration = 120;
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true,
+    positionSeconds: 5, anchorMonotonicMs: clock });
+  audio.ready();
+  audio.currentTime = 6; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(6);
+  clock += 2_000; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(6); // Waiting cannot turn the same position assignment into playback.
+  audio.currentTime = 6.03; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(7);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test.each(['local pause', 'shared pause', 'permission loss', 'source change', 'detach', 'native pause'] as const)(
   '%s cancels pending first-progress correction', async cancellation => {
     let clock = 10_000;
     const { audio, room, store, onIntent } = setup(undefined, { now: () => clock });
@@ -206,13 +249,19 @@ test.each(['local pause', 'shared pause', 'permission loss', 'detach', 'native p
       positionSeconds: 5, anchorMonotonicMs: clock };
     await room.apply(initial); audio.ready();
     clock += 1_000;
+    expect(room.correct(6)).toBe('seek');
     if (cancellation === 'local pause') room.pauseLocally();
     else if (cancellation === 'shared pause') await room.apply({ ...initial, revision: 2, playbackEpoch: initial.playbackEpoch + 1, status: 'paused' });
     else if (cancellation === 'permission loss') await room.apply({ ...initial, revision: 2, playbackAllowed: false });
+    else if (cancellation === 'source change') {
+      await room.apply({ ...initial, revision: 2, playbackEpoch: initial.playbackEpoch + 1,
+        currentEntryId: 'entry-b', mediaRevision: 'b', status: 'preparing', playbackAllowed: false });
+      audio.ready();
+    }
     else if (cancellation === 'detach') room.detach();
     else audio.pause();
     // A late native progress callback cannot consume authority from before cancellation.
-    audio.paused = false; audio.currentTime = 5.1; audio.emit('timeupdate');
+    audio.paused = false; audio.currentTime = 5.1; audio.emit('seeked'); audio.emit('timeupdate');
     expect(audio.currentTime).toBe(5.1);
     expect(audio.playbackRate).toBe(1);
     expect(onIntent).not.toHaveBeenCalled();

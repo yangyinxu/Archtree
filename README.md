@@ -248,7 +248,15 @@ buffered Audio decoder that stays paused with only current-frame data after a
 completed seek gets at most one paused source reload per playback occurrence;
 readiness still requires future data, and local pause or leaving cancels recovery.
 CI uploads `finitude-social-browser-evidence` immediately after these scenarios,
-so failures can be diagnosed while the ordinary browser matrix continues.
+before running the remaining MongoDB integration and ordinary browser gates.
+The isolated PulseAudio sink uses a requested 100 ms device-buffer budget
+(`PULSE_LATENCY_MSEC=100`); its unrestricted default can introduce seconds of
+output buffering (see [PulseAudio latency control](https://www.freedesktop.org/software/pulseaudio/doxygen/structpa__buffer__attr.html)).
+This changes only the simulated output device, with no browser media-clock
+substitution or readiness/drift threshold changes. Compressed-audio evidence
+records the observed stream/sink latencies when available, continuous playback
+advancement, and capture-time-adjusted drift. These results do not establish a
+latency guarantee for arbitrary physical or Bluetooth output devices.
 
 In isolated Linux CI (`CI=true` or `CI=1`), the native-tab fixture matches
 Playwright's default `--no-sandbox` launch option; other local launches keep the
