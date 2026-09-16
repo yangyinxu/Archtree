@@ -18,6 +18,7 @@ const desktopDevices = { chromium: devices['Desktop Chrome'], firefox: devices['
 
 /** Opt-in Mongo/S3/WS gate uses real production routes and separate synthetic accounts. */
 export default defineConfig({
+  forbidOnly: Boolean(process.env.CI),
   testDir: './e2e-social', workers: 1, fullyParallel: false, retries: 0, timeout: 120_000,
   expect: { timeout: 10_000 }, outputDir: './test-results/social-real', reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:4175', headless: true, actionTimeout: 10_000, screenshot: 'only-on-failure', trace: 'retain-on-failure' },

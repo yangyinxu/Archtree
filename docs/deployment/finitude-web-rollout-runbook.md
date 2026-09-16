@@ -9,7 +9,11 @@ canonical in [`../business-rules.md`](../business-rules.md).
 - Promote the exact tested Elastic Beanstalk bundle. Never rebuild between
   staging, production, or rollback.
 - Every candidate contains `RELEASE.json` with the source commit and CI build
-  identity. Record both values with the deployment evidence.
+  identity. Its retained ZIP has a `release-provenance.json` sidecar binding the
+  SHA-256, workflow run/attempt and successful gate set. Record all identities.
+- CodeBuild promotes only the retained artifact from the exact successful
+  merged-main push gate. Its repository buildspec cannot rebuild a substitute
+  from source or promote a PR, fork, failed run, or earlier rerun attempt.
 - Keep the immediately previous successful bundle available until the release
   has passed its agreed observation window.
 - The bundle must contain only the explicit runtime allowlist produced by
@@ -32,8 +36,8 @@ canonical in [`../business-rules.md`](../business-rules.md).
 The release workflow runs unit/component tests, Mongo-backed lifecycle
 integration tests, production builds, the real social browser scenarios, the
 three-engine browser/axe gate, and artifact staging before retaining a
-commit-named rollback bundle. Integration coverage is required for the account,
-Playlist, transaction, S3, and content-reference lifecycle; do not infer it from
+commit/run/attempt-named rollback bundle and checksum sidecar. Integration coverage
+is required for the account, Playlist, transaction, S3, and content-reference lifecycle; do not infer it from
 unit or browser results. For a local artifact verification run in a provisioned
 Linux environment:
 
@@ -52,10 +56,10 @@ npm run stage:eb-artifact
 
 CI installs Xvfb for the social suite's headed background-tab checks and a
 PulseAudio null sink for Firefox. All social Chromium launches disable hardware
-audio output. The seven isolated social scenarios cover rooms, invitations,
-song requests, music shares, room interactions, listening status, and catalog
-room entry. Once the browser environment is ready, the ordinary browser/visual
-gate runs even if a social assertion failed so both suites retain diagnostic
+audio output. The eight isolated social scenarios cover rooms, invitations,
+song requests, music shares, room interactions, listening status, catalog
+room entry, and compressed-audio formats. Once the browser environment is ready,
+the ordinary browser/visual gate runs even if a social assertion failed so both suites retain diagnostic
 evidence. Both gates must pass before artifact staging. Their traces and failure
 screenshots remain under the retained `web/test-results` evidence.
 
@@ -105,6 +109,43 @@ Before promotion, verify all of the following:
 Stop if the candidate or previous version cannot be identified exactly. Also
 stop the first base-path migration if rollback would leave `/finitude` deep
 links unavailable and no tested compatibility redirect exists.
+
+### CodePipeline promotion setup
+
+Use the repository `buildspec.yml` with a Node 24/Python 3 build image and a
+CodeBuild timeout of at least 45 minutes. Preserve the source revision as the full
+`CODEBUILD_RESOLVED_SOURCE_VERSION`; do not replace it with a branch name or an
+operator-selected newer SHA. The promoter waits up to 35 minutes for that exact
+main workflow to finish (`ARCHTREE_RELEASE_WAIT_SECONDS`, 0–3600); a failed gate
+stops immediately. A timeout is a failed promotion and requires an explicit retry
+after the same gate succeeds. The pipeline emits no deployable fallback artifact.
+
+Provide `GITHUB_ARTIFACT_TOKEN` from a managed secret with only **Actions: read**
+for `yangyinxu/Archtree`, and grant the CodeBuild service role access to that secret.
+Confirm the source pipeline connection is not being mistaken for this independent
+API permission. Permit HTTPS to GitHub's API and artifact blob storage. The
+promoter strips the GitHub credential before downloading the signed storage URL.
+The repository does not provision these account-side settings.
+
+The successful main workflow retains
+`archtree-eb-<commit>-<run-id>-<attempt>` containing
+`archtree-eb-<commit>.zip` and `release-provenance.json`. CodeBuild validates both
+archive digests, exact workflow event/repository/source/attempt, all gate results,
+`RELEASE.json`, ZIP safety, runtime layout and executable hooks before handing the
+unchanged extracted runtime tree to the existing EB deploy action. It fails if
+its output directory already exists. Keep the upload/deploy role restricted to
+this verified artifact path and remove saved buildspec overrides that rebuild.
+
+Check the CodeBuild `tested_release_promoted` event against the GitHub run,
+artifact ID and bundle digest before enabling automatic deployment. Test one
+pending/failed gate and one wrong-source candidate in a safe pipeline to prove
+there is no deploy action on failure. This account-side handoff check remains
+required even when all offline synthetic promotion tests pass.
+
+Store the exact candidate ZIP and sidecar, plus the prior successful pair, in
+retained deployment storage. GitHub's 30-day expiration must not remove the only
+rollback copy. Existing pre-provenance archives remain manual emergency recovery
+inputs under this runbook; they cannot silently pass the new promotion verifier.
 
 ## 2. Deploy and verify staging
 

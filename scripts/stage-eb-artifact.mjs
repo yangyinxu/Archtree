@@ -370,6 +370,14 @@ const validateHookPermissions = async (artifactRoot) => {
   }
 };
 
+/** Rechecks a promoted artifact without rebuilding or rewriting its source identity. */
+export const validateElasticBeanstalkArtifact = async artifactRoot => {
+  await validateExactLayout(artifactRoot);
+  await validateForbiddenPaths(artifactRoot);
+  await validateListenerDistribution(artifactRoot);
+  await validateHookPermissions(artifactRoot);
+};
+
 /** Stages and validates the exact root layout consumed by Elastic Beanstalk. */
 export const stageElasticBeanstalkArtifact = async ({
   sourceRoot = repositoryRoot,
@@ -406,10 +414,7 @@ export const stageElasticBeanstalkArtifact = async ({
       { encoding: 'utf8', mode: 0o644 }
     );
 
-    await validateExactLayout(temporaryDirectory);
-    await validateForbiddenPaths(temporaryDirectory);
-    await validateListenerDistribution(temporaryDirectory);
-    await validateHookPermissions(temporaryDirectory);
+    await validateElasticBeanstalkArtifact(temporaryDirectory);
 
     await rm(resolvedOutputDirectory, { recursive: true, force: true });
     await rename(temporaryDirectory, resolvedOutputDirectory);

@@ -49,12 +49,15 @@ jobs:
         run: npm run doctor:release
 
       - name: Run server and Web unit tests (including Linux platform suites)
+        id: unit
         run: npm test
 
       - name: Build production server and listener
+        id: build
         run: npm run build
 
       - name: Type-check browser fixtures and release specs
+        id: e2e_typecheck
         run: npm run typecheck:e2e --workspace @archtree/finitude-web
 
       - name: Install Playwright browsers and operating-system dependencies
@@ -70,6 +73,7 @@ jobs:
           pactl list short sinks
 
       - name: Run real social MongoDB, media, and WebSocket browser tests
+        id: social
         env:
           # Bound the simulated device buffer; PulseAudio's default can add seconds before audio advances.
           PULSE_LATENCY_MSEC: '100'
@@ -85,15 +89,18 @@ jobs:
           retention-days: 30
 
       - name: Run Mongo-backed lifecycle integration tests
+        id: integration
         run: npm run test:integration
 
       - name: Run production-bundle browser and accessibility tests
+        id: browser
         if: ${{ !cancelled() && steps.browser_environment.outcome == 'success' }}
         env:
           PULSE_LATENCY_MSEC: '100'
         run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 
       - name: Stage the Elastic Beanstalk deployment artifact
+        id: staging
         run: npm run stage:eb-artifact
 
       - name: Create the versioned Elastic Beanstalk rollback bundle
@@ -104,11 +111,24 @@ jobs:
           zip -q -r "../${EB_BUNDLE_NAME}" \
             .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json localization src tsconfig.json web
 
+      - name: Bind the tested bundle to this workflow attempt
+        env:
+          RELEASE_UNIT_RESULT: ${{ steps.unit.outcome }}
+          RELEASE_BUILD_RESULT: ${{ steps.build.outcome }}
+          RELEASE_E2E_TYPECHECK_RESULT: ${{ steps.e2e_typecheck.outcome }}
+          RELEASE_SOCIAL_RESULT: ${{ steps.social.outcome }}
+          RELEASE_INTEGRATION_RESULT: ${{ steps.integration.outcome }}
+          RELEASE_BROWSER_RESULT: ${{ steps.browser.outcome }}
+          RELEASE_STAGING_RESULT: ${{ steps.staging.outcome }}
+        run: node scripts/write-release-provenance.mjs
+
       - name: Retain the versioned Elastic Beanstalk rollback bundle
         uses: actions/upload-artifact@v5
         with:
-          name: archtree-eb-${{ github.sha }}
-          path: archtree-eb-${{ github.sha }}.zip
+          name: archtree-eb-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            archtree-eb-${{ github.sha }}.zip
+            release-provenance.json
           if-no-files-found: error
           retention-days: 30
 

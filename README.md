@@ -683,34 +683,61 @@ multi-source staging traffic against the real media store.
 
 ## AWS CodeBuild
 
-This repo includes `buildspec.yml` with CI-oriented behavior:
+`buildspec.yml` is a promotion-only bridge from GitHub Actions to Elastic
+Beanstalk. It runs on Node 24 and Python 3; it does not run `npm ci`, rebuild the
+application, or substitute a bundle produced by a smaller test suite.
 
-- `install`: `npm ci`
-- `build`: `npm test`, then `npm run build --if-present`
-- `post_build`: stages and validates the explicit Elastic Beanstalk runtime
-  allowlist before packaging
+The `.github/workflows/finitude-web-release.yml` workflow runs unit/component
+tests, Mongo lifecycle integration, production builds, E2E type checking, real
+social scenarios, and all three browser/axe projects before staging its bundle.
+Both Playwright configurations reject focused tests in CI. The workflow uploads
+`archtree-eb-<commit>-<run-id>-<attempt>` for 30 days, containing the runtime ZIP
+and `release-provenance.json` with the bundle SHA-256, exact source/run/attempt,
+and all successful gate names. PR artifacts are review evidence only.
 
-Artifact packaging includes only the root package/lock/TypeScript files,
-server source, Web runtime package plus built distribution, `.platform`, and
-`.ebextensions`. It rejects nested dependencies, environment files, test
-reports, symbolic links, missing or unhashed Vite assets, and non-executable
-platform hooks. `RELEASE.json` records the source commit and build identity;
-Elastic Beanstalk performs a clean dependency install on each instance.
+CodeBuild runs `node scripts/promote-eb-artifact.mjs`. The promoter requires
+`CODEBUILD_RESOLVED_SOURCE_VERSION` to be the full main commit SHA, queries the
+fixed `yangyinxu/Archtree` release workflow, and accepts only the latest successful
+`push` run on `main` from that repository. It waits for an absent or running gate
+for up to 35 minutes, so an existing source-triggered pipeline can run concurrently
+with GitHub CI. A completed failed gate stops immediately; no older successful
+run is substituted. `ARCHTREE_RELEASE_WAIT_SECONDS` can set a bounded 0–3600 second
+wait, with `0` for fail-fast operational checks. Allow the CodeBuild project at
+least 45 minutes for the default wait and download/validation.
 
-The separate `.github/workflows/finitude-web-release.yml` gate follows the
-Playwright CI installation flow and runs unit/component tests, the Mongo-backed
-lifecycle integration suite, both production builds, and all three browser/axe
-projects on pull requests and pushes to `main`. Browser traces,
-screenshots, videos, JUnit output, and the HTML report are retained as workflow
-artifacts. A missing or failed integration environment blocks artifact staging.
+Supply `GITHUB_ARTIFACT_TOKEN` through CodeBuild Secrets Manager or Parameter
+Store when needed. It needs only the repository's **Actions: read** permission;
+never put its value in Git, plaintext buildspec variables, or shell commands.
+The CodeBuild service role must be allowed to retrieve that one secret. Artifact
+downloads use GitHub's [Actions artifact API](https://docs.github.com/en/rest/actions/artifacts),
+and the token is never forwarded to signed blob-storage URLs. Private-repository
+access, expired credentials, missing/expired artifacts and API failures fail closed.
+No AWS or GitHub account configuration is changed by this repository update.
 
-After the browser gate, CI retains a commit-named Elastic Beanstalk ZIP for 30
-days so staging and production can promote the same tested bytes and the
-previous successful version remains directly deployable. Follow
+Promotion verifies GitHub's archive digest, the internal bundle checksum, every
+required gate, the source/run/attempt in `RELEASE.json`, and the runtime allowlist.
+It rejects unsafe ZIP paths, links, duplicate entries, oversized archives,
+credentials, unexpected distribution files and missing executable platform hooks.
+It rechecks the workflow's success and attempt before installing the verified tree
+into the previously absent `elastic-beanstalk-artifact` directory for the existing
+CodePipeline/EB artifact handoff. The GitHub build identity remains unchanged;
+CodeBuild logs its digest and artifact ID. The pipeline's GitHub source connection
+alone does not grant Actions download permission.
+
+The artifact includes only root package/lock/TypeScript files, server source,
+localization, the Web runtime package and built distribution, `.platform` and
+`.ebextensions`. Elastic Beanstalk still installs locked runtime dependencies on
+each instance. Keep the source buildspec override set to `buildspec.yml`, preserve
+executable modes in the output archive, and disable any older AWS rebuild override.
+
+Retain the candidate and previous tested ZIP, sidecar, GitHub run identity and
+checksum in deployment storage through the observation/rollback window; the
+30-day GitHub retention is not a permanent rollback store. An older archive without
+the provenance sidecar cannot enter this promotion path. Follow
 [`docs/deployment/finitude-web-rollout-runbook.md`](docs/deployment/finitude-web-rollout-runbook.md)
-for the smoke, observation, evidence, and rollback contract. A retained bundle
-and runbook do not replace the required production-equivalent rollout and
-rollback rehearsal.
+for exact-artifact rollout and rollback. Local synthetic promotion tests do not
+replace a successful merged-main workflow, configured AWS handoff, production-
+equivalent rollout, or rollback rehearsal.
 
 ### Single-instance Elastic Beanstalk HTTPS
 
