@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { after, before, test } from 'node:test';
-import { ObjectId } from 'mongodb';
+import { after, before, test, type TestContext } from 'node:test';
+import { Collection, ObjectId } from 'mongodb';
 
 import { getDb } from '../src/infrastructure/database';
 import { UserLibrary } from '../src/models/userLibrary';
+import { deleteListenerAccountData } from '../src/services/accountDeletionService';
+import { AccountReferenceUnavailableError } from '../src/services/accountReferenceFenceService';
 import {
     MongoReplicaSetHarness,
     startMongoReplicaSet
@@ -212,4 +214,145 @@ test('recording playback updates durable saved activity and bounded history toge
     assert.ok(save?.lastActivityAt instanceof Date);
     assert.equal(activity?.recentlyPlayed.length, 1);
     assert.equal(activity?.recentlyPlayed[0].contentId, albumId.toString());
+});
+
+/** Coordinates actual transaction boundaries without production-only test hooks. */
+const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    return { promise, resolve };
+};
+
+/** Creates one independent owner and a valid saved Album through the public model operation. */
+const seedSavedAlbum = async () => {
+    const userId = new ObjectId().toHexString();
+    const albumId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.com` });
+    await getDb()!.collection('albums').insertOne({ _id: new ObjectId(albumId), title: 'Synthetic Album' });
+    await UserLibrary.save(userId, 'album', albumId);
+    return { userId, albumId };
+};
+
+/** Holds the unsave transaction after the first write, when a partial commit would be harmful. */
+const pauseUnsave = (context: TestContext, userId: string) => {
+    const removed = deferred();
+    const release = deferred();
+    const original = Collection.prototype.deleteOne;
+    context.mock.method(Collection.prototype, 'deleteOne', async function (this: Collection, ...args: any[]) {
+        const result = await (original as any).apply(this, args);
+        if (this.collectionName === 'userSaves' && args[0]?.userId === userId) {
+            removed.resolve();
+            await release.promise;
+        }
+        return result;
+    });
+    return { removed: removed.promise, release: release.resolve };
+};
+
+/** Signals that a competing operation has reached the same durable account fence. */
+const observeAccountFence = (context: TestContext, userId: string) => {
+    const attempted = deferred();
+    const original = Collection.prototype.updateOne;
+    context.mock.method(Collection.prototype, 'updateOne', function (this: Collection, ...args: any[]) {
+        if (this.collectionName === 'users' && String(args[0]?._id) === userId
+            && args[1]?.$inc?.listenerMutationRevision === 1) attempted.resolve();
+        return (original as any).apply(this, args);
+    });
+    return attempted.promise;
+};
+
+test('unsave rolls back the save removal when its activity write fails', async (context) => {
+    const { userId, albumId } = await seedSavedAlbum();
+    const original = Collection.prototype.updateOne;
+    context.mock.method(Collection.prototype, 'updateOne', function (this: Collection, ...args: any[]) {
+        if (this.collectionName === 'userActivity' && args[0]?.userId === userId) {
+            return Promise.reject(new Error('Synthetic activity write failure'));
+        }
+        return (original as any).apply(this, args);
+    });
+    await assert.rejects(UserLibrary.unsave(userId, 'album', albumId), /Synthetic activity write failure/);
+    assert.equal((await UserLibrary.statuses(userId, [{ contentType: 'album', contentId: albumId }]))[0].saved, true);
+    assert.equal((await UserLibrary.recent(userId, 'recentlySaved'))[0].contentId, albumId);
+});
+
+test('unsave is owner-scoped and idempotently removes its Recently Saved entry', async () => {
+    const { userId, albumId } = await seedSavedAlbum();
+    const otherUserId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(otherUserId), email: `${otherUserId}@example.com` });
+    await UserLibrary.save(otherUserId, 'album', albumId);
+    await UserLibrary.unsave(userId, 'album', albumId);
+    await UserLibrary.unsave(userId, 'album', albumId);
+    assert.equal((await UserLibrary.statuses(userId, [{ contentType: 'album', contentId: albumId }]))[0].saved, false);
+    assert.deepEqual(await UserLibrary.recent(userId, 'recentlySaved'), []);
+    assert.equal((await UserLibrary.statuses(otherUserId, [{ contentType: 'album', contentId: albumId }]))[0].saved, true);
+    assert.equal((await UserLibrary.recent(otherUserId, 'recentlySaved'))[0].contentId, albumId);
+});
+
+test('a save racing unsave restores both the save and Recently Saved after the unsave commits', async (context) => {
+    const { userId, albumId } = await seedSavedAlbum();
+    const pause = pauseUnsave(context, userId);
+    const unsave = UserLibrary.unsave(userId, 'album', albumId);
+    await pause.removed;
+    const fenceAttempted = observeAccountFence(context, userId);
+    const save = UserLibrary.save(userId, 'album', albumId);
+    try { await fenceAttempted; } finally { pause.release(); }
+    await Promise.all([unsave, save]);
+    assert.equal((await UserLibrary.statuses(userId, [{ contentType: 'album', contentId: albumId }]))[0].saved, true);
+    assert.equal((await UserLibrary.recent(userId, 'recentlySaved'))[0].contentId, albumId);
+});
+
+test('an unsave racing an admitted save removes both its save and Recently Saved entry', async (context) => {
+    const { userId, albumId } = await seedSavedAlbum();
+    const saved = deferred();
+    const release = deferred();
+    const original = Collection.prototype.updateOne;
+    context.mock.method(Collection.prototype, 'updateOne', async function (this: Collection, ...args: any[]) {
+        const result = await (original as any).apply(this, args);
+        if (this.collectionName === 'userSaves' && args[0]?.userId === userId) {
+            saved.resolve();
+            await release.promise;
+        }
+        return result;
+    });
+    const save = UserLibrary.save(userId, 'album', albumId);
+    await saved.promise;
+    const fenceAttempted = observeAccountFence(context, userId);
+    const unsave = UserLibrary.unsave(userId, 'album', albumId);
+    try { await fenceAttempted; } finally { release.resolve(); }
+    await Promise.all([save, unsave]);
+    assert.equal((await UserLibrary.statuses(userId, [{ contentType: 'album', contentId: albumId }]))[0].saved, false);
+    assert.deepEqual(await UserLibrary.recent(userId, 'recentlySaved'), []);
+});
+
+test('account deletion after an admitted unsave removes all private data', async (context) => {
+    const { userId, albumId } = await seedSavedAlbum();
+    const pause = pauseUnsave(context, userId);
+    const unsave = UserLibrary.unsave(userId, 'album', albumId);
+    await pause.removed;
+    const deletionStarted = deferred();
+    const deletion = deleteListenerAccountData(userId, {
+        beforeAccountFence: async () => { deletionStarted.resolve(); }
+    });
+    try { await deletionStarted.promise; } finally { pause.release(); }
+    await unsave;
+    assert.deepEqual(await deletion, { status: 'deleted' });
+    assert.equal(await getDb()!.collection('userSaves').countDocuments({ userId }), 0);
+    assert.equal(await getDb()!.collection('userActivity').countDocuments({ userId }), 0);
+});
+
+test('an unsave racing committed account deletion rejects without recreating private state', async (context) => {
+    const { userId, albumId } = await seedSavedAlbum();
+    const fenced = deferred();
+    const release = deferred();
+    const deletion = deleteListenerAccountData(userId, {
+        afterAccountFence: async () => { fenced.resolve(); await release.promise; }
+    });
+    await fenced.promise;
+    const fenceAttempted = observeAccountFence(context, userId);
+    const unsave = assert.rejects(UserLibrary.unsave(userId, 'album', albumId), AccountReferenceUnavailableError);
+    try { await fenceAttempted; } finally { release.resolve(); }
+    assert.deepEqual(await deletion, { status: 'deleted' });
+    await unsave;
+    assert.equal(await getDb()!.collection('userSaves').countDocuments({ userId }), 0);
+    assert.equal(await getDb()!.collection('userActivity').countDocuments({ userId }), 0);
 });

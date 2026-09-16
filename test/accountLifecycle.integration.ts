@@ -14,6 +14,7 @@ import AuthIdentity from '../src/models/authIdentity';
 import AuthSession from '../src/models/authSession';
 import { Album } from '../src/models/album';
 import { Artist } from '../src/models/artist';
+import { Organization } from '../src/models/organization';
 import { AudioFormat, AudioTrack } from '../src/models/audioTrack';
 import { Carousel } from '../src/models/carousel';
 import { ContentCollection } from '../src/models/contentCollection';
@@ -97,6 +98,7 @@ const deferred = () => {
 
 const sharedProvenanceCollections = [
     'artists',
+    'organizations',
     'albums',
     'audioTracks',
     'carousels',
@@ -904,6 +906,13 @@ test('every production provenance writer rejects a missing creator account', asy
                 [] as unknown as [string],
                 creatorUserId,
                 new ObjectId()
+            ).save()
+        },
+        {
+            label: 'Organization.save',
+            collectionName: 'organizations',
+            write: () => new Organization(
+                'Missing creator Organization', 'label', '', creatorUserId
             ).save()
         },
         {

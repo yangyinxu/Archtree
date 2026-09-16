@@ -299,6 +299,89 @@ test('listener Album DTO resolves Organization-only attribution without inventin
     }]);
 });
 
+/** Makes Track-only attribution deliberately disagree with the Album's own attribution. */
+const seedIndependentTrackAttribution = async () => {
+    const ids = await seed();
+    await getDb()!.collection('albums').updateOne({ _id: ids.albumId }, {
+        $set: { audioTrackIds: [ids.trackId.toHexString()] }
+    });
+    await getDb()!.collection('audioTracks').updateOne({ _id: ids.trackId }, {
+        $set: {
+            albumId: ids.albumId.toHexString(),
+            artistIds: [ids.featuredId.toHexString()],
+            s3Key: ids.trackId.toHexString()
+        }
+    });
+    return ids;
+};
+
+test('Organization-only Album attribution stays independent of its ready component Track', async () => {
+    const { organizationId, albumId } = await seedIndependentTrackAttribution();
+    await replaceCatalogCredits('album', albumId.toHexString(), [{
+        creditId: 'album_only_label', subjectType: 'organization',
+        subjectId: organizationId.toHexString(), role: 'label'
+    }], 'documented');
+    const listener = await getListenerAlbum(albumId.toHexString());
+    assert.deepEqual(listener?.album.artistNames, []);
+    assert.equal(listener?.album.displayByline, 'Release House');
+    assert.deepEqual(listener?.tracks[0].artistNames, ['Featured']);
+});
+
+test('explicit unknown Album attribution never inherits its ready component Track or stale legacy membership', async () => {
+    const { artistId, albumId } = await seedIndependentTrackAttribution();
+    await replaceCatalogCredits('album', albumId.toHexString(), [], 'unknown');
+    // A stale compatibility projection must not override a canonical empty attribution.
+    await getDb()!.collection('artists').updateOne({ _id: artistId }, {
+        $set: { albumIds: [albumId.toHexString()] }
+    });
+    const listener = await getListenerAlbum(albumId.toHexString());
+    assert.deepEqual(listener?.album.artistNames, []);
+    assert.equal(listener?.album.displayByline, 'Attribution not documented');
+    assert.deepEqual(listener?.tracks[0].artistNames, ['Featured']);
+});
+
+test('unmigrated Album attribution uses only its legacy Album Artist relationship', async () => {
+    const { artistId, albumId } = await seedIndependentTrackAttribution();
+    await getDb()!.collection('artists').updateOne({ _id: artistId }, {
+        $set: { albumIds: [albumId.toHexString()] }
+    });
+    const listener = await getListenerAlbum(albumId.toHexString());
+    assert.deepEqual(listener?.album.artistNames, ['Primary']);
+    assert.deepEqual(listener?.tracks[0].artistNames, ['Featured']);
+    await getDb()!.collection('artists').updateOne({ _id: artistId }, { $set: { albumIds: [] } });
+    assert.deepEqual((await getListenerAlbum(albumId.toHexString()))?.album.artistNames, []);
+});
+
+test('canonical Album attribution with an unavailable Artist does not reveal stale legacy attribution', async () => {
+    const { artistId, featuredId, albumId } = await seedIndependentTrackAttribution();
+    await replaceCatalogCredits('album', albumId.toHexString(), [{
+        creditId: 'album_primary_unavailable', subjectType: 'artist',
+        subjectId: artistId.toHexString(), role: 'primary'
+    }], 'documented');
+    await getDb()!.collection('artists').updateOne({ _id: artistId }, { $set: { lifecycleStatus: 'deleting' } });
+    await getDb()!.collection('artists').updateOne({ _id: featuredId }, { $set: { albumIds: [albumId.toHexString()] } });
+    assert.deepEqual((await getListenerAlbum(albumId.toHexString()))?.album.artistNames, []);
+});
+
+test('Credit read rollback uses only the Album compatibility relationship', async () => {
+    const { artistId, albumId } = await seedIndependentTrackAttribution();
+    await replaceCatalogCredits('album', albumId.toHexString(), [{
+        creditId: 'album_primary_rollback', subjectType: 'artist',
+        subjectId: artistId.toHexString(), role: 'primary'
+    }], 'documented');
+    const previous = process.env.CATALOG_CREDIT_READS_ENABLED;
+    process.env.CATALOG_CREDIT_READS_ENABLED = 'false';
+    try {
+        const listener = await getListenerAlbum(albumId.toHexString());
+        assert.deepEqual(listener?.album.artistNames, ['Primary']);
+        assert.equal(listener?.album.credits, undefined);
+        assert.deepEqual(listener?.tracks[0].artistNames, ['Featured']);
+    } finally {
+        if (previous === undefined) delete process.env.CATALOG_CREDIT_READS_ENABLED;
+        else process.env.CATALOG_CREDIT_READS_ENABLED = previous;
+    }
+});
+
 test('Organization releases resolve publicly and deletion is blocked until Credits are removed', async () => {
     const { organizationId, albumId } = await seed();
     await replaceCatalogCredits('album', albumId.toHexString(), [{

@@ -32,6 +32,7 @@ class AccountDeletionBlockedError extends Error {
 
 const sharedProvenanceCollections = [
     'artists',
+    'organizations',
     'albums',
     'audioTracks',
     'carousels',

@@ -7,7 +7,7 @@ import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceServic
 import { resolvePublicCatalogBylines } from '../services/publicCatalogService';
 import { withReadyCatalogItemReferences } from '../services/catalogItemReferenceFenceService';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
-import { touchActiveAccount } from '../services/accountReferenceFenceService';
+import { touchActiveAccount, withActiveAccount } from '../services/accountReferenceFenceService';
 import { escapeRegex } from '../utils/search';
 
 export type LibraryContentType = 'album' | 'audioTrack';
@@ -99,12 +99,18 @@ export class UserLibrary {
         );
     }
 
+    /** Removes the save and its activity together, serialized with saves and account deletion. */
     static async unsave(userId: string, contentType: LibraryContentType, contentId: string) {
-        await getDb()!.collection(savesCollection).deleteOne({ userId, contentType, contentId });
-        await getDb()!.collection(activityCollection).updateOne(
-            { userId },
-            { $pull: { recentlySaved: { contentType, contentId } } } as any
-        );
+        await withActiveAccount(userId, async (session) => {
+            await getDb()!.collection(savesCollection).deleteOne(
+                { userId, contentType, contentId }, { session }
+            );
+            await getDb()!.collection(activityCollection).updateOne(
+                { userId },
+                { $pull: { recentlySaved: { contentType, contentId } } } as any,
+                { session }
+            );
+        });
     }
 
     static async statuses(userId: string, items: Array<{ contentType: LibraryContentType; contentId: string }>) {
