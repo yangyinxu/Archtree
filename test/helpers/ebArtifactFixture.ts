@@ -52,4 +52,3 @@ export const createSourceFixture = async () => {
   await writeFixtureFile(root, 'README.md', 'must not be staged\n');
   return root;
 };
-
