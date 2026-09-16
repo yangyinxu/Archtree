@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AudioLines } from 'lucide-react';
 import { Link, useParams } from 'react-router';
@@ -58,13 +58,6 @@ export const AlbumPage = () => {
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id;
   const albumQuery = useQuery(listenerAlbumQuery(albumId));
-  const overrideOwner = `${viewerId ?? 'signed-out'}:${albumId}`;
-  const [savedOverrides, setSavedOverrides] = useState<{
-    owner: string;
-    values: Record<string, boolean>;
-  }>({ owner: overrideOwner, values: {} });
-  useEffect(() => setSavedOverrides({ owner: overrideOwner, values: {} }), [overrideOwner]);
-  const currentOverrides = savedOverrides.owner === overrideOwner ? savedOverrides.values : {};
   const targets = useMemo<LibraryTarget[]>(() => {
     if (!albumQuery.data) return [];
     return [
@@ -82,17 +75,7 @@ export const AlbumPage = () => {
   const savedFor = (target: LibraryTarget) => {
     if (!viewerId) return false;
     const key = `${target.contentType}:${target.contentId}`;
-    return currentOverrides[key] ?? savedByKey.get(key) ?? null;
-  };
-  const setSaved = (target: LibraryTarget, saved: boolean) => {
-    const key = `${target.contentType}:${target.contentId}`;
-    setSavedOverrides((current) => ({
-      owner: overrideOwner,
-      values: {
-        ...(current.owner === overrideOwner ? current.values : {}),
-        [key]: saved
-      }
-    }));
+    return statuses.isError ? null : savedByKey.get(key) ?? null;
   };
 
   if (albumQuery.isPending) {
@@ -152,13 +135,17 @@ export const AlbumPage = () => {
           </button>
           <SaveButton
             compact
-            onSavedChange={(saved) => setSaved(albumTarget, saved)}
             saved={savedFor(albumTarget)}
             target={albumTarget}
             viewerId={viewerId}
           />
         </div>
       </header>
+
+      {viewerId && statuses.isError && <div className={styles.state} role="alert">
+        <p>{t('library.error.load')}</p>
+        <button onClick={() => statuses.refetch()} type="button">{t('common.action.try_again')}</button>
+      </div>}
 
       {(album.credits?.length ?? 0) > 0 && (
         <section className={styles.creditSection} aria-labelledby="album-credits-title">
@@ -248,7 +235,6 @@ export const AlbumPage = () => {
                     />
                     <SaveButton
                       compact
-                      onSavedChange={(saved) => setSaved(target, saved)}
                       saved={savedFor(target)}
                       target={target}
                       viewerId={viewerId}

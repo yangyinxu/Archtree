@@ -14,7 +14,8 @@ import { musicShareSession } from './musicShareSession';
 const mocks = vi.hoisted(() => ({ profile: vi.fn(), shares: vi.fn(), prepare: vi.fn(), send: vi.fn(), outcome: vi.fn(),
   track: vi.fn(), album: vi.fn(), statuses: vi.fn(), save: vi.fn(), launchTrack: vi.fn(), launchAlbum: vi.fn(), roomRun: vi.fn(), currentRoom: vi.fn(), refreshRoom: vi.fn(),
   roomState: { viewerId: 'viewer-1', room: null as RoomSnapshot | null, connected: true, busy: false, uncertain: null, error: null } }));
-vi.mock('../../api/social', async original => ({ ...await original<typeof import('../../api/social')>(), getSocialProfile: mocks.profile,
+vi.mock('../../api/socialProfile', () => ({ getSocialProfile: mocks.profile }));
+vi.mock('../../api/social', async original => ({ ...await original<typeof import('../../api/social')>(),
   prepareSocialCommand: mocks.prepare, sendSocialCommand: mocks.send, getSocialOutcome: mocks.outcome }));
 vi.mock('../../api/musicShares', async original => ({ ...await original<typeof import('../../api/musicShares')>(), getMusicShares: mocks.shares }));
 vi.mock('../../api/rooms', async original => ({ ...await original<typeof import('../../api/rooms')>(), getCurrentRoom: mocks.currentRoom }));

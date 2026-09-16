@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { captureAccountOperation, isAccountOperationCurrent } from '../../api/accountEpoch';
 import { browserSessionQuery, browserSessionResolvingQuery } from '../../api/session';
-import { getSocialProfile } from '../../api/social';
+import { getSocialProfile } from '../../api/socialProfile';
 import { getMusicShares, type MusicShareDirection, type MusicShareItem } from '../../api/musicShares';
 import { saveStatusesQuery } from '../../api/listener';
 import { Artwork } from '../../components/Artwork';

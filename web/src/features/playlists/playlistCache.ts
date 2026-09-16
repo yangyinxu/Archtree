@@ -42,12 +42,15 @@ export const commitPlaylistDetail = (
   guard: AccountOperationGuard
 ) => {
   if (!isAccountOperationCurrent(guard, viewerId)) return;
-  queryClient.setQueryData(playlistQueryKeys.detail(viewerId, playlist.id), playlist);
+  queryClient.setQueryData<PlaylistDetail>(playlistQueryKeys.detail(viewerId, playlist.id), (current) =>
+    current && current.revision > playlist.revision ? current : playlist);
   const summary = playlistSummaryFromDetail(playlist);
   for (const [queryKey, current] of queryClient.getQueriesData<PlaylistPage>({
     queryKey: playlistQueryKeys.lists(viewerId)
   })) {
     if (!current) continue;
+    // An older receipt cannot overwrite a newer confirmed or optimistic revision.
+    if (current.items.some((item) => item.id === summary.id && item.revision > summary.revision)) continue;
     const items = [summary, ...current.items.filter((item) => item.id !== summary.id)]
       .sort(newestFirst)
       .slice(0, listLimitFromKey(queryKey));

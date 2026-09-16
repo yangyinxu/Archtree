@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query';
 import { ListMusic, Play, Plus } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router';
 
@@ -74,7 +74,22 @@ const memberMutationMessage = (error: unknown, t: LocalizationContextValue['t'])
   return t('playlist.error.change_unconfirmed');
 };
 
-interface ReorderVariables {
+/** Immutable identity of one gesture, independent of the currently rendered route. */
+interface MemberMutationScope {
+  viewerId: string;
+  playlistId: string;
+  operation: number;
+}
+
+interface MemberMutationContext {
+  guard: AccountOperationGuard;
+  queryKey: ReturnType<typeof playlistQueryKeys.detail>;
+  previous?: PlaylistDetail;
+  cacheEntry?: Query;
+  optimisticVersion?: number;
+}
+
+interface ReorderVariables extends MemberMutationScope {
   itemIds: string[];
   revision: number;
   idempotencyKey: string;
@@ -82,7 +97,7 @@ interface ReorderVariables {
   signature: string;
 }
 
-interface RemoveVariables {
+interface RemoveVariables extends MemberMutationScope {
   itemId: string;
   revision: number;
   idempotencyKey: string;
@@ -107,112 +122,106 @@ export const PlaylistDetailPage = () => {
   const [dialog, setDialog] = useState<'rename' | 'add' | 'delete' | null>(null);
   const [feedback, setFeedback] = useState<{ kind: 'error' | 'success'; message: string } | null>(null);
   const [movementAnnouncement, setMovementAnnouncement] = useState('');
-  const localOwnerRef = useRef(viewerId);
-  const ownsLocalState = localOwnerRef.current === viewerId;
+  const ownerKey = `${viewerId}:${playlistId}`;
+  const localOwnerRef = useRef(ownerKey);
+  const activeOwnerRef = useRef(ownerKey);
+  activeOwnerRef.current = ownerKey;
+  const mutationOperationRef = useRef(0);
+  const ownsLocalState = localOwnerRef.current === ownerKey;
   const visibleDialog = ownsLocalState ? dialog : null;
   const visibleFeedback = ownsLocalState ? feedback : null;
   const visibleMovementAnnouncement = ownsLocalState ? movementAnnouncement : '';
-  const detailKey = playlistQueryKeys.detail(viewerId, playlistId);
+  const isVisibleMutation = (variables: MemberMutationScope) =>
+    activeOwnerRef.current === `${variables.viewerId}:${variables.playlistId}`
+    && mutationOperationRef.current === variables.operation;
+
+  /** Owns only the original resource's exact cache write, even across route reuse. */
+  const applyOptimisticMutation = async (
+    variables: MemberMutationScope & { revision: number },
+    update: (previous: PlaylistDetail) => PlaylistDetail
+  ): Promise<MemberMutationContext> => {
+    const guard = captureAccountOperation(variables.viewerId);
+    const queryKey = playlistQueryKeys.detail(variables.viewerId, variables.playlistId);
+    if (isVisibleMutation(variables)) setFeedback(null);
+    await queryClient.cancelQueries({ queryKey, exact: true });
+    if (!isAccountOperationCurrent(guard)) {
+      throw new ApiError('The active account changed.', 'invalid-response', 409, 'account_viewer_mismatch');
+    }
+    const previous = queryClient.getQueryData<PlaylistDetail>(queryKey);
+    if (!previous || previous.revision !== variables.revision) return { guard, queryKey };
+    queryClient.setQueryData(queryKey, update(previous));
+    return {
+      guard, queryKey, previous,
+      cacheEntry: queryClient.getQueryCache().find({ queryKey, exact: true }),
+      optimisticVersion: queryClient.getQueryState(queryKey)?.dataUpdateCount
+    };
+  };
 
   const reconcileMutationError = (
     error: unknown,
-    guard: AccountOperationGuard | undefined,
-    previous?: PlaylistDetail
+    variables: MemberMutationScope,
+    context: MemberMutationContext | undefined
   ) => {
-    if (!guard || !isAccountOperationCurrent(guard, viewerId)) return;
-    if (previous) queryClient.setQueryData(detailKey, previous);
-    setFeedback({ kind: 'error', message: memberMutationMessage(error, t) });
+    if (!context || !isAccountOperationCurrent(context.guard)) return;
+    // A read or a later gesture may already have replaced this optimistic write.
+    if (context.previous
+      && queryClient.getQueryCache().find({ queryKey: context.queryKey, exact: true }) === context.cacheEntry
+      && queryClient.getQueryState(context.queryKey)?.dataUpdateCount === context.optimisticVersion) {
+      queryClient.setQueryData(context.queryKey, context.previous);
+    }
+    if (isVisibleMutation(variables)) setFeedback({ kind: 'error', message: memberMutationMessage(error, t) });
     if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
-      void queryClient.invalidateQueries({ queryKey: detailKey, exact: true });
-      void revalidatePlaylistLists(queryClient, viewerId, guard);
+      void queryClient.invalidateQueries({ queryKey: context.queryKey, exact: true });
+      void revalidatePlaylistLists(queryClient, variables.viewerId, context.guard);
     }
   };
 
+  const confirmMutation = (detail: PlaylistDetail, variables: MemberMutationScope & { signature: string }, context?: MemberMutationContext) => {
+    if (!context || !isAccountOperationCurrent(context.guard)) return;
+    if (isVisibleMutation(variables)) mutationKeysRef.current.delete(variables.signature);
+    commitPlaylistDetail(queryClient, variables.viewerId, detail, context.guard);
+    void revalidatePlaylistLists(queryClient, variables.viewerId, context.guard);
+  };
+
   const removeMutation = useMutation({
-    mutationFn: (variables: RemoveVariables) => removePlaylistItem({
-      viewerId,
-      playlistId,
-      itemId: variables.itemId,
-      revision: variables.revision,
-      idempotencyKey: variables.idempotencyKey
+    mutationFn: (variables: RemoveVariables) => removePlaylistItem(variables),
+    onMutate: (variables) => applyOptimisticMutation(variables, (previous) => {
+      const items = previous.items.filter((item) => item.itemId !== variables.itemId);
+      return { ...previous, items, itemCount: items.length, revision: previous.revision + 1, updatedAt: new Date().toISOString() };
     }),
-    onMutate: async (variables) => {
-      const guard = captureAccountOperation(viewerId);
-      setFeedback(null);
-      await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
-      if (!isAccountOperationCurrent(guard, viewerId)) return { guard };
-      const previous = queryClient.getQueryData<PlaylistDetail>(detailKey);
-      if (previous) {
-        const items = previous.items.filter((item) => item.itemId !== variables.itemId);
-        queryClient.setQueryData<PlaylistDetail>(detailKey, {
-          ...previous,
-          items,
-          itemCount: items.length,
-          revision: previous.revision + 1,
-          updatedAt: new Date().toISOString()
-        });
-      }
-      return { previous, guard };
-    },
-    onError: (error, _variables, context) => reconcileMutationError(
-      error,
-      context?.guard,
-      context?.previous
-    ),
+    onError: reconcileMutationError,
     onSuccess: (detail, variables, context) => {
-      if (!context?.guard || !isAccountOperationCurrent(context.guard, viewerId)) return;
-      // A confirmed receipt is no longer needed for another intentional action.
-      mutationKeysRef.current.delete(variables.signature);
-      commitPlaylistDetail(queryClient, viewerId, detail, context.guard);
-      void revalidatePlaylistLists(queryClient, viewerId, context.guard);
-      setFeedback({ kind: 'success', message: t('playlist.detail.removed') });
+      confirmMutation(detail, variables, context);
+      if (context && isAccountOperationCurrent(context.guard) && isVisibleMutation(variables)) {
+        setFeedback({ kind: 'success', message: t('playlist.detail.removed') });
+      }
     }
   });
 
   const reorderMutation = useMutation({
-    mutationFn: (variables: ReorderVariables) => reorderPlaylistItems({
-      viewerId,
-      playlistId,
-      revision: variables.revision,
-      itemIds: variables.itemIds,
-      idempotencyKey: variables.idempotencyKey
-    }),
-    onMutate: async (variables) => {
-      const guard = captureAccountOperation(viewerId);
-      setFeedback(null);
-      setMovementAnnouncement(variables.announcement);
-      await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
-      if (!isAccountOperationCurrent(guard, viewerId)) return { guard };
-      const previous = queryClient.getQueryData<PlaylistDetail>(detailKey);
-      if (previous) {
+    mutationFn: (variables: ReorderVariables) => reorderPlaylistItems(variables),
+    onMutate: (variables) => {
+      if (isVisibleMutation(variables)) setMovementAnnouncement(variables.announcement);
+      return applyOptimisticMutation(variables, (previous) => {
         const byId = new Map(previous.items.map((item) => [item.itemId, item]));
-        queryClient.setQueryData<PlaylistDetail>(detailKey, {
-          ...previous,
-          items: variables.itemIds.flatMap((itemId) => {
-            const item = byId.get(itemId);
-            return item ? [item] : [];
-          }),
-          revision: previous.revision + 1,
-          updatedAt: new Date().toISOString()
-        });
+        return { ...previous, items: variables.itemIds.flatMap((itemId) => {
+          const item = byId.get(itemId);
+          return item ? [item] : [];
+        }), revision: previous.revision + 1, updatedAt: new Date().toISOString() };
+      });
+    },
+    onError: (error, variables, context) => {
+      if (context && isAccountOperationCurrent(context.guard) && isVisibleMutation(variables)) {
+        setMovementAnnouncement(t('playlist.detail.move_failed'));
       }
-      return { previous, guard };
+      reconcileMutationError(error, variables, context);
     },
-    onError: (error, _variables, context) => {
-      if (!context?.guard || !isAccountOperationCurrent(context.guard, viewerId)) return;
-      setMovementAnnouncement(t('playlist.detail.move_failed'));
-      reconcileMutationError(error, context.guard, context.previous);
-    },
-    onSuccess: (detail, variables, context) => {
-      if (!isAccountOperationCurrent(context?.guard, viewerId)) return;
-      mutationKeysRef.current.delete(variables.signature);
-      commitPlaylistDetail(queryClient, viewerId, detail, context.guard);
-      void revalidatePlaylistLists(queryClient, viewerId, context.guard);
-    }
+    onSuccess: confirmMutation
   });
 
   useEffect(() => {
-    localOwnerRef.current = viewerId;
+    localOwnerRef.current = ownerKey;
+    mutationOperationRef.current += 1;
     setDialog(null);
     setFeedback(null);
     setMovementAnnouncement('');
@@ -264,6 +273,7 @@ export const PlaylistDetailPage = () => {
     const idempotencyKey = mutationKeysRef.current.get(signature) ?? createPlaylistIdempotencyKey();
     mutationKeysRef.current.set(signature, idempotencyKey);
     reorderMutation.mutate({
+      viewerId, playlistId, operation: ++mutationOperationRef.current,
       itemIds: order,
       revision: playlist.revision,
       idempotencyKey,
@@ -465,6 +475,7 @@ export const PlaylistDetailPage = () => {
                                 ?? createPlaylistIdempotencyKey();
                               mutationKeysRef.current.set(signature, idempotencyKey);
                               removeMutation.mutate({
+                                viewerId, playlistId, operation: ++mutationOperationRef.current,
                                 itemId: item.itemId,
                                 revision: playlist.revision,
                                 idempotencyKey,

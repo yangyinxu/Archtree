@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { MusicShareAction } from '../../../../src/contracts/socialMusicV1';
 import { captureAccountOperation, isAccountOperationCurrent, subscribeToAccountEpoch } from '../../api/accountEpoch';
-import { getSocialOutcome, prepareSocialCommand, sendSocialCommand, type SocialCommand, type SocialOutcome } from '../../api/social';
+import type { SocialCommand, SocialOutcome } from '../../api/social';
 import { isUncertainSocialFailure } from '../../api/socialFailure';
 import type { MessageKey } from '../../localization/contract';
 
@@ -32,11 +32,14 @@ export const createMusicShareSession = () => {
     if (!current(version) || state.busy || (state.uncertain && !retry)) return;
     const observed = version;
     const viewerId = state.viewerId;
+    const intent = action ? Object.freeze({ ...action }) : undefined;
     let command = retry;
     let dispatched = false;
     emit({ busy: true, message: null });
     try {
-      command ??= await prepareSocialCommand(viewerId, action!);
+      const { prepareSocialCommand, sendSocialCommand } = await import('../../api/social');
+      if (!current(observed)) return;
+      command ??= await prepareSocialCommand(viewerId, intent!);
       if (!current(observed)) return;
       dispatched = true;
       const outcome = await sendSocialCommand(viewerId, command);
@@ -64,6 +67,8 @@ export const createMusicShareSession = () => {
       const observed = version;
       emit({ busy: true });
       try {
+        const { getSocialOutcome } = await import('../../api/social');
+        if (!current(observed)) return;
         const result = await getSocialOutcome(state.viewerId, state.uncertain);
         if (current(observed) && result.outcome) await settle(result.outcome);
       } catch { if (current(observed)) emit({ message: 'social.unknown' }); }

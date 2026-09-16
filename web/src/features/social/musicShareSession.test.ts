@@ -27,7 +27,8 @@ test('synchronous locking sends one immutable intent for simultaneous clicks', a
   const scope = deferred<SocialCommand>(); mocks.prepare.mockReturnValue(scope.promise);
   const session = createMusicShareSession(); const refresh = vi.fn(); session.ensure('alice', refresh);
   const first = session.run(action); await session.run(action);
-  expect(mocks.prepare).toHaveBeenCalledTimes(1); expect(session.getSnapshot().busy).toBe(true);
+  expect(session.getSnapshot().busy).toBe(true);
+  await vi.waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(1));
   scope.resolve(command); await first;
   expect(mocks.send).toHaveBeenCalledExactlyOnceWith('alice', command);
   expect(refresh).toHaveBeenCalledTimes(1); expect(session.getSnapshot()).toMatchObject({ busy: false, uncertain: null, message: 'social.updated' });
@@ -36,7 +37,9 @@ test('synchronous locking sends one immutable intent for simultaneous clicks', a
 test('an account change while preparing a scope prevents dispatch', async () => {
   const scope = deferred<SocialCommand>(); mocks.prepare.mockReturnValue(scope.promise);
   const session = createMusicShareSession(); session.ensure('alice', vi.fn());
-  const pending = session.run(action); advanceAccountEpoch(); session.ensure('bob', vi.fn());
+  const pending = session.run(action);
+  await vi.waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(1));
+  advanceAccountEpoch(); session.ensure('bob', vi.fn());
   scope.resolve(command); await pending;
   expect(mocks.send).not.toHaveBeenCalled();
   expect(session.getSnapshot()).toMatchObject({ viewerId: 'bob', busy: false, uncertain: null, message: null });
@@ -68,7 +71,8 @@ test('checking an unknown outcome never resends and clears only on a recorded ou
 test.each(['success', 'failure'])('late %s cannot update the replacement account', async kind => {
   const response = deferred<typeof applied>(); mocks.send.mockReturnValue(response.promise);
   const session = createMusicShareSession(); const aliceRefresh = vi.fn(); const bobRefresh = vi.fn();
-  session.ensure('alice', aliceRefresh); const pending = session.run(action); await Promise.resolve();
+  session.ensure('alice', aliceRefresh); const pending = session.run(action);
+  await vi.waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(1));
   advanceAccountEpoch(); session.ensure('bob', bobRefresh);
   if (kind === 'success') response.resolve(applied); else response.reject(new TypeError('old error'));
   await pending;
@@ -96,4 +100,24 @@ test.each([['music_unavailable', 'music_shares.unavailable'], ['music_share_capa
   mocks.send.mockResolvedValueOnce({ ...applied, outcome: 'rejected', code });
   const session = createMusicShareSession(); session.ensure('alice', vi.fn()); await session.run(action);
   expect(session.getSnapshot()).toMatchObject({ uncertain: null, busy: false, message });
+});
+
+
+test('an account change while loading command code prevents preparation and dispatch', async () => {
+  const session = createMusicShareSession(); session.ensure('alice', vi.fn());
+  const pending = session.run(action);
+  advanceAccountEpoch(); session.ensure('bob', vi.fn());
+  await pending;
+  expect(mocks.prepare).not.toHaveBeenCalled();
+  expect(mocks.send).not.toHaveBeenCalled();
+  expect(session.getSnapshot()).toMatchObject({ viewerId: 'bob', busy: false, uncertain: null, message: null });
+});
+
+test('loading command code preserves the original gesture fields', async () => {
+  const session = createMusicShareSession(); session.ensure('alice', vi.fn());
+  const mutableAction = { ...action };
+  const pending = session.run(mutableAction);
+  mutableAction.contentId = 'c'.repeat(24);
+  await pending;
+  expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith('alice', action);
 });

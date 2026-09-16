@@ -21,8 +21,7 @@ export type SocialAction = { action: 'profile'; handle: string; alias: string; d
   | MusicShareAction | ListeningAction;
 export type SocialCommand = SocialAction & { readonly scopeToken: string; readonly commandId: string };
 
-export const getSocialProfile = (viewerId: string, signal?: AbortSignal) =>
-  socialReadRequest(`${base}/me/profile`, z.object({ profile: socialProfileSchema.nullable() }).strict(), { accountViewer: viewerId, signal });
+export { getSocialProfile } from './socialProfile';
 export const lookupSocialProfile = (viewerId: string, handle: string, signal?: AbortSignal) =>
   socialReadRequest(`${base}/profiles?${new URLSearchParams({ handle: handle.toLowerCase().trim() })}`,
     z.object({ profile: socialCardSchema.nullable() }).strict(), { accountViewer: viewerId, signal });
