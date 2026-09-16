@@ -8,7 +8,7 @@ import {
     UserLibrary
 } from '../models/userLibrary';
 import { resolvedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { catalogSearchFilter } from '../utils/catalogSearch';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import {
@@ -1051,26 +1051,23 @@ export const getListenerCollectionPage = async (
 export const searchListenerContent = async (query: string, limit = 20): Promise<ListenerSearch> => {
     const db = getDb()!;
     const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 50));
-    const expression = { $regex: escapeRegex(query), $options: 'i' };
     const organizationSearch = catalogCreditRollout().organizationSurfacesEnabled
         ? db.collection('organizations').find({
-            name: expression,
-            ...readyOrganizationLifecycleFilter
+            $and: [catalogSearchFilter('name', query), readyOrganizationLifecycleFilter]
         }).project(organizationProjection).sort({ name: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray()
         : Promise.resolve([]);
     const [artists, organizations, albums, tracks] = await Promise.all([
-        db.collection('artists').find({ name: expression, ...readyArtistLifecycleFilter })
+        db.collection('artists').find({ $and: [catalogSearchFilter('name', query), readyArtistLifecycleFilter] })
             .project(artistProjection).sort({ name: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray(),
         organizationSearch,
         db.collection('albums').find({
-            title: expression,
-            ...readyAlbumLifecycleFilter
+            $and: [catalogSearchFilter('title', query), readyAlbumLifecycleFilter]
         })
             .project(albumProjection).sort({ title: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray(),
-        db.collection('audioTracks').find({ ...readyAudioFilter, title: expression })
+        db.collection('audioTracks').find({ $and: [readyAudioFilter, catalogSearchFilter('title', query)] })
             .project(audioTrackProjection).sort({ title: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray()
     ]);

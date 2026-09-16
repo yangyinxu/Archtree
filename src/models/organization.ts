@@ -8,7 +8,7 @@ import {
     readyOrganizationLifecycleFilter,
     withReadyOrganizationReferences
 } from '../services/organizationReferenceFenceService';
-import { escapeRegex } from '../utils/search';
+import { catalogSearchFilter, catalogSearchProjection, withCatalogSearchUpdate } from '../utils/catalogSearch';
 
 export const organizationTypes = [
     'label',
@@ -55,9 +55,10 @@ export class Organization {
         if (!this.name || this.name.length > 200 || !organizationTypes.includes(this.organizationType)) {
             throw new Error('Organization name or type is invalid.');
         }
-        return withActiveAccount(this.createdBy, (session) =>
-            getDb()!.collection('organizations').insertOne(this, { session })
-        );
+        return withActiveAccount(this.createdBy, (session) => {
+            Object.assign(this, catalogSearchProjection(this.name));
+            return getDb()!.collection('organizations').insertOne(this, { session });
+        });
     }
 
     static findById(organizationId: string) {
@@ -86,10 +87,8 @@ export class Organization {
 
     static searchByName(query: string, limit: number = 10) {
         return getDb()!.collection('organizations')
-            .find({
-                name: { $regex: escapeRegex(query), $options: 'i' },
-                ...readyOrganizationLifecycleFilter
-            })
+            .find({ $and: [catalogSearchFilter('name', query), readyOrganizationLifecycleFilter] })
+            .maxTimeMS(3_000)
             .sort({ name: 1, _id: 1 })
             .limit(limit)
             .toArray();
@@ -111,7 +110,7 @@ export class Organization {
                     _id: ObjectId.createFromHexString(organizationId),
                     ...readyOrganizationLifecycleFilter
                 },
-                { $set: allowed },
+                { $set: withCatalogSearchUpdate(allowed, 'name') },
                 { session }
             );
             if (result.matchedCount !== 1) throw new OrganizationReferenceUnavailableError();

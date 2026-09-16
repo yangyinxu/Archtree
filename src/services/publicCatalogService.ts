@@ -2,7 +2,7 @@ import { ObjectId } from 'mongodb';
 
 import { getDb } from '../infrastructure/database';
 import { resolvedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { catalogSearchFilter } from '../utils/catalogSearch';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import {
@@ -624,29 +624,25 @@ export const listPublicAudioTracks = async (limit: number, offset: number) => {
 };
 
 export const searchPublicCatalog = async (query: string, limit: number) => {
-    const expression = { $regex: escapeRegex(query), $options: 'i' };
     const organizationSearch = catalogCreditRollout().organizationSurfacesEnabled
         ? getDb()!.collection('organizations').find({
-            name: expression,
-            ...readyOrganizationLifecycleFilter
+            $and: [catalogSearchFilter('name', query), readyOrganizationLifecycleFilter]
         }).project(organizationProjection).sort({ name: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray()
         : Promise.resolve([]);
     const [artists, organizations, albums, tracks] = await Promise.all([
         getDb()!.collection('artists').find({
-            name: expression,
-            ...readyArtistLifecycleFilter
+            $and: [catalogSearchFilter('name', query), readyArtistLifecycleFilter]
         })
             .project(artistProjection).sort({ name: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray(),
         organizationSearch,
         getDb()!.collection('albums').find({
-            title: expression,
-            ...readyAlbumLifecycleFilter
+            $and: [catalogSearchFilter('title', query), readyAlbumLifecycleFilter]
         })
             .project(albumProjection).sort({ title: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray(),
-        getDb()!.collection('audioTracks').find({ ...readyPublicAudioFilter, title: expression })
+        getDb()!.collection('audioTracks').find({ $and: [readyPublicAudioFilter, catalogSearchFilter('title', query)] })
             .project(audioTrackProjection).sort({ title: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray()
     ]);

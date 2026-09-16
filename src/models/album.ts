@@ -10,7 +10,7 @@ import {
 } from '../services/albumReferenceFenceService';
 import { replaceReadyAlbumAudioTracks } from '../services/albumTrackLinkService';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { catalogSearchFilter, withCatalogSearchUpdate } from '../utils/catalogSearch';
 import type { AttributionStatus, CatalogCredit } from './catalogCredit';
 export {
     AlbumCreationOutcomeUnknownError,
@@ -105,7 +105,7 @@ export class Album {
 
         return db!
             .collection('albums')
-            .find({ title: { $regex: escapeRegex(query), $options: 'i' } })
+            .find(catalogSearchFilter('title', query))
             .maxTimeMS(3_000)
             .limit(limit)
             .toArray()
@@ -126,7 +126,7 @@ export class Album {
     static updateById(albumId: string, update: Record<string, unknown>) {
         const db = getDb();
         const albumObjectId = ObjectId.createFromHexString(albumId);
-        const normalizedUpdate = { ...update };
+        const normalizedUpdate = withCatalogSearchUpdate(update, 'title');
         const mutate = async (session?: import('mongodb').ClientSession) => {
             const result = await db!
                 .collection('albums')
@@ -155,7 +155,7 @@ export class Album {
         expectedImageId: string | undefined | null,
         update: Record<string, unknown>
     ) {
-        const normalizedUpdate = { ...update };
+        const normalizedUpdate = withCatalogSearchUpdate(update, 'title');
         if (Object.prototype.hasOwnProperty.call(normalizedUpdate, 'audioTrackIds')) {
             if (!Array.isArray(normalizedUpdate.audioTrackIds)) {
                 throw new Error('audioTrackIds must be an array.');

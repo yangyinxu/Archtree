@@ -1,4 +1,10 @@
 import type { Db, CreateIndexesOptions, IndexSpecification, Document } from 'mongodb';
+import { catalogSearchCollections } from '../utils/catalogSearch';
+
+const catalogSearchIndexKeys: IndexSpecification[] = [
+  { catalogSearchVersion: 1 },
+  { catalogSearchGrams: 1, catalogSearchVersion: 1 }
+];
 
 /** Versioned index definitions; unique constraints are mandatory for correctness. */
 export const databaseIndexes: Array<{
@@ -105,7 +111,9 @@ export const databaseIndexes: Array<{
     { collection: 'audioTracks', keys: { publicationStatus: 1, uploadStatus: 1 } },
     { collection: 'imageAssets', keys: { ownerType: 1, ownerId: 1, _id: 1 } },
     { collection: 'imageAssets', keys: { createdBy: 1, ownerType: 1 } },
-    { collection: 'posts', keys: { createdAt: -1 } }
+    { collection: 'posts', keys: { createdAt: -1 } },
+    ...Object.keys(catalogSearchCollections).flatMap(collection =>
+      catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
 export const requiredIndexRevision = 'required-indexes-v4-social-participation';

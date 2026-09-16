@@ -11,7 +11,7 @@ import {
 } from './catalogCredit';
 import { touchReadyOrganizationReferences } from '../services/organizationReferenceFenceService';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { catalogSearchFilter, catalogSearchProjection, withCatalogSearchUpdate } from '../utils/catalogSearch';
 import { withReadyArtistReferences } from '../services/artistReferenceFenceService';
 import { touchReadyAlbumReferences } from '../services/albumReferenceFenceService';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
@@ -66,7 +66,7 @@ const normalizedAudioTrackUpdate = (update: Record<string, unknown>) => {
     if (typeof normalizedUpdate.originalFileName === 'string') {
         normalizedUpdate.originalFileName = normalizeUtf8Text(normalizedUpdate.originalFileName);
     }
-    return normalizedUpdate;
+    return withCatalogSearchUpdate(normalizedUpdate, 'title');
 };
 
 export class AudioTrack {
@@ -183,6 +183,7 @@ export class AudioTrack {
             );
             this.albumId = albumIds[0] ?? '';
             await touchActiveAccount(this.createdBy, session);
+            Object.assign(this, catalogSearchProjection(this.title));
             return db!
                 .collection(collectionId)
                 .insertOne(this, { session });
@@ -366,7 +367,7 @@ export class AudioTrack {
 
         return db!
             .collection(collectionId)
-            .find({ title: { $regex: escapeRegex(query), $options: 'i' } })
+            .find(catalogSearchFilter('title', query))
             .maxTimeMS(3_000)
             .limit(limit)
             .toArray()

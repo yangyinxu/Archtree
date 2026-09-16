@@ -1452,16 +1452,59 @@ Run this isolated, bounded query-plan probe:
 npm run profile:search
 ```
 
-It creates only 10000 synthetic records in a disposable loopback MongoDB replica
-set and removes that database afterward. It does not read application `.env` values
-for its target or query an existing catalog. It reports counts and execution time,
-never titles, content IDs, or a target URL. In the local Windows/MongoDB 8.0.12 run,
-a substring query returning the final 20 sorted items examined 10000 documents
-without the title/ID index. With the index it examined 20 documents but still
-10000 index keys (4 ms vs 6 ms in this small run). This proves lower document
-fetching, not a general latency improvement or sublinear substring search. Large
-catalog search remains a capacity measurement item, with bounded admission and
-query time; changing search semantics requires a separate product decision.
+It creates 10000 synthetic records in a disposable loopback MongoDB replica set,
+then compares the original regex, title/ID index, and substring candidate index.
+It never reads an application database or prints titles or target URLs. A local
+MongoDB 7.0.11 run returned the same 20 rows with 10000 keys examined by the
+ordering index versus 21 keys and 40 document examinations by the candidate
+index. `test/catalogSearch.integration.ts` enforces a candidate-work bound for
+that workload. This is a selective-query regression guard, not a latency SLO for
+all queries or all catalog sizes.
+
+### Substring candidate index rollout
+
+`CATALOG_SEARCH_INDEX_ENABLED` defaults to false and enables indexed candidate
+filtering only when exactly `true`. Every supported Artist, Organization, Album,
+and MediaTrack create/rename path writes derived `catalogSearchVersion` and
+`catalogSearchGrams` in the same document mutation as its name/title, regardless
+of the read flag. These internal fields never enter public DTOs. They contain
+unique lower-case ASCII one-, two-, and three-character grams for source strings
+up to 512 characters (at most 1533 entries). Non-ASCII or longer sources use
+version 0; missing/unsupported versions remain on the original regex path.
+Non-ASCII queries also use that path, preserving MongoDB Unicode case matching.
+The original escaped, case-insensitive substring regex always verifies candidates;
+ordering, limits and ready-content predicates do not change.
+
+The additive indexes are `{catalogSearchVersion: 1}` and
+`{catalogSearchGrams: 1, catalogSearchVersion: 1}` on each of the four collections.
+They increase write/storage work; measure representative text lengths, common
+short queries, Unicode share and catalog sizes before enabling broadly. Broad
+matches and unsupported/legacy sources can still require linear work. Existing
+search admission and query-time bounds remain mandatory.
+
+Deploy the new writers to every process with indexed reads disabled, then run
+bounded backfill pages on the intended configured database:
+
+```sh
+npm run backfill:catalog-search -- --collection=albums --limit=100
+npm run backfill:catalog-search -- --collection=albums --limit=100 --apply --confirm=APPLY_CATALOG_SEARCH
+```
+
+Repeat separately for `artists`, `organizations`, and `audioTracks`. Pass the
+returned `nextCursor` as `--after=<cursor>` until it is null. The default is a
+read-only report; apply requires the explicit confirmation value. The script
+verifies existing required schema without creating indexes or collections. It
+prints only counts and a checkpoint, never source text. Each update compares the
+exact observed source, so a concurrent rename or deletion cannot be overwritten.
+A failed/uncertain page is safely rerun with the same cursor; a changed source is
+reported separately and can be rechecked on a new pass. Retain checkpoints until
+completion and confirm the two candidate indexes exist before enabling the flag.
+
+Disable indexed reads before rolling back to a binary that does not maintain the
+projection. Keep them disabled across any mixed-version writer period. Before
+re-enabling after such a rollback, rerun the full backfill from the first page:
+old writers can leave an otherwise valid version-1 projection stale. Normal
+query reads never perform migrations or mutate catalog records.
 
 Use the existing `npm run test:media-load` only against an explicitly authorized
 target. Before a capacity change, compare rejected playback, API latency buckets,

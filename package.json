@@ -22,6 +22,7 @@
     "test:e2e:chromium": "npm run test:e2e:chromium --workspace @archtree/finitude-web",
     "test:integration": "node scripts/run-server-tests.mjs integration",
     "profile:search": "node scripts/check-runtime.mjs --mongo && tsx scripts/profile-catalog-search.ts",
+    "backfill:catalog-search": "tsx scripts/backfill-catalog-search.ts",
     "test:media-load": "node scripts/media-range-load.mjs",
     "localization:check": "node scripts/build-localizations.mjs --check",
     "localization:generate": "node scripts/build-localizations.mjs",

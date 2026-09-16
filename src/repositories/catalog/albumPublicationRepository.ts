@@ -1,4 +1,5 @@
 import { ObjectId } from 'mongodb';
+import { catalogSearchProjection } from '../../utils/catalogSearch';
 import { getDb } from '../../infrastructure/database';
 import type { Album } from '../../models/album';
 import { withReadyAudioTrackReferences } from '../../services/audioTrackReferenceFenceService';
@@ -52,6 +53,7 @@ export const insertPublishedAlbum = async (album: Album) => {
                     audioTrackIds
                 ) as [string];
                 await touchActiveAccount(album.createdBy, session);
+                Object.assign(album, catalogSearchProjection(album.title));
                 return db!.collection('albums').insertOne(album, { session });
             }
         );
