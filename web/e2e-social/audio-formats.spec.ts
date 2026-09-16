@@ -104,50 +104,89 @@ const expectPlaying = async (page: Page, entry: RoomMedia, baseURL: string) => {
   expect(values[0].seekable.some(([start, end]) => start <= values[0].time && end >= values[0].time)).toBe(true);
 };
 
+type MediaSample = Awaited<ReturnType<typeof media>>[number];
+type SynchronizationObservation = {
+  mediaCount: number;
+  sourceMatches: boolean;
+  value: Omit<MediaSample, 'source'> | null;
+};
+type SynchronizationCheckpoint = {
+  stage: 'initial-play' | 'next' | 'seek';
+  title: string;
+  status: 'observing' | 'passed' | 'failed';
+  samples: Array<{ host: SynchronizationObservation; guest: SynchronizationObservation }>;
+  comparison?: {
+    rawDriftMs: number;
+    alignedDriftMs: number;
+    captureSkewMs: number;
+    times: number[];
+    projectedTimes: number[];
+    continuous: Array<{ observedMs: number; advancedSeconds: number }>;
+  };
+};
+
 /** Observe continuous advancement; a decoder correction cannot count as elapsed playback. */
-const expectSynchronized = async (pages: Page[], entry: RoomMedia, baseURL: string) => {
-  await Promise.all(pages.map(page => expectPlaying(page, entry, baseURL)));
-  type Sample = Awaited<ReturnType<typeof media>>[number];
-  const windows: Array<{ first: Sample; previous: Sample } | undefined> = pages.map(() => undefined);
-  let samples: Sample[] = [];
-  await expect.poll(async () => {
-    const latest = await Promise.all(pages.map(page => media(page)));
-    samples = latest.map(values => values[0]);
-    // Map before every so each participant's window advances even while the other is still preparing.
-    const continuouslyPlaying = latest.map((values, index) => {
-      const sample = values[0];
-      if (values.length !== 1 || sample.source !== new URL(entry.streamUrl, baseURL).href
-        || sample.paused || sample.seeking || sample.ready < 3 || sample.error !== null
-        || !Number.isFinite(sample.time) || !Number.isFinite(sample.duration) || sample.duration <= 0
-        || !Number.isFinite(sample.observedAtMs) || !Number.isFinite(sample.capturedAtMs)
-        || !Number.isFinite(sample.playbackRate) || sample.playbackRate <= 0) {
-        windows[index] = undefined;
-        return false;
-      }
-      const window = windows[index];
-      const restart = () => { windows[index] = { first: sample, previous: sample }; return false; };
-      if (!window) return restart();
-      const elapsedSeconds = (sample.observedAtMs - window.previous.observedAtMs) / 1000;
-      const advancedSeconds = sample.time - window.previous.time;
-      const expectedAdvance = elapsedSeconds * (sample.playbackRate + window.previous.playbackRate) / 2;
-      // Allow normal decoder clock granularity and rate correction, but reject jumps or an unobserved long interval.
-      if (elapsedSeconds <= 0 || elapsedSeconds > 0.75 || advancedSeconds <= 0
-        || Math.abs(advancedSeconds - expectedAdvance) > Math.max(0.12, elapsedSeconds * 0.2)) return restart();
-      window.previous = sample;
-      return sample.observedAtMs - window.first.observedAtMs > 1000 && sample.time - window.first.time > 1;
-    }).every(Boolean);
-    return continuouslyPlaying && Math.max(...samples.map(value => value.capturedAtMs))
-      - Math.min(...samples.map(value => value.capturedAtMs)) <= 50;
-  }, { intervals: [100] }).toBe(true);
-  const latestCaptureMs = Math.max(...samples.map(value => value.capturedAtMs));
-  const captureSkewMs = latestCaptureMs - Math.min(...samples.map(value => value.capturedAtMs));
-  // Both clocks advanced continuously; compare their positions at the later capture, not at two different instants.
-  const projectedTimes = samples.map(value => value.time + (latestCaptureMs - value.capturedAtMs) / 1000 * value.playbackRate);
-  const driftMs = Math.abs(projectedTimes[0] - projectedTimes[1]) * 1000;
-  expect(driftMs).toBeLessThan(750);
-  return { title: entry.title, driftMs, captureSkewMs, times: samples.map(value => value.time), projectedTimes,
-    continuous: samples.map((value, index) => ({ observedMs: value.observedAtMs - windows[index]!.first.observedAtMs,
-      advancedSeconds: value.time - windows[index]!.first.time })) };
+const expectSynchronized = async (pages: [Page, Page], entry: RoomMedia, baseURL: string,
+  stage: SynchronizationCheckpoint['stage'], diagnostics: SynchronizationCheckpoint[]) => {
+  const checkpoint: SynchronizationCheckpoint = { stage, title: entry.title, status: 'observing', samples: [] };
+  diagnostics.push(checkpoint);
+  const observeSample = (values: MediaSample[]): SynchronizationObservation => {
+    if (!values[0]) return { mediaCount: values.length, sourceMatches: false, value: null };
+    const { source, ...value } = values[0];
+    return { mediaCount: values.length, sourceMatches: source === new URL(entry.streamUrl, baseURL).href, value };
+  };
+  try {
+    await Promise.all(pages.map(page => expectPlaying(page, entry, baseURL)));
+    const windows: Array<{ first: MediaSample; previous: MediaSample } | undefined> = pages.map(() => undefined);
+    let samples: MediaSample[] = [];
+    await expect.poll(async () => {
+      const latest = await Promise.all(pages.map(page => media(page)));
+      // Keep failed checkpoints reviewable without retaining media URLs or an unbounded trace.
+      checkpoint.samples.push({ host: observeSample(latest[0]), guest: observeSample(latest[1]) });
+      if (checkpoint.samples.length > 100) checkpoint.samples.shift();
+      samples = latest.map(values => values[0]);
+      // Map before every so each participant's window advances even while the other is still preparing.
+      const continuouslyPlaying = latest.map((values, index) => {
+        const sample = values[0];
+        if (values.length !== 1 || sample.source !== new URL(entry.streamUrl, baseURL).href
+          || sample.paused || sample.seeking || sample.ready < 3 || sample.error !== null
+          || !Number.isFinite(sample.time) || !Number.isFinite(sample.duration) || sample.duration <= 0
+          || !Number.isFinite(sample.observedAtMs) || !Number.isFinite(sample.capturedAtMs)
+          || !Number.isFinite(sample.playbackRate) || sample.playbackRate <= 0) {
+          windows[index] = undefined;
+          return false;
+        }
+        const window = windows[index];
+        const restart = () => { windows[index] = { first: sample, previous: sample }; return false; };
+        if (!window) return restart();
+        const elapsedSeconds = (sample.observedAtMs - window.previous.observedAtMs) / 1000;
+        const advancedSeconds = sample.time - window.previous.time;
+        const expectedAdvance = elapsedSeconds * (sample.playbackRate + window.previous.playbackRate) / 2;
+        // Allow normal decoder clock granularity and rate correction, but reject jumps or an unobserved long interval.
+        if (elapsedSeconds <= 0 || elapsedSeconds > 0.75 || advancedSeconds <= 0
+          || Math.abs(advancedSeconds - expectedAdvance) > Math.max(0.12, elapsedSeconds * 0.2)) return restart();
+        window.previous = sample;
+        return sample.observedAtMs - window.first.observedAtMs > 1000 && sample.time - window.first.time > 1;
+      }).every(Boolean);
+      return continuouslyPlaying && Math.max(...samples.map(value => value.capturedAtMs))
+        - Math.min(...samples.map(value => value.capturedAtMs)) <= 50;
+    }, { intervals: [100] }).toBe(true);
+    const latestCaptureMs = Math.max(...samples.map(value => value.capturedAtMs));
+    const captureSkewMs = latestCaptureMs - Math.min(...samples.map(value => value.capturedAtMs));
+    // Both clocks advanced continuously; compare their positions at the later capture, not at two different instants.
+    const projectedTimes = samples.map(value => value.time + (latestCaptureMs - value.capturedAtMs) / 1000 * value.playbackRate);
+    const driftMs = Math.abs(projectedTimes[0] - projectedTimes[1]) * 1000;
+    const continuous = samples.map((value, index) => ({ observedMs: value.observedAtMs - windows[index]!.first.observedAtMs,
+      advancedSeconds: value.time - windows[index]!.first.time }));
+    checkpoint.comparison = { rawDriftMs: Math.abs(samples[0].time - samples[1].time) * 1000,
+      alignedDriftMs: driftMs, captureSkewMs, times: samples.map(value => value.time), projectedTimes, continuous };
+    expect(driftMs).toBeLessThan(750);
+    checkpoint.status = 'passed';
+    return { title: entry.title, driftMs, captureSkewMs, times: samples.map(value => value.time), projectedTimes, continuous };
+  } catch (error) {
+    checkpoint.status = 'failed';
+    throw error;
+  }
 };
 
 test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and no command echo', async ({ browser, browserName, baseURL, request }) => {
@@ -159,6 +198,7 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
     const host = await hostContext.newPage(), guest = await native.context.newPage();
     const hostState = observe(host), guestState = observe(guest);
     const driftEvidence: Array<Awaited<ReturnType<typeof expectSynchronized>>> = [];
+    const synchronization: SynchronizationCheckpoint[] = [];
     let pulseAudio: Awaited<ReturnType<typeof capturePulseAudioDiagnostics>> | undefined;
     try {
       await Promise.all([login(host, 'invitation_host', baseURL!), login(guest, 'invitation_guest', baseURL!)]);
@@ -179,7 +219,7 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
       }
       const hostInitial = hostState.commands.length, guestInitial = guestState.commands.length;
       await panel(host).getByRole('button', { name: 'Play for everyone', exact: true }).click();
-      driftEvidence.push(await expectSynchronized([host, guest], queue[0], baseURL!));
+      driftEvidence.push(await expectSynchronized([host, guest], queue[0], baseURL!, 'initial-play', synchronization));
       expect(hostState.commands.slice(hostInitial).map(value => value.action)).toEqual(['play']);
       expect(guestState.commands).toHaveLength(guestInitial);
 
@@ -191,7 +231,7 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
           await panel(host).getByRole('button', { name: 'Next', exact: true }).click();
           await expect.poll(() => hostState.room()?.timeline?.playbackGeneration).toBe(previousGeneration + 1);
           await expect.poll(() => guestState.room()?.timeline?.entryId).toBe(entry.entryId);
-          driftEvidence.push(await expectSynchronized([host, guest], entry, baseURL!));
+          driftEvidence.push(await expectSynchronized([host, guest], entry, baseURL!, 'next', synchronization));
           expect(hostState.commands.slice(beforeNext).map(value => value.action)).toEqual(['next']);
         }
         // Native pointer input captures real command preconditions and seeks well past the initial buffer position.
@@ -208,7 +248,7 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
         expect(command.positionMs).toBeLessThan(80_000);
         await expect.poll(() => hostState.room()?.timeline?.playbackGeneration).toBe(previousGeneration + 1);
         await expect.poll(() => guestState.room()?.timeline?.playbackGeneration).toBe(previousGeneration + 1);
-        driftEvidence.push(await expectSynchronized([host, guest], entry, baseURL!));
+        driftEvidence.push(await expectSynchronized([host, guest], entry, baseURL!, 'seek', synchronization));
         for (const page of [host, guest]) expect((await media(page))[0].time).toBeGreaterThan(command.positionMs! / 1000 - 0.15);
         for (const state of [hostState, guestState]) {
           expect(state.ready).toContainEqual({ generation: previousGeneration + 1, revision: entry.mediaRevision });
@@ -236,6 +276,7 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
         browsers: { host: browserName, guest: 'chromium' },
         pulseAudio,
         drift: driftEvidence,
+        synchronization,
         host: { commands: hostState.commands, ready: hostState.ready, streams: hostState.streams, media: await media(host).catch(() => []) },
         guest: { commands: guestState.commands, ready: guestState.ready, streams: guestState.streams, media: await media(guest).catch(() => []) }
       }));

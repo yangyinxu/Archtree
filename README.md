@@ -243,7 +243,15 @@ Chromium guest and its own server/database. These extra projects are never
 collected on macOS; browser-specific results remain separate from Chromium proof.
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
-It corrects startup drift once the media clock actually advances. A fully
+It corrects startup drift after credible media-clock advancement. A corrective
+seek measures the clock time lost during that seek, separately from initial
+play startup. One additional seek per playback occurrence may compensate the
+measured delay; concurrent heartbeat corrections update the clock reference
+without interrupting that observation. Measurements expire after three seconds
+and accept only delays from zero to two seconds. Later ordinary heartbeat
+corrections can reuse the measured delay until the playback effect changes.
+All pending work is cancelled by local pause, authority loss, or source changes.
+A fully
 buffered Audio decoder that stays paused with only current-frame data after a
 completed seek gets at most one paused source reload per playback occurrence;
 readiness still requires future data, and local pause or leaving cancels recovery.

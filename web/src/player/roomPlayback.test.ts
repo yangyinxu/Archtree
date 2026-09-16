@@ -197,7 +197,7 @@ test('the first advancing media clock corrects a delayed start once without repl
   store.destroy();
 });
 
-test('a ping correction before natural playback cannot consume the pending first-progress observation', async () => {
+test('a ping correction before natural playback owns convergence without treating its time jump as progress', async () => {
   let clock = 10_000;
   const { audio, room, store, onIntent } = setup(undefined, { now: () => clock });
   audio.duration = 120;
@@ -213,11 +213,11 @@ test('a ping correction before natural playback cannot consume the pending first
   expect(audio.currentTime).toBe(7);
   clock += 1_000;
   audio.currentTime = 7.03; audio.emit('timeupdate');
-  expect(audio.currentTime).toBe(8.5);
-  // The actual first-progress correction remains consumed across its own completion callbacks.
+  expect(audio.currentTime).toBeCloseTo(9.97); // Authority 8.5 + the correction's measured 1.47 seconds of lost media time.
+  // The measured follow-up remains consumed across its own completion callbacks.
   audio.emit('seeked'); audio.emit('playing');
-  clock += 1_000; audio.currentTime = 8.6; audio.emit('timeupdate');
-  expect(audio.currentTime).toBe(8.6);
+  clock += 1_000; audio.currentTime = 10.07; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(10.07);
   expect(audio.playCalls).toBe(1);
   expect(onIntent).not.toHaveBeenCalled();
   store.destroy();
@@ -474,10 +474,13 @@ test('rate correction resets by deadline and uses seek fallback; unsupported rat
   await vi.advanceTimersByTimeAsync(4000);
   expect(audio.playbackRate).toBe(1);
   expect(audio.currentTime).toBeCloseTo(5.3);
+  audio.emit('seeked');
+  await vi.advanceTimersByTimeAsync(100);
+  audio.currentTime += 0.1; audio.emit('timeupdate'); // Complete the fallback before starting an independent correction.
   audio.currentTime = 1;
   Object.defineProperty(audio, 'playbackRate', { get: () => 1, set: () => { throw new Error('Unsupported'); } });
   expect(room.correct(1.3)).toBe('seek');
-  expect(audio.currentTime).toBe(1.3);
+  expect(audio.currentTime).toBeCloseTo(1.3);
   expect(onObservation.mock.calls.some(([value]) => value.type === 'unsupported-rate')).toBe(true);
   store.destroy();
 });

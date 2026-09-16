@@ -100,6 +100,14 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let seekFailed = false;
   let playRequested = false;
   let firstProgress: { position: number; monotonicMs: number; seeking: boolean } | undefined;
+  // The dispatch clock measures seek cost; seeked only establishes a separate proof-of-progress baseline.
+  let postSeek: { occurrence: string; effect: number; source: number; target: number; dispatchedAt: number;
+    referencePosition: number; referenceAt: number; baselinePosition: number; baselineAt: number;
+    completed: boolean; accepted: boolean } | undefined;
+  let postSeekExpiry: ReturnType<typeof setTimeout> | undefined;
+  let seekLatency: number | undefined;
+  let compensatedOccurrence: string | null = null;
+  let latestCorrection: { position: number; monotonicMs: number } | undefined;
   const observed = new Set<string>();
 
   const report = (type: RoomPlaybackObservation['type']) => {
@@ -123,6 +131,12 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     try { target.playbackRate = 1; } catch { /* Unsupported rate remains an explicit fallback. */ }
   };
 
+  const clearPostSeek = () => {
+    clearTimeout(postSeekExpiry);
+    postSeekExpiry = undefined;
+    postSeek = undefined;
+  };
+
   const cancelEffects = () => {
     effect += 1;
     clearTimeout(scheduled);
@@ -133,6 +147,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     decoderRecovery = undefined;
     playRequested = false;
     firstProgress = undefined;
+    clearPostSeek();
+    seekLatency = undefined;
+    latestCorrection = undefined;
     observed.clear();
     resetRate();
   };
@@ -158,21 +175,66 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     && state.status === 'playing' && state.playbackAllowed !== false && playRequested && !target.paused
     && !needsSeek && !seekPending && !seekFailed && !target.seeking && (target.readyState ?? 0) >= 3);
 
-  /** A correction writes media time; its resulting callbacks cannot prove the decoder has started advancing. */
+  /** Serializes seek measurement and preserves its unmodified authoritative clock separately from predictive lead. */
   const correctionSeek = (target: PlayerAudio, position: number) => {
-    const pending = firstProgress;
-    if (pending) pending.seeking = true;
-    const accepted = port.seek(position);
-    if (pending && firstProgress === pending) {
-      pending.position = target.currentTime;
-      pending.monotonicMs = now();
-      if (!accepted) pending.seeking = false;
+    const key = occurrence();
+    if (!key || postSeek) return false;
+    const lead = seekLatency ?? 0;
+    const destination = Math.min(position + (position + lead < target.duration - 0.35 ? lead : 0), target.duration);
+    const dispatchedAt = now();
+    const pending = { occurrence: key, effect, source, target: destination, dispatchedAt,
+      referencePosition: position, referenceAt: dispatchedAt, baselinePosition: destination, baselineAt: dispatchedAt,
+      completed: false, accepted: false };
+    const startup = firstProgress;
+    firstProgress = undefined; // A correction owns startup convergence; its timeupdate cannot also run the original latch.
+    postSeek = pending;
+    const accepted = port.seek(destination);
+    if (postSeek === pending) {
+      pending.accepted = accepted;
+      if (!accepted) { clearPostSeek(); firstProgress = startup; }
+      else postSeekExpiry = setTimeout(() => {
+        if (postSeek !== pending) return;
+        clearPostSeek();
+        seekLatency = undefined;
+      }, 3000);
     }
     return accepted;
   };
 
   // Logical identity survives decoder reinstalls; physical source generations only fence in-flight work.
   const occurrence = () => state && JSON.stringify([state.roomId, state.epoch, state.currentEntryId, state.mediaRevision, state.playbackEpoch]);
+  const currentPostSeek = () => postSeek && postSeek.effect === effect && postSeek.source === source
+    && source === port.sourceGeneration() && postSeek.occurrence === occurrence();
+
+  const expirePostSeek = () => {
+    if (!postSeek || now() - postSeek.dispatchedAt < 3000) return false;
+    clearPostSeek(); seekLatency = undefined;
+    return true;
+  };
+
+  /** One measured follow-up can compensate decoder delay; completion can learn, but never recursively retry. */
+  const observePostSeekProgress = (target: PlayerAudio) => {
+    if (expirePostSeek()) return;
+    const pending = postSeek;
+    if (!pending || !pending.accepted || !pending.completed || !currentPostSeek() || !correctionAllowed(target)) return;
+    const elapsed = (now() - pending.baselineAt) / 1000;
+    const advanced = target.currentTime - pending.baselinePosition;
+    if (elapsed === 0 && advanced === 0) return;
+    if (!finiteNonnegative(target.currentTime) || target.ended || target.error
+      || Math.abs((target.playbackRate ?? 1) - 1) > 0.001 || elapsed <= 0 || advanced < 0 || advanced > elapsed + 0.05) {
+      clearPostSeek(); seekLatency = undefined; return;
+    }
+    if (advanced <= 0.02) return;
+    const latency = Math.max(0, (now() - pending.dispatchedAt) / 1000 - (target.currentTime - pending.target));
+    const position = pending.referencePosition + (now() - pending.referenceAt) / 1000;
+    clearPostSeek();
+    if (!finiteNonnegative(latency) || latency > 2) { seekLatency = undefined; return; }
+    seekLatency = latency;
+    if (compensatedOccurrence === pending.occurrence || Math.abs(position - target.currentTime) <= 0.35
+      || !finiteNonnegative(target.duration) || position + latency >= target.duration - 0.35) return;
+    compensatedOccurrence = pending.occurrence; // Consume before the write, including rejected or synchronously cancelled seeks.
+    correctionSeek(target, position);
+  };
   /** Excludes loading, failed, deliberately paused, and end-of-media states from automatic repair. */
   const stalledDecoder = (target: PlayerAudio) => {
     if (!state || localPaused || !matchesSource(target) || state.status === 'ended'
@@ -362,7 +424,20 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     },
     correct(positionSeconds) {
       const target = port.media();
-      if (!state || !target || !correctionAllowed(target) || !finiteNonnegative(positionSeconds)) return 'none';
+      if (!state || !target || !finiteNonnegative(positionSeconds)) return 'none';
+      expirePostSeek(); // Browser timer callbacks may be delayed behind a media event or heartbeat.
+      if (postSeek) {
+        if (currentPostSeek() && !detached && !localPaused && matchesSource(target)
+          && state.status === 'playing' && state.playbackAllowed !== false && playRequested) {
+          postSeek.referencePosition = positionSeconds;
+          postSeek.referenceAt = now();
+          latestCorrection = { position: positionSeconds, monotonicMs: now() };
+          return 'none'; // Pings refine the authoritative clock while the decoder finishes the sole in-flight correction.
+        }
+        clearPostSeek(); seekLatency = undefined;
+      }
+      if (!correctionAllowed(target)) return 'none';
+      latestCorrection = { position: positionSeconds, monotonicMs: now() };
       const drift = positionSeconds - target.currentTime;
       clearTimeout(correction);
       resetRate();
@@ -378,12 +453,12 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
             if (detached || effect !== expectedEffect || !matchesSource(target) || target.seeking || target.paused) return;
             resetRate();
             const expected = positionSeconds + (now() - correctionStart) / 1000;
-            if (Math.abs(expected - target.currentTime) > 0.15) correctionSeek(target, Math.min(expected, target.duration));
+            if (Math.abs(expected - target.currentTime) > 0.15) correctionSeek(target, expected);
           }, 4000);
           return 'rate';
         } catch { report('unsupported-rate'); }
       }
-      return correctionSeek(target, Math.min(positionSeconds, target.duration)) ? 'seek' : 'none';
+      return correctionSeek(target, positionSeconds) ? 'seek' : 'none';
     },
     detach() {
       if (detached) return;
@@ -433,14 +508,19 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         return event === 'playing' && !target.paused;
       }
       if (event === 'ended') {
+        if (target.ended) { clearPostSeek(); seekLatency = undefined; }
         if (target.ended && (target.readyState ?? 0) >= 2 && !seekPending) report('ended');
         return target.ended; // The store records completion without advancing its room queue.
       }
       if (event === 'pause') {
         if (!target.paused) return false;
         firstProgress = undefined;
+        clearPostSeek(); seekLatency = undefined;
+        latestCorrection = undefined;
       }
       if (event === 'error' && !target.error) return false;
+      if (event === 'error') { clearPostSeek(); seekLatency = undefined; }
+      if (event === 'seeking' && target.seeking && postSeek?.completed) { clearPostSeek(); seekLatency = undefined; }
       if (event === 'seeking' && target.seeking && firstProgress) firstProgress.seeking = true;
       if (event === 'seeked' && !target.seeking) {
         if (seekPending && Math.abs(target.currentTime - seekTarget) > 0.15) {
@@ -455,9 +535,18 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
           firstProgress.monotonicMs = now();
           firstProgress.seeking = false;
         }
+        if (postSeek && !postSeek.completed && currentPostSeek()) {
+          if (Math.abs(target.currentTime - postSeek.target) > 0.15) { clearPostSeek(); seekLatency = undefined; }
+          else {
+            postSeek.completed = true;
+            postSeek.baselinePosition = target.currentTime;
+            postSeek.baselineAt = now();
+          }
+        }
         report('seek-complete');
       }
       if (['loadedmetadata', 'canplay', 'seeked'].includes(event)) void reconcile();
+      if (event === 'timeupdate' && postSeek) observePostSeekProgress(target);
       if (event === 'timeupdate' && firstProgress && !firstProgress.seeking && correctionAllowed(target)
         && !target.ended && !target.error && state && now() >= state.anchorMonotonicMs
         && finiteNonnegative(target.currentTime)) {
@@ -470,7 +559,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         } else if (advanced > 0.02) {
           // Ready/playing can precede decoder progress. Consume before correction; seek callbacks never rearm it.
           firstProgress = undefined;
-          attachment.correct(desiredPosition());
+          // Heartbeats may refine the clock offset without needing a seek; never replace that estimate with the cached anchor.
+          const position = latestCorrection ? latestCorrection.position + (now() - latestCorrection.monotonicMs) / 1000 : desiredPosition();
+          attachment.correct(position);
         }
       }
       return true;
