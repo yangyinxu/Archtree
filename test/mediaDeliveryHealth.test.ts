@@ -5,6 +5,7 @@ import type { Db } from 'mongodb';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { createHealthController } from '../src/controllers/healthController';
+import { createRoomGatewayMetrics, roomGatewayMetrics } from '../src/realtime/roomGatewayMetrics';
 import { createMediaDeliveryMetricsRegistry } from '../src/services/mediaDeliveryService';
 
 const responseDouble = () => {
@@ -236,4 +237,33 @@ test('an expired schema probe never starts a late ping after its HTTP deadline',
     release();
     await delay(0);
     assert.equal(calls, 0);
+});
+
+
+test('optional room degradation is visible without changing database readiness', async () => {
+    let now = 100;
+    const rooms = createRoomGatewayMetrics(() => now);
+    rooms.recordSuccessfulSweep();
+    rooms.setAuthorityState('unavailable');
+    rooms.recordFailure('authorityAcquisition');
+    now = 400;
+    for (const ready of [true, false]) {
+        const handler = createHealthController({
+            checkIndexes: async () => ready,
+            getDatabase: stableDatabase({ command: async () => ({ ok: 1 }) }),
+            getRoomMetrics: rooms.snapshot
+        });
+        const { response, state } = responseDouble();
+        await handler({} as Request, response);
+        assert.equal(state.statusCode, ready ? 200 : 503);
+        assert.deepEqual(state.body.rooms, rooms.snapshot());
+        assert.equal(state.body.rooms.lastSuccessfulSweepAgeMs, 300);
+    }
+});
+
+test('health defaults to the same room metrics registry as the production gateway', async () => {
+    const handler = createHealthController({ getDatabase: () => null });
+    const { response, state } = responseDouble();
+    await handler({} as Request, response);
+    assert.deepEqual(state.body.rooms, roomGatewayMetrics.snapshot());
 });

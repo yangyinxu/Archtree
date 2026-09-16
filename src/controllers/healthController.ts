@@ -5,6 +5,7 @@ import { getMediaDeliveryMetrics } from '../services/mediaDeliveryService';
 import type { createRequestDiagnostics } from '../middleware/requestDiagnosticsMiddleware';
 import { getRuntimeResources } from '../services/runtimeResourcesService';
 import { createReadinessProbe } from '../infrastructure/readinessProbe';
+import { roomGatewayMetrics, type RoomGatewayMetrics } from '../realtime/roomGatewayMetrics';
 
 /** Slow optional capacity diagnostics must not hold an otherwise ready response. */
 const withinDeadline = <T>(operation: Promise<T>, fallback: T, milliseconds: number): Promise<T> =>
@@ -21,6 +22,8 @@ export interface HealthControllerDependencies {
     getResources?: typeof getRuntimeResources;
     getDatabase?: () => Pick<Db, 'command'> | null;
     getMetrics?: typeof getMediaDeliveryMetrics;
+    /** Optional rooms are diagnostic only and never gate ordinary HTTP readiness. */
+    getRoomMetrics?: RoomGatewayMetrics['snapshot'];
     getMemoryUsage?: typeof process.memoryUsage;
     getUptimeSeconds?: typeof process.uptime;
     now?: () => number;
@@ -32,6 +35,7 @@ export const createHealthController = (
 ) => {
     const getDatabase = dependencies.getDatabase ?? getDb;
     const getMetrics = dependencies.getMetrics ?? getMediaDeliveryMetrics;
+    const getRoomMetrics = dependencies.getRoomMetrics ?? roomGatewayMetrics.snapshot;
     const getMemoryUsage = dependencies.getMemoryUsage ?? process.memoryUsage;
     const getUptimeSeconds = dependencies.getUptimeSeconds ?? process.uptime;
     const checkIndexes = dependencies.checkIndexes ?? checkDatabaseReadiness;
@@ -58,6 +62,7 @@ export const createHealthController = (
                 status: 'ok',
                 uptimeSeconds: Math.max(0, Math.floor(getUptimeSeconds())),
                 mediaDelivery: getMetrics(),
+                rooms: getRoomMetrics(),
                 requests: dependencies.getRequestMetrics?.(),
                 resources,
                 memory: {
@@ -70,6 +75,7 @@ export const createHealthController = (
                 status: 'unavailable',
                 uptimeSeconds: Math.max(0, Math.floor(getUptimeSeconds())),
                 mediaDelivery: getMetrics(),
+                rooms: getRoomMetrics(),
                 requests: dependencies.getRequestMetrics?.()
             });
         }

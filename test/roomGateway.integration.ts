@@ -5,12 +5,15 @@ import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { WebSocket } from 'ws';
+import express from 'express';
 import type { RoomActor, RoomApi } from '../src/contracts/roomV1';
 import { SocialError } from '../src/contracts/socialV1';
 import { createRoomService } from '../src/application/rooms/roomService';
 import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import AuthSession from '../src/models/authSession';
 import { installRoomGateway } from '../src/realtime/roomGateway';
+import { createRoomGatewayMetrics, type RoomGatewayMetrics } from '../src/realtime/roomGatewayMetrics';
+import { createHealthController } from '../src/controllers/healthController';
 import { notifyRoomChanges } from '../src/realtime/roomEvents';
 import { ServerLifecycle } from '../src/services/serverLifecycleService';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
@@ -33,16 +36,19 @@ const waitFor = async (condition: () => boolean) => {
 };
 
 /** Real TCP/WebSocket handshakes isolate admission races from the separately tested durable room API. */
-const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: () => Promise<number | null> } = {}) => {
+const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: () => Promise<number | null>; metrics?: RoomGatewayMetrics } = {}) => {
     const lifecycle = new ServerLifecycle();
-    const server = createServer((_req, res) => res.writeHead(404).end());
+    const metrics = options.metrics ?? createRoomGatewayMetrics();
+    const app = express();
+    app.get('/health', createHealthController({ getRoomMetrics: metrics.snapshot }));
+    const server = createServer(app);
     const transports: Socket[] = []; server.on('connection', socket => { transports.push(socket); });
     const sockets: WebSocket[] = [];
     let held = false;
     const redemptions: Array<() => void> = [];
     let sequence = 0;
     const api = options.api ?? { currentRoom: async () => null, sweep: async () => undefined, disconnected: async () => undefined } as unknown as RoomApi;
-    const gateway = installRoomGateway(server, lifecycle, { api, acquire: options.acquire ?? (async () => 1), release: async () => undefined,
+    const gateway = installRoomGateway(server, lifecycle, { api, metrics, acquire: options.acquire ?? (async () => 1), release: async () => undefined,
         redeemTicket: async () => {
             const actor: RoomActor = options.actor ?? { userId: (++sequence).toString(16).padStart(24, '0'), sessionId: '1'.repeat(24), clientId: randomUUID() };
             if (held) await new Promise<void>(resolve => { redemptions.push(resolve); });
@@ -62,7 +68,7 @@ const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: ()
         });
         return { socket, result };
     };
-    return { lifecycle, server, transports, sockets, connect, redemptions, hold: () => { held = true; },
+    return { lifecycle, server, transports, sockets, connect, redemptions, metrics, origin, hold: () => { held = true; },
         stop: async () => {
             held = false; redemptions.splice(0).forEach(resolve => resolve());
             await lifecycle.stop(server, async () => {
@@ -220,6 +226,7 @@ test('heartbeat and readiness repair actual Mongo write conflicts with the same 
             assert.equal(admitted.socket.readyState, WebSocket.OPEN);
             await lock.commitTransaction();
             await waitFor(() => completed === 1);
+            assert.equal(gateway.metrics.snapshot().failures.report, 0, 'A repaired report is not a terminal report failure.');
             assert.equal(observed.length, 2);
             assert.equal(observed[0], observed[1], 'Repair must retain the exact parsed observation object.');
             assert.equal(Object.isFrozen(observed[0]), true);
@@ -256,6 +263,7 @@ test('dispatch rejects revoked sessions and uncertain outcomes, bounds failures,
                 await waitFor(() => code !== undefined);
                 assert.equal(code, kind === 'revoked' ? 1008 : kind === 'authority' ? 1012 : 1013);
             }
+            assert.equal(gateway.metrics.snapshot().failures.report, ['stale', 'removed'].includes(kind) ? 0 : 1);
             assert.equal(attempts.length, kind === 'unavailable' ? 3 : 1);
             if (kind === 'unavailable') { assert.ok(attempts[1] - attempts[0] >= 100); assert.ok(attempts[2] - attempts[1] >= 200); }
         } finally { await gateway.stop(); }
@@ -283,7 +291,85 @@ test('timer contention requires a fresh lease and repairs on a later tick with a
                 await waitFor(() => code !== undefined);
                 assert.equal(code, kind === 'authority' ? 1012 : 1013);
                 assert.equal(failures, kind === 'authority' ? 1 : 3);
+                assert.equal(gateway.metrics.snapshot().failures.authorityAcquisition, kind === 'authority' ? 1 : 0);
             }
         } finally { await gateway.stop(); }
     }
+});
+
+
+test('room health observes authority and timer failure then recovery while ordinary HTTP stays ready', async () => {
+    let now = 1_000;
+    let failSweep = false;
+    let failAuthority = false;
+    const metrics = createRoomGatewayMetrics(() => now);
+    const api = { currentRoom: async () => null, disconnected: async () => undefined, sweep: async () => {
+        if (failSweep) throw new SocialError(503, 'room_unavailable');
+    } } as unknown as RoomApi;
+    const gateway = await fixture({ api, metrics, acquire: async () => {
+        if (failAuthority) throw new Error('Synthetic private failure details must never enter health.');
+        return 1;
+    } });
+    try {
+        await waitFor(() => metrics.snapshot().lastSuccessfulSweepAgeMs === 0);
+        assert.equal(metrics.snapshot().authorityState, 'ready');
+        now = 2_500;
+        failSweep = true;
+        failAuthority = true;
+        await waitFor(() => metrics.snapshot().authorityState === 'unavailable');
+        const failed = await fetch(`${gateway.origin}/health`);
+        assert.equal(failed.status, 200);
+        const body: any = await failed.json();
+        assert.equal(body.status, 'ok');
+        assert.equal(body.rooms.authorityState, 'unavailable');
+        assert.equal(body.rooms.failures.sweep, 1);
+        assert.equal(body.rooms.failures.authorityAcquisition, 1);
+        assert.equal(body.rooms.lastSuccessfulSweepAgeMs, 1_500);
+        assert.doesNotMatch(JSON.stringify(body.rooms), /private|details|roomId|userId|sessionId|stack/);
+        now = 3_000;
+        failSweep = false;
+        failAuthority = false;
+        await waitFor(() => metrics.snapshot().authorityState === 'ready' && metrics.snapshot().lastSuccessfulSweepAgeMs === 0);
+        const recovered = await fetch(`${gateway.origin}/health`);
+        assert.equal(recovered.status, 200);
+        const recoveredBody: any = await recovered.json();
+        assert.equal(recoveredBody.rooms.authorityState, 'ready');
+        assert.equal(recoveredBody.rooms.lastSuccessfulSweepAgeMs, 0);
+        assert.equal(recoveredBody.rooms.failures.sweep, 1);
+        assert.equal(recoveredBody.rooms.failures.authorityAcquisition, 1);
+    } finally { await gateway.stop(); }
+    assert.equal(metrics.snapshot().authorityState, 'stopped');
+});
+
+test('terminal refresh and disconnect failures retain only their fixed counters', async () => {
+    let failRefresh = false;
+    const gateway = await fixture({ api: {
+        currentRoom: async () => {
+            if (failRefresh) throw new Error('Synthetic private refresh payload.');
+            return null;
+        },
+        sweep: async () => undefined,
+        disconnected: async () => { throw new Error('Synthetic private disconnect payload.'); }
+    } as unknown as RoomApi });
+    try {
+        const admitted = gateway.connect('192.0.2.81');
+        let subscribed = false;
+        admitted.socket.on('message', bytes => { if (JSON.parse(bytes.toString()).type === 'subscribed') subscribed = true; });
+        assert.equal(await admitted.result, 101);
+        await waitFor(() => subscribed);
+        failRefresh = true;
+        notifyRoomChanges();
+        await waitFor(() => gateway.metrics.snapshot().failures.disconnect === 1);
+        assert.equal(gateway.metrics.snapshot().failures.refresh, 1);
+        assert.doesNotMatch(JSON.stringify(gateway.metrics.snapshot()), /private|payload|192\.0\.2|userId|sessionId/);
+    } finally { await gateway.stop(); }
+});
+
+test('late authority acquisition cannot overwrite the stopped diagnostic state', async () => {
+    let release!: () => void;
+    const gateway = await fixture({ acquire: () => new Promise(resolve => { release = () => resolve(1); }) });
+    const stopped = gateway.stop();
+    release();
+    await stopped;
+    assert.equal(gateway.metrics.snapshot().authorityState, 'stopped');
 });

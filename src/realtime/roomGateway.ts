@@ -8,6 +8,7 @@ import { parseRoomHeartbeat, parseRoomReady, ROOM_LIMITS, type RoomActor, type R
 import { getDb } from '../infrastructure/database';
 import type { ServerLifecycle } from '../services/serverLifecycleService';
 import { roomAuthority } from './roomAuthority';
+import { roomGatewayMetrics, type RoomGatewayMetrics } from './roomGatewayMetrics';
 import { onRoomChanges } from './roomEvents';
 import { redeemRoomTicket } from './roomTickets';
 import { createRoomUpgradeContext, createRoomUpgradeRateLimit } from './roomUpgradeProtection';
@@ -15,11 +16,13 @@ import { createRoomUpgradeContext, createRoomUpgradeRateLimit } from './roomUpgr
 interface Connection { socket: WebSocket; actor: RoomActor; key: string; ip: string; version: string;
     lastSeen: number; lastHeartbeat: number; heartbeatState: string; window: number; reports: number; pending: number; socialVersion: number }
 interface GatewayOptions { api?: RoomApi; acquire?: typeof roomAuthority.acquire; release?: typeof roomAuthority.release;
-    redeemTicket?: typeof redeemRoomTicket }
+    redeemTicket?: typeof redeemRoomTicket; metrics?: RoomGatewayMetrics }
 
 /** Authenticated complete-state delivery; commands stay on HTTP and media bytes stay on the stream route. */
 export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, options: GatewayOptions = {}) => {
     const api = options.api ?? createRoomService();
+    const metrics = options.metrics ?? roomGatewayMetrics;
+    metrics.setAuthorityState('starting');
     const acquire = options.acquire ?? (() => roomAuthority.acquire());
     const release = options.release ?? (() => roomAuthority.release());
     const redeemTicket = options.redeemTicket ?? redeemRoomTicket;
@@ -39,6 +42,19 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
     let lastRecovery = 0;
     let authorityReady = false;
     let sweepFailures = 0;
+
+    /** Observe lease acquisition without changing its scheduling or retry policy. */
+    const acquireAuthority = async () => {
+        try {
+            authorityReady = (await acquire()) !== null;
+            if (!authorityReady) metrics.recordFailure('authorityAcquisition');
+            if (!stopped) metrics.setAuthorityState(authorityReady ? 'ready' : 'unavailable');
+        } catch (error) {
+            metrics.recordFailure('authorityAcquisition');
+            if (!stopped) metrics.setAuthorityState('unavailable');
+            throw error;
+        }
+    };
 
     const unavailable = (error: unknown): error is SocialError => error instanceof SocialError && error.statusCode === 503
         && ['room_unavailable', 'social_unavailable'].includes(error.code);
@@ -96,6 +112,7 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
             connection.version = version;
             if (socialVersion !== connection.socialVersion) { connection.socialVersion = socialVersion; send(connection, { type: 'socialChanged' }); }
         } catch (error) {
+            metrics.recordFailure('refresh');
             closeForFailure(connection, error);
         }
     };
@@ -109,10 +126,10 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
                 refreshPending = false;
                 const current = [...connections.values()];
                 for (let i = 0; i < current.length && !stopped; i += 8) {
-                    await Promise.all(current.slice(i, i + 8).map(connection => serialized(connection.key, () => refresh(connection)).catch(() => undefined)));
+                    await Promise.all(current.slice(i, i + 8).map(connection => serialized(connection.key, () => refresh(connection)).catch(() => { metrics.recordFailure('refresh'); })));
                 }
             }
-        }).catch(() => undefined).finally(() => { refreshing = false; });
+        }).catch(() => { metrics.recordFailure('refresh'); }).finally(() => { refreshing = false; });
     };
     const unsubscribe = onRoomChanges(fanout);
 
@@ -177,15 +194,15 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
             connections.delete(key);
             if (!stopped) void serialized(key, async () => {
                 if (!connections.has(key)) await api.disconnected(actor);
-            }).catch(() => undefined);
+            }).catch(() => { metrics.recordFailure('disconnect'); });
         });
         socket.on('message', (bytes, binary) => {
             if (++connection.pending > 8) { socket.close(1008, 'Too many pending reports.'); return; }
             void serialized(key, () => dispatch(connection, Buffer.from(bytes as ArrayBuffer), binary))
-                .catch(error => closeForFailure(connection, error))
+                .catch(error => { metrics.recordFailure('report'); closeForFailure(connection, error); })
                 .finally(() => { connection.pending--; });
         });
-        void serialized(key, () => refresh(connection, true)).catch(() => socket.close(1011, 'Unavailable.'));
+        void serialized(key, () => refresh(connection, true)).catch(() => { metrics.recordFailure('refresh'); socket.close(1011, 'Unavailable.'); });
     };
     const reject = (socket: Duplex, status = 401) => {
         if (!socket.destroyed) socket.end(`HTTP/1.1 ${status} Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -230,17 +247,18 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
         try {
             await lifecycle.track(async () => {
                 const now = Date.now();
-                if (now - lastLease >= 3_000) { authorityReady = (await acquire()) !== null; lastLease = now; }
+                if (now - lastLease >= 3_000) { await acquireAuthority(); lastLease = now; }
                 if (!authorityReady) {
                     for (const connection of connections.values()) connection.socket.close(1012, 'Authority changed.');
                     return;
                 }
-                try { await api.sweep(); sweepFailures = 0; }
+                try { await api.sweep(); sweepFailures = 0; metrics.recordSuccessfulSweep(); }
                 catch (error) {
+                    metrics.recordFailure('sweep');
                     if (!unavailable(error) || ++sweepFailures >= 3) throw error;
                     // A known-aborted timer does not prove lease loss. Revalidate authority now,
                     // then let the next ordinary tick capture a new, independently fenced observation.
-                    authorityReady = (await acquire()) !== null; lastLease = Date.now();
+                    await acquireAuthority(); lastLease = Date.now();
                     if (!authorityReady) throw new SocialError(503, 'room_authority_unavailable');
                     return;
                 }
@@ -251,6 +269,7 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
             });
         } catch (error) {
             authorityReady = false;
+            if (!stopped) metrics.setAuthorityState('unavailable');
             const temporary = unavailable(error) || (error instanceof SocialError && error.code === 'mutation_outcome_unknown');
             for (const connection of connections.values()) connection.socket.close(temporary ? 1013 : 1012, 'Synchronization unavailable.');
         }
@@ -263,7 +282,7 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
     /** Stop admission and socket callbacks before draining; release only this process's matching lease last. */
     const stop = () => {
         if (stopped) return;
-        stopped = true; clearInterval(interval); unsubscribe();
+        stopped = true; metrics.setAuthorityState('stopped'); clearInterval(interval); unsubscribe();
         server.off('upgrade', upgrade);
         for (const connection of connections.values()) connection.socket.terminate();
         connections.clear(); wss.close();
