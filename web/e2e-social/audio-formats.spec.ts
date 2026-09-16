@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import type { RoomMedia, RoomSnapshot } from '../src/api/rooms';
 import { nativeSocialBrowser } from './support/nativeSocialBrowser';
 
@@ -14,8 +14,10 @@ type Format = typeof formats[number];
 /** Observe decoded browser state without substituting media events, clocks, sockets or response bytes. */
 const media = (page: Page) => page.locator('audio, video').evaluateAll(elements => elements.map(element => {
   const value = element as HTMLMediaElement;
+  const observedAtMs = performance.now();
   return { source: value.currentSrc, paused: value.paused, time: value.currentTime, duration: value.duration,
     ready: value.readyState, seeking: value.seeking, error: value.error?.code ?? null, preload: value.preload,
+    observedAtMs, capturedAtMs: performance.timeOrigin + observedAtMs, playbackRate: value.playbackRate,
     buffered: Array.from({ length: value.buffered.length }, (_, index) => [value.buffered.start(index), value.buffered.end(index)]),
     seekable: Array.from({ length: value.seekable.length }, (_, index) => [value.seekable.start(index), value.seekable.end(index)]) };
 }));
@@ -101,18 +103,50 @@ const expectPlaying = async (page: Page, entry: RoomMedia, baseURL: string) => {
   expect(values[0].seekable.some(([start, end]) => start <= values[0].time && end >= values[0].time)).toBe(true);
 };
 
-/** Actual advancing playback over a full second exposes callback echoes as well as a one-time aligned seek. */
+/** Observe continuous advancement; a decoder correction cannot count as elapsed playback. */
 const expectSynchronized = async (pages: Page[], entry: RoomMedia, baseURL: string) => {
   await Promise.all(pages.map(page => expectPlaying(page, entry, baseURL)));
-  const initial = await Promise.all(pages.map(page => media(page)));
+  type Sample = Awaited<ReturnType<typeof media>>[number];
+  const windows: Array<{ first: Sample; previous: Sample } | undefined> = pages.map(() => undefined);
+  let samples: Sample[] = [];
   await expect.poll(async () => {
     const latest = await Promise.all(pages.map(page => media(page)));
-    return latest.every((values, index) => values[0].time > initial[index][0].time + 1);
-  }).toBe(true);
-  const values = await Promise.all(pages.map(page => media(page)));
-  const driftMs = Math.abs(values[0][0].time - values[1][0].time) * 1000;
+    samples = latest.map(values => values[0]);
+    // Map before every so each participant's window advances even while the other is still preparing.
+    const continuouslyPlaying = latest.map((values, index) => {
+      const sample = values[0];
+      if (values.length !== 1 || sample.source !== new URL(entry.streamUrl, baseURL).href
+        || sample.paused || sample.seeking || sample.ready < 3 || sample.error !== null
+        || !Number.isFinite(sample.time) || !Number.isFinite(sample.duration) || sample.duration <= 0
+        || !Number.isFinite(sample.observedAtMs) || !Number.isFinite(sample.capturedAtMs)
+        || !Number.isFinite(sample.playbackRate) || sample.playbackRate <= 0) {
+        windows[index] = undefined;
+        return false;
+      }
+      const window = windows[index];
+      const restart = () => { windows[index] = { first: sample, previous: sample }; return false; };
+      if (!window) return restart();
+      const elapsedSeconds = (sample.observedAtMs - window.previous.observedAtMs) / 1000;
+      const advancedSeconds = sample.time - window.previous.time;
+      const expectedAdvance = elapsedSeconds * (sample.playbackRate + window.previous.playbackRate) / 2;
+      // Allow normal decoder clock granularity and rate correction, but reject jumps or an unobserved long interval.
+      if (elapsedSeconds <= 0 || elapsedSeconds > 0.75 || advancedSeconds <= 0
+        || Math.abs(advancedSeconds - expectedAdvance) > Math.max(0.12, elapsedSeconds * 0.2)) return restart();
+      window.previous = sample;
+      return sample.observedAtMs - window.first.observedAtMs > 1000 && sample.time - window.first.time > 1;
+    }).every(Boolean);
+    return continuouslyPlaying && Math.max(...samples.map(value => value.capturedAtMs))
+      - Math.min(...samples.map(value => value.capturedAtMs)) <= 50;
+  }, { intervals: [100] }).toBe(true);
+  const latestCaptureMs = Math.max(...samples.map(value => value.capturedAtMs));
+  const captureSkewMs = latestCaptureMs - Math.min(...samples.map(value => value.capturedAtMs));
+  // Both clocks advanced continuously; compare their positions at the later capture, not at two different instants.
+  const projectedTimes = samples.map(value => value.time + (latestCaptureMs - value.capturedAtMs) / 1000 * value.playbackRate);
+  const driftMs = Math.abs(projectedTimes[0] - projectedTimes[1]) * 1000;
   expect(driftMs).toBeLessThan(750);
-  return { title: entry.title, driftMs, times: values.map(value => value[0].time) };
+  return { title: entry.title, driftMs, captureSkewMs, times: samples.map(value => value.time), projectedTimes,
+    continuous: samples.map((value, index) => ({ observedMs: value.observedAtMs - windows[index]!.first.observedAtMs,
+      advancedSeconds: value.time - windows[index]!.first.time })) };
 };
 
 test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and no command echo', async ({ browser, browserName, baseURL, request }) => {
@@ -192,12 +226,14 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
       expect(hostState.commands.slice(hostInitial).map(value => value.action)).toEqual(['play', 'seek', 'next', 'seek', 'next', 'seek', 'end']);
       expect(guestState.commands).toHaveLength(guestInitial);
     } finally {
-      await test.info().attach('compressed-audio-evidence', { contentType: 'application/json', body: JSON.stringify({
+      const evidencePath = test.info().outputPath('compressed-audio-evidence.json');
+      await writeFile(evidencePath, JSON.stringify({
         browsers: { host: browserName, guest: 'chromium' },
         drift: driftEvidence,
         host: { commands: hostState.commands, ready: hostState.ready, streams: hostState.streams, media: await media(host).catch(() => []) },
         guest: { commands: guestState.commands, ready: guestState.ready, streams: guestState.streams, media: await media(guest).catch(() => []) }
-      }) });
+      }));
+      await test.info().attach('compressed-audio-evidence', { contentType: 'application/json', path: evidencePath });
     }
   } finally { await Promise.all([hostContext?.close(), native.close()]); }
 });
