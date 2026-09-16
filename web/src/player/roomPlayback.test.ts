@@ -18,6 +18,7 @@ class RoomAudio implements PlayerAudio {
   error = null;
   playbackRate = 1;
   readyState = 0;
+  preload = 'metadata';
   seeking = false;
   loadCalls = 0;
   playCalls = 0;
@@ -129,6 +130,45 @@ test('preparation completion keeps its generation and starts only at the future 
   expect(audio.loadCalls).toBe(1);
   expect(onIntent).not.toHaveBeenCalled();
   store.destroy();
+});
+
+test('room preparation buffers paused media and restores ordinary preload after detaching', async () => {
+  const { audio, room, store, onObservation } = setup();
+  await room.apply({ ...frame(0), status: 'preparing', playbackAllowed: false });
+  expect(audio.preload).toBe('auto');
+  audio.currentSrc = audio.src; audio.readyState = 2; audio.emit('loadedmetadata'); audio.emit('seeked');
+  expect(audio.playCalls).toBe(0);
+  expect(onObservation.mock.calls.some(([value]) => value.type === 'ready')).toBe(false);
+  audio.readyState = 4; audio.emit('canplay');
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }));
+  expect(audio.playCalls).toBe(0);
+  room.detach();
+  await store.launchStandalone(queue[0]);
+  expect(audio.preload).toBe('metadata');
+  store.destroy();
+});
+
+test('readiness confirmation and scheduled start reuse the completed seek without flushing the decoder', async () => {
+  vi.useFakeTimers();
+  const audio = new RoomAudio(); audio.duration = 120; audio.readyState = 4;
+  audio.src = queue[0].streamUrl; audio.currentSrc = audio.src;
+  const seek = vi.fn((position: number) => { audio.currentTime = position; audio.seeking = true; return true; });
+  const onObservation = vi.fn(), onIntent = vi.fn();
+  const controller = createRoomPlaybackController({ media: () => audio, sourceGeneration: () => 1,
+    install: async () => undefined, updateQueue: () => undefined, play: () => audio.play(), pause: () => audio.pause(),
+    seek, detach: () => undefined }, { now: () => 10000 + performance.now(), onObservation, onIntent });
+  const preparing = { ...frame(0), positionSeconds: 66, status: 'preparing' as const, playbackAllowed: false };
+  await controller.attachment.apply(preparing);
+  expect(seek).toHaveBeenCalledExactlyOnceWith(66);
+  audio.seeking = false; controller.observe('seeked', audio);
+  await controller.attachment.apply({ ...preparing, revision: 2, playbackAllowed: true });
+  await controller.attachment.apply({ ...preparing, revision: 3, playbackAllowed: true, status: 'playing', anchorMonotonicMs: 10350 });
+  expect(seek).toHaveBeenCalledTimes(1);
+  expect(audio.playCalls).toBe(0);
+  await vi.advanceTimersByTimeAsync(350);
+  expect(audio.playCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  controller.attachment.detach();
 });
 
 test('late-join readiness prepares the current position without playing before server confirmation', async () => {

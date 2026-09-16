@@ -466,6 +466,8 @@ export const createPlayerStore = (
 
     try {
       target.pause();
+      // Room preparation must buffer while paused, before the server permits a scheduled start.
+      target.preload = room ? 'auto' : 'metadata';
       target.poster = item.artworkUrl;
       target.src = item.streamUrl;
       target.currentTime = 0;

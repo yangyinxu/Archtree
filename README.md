@@ -241,6 +241,8 @@ and absence of command echoes. In Linux CI (`CI=true` or `CI=1`), the same
 scenario also runs with Firefox and WebKit hosts, each paired with an isolated
 Chromium guest and its own server/database. These extra projects are never
 collected on macOS; browser-specific results remain separate from Chromium proof.
+Room playback preloads media while paused so readiness can precede the shared
+start; confirming a completed seek does not seek again to the same position.
 
 In isolated Linux CI (`CI=true` or `CI=1`), the native-tab fixture matches
 Playwright's default `--no-sandbox` launch option; other local launches keep the

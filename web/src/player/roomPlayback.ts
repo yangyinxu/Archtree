@@ -155,7 +155,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
       needsSeek = false;
       seekPending = true;
       seekTarget = Math.min(desiredPosition(), target.duration);
-      if (!port.seek(seekTarget)) {
+      // Reconfirming readiness must not flush a decoder that already completed this exact seek.
+      const atTarget = !target.seeking && Math.abs(target.currentTime - seekTarget) <= 0.001;
+      if (!atTarget && !port.seek(seekTarget)) {
         needsSeek = true;
         seekPending = false;
         return;

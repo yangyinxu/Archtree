@@ -179,6 +179,7 @@ test('room reactions and actor notices stay local, finite and independent of sha
     await expect.poll(() => guestState.room()?.members.find(member => member.memberId === guestState.room()?.self.memberId)?.ready).toBe(true);
     await roomPanel(host).getByRole('button', { name: 'Play for everyone', exact: true }).click();
     await Promise.all([playing(host), playing(guest)]);
+    await expect.poll(() => hostState.room()?.timeline?.state).toBe('playing');
     await expect.poll(() => playbackIdentity(guestState.room()!)).toEqual(playbackIdentity(hostState.room()!));
     await Promise.all([watchContinuity(host), watchContinuity(guest)]);
     const before = playbackIdentity(hostState.room()!);
@@ -215,6 +216,8 @@ test('room reactions and actor notices stay local, finite and independent of sha
     await roomPanel(host).getByRole('button', { name: 'Next', exact: true }).click();
     for (const page of [host, guest, observer]) await expect(eventList(page).getByText('Invitation host changed the song.', { exact: true })).toHaveCount(1);
     await expect.poll(() => hostState.room()?.timeline?.entryId).not.toBe(before.timeline!.entryId);
+    // Readiness legitimately changes the scheduled anchor; retain the expected timeline only after it settles.
+    await expect.poll(() => hostState.room()?.timeline?.state).toBe('playing');
     await expect.poll(() => guestState.room()?.timeline).toEqual(hostState.room()!.timeline);
     await Promise.all([playing(host), playing(guest)]);
     expect(probes.flatMap(probe => probe.commands).filter(command => command.action === 'next')).toHaveLength(1);
