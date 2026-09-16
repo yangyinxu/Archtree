@@ -82,6 +82,7 @@ export interface PlayerAudio {
   playbackRate: number;
   readonly readyState?: number;
   readonly seeking?: boolean;
+  readonly buffered?: Pick<TimeRanges, 'length' | 'start' | 'end'>;
   preload?: string;
   poster?: string;
   playsInline?: boolean;

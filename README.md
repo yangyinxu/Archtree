@@ -243,6 +243,12 @@ Chromium guest and its own server/database. These extra projects are never
 collected on macOS; browser-specific results remain separate from Chromium proof.
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
+It corrects startup drift once the media clock actually advances. A fully
+buffered Audio decoder that stays paused with only current-frame data after a
+completed seek gets at most one paused source reload per playback occurrence;
+readiness still requires future data, and local pause or leaving cancels recovery.
+CI uploads `finitude-social-browser-evidence` immediately after these scenarios,
+so failures can be diagnosed while the ordinary browser matrix continues.
 
 In isolated Linux CI (`CI=true` or `CI=1`), the native-tab fixture matches
 Playwright's default `--no-sandbox` launch option; other local launches keep the

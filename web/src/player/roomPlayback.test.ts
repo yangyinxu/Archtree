@@ -95,9 +95,10 @@ test('ordinary player construction requires an explicit room controller to attac
 });
 
 test('room listening observations require actual ready playback and retain occurrence through queue-only snapshots', async () => {
-  const { audio, room, store, onIntent } = setup();
+  let clock = 10000;
+  const { audio, room, store, onIntent } = setup(undefined, { now: () => clock });
   const observations: ActualPlaybackObservation[] = [];
-  const stop = createActualPlaybackObserver(store, event => observations.push(event), { now: () => 10000 + performance.now() });
+  const stop = createActualPlaybackObserver(store, event => observations.push(event), { now: () => clock });
   const preparing = { ...frame(0), status: 'preparing' as const, playbackAllowed: false, anchorMonotonicMs: 10000 };
   await room.apply(preparing); audio.ready();
   expect(observations).toEqual([]);
@@ -109,7 +110,7 @@ test('room listening observations require actual ready playback and retain occur
   await room.apply({ ...playing, revision: 3, queueRevision: 2 });
   expect(observations.filter(event => event.type === 'stopped')).toEqual([]);
   await room.apply({ ...playing, revision: 1, currentEntryId: 'entry-b' });
-  audio.currentTime += .5; audio.emit('timeupdate');
+  clock += 500; audio.currentTime += .5; audio.emit('timeupdate');
   expect(observations.at(-1)).toMatchObject({ type: 'progress', sample: { room: { entryId: preparing.currentEntryId } } });
   expect(onIntent).not.toHaveBeenCalled();
   room.pauseLocally(); expect(observations.at(-1)?.type).toBe('stopped');
@@ -169,6 +170,89 @@ test('readiness confirmation and scheduled start reuse the completed seek withou
   expect(audio.playCalls).toBe(1);
   expect(onIntent).not.toHaveBeenCalled();
   controller.attachment.detach();
+});
+
+test('the first advancing media clock corrects a delayed start once without replaying a command', async () => {
+  let clock = 10_000;
+  const { audio, room, store, onIntent } = setup(undefined, { now: () => clock });
+  audio.duration = 120;
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true, canControl: false,
+    positionSeconds: 5, anchorMonotonicMs: clock });
+  audio.ready();
+  expect(audio.playCalls).toBe(1);
+  clock += 1_000;
+  for (const event of ['canplay', 'playing', 'seeked', 'timeupdate']) audio.emit(event);
+  expect(audio.currentTime).toBe(5); // A play promise and readiness do not prove an advancing clock.
+  audio.currentTime = 5.01; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(5.01);
+  audio.currentTime = 5.03; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(6);
+  clock += 1_000;
+  for (const event of ['seeked', 'playing', 'canplay', 'timeupdate']) audio.emit(event);
+  audio.currentTime = 6.1; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(6.1); // Correction-generated events cannot start a seek loop.
+  expect(audio.playCalls).toBe(1);
+  expect(audio.playbackRate).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test.each(['local pause', 'shared pause', 'permission loss', 'detach', 'native pause'] as const)(
+  '%s cancels pending first-progress correction', async cancellation => {
+    let clock = 10_000;
+    const { audio, room, store, onIntent } = setup(undefined, { now: () => clock });
+    audio.duration = 120;
+    const initial = { ...frame(0), status: 'playing' as const, playbackAllowed: true,
+      positionSeconds: 5, anchorMonotonicMs: clock };
+    await room.apply(initial); audio.ready();
+    clock += 1_000;
+    if (cancellation === 'local pause') room.pauseLocally();
+    else if (cancellation === 'shared pause') await room.apply({ ...initial, revision: 2, playbackEpoch: initial.playbackEpoch + 1, status: 'paused' });
+    else if (cancellation === 'permission loss') await room.apply({ ...initial, revision: 2, playbackAllowed: false });
+    else if (cancellation === 'detach') room.detach();
+    else audio.pause();
+    // A late native progress callback cannot consume authority from before cancellation.
+    audio.paused = false; audio.currentTime = 5.1; audio.emit('timeupdate');
+    expect(audio.currentTime).toBe(5.1);
+    expect(audio.playbackRate).toBe(1);
+    expect(onIntent).not.toHaveBeenCalled();
+    store.destroy();
+  }
+);
+
+test('first-progress correction waits for source and seek readiness, and a new occurrence gets its own baseline', async () => {
+  let clock = 10_000;
+  const { audio, room, store, onIntent } = setup(undefined, { now: () => clock });
+  audio.duration = 120;
+  const initial = { ...frame(0), status: 'playing' as const, playbackAllowed: true,
+    positionSeconds: 5, anchorMonotonicMs: clock };
+  await room.apply(initial); audio.ready();
+  clock += 1_000;
+  audio.currentTime = 5.1; audio.currentSrc = queue[1].streamUrl; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(5.1);
+  audio.currentSrc = audio.src; audio.seeking = true; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(5.1);
+  audio.seeking = false; audio.readyState = 2; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(5.1);
+  audio.readyState = 4; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(6);
+
+  const preparing = { ...initial, revision: 2, playbackEpoch: initial.playbackEpoch + 1,
+    currentEntryId: 'entry-b', mediaRevision: 'b', status: 'preparing' as const,
+    playbackAllowed: false, positionSeconds: 20, anchorMonotonicMs: clock };
+  await room.apply(preparing); audio.ready();
+  audio.paused = false; audio.currentTime = 20.1; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(20.1);
+  await room.apply({ ...preparing, revision: 3, status: 'playing', playbackAllowed: true });
+  expect(audio.currentTime).toBe(20);
+  clock += 1_000;
+  audio.emit('playing'); audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(20);
+  audio.currentTime = 20.03; audio.emit('timeupdate');
+  expect(audio.currentTime).toBe(21);
+  expect(audio.playCalls).toBe(2);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
 });
 
 test('late-join readiness prepares the current position without playing before server confirmation', async () => {

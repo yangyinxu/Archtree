@@ -91,11 +91,15 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let source = -1;
   let scheduled: ReturnType<typeof setTimeout> | undefined;
   let correction: ReturnType<typeof setTimeout> | undefined;
+  let decoderRecovery: ReturnType<typeof setTimeout> | undefined;
+  let recoveredOccurrence: string | null = null;
+  let reloadingOccurrence: string | null = null;
   let needsSeek = true;
   let seekPending = false;
   let seekTarget = 0;
   let seekFailed = false;
   let playRequested = false;
+  let firstProgressPosition: number | undefined;
   const observed = new Set<string>();
 
   const report = (type: RoomPlaybackObservation['type']) => {
@@ -123,15 +127,19 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     effect += 1;
     clearTimeout(scheduled);
     clearTimeout(correction);
+    clearTimeout(decoderRecovery);
     scheduled = undefined;
     correction = undefined;
+    decoderRecovery = undefined;
     playRequested = false;
+    firstProgressPosition = undefined;
     observed.clear();
     resetRate();
   };
 
   const matchesSource = (target: PlayerAudio) => {
     if (!state || detached || source !== port.sourceGeneration()) return false;
+    if (reloadingOccurrence !== null && reloadingOccurrence === occurrence()) return false;
     const item = state.queue[state.entryIds.indexOf(state.currentEntryId)];
     if (!item) return false;
     const absolute = (url: string) => {
@@ -145,6 +153,57 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   const desiredPosition = () => state === null ? 0 : state.positionSeconds + (
     state.status === 'playing' ? Math.max(0, now() - state.anchorMonotonicMs) / 1000 : 0
   );
+
+  const correctionAllowed = (target: PlayerAudio) => Boolean(state && !detached && !localPaused && matchesSource(target)
+    && state.status === 'playing' && state.playbackAllowed !== false && playRequested && !target.paused
+    && !needsSeek && !seekPending && !seekFailed && !target.seeking && (target.readyState ?? 0) >= 3);
+
+  // Logical identity survives decoder reinstalls; physical source generations only fence in-flight work.
+  const occurrence = () => state && JSON.stringify([state.roomId, state.epoch, state.currentEntryId, state.mediaRevision, state.playbackEpoch]);
+  /** Excludes loading, failed, deliberately paused, and end-of-media states from automatic repair. */
+  const stalledDecoder = (target: PlayerAudio) => {
+    if (!state || localPaused || !matchesSource(target) || state.status === 'ended'
+      || state.queue[state.entryIds.indexOf(state.currentEntryId)].mediaType !== 'audio'
+      || !target.paused || target.seeking || seekPending || needsSeek || seekFailed || target.error
+      || target.readyState !== 2 || !finiteNonnegative(target.currentTime) || !finiteNonnegative(target.duration)
+      || target.currentTime >= target.duration - 0.35) return false;
+    try {
+      const buffered = target.buffered;
+      return buffered?.length === 1 && buffered.start(0) <= 0.001 && buffered.end(0) >= target.duration - 0.001;
+    } catch { return false; }
+  };
+
+  /** A fully downloaded paused decoder can stall after seeking; retry its source once, never manufacture readiness. */
+  const recoverDecoder = (target: PlayerAudio) => {
+    const key = occurrence();
+    if (!key || decoderRecovery !== undefined || key === recoveredOccurrence || !stalledDecoder(target)) return;
+    const expectedEffect = effect, expectedSource = source;
+    decoderRecovery = setTimeout(() => {
+      decoderRecovery = undefined;
+      if (!state || detached || effect !== expectedEffect || source !== expectedSource || occurrence() !== key || !stalledDecoder(target)) return;
+      recoveredOccurrence = key;
+      reloadingOccurrence = key;
+      cancelEffects();
+      needsSeek = true;
+      seekPending = false;
+      port.pause();
+      const recovering = state;
+      void (async () => {
+        try { await port.install(recovering.queue, recovering.entryIds.indexOf(recovering.currentEntryId)); }
+        catch {
+          // Keep the source fenced and unready after failure; never repeat this automatic reload.
+          if (reloadingOccurrence === key) reloadingOccurrence = null;
+          if (!detached && occurrence() === key) { source = port.sourceGeneration(); seekFailed = true; }
+          return;
+        }
+        if (reloadingOccurrence === key) reloadingOccurrence = null;
+        if (!detached && occurrence() === key) source = port.sourceGeneration();
+        if (detached || localPaused || occurrence() !== key) return;
+        // Same-occurrence snapshots may finish preparation during install; source effects were fenced until now.
+        await reconcile(); // Use the latest authoritative anchor, including a cohort that started during reload.
+      })();
+    }, 1000);
+  };
 
   /** Readiness requires real metadata, a completed seek, and enough decoded data to start. */
   const reconcile = async (): Promise<void> => {
@@ -170,7 +229,10 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
       }
       if (!seekPending) report('seek-complete');
     }
-    if (seekPending || target.seeking || (target.readyState ?? 0) < 3) return;
+    if (seekPending || target.seeking) return;
+    if ((target.readyState ?? 0) < 3) { recoverDecoder(target); return; }
+    clearTimeout(decoderRecovery);
+    decoderRecovery = undefined;
     report('ready');
     if (localPaused || state.playbackAllowed === false || state.status !== 'playing') {
       port.pause();
@@ -192,6 +254,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     }
     if (playRequested || (!target.paused && !target.ended)) return;
     playRequested = true;
+    firstProgressPosition = target.currentTime;
     await port.play();
   };
 
@@ -286,10 +349,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     },
     correct(positionSeconds) {
       const target = port.media();
-      if (!state || !target || detached || localPaused || !matchesSource(target)
-        || state.status !== 'playing' || state.playbackAllowed === false || !playRequested || target.paused
-        || needsSeek || seekPending || seekFailed || target.seeking
-        || !finiteNonnegative(positionSeconds) || (target.readyState ?? 0) < 3) return 'none';
+      if (!state || !target || !correctionAllowed(target) || !finiteNonnegative(positionSeconds)) return 'none';
       const drift = positionSeconds - target.currentTime;
       clearTimeout(correction);
       resetRate();
@@ -363,7 +423,10 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         if (target.ended && (target.readyState ?? 0) >= 2 && !seekPending) report('ended');
         return target.ended; // The store records completion without advancing its room queue.
       }
-      if (event === 'pause' && !target.paused) return false;
+      if (event === 'pause') {
+        if (!target.paused) return false;
+        firstProgressPosition = undefined;
+      }
       if (event === 'error' && !target.error) return false;
       if (event === 'seeked' && !target.seeking) {
         if (seekPending && Math.abs(target.currentTime - seekTarget) > 0.15) {
@@ -376,6 +439,13 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         report('seek-complete');
       }
       if (['loadedmetadata', 'canplay', 'seeked'].includes(event)) void reconcile();
+      if (event === 'timeupdate' && firstProgressPosition !== undefined && correctionAllowed(target)
+        && !target.ended && !target.error && state && now() >= state.anchorMonotonicMs
+        && finiteNonnegative(target.currentTime) && target.currentTime > firstProgressPosition + 0.02) {
+        // Ready/playing can precede decoder progress. Correct once after actual advancement, never rearm from seek callbacks.
+        firstProgressPosition = undefined;
+        attachment.correct(desiredPosition());
+      }
       return true;
     }
   };

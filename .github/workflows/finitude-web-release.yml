@@ -75,6 +75,15 @@ jobs:
       - name: Run real social MongoDB, media, and WebSocket browser tests
         run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web
 
+      - name: Retain social browser evidence
+        if: ${{ !cancelled() && steps.browser_environment.outcome == 'success' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: finitude-social-browser-evidence
+          path: web/test-results/social-real
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: Run production-bundle browser and accessibility tests
         if: ${{ !cancelled() && steps.browser_environment.outcome == 'success' }}
         run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
