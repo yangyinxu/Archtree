@@ -1119,6 +1119,14 @@ User Playlists:
   `X-Finitude-Account-Viewer` so a stale browser tab cannot read or mutate the
   newly switched account's private data. Bearer-authenticated native requests
   remain bound to their access-token identity.
+- Web retains one uncertain Playlist creation intent (original name and key)
+  in account-scoped tab memory across dialog closure and route changes. Reopen
+  Create to retry that intent explicitly, or choose Stop retrying before
+  starting another. This does not delete a Playlist that may already exist.
+  Confirmed responses refresh the current account's cache; late responses from
+  a previous account are ignored. Recovery ends on account transition or full
+  page reload, and a retained intent cannot be replayed after its 24-hour
+  receipt window. Same-name Playlists remain supported.
 - Names contain 1–100 trimmed Unicode characters. Each account may own at most
   100 Playlists, each containing at most 500 unique MediaTracks. Playlist order
   is explicit; unavailable members remain represented but only ready members
@@ -1134,6 +1142,16 @@ Session behavior:
 - Access tokens default to 15 minutes. Refresh sessions have an absolute
   lifetime of 30 days by default.
 - Refresh rotation is atomic, so a refresh token can succeed only once.
+- Email-code consumption, password/email effects, and session/listening/room
+  revocation commit together. Failed transactions leave the original code,
+  credential, and sessions available for a safe retry. Password login rechecks
+  its verified password hash when committing the session, so a concurrent
+  reset cannot be bypassed by a delayed login.
+- Provider unlink checks the remaining recovery methods inside the account
+  transaction. Account-owned sessions, identities, passkeys, codes, and
+  challenges share the account deletion fence; discoverable passkey challenges
+  can still be issued without an account. Authenticated credential changes
+  recheck their session before writing.
 - Protected requests verify that the access token's backing session is still
   active, allowing logout and logout-all to revoke access immediately.
 - Web login stores the access and refresh credentials in separate HttpOnly
@@ -1155,6 +1173,9 @@ Session behavior:
   boundaries, so public catalog data may refetch afterward.
   Storage or BroadcastChannel unavailability does not block the originating
   authentication action.
+- Playback activity captures the viewer and account epoch before awaiting
+  playback start. A delayed start cannot report the previous account's activity
+  or invalidate the replacement account's cache.
 - Listener avatar reads bind private bytes to the requesting account and
   authoritative revision; a stale account projection receives no image bytes.
 - Listener avatar writes and destructive account actions also bind to the
