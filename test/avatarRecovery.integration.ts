@@ -217,3 +217,65 @@ test('cover-art storage records acknowledged versions and removes them without a
         assert.equal(await getDb()!.collection('imageAssets').countDocuments({ _id: new ObjectId(cover.imageId) }), 0);
     } finally { s3.send = previousSend; }
 });
+
+test('account deletion retires only empty expired reserved/cleared states and fences late workers', async () => {
+    const { deleteListenerAccountData } = await import('../src/services/accountDeletionService');
+    const { finalizeAvatarAssetDeletion } = await import('../src/services/avatarStorageService');
+    const { AccountReferenceUnavailableError } = await import('../src/services/accountReferenceFenceService');
+    for (const phase of ['reserved', 'cleared'] as const) {
+        const userId = await account();
+        const lease = (await beginAvatarMutation(userId, `retire-${phase}`, 'replace', 0)).lease!;
+        if (phase === 'cleared') await setAvatarMutationPhase(lease, phase);
+        await getDb()!.collection('avatarMutations').updateOne({ _id: lease.mutationId } as any, { $set: { leaseUntil: new Date(0) } });
+        assert.deepEqual(await deleteListenerAccountData(userId), { status: 'deleted' });
+        let staged = false;
+        await assert.rejects(setAvatarMutationPhase(lease, 'uploading', {}, async session => {
+            staged = true;
+            await getDb()!.collection('imageAssets').insertOne({ ownerType: 'user', ownerId: userId }, { session });
+        }), AccountReferenceUnavailableError);
+        assert.equal(staged, false);
+        await assert.rejects(completeAvatarMutation(lease, { statusCode: 200 }), AccountReferenceUnavailableError);
+        await assert.rejects(finalizeAvatarAssetDeletion(String(new ObjectId()), {}, { lease, detached: true }), AccountReferenceUnavailableError);
+        assert.equal(await getDb()!.collection('imageAssets').countDocuments({ ownerId: userId }), 0);
+        assert.equal(await getDb()!.collection('avatarMutations').countDocuments({ userId }), 0);
+    }
+});
+
+test('avatar staging that owns the account fence first blocks deletion and preserves its evidence', async () => {
+    const { deleteListenerAccountData } = await import('../src/services/accountDeletionService');
+    const userId = await account();
+    const lease = (await beginAvatarMutation(userId, 'stage-first', 'replace', 0)).lease!;
+    const imageId = new ObjectId();
+    let release!: () => void; let staged!: () => void;
+    const pause = new Promise<void>(resolve => { release = resolve; });
+    const stagingWritten = new Promise<void>(resolve => { staged = resolve; });
+    const staging = setAvatarMutationPhase(lease, 'uploading', { assetId: String(imageId) }, async session => {
+        await getDb()!.collection('imageAssets').insertOne({ _id: imageId, ownerType: 'user', ownerId: userId,
+            avatarMutationId: lease.mutationId, uploadStatus: 'pending', uploadOutcomeUnknown: true }, { session });
+        staged(); await pause;
+    });
+    await stagingWritten;
+    const deletion = deleteListenerAccountData(userId);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    release(); await staging;
+    assert.deepEqual(await deletion, { status: 'avatarCleanupPending' });
+    assert.ok(await getDb()!.collection('users').findOne({ _id: new ObjectId(userId) }));
+    assert.ok(await getDb()!.collection('imageAssets').findOne({ _id: imageId }));
+    assert.equal((await getDb()!.collection('avatarMutations').findOne({ _id: lease.mutationId } as any))?.phase, 'uploading');
+});
+
+test('account deletion keeps active, legacy, dispatched and asset-bearing avatar operations', async () => {
+    const { deleteListenerAccountData } = await import('../src/services/accountDeletionService');
+    for (const scenario of ['active', 'legacy', 'uploading', 'reserved-asset', 'cleared-asset']) {
+        const userId = await account();
+        const lease = (await beginAvatarMutation(userId, scenario, 'replace', 0)).lease!;
+        const phase = scenario === 'uploading' ? 'uploading' : scenario === 'cleared-asset' ? 'cleared' : 'reserved';
+        await setAvatarMutationPhase(lease, phase);
+        if (scenario !== 'active') await getDb()!.collection('avatarMutations').updateOne({ _id: lease.mutationId } as any, { $set: { leaseUntil: new Date(0) } });
+        if (scenario === 'legacy') await getDb()!.collection('avatarMutations').updateOne({ _id: lease.mutationId } as any, { $unset: { phase: '' } });
+        if (scenario.endsWith('-asset')) await getDb()!.collection('imageAssets').insertOne({ ownerType: 'user', ownerId: userId, uploadOutcomeUnknown: true });
+        assert.deepEqual(await deleteListenerAccountData(userId), { status: 'avatarCleanupPending' }, scenario);
+        assert.ok(await getDb()!.collection('users').findOne({ _id: new ObjectId(userId) }));
+        assert.ok(await getDb()!.collection('avatarMutations').findOne({ _id: lease.mutationId } as any));
+    }
+});

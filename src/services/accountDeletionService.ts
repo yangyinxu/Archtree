@@ -97,19 +97,26 @@ export const deleteListenerAccountData = async (
                     throw new AccountDeletionBlockedError('avatarAttached');
                 }
 
-                const pendingAvatarMutation = await db.collection('avatarMutations').findOne(
-                    { userId: ownedByUser, status: 'pending' },
-                    { session, projection: { _id: 1 } }
-                );
-                if (pendingAvatarMutation) {
-                    throw new AccountDeletionBlockedError('avatarCleanupPending');
-                }
-
                 const privateImageAsset = await db.collection('imageAssets').findOne(
                     { ownerType: 'user', ownerId: ownedByUser },
                     { session, projection: { _id: 1 } }
                 );
                 if (privateImageAsset) {
+                    throw new AccountDeletionBlockedError('avatarCleanupPending');
+                }
+
+                // No avatar or private asset exists. Only a never-dispatched or
+                // fully-cleared expired operation can now be retired. The same
+                // account transaction fences any late staging/finalization worker.
+                await db.collection('avatarMutations').deleteMany({
+                    userId: ownedByUser, status: 'pending',
+                    phase: { $in: ['reserved', 'cleared'] }, leaseUntil: { $lte: new Date() }
+                }, { session });
+                const pendingAvatarMutation = await db.collection('avatarMutations').findOne(
+                    { userId: ownedByUser, status: 'pending' },
+                    { session, projection: { _id: 1 } }
+                );
+                if (pendingAvatarMutation) {
                     throw new AccountDeletionBlockedError('avatarCleanupPending');
                 }
 
