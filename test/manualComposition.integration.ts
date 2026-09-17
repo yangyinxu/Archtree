@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { Request, Response } from 'express';
 import { getDb } from '../src/infrastructure/database';
 import { Carousel } from '../src/models/carousel';
 import { ContentCollection } from '../src/models/contentCollection';
+import { addContentCollectionItem } from '../src/controllers/contentCollectionController';
+import { addCarouselItem, addCarouselItemWeb } from '../src/controllers/pageController';
 import { ManualCompositionConflictError } from '../src/services/manualCompositionService';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
 
@@ -118,4 +121,49 @@ for (const batch of [false, true]) {
         assert.equal((await stored('carousels', source))[0].contentId, String(albums[0]));
         assert.equal((await stored('carousels', target))[0].contentId, String(albums[1]));
     });
+}
+
+const additionControllers = [
+    { name: 'Grid/List API', collection: 'contentCollections', model: ContentCollection, handler: addContentCollectionItem },
+    { name: 'Carousel API', collection: 'carousels', model: Carousel, handler: addCarouselItem },
+    { name: 'Carousel Web', collection: 'carousels', model: Carousel, handler: addCarouselItemWeb }
+];
+for (const entry of additionControllers) {
+    for (const condition of ['full', 'deleted'] as const) {
+        test(`${entry.name}: ${condition} composition returns 409 with refresh guidance instead of success`, async () => {
+            const id = await seed(entry.collection, condition === 'full' ? Array.from({ length: 500 }, () => item(0)) : []);
+            const req = {
+                auth: { userId: actor.toHexString(), email: 'admin@example.test', role: 'admin' },
+                params: { collectionId: id, carouselId: id },
+                body: { carouselId: id, contentType: 'album', contentId: String(albums[1]) }
+            } as unknown as Request;
+            let status = 200; let body: any; let redirected = false;
+            const res = {
+                status(value: number) { status = value; return this; },
+                json(value: unknown) { body = value; return this; },
+                redirect() { redirected = true; return this; }
+            } as unknown as Response;
+            const original = entry.model.addItem;
+            if (condition === 'deleted') {
+                // Pause at the boundary after controller validation, then use the
+                // actual mutation to observe deletion during its transactional read.
+                entry.model.addItem = (async (...args: Parameters<typeof original>) => {
+                    await getDb()!.collection(entry.collection).deleteOne({ _id: new ObjectId(id) });
+                    return original.apply(entry.model, args);
+                }) as typeof original;
+            }
+            try {
+                await entry.handler(req, res, error => {
+                    assert.ok(error instanceof ManualCompositionConflictError);
+                    res.status(error.statusCode).json({ message: error.message, data: error.data });
+                });
+            } finally { entry.model.addItem = original; }
+            assert.equal(status, 409);
+            assert.equal(body.data.code, 'manual_composition_changed');
+            assert.match(body.message, /refresh/i);
+            assert.equal(redirected, false);
+            if (condition === 'full') assert.equal((await stored(entry.collection, id)).length, 500);
+            else assert.equal(await getDb()!.collection(entry.collection).countDocuments({ _id: new ObjectId(id) }), 0);
+        });
+    }
 }

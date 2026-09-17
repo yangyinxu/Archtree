@@ -70,22 +70,57 @@ test('Legacy membership applies only to unmigrated records, never canonical empt
     assert.deepEqual(page!.appearsOn.map(entry => entry.id), [String(legacyTrack)]);
 });
 
-test('Disabling credit sections restores the same legacy fallback on Artist pages and carousels', async () => {
+test('partial Credit migration keeps legacy Album primary precedence and legacy track participation precedence', async () => {
+    const legacyPerformer = await album('A legacy primary with canonical performer'); await track(legacyPerformer, ['performer']);
+    const legacyComposer = await album('B legacy primary with canonical composer'); await track(legacyComposer, ['composer']);
+    const albumComposer = await album('C canonical composer with legacy track'); await track(albumComposer);
+    await getDb()!.collection('albums').updateOne({ _id: albumComposer }, {
+        $set: { credits: [credit('composer')], attributionStatus: 'documented' }
+    });
+    const featured = await album('D canonical featured with legacy track', ['featured']); await track(featured);
+    await getDb()!.collection('artists').updateOne({ _id: artistId }, {
+        $set: { albumIds: [legacyPerformer, legacyComposer, albumComposer, featured].map(String) }
+    });
+    assert.deepEqual(await resolve('discography'), [legacyPerformer, legacyComposer].map(String));
+    assert.deepEqual(await resolve('appearsOn'), [String(albumComposer)]);
+    assert.deepEqual(await resolve('collaborations'), [String(featured)]);
+    const page = await getListenerArtist(String(artistId));
+    assert.deepEqual(page!.discography.map(entry => entry.id), [legacyPerformer, legacyComposer].map(String));
+    assert.deepEqual(page!.appearsOn.map(entry => entry.id), [String(albumComposer)]);
+    assert.deepEqual(page!.collaborations.map(entry => entry.id), [String(featured)]);
+    assert.deepEqual(page!.creditAlbums, []);
+});
+
+test('legacy uppercase relationship IDs resolve identically in Artist pages and Album carousels', async () => {
+    const canonicalTrackAlbum = await album('A uppercase Album link');
+    const canonicalTrack = await track(canonicalTrackAlbum, ['performer']);
+    await getDb()!.collection('audioTracks').updateOne({ _id: canonicalTrack }, { $set: { albumId: String(canonicalTrackAlbum).toUpperCase() } });
+    const legacyTrackAlbum = await album('B uppercase Artist link');
+    const legacyTrack = await track(legacyTrackAlbum);
+    await getDb()!.collection('audioTracks').updateOne({ _id: legacyTrack }, { $set: { artistIds: [String(artistId).toUpperCase()] } });
+    const expected = [canonicalTrackAlbum, legacyTrackAlbum].map(String);
+    assert.deepEqual((await getListenerArtist(String(artistId)))!.appearsOn.map(entry => entry.id), expected);
+    assert.deepEqual(await resolve('appearsOn'), expected);
+});
+
+for (const rolloutFlag of ['CATALOG_CREDIT_SECTIONS_ENABLED', 'CATALOG_CREDIT_READS_ENABLED']) {
+test(`Disabling ${rolloutFlag} restores the same legacy fallback on Artist pages and carousels`, async () => {
     const primary = await album('A primary', ['primary']);
     const legacy = await album('B legacy', []);
     await getDb()!.collection('artists').updateOne({ _id: artistId }, { $set: { albumIds: [String(legacy)] } });
-    const previous = process.env.CATALOG_CREDIT_SECTIONS_ENABLED;
-    process.env.CATALOG_CREDIT_SECTIONS_ENABLED = 'false';
+    const previous = process.env[rolloutFlag];
+    process.env[rolloutFlag] = 'false';
     try {
         assert.deepEqual(await resolve('discography'), [String(legacy)]);
         assert.deepEqual(await resolve('allRelated'), [String(legacy)]);
         assert.deepEqual((await getListenerArtist(String(artistId)))!.discography.map(entry => entry.id), [String(legacy)]);
     } finally {
-        if (previous === undefined) delete process.env.CATALOG_CREDIT_SECTIONS_ENABLED;
-        else process.env.CATALOG_CREDIT_SECTIONS_ENABLED = previous;
+        if (previous === undefined) delete process.env[rolloutFlag];
+        else process.env[rolloutFlag] = previous;
     }
     assert.deepEqual(await resolve('discography'), [String(primary)]);
 });
+}
 
 test('A prolific first release cannot hide later releases behind the old 2000-track cutoff', async () => {
     const first = await album('A prolific');

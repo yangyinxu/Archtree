@@ -18,12 +18,15 @@ export const artistAlbumSection = (artist: any, album: any, tracks: any[]) => {
     const relatedTracks = tracks.filter(track => String(track.albumId ?? '').toLowerCase() === albumId);
     const rollout = catalogCreditRollout();
     const canonical = rollout.readsEnabled && rollout.sectionsEnabled;
-    const section = canonical ? classifyArtistAlbumCredit(artistId, validStoredCredits(album) ?? [],
-        relatedTracks.flatMap(track => validStoredCredits(track) ?? [])) : null;
-    if (section) return section;
+    // An explicit unmigrated Album relationship represents primary credit, so
+    // it must participate at primary precedence even when its tracks migrated first.
     if ((!canonical || album.credits === undefined)
         && (Array.isArray(artist.albumIds) ? artist.albumIds : []).some((id: unknown) => String(id).toLowerCase() === albumId)) return 'discography';
+    const section = canonical ? classifyArtistAlbumCredit(artistId, validStoredCredits(album) ?? [],
+        relatedTracks.flatMap(track => validStoredCredits(track) ?? [])) : null;
+    if (section && section !== 'credits') return section;
+    // Legacy track participation has Appears On precedence over composer/producer Credits.
     if (relatedTracks.some(track => (!canonical || track.credits === undefined)
         && (Array.isArray(track.artistIds) ? track.artistIds : []).some((id: unknown) => String(id).toLowerCase() === artistId))) return 'appearsOn';
-    return null;
+    return section;
 };

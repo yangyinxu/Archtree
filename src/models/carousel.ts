@@ -272,6 +272,7 @@ export class Carousel {
         let content: any[] = [];
         if (config.contentType === 'album') {
             const artistId = artistObjectId.toHexString();
+            const artistValues = [artistId, artistId.toUpperCase(), artistObjectId];
             const legacyDiscographyIds = (Array.isArray(artist.albumIds) ? artist.albumIds : [])
                 .map((id: unknown) => toObjectId(String(id))).filter(Boolean);
             const scope = config.scope ?? 'discography';
@@ -279,7 +280,7 @@ export class Carousel {
             const relatedAlbums = await db!.collection('audioTracks').aggregate<{ _id: unknown }>([
                 { $match: { $and: [readyAudioFilter, { $or: [
                     { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
-                    { artistIds: { $in: [artistId, artistObjectId] } }
+                    { artistIds: { $in: artistValues } }
                 ] }] } },
                 { $group: { _id: '$albumId' } }
             ], { maxTimeMS: 3_000 }).toArray();
@@ -293,12 +294,12 @@ export class Carousel {
                 while (content.length < itemLimit && await cursor.hasNext()) {
                     const candidates = [];
                     while (candidates.length < 50 && await cursor.hasNext()) candidates.push((await cursor.next())!);
-                    const albumValues = candidates.flatMap(album => [album._id, String(album._id)]);
+                    const albumValues = candidates.flatMap(album => [album._id, String(album._id), String(album._id).toUpperCase()]);
                     const tracks = await db!.collection('audioTracks').find({ $and: [readyAudioFilter, {
                         albumId: { $in: albumValues },
                         $or: [
                             { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
-                            { artistIds: { $in: [artistId, artistObjectId] } }
+                            { artistIds: { $in: artistValues } }
                         ]
                     }] }).project({ albumId: 1, credits: 1, attributionStatus: 1, artistIds: 1 })
                         .maxTimeMS(3_000).toArray();
