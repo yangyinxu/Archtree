@@ -14,7 +14,9 @@ import {
     touchActiveAccount,
     withActiveAccount
 } from '../services/accountReferenceFenceService';
+import { artistAlbumSection } from '../services/artistAlbumClassificationService';
 import { deleteCarouselAndPageReferences } from '../services/pageReferenceLifecycleService';
+import { mutateManualComposition, type ManualCompositionHooks } from '../services/manualCompositionService';
 
 const collectionId = 'carousels';
 const maximumManualCarouselItems = 500;
@@ -269,54 +271,51 @@ export class Carousel {
             };
         let content: any[] = [];
         if (config.contentType === 'album') {
-            const legacyDiscographyIds = [...new Set<string>(
-                (Array.isArray(artist.albumIds) ? artist.albumIds : [])
-                    .map(String)
-                    .filter((id: string) => Boolean(toObjectId(id)))
-            )];
+            const artistId = artistObjectId.toHexString();
+            const legacyDiscographyIds = (Array.isArray(artist.albumIds) ? artist.albumIds : [])
+                .map((id: unknown) => toObjectId(String(id))).filter(Boolean);
             const scope = config.scope ?? 'discography';
-            const directRoles = scope === 'discography'
-                ? ['primary']
-                : scope === 'collaborations' ? ['featured'] : null;
-            const relatedTracks = scope === 'appearsOn' || scope === 'allRelated'
-                ? await db!.collection('audioTracks').find({
-                    $and: [
-                        readyAudioFilter,
-                        { $or: [
-                            { credits: { $elemMatch: { subjectType: 'artist', subjectId: config.artistId } } },
-                            { artistIds: { $in: [config.artistId, artistObjectId] } }
-                        ] }
-                    ]
-                }).project({ albumId: 1 }).limit(2_000).maxTimeMS(3_000).toArray()
-                : [];
-            const relatedAlbumIds = relatedTracks
-                .map((track) => String(track.albumId ?? '').toLowerCase())
-                .filter((id) => Boolean(toObjectId(id)));
-            const clauses: Record<string, unknown>[] = [];
-            if (directRoles) {
-                clauses.push({ credits: { $elemMatch: {
-                    subjectType: 'artist',
-                    subjectId: config.artistId,
-                    role: { $in: directRoles }
-                } } });
-            } else if (scope === 'allRelated') {
-                clauses.push({ credits: { $elemMatch: {
-                    subjectType: 'artist',
-                    subjectId: config.artistId
-                } } });
-            }
-            if (scope === 'discography' && legacyDiscographyIds.length > 0) {
-                clauses.push({ _id: { $in: legacyDiscographyIds.map(toObjectId) } });
-            }
-            if (relatedAlbumIds.length > 0) {
-                clauses.push({ _id: { $in: relatedAlbumIds.map(toObjectId) } });
-            }
-            content = clauses.length > 0
-                ? await db!.collection('albums').find({
-                    ...readyAlbumLifecycleFilter,
-                    $or: clauses
-                }).sort(sort).limit(itemLimit).maxTimeMS(3_000).toArray()
-                : [];
+            // Group in Mongo so prolific Artists do not lose releases behind a track-count cutoff.
+            const relatedAlbums = await db!.collection('audioTracks').aggregate<{ _id: unknown }>([
+                { $match: { $and: [readyAudioFilter, { $or: [
+                    { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
+                    { artistIds: { $in: [artistId, artistObjectId] } }
+                ] }] } },
+                { $group: { _id: '$albumId' } }
+            ], { maxTimeMS: 3_000 }).toArray();
+            const relatedAlbumIds = relatedAlbums.map(album => toObjectId(String(album._id))).filter(Boolean);
+            const cursor = db!.collection('albums').find({ $and: [readyAlbumLifecycleFilter, { $or: [
+                { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
+                { _id: { $in: [...legacyDiscographyIds, ...relatedAlbumIds] } }
+            ] }] }).sort(sort).batchSize(100).maxTimeMS(3_000);
+            try {
+                // Classify before the output limit, so unrelated roles and non-ready Albums cannot consume slots.
+                while (content.length < itemLimit && await cursor.hasNext()) {
+                    const candidates = [];
+                    while (candidates.length < 50 && await cursor.hasNext()) candidates.push((await cursor.next())!);
+                    const albumValues = candidates.flatMap(album => [album._id, String(album._id)]);
+                    const tracks = await db!.collection('audioTracks').find({ $and: [readyAudioFilter, {
+                        albumId: { $in: albumValues },
+                        $or: [
+                            { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
+                            { artistIds: { $in: [artistId, artistObjectId] } }
+                        ]
+                    }] }).project({ albumId: 1, credits: 1, attributionStatus: 1, artistIds: 1 })
+                        .maxTimeMS(3_000).toArray();
+                    const tracksByAlbum = new Map<string, typeof tracks>();
+                    for (const track of tracks) {
+                        const id = String(track.albumId).toLowerCase();
+                        const related = tracksByAlbum.get(id) ?? [];
+                        related.push(track);
+                        tracksByAlbum.set(id, related);
+                    }
+                    for (const album of candidates) {
+                        const section = artistAlbumSection(artist, album, tracksByAlbum.get(String(album._id)) ?? []);
+                        if (section && (scope === 'allRelated' || section === scope)) content.push(album);
+                        if (content.length >= itemLimit) break;
+                    }
+                }
+            } finally { await cursor.close(); }
         } else {
             const scope = config.scope ?? 'discography';
             const roles = scope === 'discography'
@@ -411,158 +410,56 @@ export class Carousel {
         return persist(update);
     }
 
-    static async addItem(carouselId: string, item: Omit<CarouselItemRef, 'order'>, updatedBy: string, position?: number) {
-        const existing: any = await this.findById(carouselId);
-        if (!existing || existing.mode !== 'manual') {
-            return null;
-        }
-
-        const nextItems = Array.isArray(existing.items) ? [...existing.items] : [];
-        if (nextItems.length >= maximumManualCarouselItems) {
-            return null;
-        }
-        const insertAt = typeof position === 'number'
-            ? Math.max(0, Math.min(position, nextItems.length))
-            : nextItems.length;
-
-        nextItems.splice(insertAt, 0, {
-            ...item,
-            order: insertAt
-        });
-
-        const normalizedItems = normalizeOrder(nextItems);
-        await this.updateById(carouselId, {
-            items: normalizedItems,
-            updatedBy
-        });
-
-        return normalizedItems;
+    /** Appends retry against the current contents; positional edits reject a changed snapshot. */
+    static async addItem(carouselId: string, item: Omit<CarouselItemRef, 'order'>, updatedBy: string, position?: number, hooks: ManualCompositionHooks = {}) {
+        const result = await mutateManualComposition<CarouselItemRef>(collectionId, [carouselId], updatedBy, ([existing]) => {
+            const items = Array.isArray(existing.items) ? [...existing.items] : [];
+            if (items.length >= maximumManualCarouselItems || (position !== undefined && !Number.isInteger(position))) return null;
+            const insertAt = position === undefined ? items.length : Math.max(0, Math.min(position, items.length));
+            items.splice(insertAt, 0, { ...item, order: insertAt });
+            return [items];
+        }, position !== undefined, hooks);
+        return result?.[0] ?? null;
     }
 
-    static async reorderItem(carouselId: string, fromIndex: number, toIndex: number, updatedBy: string) {
-        const existing: any = await this.findById(carouselId);
-        if (!existing || existing.mode !== 'manual') {
-            return null;
-        }
-
-        const nextItems = Array.isArray(existing.items) ? [...existing.items] : [];
-        if (fromIndex < 0 || toIndex < 0 || fromIndex >= nextItems.length || toIndex >= nextItems.length) {
-            return null;
-        }
-
-        const reordered = moveByIndex(nextItems, fromIndex, toIndex);
-        const normalizedItems = normalizeOrder(reordered);
-
-        await this.updateById(carouselId, {
-            items: normalizedItems,
-            updatedBy
-        });
-
-        return normalizedItems;
+    static async reorderItem(carouselId: string, fromIndex: number, toIndex: number, updatedBy: string, hooks: ManualCompositionHooks = {}) {
+        const result = await mutateManualComposition<CarouselItemRef>(collectionId, [carouselId], updatedBy, ([existing]) => {
+            const items = Array.isArray(existing.items) ? [...existing.items] : [];
+            if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)
+                || fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) return null;
+            return [moveByIndex(items, fromIndex, toIndex)];
+        }, true, hooks);
+        return result?.[0] ?? null;
     }
 
-    static async moveItemBetweenCarousels(sourceCarouselId: string, targetCarouselId: string, fromIndex: number, toIndex: number, updatedBy: string) {
-        const source: any = await this.findById(sourceCarouselId);
-        const target: any = await this.findById(targetCarouselId);
-
-        if (!source || !target || source.mode !== 'manual' || target.mode !== 'manual') {
-            return null;
-        }
-
-        const sourceItems = Array.isArray(source.items) ? [...source.items] : [];
-        const targetItems = Array.isArray(target.items) ? [...target.items] : [];
-        if (targetItems.length >= maximumManualCarouselItems) {
-            return null;
-        }
-
-        if (fromIndex < 0 || fromIndex >= sourceItems.length) {
-            return null;
-        }
-
-        const [movedItem] = sourceItems.splice(fromIndex, 1);
-        const insertAt = Math.max(0, Math.min(toIndex, targetItems.length));
-        targetItems.splice(insertAt, 0, movedItem);
-
-        const normalizedSourceItems = normalizeOrder(sourceItems);
-        const normalizedTargetItems = normalizeOrder(targetItems);
-        const persisted = await withReadyCatalogItemReferences(
-            [...normalizedSourceItems, ...normalizedTargetItems],
-            async (session, normalizedItems) => {
-                const normalizedSource = normalizedItems.slice(0, normalizedSourceItems.length);
-                const normalizedTarget = normalizedItems.slice(normalizedSourceItems.length);
-                const sourceUpdate = await getDb()!.collection(collectionId).updateOne(
-                    { _id: ObjectId.createFromHexString(sourceCarouselId), mode: 'manual' },
-                    { $set: { items: normalizedSource, updatedBy, updatedAt: new Date() } },
-                    { session }
-                );
-                const targetUpdate = await getDb()!.collection(collectionId).updateOne(
-                    { _id: ObjectId.createFromHexString(targetCarouselId), mode: 'manual' },
-                    { $set: { items: normalizedTarget, updatedBy, updatedAt: new Date() } },
-                    { session }
-                );
-                if (sourceUpdate.matchedCount !== 1 || targetUpdate.matchedCount !== 1) {
-                    throw new Error('Source or target Carousel changed during the move.');
-                }
-                return {
-                    sourceItems: normalizedSource as unknown as CarouselItemRef[],
-                    targetItems: normalizedTarget as unknown as CarouselItemRef[]
-                };
-            }
-        );
-        return persisted;
+    /** Moves both sides atomically and never reinterprets a stale source index on transaction retry. */
+    static async moveItemBetweenCarousels(sourceCarouselId: string, targetCarouselId: string, fromIndex: number, toIndex: number, updatedBy: string, hooks: ManualCompositionHooks = {}) {
+        const result = await mutateManualComposition<CarouselItemRef>(collectionId, [sourceCarouselId, targetCarouselId], updatedBy, ([source, target]) => {
+            const sourceItems = Array.isArray(source.items) ? [...source.items] : [];
+            const targetItems = Array.isArray(target.items) ? [...target.items] : [];
+            if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)
+                || fromIndex < 0 || fromIndex >= sourceItems.length || targetItems.length >= maximumManualCarouselItems) return null;
+            const [movedItem] = sourceItems.splice(fromIndex, 1);
+            targetItems.splice(Math.max(0, Math.min(toIndex, targetItems.length)), 0, movedItem);
+            return [sourceItems, targetItems];
+        }, true, hooks);
+        return result ? { sourceItems: result[0], targetItems: result[1] } : null;
     }
 
-    static async moveItemsBetweenCarousels(sourceCarouselId: string, targetCarouselId: string, fromIndexes: number[], updatedBy: string) {
-        const source: any = await this.findById(sourceCarouselId);
-        const target: any = await this.findById(targetCarouselId);
-
-        if (!source || !target || sourceCarouselId === targetCarouselId || source.mode !== 'manual' || target.mode !== 'manual') {
-            return null;
-        }
-
-        const sourceItems = (Array.isArray(source.items) ? [...source.items] : [])
-            .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0));
-        const targetItems = (Array.isArray(target.items) ? [...target.items] : [])
-            .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0));
-        const selectedIndexes = [...new Set(fromIndexes)].sort((a, b) => a - b);
-        if (selectedIndexes.length === 0 || selectedIndexes.some((index) => index < 0 || index >= sourceItems.length)) {
-            return null;
-        }
-        if (targetItems.length + selectedIndexes.length > maximumManualCarouselItems) {
-            return null;
-        }
-
-        const selectedIndexSet = new Set(selectedIndexes);
-        const movedItems = selectedIndexes.map((index) => sourceItems[index]);
-        const remainingSourceItems = sourceItems.filter((_, index) => !selectedIndexSet.has(index));
-        const nextSourceItems = normalizeOrder(remainingSourceItems);
-        const nextTargetItems = normalizeOrder([...targetItems, ...movedItems]);
-
-        const persisted = await withReadyCatalogItemReferences(
-            [...nextSourceItems, ...nextTargetItems],
-            async (session, normalizedItems) => {
-                const normalizedSource = normalizedItems.slice(0, nextSourceItems.length);
-                const normalizedTarget = normalizedItems.slice(nextSourceItems.length);
-                const sourceUpdate = await getDb()!.collection(collectionId).updateOne(
-                    { _id: ObjectId.createFromHexString(sourceCarouselId), mode: 'manual' },
-                    { $set: { items: normalizedSource, updatedBy, updatedAt: new Date() } },
-                    { session }
-                );
-                const targetUpdate = await getDb()!.collection(collectionId).updateOne(
-                    { _id: ObjectId.createFromHexString(targetCarouselId), mode: 'manual' },
-                    { $set: { items: normalizedTarget, updatedBy, updatedAt: new Date() } },
-                    { session }
-                );
-                if (sourceUpdate.matchedCount !== 1 || targetUpdate.matchedCount !== 1) {
-                    throw new Error('Source or target Carousel changed during the move.');
-                }
-                return {
-                    sourceItems: normalizedSource as unknown as CarouselItemRef[],
-                    targetItems: normalizedTarget as unknown as CarouselItemRef[]
-                };
-            }
-        );
-        return persisted;
+    /** Preserves selected source order while committing the entire batch in one transaction. */
+    static async moveItemsBetweenCarousels(sourceCarouselId: string, targetCarouselId: string, fromIndexes: number[], updatedBy: string, hooks: ManualCompositionHooks = {}) {
+        const result = await mutateManualComposition<CarouselItemRef>(collectionId, [sourceCarouselId, targetCarouselId], updatedBy, ([source, target]) => {
+            const sourceItems = (Array.isArray(source.items) ? [...source.items] : [])
+                .sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0));
+            const targetItems = (Array.isArray(target.items) ? [...target.items] : [])
+                .sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0));
+            const selectedIndexes = [...new Set(fromIndexes)].sort((a, b) => a - b);
+            if (selectedIndexes.length === 0 || selectedIndexes.some(index => !Number.isInteger(index) || index < 0 || index >= sourceItems.length)
+                || targetItems.length + selectedIndexes.length > maximumManualCarouselItems) return null;
+            const selected = new Set(selectedIndexes);
+            return [sourceItems.filter((_, index) => !selected.has(index)), [...targetItems, ...selectedIndexes.map(index => sourceItems[index])]];
+        }, true, hooks);
+        return result ? { sourceItems: result[0], targetItems: result[1] } : null;
     }
 
     /** Deletes a Carousel only through the atomic Page-detachment lifecycle. */

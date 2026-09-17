@@ -23,13 +23,8 @@ import {
     isReadyAlbumLifecycle,
     readyAlbumLifecycleFilter
 } from './albumReferenceFenceService';
-import {
-    AttributionStatus,
-    CatalogCredit,
-    classifyArtistAlbumCredit,
-    normalizeCatalogCredits,
-    validateAttribution
-} from '../models/catalogCredit';
+import { AttributionStatus } from '../models/catalogCredit';
+import { artistAlbumSection, validStoredCredits } from './artistAlbumClassificationService';
 import { readyOrganizationLifecycleFilter } from './organizationReferenceFenceService';
 import { Carousel } from '../models/carousel';
 import { catalogCreditRollout } from '../config/catalogCreditRollout';
@@ -354,18 +349,6 @@ const trackBelongsToAlbum = (track: any, albumId: string) =>
 const artistReferencesAlbum = (artist: any, albumId: string) =>
     (Array.isArray(artist?.albumIds) ? artist.albumIds : [])
         .some((id: unknown) => String(id).trim().toLowerCase() === albumId.toLowerCase());
-
-const validStoredCredits = (owner: any): CatalogCredit[] | null => {
-    if (!catalogCreditRollout().readsEnabled) return null;
-    if (!Array.isArray(owner?.credits)) return null;
-    try {
-        const credits = normalizeCatalogCredits(owner.credits);
-        validateAttribution(owner.attributionStatus, credits);
-        return credits;
-    } catch {
-        return null;
-    }
-};
 
 /** Loads only the catalog fields needed to create public listener DTOs. */
 const createCatalogContext = async (
@@ -1110,8 +1093,6 @@ export const getListenerArtist = async (artistId: string): Promise<Required<List
     ];
     const albums = orderedAlbumIds.flatMap((id) => albumsById.has(id) ? [albumsById.get(id)] : []);
     const context = await createCatalogContext(albums, tracks, [artist]);
-    const sectionsEnabled = catalogCreditRollout().readsEnabled
-        && catalogCreditRollout().sectionsEnabled;
     const sections = {
         discography: [] as ListenerAlbumSummary[],
         collaborations: [] as ListenerAlbumSummary[],
@@ -1119,22 +1100,7 @@ export const getListenerArtist = async (artistId: string): Promise<Required<List
         creditAlbums: [] as ListenerAlbumSummary[]
     };
     for (const album of albums) {
-        const albumId = String(album._id).toLowerCase();
-        const albumCredits = sectionsEnabled ? validStoredCredits(album) ?? [] : [];
-        const relatedTrackCredits = tracks
-            .filter((track) => trackBelongsToAlbum(track, albumId))
-            .flatMap((track) => validStoredCredits(track) ?? []);
-        let section = sectionsEnabled ? classifyArtistAlbumCredit(
-            normalizedArtistId,
-            albumCredits,
-            relatedTrackCredits
-        ) : null;
-        if (!section && legacyAlbumIds.includes(albumId)) section = 'discography';
-        if (!section && tracks.some((track) => trackBelongsToAlbum(track, albumId)
-            && (Array.isArray(track.artistIds) ? track.artistIds : [])
-                .some((id: unknown) => String(id).toLowerCase() === normalizedArtistId))) {
-            section = 'appearsOn';
-        }
+        const section = artistAlbumSection(artist, album, tracks);
         const summary = toAlbumSummary(album, context);
         if (section === 'discography') sections.discography.push(summary);
         else if (section === 'collaborations') sections.collaborations.push(summary);

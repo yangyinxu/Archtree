@@ -7,6 +7,7 @@ import {
     withActiveAccount
 } from '../services/accountReferenceFenceService';
 import { deleteContentCollectionAndPageReferences } from '../services/pageReferenceLifecycleService';
+import { mutateManualComposition, type ManualCompositionHooks } from '../services/manualCompositionService';
 
 const collectionId = 'contentCollections';
 const maximumManualItems = 500;
@@ -121,45 +122,28 @@ export class ContentCollection {
         id: string,
         item: Omit<ContentCollectionItemRef, 'order'>,
         updatedBy: string,
-        position?: number
+        position?: number,
+        hooks: ManualCompositionHooks = {}
     ) {
-        const existing: any = await this.findById(id);
-        if (!existing || existing.mode !== 'manual' || existing.contentType !== item.contentType) {
-            return null;
-        }
-        const nextItems = Array.isArray(existing.items) ? [...existing.items] : [];
-        if (nextItems.length >= maximumManualItems) return null;
-        const insertAt = typeof position === 'number'
-            ? Math.max(0, Math.min(position, nextItems.length))
-            : nextItems.length;
-        nextItems.splice(insertAt, 0, { ...item, order: insertAt });
-        const items = normalizeOrder(nextItems);
-        await withReadyCatalogItemReferences(items, async (session, normalizedItems) => {
-            await getDb()!.collection(collectionId).updateOne(
-                { _id: ObjectId.createFromHexString(id), mode: 'manual' },
-                { $set: { items: normalizedItems, updatedBy, updatedAt: new Date() } },
-                { session }
-            );
-        });
-        return items;
+        const result = await mutateManualComposition<ContentCollectionItemRef>(collectionId, [id], updatedBy, ([existing]) => {
+            if (existing.contentType !== item.contentType) return null;
+            const items = Array.isArray(existing.items) ? [...existing.items] : [];
+            if (items.length >= maximumManualItems || (position !== undefined && !Number.isInteger(position))) return null;
+            const insertAt = position === undefined ? items.length : Math.max(0, Math.min(position, items.length));
+            items.splice(insertAt, 0, { ...item, order: insertAt });
+            return [items];
+        }, position !== undefined, hooks);
+        return result?.[0] ?? null;
     }
 
-    static async reorderItem(id: string, fromIndex: number, toIndex: number, updatedBy: string) {
-        const existing: any = await this.findById(id);
-        if (!existing || existing.mode !== 'manual') return null;
-        const items = Array.isArray(existing.items) ? [...existing.items] : [];
-        if (fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) {
-            return null;
-        }
-        const reordered = normalizeOrder(moveByIndex(items, fromIndex, toIndex));
-        await withReadyCatalogItemReferences(reordered, async (session, normalizedItems) => {
-            await getDb()!.collection(collectionId).updateOne(
-                { _id: ObjectId.createFromHexString(id), mode: 'manual' },
-                { $set: { items: normalizedItems, updatedBy, updatedAt: new Date() } },
-                { session }
-            );
-        });
-        return reordered;
+    static async reorderItem(id: string, fromIndex: number, toIndex: number, updatedBy: string, hooks: ManualCompositionHooks = {}) {
+        const result = await mutateManualComposition<ContentCollectionItemRef>(collectionId, [id], updatedBy, ([existing]) => {
+            const items = Array.isArray(existing.items) ? [...existing.items] : [];
+            if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)
+                || fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) return null;
+            return [moveByIndex(items, fromIndex, toIndex)];
+        }, true, hooks);
+        return result?.[0] ?? null;
     }
 
     /** Deletes a Grid/List only through the atomic Page-detachment lifecycle. */

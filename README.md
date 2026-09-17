@@ -975,7 +975,16 @@ Web content management:
 - The Content Manager Credit editor supports named subject search, role
   changes, ordering, removal, Organization-only attribution, and an explicit
   `Attribution not documented` state. Dynamic Artist Carousels can target
-  Discography, Collaborations, Appears On, or all related Credits.
+  Discography, Collaborations, Appears On, or all related Credits. Album
+  carousels share the Artist detail classification and rollout switches, apply
+  ready lifecycle and role precedence before the result limit, and use legacy
+  relationships only for records without canonical Credits.
+- Manual Carousel and Grid/List additions, reorder operations, and moves read
+  their current contents inside the same MongoDB transaction as the reference
+  fences and writes. Concurrent appends preserve both edits and the 500-item
+  limit; positional edits return `409 manual_composition_changed` if transaction
+  retry observes changed contents. Refresh the editor before resubmitting a
+  positional edit. Cross-Carousel moves commit both sides or neither.
 - Single and bulk Content Manager Audio MediaTrack creation records original filenames
   and a pending upload state before sending files to S3. They accept Artist Credits,
   Organization Credits, inherited Album primary Artists, or an explicitly
