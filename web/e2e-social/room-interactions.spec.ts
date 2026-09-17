@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page, type Request } from '@playwright/test';
 import type { RoomCommunity, RoomCommunityEvent } from '../../src/contracts/roomV1';
 import type { RoomSnapshot } from '../src/api/rooms';
 import { expectNoUnownedAxeViolations } from '../e2e/support/accessibility';
@@ -9,14 +9,41 @@ const activity = (page: Page) => page.getByRole('region', { name: 'Room activity
 const eventList = (page: Page) => activity(page).getByRole('list', { name: 'Room activity', exact: true });
 const announcement = (page: Page) => page.getByRole('status', { name: 'Room activity', exact: true });
 
+const diagnosticActions = new Set(['create', 'invite', 'acceptInvitation', 'takeControl', 'play', 'pause', 'next', 'previous',
+  'seek', 'select', 'react', 'offerTransfer', 'acceptTransfer', 'cancelTransfer', 'leave', 'end']);
+type Diagnostic = { atMs: number; event: string; action?: string; status?: number; outcome?: string; code?: string;
+  socket?: number; commandCount?: number; lastPongAgeMs?: number | null; hasRoom?: boolean; hasTransferOffer?: boolean };
+
+/** Only fixed command labels are retained; payloads, mutation identities and credentials never enter diagnostics. */
+const diagnosticAction = (request: Request) => {
+  if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/social/v1/room-commands') return undefined;
+  try {
+    const action: unknown = request.postDataJSON()?.action;
+    return typeof action === 'string' && diagnosticActions.has(action) ? action : undefined;
+  } catch { return undefined; }
+};
+
 /** Observe actual HTTP projections, command identities and WS snapshots without replacing their implementations. */
-const observe = (page: Page) => {
+const observe = (page: Page, startedAt: number) => {
   let room: RoomSnapshot | null | undefined;
   let community: RoomCommunity | undefined;
   let subscribed = 0;
   let closed = 0;
   const reads: string[] = [];
   const commands: Array<{ action: string; commandId: string; reaction?: string }> = [];
+  const diagnostics: Diagnostic[] = [];
+  let sockets = 0, lastPongAt: number | undefined;
+  const record = (event: string, fields: Omit<Diagnostic, 'atMs' | 'event'> = {}) => {
+    const entry = { atMs: Date.now() - startedAt, event, ...fields };
+    diagnostics.push(entry);
+    if (diagnostics.length > 120) diagnostics.shift();
+    return entry;
+  };
+  const transferGesture = (action: 'offerTransfer' | 'acceptTransfer', phase: 'before-click' | 'after-click') => record(phase, {
+    action, commandCount: commands.filter(command => command.action === action).length,
+    lastPongAgeMs: lastPongAt === undefined ? null : Date.now() - lastPongAt,
+    hasRoom: Boolean(room), hasTransferOffer: Boolean(room?.transferOffer)
+  });
   page.on('request', request => {
     const path = new URL(request.url()).pathname;
     if (request.method() === 'GET' && path.startsWith('/api/social/')) reads.push(path);
@@ -24,8 +51,26 @@ const observe = (page: Page) => {
       const { action, commandId, reaction } = request.postDataJSON();
       commands.push({ action, commandId, reaction });
     }
+    const action = diagnosticAction(request);
+    if (action) record('command-request', { action });
+  });
+  page.on('requestfailed', request => {
+    const action = diagnosticAction(request);
+    if (!action) return;
+    const failure = request.failure()?.errorText;
+    record('command-request-failed', { action, code: failure && /^net::ERR_[A-Z_]{1,60}$/.test(failure) ? failure : 'transport_failure' });
   });
   page.on('response', response => {
+    const action = diagnosticAction(response.request());
+    if (action) {
+      const entry = record('command-response', { action, status: response.status() });
+      void response.json().then((value: unknown) => {
+        if (!value || typeof value !== 'object') return;
+        const { outcome, code } = value as Record<string, unknown>;
+        if (typeof outcome === 'string' && ['applied', 'noop', 'rejected'].includes(outcome)) entry.outcome = outcome;
+        if (typeof code === 'string' && /^[a-z][a-z0-9_]{0,99}$/.test(code)) entry.code = code;
+      }).catch(() => { entry.code = 'unreadable_response'; });
+    }
     if (response.ok() && /\/api\/social\/v1\/rooms\/[^/]+\/community$/.test(new URL(response.url()).pathname)) {
       void response.json().then((value: { community: RoomCommunity }) => {
         if (!community || value.community.epoch > community.epoch
@@ -34,14 +79,20 @@ const observe = (page: Page) => {
     }
   });
   page.on('websocket', socket => {
-    socket.on('close', () => { closed += 1; });
+    const socketIndex = ++sockets;
+    socket.on('close', () => { closed += 1; record('ws-close', { socket: socketIndex }); });
     socket.on('framereceived', frame => {
       const message = JSON.parse(String(frame.payload));
       if (message.type === 'subscribed') subscribed += 1;
-      if (message.type === 'subscribed' || message.type === 'snapshot') room = message.room;
+      if (message.type === 'pong') lastPongAt = Date.now();
+      if (message.type === 'subscribed' || message.type === 'snapshot') {
+        room = message.room;
+        record(`ws-${message.type}`, { socket: socketIndex, hasRoom: Boolean(room), hasTransferOffer: Boolean(room?.transferOffer) });
+      }
     });
   });
-  return { room: () => room, community: () => community, subscribed: () => subscribed, closed: () => closed, reads, commands };
+  return { room: () => room, community: () => community, subscribed: () => subscribed, closed: () => closed,
+    reads, commands, diagnostics, transferGesture };
 };
 
 const login = async (page: Page, username: string, baseURL: string) => {
@@ -126,9 +177,12 @@ const eventOf = (events: RoomCommunityEvent[] | undefined, kind: RoomCommunityEv
 const broadReads = (reads: string[]) => reads.filter(path =>
   /^\/api\/social\/v1\/(?:me\/profile|profiles|relationships|music-shares)(?:\/|$)/.test(path));
 
-test('room reactions and actor notices stay local, finite and independent of shared playback', async ({ browser, baseURL }) => {
+test('room reactions and actor notices stay local, finite and independent of shared playback', async ({ browser, baseURL }, testInfo) => {
   const contexts: BrowserContext[] = [];
   const failures: Array<{ path: string; status: number }> = [];
+  const probes: Array<ReturnType<typeof observe>> = [];
+  const startedAt = Date.now();
+  let failed = false;
   let host: Page | undefined;
   let guest: Page | undefined;
   let hostedBy: Page | undefined;
@@ -144,7 +198,8 @@ test('room reactions and actor notices stay local, finite and independent of sha
       });
     }
     host = await contexts[0].newPage(); guest = await contexts[1].newPage();
-    const hostState = observe(host); const guestState = observe(guest);
+    const hostState = observe(host, startedAt); const guestState = observe(guest, startedAt);
+    probes.push(hostState, guestState);
     await login(host, 'invitation_host', baseURL!);
     await login(guest, 'invitation_guest', baseURL!);
     for (const title of ['First Light', 'Across the Water']) await roomPanel(host).getByRole('checkbox', { name: new RegExp(title) }).check();
@@ -163,7 +218,8 @@ test('room reactions and actor notices stay local, finite and independent of sha
     expect(guestState.room()?.controlMode).toBe('hostOnly');
     expect(guestState.room()?.self.canControl).toBe(false);
 
-    const observer = await contexts[2].newPage(); const observerState = observe(observer);
+    const observer = await contexts[2].newPage(); const observerState = observe(observer, startedAt);
+    probes.push(observerState);
     await observer.setViewportSize({ width: 1280, height: 720 });
     await observer.emulateMedia({ reducedMotion: 'reduce' }); await observer.bringToFront();
     await observeAnnouncements(observer);
@@ -183,7 +239,6 @@ test('room reactions and actor notices stay local, finite and independent of sha
     await expect.poll(() => playbackIdentity(guestState.room()!)).toEqual(playbackIdentity(hostState.room()!));
     await Promise.all([watchContinuity(host), watchContinuity(guest)]);
     const before = playbackIdentity(hostState.room()!);
-    const probes = [hostState, guestState, observerState];
     const readStarts = probes.map(probe => probe.reads.length);
     const commandStarts = probes.map(probe => probe.commands.length);
     const reactionWindowStarted = Date.now();
@@ -264,8 +319,12 @@ test('room reactions and actor notices stay local, finite and independent of sha
 
     await activity(host).getByRole('button', { name: 'Send fire', exact: true }).click();
     await expect(eventList(guest).getByText('Invitation host reacted 🔥', { exact: true })).toHaveCount(1);
+    hostState.transferGesture('offerTransfer', 'before-click');
     await roomPanel(host).getByRole('button', { name: 'Transfer and leave', exact: true }).click();
+    hostState.transferGesture('offerTransfer', 'after-click');
+    guestState.transferGesture('acceptTransfer', 'before-click');
     await roomPanel(guest).getByRole('button', { name: 'Accept host role', exact: true }).click(); hostedBy = guest;
+    guestState.transferGesture('acceptTransfer', 'after-click');
     await expect.poll(hostState.room).toBeNull();
     for (const page of [guest, observer]) {
       await expect(eventList(page).getByText('Invitation guest became the host.', { exact: true })).toHaveCount(1);
@@ -279,7 +338,17 @@ test('room reactions and actor notices stay local, finite and independent of sha
     for (const probe of probes) await expect.poll(probe.room).toBeNull();
     for (const page of [host, guest, observer]) await expect(activity(page)).toHaveCount(0);
     expect(failures).toEqual([]);
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
+    if (failed || testInfo.error) {
+      const diagnostics = probes.map((probe, index) => ({ client: ['host', 'guest', 'observer'][index], events: probe.diagnostics }));
+      const body = JSON.stringify(diagnostics, null, 2);
+      await testInfo.attach('room-command-diagnostics', { body, contentType: 'application/json' })
+        .catch(() => console.log('Room command diagnostic attachment could not be saved.'));
+      console.log(`Room activity command diagnostics: ${JSON.stringify(diagnostics)}`);
+    }
     if (failures.length) console.log(`Room activity HTTP failures: ${JSON.stringify(failures)}`);
     try {
       if (hostedBy && !hostedBy.isClosed()) {
