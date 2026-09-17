@@ -11,6 +11,8 @@ import {
 } from '../services/federatedIdentityService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import { normalizeUserRole } from '../services/authRoleService';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
+import { requireActiveAuthSession } from '../services/authCredentialService';
 
 const conflict = () => {
     const error = new Error(
@@ -47,12 +49,17 @@ const resolveFederatedUser = async (
             error.statusCode = 401;
             throw error;
         }
-        await AuthIdentity.create(
-            req.auth.userId,
-            identity.provider,
-            identity.subject,
-            identity.email
-        );
+        const auth = req.auth;
+        await withActiveAccount(auth.userId, async session => {
+            if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+            await AuthIdentity.create(
+                auth.userId,
+                identity.provider,
+                identity.subject,
+                identity.email,
+                session
+            );
+        });
         recordSecurityEvent('federated_identity_linked', { userId: req.auth.userId });
         return authenticatedUser;
     }

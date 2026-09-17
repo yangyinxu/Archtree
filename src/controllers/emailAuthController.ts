@@ -2,10 +2,10 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { validationResult } from 'express-validator';
 import AuthActionToken, { AuthActionPurpose } from '../models/authActionToken';
-import AuthSession from '../models/authSession';
 import User from '../models/user';
 import { requireAuthEmailConfiguration, sendAuthCode } from '../services/authEmailService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
+import { applyEmailAction } from '../services/authCredentialService';
 
 const normalizeEmail = (value: unknown) => String(value ?? '').trim().toLowerCase();
 const acceptedMessage = { message: 'If the account can use this action, an email has been sent.' };
@@ -92,10 +92,9 @@ export const verifyEmail = async (req: Request, res: Response) => {
     if (rejectInvalidRequest(req, res)) return;
     const user = await User.findByEmail(normalizeEmail(req.body.email));
     const code = String(req.body.code ?? '').trim();
-    if (!user || !await AuthActionToken.consume(user._id.toString(), 'verifyEmail', code)) {
+    if (!user || !await applyEmailAction(user._id.toString(), 'verifyEmail', code)) {
         return res.status(400).json({ message: 'The verification code is invalid or expired.' });
     }
-    await User.markEmailVerified(user._id.toString());
     recordSecurityEvent('email_verified', { userId: user._id.toString() });
     recordAuthFunnelEvent('verification', 'email', 'succeeded');
     return res.status(204).send();
@@ -131,11 +130,9 @@ export const resetPassword = async (req: Request, res: Response) => {
     const passwordHash = await bcrypt.hash(String(req.body.password), 12);
     const user = await User.findByEmail(normalizeEmail(req.body.email));
     const code = String(req.body.code ?? '').trim();
-    if (!user || !await AuthActionToken.consume(user._id.toString(), 'resetPassword', code)) {
+    if (!user || !await applyEmailAction(user._id.toString(), 'resetPassword', code, passwordHash)) {
         return res.status(400).json({ message: 'The reset code is invalid or expired.' });
     }
-    await User.updatePassword(user._id.toString(), passwordHash);
-    await AuthSession.revokeAll(user._id.toString());
     recordSecurityEvent('password_reset_completed', { userId: user._id.toString() });
     recordAuthFunnelEvent('recovery', 'password', 'succeeded');
     return res.status(204).send();

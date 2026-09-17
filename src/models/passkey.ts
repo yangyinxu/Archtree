@@ -1,5 +1,7 @@
 import crypto from 'crypto';
+import { ClientSession } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
 
 export interface PasskeyDocument {
     credentialId: string;
@@ -15,21 +17,21 @@ export interface PasskeyDocument {
 
 /** Stores only public WebAuthn credential material and signature counters. */
 export class Passkey {
-    static listForUser(userId: string) {
-        return getDb()!.collection<PasskeyDocument>('passkeys').find({ userId }).toArray();
+    static listForUser(userId: string, session?: ClientSession) {
+        return getDb()!.collection<PasskeyDocument>('passkeys').find({ userId }, { session }).toArray();
     }
 
     static findByCredentialId(credentialId: string) {
         return getDb()!.collection<PasskeyDocument>('passkeys').findOne({ credentialId });
     }
 
-    static create(document: Omit<PasskeyDocument, 'createdAt' | 'updatedAt'>) {
+    static create(document: Omit<PasskeyDocument, 'createdAt' | 'updatedAt'>, session?: ClientSession) {
         const now = new Date();
-        return getDb()!.collection<PasskeyDocument>('passkeys').insertOne({
+        return withActiveAccount(document.userId, transaction => getDb()!.collection<PasskeyDocument>('passkeys').insertOne({
             ...document,
             createdAt: now,
             updatedAt: now
-        });
+        }, { session: transaction }), session);
     }
 
     static updateCounter(credentialId: string, counter: number) {
@@ -47,17 +49,20 @@ export class PasskeyChallenge {
     static async issue(
         purpose: PasskeyChallengePurpose,
         challenge: string,
-        userId?: string
+        userId?: string,
+        session?: ClientSession
     ) {
         const flowId = crypto.randomBytes(32).toString('base64url');
-        await getDb()!.collection('passkeyChallenges').insertOne({
+        const insert = (transaction?: ClientSession) => getDb()!.collection('passkeyChallenges').insertOne({
             flowId,
             purpose,
             challenge,
             userId,
             createdAt: new Date(),
             expiresAt: new Date(Date.now() + 5 * 60_000)
-        });
+        }, { session: transaction });
+        if (userId) await withActiveAccount(userId, insert, session);
+        else await insert(session);
         return flowId;
     }
 

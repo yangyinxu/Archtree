@@ -1,6 +1,7 @@
 import crypto from 'crypto';
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
 
 export type AuthActionPurpose = 'verifyEmail' | 'resetPassword';
 
@@ -33,11 +34,11 @@ const hashCode = (userId: string, purpose: AuthActionPurpose, code: string) => {
 
 /** Stores short-lived, single-use authentication codes only as hashes. */
 class AuthActionToken {
-    static async issue(userId: string, purpose: AuthActionPurpose, lifetimeMinutes: number) {
+    static async issue(userId: string, purpose: AuthActionPurpose, lifetimeMinutes: number, session?: ClientSession) {
         const db = getDb();
         const code = crypto.randomInt(100_000, 1_000_000).toString();
         const now = new Date();
-        await db!.collection<AuthActionTokenDocument>('authActionTokens').findOneAndUpdate(
+        await withActiveAccount(userId, transaction => db!.collection<AuthActionTokenDocument>('authActionTokens').findOneAndUpdate(
             { _id: tokenDocumentId(userId, purpose) },
             {
                 $set: {
@@ -49,13 +50,18 @@ class AuthActionToken {
                 },
                 $unset: { consumedAt: '' }
             },
-            { upsert: true, returnDocument: 'after' }
-        );
+            { upsert: true, returnDocument: 'after', session: transaction }
+        ), session);
         return code;
     }
 
     /** Atomically consumes a matching code so concurrent reuse can succeed only once. */
-    static async consume(userId: string, purpose: AuthActionPurpose, code: string) {
+    static consume(userId: string, purpose: AuthActionPurpose, code: string, session?: ClientSession) {
+        return withActiveAccount(userId, transaction => this.consumeInTransaction(userId, purpose, code, transaction), session);
+    }
+
+    /** Includes the legacy migration claim in the caller's account transaction. */
+    private static async consumeInTransaction(userId: string, purpose: AuthActionPurpose, code: string, session: ClientSession) {
         const db = getDb();
         const collection = db!.collection<AuthActionTokenDocument>('authActionTokens');
         const currentDocumentId = tokenDocumentId(userId, purpose);
@@ -71,7 +77,7 @@ class AuthActionToken {
                 expiresAt: { $gt: now }
             },
             { $set: { consumedAt: now } },
-            { returnDocument: 'after' }
+            { returnDocument: 'after', session }
         );
         if (result.value) return result.value;
 
@@ -79,7 +85,7 @@ class AuthActionToken {
         // written before deterministic per-purpose slots were introduced.
         const currentSlot = await collection.findOne(
             { _id: currentDocumentId },
-            { projection: { _id: 1 } }
+            { projection: { _id: 1 }, session }
         );
         if (currentSlot) return null;
 
@@ -94,7 +100,7 @@ class AuthActionToken {
                 consumedAt: { $exists: false },
                 expiresAt: { $gt: now }
             },
-            { projection: { _id: 1, userId: 1, purpose: 1, codeHash: 1, createdAt: 1, expiresAt: 1 } }
+            { projection: { _id: 1, userId: 1, purpose: 1, codeHash: 1, createdAt: 1, expiresAt: 1 }, session }
         );
         if (!legacyToken) return null;
 
@@ -114,7 +120,7 @@ class AuthActionToken {
                     consumedAt: now
                 }
             },
-            { upsert: true, returnDocument: 'before' }
+            { upsert: true, returnDocument: 'before', session }
         );
         return legacyClaim.value ? null : legacyToken;
     }

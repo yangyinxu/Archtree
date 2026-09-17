@@ -15,6 +15,8 @@ import User from '../models/user';
 import { createSession } from '../services/authSessionService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import { normalizeUserRole } from '../services/authRoleService';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
+import { requireActiveAuthSession } from '../services/authCredentialService';
 
 const configuration = () => {
     const rpID = String(process.env.WEBAUTHN_RP_ID ?? '').trim();
@@ -52,7 +54,10 @@ export const registrationOptions = async (req: Request, res: Response) => {
             userVerification: 'required'
         }
     });
-    const flowId = await PasskeyChallenge.issue('register', options.challenge, auth.userId);
+    const flowId = await withActiveAccount(auth.userId, async session => {
+        if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+        return PasskeyChallenge.issue('register', options.challenge, auth.userId, session);
+    });
     return res.status(200).json({ flowId, options });
 };
 
@@ -76,14 +81,17 @@ export const verifyRegistration = async (req: Request, res: Response) => {
     }
     const { credential, credentialDeviceType, credentialBackedUp } =
         verification.registrationInfo;
-    await Passkey.create({
-        credentialId: credential.id,
-        userId: auth.userId,
-        publicKey: Buffer.from(credential.publicKey).toString('base64url'),
-        counter: credential.counter,
-        transports: (credential.transports ?? []) as string[],
-        deviceType: credentialDeviceType,
-        backedUp: credentialBackedUp
+    await withActiveAccount(auth.userId, async session => {
+        if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+        await Passkey.create({
+            credentialId: credential.id,
+            userId: auth.userId,
+            publicKey: Buffer.from(credential.publicKey).toString('base64url'),
+            counter: credential.counter,
+            transports: (credential.transports ?? []) as string[],
+            deviceType: credentialDeviceType,
+            backedUp: credentialBackedUp
+        }, session);
     });
     recordSecurityEvent('passkey_registered', { userId: auth.userId });
     recordAuthFunnelEvent('link', 'passkey', 'succeeded');

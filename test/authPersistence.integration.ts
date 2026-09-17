@@ -54,6 +54,7 @@ test('refresh rotation permits exactly one concurrent use and revocation is imme
 
 test('revoke-all-except preserves only the credential-changing device', async () => {
     const userId = new ObjectId().toString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const expiry = new Date(Date.now() + 60_000);
     const current = await AuthSession.create(userId, 'hash-current', expiry);
     const otherA = await AuthSession.create(userId, 'hash-other-a', expiry);
@@ -68,6 +69,7 @@ test('revoke-all-except preserves only the credential-changing device', async ()
 
 test('email action codes and passkey challenges are single-use under concurrency', async () => {
     const userId = new ObjectId().toString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const code = await AuthActionToken.issue(userId, 'resetPassword', 5);
     const codeAttempts = await Promise.all(
         Array.from(
@@ -88,8 +90,10 @@ test('email action codes and passkey challenges are single-use under concurrency
 });
 
 test('expired and malformed session identifiers fail closed', async () => {
+    const userId = new ObjectId().toString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const expired = await AuthSession.create(
-        new ObjectId().toString(),
+        userId,
         'expired-hash',
         new Date(Date.now() - 1_000)
     );

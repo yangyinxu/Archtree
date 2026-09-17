@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
-import { MongoServerError, ObjectId, type ClientSession } from 'mongodb';
+import { Collection, MongoServerError, ObjectId, type ClientSession } from 'mongodb';
 import { createRoomService, type RoomServiceOptions } from '../src/application/rooms/roomService';
 import { applyRoomSafety, invalidateRoomsForMedia } from '../src/application/rooms/roomLifecycle';
 import { createSocialService } from '../src/application/social/socialService';
@@ -9,6 +9,8 @@ import { ROOM_LIMITS, type RoomActor, type RoomApi, type RoomCommand, type RoomM
 import { SOCIAL_LIMITS, SocialError, type SocialApi, type SocialScope } from '../src/contracts/socialV1';
 import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import AuthSession from '../src/models/authSession';
+import AuthActionToken from '../src/models/authActionToken';
+import { applyEmailAction, changeAccountPassword } from '../src/services/authCredentialService';
 import { deleteListenerAccountData } from '../src/services/accountDeletionService';
 import type { RoomDocument } from '../src/repositories/social/roomDocuments';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
@@ -1237,6 +1239,36 @@ test('revokeAllExcept preserves a kept controller and disconnects only a control
     assert.equal(remaining.members.length, 2);
     const stillSignedIn = { ...host, actor: { ...host.actor, sessionId: kept } };
     assert.equal((await snapshot(stillSignedIn)).self.isController, false);
+});
+
+test('password reset rolls back room removal with the credential and permits the same-code retry', async () => {
+    const { host, guest } = await pair(); const state = await snapshot(host);
+    const guestId = guest.actor.userId;
+    await database().collection('users').updateOne({ _id: new ObjectId(guestId) }, { $set: { password: 'old-hash' } });
+    const code = await AuthActionToken.issue(guestId, 'resetPassword', 15);
+    const original = Collection.prototype.deleteMany;
+    Collection.prototype.deleteMany = async function (filter, ...args) {
+        if (this.collectionName === 'socialRealtimeTickets' && filter?.accountId === guestId) throw new Error('Synthetic late cleanup failure');
+        return original.call(this, filter, ...args);
+    } as typeof original;
+    try {
+        await assert.rejects(applyEmailAction(guestId, 'resetPassword', code, 'new-hash'), /Synthetic late cleanup failure/);
+    } finally { Collection.prototype.deleteMany = original; }
+    assert.deepEqual(await snapshot(host), state);
+    assert.equal((await database().collection('users').findOne({ _id: new ObjectId(guestId) }))!.password, 'old-hash');
+    assert.ok(await AuthSession.findActiveById(guest.actor.sessionId));
+    assert.equal(await applyEmailAction(guestId, 'resetPassword', code, 'new-hash'), true);
+    assert.equal((await snapshot(host)).members.length, 1);
+    assert.equal(await AuthSession.findActiveById(guest.actor.sessionId), null);
+});
+
+test('password change disconnects the revoked controller while preserving its own session', async () => {
+    const { host, guest } = await pair();
+    const kept = await AuthSession.create(host.actor.userId, `synthetic-password-kept-${randomUUID()}`, new Date(now + SOCIAL_LIMITS.scopeMs));
+    await changeAccountPassword(host.actor.userId, kept, undefined, 'changed-hash');
+    assert.ok(await AuthSession.findActiveById(kept));
+    assert.equal(await AuthSession.findActiveById(host.actor.sessionId), null);
+    assert.equal((await snapshot(guest)).members.find(member => member.socialId === host.profile.socialId)?.connected, false);
 });
 
 test('readiness is cleared on local pause and disconnect, and a new controller can start its own report sequence', async () => {

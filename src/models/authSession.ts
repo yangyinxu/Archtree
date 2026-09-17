@@ -1,6 +1,7 @@
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
-import { revokeSessionsWithRoomCleanup } from '../services/sessionRoomLifecycleService';
+import { revokeSessionsInTransaction, revokeSessionsWithRoomCleanup } from '../services/sessionRoomLifecycleService';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
 
 export interface AuthSessionDocument {
     _id: ObjectId;
@@ -23,11 +24,12 @@ class AuthSession {
         refreshTokenHash: string,
         expiresAt: Date,
         userAgent?: string,
-        device?: { deviceName: string; deviceType: 'phone' | 'tablet' }
+        device?: { deviceName: string; deviceType: 'phone' | 'tablet' },
+        session?: ClientSession
     ) {
         const db = getDb();
         const now = new Date();
-        const result = await db!.collection<AuthSessionDocument>('authSessions').insertOne({
+        const result = await withActiveAccount(userId, transaction => db!.collection<AuthSessionDocument>('authSessions').insertOne({
             _id: new ObjectId(),
             userId,
             refreshTokenHash,
@@ -36,7 +38,7 @@ class AuthSession {
             expiresAt,
             ...(userAgent ? { userAgent } : {}),
             ...(device ?? {})
-        });
+        }, { session: transaction }), session);
 
         return result.insertedId.toString();
     }
@@ -63,7 +65,7 @@ class AuthSession {
     }
 
     /** Returns an active session used to enforce access-token revocation. */
-    static async findActiveById(sessionId: string) {
+    static async findActiveById(sessionId: string, session?: ClientSession) {
         if (!ObjectId.isValid(sessionId)) {
             return null;
         }
@@ -73,7 +75,7 @@ class AuthSession {
             _id: new ObjectId(sessionId),
             revokedAt: { $exists: false },
             expiresAt: { $gt: new Date() }
-        });
+        }, { session });
     }
 
     /** Resolves an opaque refresh credential without rotating or exposing its hash. */
@@ -102,13 +104,16 @@ class AuthSession {
             revokedAt: { $exists: false } }, 'session', userId);
     }
 
-    static async revokeAll(userId: string) {
+    static async revokeAll(userId: string, session?: ClientSession) {
+        if (session) return revokeSessionsInTransaction({ userId, revokedAt: { $exists: false } }, 'logoutAll', session, userId);
         return revokeSessionsWithRoomCleanup({ userId, revokedAt: { $exists: false } }, 'logoutAll', userId);
     }
 
     /** A credential change preserves the current session and its room controller. */
-    static async revokeAllExcept(userId: string, sessionId: string) {
+    static async revokeAllExcept(userId: string, sessionId: string, session?: ClientSession) {
         if (!ObjectId.isValid(sessionId)) return null;
+        if (session) return revokeSessionsInTransaction({ userId, _id: { $ne: new ObjectId(sessionId) },
+            revokedAt: { $exists: false } }, 'otherSessions', session, userId, sessionId);
         return revokeSessionsWithRoomCleanup({ userId, _id: { $ne: new ObjectId(sessionId) },
             revokedAt: { $exists: false } }, 'otherSessions', userId, sessionId);
     }

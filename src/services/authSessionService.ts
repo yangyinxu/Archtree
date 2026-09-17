@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import AuthSession from '../models/authSession';
 import User from '../models/user';
 import { normalizeUserRole, UserRole } from './authRoleService';
+import { withActiveAccount } from './accountReferenceFenceService';
 
 export interface SessionUser {
     _id: { toString(): string };
@@ -121,16 +122,27 @@ const deviceFrom = (req?: Request) => {
 };
 
 /** Creates the initial access/refresh pair for a newly authenticated user. */
-export const createSession = async (user: SessionUser, req?: Request): Promise<SessionTokens> => {
+export const createSession = async (user: SessionUser, req?: Request, expectedPassword?: string): Promise<SessionTokens> => {
     const refreshToken = newRefreshToken();
     const refreshTokenExpiresAt = new Date(Date.now() + refreshSessionDurationMilliseconds());
-    const sessionId = await AuthSession.create(
-        user._id.toString(),
-        hashRefreshToken(refreshToken),
-        refreshTokenExpiresAt,
-        userAgentFrom(req),
-        deviceFrom(req)
-    );
+    // Password verification runs outside the transaction. A reset/change that
+    // wins the account fence invalidates that earlier verification result.
+    const sessionId = await withActiveAccount(user._id.toString(), async session => {
+        if (expectedPassword !== undefined) {
+            const current = await User.findById(user._id.toString(), session);
+            if (current?.password !== expectedPassword) {
+                throw Object.assign(new Error('Invalid credentials.'), { statusCode: 401 });
+            }
+        }
+        return AuthSession.create(
+            user._id.toString(),
+            hashRefreshToken(refreshToken),
+            refreshTokenExpiresAt,
+            userAgentFrom(req),
+            deviceFrom(req),
+            session
+        );
+    });
 
     return {
         accessToken: signAccessToken(user, sessionId),

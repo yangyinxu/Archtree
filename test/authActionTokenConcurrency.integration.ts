@@ -50,6 +50,7 @@ after(async () => {
 
 test('concurrent issuance leaves one current code and at most one successful consume', async () => {
     const userId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const requestCount = 16;
     const beginIssue = startBarrier(requestCount);
     const codes = await Promise.all(Array.from({ length: requestCount }, async () => {
@@ -82,6 +83,7 @@ test('concurrent issuance leaves one current code and at most one successful con
 
 test('a delivered legacy code remains consumable before the first single-slot issue', async () => {
     const userId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const code = '123456';
     const now = new Date();
     await getDb()!.collection('authActionTokens').insertOne({
@@ -99,6 +101,7 @@ test('a delivered legacy code remains consumable before the first single-slot is
 
 test('distinct legacy codes race through one migration claim', async () => {
     const userId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const codes = ['123456', '654321'];
     const now = new Date();
     await getDb()!.collection('authActionTokens').insertMany(codes.map((code) => ({
@@ -131,6 +134,7 @@ test('distinct legacy codes race through one migration claim', async () => {
 
 test('issuing into the single slot invalidates an earlier legacy code', async () => {
     const userId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const legacyCode = '654321';
     const now = new Date();
     await getDb()!.collection('authActionTokens').insertOne({

@@ -1,4 +1,4 @@
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import Post from './post';
 import { escapeRegex } from '../utils/search';
@@ -31,7 +31,7 @@ class User {
             .insertOne(this)
     }
 
-    static findById(userId: string) {
+    static findById(userId: string, session?: ClientSession) {
         if (!ObjectId.isValid(userId)) {
             return null;
         }
@@ -39,7 +39,7 @@ class User {
 
         return db!
             .collection('users')
-            .find({ _id: new ObjectId(userId)})
+            .find({ _id: new ObjectId(userId)}, { session })
             .next();
     }
 
@@ -88,19 +88,21 @@ class User {
         return this.findByEmail(normalized);
     }
 
-    static markEmailVerified(userId: string) {
+    static markEmailVerified(userId: string, session?: ClientSession) {
         const db = getDb();
         return db!.collection('users').updateOne(
             { _id: new ObjectId(userId) },
-            { $set: { emailVerified: true, emailVerifiedAt: new Date() } }
+            { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
+            { session }
         );
     }
 
-    static updatePassword(userId: string, password: string) {
+    static updatePassword(userId: string, password: string, session: ClientSession) {
         const db = getDb();
         return db!.collection('users').updateOne(
             { _id: new ObjectId(userId) },
-            { $set: { password, passwordUpdatedAt: new Date() } }
+            { $set: { password, passwordUpdatedAt: new Date() } },
+            { session }
         );
     }
 

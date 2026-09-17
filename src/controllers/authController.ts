@@ -276,7 +276,7 @@ const authenticateUser = async (identifier: string, password: string, req?: Requ
     avatarRevision: Number(user.avatarRevision ?? 0),
     emailVerified: user.emailVerified !== false,
     legacyToken: createLegacyMigrationToken(user as unknown as SessionUser),
-    ...(await createSession(user as unknown as SessionUser, req))
+    ...(await createSession(user as unknown as SessionUser, req, user.password))
   };
 };
 
