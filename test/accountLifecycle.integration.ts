@@ -504,7 +504,7 @@ test('an Avatar mutation reservation wins the account fence before deletion chec
         status: 'pending'
     }));
 
-    await releaseAvatarMutation((await reservation).mutationId);
+    await releaseAvatarMutation((await reservation).lease!);
     assert.deepEqual(await deleteListenerAccountData(userIdString), { status: 'deleted' });
     assert.equal(await getDb()!.collection('users').findOne({ _id: userId }), null);
     assert.equal(await AuthSession.findActiveById(sessionId), null);
@@ -557,7 +557,7 @@ test('one pending Avatar lease excludes a different concurrent mutation for the 
         userId: userIdString,
         status: 'pending'
     }), 1);
-    await releaseAvatarMutation(firstResult.mutationId);
+    await releaseAvatarMutation(firstResult.lease!);
     assert.deepEqual(await deleteListenerAccountData(userIdString), { status: 'deleted' });
 });
 

@@ -302,6 +302,8 @@ test('image reconciliation audits cover art and private avatars without mutating
     );
     assert.deepEqual(report.missingObjects.map(asset => asset.imageId), [avatarMissing]);
     assert.deepEqual(report.incompleteAssets.map(asset => asset.imageId), [avatarMissing]);
+    assert.equal(report.summary.storageIdentityIssueCount, assets.length);
+    assert.ok(report.storageIdentityIssues.every(asset => asset.storageIdentityMissing));
     assert.deepEqual(report.detachedAssets.map(asset => asset.imageId), [coverDetached]);
     assert.deepEqual(
         report.invalidStorageKeys.map(asset => asset.imageId),

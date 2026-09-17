@@ -2,7 +2,6 @@ import { abortError, scheduleCoverArtVariant, type CoverArtVariantScheduler } fr
 export { createCoverArtVariantScheduler, createConfiguredCoverArtVariantScheduler } from './coverArtVariantScheduler';
 export type { CoverArtVariantScheduler } from './coverArtVariantScheduler';
 import {
-    DeleteObjectCommand,
     GetObjectCommand,
     PutObjectCommand
 } from '@aws-sdk/client-s3';
@@ -12,6 +11,7 @@ import { Readable } from 'node:stream';
 import sharp from 'sharp';
 import { getDatabaseClient, getDb } from '../infrastructure/database';
 import { getS3 } from '../infrastructure/s3';
+import { deleteImageStorageObject, imageStorageIdentity } from './imageObjectLifecycleService';
 import {
     ImageAsset,
     ImageAssetRecord,
@@ -118,7 +118,10 @@ const exactCoverArtAsset = (
     && asset.ownerType === expected.ownerType
     && canonicalOwnerId(String(asset.ownerId ?? '')) === canonicalOwnerId(expected.ownerId)
     && String(asset.s3Key ?? '') === expected.s3Key
-    && String(asset.createdBy ?? '') === expected.createdBy;
+    && String(asset.createdBy ?? '') === expected.createdBy
+    && (!expected.storageIdentity || (asset.storageIdentity?.etag === expected.storageIdentity.etag
+        && asset.storageIdentity?.versionId === expected.storageIdentity.versionId
+        && asset.uploadOutcomeUnknown === false));
 
 const touchCoverArtOwner = async (asset: ImageAssetRecord, session: ClientSession) => {
     const normalizedOwnerId = canonicalOwnerId(asset.ownerId);
@@ -235,12 +238,12 @@ export interface CoverArtUploadOrchestrationDependencies {
     putObject: (
         asset: ImageAssetRecord,
         uploadFile: Express.Multer.File
-    ) => Promise<void>;
+    ) => Promise<void | ImageAssetRecord['storageIdentity']>;
     finalizeAsset: (
         asset: ImageAssetRecord,
         options: CoverArtUploadOptions
     ) => Promise<void>;
-    deleteObject: (s3Key: string) => Promise<void>;
+    deleteObject: (s3Key: string, asset?: ImageAssetRecord) => Promise<void>;
     markFailedAsset: (
         asset: ImageAssetRecord,
         error: unknown
@@ -271,7 +274,10 @@ export const markStagedCoverArtUploadFailed = (
     {
         uploadStatus: 'failed',
         uploadUpdatedAt: new Date(),
-        uploadError: errorMessage(failure)
+        uploadError: errorMessage(failure),
+        uploadOutcomeUnknown: asset.uploadOutcomeUnknown ?? true,
+        ...(asset.storageIdentity ? { storageIdentity: asset.storageIdentity } : {}),
+        ...(asset.storageDeleted ? { storageDeleted: true } : {})
     }
 );
 
@@ -307,7 +313,9 @@ export const finalizeStagedCoverArtLifecycleRecord = async (
             const result = await finalization.updatePendingAsset(asset, {
                 uploadStatus: 'ready',
                 uploadUpdatedAt: new Date(),
-                uploadError: null
+                uploadError: null,
+                uploadOutcomeUnknown: false,
+                ...(asset.storageIdentity ? { storageIdentity: asset.storageIdentity } : {})
             }, session);
             if (result.matchedCount !== 1) {
                 throw new Error(`Cover-art lifecycle record ${asset._id.toHexString()} could not be finalized.`);
@@ -351,6 +359,7 @@ type CoverArtLookupDependencies = {
 type CoverArtObjectDependencies = CoverArtLookupDependencies & {
     getObject?: (input: {
         s3Key: string;
+        VersionId?: string;
         ifNoneMatch?: string;
         abortSignal?: AbortSignal;
     }) => Promise<any>;
@@ -359,6 +368,7 @@ type CoverArtObjectDependencies = CoverArtLookupDependencies & {
 type CoverArtVariantDependencies = CoverArtLookupDependencies & {
     getObject?: (input: {
         s3Key: string;
+        VersionId?: string;
         abortSignal?: AbortSignal;
     }) => Promise<any>;
     transform?: (input: Buffer, width: CoverArtVariantWidth) => Promise<Buffer>;
@@ -377,7 +387,7 @@ export interface CoverArtDeletionDependencies {
         update: Record<string, unknown>,
         expected?: Record<string, unknown>
     ) => Promise<unknown>;
-    deleteObject: (s3Key: string) => Promise<void>;
+    deleteObject: (s3Key: string, asset?: ImageAssetRecord) => Promise<void>;
     deleteAsset: (imageId: string) => Promise<unknown>;
 }
 
@@ -586,16 +596,18 @@ export const uploadCoverArt = async (
         s3Key,
         uploadStatus: 'pending',
         uploadUpdatedAt: now,
-        uploadError: null
+        uploadError: null,
+        uploadOutcomeUnknown: true
     };
 
     const orchestration: CoverArtUploadOrchestrationDependencies = {
         stageAsset: stageCoverArtLifecycleRecord,
         putObject: async (stagedAsset, file) => {
             const body = file.path ? createReadStream(file.path) : file.buffer;
-            await getS3().send(new PutObjectCommand({
+            const result = await getS3().send(new PutObjectCommand({
                 Bucket: process.env.S3_BUCKET_NAME!,
                 Key: stagedAsset.s3Key,
+                IfNoneMatch: '*',
                 Body: body,
                 ContentLength: file.size,
                 ContentType: file.mimetype,
@@ -607,13 +619,12 @@ export const uploadCoverArt = async (
                     createdby: stagedAsset.createdBy
                 }
             }));
+            return imageStorageIdentity(result);
         },
         finalizeAsset: finalizeStagedCoverArtLifecycleRecord,
-        deleteObject: async (key) => {
-            await getS3().send(new DeleteObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME!,
-                Key: key
-            }));
+        deleteObject: async (_key, stagedAsset) => {
+            if (!stagedAsset) throw new Error('Image lifecycle evidence is missing.');
+            await deleteImageStorageObject(stagedAsset);
         },
         markFailedAsset: markStagedCoverArtUploadFailed,
         ...dependencies
@@ -623,7 +634,9 @@ export const uploadCoverArt = async (
 
     let objectStored = false;
     try {
-        await orchestration.putObject(asset, uploadFile);
+        const identity = await orchestration.putObject(asset, uploadFile);
+        if (identity) asset.storageIdentity = identity;
+        asset.uploadOutcomeUnknown = false;
         objectStored = true;
         await orchestration.finalizeAsset(asset, options);
         return { imageId, coverArtUrl: coverArtUrlForId(imageId) };
@@ -634,7 +647,8 @@ export const uploadCoverArt = async (
         let cleanupError: unknown;
         if (objectStored) {
             try {
-                await orchestration.deleteObject(s3Key);
+                await orchestration.deleteObject(s3Key, asset);
+                asset.storageDeleted = true;
             } catch (deleteError) {
                 cleanupError = deleteError;
             }
@@ -665,11 +679,9 @@ const defaultCoverArtDeletionDependencies: CoverArtDeletionDependencies = {
         expected,
         update
     ),
-    deleteObject: async s3Key => {
-        await getS3().send(new DeleteObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: s3Key
-        }));
+    deleteObject: async (_s3Key, asset) => {
+        if (!asset) throw new Error('Image lifecycle evidence is missing.');
+        await deleteImageStorageObject(asset);
     },
     deleteAsset: imageId => ImageAsset.deleteByIdWhere(imageId, { uploadStatus: 'deleting' })
 };
@@ -760,7 +772,7 @@ export const prepareCoverArtDeletion = async (
     }
 
     try {
-        await deletion.deleteObject(s3Key);
+        await deletion.deleteObject(s3Key, asset);
         return true;
     } catch (error) {
         await markCoverArtDeletionFailed(deletion, imageId, asset, error);
@@ -1135,12 +1147,14 @@ export const getCoverArtObject = async (
         const object = await (dependencies.getObject
             ? dependencies.getObject({
                 s3Key: String(asset.s3Key),
+                ...(asset.storageIdentity ? { VersionId: (asset.storageIdentity as any).versionId ?? 'null' } : {}),
                 ifNoneMatch: options.ifNoneMatch,
                 abortSignal: options.abortSignal
             })
             : getS3().send(new GetObjectCommand({
                 Bucket: process.env.S3_BUCKET_NAME!,
                 Key: String(asset.s3Key),
+                ...(asset.storageIdentity ? { VersionId: (asset.storageIdentity as any).versionId ?? 'null' } : {}),
                 IfNoneMatch: options.ifNoneMatch
             }), { abortSignal: options.abortSignal }));
         return { asset, object, notModified: false as const };
@@ -1234,11 +1248,13 @@ export const getCoverArtVariant = async (
         const object = await (dependencies.getObject
             ? dependencies.getObject({
                 s3Key: String(asset.s3Key),
+                ...(asset.storageIdentity ? { VersionId: (asset.storageIdentity as any).versionId ?? 'null' } : {}),
                 abortSignal: options.abortSignal
             })
             : getS3().send(new GetObjectCommand({
                 Bucket: process.env.S3_BUCKET_NAME!,
-                Key: String(asset.s3Key)
+                Key: String(asset.s3Key),
+                ...(asset.storageIdentity ? { VersionId: (asset.storageIdentity as any).versionId ?? 'null' } : {})
             }), { abortSignal: options.abortSignal }));
         const stream = object.Body as unknown as Readable | undefined;
         if (!stream || typeof stream.pipe !== 'function') {

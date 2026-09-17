@@ -1,5 +1,4 @@
 import {
-    DeleteObjectCommand,
     GetObjectCommand,
     PutObjectCommand
 } from '@aws-sdk/client-s3';
@@ -8,7 +7,9 @@ import sharp from 'sharp';
 import { getDb } from '../infrastructure/database';
 import { getS3 } from '../infrastructure/s3';
 import { maxAvatarUploadMb } from '../middleware/imageUpload';
-import { ImageAsset } from '../models/imageAsset';
+import { ImageAsset, type ImageAssetRecord } from '../models/imageAsset';
+import { deleteImageStorageObject, imageStorageIdentity } from './imageObjectLifecycleService';
+import { setAvatarMutationPhase, withAvatarMutationLease, type AvatarMutationLease } from './avatarMutationService';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 
 export const maxAvatarPixels = 16_000_000;
@@ -29,12 +30,15 @@ export const isAvatarObjectKeyForImage = (value: unknown, imageId: string) => {
 
 /** Isolates private-avatar storage boundaries for deterministic deletion retries. */
 export interface AvatarAssetDeletionDependencies {
+    /** Test-only coordination after the cleanup owner's snapshot is read. */
+    afterOwnerRead?: () => Promise<void>;
     findAsset: (imageId: string) => Promise<any | null>;
     updateAsset: (
         imageId: string,
-        update: Record<string, unknown>
+        update: Record<string, unknown>,
+        expected?: Record<string, unknown>
     ) => Promise<{ matchedCount: number }>;
-    deleteObject: (s3Key: string) => Promise<void>;
+    deleteObject: (s3Key: string, asset?: ImageAssetRecord) => Promise<void>;
     deleteAsset: (imageId: string) => Promise<{ deletedCount: number }>;
 }
 
@@ -52,12 +56,10 @@ export class AvatarMutationOutcomeUnknownError extends Error {
 
 const defaultAvatarAssetDeletionDependencies: AvatarAssetDeletionDependencies = {
     findAsset: imageId => ImageAsset.findById(imageId),
-    updateAsset: (imageId, update) => ImageAsset.updateById(imageId, update),
-    deleteObject: async s3Key => {
-        await getS3().send(new DeleteObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: s3Key
-        }));
+    updateAsset: (imageId, update, expected = {}) => ImageAsset.updateByIdWhere(imageId, expected, update),
+    deleteObject: async (_s3Key, asset) => {
+        if (!asset) throw new Error('Avatar lifecycle evidence is missing.');
+        await deleteImageStorageObject(asset);
     },
     deleteAsset: imageId => ImageAsset.deleteById(imageId)
 };
@@ -104,54 +106,52 @@ export const normalizeAvatar = async (uploadFile: Express.Multer.File) => {
 };
 
 /** Stages one private, account-owned avatar with a traceable S3 lifecycle record. */
-export const uploadAvatar = async (userId: string, uploadFile: Express.Multer.File) => {
+export const uploadAvatar = async (
+    userId: string, uploadFile: Express.Multer.File, lease?: AvatarMutationLease
+) => {
     const body = await normalizeAvatar(uploadFile);
     const imageObjectId = new ObjectId();
     const imageId = imageObjectId.toHexString();
-    const s3Key = `avatars/${imageId}`;
-    const now = new Date();
-
-    await ImageAsset.insert({
-        _id: imageObjectId,
-        ownerType: 'user',
-        ownerId: userId,
-        createdBy: userId,
-        originalFileName: normalizeUtf8Text(uploadFile.originalname),
-        contentType: 'image/jpeg',
-        s3Key,
-        uploadStatus: 'pending',
-        uploadUpdatedAt: now,
-        uploadError: null
-    });
-
+    const asset: ImageAssetRecord = {
+        _id: imageObjectId, ownerType: 'user', ownerId: userId, createdBy: userId,
+        originalFileName: normalizeUtf8Text(uploadFile.originalname), contentType: 'image/jpeg',
+        s3Key: `avatars/${imageId}`, uploadStatus: 'pending', uploadUpdatedAt: new Date(),
+        uploadError: null, uploadOutcomeUnknown: true,
+        ...(lease ? { avatarMutationId: lease.mutationId } : {})
+    };
+    if (lease) {
+        await setAvatarMutationPhase(lease, 'uploading', { assetId: imageId }, async session => {
+            await ImageAsset.insert(asset, session);
+        });
+    } else {
+        await ImageAsset.insert(asset);
+    }
     try {
-        await getS3().send(new PutObjectCommand({
-            Bucket: process.env.S3_BUCKET_NAME!,
-            Key: s3Key,
-            Body: body,
-            ContentLength: body.length,
-            ContentType: 'image/jpeg',
+        const result = await getS3().send(new PutObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME!, Key: asset.s3Key, Body: body,
+            IfNoneMatch: '*', ContentLength: body.length, ContentType: 'image/jpeg',
             CacheControl: 'private, max-age=86400',
             Metadata: { imageid: imageId, ownertype: 'user', ownerid: userId }
         }));
-        const readyUpdate = await ImageAsset.updateById(imageId, {
-            uploadStatus: 'ready',
-            uploadUpdatedAt: new Date(),
-            uploadError: null
-        });
-        if (readyUpdate.matchedCount !== 1) {
-            await getS3().send(new DeleteObjectCommand({
-                Bucket: process.env.S3_BUCKET_NAME!,
-                Key: s3Key
-            }));
-            throw new Error(`Avatar lifecycle record ${imageId} could not be finalized.`);
-        }
+        asset.storageIdentity = imageStorageIdentity(result);
+        asset.uploadOutcomeUnknown = false;
+        const finalize = async (session?: import('mongodb').ClientSession) => {
+            const updated = await ImageAsset.updateByIdWhere(imageId, {
+                ownerType: 'user', ownerId: userId, uploadStatus: 'pending', s3Key: asset.s3Key
+            }, { uploadStatus: 'ready', uploadUpdatedAt: new Date(), uploadError: null,
+                storageIdentity: asset.storageIdentity, uploadOutcomeUnknown: false }, session);
+            if (updated.matchedCount !== 1) throw new Error('Avatar upload finalization requires reconciliation.');
+        };
+        if (lease) await setAvatarMutationPhase(lease, 'uploaded', {}, finalize);
+        else await finalize();
         return imageId;
     } catch (error) {
-        await ImageAsset.updateById(imageId, {
-            uploadStatus: 'failed',
-            uploadUpdatedAt: new Date(),
-            uploadError: errorMessage(error)
+        // A late worker may preserve an acknowledged version, but can never promote
+        // the avatar or erase a successor's state after losing its lease.
+        await ImageAsset.updateByIdWhere(imageId, { uploadStatus: 'pending', s3Key: asset.s3Key }, {
+            uploadStatus: 'failed', uploadUpdatedAt: new Date(), uploadError: errorMessage(error),
+            uploadOutcomeUnknown: asset.uploadOutcomeUnknown,
+            ...(asset.storageIdentity ? { storageIdentity: asset.storageIdentity } : {})
         }).catch(() => undefined);
         throw error;
     }
@@ -173,6 +173,7 @@ export const getAvatarObject = async (
         const object = await getS3().send(new GetObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!,
             Key: String(asset.s3Key),
+            ...(asset.storageIdentity ? { VersionId: asset.storageIdentity.versionId ?? 'null' } : {}),
             IfNoneMatch: options.ifNoneMatch
         }), { abortSignal: options.abortSignal });
         return { asset, object, notModified: false as const };
@@ -185,36 +186,48 @@ export const getAvatarObject = async (
 };
 
 /** Deletes only the recorded object and retains its database evidence for owner finalization. */
+export type AvatarDeletionContext = { lease: AvatarMutationLease; detached: boolean };
+
 export const prepareAvatarAssetDeletion = async (
     imageId: string,
     userId: string,
-    dependencies: Partial<AvatarAssetDeletionDependencies> = {}
+    dependencies: Partial<AvatarAssetDeletionDependencies> = {},
+    context?: AvatarDeletionContext
 ) => {
     const deletion = { ...defaultAvatarAssetDeletionDependencies, ...dependencies };
     const asset = await deletion.findAsset(imageId);
-    if (!asset) {
-        throw new Error('Avatar lifecycle evidence is missing.');
-    }
+    if (!asset) throw new Error('Avatar lifecycle evidence is missing.');
     if (asset.ownerType !== 'user' || String(asset.ownerId) !== userId
         || !isAvatarObjectKeyForImage(asset.s3Key, imageId)) {
         throw new Error('Avatar lifecycle ownership or storage key is invalid.');
     }
-    const deletingUpdate = await deletion.updateAsset(imageId, {
-        uploadStatus: 'deleting',
-        uploadUpdatedAt: new Date(),
-        uploadError: null
-    });
-    if (deletingUpdate.matchedCount !== 1) {
-        throw new Error(`Avatar lifecycle record ${imageId} could not be prepared.`);
+    const claim = { uploadStatus: 'deleting', uploadUpdatedAt: new Date(), uploadError: null,
+        ...(context ? { deletionMutationId: context.lease.mutationId, deletionLeaseToken: context.lease.leaseToken } : {}) };
+    const expected = { ownerType: 'user', ownerId: asset.ownerId, s3Key: asset.s3Key,
+        uploadStatus: asset.uploadStatus ?? { $exists: false },
+        storageIdentity: asset.storageIdentity ?? { $exists: false },
+        storageCleanupVersions: asset.storageCleanupVersions ?? { $exists: false },
+        avatarMutationId: asset.avatarMutationId ?? { $exists: false },
+        uploadOutcomeUnknown: asset.uploadOutcomeUnknown ?? { $exists: false } };
+    if (context) {
+        // The claim and lease fence commit together. Any successor sees deleting,
+        // so even a delayed external DELETE cannot race this asset into publication.
+        await withAvatarMutationLease(context.lease, async session => {
+            const owner = await getDb()!.collection('users').findOne({ _id: new ObjectId(userId) }, { session });
+            if (context.detached && String(owner?.avatarAssetId ?? '') === imageId) throw new Error('Avatar remains attached.');
+            const updated = await ImageAsset.updateByIdWhere(imageId, expected, claim, session);
+            if (updated.matchedCount !== 1) throw new Error('Avatar cleanup candidate changed.');
+        });
+    } else {
+        const updated = await deletion.updateAsset(imageId, claim, expected);
+        if (updated.matchedCount !== 1) throw new Error('Avatar lifecycle record could not be prepared.');
     }
     try {
-        await deletion.deleteObject(String(asset.s3Key));
+        await deletion.deleteObject(String(asset.s3Key), asset);
     } catch (error) {
         await deletion.updateAsset(imageId, {
-            uploadStatus: 'deleteFailed',
-            uploadUpdatedAt: new Date(),
-            uploadError: errorMessage(error)
-        }).catch(() => undefined);
+            uploadStatus: 'deleteFailed', uploadUpdatedAt: new Date(), uploadError: errorMessage(error)
+        }, { uploadStatus: 'deleting', ...(context ? { deletionLeaseToken: context.lease.leaseToken } : {}) }).catch(() => undefined);
         throw error;
     }
 };
@@ -222,8 +235,19 @@ export const prepareAvatarAssetDeletion = async (
 /** Removes private-avatar lifecycle evidence only after no account references it. */
 export const finalizeAvatarAssetDeletion = async (
     imageId: string,
-    dependencies: Partial<AvatarAssetDeletionDependencies> = {}
+    dependencies: Partial<AvatarAssetDeletionDependencies> = {},
+    context?: AvatarDeletionContext
 ) => {
+    if (context) {
+        await withAvatarMutationLease(context.lease, async session => {
+            const deleted = await getDb()!.collection('imageAssets').deleteOne({
+                _id: new ObjectId(imageId), ownerType: 'user', ownerId: context.lease.record.userId,
+                uploadStatus: 'deleting', deletionMutationId: context.lease.mutationId
+            }, { session });
+            if (deleted.deletedCount !== 1) throw new Error('Avatar deletion claim changed.');
+        });
+        return;
+    }
     const deletion = { ...defaultAvatarAssetDeletionDependencies, ...dependencies };
     const deleted = await deletion.deleteAsset(imageId);
     if (deleted.deletedCount !== 1) {
@@ -235,10 +259,11 @@ export const finalizeAvatarAssetDeletion = async (
 export const deleteAvatarAsset = async (
     imageId: string,
     userId: string,
-    dependencies: Partial<AvatarAssetDeletionDependencies> = {}
+    dependencies: Partial<AvatarAssetDeletionDependencies> = {},
+    context?: AvatarDeletionContext
 ) => {
-    await prepareAvatarAssetDeletion(imageId, userId, dependencies);
-    await finalizeAvatarAssetDeletion(imageId, dependencies);
+    await prepareAvatarAssetDeletion(imageId, userId, dependencies, context);
+    await finalizeAvatarAssetDeletion(imageId, dependencies, context);
 };
 
 /** Confirms a lost avatar-attachment response before choosing old/new asset cleanup. */
@@ -340,7 +365,8 @@ export const deleteAvatarOwnerAndAsset = async (
  */
 export const cleanupDetachedAvatarAssets = async (
     userId: string,
-    dependencies: Partial<AvatarAssetDeletionDependencies> = {}
+    dependencies: Partial<AvatarAssetDeletionDependencies> = {},
+    lease?: AvatarMutationLease
 ) => {
     if (!/^[0-9a-f]{24}$/i.test(userId)) {
         return { cleanupPending: false, cleanupErrors: [] as unknown[] };
@@ -353,6 +379,7 @@ export const cleanupDetachedAvatarAssets = async (
         { projection: { avatarAssetId: 1 } }
     );
     const currentAvatarId = String(owner?.avatarAssetId ?? '').toLowerCase();
+    await dependencies.afterOwnerRead?.();
     const assets = await db.collection('imageAssets').find({
         ownerType: 'user',
         ownerId: { $in: [canonicalUserId, userObjectId] }
@@ -369,7 +396,7 @@ export const cleanupDetachedAvatarAssets = async (
         const imageId = String(asset._id).toLowerCase();
         if (imageId === currentAvatarId) continue;
         try {
-            await deleteAvatarAsset(imageId, canonicalUserId, dependencies);
+            await deleteAvatarAsset(imageId, canonicalUserId, dependencies, lease ? { lease, detached: true } : undefined);
         } catch (error) {
             cleanupErrors.push(error);
         }

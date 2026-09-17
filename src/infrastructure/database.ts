@@ -1,6 +1,7 @@
 import * as dotenv from 'dotenv';
 import * as mongoDb from 'mongodb';
 import { initializeDatabaseIndexes, verifyRequiredDatabaseIndexes } from './databaseIndexes';
+import { initializeAvatarMutationRecovery } from '../services/avatarMutationService';
 import { verifyDatabaseTransactionTopology } from './databaseTopology';
 import { MissingStartupConfigurationError, recordStartupFailureStage, type StartupStage } from './startupDiagnostics';
 
@@ -38,7 +39,10 @@ export const connectToDatabase = async (options: { initializeIndexes?: boolean; 
     await verifyDatabaseTransactionTopology(connectedDatabase);
     stage = 'database_initialization';
     if (options.initializeIndexes === false) await verifyRequiredDatabaseIndexes(connectedDatabase);
-    else await initializeDatabaseIndexes(connectedDatabase);
+    else {
+      await initializeDatabaseIndexes(connectedDatabase);
+      await initializeAvatarMutationRecovery(connectedDatabase);
+    }
     databaseClient = client;
     database = connectedDatabase;
     readinessCheckedAt = Date.now();
