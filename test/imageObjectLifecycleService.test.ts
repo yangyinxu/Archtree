@@ -19,8 +19,13 @@ test('deletion removes exact stored versions including null, never a key-only ma
     const calls: any[] = [];
     await deleteImageStorageObject({ ...asset(), storageCleanupVersions: [
         { etag: '"a"', versionId: 'v1' }, { etag: '"b"', versionId: null }
-    ], storageDeleteMarkers: ['marker1'] }, async command => { calls.push(command.input); });
-    assert.deepEqual(calls.map(call => [call.VersionId, call.IfMatch]), [['v1', '"a"'], ['null', '"b"'], ['marker1', undefined]]);
+    ], storageDeleteMarkers: ['marker1'] }, async command => {
+        // AWS rejects version-specific conditional DELETE; permissive object-map
+        // stubs must not hide a request the actual service cannot execute.
+        if (command.input.VersionId && command.input.IfMatch) throw new Error('NotImplemented');
+        calls.push(command.input);
+    });
+    assert.deepEqual(calls.map(call => [call.VersionId, call.IfMatch]), [['v1', undefined], ['null', undefined], ['marker1', undefined]]);
     assert.ok(calls.every(call => call.Key === asset().s3Key));
 });
 
@@ -34,7 +39,10 @@ test('version deletion failures remain retryable with the same version identitie
     const input = { ...asset(), storageIdentity: { etag: '"a"', versionId: 'v1' } };
     await assert.rejects(deleteImageStorageObject(input, async () => { throw new Error('lost acknowledgement'); }));
     let version: string | undefined;
-    await deleteImageStorageObject(input, async command => { version = command.input.VersionId; });
+    await deleteImageStorageObject(input, async command => {
+        assert.equal(command.input.IfMatch, undefined);
+        version = command.input.VersionId;
+    });
     assert.equal(version, 'v1');
 });
 

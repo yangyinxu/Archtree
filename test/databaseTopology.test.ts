@@ -94,6 +94,7 @@ test('cached readiness rechecks topology after expiry and recovers without new i
   let now = 1_000;
   let hello: Document = replicaSetHello;
   let writes = 0;
+  let avatarMigrations = 0;
   t.mock.method(Date, 'now', () => now);
   const db = {
     command: async () => hello,
@@ -101,6 +102,12 @@ test('cached readiness rechecks topology after expiry and recovers without new i
     collection: (name: string) => ({
       createIndex: async () => { writes++; },
       updateOne: async () => { writes++; },
+      updateMany: async (filter: Document, update: Document) => {
+        assert.equal(name, 'avatarMutations');
+        assert.deepEqual(filter, { status: 'pending', expiresAt: { $exists: true } });
+        assert.deepEqual(update, { $unset: { expiresAt: '' } });
+        writes++; avatarMigrations++;
+      },
       listIndexes: () => ({ toArray: async () => databaseIndexes.filter(index => index.collection === name)
         .map(index => ({ key: index.keys, unique: index.options?.unique })) })
     })
@@ -111,6 +118,7 @@ test('cached readiness rechecks topology after expiry and recovers without new i
   try {
     await connectToDatabase();
     const startupWrites = writes;
+    assert.equal(avatarMigrations, 1);
     hello = { ...replicaSetHello, setName: undefined };
     assert.equal(await checkDatabaseReadiness(), true);
     now += 30_001;
@@ -118,6 +126,14 @@ test('cached readiness rechecks topology after expiry and recovers without new i
     hello = replicaSetHello;
     assert.equal(await checkDatabaseReadiness(), true);
     assert.equal(writes, startupWrites);
+    assert.equal(avatarMigrations, 1);
+    await disconnectFromDatabase();
+    // A fresh Db wrapper bypasses initializer caching: read-only operational
+    // connections must not invoke either index or avatar-receipt migrations.
+    t.mock.method(MongoClient.prototype, 'db', () => ({ ...db }) as Db);
+    await connectToDatabase({ initializeIndexes: false });
+    assert.equal(writes, startupWrites);
+    assert.equal(avatarMigrations, 1);
   } finally {
     await disconnectFromDatabase();
     if (originalUri === undefined) delete process.env.DB_CONN_STRING; else process.env.DB_CONN_STRING = originalUri;

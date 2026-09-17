@@ -32,8 +32,10 @@ export const deleteImageStorageObject = async (
         imageStorageIdentity({ ETag: version.etag, VersionId: version.versionId ?? undefined });
         await send(new DeleteObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME!, Key: asset.s3Key,
-            // Explicit null keeps deletion exact even if bucket versioning later changes.
-            VersionId: version.versionId ?? 'null', IfMatch: version.etag
+            // Version deletion cannot use If-Match: S3 evaluates conditional deletes
+            // only against the current object. Unique conditional PUT keys and the
+            // legacy quiescence gate prevent null-version replacement by old writers.
+            VersionId: version.versionId ?? 'null'
         }));
     }
     for (const versionId of asset.storageDeleteMarkers ?? []) {
