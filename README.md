@@ -984,7 +984,9 @@ Web content management:
   fences and writes. Concurrent appends preserve both edits and the 500-item
   limit; positional edits return `409 manual_composition_changed` if transaction
   retry observes changed contents. Refresh the editor before resubmitting a
-  positional edit. Cross-Carousel moves commit both sides or neither.
+  positional edit. Adds rejected by the current size limit or a concurrently
+  deleted definition also return that conflict rather than reporting success.
+  Cross-Carousel moves commit both sides or neither.
 - Single and bulk Content Manager Audio MediaTrack creation records original filenames
   and a pending upload state before sending files to S3. They accept Artist Credits,
   Organization Credits, inherited Album primary Artists, or an explicitly
@@ -1173,6 +1175,12 @@ Session behavior:
   boundaries, so public catalog data may refetch afterward.
   Storage or BroadcastChannel unavailability does not block the originating
   authentication action.
+- Social reads are serialized within an account epoch. An active read has a
+  30-second deadline covering response-body decoding and existing transient
+  transaction retries; queue waiting time is excluded. Caller cancellation
+  settles immediately, and an account transition cancels and discards the old
+  queue so it cannot block the next epoch. Cancellation or a deadline does not
+  establish that the server stopped processing the request.
 - Playback activity captures the viewer and account epoch before awaiting
   playback start. A delayed start cannot report the previous account's activity
   or invalidate the replacement account's cache.
@@ -1181,10 +1189,27 @@ Session behavior:
 - Listener avatar writes and destructive account actions also bind to the
   account projected in the page. A stale tab receives a conflict instead of
   mutating whichever account most recently replaced the browser cookies.
+- Avatar uploads require `Content-Length`, one `avatar` file no larger than
+  5 MiB, no text fields, and a total multipart envelope no larger than 6 MiB.
+  Total-size admission runs before in-memory multipart parsing; the parser
+  separately enforces file size and file/field/part counts.
 - Avatar mutations reserve a pending account-scoped lease in the same
-  transaction that touches the active account. Account deletion takes that
-  fence and refuses to commit while an avatar reference, pending lease, or any
-  current/detached private avatar lifecycle record remains.
+  transaction that touches the active account. Leases last 30 seconds and
+  renew every 10 seconds. A retry first resumes expired work using its recorded
+  phase; every owner publication and asset cleanup claim checks that lease
+  transactionally, so a late worker cannot overwrite or delete its successor.
+  Pending receipts do not expire. Startup removes the old `expiresAt` field
+  from pending avatar receipts; completed responses retain a 24-hour TTL.
+  Account deletion takes the account fence and refuses to commit while an
+  avatar reference, pending lease, or any current/detached private avatar
+  lifecycle record remains. Once no avatar or private image asset remains,
+  account deletion can retire expired `reserved` and `cleared` receipts in
+  that same transaction; other pending states, including legacy, active, or
+  uncertain operations, continue to block removal.
+- A recovered legacy receipt without phase information, or an upload without
+  a confirmed S3 response, preserves its image lifecycle evidence and returns
+  an explicit recovery outcome. A new key can start a new operation; uncertain
+  storage cleanup remains pending until an operator reconciles exact versions.
 - Protected web pages redirect to login if unauthenticated. Content Manager
   additionally requires the current database role to be `admin`.
 
@@ -1289,6 +1314,29 @@ Reconciliation:
   automatically. Remediation requires a separate explicit administrator POST.
 - Admin-only image report: `GET /admin/image-storage/reconciliation`
 - The image report audits the `images/` namespace against `imageAssets`, including orphaned, detached, missing, pending, and failed image records.
+- New cover art and avatars record the PUT ETag and VersionId (including the
+  explicit null version). Reads and cleanup address those exact versions;
+  cleanup never treats a key-only delete marker as proof that bytes were
+  erased. Unknown uploads or legacy records without a confirmed version keep
+  their database evidence and report pending reconciliation.
+- Image version recovery uses an administrator checkout with the normal
+  private database/S3 configuration. Inspect one image without changing it:
+  `npx --no-install tsx scripts/reconcile-image-versions.ts --image-id=<24-hex-id>`.
+  The command inventories the exact key with `ListObjectVersions`, checks each
+  version's ownership metadata with HEAD, and accepts at most 100 versions and
+  delete markers. Missing/mismatched ownership, incomplete inventory, or
+  concurrent lifecycle changes fail closed.
+- To record that inventory, first stop all upload workers, then run
+  `npx --no-install tsx scripts/reconcile-image-versions.ts --image-id=<24-hex-id> --apply --confirm=UPLOAD_WORKERS_STOPPED`.
+  Apply conditionally updates only that image lifecycle row; it does not delete
+  S3 data. Then retry the existing avatar deletion or cover-art cleanup path.
+  This requires explicit authorization for the target environment. Deployment
+  bundles exclude repository scripts, so run it from the administrator checkout.
+- Before deploying version-aware image handling, grant `s3:GetObjectVersion`
+  and `s3:DeleteObjectVersion` for image/avatar objects, including explicit null
+  versions, alongside existing object permissions. The recovery operator also
+  needs bucket-level `s3:ListBucketVersions`. Keep old upload workers stopped
+  throughout an applied version reconciliation.
 - Admin-only content-reference report: `GET /admin/content-references/reconciliation`
 - The content-reference report detects dangling saved/activity references,
   Page-to-Carousel and Page-to-Grid/List references (including presentation
