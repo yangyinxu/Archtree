@@ -1718,7 +1718,9 @@ test('moving Carousel items persists the normalized fenced identity', async () =
     const albumId = new ObjectId();
     const sourceId = new ObjectId();
     const targetId = new ObjectId();
+    const actorId = new ObjectId();
     await Promise.all([
+        getDb()!.collection('users').insertOne({ _id: actorId, role: 'admin' }),
         getDb()!.collection('albums').insertOne({
             _id: albumId,
             title: 'Normalized Move Album',
@@ -1745,7 +1747,7 @@ test('moving Carousel items persists the normalized fenced identity', async () =
         targetId.toHexString(),
         0,
         0,
-        new ObjectId().toHexString()
+        actorId.toHexString()
     );
     const [source, target] = await Promise.all([
         getDb()!.collection('carousels').findOne({ _id: sourceId }),
