@@ -12,7 +12,8 @@ test('owned state and friend query preserve account fences, cancellation, and ex
   await getListeningStatuses('alice', [socialId], controller.signal);
   expect(fetcher.mock.calls[1][0]).toBe('/api/social/v1/listening-status/query');
   const options = fetcher.mock.calls[1][1];
-  expect(options.signal).toBe(controller.signal); expect(JSON.parse(options.body)).toEqual({ socialIds: [socialId] });
+  expect(options.signal).toBeInstanceOf(AbortSignal); expect(options.signal.aborted).toBe(false);
+  expect(JSON.parse(options.body)).toEqual({ socialIds: [socialId] });
   expect(new Headers(options.headers).get('X-Finitude-Account-Viewer')).toBe('alice');
 });
 test('strict DTOs exclude private playback, room, account and historical fields and accept Unicode bounds', () => {

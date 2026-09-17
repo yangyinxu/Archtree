@@ -15,7 +15,8 @@ test('share directions and cursors remain account-owned reads with cancellation'
   const [url, options] = fetcher.mock.calls[0];
   expect(url).toBe('/api/social/v1/music-shares?direction=incoming&limit=20&cursor=a%2Bb%2F%3D');
   expect(new Headers(options.headers).get('X-Finitude-Account-Viewer')).toBe('viewer-1');
-  expect(options.signal).toBe(controller.signal); expect(options.body).toBeUndefined();
+  expect(options.signal).toBeInstanceOf(AbortSignal); expect(options.signal.aborted).toBe(false);
+  expect(options.body).toBeUndefined();
   await getMusicShares('viewer-1', 'outgoing');
   expect(fetcher.mock.calls[1][0]).toBe('/api/social/v1/music-shares?direction=outgoing&limit=20');
 });

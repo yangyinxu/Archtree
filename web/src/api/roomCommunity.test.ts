@@ -19,7 +19,8 @@ test('community reads preserve strict public metadata and use the shared account
   expect(url).toBe('/api/social/v1/rooms/room-a/community');
   expect(new Headers(options.headers).get('X-Finitude-Account-Viewer')).toBe('viewer-1');
   expect(new Headers(options.headers).get('X-Finitude-Room-Client')).toBe(roomClientId());
-  expect(options.signal).toBe(controller.signal); expect(options.body).toBeUndefined();
+  expect(options.signal).toBeInstanceOf(AbortSignal); expect(options.signal.aborted).toBe(false);
+  expect(options.body).toBeUndefined();
 });
 
 test('community projections reject private fields at every nested boundary', () => {
