@@ -64,7 +64,8 @@ import {
 } from '../services/authCapabilitiesService';
 import { requireAcceptablePassword } from '../services/passwordPolicyService';
 import { deleteAvatar, getAvatar, putAvatar } from '../controllers/avatarController';
-import { avatarUpload } from '../middleware/imageUpload';
+import { avatarUpload, maxAvatarRequestMb } from '../middleware/imageUpload';
+import { requireUploadSize } from '../middleware/audioUpload';
 import {
     uploadConcurrencyLimit,
     uploadRateLimit
@@ -244,6 +245,7 @@ router.put(
     requireCurrentAccountViewer,
     uploadRateLimit,
     uploadConcurrencyLimit,
+    requireUploadSize(maxAvatarRequestMb),
     avatarUpload.single('avatar'),
     asyncHandler(putAvatar)
 );
