@@ -1,5 +1,5 @@
 import type { AudioTrackSummary } from '../../api/contentSchemas';
-import { captureAccountOperation } from '../../api/accountEpoch';
+import { captureAccountOperation, isAccountOperationCurrent, type AccountOperationGuard } from '../../api/accountEpoch';
 import {
   playbackActivityTarget,
   playerStore,
@@ -21,21 +21,20 @@ export const queueItemFromTrack = (track: AudioTrackSummary): PlayerQueueItem =>
 });
 
 const recordAfterPlaybackStarts = (
-  viewerId: string | null | undefined,
+  guard: AccountOperationGuard | undefined,
   event: PlaybackActivityEvent,
   launchGeneration: number,
   expectedTrackId: string
 ) => {
   const snapshot = playerStore.getSnapshot();
-  if (!viewerId
+  if (!guard || !isAccountOperationCurrent(guard)
     || launchGeneration !== latestPlaybackLaunch
     || snapshot.status !== 'playing'
     || snapshot.currentItem?.id !== expectedTrackId) return;
   const target = playbackActivityTarget(event);
   if (!target) return;
-  const guard = captureAccountOperation(viewerId);
   void import('./recordPlaybackHistory').then(({ recordPlaybackHistory }) => {
-    return recordPlaybackHistory(target, viewerId, guard);
+    return recordPlaybackHistory(target, guard.viewerId, guard);
   }).catch(() => {
     // Activity history is best-effort and never interrupts public playback.
   });
@@ -47,9 +46,10 @@ export const launchStandalonePlayback = async (
   viewerId?: string | null
 ) => {
   const launchGeneration = ++latestPlaybackLaunch;
+  const guard = viewerId ? captureAccountOperation(viewerId) : undefined;
   await playerStore.launchStandalone(queueItemFromTrack(track));
   recordAfterPlaybackStarts(
-    viewerId,
+    guard,
     { type: 'standaloneTrack', trackId: track.id },
     launchGeneration,
     track.id
@@ -69,9 +69,10 @@ export const launchAlbumPlayback = async (
     : -1;
   const initialIndex = requestedIndex >= 0 ? requestedIndex : 0;
   const launchGeneration = ++latestPlaybackLaunch;
+  const guard = viewerId ? captureAccountOperation(viewerId) : undefined;
   await playerStore.launchAlbumQueue(tracks.map(queueItemFromTrack), initialIndex);
   recordAfterPlaybackStarts(
-    viewerId,
+    guard,
     requestedIndex >= 0
       ? { type: 'explicitAlbumTrack', trackId: tracks[initialIndex].id }
       : { type: 'albumPlay', albumId },
@@ -92,9 +93,10 @@ export const launchPlaylistPlayback = async (
     : -1;
   const initialIndex = requestedIndex >= 0 ? requestedIndex : 0;
   const launchGeneration = ++latestPlaybackLaunch;
+  const guard = viewerId ? captureAccountOperation(viewerId) : undefined;
   await playerStore.launchQueue(tracks.map(queueItemFromTrack), initialIndex);
   recordAfterPlaybackStarts(
-    viewerId,
+    guard,
     { type: 'playlistTrack', trackId: tracks[initialIndex].id },
     launchGeneration,
     tracks[initialIndex].id

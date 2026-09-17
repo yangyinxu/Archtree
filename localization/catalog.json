@@ -3367,6 +3367,40 @@
         "name": "string"
       }
     },
+    "playlist.create.abandon": {
+      "description": "Action explicitly discarding recovery of an unconfirmed Playlist creation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.create.abandon_confirm": {
+      "description": "Confirmation explaining that abandoning recovery does not undo a possibly committed Playlist creation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.create.expired": {
+      "description": "An uncertain Playlist creation can no longer be retried safely after its server receipt retention window.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.create.recovery": {
+      "description": "Preserved unknown Playlist creation guidance across dialog and route changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
     "playlist.delete.deleting": {
       "description": "Status while a Playlist deletion is confirmed.",
       "delivery": [

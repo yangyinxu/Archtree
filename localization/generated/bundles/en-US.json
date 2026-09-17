@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-CgFliQlxcK0uA70Ut78LM8jO9wJhlsxBVpSlTSKPUVk",
+  "revision": "sha256-aeXBLHCxpKTVVn8jIEPtzR-e26TxiMsd0pt2Uf2t9lM",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.back_login": "Back to Log in",
@@ -469,6 +469,10 @@
     "playlist.add.searching": "Searching MediaTracks…",
     "playlist.add.title": "Add MediaTracks",
     "playlist.artwork_alt": "{name} Playlist artwork",
+    "playlist.create.abandon": "Stop retrying",
+    "playlist.create.abandon_confirm": "Stop retrying “{name}”? It may already exist. This does not delete it. Creating again may make another Playlist.",
+    "playlist.create.expired": "The retry window for “{name}” has ended. Check your Playlists before creating another.",
+    "playlist.create.recovery": "Creation of “{name}” is not confirmed. Retry this action to recover its original result. Closing this dialog keeps this request.",
     "playlist.delete.deleting": "Deleting…",
     "playlist.delete.description": "“{name}” will disappear, but its MediaTracks, Saved Library state, and anything already playing will stay unchanged.",
     "playlist.delete.kicker": "Permanent action",

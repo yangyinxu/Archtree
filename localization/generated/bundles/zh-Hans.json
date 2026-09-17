@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-cP7LSeECmmvN2D3rMsKo-9bahzOTXNICwtT_FQ29tLo",
+  "revision": "sha256-CAyomOiXlqitEHQYCvYpfguEC1-a2yLFdeYztKzF_MM",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.back_login": "返回登录",
@@ -469,6 +469,10 @@
     "playlist.add.searching": "正在搜索媒体曲目…",
     "playlist.add.title": "添加媒体曲目",
     "playlist.artwork_alt": "{name}播放列表封面",
+    "playlist.create.abandon": "放弃重试",
+    "playlist.create.abandon_confirm": "确定放弃重试“{name}”？它可能已经创建成功，此操作不会将其删除。再次创建可能会生成另一个播放列表。",
+    "playlist.create.expired": "“{name}”的安全重试期限已过。再次创建前，请先检查已有的播放列表。",
+    "playlist.create.recovery": "尚未确认“{name}”是否创建成功。请重试此操作以恢复原始结果。关闭此对话框仍会保留这次请求。",
     "playlist.delete.deleting": "正在删除…",
     "playlist.delete.description": "“{name}”会消失，但其中的媒体曲目、已保存的音乐库状态和正在播放的内容都不会改变。",
     "playlist.delete.kicker": "永久操作",
