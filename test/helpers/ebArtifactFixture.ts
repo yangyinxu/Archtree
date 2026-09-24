@@ -8,6 +8,20 @@ export const writeFixtureFile = async (root: string, relativePath: string, conte
   await writeFile(filePath, contents, 'utf8');
 };
 
+/** Adds only the generated guide assets for a specific clean release identity. */
+export const writeEngineeringFixture = async (root: string, commit = 'a'.repeat(40)) => {
+  const html = '<link rel="stylesheet" href="/engineering/guide.css"><script defer src="/engineering/guide.js"></script>';
+  await writeFixtureFile(root, 'engineering/dist/index.html', html);
+  await writeFixtureFile(root, 'engineering/dist/system/map/index.html', html);
+  await writeFixtureFile(root, 'engineering/dist/guide.css', 'body { color: black; }');
+  await writeFixtureFile(root, 'engineering/dist/guide.js', '"use strict";');
+  await writeFixtureFile(root, 'engineering/dist/manifest.json', JSON.stringify({ schemaVersion: 1,
+    revision: { commit, dirty: false }, sourceDigest: 'd'.repeat(64),
+    pages: [{ slug: '', title: 'Engineering', description: 'Overview', file: 'index.html' },
+      { slug: 'system/map', title: 'System map', description: 'Boundaries', file: 'system/map/index.html' }],
+    assets: ['guide.css', 'guide.js'] }));
+};
+
 /** Creates the minimum source tree accepted by the deployment allowlist. */
 export const createSourceFixture = async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'archtree-eb-source-'));
@@ -50,5 +64,7 @@ export const createSourceFixture = async () => {
   await writeFixtureFile(root, '.platform/nginx/conf.d/fixture.conf', 'send_timeout 120s;\n');
   await writeFixtureFile(root, '.ebextensions/https-instance.config', 'Resources: {}\n');
   await writeFixtureFile(root, 'README.md', 'must not be staged\n');
+  await writeFixtureFile(root, '.gitignore', 'engineering/dist\nelastic-beanstalk-artifact\n');
+  await writeEngineeringFixture(root);
   return root;
 };

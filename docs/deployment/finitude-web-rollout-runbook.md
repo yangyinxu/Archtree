@@ -67,6 +67,15 @@ Local staging requires a clean committed worktree so `RELEASE.json` cannot
 misidentify uncommitted bytes. CI supplies the immutable source identity
 directly.
 
+The same build emits the Engineering Guide under `engineering/dist`. Both the
+staged runtime and the versioned rollback ZIP must retain that directory alongside
+`web/dist`. Staging and promotion reject a guide whose manifest identifies a dirty
+checkout or a different commit from `RELEASE.json`; rebuild after committing the
+candidate. Guide source documents are not copied into the runtime. Once deployed,
+verify an administrator can open `/engineering` and a nested page, while an
+ordinary account cannot read either the pages or their assets. Local preview and
+fixture tests do not replace that deployment check.
+
 The release workflow never updates visual baselines. When the current
 candidate has no reviewed Linux baseline yet, its first Ubuntu run is expected
 to fail the affected visual assertions while retaining `test-results` with the

@@ -78,8 +78,11 @@ const normalizeIdentifier = (value: string) => {
 /** Restricts legacy form redirects to known same-origin browser destinations. */
 export const safeWebReturnTo = (value: unknown) => {
   const candidate = String(value ?? '').trim();
-  if (!candidate.startsWith('/') || candidate.startsWith('//')) return '/';
+  if (!candidate.startsWith('/') || candidate.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(candidate)) return '/';
   try {
+    // Inspect before URL normalization so traversal cannot become an allowed page.
+    const rawPath = decodeURIComponent(candidate.split(/[?#]/, 1)[0]);
+    if (rawPath.includes('\\') || rawPath.split('/').some((segment) => segment === '.' || segment === '..')) return '/';
     const base = 'https://archtree.invalid';
     const destination = new URL(candidate, base);
     if (destination.origin !== base) return '/';
@@ -92,9 +95,12 @@ export const safeWebReturnTo = (value: unknown) => {
       || destination.pathname.startsWith('/finitude/');
     const legacyListenerDestination = destination.pathname === '/listen'
       || destination.pathname.startsWith('/listen/');
+    const engineeringDestination = destination.pathname.length <= 174
+      && /^\/engineering(?:\/[a-z0-9]+(?:-[a-z0-9]+)*){0,4}\/?$/.test(destination.pathname);
     if (!contentManagerDestination
       && !listenerDestination
       && !legacyListenerDestination
+      && !engineeringDestination
       && destination.pathname !== '/') {
       return '/';
     }

@@ -109,7 +109,7 @@ jobs:
         run: |
           cd elastic-beanstalk-artifact
           zip -q -r "../${EB_BUNDLE_NAME}" \
-            .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json localization src tsconfig.json web
+            .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json localization src tsconfig.json web engineering
 
       - name: Bind the tested bundle to this workflow attempt
         env:

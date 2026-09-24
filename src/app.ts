@@ -11,6 +11,7 @@ import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import listenerRoutes from './routes/listenerRoutes';
 import { createLocalizationRouter } from './routes/localizationRoutes';
+import { createEngineeringRouter } from './routes/engineeringRoutes';
 import videoRoutes from './routes/videoRoutes';
 import narutoMobileRoutes from './routes/narutoMobileRoutes';
 import { createSocialRouter } from './routes/socialRoutes';
@@ -46,6 +47,8 @@ export interface CreateAppOptions {
   lifecycle?: ServerLifecycle;
   /** Overrides the production listener bundle location for isolated route tests. */
   listenerDistPath?: string;
+  /** Overrides the generated internal engineering guide for isolated route tests. */
+  engineeringDistPath?: string;
   /** Overrides generated localization artifacts for isolated route tests. */
   localizationDistPath?: string;
   /** Retains explicit runtime context for existing isolated application callers. */
@@ -182,7 +185,8 @@ export const renderLandingActions = (
       : '';
     const adminHeroActions = auth.role === 'admin'
       ? `<a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Open Content Manager</a>
-        <a class="button button--secondary" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i>Browse MediaTracks</a>`
+        <a class="button button--secondary" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i>Browse MediaTracks</a>
+        <a class="button button--secondary" href="/engineering"><i class="ph ph-tree-structure" aria-hidden="true"></i>Engineering Guide</a>`
       : '';
     return {
       headerActions: `<div class="header-actions">
@@ -236,6 +240,9 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     );
     next();
   });
+
+  // The guide's pages, assets, redirects, and errors all share the admin boundary.
+  app.use('/engineering', createEngineeringRouter(options.engineeringDistPath));
 
   // Cookie mutation proof and shared-content authorization must run before a
   // rejected request can consume application body-parser or upload work.

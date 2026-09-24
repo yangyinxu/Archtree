@@ -27,6 +27,15 @@ Search coverage verifies cancellable debounced result previews without history
 writes, explicit history commits, and committed query restoration through
 browser Back and Forward.
 
+The Engineering Guide browser spec verifies its hosted login return destination,
+then reads the same generated bundle through the loopback documentation preview.
+It checks deep links, refresh/back navigation, keyboard focus, operation without
+JavaScript, WCAG axe checks, and 320/768/1440 px reflow. Server tests separately
+verify real session and administrator middleware for every guide page and asset.
+Run `npm run build` before the browser gate; the guide build validates its curated
+source references and internal links. The preview verifies document presentation,
+not production account access or deployment.
+
 The current local uncommitted candidate's 2026-08-19 MediaTrack amendment passes
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
 tests, both production builds, and E2E TypeScript. The focused Audio/Video

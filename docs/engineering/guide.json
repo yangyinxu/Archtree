@@ -1,0 +1,1657 @@
+{
+  "schemaVersion": 1,
+  "pages": [
+    {
+      "slug": "",
+      "title": "Understand Archtree in 15 minutes",
+      "eyebrow": "Engineering guide",
+      "description": "A guided route from the system map to the code you will change.",
+      "readingMinutes": 2,
+      "sections": [
+        {
+          "id": "purpose",
+          "title": "One backend, several experiences",
+          "body": [
+            "Archtree manages the shared music and video catalog, account services, media delivery, and private listener features. Finitude is the listening experience built on those contracts.",
+            "This guide explains the implementation in this repository. Follow each source link to inspect the corresponding code. Business rules remain the authority for product behavior; this guide is a reading map."
+          ],
+          "sources": [
+            {
+              "path": "docs/business-rules.md",
+              "label": "Canonical business rules"
+            },
+            {
+              "path": "src/app.ts",
+              "label": "Application entry and route mounts",
+              "find": "export const createApp"
+            }
+          ]
+        },
+        {
+          "id": "system-map",
+          "title": "Explore the system",
+          "layout": "map",
+          "items": [
+            {
+              "title": "Finitude Web",
+              "text": "React routes and one persistent player consume the listener APIs.",
+              "href": "/engineering/modules/web"
+            },
+            {
+              "title": "Identity",
+              "text": "Sessions and viewer fences protect every private account operation.",
+              "href": "/engineering/modules/identity"
+            },
+            {
+              "title": "Catalog + Content Manager",
+              "text": "Administrators curate shared content; listeners receive ready public projections.",
+              "href": "/engineering/modules/catalog"
+            },
+            {
+              "title": "Media + storage",
+              "text": "MongoDB records ownership and lifecycle; S3 holds the media bytes.",
+              "href": "/engineering/modules/media"
+            },
+            {
+              "title": "Library + Playlists",
+              "text": "Private saves, history, and ordered collections belong to one account.",
+              "href": "/engineering/modules/library"
+            },
+            {
+              "title": "Social + rooms",
+              "text": "Explicit participation, recoverable commands, and authorized realtime updates.",
+              "href": "/engineering/modules/social"
+            }
+          ]
+        },
+        {
+          "id": "reading-path",
+          "title": "Your first 15 minutes",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "01 / Get the shape · 4 min",
+              "text": "Learn the runtime surfaces, ownership boundaries, and actual code organization.",
+              "href": "/engineering/architecture"
+            },
+            {
+              "title": "02 / Follow one request · 6 min",
+              "text": "Trace an Album from its URL through MongoDB and the public DTO into the Web page.",
+              "href": "/engineering/flows/read-album"
+            },
+            {
+              "title": "03 / Find your change · 3 min",
+              "text": "Choose the module and verification path for the feature you need to work on.",
+              "href": "/engineering/modules"
+            }
+          ]
+        },
+        {
+          "id": "first-session",
+          "title": "Then make it run",
+          "body": [
+            "Use the startup guide for runtime prerequisites, local configuration, and observable success checks. Use the development guide before your first behavior change."
+          ],
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Run locally",
+              "text": "Start Express and the listener development server.",
+              "href": "/engineering/start"
+            },
+            {
+              "title": "Ship a considered change",
+              "text": "Check the contract, failure paths, and relevant release gates.",
+              "href": "/engineering/development"
+            }
+          ],
+          "callout": {
+            "title": "Current implementation, with boundaries",
+            "text": "A feature present in code is not proof that a deployment enables it. Social and room capabilities have explicit rollout controls, and native adoption and device verification are separate work."
+          }
+        }
+      ]
+    },
+    {
+      "slug": "start",
+      "title": "Run Archtree locally",
+      "eyebrow": "First session",
+      "description": "Prepare the tools, configure a development environment, and recognize a healthy start.",
+      "readingMinutes": 4,
+      "sections": [
+        {
+          "id": "prerequisites",
+          "title": "Start with the checked-in runtime",
+          "body": [
+            "Use Node.js 24 and the patch recorded in .nvmrc. Install dependencies from the lockfile with npm ci. A different Node major is rejected by the test and build preflight.",
+            "The development checks require a trusted MongoDB daemon for disposable integration databases. Room audio analysis also requires FFmpeg with the documented decoding capabilities. The doctor command checks tools without reading application secrets or connecting to the application database."
+          ],
+          "code": {
+            "language": "sh",
+            "text": "npm ci\nnpm run doctor"
+          },
+          "sources": [
+            {
+              "path": ".nvmrc",
+              "label": "Pinned Node version"
+            },
+            {
+              "path": "package.json",
+              "label": "Available commands",
+              "find": "\"scripts\""
+            },
+            {
+              "path": "docs/development-environment.md",
+              "label": "Runtime setup and diagnostics",
+              "find": "## Install and check"
+            }
+          ]
+        },
+        {
+          "id": "configuration",
+          "title": "Configure a private development environment",
+          "body": [
+            "Read .env.example for configuration names and the README for each setting. Create a local .env only when one does not already exist, or supply settings through the process environment. Keep values out of source control and diagnostic reports.",
+            "DB_CONN_STRING and DB_NAME select the intended development database. It must provide writable replica-set or mongos transactions. Authentication needs JWT_SECRET; storage, mail, and optional providers have their own settings. A passing doctor check does not supply these services.",
+            "Use a development database you are authorized to change. Application startup initializes required indexes and recovery state; the disposable test daemon does not become your development database."
+          ],
+          "sources": [
+            {
+              "path": ".env.example",
+              "label": "Configuration template"
+            },
+            {
+              "path": "docs/development-environment.md",
+              "label": "Application startup setup",
+              "find": "## Configure application startup"
+            },
+            {
+              "path": "src/infrastructure/database.ts",
+              "label": "Connection and initialization",
+              "find": "export const connectToDatabase"
+            }
+          ]
+        },
+        {
+          "id": "start-processes",
+          "title": "Open the two development surfaces",
+          "layout": "steps",
+          "steps": [
+            {
+              "title": "Start Express",
+              "text": "Run npm run dev from the repository root. With the default port, open http://localhost:8080. The landing page links to Finitude and available account actions.",
+              "sources": [
+                {
+                  "path": "package.json",
+                  "label": "Server development command",
+                  "find": "\"dev\":"
+                }
+              ]
+            },
+            {
+              "title": "Start Finitude hot reload",
+              "text": "In another terminal, run npm run dev:web and open http://localhost:5173/finitude/. Vite proxies API requests to Express at 127.0.0.1:8080. If you change the server port, align the proxy configuration.",
+              "sources": [
+                {
+                  "path": "web/vite.config.ts",
+                  "label": "Vite base path and proxy",
+                  "find": "server: {"
+                }
+              ]
+            },
+            {
+              "title": "Check the built experience",
+              "text": "Run npm run build, then use the Express /finitude route to inspect the generated listener bundle and deep links. A missing bundle and an empty catalog are different problems.",
+              "sources": [
+                {
+                  "path": "README.md",
+                  "label": "Local run and production-style bundle",
+                  "find": "## Local Run"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "language": "sh",
+            "text": "npm run dev\n# In a separate terminal:\nnpm run dev:web"
+          }
+        },
+        {
+          "id": "success",
+          "title": "Know what success looks like",
+          "body": [
+            "A successful server start reports server_listening. Check /health for the connected application database, required indexes, and topology. A running Vite server alone does not establish API readiness.",
+            "You should be able to open the listener without signing in. An empty development catalog can be a valid empty state. Content Manager at /content/manage requires an administrator account; public registration never creates one.",
+            "If startup fails, use the fixed stage, reason, and action fields in server_start_failed. Resolve the named configuration, topology, index, or port problem without pasting credential-bearing driver output."
+          ],
+          "sources": [
+            {
+              "path": "src/server.ts",
+              "label": "Server listening confirmation",
+              "find": "category: 'server_listening'"
+            },
+            {
+              "path": "src/controllers/healthController.ts",
+              "label": "Health endpoint"
+            },
+            {
+              "path": "docs/business-rules.md",
+              "label": "Administrator access contract",
+              "find": "## Catalog Visibility and Administration"
+            }
+          ],
+          "callout": {
+            "title": "The first verification loop",
+            "text": "Run npm test and npm run build before handing off an implementation. Add the MongoDB integration and browser gates required by the behavior you changed."
+          }
+        }
+      ]
+    },
+    {
+      "slug": "architecture",
+      "title": "See the whole system",
+      "eyebrow": "Architecture",
+      "description": "Understand the running surfaces before choosing a folder or abstraction.",
+      "readingMinutes": 4,
+      "sections": [
+        {
+          "id": "surfaces",
+          "title": "One Express application, distinct surfaces",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Public listener API",
+              "text": "/api/listener/v1 returns bounded, allowlisted catalog and composition DTOs. Private endpoints apply account guards.",
+              "href": "/engineering/flows/read-album"
+            },
+            {
+              "title": "Finitude Web",
+              "text": "/finitude serves the built React application; development uses Vite with same-origin API proxies.",
+              "href": "/engineering/modules/web"
+            },
+            {
+              "title": "Content Manager",
+              "text": "/content/manage renders administrator workflows for metadata, relationships, uploads, and recovery.",
+              "href": "/engineering/modules/catalog"
+            },
+            {
+              "title": "Account + social APIs",
+              "text": "/auth handles identity; /api/social/v1 provides explicitly enabled social and Audio room capabilities.",
+              "href": "/engineering/modules/identity"
+            }
+          ],
+          "sources": [
+            {
+              "path": "src/app.ts",
+              "label": "Surface composition",
+              "find": "export const createApp"
+            }
+          ]
+        },
+        {
+          "id": "code-shape",
+          "title": "The code has several established patterns",
+          "body": [
+            "Routes compose transport guards and handlers. Controllers interpret HTTP input and response behavior. Services coordinate catalog reads, storage, identity, and lifecycle work. Models include persistence behavior rather than being plain type declarations.",
+            "Some newer workflows use application modules and focused repositories. Catalog publication uses these boundaries; social and rooms have application services and document types. Listener catalog reads currently query MongoDB directly from listenerContentService.",
+            "Trace the path you are changing before introducing a new layer. Do not assume that every endpoint follows Route → Controller → Service → Repository."
+          ],
+          "sources": [
+            {
+              "path": "src/routes/listenerRoutes.ts",
+              "label": "Listener routing"
+            },
+            {
+              "path": "src/services/listenerContentService.ts",
+              "label": "Direct read projection",
+              "find": "export const getListenerAlbum"
+            },
+            {
+              "path": "src/application/catalog/publishNewAlbum.ts",
+              "label": "Publication workflow",
+              "find": "export const publishNewAlbum"
+            },
+            {
+              "path": "src/models/album.ts",
+              "label": "Album persistence model",
+              "find": "export class Album"
+            },
+            {
+              "path": "src/repositories/catalog/albumPublicationRepository.ts",
+              "label": "Publication repository",
+              "find": "export const insertPublishedAlbum"
+            }
+          ]
+        },
+        {
+          "id": "state",
+          "title": "Know which system owns the state",
+          "layout": "map",
+          "items": [
+            {
+              "title": "MongoDB",
+              "text": "Owns catalog identity, accounts, references, lifecycle evidence, and durable command outcomes.",
+              "href": "/engineering/modules/catalog"
+            },
+            {
+              "title": "S3",
+              "text": "Stores object bytes. Object existence alone never grants public catalog visibility.",
+              "href": "/engineering/modules/media"
+            },
+            {
+              "title": "HTTP",
+              "text": "Handles reads and durable mutations, with ownership and retry rules at the relevant boundary.",
+              "href": "/engineering/flows"
+            },
+            {
+              "title": "WebSocket",
+              "text": "Pushes authorized room updates; durable room state stays on the server.",
+              "href": "/engineering/modules/social"
+            },
+            {
+              "title": "Browser player",
+              "text": "Owns the local media element and execution state while following server room authority when admitted.",
+              "href": "/engineering/modules/web"
+            },
+            {
+              "title": "Native clients",
+              "text": "Consume shared contracts; device-local download and system playback rules are separately defined.",
+              "href": "/engineering/development"
+            }
+          ]
+        },
+        {
+          "id": "contracts",
+          "title": "Read contracts at the boundary",
+          "body": [
+            "docs/business-rules.md defines agreed product behavior across clients. src/contracts contains versioned wire types; Web response schemas validate incoming JSON. Contract fixtures exercise old and current response shapes.",
+            "docs/architecture.md contains detailed implementation material and rollout context. Proposal files under docs/plans are sequencing or future work, not automatic evidence that a feature exists or is deployed."
+          ],
+          "sources": [
+            {
+              "path": "docs/business-rules.md",
+              "label": "Canonical business rules"
+            },
+            {
+              "path": "src/contracts/listenerV1.ts",
+              "label": "Listener response types"
+            },
+            {
+              "path": "contracts/listener/v1/fixtures/album-current.json",
+              "label": "Current Album fixture"
+            },
+            {
+              "path": "web/src/api/listenerContractCompatibility.test.ts",
+              "label": "Compatibility checks"
+            },
+            {
+              "path": "docs/architecture.md",
+              "label": "Detailed architecture reference"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "modules",
+      "title": "Where should I make a change?",
+      "eyebrow": "Module finder",
+      "description": "Start with the behavior, then follow its entry point, contract, and tests.",
+      "readingMinutes": 3,
+      "sections": [
+        {
+          "id": "tasks",
+          "title": "Choose your task",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Change Album details or catalog search",
+              "text": "Read the public projection, lifecycle filters, response contract, and catalog UI together.",
+              "href": "/engineering/modules/catalog"
+            },
+            {
+              "title": "Fix login or account switching",
+              "text": "Trace sessions, browser viewer fencing, and cache invalidation before editing a screen.",
+              "href": "/engineering/modules/identity"
+            },
+            {
+              "title": "Investigate a failed upload or replacement",
+              "text": "Follow ownership and storage lifecycle evidence through failure, retry, and reconciliation.",
+              "href": "/engineering/modules/media"
+            },
+            {
+              "title": "Change Save, history, or a Playlist",
+              "text": "Identify which private collection owns the state and which mutation contract applies.",
+              "href": "/engineering/modules/library"
+            },
+            {
+              "title": "Change friends or shared playback",
+              "text": "Inspect social admission, durable command recovery, room authority, and the single player.",
+              "href": "/engineering/modules/social"
+            },
+            {
+              "title": "Change a screen, player, or translation",
+              "text": "Find the Web feature, shared state, locale source, and matching browser coverage.",
+              "href": "/engineering/modules/web"
+            }
+          ]
+        },
+        {
+          "id": "directory-map",
+          "title": "Use the folders as a map",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "src/routes + src/controllers",
+              "text": "HTTP entry points, transport checks, and response handling."
+            },
+            {
+              "title": "src/services + src/models",
+              "text": "Existing read projections, persistence behavior, storage, and lifecycle work."
+            },
+            {
+              "title": "src/application + src/repositories",
+              "text": "Focused application workflows and persistence boundaries used by selected modules."
+            },
+            {
+              "title": "src/contracts + contracts",
+              "text": "Versioned wire types and compatibility fixtures."
+            },
+            {
+              "title": "web/src + localization",
+              "text": "Listener features, shared player, response validation, and canonical translation sources."
+            },
+            {
+              "title": "test + web/e2e",
+              "text": "Server unit and integration cases plus listener browser verification."
+            }
+          ],
+          "sources": [
+            {
+              "path": "src/app.ts",
+              "label": "Start at the route mounts",
+              "find": "export const createApp"
+            },
+            {
+              "path": "web/src/app/router.tsx",
+              "label": "Start at the Web route map"
+            }
+          ]
+        },
+        {
+          "id": "before-editing",
+          "title": "Read the neighboring failure path",
+          "body": [
+            "A happy-path handler is only part of the module. Find its authorization tests, stale-response handling, retry identity, and cleanup behavior before changing it.",
+            "For a first investigation, use the Album walkthrough. It connects a visible screen to the exact server and client boundaries without requiring a private account mutation."
+          ],
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Trace an Album request",
+              "text": "A complete read path with source links at every step.",
+              "href": "/engineering/flows/read-album"
+            },
+            {
+              "title": "Choose verification",
+              "text": "Match checks to the type of change.",
+              "href": "/engineering/development"
+            }
+          ],
+          "sources": [
+            {
+              "path": "AGENTS.md",
+              "label": "Repository workflow and verification"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "modules/catalog",
+      "title": "Catalog and Content Manager",
+      "eyebrow": "Module / Shared content",
+      "description": "Shared content has public read projections and administrator-only mutation paths.",
+      "readingMinutes": 4,
+      "sections": [
+        {
+          "id": "responsibility",
+          "title": "Separate curation from listening",
+          "body": [
+            "Artists, Organizations, Albums, MediaTracks, Credits, and configured page items describe the shared catalog. Content Manager provides server-rendered administration; Finitude reads listener-specific DTOs.",
+            "Only the exact persisted admin role grants shared-content mutation access. createdBy records provenance and does not grant ownership permissions. Ready public content is readable regardless of the viewer role."
+          ],
+          "sources": [
+            {
+              "path": "docs/business-rules.md",
+              "label": "Catalog rules",
+              "find": "## Catalog Visibility and Administration"
+            },
+            {
+              "path": "src/routes/content/contentManagerRoutes.ts",
+              "label": "Administrator workflows"
+            },
+            {
+              "path": "src/middleware/authMiddleware.ts",
+              "label": "Authentication and role guards"
+            }
+          ]
+        },
+        {
+          "id": "read-path",
+          "title": "Find public content at its projection",
+          "body": [
+            "listenerContentService resolves listener Home, search, Album, Artist, and track data. publicCatalogService serves legacy public catalog projections. Both must preserve ready visibility and avoid leaking persistence fields.",
+            "MediaTrack is the product identity. Existing audioTracks collections and audioTrack relationship values remain compatibility names and may also describe Video. Do not infer the media kind from those names.",
+            "Canonical Credits describe attribution. Compatibility artistIds and albumIds remain server-maintained projections during migration; they are not interchangeable with every credit role."
+          ],
+          "sources": [
+            {
+              "path": "src/services/listenerContentService.ts",
+              "label": "Listener reads",
+              "find": "export const getListenerAlbum"
+            },
+            {
+              "path": "src/services/publicCatalogService.ts",
+              "label": "Legacy public reads"
+            },
+            {
+              "path": "src/contracts/listenerV1.ts",
+              "label": "Media and credit DTOs"
+            },
+            {
+              "path": "src/services/catalogCreditService.ts",
+              "label": "Credit mutations"
+            }
+          ]
+        },
+        {
+          "id": "write-path",
+          "title": "Follow publication and references together",
+          "body": [
+            "Catalog creation, artwork ownership, and relationship updates have recovery paths. Inspect publication and reference-fence services alongside the controller. A successful upload can precede a failed linking step and must remain recoverable.",
+            "Album membership order derives from embedded Track Numbers, with deterministic fallback ordering. The read layer preserves declared order; it does not invent a new order from query results.",
+            "Configured Home sections use persisted Carousel, Grid, and List definitions. A personalized section resolves against its authorized viewer and must not become a shared cached account response."
+          ],
+          "sources": [
+            {
+              "path": "src/application/catalog/publishNewAlbum.ts",
+              "label": "Album publication",
+              "find": "export const publishNewAlbum"
+            },
+            {
+              "path": "src/services/albumTrackLinkService.ts",
+              "label": "Album membership writes"
+            },
+            {
+              "path": "src/services/publicPageService.ts",
+              "label": "Public page composition"
+            },
+            {
+              "path": "test/albumTrackNumberOrder.test.ts",
+              "label": "Track Number ordering tests"
+            }
+          ]
+        },
+        {
+          "id": "checks",
+          "title": "Read the tests with the implementation",
+          "body": [
+            "Use listenerContent.integration.ts for the ready-only public read contract and catalogCreatePublication tests for partial publication outcomes. Relationship, deletion, and lifecycle changes also require MongoDB integration verification."
+          ],
+          "sources": [
+            {
+              "path": "test/listenerContent.integration.ts",
+              "label": "Public projection integration coverage"
+            },
+            {
+              "path": "test/catalogCreatePublication.test.ts",
+              "label": "Publication failure coverage"
+            },
+            {
+              "path": "test/catalogCreatePublication.integration.ts",
+              "label": "Publication integration coverage"
+            }
+          ],
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Follow the Album request",
+              "text": "See how this module reaches the listener.",
+              "href": "/engineering/flows/read-album"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "modules/identity",
+      "title": "Identity and account boundaries",
+      "eyebrow": "Module / Authentication",
+      "description": "A valid identity must stay valid through sessions, account transitions, and delayed responses.",
+      "readingMinutes": 4,
+      "sections": [
+        {
+          "id": "responsibility",
+          "title": "Authentication is more than a login screen",
+          "body": [
+            "The auth routes cover password sign-in, email verification and recovery, configured federated providers, passkeys, sessions, and account actions. Capability endpoints determine which optional methods a client can advertise.",
+            "Short-lived access credentials are bound to revocable server sessions. Browser flows use HttpOnly cookies; native requests use their supported token contracts. Do not move browser credentials into ordinary client application state."
+          ],
+          "sources": [
+            {
+              "path": "src/routes/authRoutes.ts",
+              "label": "Auth routes"
+            },
+            {
+              "path": "src/services/authSessionService.ts",
+              "label": "Session lifecycle"
+            },
+            {
+              "path": "src/services/authCapabilitiesService.ts",
+              "label": "Configured capabilities"
+            },
+            {
+              "path": "docs/business-rules.md",
+              "label": "Authentication contract",
+              "find": "## Authentication and Resolution"
+            }
+          ]
+        },
+        {
+          "id": "viewer",
+          "title": "Protect the account the user is viewing",
+          "body": [
+            "Private browser requests carry a current account-viewer identity in addition to cookies. The server rejects a missing or stale viewer before reading or changing private data. Resource IDs alone never authorize access.",
+            "The browser coordinates shared-cookie transitions across tabs and removes the old account from the UI and caches immediately. Operation epochs prevent late responses from restoring the previous account after a switch.",
+            "Login and refresh install credentials under the shared session-transition lock. Review that coordination before changing retries or logout behavior."
+          ],
+          "sources": [
+            {
+              "path": "src/middleware/authMiddleware.ts",
+              "label": "Current viewer guard",
+              "find": "export const requireCurrentAccountViewer = ("
+            },
+            {
+              "path": "web/src/app/BrowserSessionCoordinator.tsx",
+              "label": "Cross-tab session coordination"
+            },
+            {
+              "path": "web/src/api/accountEpoch.ts",
+              "label": "Late-response account fencing"
+            },
+            {
+              "path": "web/src/api/sessionTransition.ts",
+              "label": "Browser transition lock"
+            }
+          ]
+        },
+        {
+          "id": "deletion",
+          "title": "Account exit has dependent lifecycles",
+          "body": [
+            "Account deletion includes sessions, private collections, and social relationships. Existing avatar and shared-catalog provenance blockers are product rules, not incidental database failures.",
+            "Changing a password, resetting it, revoking a session, and signing out everywhere have different retention rules. Test their effect on private data and active room controllers, not only the immediate HTTP response."
+          ],
+          "sources": [
+            {
+              "path": "src/services/accountDeletionService.ts",
+              "label": "Account deletion"
+            },
+            {
+              "path": "src/services/sessionRoomLifecycleService.ts",
+              "label": "Session and room lifecycle"
+            },
+            {
+              "path": "test/authPersistence.integration.ts",
+              "label": "Persistent session verification"
+            },
+            {
+              "path": "test/authCredentialLifecycle.integration.ts",
+              "label": "Credential lifecycle integration"
+            }
+          ]
+        },
+        {
+          "id": "first-files",
+          "title": "Start here for a change",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Login or refresh",
+              "text": "Auth routes → authController → authSessionService; then browser session coordination."
+            },
+            {
+              "title": "Private data leak or stale account UI",
+              "text": "Current-viewer guard → accountEpoch → the affected query cache and mutation."
+            },
+            {
+              "title": "Account removal",
+              "text": "Account deletion service → dependent collection and asset lifecycles → integration tests."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "modules/media",
+      "title": "Media, storage, and recovery",
+      "eyebrow": "Module / Lifecycle",
+      "description": "Publishing a playable file is a coordinated database and object-storage operation.",
+      "readingMinutes": 5,
+      "sections": [
+        {
+          "id": "identity",
+          "title": "A MediaTrack has one active media kind",
+          "body": [
+            "Each MediaTrack has one ready media object and one active audio or video kind. Replacement preserves its catalog identity, saves, and Playlist memberships while changing the active object.",
+            "Public metadata and stream delivery require a database-confirmed ready object whose key is bound to the correct MediaTrack and kind. Finding bytes in S3 is not enough to serve them."
+          ],
+          "sources": [
+            {
+              "path": "docs/business-rules.md",
+              "label": "Playback identity contract",
+              "find": "## Album and MediaTrack Playback"
+            },
+            {
+              "path": "src/utils/mediaStorageKey.ts",
+              "label": "Identity-bound media keys"
+            },
+            {
+              "path": "src/utils/audioStorageKey.ts",
+              "label": "Ready media query filter",
+              "find": "export const readyAudioStorageFilter"
+            },
+            {
+              "path": "src/controllers/mediaTrackController.ts",
+              "label": "Shared media delivery controller"
+            }
+          ]
+        },
+        {
+          "id": "lifecycle",
+          "title": "Keep the full lifecycle visible",
+          "layout": "steps",
+          "steps": [
+            {
+              "title": "Create",
+              "text": "Record recoverable ownership and pending lifecycle state before storing bytes. Publish only after storage and required content relationships are ready.",
+              "sources": [
+                {
+                  "path": "src/services/audioStorageService.ts",
+                  "label": "Audio storage lifecycle"
+                },
+                {
+                  "path": "src/services/audioPublicationRecoveryService.ts",
+                  "label": "Publication recovery"
+                }
+              ]
+            },
+            {
+              "title": "Replace",
+              "text": "Validate and upload the replacement, atomically promote its identity, then clean up the old object. Failed cleanup retains exact evidence for later reconciliation.",
+              "sources": [
+                {
+                  "path": "src/services/mediaRepresentationService.ts",
+                  "label": "Media replacement"
+                },
+                {
+                  "path": "src/services/mediaRepresentationLifecycleService.ts",
+                  "label": "Representation cleanup"
+                }
+              ]
+            },
+            {
+              "title": "Delete",
+              "text": "Remove owned storage through the deletion lifecycle and clean references idempotently. Retain the final database evidence until storage cleanup is confirmed.",
+              "sources": [
+                {
+                  "path": "src/services/contentReferenceService.ts",
+                  "label": "Content reference cleanup"
+                },
+                {
+                  "path": "src/services/contentReferenceReconciliationService.ts",
+                  "label": "Reference reconciliation"
+                }
+              ]
+            },
+            {
+              "title": "Recover",
+              "text": "Distinguish a known failure from an uncertain outcome. Audit first and reuse the documented retry identity; an audit does not authorize deleting unknown objects.",
+              "sources": [
+                {
+                  "path": "src/services/audioReconciliationService.ts",
+                  "label": "Audio reconciliation"
+                },
+                {
+                  "path": "src/services/audioStorageRemediationService.ts",
+                  "label": "Explicit remediation"
+                }
+              ]
+            }
+          ],
+          "sources": [
+            {
+              "path": "docs/business-rules.md",
+              "label": "Storage lifecycle authority",
+              "find": "## Database and S3 Lifecycle"
+            }
+          ]
+        },
+        {
+          "id": "delivery",
+          "title": "Delivery and room eligibility are separate",
+          "body": [
+            "Media delivery includes bounded streaming, byte-range behavior, and concurrency admission. Replacing a file must preserve seek and retry correctness, not just return a new URL.",
+            "Ordinary playback does not imply room eligibility. Shared Audio needs source-specific duration and seekability evidence, including full compressed-input structure and decoding checks. Unsupported analysis must not break ordinary playback."
+          ],
+          "sources": [
+            {
+              "path": "src/services/mediaDeliveryService.ts",
+              "label": "Range and stream delivery"
+            },
+            {
+              "path": "src/middleware/mediaDeliveryMiddleware.ts",
+              "label": "Media admission"
+            },
+            {
+              "path": "src/services/roomAudioAnalysisService.ts",
+              "label": "Room audio analysis"
+            }
+          ]
+        },
+        {
+          "id": "checks",
+          "title": "Test the failure between two systems",
+          "body": [
+            "Cover upload success followed by database failure, replacement promotion and cleanup failures, deletion retries, and concurrent reference changes. These are integration concerns even if the user-facing form change looks small.",
+            "Use the documented integration suite and relevant playback E2E gate. Successful fixture decoding does not establish deployed playback, background execution, or actual device audio output."
+          ],
+          "sources": [
+            {
+              "path": "test/audioTrackLifecycle.integration.ts",
+              "label": "Storage lifecycle tests"
+            },
+            {
+              "path": "test/mediaRepresentation.integration.ts",
+              "label": "Replacement integration tests"
+            },
+            {
+              "path": "test/roomAudioAnalysis.integration.ts",
+              "label": "Room analysis integration tests"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "modules/library",
+      "title": "Library, activity, and Playlists",
+      "eyebrow": "Module / Private collections",
+      "description": "Three related features keep distinct ownership and mutation rules.",
+      "readingMinutes": 4,
+      "sections": [
+        {
+          "id": "collections",
+          "title": "Keep the collections independent",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Saved content",
+              "text": "Save and Unsave are collection preference state. Saving an Album does not save each MediaTrack; the saved collection is not limited to 20 items."
+            },
+            {
+              "title": "Recently Played",
+              "text": "The latest 20 activity identities are independent of saves and Playlist membership. Explicit launch and automatic queue advancement have different reporting rules."
+            },
+            {
+              "title": "Playlists",
+              "text": "An owner-only ordered set of MediaTracks. Playback copies ready members into the player queue; later edits do not rewrite that running queue."
+            }
+          ],
+          "sources": [
+            {
+              "path": "docs/business-rules.md",
+              "label": "Saved content rules",
+              "find": "## Saved Content and Library"
+            },
+            {
+              "path": "docs/business-rules.md",
+              "label": "Playlist rules",
+              "find": "## User Playlists"
+            },
+            {
+              "path": "src/models/userLibrary.ts",
+              "label": "Saved content and activity model"
+            }
+          ]
+        },
+        {
+          "id": "boundaries",
+          "title": "Read and mutate as the owner",
+          "body": [
+            "Listener Library reads are guarded by authentication and the current viewer. The public catalog projection still filters content visibility inside private collections.",
+            "Playlist routes live under /content/me/playlists. Mutations use Idempotency-Key, and revision-dependent operations also require If-Match. An uncertain mutation must preserve its retry identity rather than become a second operation.",
+            "Unavailable Playlist members retain their stored positions but do not become playable queue items. Playlist artwork is a projection of usable member artwork, not a separate uploaded asset."
+          ],
+          "sources": [
+            {
+              "path": "src/routes/content/playlistRoutes.ts",
+              "label": "Playlist route guards"
+            },
+            {
+              "path": "src/controllers/playlistController.ts",
+              "label": "Mutation identity and revision parsing",
+              "find": "export const parseIdempotencyKey"
+            },
+            {
+              "path": "src/models/playlist.ts",
+              "label": "Playlist persistence and outcomes"
+            },
+            {
+              "path": "src/services/playlistProjectionService.ts",
+              "label": "Safe Playlist projection"
+            }
+          ]
+        },
+        {
+          "id": "client",
+          "title": "The Web view has separate recovery states",
+          "body": [
+            "Web Library offers My Playlists, Saved music, and Recently played. One failing section must not hide working sections or present itself as an empty collection.",
+            "Web is streaming-only. Native Library and downloads have additional device-local rules; a browser cache is not a Finitude download lifecycle.",
+            "Private query keys and mutations must remain tied to their account during logout or switching. Inspect account isolation alongside optimistic updates."
+          ],
+          "sources": [
+            {
+              "path": "web/src/features/library/LibraryPage.tsx",
+              "label": "Web Library overview"
+            },
+            {
+              "path": "web/src/features/playlists/playlistCache.ts",
+              "label": "Playlist query cache"
+            },
+            {
+              "path": "web/src/features/playlists/PlaylistMutationIsolation.test.tsx",
+              "label": "Mutation isolation tests"
+            },
+            {
+              "path": "web/src/features/playback/launchPlayback.ts",
+              "label": "Explicit playback launch"
+            }
+          ]
+        },
+        {
+          "id": "checks",
+          "title": "Useful starting tests",
+          "body": [
+            "Review Playlist integration tests for ownership, idempotency, and revision conflicts. Review lifecycle integration tests before changing content removal. Web page and mutation-isolation tests cover the corresponding presentation and account boundary."
+          ],
+          "sources": [
+            {
+              "path": "test/playlist.integration.ts",
+              "label": "Playlist contract integration"
+            },
+            {
+              "path": "test/playlistLifecycle.integration.ts",
+              "label": "Playlist content lifecycle"
+            },
+            {
+              "path": "web/src/features/library/LibraryPage.test.tsx",
+              "label": "Library component coverage"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "modules/social",
+      "title": "Social and shared Audio rooms",
+      "eyebrow": "Module / Explicit participation",
+      "description": "Private social identity and durable room authority extend the existing listener.",
+      "readingMinutes": 5,
+      "sections": [
+        {
+          "id": "scope",
+          "title": "Feature presence is not rollout status",
+          "body": [
+            "Social participation is explicit and separate from the private account profile. Friendships, direct music shares, and listening-status sharing have independent visibility and revocation rules.",
+            "Audio room support is implemented behind explicit capabilities in Finitude Web. Production rollout, native room screens, and shared Video remain separate delivery or verification stages. Check current capability responses before treating a screen as available."
+          ],
+          "sources": [
+            {
+              "path": "docs/business-rules.md",
+              "label": "Social participation rules",
+              "find": "## Social Identity and Friendships"
+            },
+            {
+              "path": "docs/business-rules.md",
+              "label": "Room scope and behavior",
+              "find": "## Shared Playback Rooms"
+            },
+            {
+              "path": "src/routes/roomRoutes.ts",
+              "label": "Room capability and transport guards"
+            }
+          ]
+        },
+        {
+          "id": "authority",
+          "title": "Commands and updates have different jobs",
+          "body": [
+            "HTTP carries durable room commands and authorized snapshots. A command uses its original server-issued scope and command ID so retrying an uncertain result cannot duplicate the operation.",
+            "Room mutation processing records durable outcomes transactionally. Room persistence writes an outbox invalidation in the same transaction; the realtime gateway pushes current authorized state.",
+            "Reconnection must recover current authority before local playback can resume. Observer devices do not become controllers just because they receive the same room updates."
+          ],
+          "sources": [
+            {
+              "path": "src/application/rooms/roomService.ts",
+              "label": "Room commands and outcomes"
+            },
+            {
+              "path": "src/application/rooms/roomLifecycle.ts",
+              "label": "Room persistence and outbox"
+            },
+            {
+              "path": "src/realtime/roomGateway.ts",
+              "label": "Authorized realtime delivery"
+            },
+            {
+              "path": "src/contracts/roomV1.ts",
+              "label": "Room wire contract"
+            }
+          ]
+        },
+        {
+          "id": "player",
+          "title": "Use the existing player",
+          "body": [
+            "A room has its own server-owned queue and timeline, while each client executes audio through its existing single player. Local callbacks must not independently advance shared state.",
+            "The online room source is pinned to a media revision and requires verified eligibility. Readiness, local pause, permission changes, stale connections, and media replacement all constrain playback.",
+            "Room management, shared playback control, and personal volume or pause are separate permissions. Do not turn a snapshot or reconnect into a user gesture."
+          ],
+          "sources": [
+            {
+              "path": "web/src/features/social/roomSession.ts",
+              "label": "Web room session"
+            },
+            {
+              "path": "web/src/player/playerStore.ts",
+              "label": "Shared browser player"
+            },
+            {
+              "path": "src/services/roomAudioAnalysisService.ts",
+              "label": "Source eligibility"
+            }
+          ]
+        },
+        {
+          "id": "checks",
+          "title": "Verify both durable state and client behavior",
+          "body": [
+            "Room lifecycle and realtime integration tests cover authority, membership, and revocation. Web room tests cover recovery and the controls using that state. Browser playback gates and deployed checks remain necessary evidence for actual audio behavior."
+          ],
+          "sources": [
+            {
+              "path": "test/roomLifecycle.integration.ts",
+              "label": "Room lifecycle integration"
+            },
+            {
+              "path": "test/roomRealtime.integration.ts",
+              "label": "Realtime integration"
+            },
+            {
+              "path": "test/roomAuthority.integration.ts",
+              "label": "Authority integration"
+            },
+            {
+              "path": "web/src/features/social/roomSession.test.ts",
+              "label": "Client room-session tests"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "modules/web",
+      "title": "Finitude Web",
+      "eyebrow": "Module / Listener experience",
+      "description": "A routed React application with validated server data and one long-lived player.",
+      "readingMinutes": 4,
+      "sections": [
+        {
+          "id": "composition",
+          "title": "Start at the shell and route map",
+          "body": [
+            "web/src/main.tsx installs localization, query state, browser session coordination, and the router. The application shell frames feature routes, while the player lives across navigation.",
+            "Feature folders organize Home, Search, Catalog, Library, Playlists, account flows, and social screens. API modules own request construction and response schemas. Follow the relevant route into its feature before changing shared shell state."
+          ],
+          "sources": [
+            {
+              "path": "web/src/main.tsx",
+              "label": "Web entry point"
+            },
+            {
+              "path": "web/src/app/router.tsx",
+              "label": "Route map"
+            },
+            {
+              "path": "web/src/app/AppShell.tsx",
+              "label": "Application shell"
+            },
+            {
+              "path": "web/src/api/client.ts",
+              "label": "Validated request boundary"
+            }
+          ]
+        },
+        {
+          "id": "player",
+          "title": "Keep one player across routes and media kinds",
+          "body": [
+            "The shared player owns queue, elapsed time, transport, media kind, Shuffle, and Repeat. Audio and Video use the same long-lived media element. Visual surfaces subscribe to that state rather than creating another player.",
+            "Launching playback and reporting Recently Played are explicit policies. Album Play, a selected track, and automatic advancement must not accidentally report the same activity.",
+            "Account transitions clear private caches but do not stop an already-playing public stream. Room transitions have additional authority and local-pause rules."
+          ],
+          "sources": [
+            {
+              "path": "web/src/player/playerStore.ts",
+              "label": "Player state and execution"
+            },
+            {
+              "path": "web/src/player/activityPolicy.ts",
+              "label": "Activity policy"
+            },
+            {
+              "path": "web/src/features/playback/launchPlayback.ts",
+              "label": "Playback launch orchestration"
+            },
+            {
+              "path": "docs/business-rules.md",
+              "label": "Web behavior contract",
+              "find": "The Web listener renders administrator-configured Carousel, Grid, and List"
+            }
+          ]
+        },
+        {
+          "id": "copy",
+          "title": "Edit canonical translation sources",
+          "body": [
+            "Interface messages come from localization/catalog.json and localization/locales. Update canonical sources, validate them, regenerate outputs, then sync native resources when the shared contract changes. Do not hand-edit generated bundles.",
+            "Runtime bundles validate completely before activation. A failed remote language update preserves the readable current bundle; the packaged en-US bundle provides the final fallback."
+          ],
+          "code": {
+            "language": "sh",
+            "text": "npm run localization:check\nnpm run localization:generate\nnpm run localization:sync-native"
+          },
+          "sources": [
+            {
+              "path": "docs/localization.md",
+              "label": "Localization workflow"
+            },
+            {
+              "path": "localization/catalog.json",
+              "label": "Canonical message catalog"
+            },
+            {
+              "path": "scripts/sync-native-localizations.mjs",
+              "label": "Native artifact synchronization"
+            }
+          ]
+        },
+        {
+          "id": "checks",
+          "title": "Check behavior in the rendered application",
+          "body": [
+            "Component tests exercise route and state behavior; Playwright covers navigation, playback, and accessibility in browsers. For UI changes, inspect loading, empty, failed, signed-out, keyboard, and narrow-screen states.",
+            "The Web build enforces initial JavaScript and static asset budgets. Keep new onboarding or administration surfaces from adding unnecessary code to the listener entry bundle."
+          ],
+          "sources": [
+            {
+              "path": "web/package.json",
+              "label": "Web verification commands"
+            },
+            {
+              "path": "web/playwright.config.ts",
+              "label": "Browser gate configuration"
+            },
+            {
+              "path": "web/scripts/check-initial-js-budget.mjs",
+              "label": "Initial JavaScript budget"
+            },
+            {
+              "path": "docs/testing/finitude-web-release-matrix.md",
+              "label": "Full release matrix"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "flows",
+      "title": "Follow the request",
+      "eyebrow": "Request walkthroughs",
+      "description": "Use a concrete operation to connect the screen, contract, server, and persistence.",
+      "readingMinutes": 2,
+      "sections": [
+        {
+          "id": "first-flow",
+          "title": "Begin with a public read",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Open an Album",
+              "text": "A complete trace from /api/listener/v1/albums/:id through ready filtering and DTO projection to the Web response parser.",
+              "href": "/engineering/flows/read-album"
+            }
+          ]
+        },
+        {
+          "id": "other-paths",
+          "title": "Then use the appropriate mutation map",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Publish or replace media",
+              "text": "Read the lifecycle map before touching bytes or relationships.",
+              "href": "/engineering/modules/media#lifecycle"
+            },
+            {
+              "title": "Edit a private Playlist",
+              "text": "Find owner guards, revision checks, and idempotent outcomes.",
+              "href": "/engineering/modules/library#boundaries"
+            },
+            {
+              "title": "Change room playback",
+              "text": "Separate the durable HTTP command from realtime state delivery and local player execution.",
+              "href": "/engineering/modules/social#authority"
+            }
+          ]
+        },
+        {
+          "id": "trace-method",
+          "title": "Ask the same questions at every boundary",
+          "layout": "steps",
+          "steps": [
+            {
+              "title": "Who can make this request?",
+              "text": "Locate authentication, account scope, role guards, origin checks, and rate or size limits before the handler."
+            },
+            {
+              "title": "Which state is authoritative?",
+              "text": "Find the canonical order, revision, lifecycle status, and ownership record. Distinguish a database record from its public DTO."
+            },
+            {
+              "title": "What happens after a partial failure?",
+              "text": "Determine whether retry reads state, reuses an operation identity, or must reconcile an uncertain write."
+            },
+            {
+              "title": "How does the client know it succeeded?",
+              "text": "Inspect the response parser, cache update, visible error state, and tests. A successful HTTP response is one boundary, not the whole user experience."
+            }
+          ],
+          "sources": [
+            {
+              "path": "AGENTS.md",
+              "label": "Boundary and verification requirements"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "flows/read-album",
+      "title": "Trace an Album from URL to screen",
+      "eyebrow": "Walkthrough / Public read",
+      "description": "GET /api/listener/v1/albums/:id is a small path that reveals several important boundaries.",
+      "readingMinutes": 6,
+      "sections": [
+        {
+          "id": "overview",
+          "title": "The path you will follow",
+          "body": [
+            "AlbumPage → listenerAlbumQuery → apiRequest → listener route → album controller → listenerContentService → MongoDB → allowlisted DTO → response schema → AlbumPage.",
+            "This read is public. Opening the page does not save the Album, report playback activity, or fetch the media stream. Personal Save status and an explicit Play action use separate paths."
+          ],
+          "sources": [
+            {
+              "path": "web/src/features/catalog/AlbumPage.tsx",
+              "label": "Album page",
+              "find": "export const AlbumPage"
+            },
+            {
+              "path": "web/src/api/listener.ts",
+              "label": "Album query",
+              "find": "export const listenerAlbumQuery"
+            }
+          ]
+        },
+        {
+          "id": "server",
+          "title": "Inside the server",
+          "layout": "steps",
+          "steps": [
+            {
+              "title": "1. Mount the public route",
+              "text": "createApp mounts listenerRoutes at /api/listener/v1. The /albums/:id route applies publicReadRateLimit and asyncHandler. It does not require a login or account-viewer header.",
+              "sources": [
+                {
+                  "path": "src/app.ts",
+                  "label": "Listener route mount",
+                  "find": "app.use('/api/listener/v1', listenerRoutes)"
+                },
+                {
+                  "path": "src/routes/listenerRoutes.ts",
+                  "label": "Public Album route",
+                  "find": "router.get('/albums/:id'"
+                }
+              ]
+            },
+            {
+              "title": "2. Convert the HTTP request into a read",
+              "text": "The album controller trims the route ID and calls getListenerAlbum. An unavailable result becomes 404. A successful projection is returned as JSON with Cache-Control: public, max-age=60.",
+              "sources": [
+                {
+                  "path": "src/controllers/listenerController.ts",
+                  "label": "Album controller",
+                  "find": "export const album ="
+                },
+                {
+                  "path": "src/controllers/listenerController.ts",
+                  "label": "Public catalog cache",
+                  "find": "const setPublicCatalogCache"
+                }
+              ]
+            },
+            {
+              "title": "3. Validate identity and Album visibility",
+              "text": "getListenerAlbum accepts a 24-character hexadecimal ID and normalizes it. Its bounded MongoDB query requires a ready Album lifecycle, while explicitly supporting older records that have no lifecycleStatus. Missing and non-ready Albums return no projection.",
+              "sources": [
+                {
+                  "path": "src/services/listenerContentService.ts",
+                  "label": "Album read",
+                  "find": "export const getListenerAlbum"
+                },
+                {
+                  "path": "src/services/albumReferenceFenceService.ts",
+                  "label": "Ready Album filter",
+                  "find": "export const readyAlbumLifecycleFilter"
+                }
+              ]
+            },
+            {
+              "title": "4. Resolve only the canonical ready tracks",
+              "text": "When audioTrackIds is populated, the service normalizes and deduplicates its bounded ID list, fetches ready tracks, then restores declared order. It skips missing or non-ready entries and does not append reverse-linked tracks. Only a legacy Album without lifecycleStatus and with no declared IDs uses the albumId fallback, ordered by title and ID. A lifecycle-managed Album with an empty list stays empty.",
+              "sources": [
+                {
+                  "path": "src/services/listenerContentService.ts",
+                  "label": "Track ordering and legacy fallback",
+                  "find": "const declared = Array.isArray(album.audioTrackIds)"
+                },
+                {
+                  "path": "src/utils/audioStorageKey.ts",
+                  "label": "Ready object and publication filter",
+                  "find": "export const readyAudioStorageFilter"
+                }
+              ]
+            },
+            {
+              "title": "5. Construct the listener DTO",
+              "text": "Catalog context resolves artwork and attribution. toAlbumSummary and toAudioTrackSummary explicitly construct { album, tracks } using listener fields. Storage keys, createdBy, lifecycle errors, and account data do not belong in that response. Each track has one mediaType and streamUrl.",
+              "sources": [
+                {
+                  "path": "src/services/listenerContentService.ts",
+                  "label": "Album summary projection",
+                  "find": "const toAlbumSummary ="
+                },
+                {
+                  "path": "src/services/listenerContentService.ts",
+                  "label": "Track summary projection",
+                  "find": "const toAudioTrackSummary ="
+                },
+                {
+                  "path": "src/contracts/listenerV1.ts",
+                  "label": "Album response contract",
+                  "find": "export interface ListenerAlbum {"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "client",
+          "title": "Back in the Web client",
+          "layout": "steps",
+          "steps": [
+            {
+              "title": "6. Validate the response at runtime",
+              "text": "getListenerAlbum encodes the ID into a same-origin path and calls apiRequest with listenerAlbumSchema. The parser validates known fields and enum values while stripping unknown additive response fields. A malformed payload becomes an invalid-response error, not unchecked page state.",
+              "sources": [
+                {
+                  "path": "web/src/api/listener.ts",
+                  "label": "Client request",
+                  "find": "export const getListenerAlbum ="
+                },
+                {
+                  "path": "web/src/api/client.ts",
+                  "label": "Runtime response validation",
+                  "find": "const result = schema.safeParse(body)"
+                },
+                {
+                  "path": "web/src/api/contentSchemas.ts",
+                  "label": "Album response schema",
+                  "find": "export const listenerAlbumSchema"
+                }
+              ]
+            },
+            {
+              "title": "7. Render data, loading, or recovery",
+              "text": "AlbumPage uses the query result for metadata and the ready-track list. Failed reads expose a retry action. Save status is queried separately for the resolved account, and a Save-status failure does not convert public catalog data into a failed Album read.",
+              "sources": [
+                {
+                  "path": "web/src/features/catalog/AlbumPage.tsx",
+                  "label": "Album state and personal status",
+                  "find": "const albumQuery = useQuery(listenerAlbumQuery(albumId))"
+                }
+              ]
+            },
+            {
+              "title": "8. Start playback only on a gesture",
+              "text": "The Album Play button passes the ready ordered tracks to launchAlbumPlayback. Reading the Album alone never starts audio. The launch policy records the Album activity identity; queue advancement follows its separate activity rules.",
+              "sources": [
+                {
+                  "path": "web/src/features/playback/launchPlayback.ts",
+                  "label": "Album playback launch",
+                  "find": "launchAlbumPlayback"
+                },
+                {
+                  "path": "web/src/player/activityPolicy.ts",
+                  "label": "Activity identity policy"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "verify",
+          "title": "Inspect evidence for the boundary you change",
+          "body": [
+            "The listener integration suite requests the real Album endpoint without a session, asserts canonical ready-track order, and recursively checks for unsafe response fields. Its seeded content includes pending, unpublished, and missing references.",
+            "The Web compatibility tests parse legacy and current Album fixtures, strip future additive fields, and reject invalid known values. These tests complement the server DTO checks; they do not prove a deployed database contains the expected Album."
+          ],
+          "sources": [
+            {
+              "path": "test/listenerContent.integration.ts",
+              "label": "Public ready-only endpoint integration",
+              "find": "test('listener read layer preserves composition and exposes only ready safe DTOs'"
+            },
+            {
+              "path": "web/src/api/listenerContractCompatibility.test.ts",
+              "label": "Client compatibility cases"
+            },
+            {
+              "path": "contracts/listener/v1/fixtures/album-legacy.json",
+              "label": "Legacy Album fixture"
+            },
+            {
+              "path": "contracts/listener/v1/fixtures/album-current.json",
+              "label": "Current Album fixture"
+            }
+          ],
+          "callout": {
+            "title": "A useful first exercise",
+            "text": "Choose one Album field and identify its stored input, public projection, response type, client schema, and visible use. Keep private persistence fields out of the DTO even if the client would ignore them."
+          }
+        }
+      ]
+    },
+    {
+      "slug": "development",
+      "title": "Make and verify a change",
+      "eyebrow": "Development workflow",
+      "description": "Use the product contract, follow the actual implementation, and report the evidence you have.",
+      "readingMinutes": 5,
+      "sections": [
+        {
+          "id": "workflow",
+          "title": "A practical change sequence",
+          "layout": "steps",
+          "steps": [
+            {
+              "title": "Read the behavior contract",
+              "text": "Read AGENTS.md and the relevant business-rules section before planning or editing behavior. An agreed rule change belongs in the canonical document with the implementation; identify conflicts before changing the contract.",
+              "sources": [
+                {
+                  "path": "AGENTS.md",
+                  "label": "Repository instructions"
+                },
+                {
+                  "path": "docs/business-rules.md",
+                  "label": "Canonical business rules"
+                }
+              ]
+            },
+            {
+              "title": "Trace the owned boundary",
+              "text": "Follow the route, authorization, application or service code, model, projection, and client parser that actually participate. Inspect the sibling clients when the shared behavior affects them; record any unavailable verification.",
+              "sources": [
+                {
+                  "path": "src/contracts/listenerV1.ts",
+                  "label": "Shared listener types"
+                },
+                {
+                  "path": "web/src/api/listenerContractCompatibility.test.ts",
+                  "label": "Compatibility fixtures in use"
+                }
+              ]
+            },
+            {
+              "title": "Implement the behavior and its recovery",
+              "text": "Preserve unrelated work. Include tests for changed state transitions, ownership, retries, and cleanup. For storage or reference work, map create, replace, delete, partial failure, retry, and reconciliation before editing."
+            },
+            {
+              "title": "Update the durable explanation",
+              "text": "Update README or the existing operational document when commands, settings, routes, authentication, media, or deployment change. Keep proposal status distinct from shipped behavior; avoid one-off verification reports."
+            },
+            {
+              "title": "Verify and review the final diff",
+              "text": "Run the relevant gates, inspect dependency changes and the complete diff, and report skipped or unavailable checks explicitly. Temporary plan documents should be removed after completion."
+            }
+          ]
+        },
+        {
+          "id": "verification",
+          "title": "Choose checks by the affected behavior",
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Every completed implementation",
+              "text": "npm test and npm run build; also run git diff --check and review the final diff."
+            },
+            {
+              "title": "Database, auth persistence, storage, or references",
+              "text": "npm run test:integration uses a disposable MongoDB replica set and exercises durable failure paths."
+            },
+            {
+              "title": "Listener routes, UI, auth, playback, or accessibility",
+              "text": "Run the relevant Listener E2E gate. npm run test:e2e:chromium is the faster browser gate; release-facing work uses the full matrix."
+            },
+            {
+              "title": "Release and deployment work",
+              "text": "Follow the release matrix and Linux workflow for all browser engines, platform hooks, and artifact validation. Local macOS or Windows success does not replace Linux proof."
+            }
+          ],
+          "code": {
+            "language": "sh",
+            "text": "npm test\nnpm run build\n# When the changed behavior requires them:\nnpm run test:integration\nnpm run test:e2e:chromium\ngit diff --check"
+          },
+          "sources": [
+            {
+              "path": "package.json",
+              "label": "Root verification commands",
+              "find": "\"scripts\""
+            },
+            {
+              "path": "docs/testing/finitude-web-release-matrix.md",
+              "label": "Release gate matrix"
+            },
+            {
+              "path": ".github/workflows/finitude-web-release.yml",
+              "label": "Release workflow"
+            }
+          ]
+        },
+        {
+          "id": "compatibility",
+          "title": "Coordinate shared contracts",
+          "body": [
+            "Use versioned response contracts and representative old/current fixtures when evolving the API. Additive response compatibility does not permit an invalid known enum or a changed meaning for an existing field.",
+            "Read the sibling Finitude iOS and Android implementations for a shared change. Native build, device execution, offline state, and background audio are different verification gates. This guide links repository-owned sources and does not claim native parity was verified by a Web test.",
+            "Translations are authored in the canonical catalog and locale files. Generate and sync derived artifacts using the checked-in commands, then verify the receiving clients."
+          ],
+          "sources": [
+            {
+              "path": "src/contracts/listenerV1.ts",
+              "label": "Compatibility-aware response contract"
+            },
+            {
+              "path": "web/src/api/listenerContractCompatibility.test.ts",
+              "label": "Fixture compatibility tests"
+            },
+            {
+              "path": "docs/localization.md",
+              "label": "Shared localization workflow"
+            }
+          ]
+        },
+        {
+          "id": "handoff",
+          "title": "Make the result reviewable",
+          "body": [
+            "Explain what changed, the user-visible result, the commands that ran, and their results. Separate local tests, CI, deployed checks, real-account behavior, and physical-device evidence.",
+            "A missing tool or unavailable environment is a skipped gate with a reason, never a pass. Keep secrets, personal configuration, generated reports, recordings, and dependency directories out of commits."
+          ],
+          "sources": [
+            {
+              "path": "AGENTS.md",
+              "label": "Handoff and repository hygiene"
+            },
+            {
+              "path": "docs/development-environment.md",
+              "label": "Environment-specific limits",
+              "find": "## Windows and Linux gates"
+            }
+          ],
+          "layout": "cards",
+          "items": [
+            {
+              "title": "Find the next module",
+              "text": "Return to task-based navigation.",
+              "href": "/engineering/modules"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

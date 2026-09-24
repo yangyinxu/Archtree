@@ -446,6 +446,15 @@ The wire protocol and operational bounds are documented in
 - Only admins can see or access Content Manager. Hiding its navigation is not
   an authorization boundary; direct page, form, API, and upload requests must
   enforce the same administrator role before processing a mutation.
+- The hosted Engineering Guide is a read-only internal resource available only
+  to administrators. Its pages and supporting assets enforce that permission
+  directly, and its Archtree landing-page entry is visible only to admins.
+  Reading the guide grants no additional permissions and changes no account or
+  catalog data. A repository-local documentation preview uses no account data.
+- The Engineering Guide is available in English and Simplified Chinese. Its
+  language switch preserves the current topic, and the selected language is
+  retained in shareable page links. Changing the guide language does not change
+  the listener's Finitude language preference.
 - Admins manage the global shared catalog regardless of `createdBy`, while
   retaining that field for provenance and lifecycle auditing.
 - Album primary Artist Credits are the canonical Artist-to-Album membership.

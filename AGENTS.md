@@ -1,5 +1,14 @@
 # Repository Instructions
 
+## Git Workflow
+
+- Use `develop` as the working and delivery branch by default.
+- Do not create `codex/` or other feature branches unless the user explicitly
+  requests a separate branch. For parallel work, prefer read-only reviews or
+  detached worktrees when isolation is needed.
+- Commit only intended changes, preserve unrelated work, and push only when
+  the user authorizes it.
+
 ## Business Rules
 
 - Before planning, reviewing, or changing product behavior, read

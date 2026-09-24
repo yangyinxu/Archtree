@@ -10,7 +10,7 @@
     "doctor": "node scripts/check-runtime.mjs --mongo --room-audio",
     "doctor:release": "node scripts/check-runtime.mjs --mongo --linux --room-audio",
     "prebuild": "node scripts/check-runtime.mjs",
-    "build": "npm run localization:check && npm run build:server && npm run build:web",
+    "build": "npm run localization:check && npm run build:server && npm run build:web && npm run build:engineering",
     "build:server": "tsc --noEmit",
     "build:web": "npm run build --workspace @archtree/finitude-web",
     "pretest": "node scripts/check-runtime.mjs",
@@ -34,7 +34,9 @@
     "dev": "cross-env NODE_ENV=develop tsx src/app.ts",
     "dev:web": "npm run dev --workspace @archtree/finitude-web",
     "dev:auth-rotation": "cross-env NODE_ENV=develop ACCESS_TOKEN_SECONDS=5 tsx src/app.ts",
-    "demo:social": "tsx scripts/demo-social.ts"
+    "demo:social": "tsx scripts/demo-social.ts",
+    "build:engineering": "node scripts/build-engineering.mjs",
+    "preview:engineering": "npm run build:engineering && node scripts/preview-engineering.mjs"
   },
   "author": "Yangyin Xu",
   "license": "ISC",

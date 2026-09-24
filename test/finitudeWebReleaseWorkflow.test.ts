@@ -23,3 +23,14 @@ test('release CI keeps the Linux host, pinned runtime, and complete test matrix'
     assert.ok(workflow.includes(command), `Release CI must retain ${command}`);
   }
 });
+
+test('rollback archives retain the engineering bundle required during promotion', async () => {
+  const workflow = await readFile(workflowUrl, 'utf8');
+  const archiveStep = workflow.split('Create the versioned Elastic Beanstalk rollback bundle')[1]
+    ?.split('Bind the tested bundle')[0];
+  assert.ok(archiveStep, 'The tested runtime must be archived for promotion.');
+  assert.match(archiveStep, /zip -q -r/);
+  for (const directory of ['web', 'engineering']) {
+    assert.match(archiveStep, new RegExp(`\\b${directory}(?:\\s|$)`));
+  }
+});

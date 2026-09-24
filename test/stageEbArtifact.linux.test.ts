@@ -9,7 +9,7 @@ import { stageElasticBeanstalkArtifact } from '../scripts/stage-eb-artifact.mjs'
 
 const commitSha = 'a'.repeat(40);
 
-import { createSourceFixture, writeFixtureFile } from './helpers/ebArtifactFixture';
+import { createSourceFixture, writeEngineeringFixture, writeFixtureFile } from './helpers/ebArtifactFixture';
 
 const stageFixture = async (sourceRoot: string) => {
   const outputDirectory = path.join(sourceRoot, 'elastic-beanstalk-artifact');
@@ -34,6 +34,7 @@ test('stages only the Elastic Beanstalk allowlist with bounded release metadata'
     '.ebextensions',
     '.platform',
     'RELEASE.json',
+    'engineering',
     'localization',
     'package-lock.json',
     'package.json',
@@ -120,6 +121,9 @@ test('stages a clean local Git worktree before creating its temporary output', a
   ]) {
     execFileSync('git', args, { cwd: sourceRoot, stdio: 'ignore' });
   }
+
+  const localCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceRoot, encoding: 'utf8' }).trim();
+  await writeEngineeringFixture(sourceRoot, localCommit);
 
   const { release } = await stageElasticBeanstalkArtifact({
     sourceRoot,
@@ -210,4 +214,38 @@ test('rejects a manifest reference to a missing emitted asset', async (t) => {
   );
 
   await assert.rejects(stageFixture(sourceRoot), /Vite manifest asset is missing/i);
+});
+
+for (const [label, mutate] of [
+  ['dirty guide', (manifest: any) => { manifest.revision.dirty = true; }],
+  ['stale guide commit', (manifest: any) => { manifest.revision.commit = 'b'.repeat(40); }],
+  ['unsafe guide page path', (manifest: any) => { manifest.pages[1].file = '../outside.html'; }],
+  ['unknown guide manifest fields', (manifest: any) => { manifest.privateData = 'rejected'; }],
+  ['missing guide root', (manifest: any) => { manifest.pages.shift(); }],
+  ['invalid source digest', (manifest: any) => { manifest.sourceDigest = 'invalid'; }],
+  ['duplicate guide page', (manifest: any) => { manifest.pages.push(manifest.pages[0]); }]
+] as const) {
+  test(`rejects ${label} before staging a deployable artifact`, async t => {
+    const sourceRoot = await createSourceFixture();
+    t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+    const filename = path.join(sourceRoot, 'engineering/dist/manifest.json');
+    const manifest = JSON.parse(await readFile(filename, 'utf8')); mutate(manifest);
+    await writeFile(filename, JSON.stringify(manifest));
+    await assert.rejects(stageFixture(sourceRoot), /Engineering/);
+    await assert.rejects(readFile(path.join(sourceRoot, 'elastic-beanstalk-artifact/RELEASE.json')), { code: 'ENOENT' });
+  });
+}
+
+test('rejects unmanifested guide files and does not stage source documents', async t => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await writeFixtureFile(sourceRoot, 'engineering/dist/internal-notes.md', 'must not ship');
+  await assert.rejects(stageFixture(sourceRoot), /Engineering distribution contains an unexpected file/);
+});
+
+test('rejects a missing nested guide page', async t => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await rm(path.join(sourceRoot, 'engineering/dist/system/map/index.html'));
+  await assert.rejects(stageFixture(sourceRoot), /Engineering distribution file is missing/);
 });
