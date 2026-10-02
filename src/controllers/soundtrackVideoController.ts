@@ -1,6 +1,7 @@
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { NextFunction, Request, Response } from 'express';
 import { Readable } from 'node:stream';
+import { logCatalogFailure } from './catalogDiagnostics';
 
 import { getS3 } from '../infrastructure/s3';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
@@ -114,7 +115,7 @@ export const headSoundtrackVideo = async (
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
         const status = s3ErrorStatus(error);
-        if (status >= 500) console.error('Error checking MediaTrack video:', error);
+        if (status >= 500) logCatalogFailure(res, 'media_probe_failed', error);
         return res.status(status).end();
     } finally {
         context.cleanup();
@@ -164,7 +165,7 @@ export const streamSoundtrackVideo = async (
         await pipeMediaStream(req, res, stream, context);
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
-        console.error('Error streaming MediaTrack video:', error);
+        logCatalogFailure(res, 'media_stream_failed', error);
         if (!res.headersSent) return res.status(s3ErrorStatus(error)).end();
         res.destroy(error instanceof Error ? error : undefined);
     } finally {

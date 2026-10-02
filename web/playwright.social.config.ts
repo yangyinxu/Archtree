@@ -5,15 +5,17 @@ const suites = [{ name: 'rooms', port: 4175 }, { name: 'invitations', port: 4176
   { name: 'room-interactions', port: 4179 }, { name: 'listening-status', port: 4180 },
   { name: 'catalog-room', port: 4181 }, { name: 'audio-formats', port: 4182 }] as const;
 
-// Firefox/WebKit may open an audio device. They run only in Linux CI with its isolated null sink.
-const crossBrowserAudio = process.platform === 'linux' && ['true', '1'].includes(process.env.CI ?? '');
-const browserSuites = [
+/** Limit hardware-audio engines to isolated Linux CI and the two critical real-media scenarios. */
+export const socialBrowserSuites = (platform: NodeJS.Platform, ci: string | undefined) => [
   ...suites.map(suite => ({ ...suite, browser: 'chromium' as const })),
-  ...(crossBrowserAudio ? [
+  ...(platform === 'linux' && ['true', '1'].includes(ci ?? '') ? [
     { name: 'audio-formats', port: 4183, browser: 'firefox' as const },
-    { name: 'audio-formats', port: 4184, browser: 'webkit' as const }
+    { name: 'audio-formats', port: 4184, browser: 'webkit' as const },
+    { name: 'rooms', port: 4185, browser: 'firefox' as const },
+    { name: 'rooms', port: 4186, browser: 'webkit' as const }
   ] : [])
 ];
+const browserSuites = socialBrowserSuites(process.platform, process.env.CI);
 const desktopDevices = { chromium: devices['Desktop Chrome'], firefox: devices['Desktop Firefox'], webkit: devices['Desktop Safari'] };
 
 /** Opt-in Mongo/S3/WS gate uses real production routes and separate synthetic accounts. */
@@ -27,6 +29,8 @@ export default defineConfig({
     env: { FINITUDE_SOCIAL_E2E_PORT: String(port), FINITUDE_SOCIAL_E2E_SCENARIO: name },
     url: `http://127.0.0.1:${port}/finitude/social`, reuseExistingServer: false, timeout: 60_000 })),
   projects: browserSuites.map(({ name, port, browser }) => ({ name: `${browser}-${name}`, testMatch: `${name}.spec.ts`,
+    // Native Chromium owns tab-visibility/freezing coverage; other engines exercise their own controller recovery.
+    ...(name === 'rooms' && browser !== 'chromium' ? { grep: /controller recovery and running host transfer/ } : {}),
     use: { ...desktopDevices[browser], baseURL: `http://127.0.0.1:${port}`,
       // Muting alone can still open an audio device and trigger Bluetooth headphone switching.
       ...(browser === 'chromium' ? { launchOptions: { args: ['--disable-audio-output'] } } : {}) } }))

@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import { getS3 } from '../infrastructure/s3';
+import { logMediaFailure } from './mediaDiagnosticsService';
 import { AudioTrack } from '../models/audioTrack';
 import { cleanupDeletedContentReferences } from './contentReferenceService';
 import { normalizeUtf8Text } from '../utils/textEncoding';
@@ -573,7 +574,7 @@ export const uploadMediaObject = async (
             );
         } catch (statusError) {
             statusUpdateFailed = true;
-            console.log(`Unable to mark MediaTrack ${audioTrackId} replacement as failed:`, statusError);
+            logMediaFailure('media_upload_state_write_failed', statusError);
         }
         throw uploadLifecycleFailure(error, cleanupFailed || statusUpdateFailed, outcomeUnknown);
     }
@@ -887,7 +888,7 @@ export const deleteAudioObjectAndTrack = async (
             uploadUpdatedAt: new Date(),
             uploadError: errorMessage(error)
         }).catch((statusError) => {
-            console.log(`Unable to mark audio track ${audioTrackId} deletion as failed:`, statusError);
+            logMediaFailure('media_deletion_state_write_failed', statusError);
         });
         throw error;
     }
@@ -948,7 +949,7 @@ export const deleteAudioObjectAndTrack = async (
             referenceCleanupUpdatedAt: new Date(),
             referenceCleanupError: referenceCleanupCompleted ? null : errorMessage(error)
         }).catch((statusError) => {
-            console.log(`Unable to mark audio track ${audioTrackId} reference cleanup as failed:`, statusError);
+            logMediaFailure('media_reference_cleanup_state_write_failed', statusError);
         });
         throw error;
     }

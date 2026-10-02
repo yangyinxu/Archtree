@@ -4,10 +4,15 @@ import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { Socket } from 'node:net';
 import { runDisposableRuntime } from '../../../test/support/disposableRuntime';
+import { readRoomSoakOptions } from './roomSoakPolicy';
+import { startFixtureShutdown } from './fixtureShutdown';
 
 const port = Number(process.env.FINITUDE_SOCIAL_E2E_PORT ?? 4175);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error('Invalid isolated social fixture port.');
+const soak = process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'soak' ? readRoomSoakOptions() : undefined;
+const soakNames = ['listener_one', 'listener_two', 'listener_three', 'listener_four', 'listener_five', 'listener_six', 'listener_seven', 'listener_eight'];
 
 // This process never connects to a developer database or external object store.
 for (const key of Object.keys(process.env)) {
@@ -35,7 +40,7 @@ await runDisposableRuntime(async resources => {
   await resources.own(getS3(), client => client.destroy());
   const password = await bcrypt.hash('Social-real-browser-2026!', 10);
   const curator = new ObjectId();
-  const listeners = ['listener_one', 'listener_two', 'invitation_host', 'invitation_guest', 'invitation_other']
+  const listeners = [...(soak ? soakNames.slice(0, soak.members) : soakNames.slice(0, 2)), 'invitation_host', 'invitation_guest', 'invitation_other']
     .map(username => ({ _id: new ObjectId(), username,
       email: `${username}@example.test`, displayName: username, password, role: 'user', emailVerified: true }));
   await getDb()!.collection('users').insertMany([
@@ -66,6 +71,31 @@ await runDisposableRuntime(async resources => {
       targetSocialId: host.profile.socialId, expectedRevision: relation.revision });
     if (accepted.outcome !== 'applied') throw new Error('Invitation fixture friendship could not be created.');
   }
+  if (soak) {
+    // Provision only synthetic identities; browser commands still perform real invitations and admission.
+    const people = [];
+    for (const [index, value] of listeners.filter(value => value.username.startsWith('listener_')).entries()) {
+      const userId = value._id.toHexString();
+      const sessionId = await AuthSession.create(userId, `unused-fixture-${randomUUID()}`, new Date(Date.now() + 86_400_000));
+      const actor = { userId, sessionId };
+      const scope = await social.issueScope(actor);
+      const created = await social.mutate(actor, { scopeToken: scope.scopeToken, commandId: randomUUID(), action: 'profile', expectedRevision: 0,
+        handle: value.username, alias: `Soak Listener ${index + 1}`, discoverable: true });
+      const profile = await social.ownProfile(actor);
+      if (created.outcome !== 'applied' || !profile) throw new Error('Soak fixture profile could not be created.');
+      people.push({ actor, scope, profile });
+    }
+    const host = people[0];
+    for (const friend of people.slice(1)) {
+      const requested = await social.mutate(host.actor, { scopeToken: host.scope.scopeToken, commandId: randomUUID(), action: 'request',
+        targetSocialId: friend.profile.socialId, expectedRevision: 0 });
+      const relation = await social.relationship(friend.actor, host.profile.socialId);
+      if (requested.outcome !== 'applied' || !relation) throw new Error('Soak fixture friendship could not be read.');
+      const accepted = await social.mutate(friend.actor, { scopeToken: friend.scope.scopeToken, commandId: randomUUID(), action: 'accept',
+        targetSocialId: host.profile.socialId, expectedRevision: relation.revision });
+      if (accepted.outcome !== 'applied') throw new Error('Soak fixture friendship could not be created.');
+    }
+  }
   const trackIds: string[] = [];
   const compressedAudio = process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'audio-formats';
   const titles = compressedAudio ? ['MP3 Horizon', 'AAC Horizon', 'VBR MP3 Horizon'] : ['First Light', 'Across the Water', 'Home Again'];
@@ -74,11 +104,13 @@ await runDisposableRuntime(async resources => {
   }
   for (const [index, title] of titles.entries()) {
     const id = new ObjectId();
+    // Endurance selection repeats every three cycles; ordinary short fixtures retain their real end boundaries.
+    const durationSeconds = soak ? Math.max(120, soak.cycleSeconds * 3 + 60) : 120;
     await getDb()!.collection('audioTracks').insertOne({ _id: id, title, trackNumber: index + 1, artistIds: [],
-      duration: '2:00', s3Key: id.toHexString(), mediaType: 'audio', uploadStatus: 'pending', publicationStatus: 'ready',
+      duration: `${Math.floor(durationSeconds / 60)}:${String(durationSeconds % 60).padStart(2, '0')}`, s3Key: id.toHexString(), mediaType: 'audio', uploadStatus: 'pending', publicationStatus: 'ready',
       createdBy: curator.toHexString(), createdAt: new Date() });
     // The dedicated format gate publishes the original compressed bytes through the same storage lifecycle as uploads.
-    let upload = wavUploadFile(createPcmWav(120_000));
+    let upload = wavUploadFile(createPcmWav(durationSeconds * 1000));
     if (compressedAudio) {
       const filename = ['room-tone.mp3', 'room-tone.m4a', 'room-tone-vbr.mp3'][index];
       const buffer = await readFile(new URL(`../../../test/fixtures/room-audio/${filename}`, import.meta.url));
@@ -98,7 +130,33 @@ await runDisposableRuntime(async resources => {
   const listenerDistPath = await resources.own(mkdtemp(join(tmpdir(), 'archtree-social-e2e-dist-')),
     directory => rm(directory, { recursive: true, force: true }));
   await cp(fileURLToPath(new URL('../../dist', import.meta.url)), listenerDistPath, { recursive: true });
-  const server = createServer(createApp({ lifecycle, environment: 'test', listenerDistPath }));
+  const app = createApp({ lifecycle, environment: 'test', listenerDistPath });
+  const transports = new Set<Socket>();
+  const upgrades = new Set<Socket>();
+  const { getMediaDeliveryMetrics } = await import('../../../src/services/mediaDeliveryService');
+  const { defaultMediaAdmissionController } = await import('../../../src/middleware/mediaDeliveryMiddleware');
+  const server = createServer((req, res) => {
+    // This aggregate-only endpoint exists exclusively in the disposable soak fixture, never the application.
+    if (soak && req.method === 'GET' && req.url === '/__fixture/room-soak-resources') {
+      // Fixture request evidence must not masquerade as application memory growth during a long run.
+      if (storage.requests.length > 64) storage.requests.splice(0, storage.requests.length - 64);
+      const memory = process.memoryUsage();
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ rssBytes: memory.rss, heapUsedBytes: memory.heapUsed,
+        activeUpgradeTransports: upgrades.size, activeStreams: getMediaDeliveryMetrics().activeRequests,
+        queuedPlaybackRequests: defaultMediaAdmissionController.getQueuedPlaybackRequests(),
+        activeTcpTransports: transports.size, retainedStorageRequests: storage.requests.length }));
+      return;
+    }
+    app(req, res);
+  });
+  if (soak) {
+    server.on('connection', socket => { transports.add(socket); socket.once('close', () => transports.delete(socket)); });
+    server.on('upgrade', (_req, socket) => {
+      const transport = socket as Socket;
+      upgrades.add(transport); transport.once('close', () => upgrades.delete(transport));
+    });
+  }
   await resources.own(installRoomGateway(server, lifecycle), async gateway => { gateway.stop(); await gateway.release(); });
   await resources.own(server, async value => {
     if (await lifecycle.stop(value, async () => {}, 5000, 10_000) !== 'graceful') throw new Error('Fixture server drain failed.');
@@ -107,5 +165,9 @@ await runDisposableRuntime(async resources => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve(); });
   });
+  if (soak) {
+    await resources.own(startFixtureShutdown(4188, process.env.FINITUDE_ROOM_SOAK_STOP_TOKEN ?? '', () => resources.close()),
+      control => control.stopAccepting());
+  }
   console.log(`Isolated social browser fixture ready at http://127.0.0.1:${port}/finitude/social`);
 }).catch(error => { console.error('The isolated social browser fixture could not start.', error instanceof Error ? error.message : 'Unknown fixture error.'); process.exitCode = 1; });

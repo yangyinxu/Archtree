@@ -9,7 +9,7 @@ import { touchActiveAccount, AccountReferenceUnavailableError } from '../../serv
 import { getJwtSecret } from '../../services/authSessionService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { resolveRoomAudioRepresentation, touchRoomAudioRepresentation } from '../../services/mediaRepresentationService';
-import { assertRoomAuthority } from '../../realtime/roomAuthority';
+import { assertRoomAuthority, inspectRoomAuthority } from '../../realtime/roomAuthority';
 import { notifyRoomChanges } from '../../realtime/roomEvents';
 import type { SocialBudgetDocument, SocialProfileDocument, SocialReceiptDocument, SocialRelationshipDocument } from '../../repositories/social/socialDocuments';
 import type { RoomDocument, RoomInvitationDocument, RoomMemberDocument, RoomParticipationDocument, RoomQueueEntryDocument } from '../../repositories/social/roomDocuments';
@@ -23,6 +23,8 @@ export interface RoomServiceOptions {
     enabled?: () => boolean;
     secret?: () => string;
     assertAuthority?: (session: ClientSession) => Promise<number>;
+    /** Read-only no-op probe must enforce the same owner/epoch/live-lease contract as assertAuthority. */
+    inspectAuthority?: (session: ClientSession) => Promise<number>;
     resolveMedia?: (id: string, session?: ClientSession) => Promise<RoomMediaDescriptor | null>;
     touchMedia?: (id: string, revision: string, session: ClientSession) => Promise<RoomMediaDescriptor | null>;
     beforeAccountFence?: (actor: RoomActor, session: ClientSession) => Promise<void>;
@@ -36,6 +38,9 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const pairId = (a: string, b: string) => [a, b].sort().join(':');
 const fail = (code: string, status = 409): never => { throw new SocialError(status, code); };
 type Planned = { outcome: 'applied' | 'noop'; write: () => Promise<void> };
+type SweepCandidate = Pick<RoomDocument, '_id' | 'epoch' | 'playbackGeneration' | 'queueRevision' | 'timeline'>;
+type SweepPlan = 'unchanged' | 'persist' | 'close' | 'advance';
+type SweepSession = { expiresAt: Date } | null;
 const noop = (): Planned => ({ outcome: 'noop', write: async () => undefined });
 
 /** Durable room authority: every user intent, timer and readiness transition commits before delivery. */
@@ -44,6 +49,8 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
     const enabled = options.enabled ?? (() => process.env.FINITUDE_ROOMS_ENABLED === 'true' && process.env.FINITUDE_SOCIAL_ENABLED === 'true');
     const secret = options.secret ?? getJwtSecret;
     const authority = options.assertAuthority ?? assertRoomAuthority;
+    // An injected writer must supply its own matching probe; never mix authority implementations.
+    const inspectAuthority = options.inspectAuthority ?? (options.assertAuthority ? undefined : inspectRoomAuthority);
     const resolveMedia = options.resolveMedia ?? resolveRoomAudioRepresentation;
     const touchMedia = options.touchMedia ?? touchRoomAudioRepresentation;
     const db = () => { const value = getDb(); if (!value) return fail('room_unavailable', 503); return value; };
@@ -180,6 +187,94 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         room.timeline.anchorServerTimeMs = now() + (ready.length ? ROOM_LIMITS.startLeadMs : 0);
         room.preparation = null;
         return true;
+    };
+
+    /** One transition planner serves the read-only probe and the fenced recheck; it never writes storage. */
+    const planSweep = async (candidate: SweepCandidate, room: RoomDocument, epoch: number,
+        readSession: (member: RoomMemberDocument) => Promise<SweepSession>,
+        readMedia: (entry: RoomQueueEntryDocument) => Promise<RoomMediaDescriptor | null>): Promise<SweepPlan> => {
+        if (room.expiresAt.getTime() <= now()) return 'close';
+        let changed = false;
+        const recentEvents = (room.events ?? []).filter(event => event.expiresAt.getTime() > now());
+        if (recentEvents.length !== (room.events?.length ?? 0)) { room.events = recentEvents; changed = true; }
+        if (room.epoch !== epoch) { room.epoch = epoch; pauseRoom(room, now()); changed = true; }
+        if (!enabled() && room.timeline.state !== 'paused') { pauseRoom(room, now()); changed = true; }
+        for (const value of room.members) {
+            const auth = await readSession(value);
+            if ((!auth || auth.expiresAt.getTime() <= now() || now() - value.lastSeenAt.getTime() >= ROOM_LIMITS.hostGraceMs) && value.connectionPresent) {
+                value.connectionPresent = false; value.readyPlaybackGeneration = undefined; changed = true;
+            }
+        }
+        const hosting = host(room);
+        if (!hosting) return 'close';
+        if (!connected(hosting)) {
+            if (!room.hostAbsentSince) { room.hostAbsentSince = hosting.lastSeenAt; changed = true; }
+            if (room.preparation) { pauseRoom(room, now()); changed = true; }
+            const absent = now() - room.hostAbsentSince.getTime();
+            if (absent >= ROOM_LIMITS.hostCloseMs) return 'close';
+            if (absent >= ROOM_LIMITS.hostGraceMs && !room.hostSuspended) { room.hostSuspended = true; pauseRoom(room, now()); changed = true; }
+        }
+        if (room.transfer && room.transfer.expiresAt.getTime() <= now()) { room.transfer = null; changed = true; }
+        const current = room.queue.find(value => value.entryId === room.timeline.entryId);
+        if (current && !current.unavailable && (room.timeline.state === 'playing' || room.preparation)) {
+            const media = await readMedia(current);
+            if (!media || media.mediaRevision !== current.mediaRevision) {
+                current.unavailable = true; pauseRoom(room, now()); room.queueRevision = incrementRoomVersion(room.queueRevision); changed = true;
+            }
+        }
+        if (room.preparation && finishPreparation(room)) changed = true;
+        if (enabled() && room.epoch === candidate.epoch && room.playbackGeneration === candidate.playbackGeneration
+            && room.queueRevision === candidate.queueRevision && room.timeline.entryId === candidate.timeline.entryId
+            && candidate.timeline.state === 'playing' && room.timeline.state === 'playing'
+            && current && roomPositionAt(room, now()) >= current.durationMs && hostPresent(room)) return 'advance';
+        return changed ? 'persist' : 'unchanged';
+    };
+
+    const readSweepSession = (value: RoomMemberDocument, session: ClientSession): Promise<SweepSession> => db().collection<{ _id: ObjectId; userId: string; expiresAt: Date; revokedAt?: Date }>('authSessions')
+        .findOne({ _id: new ObjectId(value.controllerSessionId), userId: value.accountId, revokedAt: { $exists: false }, expiresAt: { $gt: new Date(now()) } },
+            { session, projection: { expiresAt: 1 } });
+
+    /** Only a complete unchanged snapshot can avoid writes. Uncertain evidence keeps the original fenced path. */
+    const sweepIsUnchanged = async (candidate: SweepCandidate): Promise<boolean> => {
+        if (!inspectAuthority) return false;
+        const session = getDatabaseClient().startSession();
+        let unchanged = false;
+        try {
+            session.startTransaction({ readConcern: { level: 'snapshot' } });
+            const room = await rooms().findOne({ _id: candidate._id }, { session });
+            if (!room || room.state !== 'open') return false;
+            const cohortSize = room.preparation?.cohort.length;
+            for (const id of [...new Set(room.members.map(value => value.accountId))].sort()) {
+                if (!/^[a-f0-9]{24}$/i.test(id) || !await db().collection('users').findOne({ _id: new ObjectId(id) }, { session, projection: { _id: 1 } })) return false;
+            }
+            const epoch = await inspectAuthority(session);
+            const sessions = new Map<string, SweepSession>();
+            const media = new Map<string, RoomMediaDescriptor | null>();
+            const readSession = async (value: RoomMemberDocument) => {
+                const key = `${value.accountId}:${value.controllerSessionId}`;
+                if (!sessions.has(key)) sessions.set(key, await readSweepSession(value, session));
+                return sessions.get(key)!;
+            };
+            const readMedia = async (entry: RoomQueueEntryDocument) => {
+                if (!media.has(entry.mediaTrackId)) media.set(entry.mediaTrackId, await resolveMedia(entry.mediaTrackId, session));
+                return media.get(entry.mediaTrackId)!;
+            };
+            if (await planSweep(candidate, room, epoch, readSession, readMedia) !== 'unchanged') return false;
+            // Filtering a cohort can be an in-memory-only change. Preserve that original fenced pass too.
+            if (room.preparation?.cohort.length !== cohortSize) return false;
+            // Awaited reads can cross grace/expiry/natural-end boundaries. Reuse their evidence at the final time.
+            // The original snapshot cannot observe an intervening committed takeover. Check a fresh lease snapshot.
+            await session.abortTransaction();
+            session.startTransaction({ readConcern: { level: 'snapshot' } });
+            if (await inspectAuthority(session) !== epoch) return false;
+            unchanged = await planSweep(candidate, room, epoch, readSession, readMedia) === 'unchanged'
+                && room.preparation?.cohort.length === cohortSize;
+        } catch { unchanged = false; }
+        finally {
+            if (session.inTransaction()) await session.abortTransaction().catch(() => { unchanged = false; });
+            await session.endSession().catch(() => { unchanged = false; });
+        }
+        return unchanged;
     };
     const projection = async (room: RoomDocument, actor: RoomActor, session: ClientSession): Promise<RoomSnapshot> => {
         const own = member(room, actor);
@@ -730,57 +825,28 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         async sweep() {
             // Capture a timer's observed playback identity before retries: a losing timer
             // must never reinterpret a newly committed user selection as its own target.
-            const candidates = await rooms().find({ state: 'open' }).project<Pick<RoomDocument, '_id' | 'epoch' | 'playbackGeneration' | 'queueRevision' | 'timeline'>>(
+            const candidates = await rooms().find({ state: 'open' }).project<SweepCandidate>(
                 { _id: 1, epoch: 1, playbackGeneration: 1, queueRevision: 1, timeline: 1 }).limit(ROOM_LIMITS.activeRooms + 1).toArray();
             if (candidates.length > ROOM_LIMITS.activeRooms) return fail('room_capacity', 503);
             let visible = false;
             for (const candidate of candidates) {
                 await options.beforeSweepRoom?.(candidate._id);
+                if (await sweepIsUnchanged(candidate)) continue;
                 await transaction(null, async session => {
                 const epoch = await authority(session);
                 const room = await rooms().findOne({ _id: candidate._id }, { session }); if (!room || room.state !== 'open') return;
-                if (room.expiresAt.getTime() <= now()) { await closeRoom(room, session, now()); visible = true; return; }
-                let changed = false;
-                const recentEvents = (room.events ?? []).filter(event => event.expiresAt.getTime() > now());
-                if (recentEvents.length !== (room.events?.length ?? 0)) { room.events = recentEvents; changed = true; }
-                if (room.epoch !== epoch) { room.epoch = epoch; pauseRoom(room, now()); changed = true; }
-                if (!enabled() && room.timeline.state !== 'paused') { pauseRoom(room, now()); changed = true; }
-                for (const value of room.members) {
-                    const auth = await db().collection('authSessions').findOne({ _id: new ObjectId(value.controllerSessionId), userId: value.accountId,
-                        revokedAt: { $exists: false }, expiresAt: { $gt: new Date(now()) } }, { session, projection: { _id: 1 } });
-                    if ((!auth || now() - value.lastSeenAt.getTime() >= ROOM_LIMITS.hostGraceMs) && value.connectionPresent) {
-                        value.connectionPresent = false; value.readyPlaybackGeneration = undefined; changed = true;
-                    }
-                }
-                const hosting = host(room);
-                if (!hosting) { await closeRoom(room, session, now()); visible = true; return; }
-                if (!connected(hosting)) {
-                    if (!room.hostAbsentSince) { room.hostAbsentSince = hosting.lastSeenAt; changed = true; }
-                    if (room.preparation) { pauseRoom(room, now()); changed = true; }
-                    const absent = now() - room.hostAbsentSince.getTime();
-                    if (absent >= ROOM_LIMITS.hostCloseMs) { await closeRoom(room, session, now()); visible = true; return; }
-                    if (absent >= ROOM_LIMITS.hostGraceMs && !room.hostSuspended) { room.hostSuspended = true; pauseRoom(room, now()); changed = true; }
-                }
-                if (room.transfer && room.transfer.expiresAt.getTime() <= now()) { room.transfer = null; changed = true; }
-                const current = room.queue.find(value => value.entryId === room.timeline.entryId);
-                if (current && !current.unavailable && (room.timeline.state === 'playing' || room.preparation)) {
-                    const media = await resolveMedia(current.mediaTrackId, session);
-                    if (!media || media.mediaRevision !== current.mediaRevision) { current.unavailable = true; pauseRoom(room, now()); room.queueRevision = incrementRoomVersion(room.queueRevision); changed = true; }
-                }
-                if (room.preparation && finishPreparation(room)) changed = true;
-                if (enabled() && room.epoch === candidate.epoch && room.playbackGeneration === candidate.playbackGeneration
-                    && room.queueRevision === candidate.queueRevision
-                    && room.timeline.entryId === candidate.timeline.entryId && candidate.timeline.state === 'playing'
-                    && room.timeline.state === 'playing' && current && roomPositionAt(room, now()) >= current.durationMs && hostPresent(room)) {
+                const plan = await planSweep(candidate, room, epoch, value => readSweepSession(value, session), entry => resolveMedia(entry.mediaTrackId, session));
+                if (plan === 'close') { await closeRoom(room, session, now()); visible = true; return; }
+                if (plan === 'advance') {
+                    const current = room.queue.find(value => value.entryId === room.timeline.entryId)!;
                     const next = room.queue[room.queue.indexOf(current) + 1];
                     if (next && !next.unavailable) {
                         const media = await touchMedia(next.mediaTrackId, next.mediaRevision, session);
                         if (media) { appendRoomEvent(room, 'trackChanged', null, now()); prepare(room, next, 0); }
                         else { next.unavailable = true; pauseRoom(room, now()); }
                     } else { pauseRoom(room, now()); room.timeline.state = 'ended'; }
-                    changed = true;
                 }
-                if (changed) { await persistRoom(room, session, now()); visible = true; }
+                if (plan !== 'unchanged') { await persistRoom(room, session, now()); visible = true; }
                 }, session => roomAccounts(candidate._id, session));
             }
             if (visible) notifyRoomChanges();

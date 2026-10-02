@@ -8,6 +8,7 @@ import { createSocialService } from '../src/application/social/socialService';
 import { ROOM_LIMITS, type RoomActor, type RoomApi, type RoomCommand, type RoomMediaDescriptor, type RoomSnapshot } from '../src/contracts/roomV1';
 import { SOCIAL_LIMITS, SocialError, type SocialApi, type SocialScope } from '../src/contracts/socialV1';
 import { getDatabaseClient, getDb } from '../src/infrastructure/database';
+import { createRoomAuthority } from '../src/realtime/roomAuthority';
 import AuthSession from '../src/models/authSession';
 import AuthActionToken from '../src/models/authActionToken';
 import { applyEmailAction, changeAccountPassword } from '../src/services/authCredentialService';
@@ -24,7 +25,7 @@ let social: SocialApi;
 let media: RoomMediaDescriptor[];
 const secret = 'synthetic-room-integration-secret';
 const collections = ['users', 'authSessions', 'socialProfiles', 'socialRelationships', 'socialMutations', 'socialOutbox',
-    'socialBudgets', 'socialHandles', 'socialRooms', 'socialRoomParticipation', 'socialRoomOutbox', 'socialInvitations', 'audioTracks', 'roomTestAuthority'];
+    'socialBudgets', 'socialHandles', 'socialRooms', 'socialRoomParticipation', 'socialRoomOutbox', 'socialInvitations', 'audioTracks', 'roomTestAuthority', 'socialAuthority'];
 const database = () => getDb()!;
 const roomDocuments = () => database().collection<RoomDocument>('socialRooms');
 
@@ -39,7 +40,7 @@ const touchMedia = async (id: string, revision: string, session: ClientSession) 
     return value.value?.roomFixture as RoomMediaDescriptor | undefined ?? null;
 };
 const service = (options: RoomServiceOptions = {}) => createRoomService({ now: () => now, enabled: () => enabled, secret: () => secret,
-    resolveMedia, touchMedia, assertAuthority: async session => {
+    resolveMedia, touchMedia, inspectAuthority: async () => epoch, assertAuthority: async session => {
         await database().collection('roomTestAuthority').updateOne({ _id: new ObjectId('000000000000000000000001') }, { $inc: { fence: 1 } }, { session });
         return epoch;
     }, ...options });
@@ -136,6 +137,322 @@ const reaction = async (who: Person, target = api, value = 'heart') => {
     const state = await snapshot(who, target);
     return target.mutate(who.actor, command(who, { action: 'react', ...memberBody(state), expectedEpoch: state.epoch, reaction: value }));
 };
+
+test('unchanged paused and playing sweeps do not write account, authority, media, room, or outbox fences', async () => {
+    const { host, guest } = await pair();
+    const evidence = async () => Promise.all(['users', 'authSessions', 'roomTestAuthority', 'audioTracks', 'socialRooms', 'socialRoomOutbox', 'socialOutbox']
+        .map(name => database().collection(name).find({}).sort({ _id: 1 }).toArray()));
+    for (const playing of [false, true]) {
+        if (playing) await playPair(host, guest);
+        const before = await evidence();
+        const locked = getDatabaseClient().startSession();
+        try {
+            locked.startTransaction();
+            await database().collection('users').updateOne({ _id: new ObjectId(host.actor.userId) }, { $inc: { listenerMutationRevision: 1 } }, { session: locked });
+            // An unchanged timer reads the committed account snapshot even while a command owns its write fence.
+            await Promise.all(Array.from({ length: 4 }, () => api.sweep()));
+            await locked.abortTransaction();
+        } finally { if (locked.inTransaction()) await locked.abortTransaction(); await locked.endSession(); }
+        assert.deepEqual(await evidence(), before);
+    }
+});
+
+test('unchanged preparation sweeps leave every fence untouched, including held account and authority writes', async () => {
+    const lease = createRoomAuthority('preparation-sweep-owner'); assert.equal(await lease.acquire(), 1);
+    api = service({ assertAuthority: session => lease.assert(session), inspectAuthority: session => lease.inspect(session) });
+    const { host, guest } = await pair();
+    await api.mutate(host.actor, control(host, await snapshot(host), 'play'));
+    const beforeRoom = await snapshot(host); assert.equal(beforeRoom.timeline?.state, 'preparing');
+    const evidence = async () => ({
+        accounts: (await database().collection('users').find({}, { projection: { listenerMutationRevision: 1 } }).toArray())
+            .reduce((total, value) => total + (value.listenerMutationRevision ?? 0), 0),
+        sessions: (await database().collection('authSessions').find({}, { projection: { socialMutationRevision: 1 } }).toArray())
+            .reduce((total, value) => total + (value.socialMutationRevision ?? 0), 0),
+        authority: (await database().collection('socialAuthority').findOne({ _id: 'rooms-v1' as any }))!.fence,
+        media: (await database().collection('audioTracks').find({}, { projection: { roomFence: 1 } }).toArray())
+            .reduce((total, value) => total + (value.roomFence ?? 0), 0),
+        roomRevision: (await roomDocuments().findOne({ _id: beforeRoom.roomId }))!.revision,
+        outbox: (await database().collection('socialRoomOutbox').findOne({ _id: beforeRoom.roomId as any }))?.revision ?? 0
+    });
+    const before = await evidence(); await api.sweep(); assert.deepEqual(await evidence(), before);
+    for (const collection of ['users', 'socialAuthority']) {
+        const locked = getDatabaseClient().startSession();
+        try {
+            locked.startTransaction();
+            if (collection === 'users') await database().collection('users').updateOne({ _id: new ObjectId(host.actor.userId) },
+                { $inc: { listenerMutationRevision: 1 } }, { session: locked });
+            else await database().collection('socialAuthority').updateOne({ _id: 'rooms-v1' as any }, { $inc: { fence: 1 } }, { session: locked });
+            await api.sweep(); await locked.abortTransaction();
+        } finally { if (locked.inTransaction()) await locked.abortTransaction(); await locked.endSession(); }
+        assert.deepEqual(await evidence(), before);
+    }
+    await ready(host, beforeRoom); const partialBefore = await evidence(); await api.sweep(); assert.deepEqual(await evidence(), partialBefore);
+    assert.equal((await roomDocuments().findOne({ _id: beforeRoom.roomId }))?.preparation?.cohort.filter(value => value.ready).length, 1);
+    assert.equal((await roomDocuments().findOne({ _id: beforeRoom.roomId }))?.members.find(value => value.accountId === guest.actor.userId)?.connectionPresent, true);
+    await lease.release();
+});
+
+for (const transition of ['allReady', 'partialDeadline', 'nobodyDeadline', 'invalidMedia', 'removedCohort', 'removedUnreadyCohort'] as const) {
+    test(`preparation readonly preflight retains the fully fenced ${transition} path`, async () => {
+        const { host, guest } = await pair();
+        await api.mutate(host.actor, control(host, await snapshot(host), 'play'));
+        if (['partialDeadline', 'removedCohort'].includes(transition)) await ready(host, await snapshot(host));
+        const before = await snapshot(host); const stored = (await roomDocuments().findOne({ _id: before.roomId }))!;
+        if (transition === 'allReady') await roomDocuments().updateOne({ _id: before.roomId }, { $set: {
+            'preparation.cohort': stored.preparation!.cohort.map(value => ({ ...value, ready: true })),
+            members: stored.members.map(value => ({ ...value, readyPlaybackGeneration: stored.playbackGeneration }))
+        } });
+        else if (transition === 'partialDeadline' || transition === 'nobodyDeadline') now += ROOM_LIMITS.preparationMs;
+        else if (transition === 'invalidMedia') await database().collection('audioTracks').updateOne({ _id: new ObjectId(media[0].mediaTrackId) }, { $set: { uploadStatus: 'deleting' } });
+        else await roomDocuments().updateOne({ _id: before.roomId }, { $set: {
+            members: stored.members.map(value => value.accountId === guest.actor.userId ? { ...value, controllerGeneration: value.controllerGeneration + 1 } : value)
+        } });
+        const fenceBefore = (await database().collection('roomTestAuthority').findOne({}))!.fence;
+        const accountsBefore = (await database().collection('users').find({}).toArray()).reduce((total, value) => total + value.listenerMutationRevision, 0);
+        await api.sweep(); const after = (await roomDocuments().findOne({ _id: before.roomId }))!;
+        assert.equal((await database().collection('roomTestAuthority').findOne({}))!.fence, fenceBefore + 1);
+        const accountsAfter = (await database().collection('users').find({}).toArray()).reduce((total, value) => total + value.listenerMutationRevision, 0);
+        assert.equal(accountsAfter, accountsBefore + 2);
+        if (transition === 'removedUnreadyCohort') {
+            assert.equal(after.timeline.state, 'preparing'); assert.equal(after.revision, before.revision);
+            // The existing timer does not persist cohort filtering until a visible transition occurs.
+            assert.deepEqual(after.preparation!.cohort, stored.preparation!.cohort);
+        } else {
+            assert.equal(after.preparation, null); assert.equal(after.revision, before.revision + 1);
+            const playing = ['allReady', 'partialDeadline', 'removedCohort'].includes(transition);
+            assert.equal(after.timeline.state, playing ? 'playing' : 'paused');
+            if (playing) assert.equal(after.timeline.anchorServerTimeMs, now + ROOM_LIMITS.startLeadMs);
+            if (transition === 'invalidMedia') {
+                assert.equal(after.queue[0].unavailable, true); assert.equal(after.queueRevision, before.queueRevision + 1);
+            }
+        }
+    });
+}
+
+for (const partial of [false, true]) {
+    test(`preparation preflight delayed across its deadline remains fenced with ${partial ? 'partial' : 'no'} readiness`, async () => {
+        const { host } = await pair(); await api.mutate(host.actor, control(host, await snapshot(host), 'play'));
+        if (partial) await ready(host, await snapshot(host));
+        const before = await snapshot(host); let probes = 0;
+        const timer = service({ inspectAuthority: async () => { if (++probes === 2) now += ROOM_LIMITS.preparationMs; return epoch; } });
+        const fenceBefore = (await database().collection('roomTestAuthority').findOne({}))!.fence;
+        await timer.sweep(); const after = (await roomDocuments().findOne({ _id: before.roomId }))!;
+        assert.equal(after.preparation, null); assert.equal(after.timeline.state, partial ? 'playing' : 'paused');
+        assert.equal(after.revision, before.revision + 1);
+        assert.equal((await database().collection('roomTestAuthority').findOne({}))!.fence, fenceBefore + 1);
+    });
+}
+
+for (const change of ['ready', 'selection'] as const) {
+    test(`committed ${change} while preparation preflight waits cannot be overwritten by its old candidate`, async () => {
+        const { host, guest } = await pair(); await api.mutate(host.actor, control(host, await snapshot(host), 'play'));
+        const before = await snapshot(host); let committed = false;
+        const timer = service({ inspectAuthority: async () => {
+            if (!committed) {
+                committed = true;
+                if (change === 'ready') { await ready(host, before); await ready(guest, await snapshot(guest)); }
+                else assert.equal((await api.mutate(host.actor, control(host, before, 'next'))).outcome, 'applied');
+            }
+            return epoch;
+        } });
+        await timer.sweep(); const after = (await roomDocuments().findOne({ _id: before.roomId }))!;
+        if (change === 'ready') {
+            assert.equal(after.preparation, null); assert.equal(after.timeline.state, 'playing');
+            assert.equal(after.timeline.entryId, before.timeline!.entryId); assert.equal(after.revision, before.revision + 2);
+        } else {
+            assert.equal(after.timeline.state, 'preparing'); assert.equal(after.timeline.entryId, before.queue[1].entryId);
+            assert.notEqual(after.preparation!.preparationId, before.preparation!.preparationId);
+            assert.equal(after.playbackGeneration, before.timeline!.playbackGeneration + 1); assert.equal(after.revision, before.revision + 1);
+        }
+    });
+}
+
+test('unchanged preparation still detects a lease takeover committed during preflight', async () => {
+    const a = createRoomAuthority('preparing-owner-a'); const b = createRoomAuthority('preparing-owner-b');
+    assert.equal(await a.acquire(), 1);
+    api = service({ assertAuthority: session => a.assert(session), inspectAuthority: session => a.inspect(session) });
+    const host = await person('host'); await create(host); await api.mutate(host.actor, control(host, await snapshot(host), 'play'));
+    const before = await snapshot(host); let retired = false;
+    const timer = service({ assertAuthority: session => a.assert(session), inspectAuthority: async session => {
+        const observed = await a.inspect(session);
+        if (!retired) {
+            retired = true;
+            await database().collection('socialAuthority').updateOne({ _id: 'rooms-v1' as any }, { $set: { expiresAt: new Date(0) } });
+            assert.equal(await b.acquire(), 2);
+        }
+        return observed;
+    } });
+    const accountBefore = await database().collection('users').findOne({ _id: new ObjectId(host.actor.userId) });
+    await assert.rejects(timer.sweep(), isError('room_authority_unavailable'));
+    assert.equal((await roomDocuments().findOne({ _id: before.roomId }))?.revision, before.revision);
+    assert.deepEqual(await database().collection('users').findOne({ _id: new ObjectId(host.actor.userId) }), accountBefore);
+    await b.release();
+});
+
+for (const invalidation of ['revoked', 'expired', 'mediaRevision', 'mediaDeleting'] as const) {
+    test(`readonly sweep preflight still detects direct ${invalidation} changes without lifecycle hooks`, async () => {
+        const { host, guest } = await pair(); const before = await playPair(host, guest);
+        if (invalidation === 'revoked' || invalidation === 'expired') {
+            await database().collection('authSessions').updateOne({ _id: new ObjectId(guest.actor.sessionId) },
+                { $set: invalidation === 'revoked' ? { revokedAt: new Date(now) } : { expiresAt: new Date(now) } });
+        } else {
+            await database().collection('audioTracks').updateOne({ _id: new ObjectId(media[0].mediaTrackId) },
+                { $set: invalidation === 'mediaRevision' ? { 'roomFixture.mediaRevision': 'mr_replacement' } : { uploadStatus: 'deleting' } });
+        }
+        await api.sweep();
+        const after = (await roomDocuments().findOne({ _id: before.roomId }))!;
+        if (invalidation === 'revoked' || invalidation === 'expired') {
+            assert.equal(after.members.find(value => value.accountId === guest.actor.userId)?.connectionPresent, false);
+            assert.equal(after.members.find(value => value.accountId === host.actor.userId)?.connectionPresent, true);
+            assert.equal(after.timeline.state, 'playing');
+        } else {
+            assert.equal(after.timeline.state, 'paused'); assert.equal(after.queueRevision, before.queueRevision + 1);
+            assert.equal(after.queue.find(value => value.entryId === before.timeline!.entryId)?.unavailable, true);
+        }
+        assert.equal(after.revision, before.revision + 1);
+    });
+}
+
+test('missing accounts and uncertain or unmatched authority probes cannot bypass the fenced path', async () => {
+    const host = await person('host'); const state = await create(host);
+    const fence = async () => (await database().collection('roomTestAuthority').findOne({}))!.fence;
+    for (const inspectAuthority of [undefined, async () => { throw new Error('synthetic private probe failure'); }]) {
+        const before = await fence(); await service({ inspectAuthority }).sweep(); assert.equal(await fence(), before + 1);
+    }
+    await database().collection('users').deleteOne({ _id: new ObjectId(host.actor.userId) });
+    await assert.rejects(api.sweep(), isError('account_unavailable'));
+    assert.equal((await roomDocuments().findOne({ _id: state.roomId }))?.revision, state.revision);
+});
+
+test('preflight rechecks grace deadlines after awaited reads instead of skipping a newly due transition', async () => {
+    const host = await person('host'); const before = await create(host); let probes = 0;
+    const timer = service({ inspectAuthority: async () => {
+        if (++probes === 2) now += ROOM_LIMITS.hostGraceMs;
+        return epoch;
+    } });
+    await timer.sweep();
+    const after = (await roomDocuments().findOne({ _id: before.roomId }))!;
+    assert.equal(after.hostSuspended, true); assert.equal(after.members[0].connectionPresent, false);
+    assert.equal(after.timeline.state, 'paused'); assert.equal(after.revision, before.revision + 1);
+});
+
+test('preflight crossing natural end still advances through the original candidate and media fence', async () => {
+    const { host, guest } = await pair(); const before = await playPair(host, guest); let probes = 0;
+    const timer = service({ inspectAuthority: async () => {
+        if (++probes === 2) now += media[0].durationMs + ROOM_LIMITS.startLeadMs;
+        return epoch;
+    } });
+    const sourceBefore = await database().collection('audioTracks').findOne({ _id: new ObjectId(media[1].mediaTrackId) });
+    await timer.sweep();
+    const after = (await roomDocuments().findOne({ _id: before.roomId }))!;
+    assert.equal(after.timeline.entryId, before.queue[1].entryId); assert.equal(after.timeline.state, 'preparing');
+    assert.equal(after.playbackGeneration, before.timeline!.playbackGeneration + 1);
+    const sourceAfter = await database().collection('audioTracks').findOne({ _id: new ObjectId(media[1].mediaTrackId) });
+    assert.equal(sourceAfter!.roomFence, sourceBefore!.roomFence + 1);
+});
+
+for (const transition of ['roomExpiry', 'featureDisabled', 'epochChanged', 'transferExpiry', 'eventExpiry', 'missingHost'] as const) {
+    test(`readonly sweep preflight retains the ${transition} transition and its durable cleanup`, async () => {
+        const { host, guest } = await pair(); let before = await playPair(host, guest);
+        if (transition === 'transferExpiry') {
+            const target = await snapshot(guest);
+            await api.mutate(host.actor, command(host, { action: 'offerTransfer', ...memberBody(before), expectedControlGeneration: before.controlGeneration,
+                targetMemberId: target.self.memberId, targetControllerGeneration: target.self.controllerGeneration }));
+            before = await snapshot(host);
+            await roomDocuments().updateOne({ _id: before.roomId }, { $set: { 'transfer.expiresAt': new Date(now) } });
+        } else if (transition === 'eventExpiry') {
+            const row = (await roomDocuments().findOne({ _id: before.roomId }))!;
+            assert.ok(row.events?.length);
+            await roomDocuments().updateOne({ _id: before.roomId }, { $set: { 'events.0.expiresAt': new Date(now) } });
+        } else if (transition === 'roomExpiry') await roomDocuments().updateOne({ _id: before.roomId }, { $set: { expiresAt: new Date(now) } });
+        else if (transition === 'missingHost') await roomDocuments().updateOne({ _id: before.roomId }, { $set: { hostMembershipId: 'missing-host' } });
+        else if (transition === 'featureDisabled') enabled = false;
+        else epoch += 1;
+        await api.sweep();
+        const after = (await roomDocuments().findOne({ _id: before.roomId }))!;
+        assert.equal(after.revision, before.revision + 1);
+        if (transition === 'roomExpiry' || transition === 'missingHost') {
+            assert.equal(after.state, 'closed'); assert.deepEqual(after.members, []); assert.deepEqual(after.queue, []);
+            assert.equal(await database().collection('socialRoomParticipation').countDocuments({ roomId: before.roomId }), 0);
+        } else if (transition === 'featureDisabled' || transition === 'epochChanged') {
+            assert.equal(after.timeline.state, 'paused'); assert.equal(after.preparation, null); assert.equal(after.epoch, epoch);
+        } else {
+            assert.deepEqual(after.timeline, { entryId: before.timeline!.entryId, state: before.timeline!.state,
+                positionMs: before.timeline!.positionMs, anchorServerTimeMs: before.timeline!.anchorServerTimeMs });
+            assert.equal(after.playbackGeneration, before.timeline!.playbackGeneration);
+            if (transition === 'transferExpiry') assert.equal(after.transfer, null);
+            else assert.ok(after.events?.every(event => event.expiresAt.getTime() > now));
+        }
+    });
+}
+
+test('a command committed during readonly preflight remains authoritative without a stale timer write', async () => {
+    const { host, guest } = await pair(); const before = await playPair(host, guest); let commanded = false;
+    const timer = service({ inspectAuthority: async () => {
+        if (!commanded) {
+            commanded = true;
+            assert.equal((await api.mutate(host.actor, control(host, before, 'next'))).outcome, 'applied');
+        }
+        return epoch;
+    } });
+    await timer.sweep();
+    const after = (await roomDocuments().findOne({ _id: before.roomId }))!;
+    assert.equal(after.timeline.entryId, before.queue[1].entryId); assert.equal(after.timeline.state, 'preparing');
+    assert.equal(after.playbackGeneration, before.timeline!.playbackGeneration + 1); assert.equal(after.revision, before.revision + 1);
+});
+
+test('authority takeover between preflight and a due transition rejects the stale fenced write', async () => {
+    const a = createRoomAuthority('sweep-owner-a'); const b = createRoomAuthority('sweep-owner-b');
+    assert.equal(await a.acquire(), 1);
+    const owner = service({ assertAuthority: session => a.assert(session), inspectAuthority: session => a.inspect(session) });
+    const host = await person('host'); const before = await create(host, owner); let retired = false;
+    const timer = service({ assertAuthority: session => a.assert(session), inspectAuthority: async session => {
+        const observed = await a.inspect(session);
+        if (!retired) {
+            retired = true;
+            await database().collection('socialAuthority').updateOne({ _id: 'rooms-v1' as any }, { $set: { expiresAt: new Date(0) } });
+            assert.equal(await b.acquire(), 2); now += ROOM_LIMITS.hostGraceMs;
+        }
+        return observed;
+    } });
+    const accountBefore = await database().collection('users').findOne({ _id: new ObjectId(host.actor.userId) });
+    await assert.rejects(timer.sweep(), isError('room_authority_unavailable'));
+    assert.equal((await roomDocuments().findOne({ _id: before.roomId }))?.revision, before.revision);
+    assert.deepEqual(await database().collection('users').findOne({ _id: new ObjectId(host.actor.userId) }), accountBefore);
+    await b.release();
+});
+
+test('an unchanged room does not hide a committed authority takeover behind the original snapshot', async () => {
+    const a = createRoomAuthority('stable-sweep-owner-a'); const b = createRoomAuthority('stable-sweep-owner-b');
+    assert.equal(await a.acquire(), 1);
+    const owner = service({ assertAuthority: session => a.assert(session), inspectAuthority: session => a.inspect(session) });
+    const host = await person('host'); const before = await create(host, owner); let retired = false;
+    const timer = service({ assertAuthority: session => a.assert(session), inspectAuthority: async session => {
+        const observed = await a.inspect(session);
+        if (!retired) {
+            retired = true;
+            await database().collection('socialAuthority').updateOne({ _id: 'rooms-v1' as any }, { $set: { expiresAt: new Date(0) } });
+            assert.equal(await b.acquire(), 2);
+        }
+        return observed;
+    } });
+    await assert.rejects(timer.sweep(), isError('room_authority_unavailable'));
+    assert.equal((await roomDocuments().findOne({ _id: before.roomId }))?.revision, before.revision);
+    await b.release();
+});
+
+test('simultaneous Next commands with repeated unchanged sweeps still return one applied and one stale result', async () => {
+    const { host, guest } = await pair(); await playPair(host, guest);
+    await api.mutate(host.actor, control(host, await snapshot(host), 'setControlMode', { mode: 'everyone' }));
+    const a = await snapshot(host); const b = await snapshot(guest);
+    const sweeps = Promise.all(Array.from({ length: 6 }, () => api.sweep()));
+    const results = await Promise.all([api.mutate(host.actor, control(host, a, 'next')), api.mutate(guest.actor, control(guest, b, 'next'))]);
+    await sweeps;
+    assert.deepEqual(results.map(value => value.outcome).sort(), ['applied', 'rejected']);
+    assert.equal(results.find(value => value.outcome === 'rejected')?.code, 'stale_playback');
+    const after = await snapshot(host);
+    assert.equal(after.timeline?.entryId, a.queue[1].entryId); assert.equal(after.timeline?.playbackGeneration, a.timeline!.playbackGeneration + 1);
+});
 
 test('observer reactions are status-only, fenced, and never change playback or broadcast generic social invalidations', async () => {
     const { host, guest } = await pair(); const outsider = await person('outsider');

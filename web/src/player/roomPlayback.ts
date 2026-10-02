@@ -40,7 +40,7 @@ export type RoomPlaybackIntent = RoomPlaybackAction & {
 
 /** Observations are diagnostics/readiness, never implicitly translated into user commands. */
 export interface RoomPlaybackObservation {
-  readonly type: 'ready' | 'seek-complete' | 'actual-start' | 'ended' | 'unsupported-rate' | 'unsupported-seek' | 'suspended';
+  readonly type: 'ready' | 'seek-complete' | 'actual-start' | 'ended' | 'unsupported-rate' | 'unsupported-seek' | 'media-failed' | 'suspended';
   readonly entryId: string;
   readonly playbackEpoch: number;
   readonly positionSeconds: number;
@@ -80,6 +80,8 @@ export interface RoomPlaybackPort {
 }
 
 const finiteNonnegative = (value: number) => Number.isFinite(value) && value >= 0;
+const hasMetadata = (target: PlayerAudio | null) => Boolean(target && (target.readyState ?? 0) >= 1
+  && finiteNonnegative(target.duration) && target.duration > 0);
 
 /** Separates confirmed-state application from explicit gestures and fences delayed media work. */
 export const createRoomPlaybackController = (port: RoomPlaybackPort, options: RoomPlaybackOptions) => {
@@ -94,6 +96,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let decoderRecovery: ReturnType<typeof setTimeout> | undefined;
   let recoveredOccurrence: string | null = null;
   let reloadingOccurrence: string | null = null;
+  // install() only writes the source; native metadata can arrive much later than its promise.
+  let sourceRetry: { occurrence: string; source: number; installed: boolean; timer?: ReturnType<typeof setTimeout> } | undefined;
+  const clearSourceRetry = () => { clearTimeout(sourceRetry?.timer); sourceRetry = undefined; };
   let rateFallbackOccurrence: string | null = null;
   let needsSeek = true;
   let seekPending = false;
@@ -158,6 +163,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   const matchesSource = (target: PlayerAudio) => {
     if (!state || detached || source !== port.sourceGeneration()) return false;
     if (reloadingOccurrence !== null && reloadingOccurrence === occurrence()) return false;
+    if (sourceRetry?.occurrence === occurrence() && !sourceRetry.installed) return false;
     const item = state.queue[state.entryIds.indexOf(state.currentEntryId)];
     if (!item) return false;
     const absolute = (url: string) => {
@@ -231,8 +237,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     const latency = Math.max(0, (now() - pending.dispatchedAt) / 1000 - (target.currentTime - pending.target));
     const position = pending.referencePosition + (now() - pending.referenceAt) / 1000;
     clearPostSeek();
-    if (!finiteNonnegative(latency) || latency > 2) { seekLatency = undefined; return; }
-    seekLatency = latency;
+    if (!finiteNonnegative(latency)) { seekLatency = undefined; return; }
+    // A valid slower decoder still receives compensation; prediction never exceeds two seconds.
+    seekLatency = Math.min(latency, 2);
     if (Math.abs(position - target.currentTime) <= 0.35
       || !finiteNonnegative(target.duration) || position + latency >= target.duration - 0.35) return;
     if (convergenceBudget?.occurrence !== pending.occurrence) {
@@ -294,8 +301,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   /** Readiness requires real metadata, a completed seek, and enough decoded data to start. */
   const reconcile = async (): Promise<void> => {
     const target = port.media();
-    if (!state || !target || !matchesSource(target) || seekFailed) return;
-    if ((target.readyState ?? 0) < 1 || !finiteNonnegative(target.duration) || target.duration <= 0) return;
+    if (!state || !target || !matchesSource(target) || seekFailed || target.error) return;
+    if (!hasMetadata(target)) return;
     if (needsSeek) {
       needsSeek = false;
       seekPending = true;
@@ -359,6 +366,14 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     return true;
   };
 
+  /** Failed current media withdraws readiness until an explicit local resume. */
+  const failMedia = () => {
+    if (seekFailed && localPaused) return;
+    seekFailed = true;
+    attachment.pauseLocally();
+    report('media-failed');
+  };
+
   const attachment: RoomPlaybackAttachment = {
     async apply(incoming) {
       if (detached || (state && incoming.revision <= state.revision)) return false;
@@ -392,6 +407,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         || (!preparationCompleted && (incoming.anchorMonotonicMs !== previous.anchorMonotonicMs || incoming.status !== previous.status))
       )) return false;
       state = Object.freeze({ ...incoming, entryIds: Object.freeze([...incoming.entryIds]), queue: copyQueue(incoming.queue) });
+      if (sourceRetry && sourceRetry.occurrence !== occurrence()) clearSourceRetry();
       if (hiddenNonAudio()) suspend();
       const index = state.entryIds.indexOf(state.currentEntryId);
       const sourceChanged = !previous || previous.currentEntryId !== state.currentEntryId
@@ -422,15 +438,57 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
       cancelEffects();
       port.pause();
     },
+    /** One explicit gesture may retry failed pinned bytes; native callbacks never initiate this retry. */
     async resync() {
-      if (detached) return;
+      if (detached || !state || reloadingOccurrence === occurrence()) return;
+      if (sourceRetry) {
+        if (sourceRetry.occurrence === occurrence() && (!sourceRetry.installed || sourceRetry.source === port.sourceGeneration())) return;
+        clearSourceRetry();
+      }
       if (hiddenNonAudio()) return;
+      const target = port.media();
+      const retrySource = target?.error || !hasMetadata(target);
       localPaused = false;
       cancelEffects();
       needsSeek = true;
       seekPending = false;
       seekFailed = false;
       port.pause();
+      if (detached) return;
+      if (retrySource) {
+        const retrying = state, key = occurrence()!;
+        const retry = { occurrence: key, source: port.sourceGeneration(), installed: false,
+          timer: undefined as ReturnType<typeof setTimeout> | undefined };
+        sourceRetry = retry;
+        retry.timer = setTimeout(() => {
+          if (sourceRetry !== retry) return;
+          clearSourceRetry();
+          if (!detached && occurrence() === key && port.sourceGeneration() === retry.source) failMedia();
+        }, 10_000);
+        try {
+          const installation = port.install(retrying.queue, retrying.entryIds.indexOf(retrying.currentEntryId));
+          retry.source = port.sourceGeneration();
+          await installation;
+        }
+        catch {
+          if (sourceRetry === retry) clearSourceRetry();
+          if (!detached && occurrence() === key && port.sourceGeneration() === retry.source) failMedia();
+          return;
+        }
+        if (sourceRetry !== retry || detached || occurrence() !== key || port.sourceGeneration() !== retry.source) {
+          if (sourceRetry === retry) clearSourceRetry();
+          return;
+        }
+        retry.installed = true;
+        source = retry.source;
+        const loaded = port.media();
+        if (loaded?.error || hasMetadata(loaded)) {
+          clearSourceRetry();
+          if (loaded?.error) failMedia();
+        }
+        // The user may pause while loading; authorization updates still use the latest same-occurrence anchor.
+        if (localPaused) return;
+      }
       await reconcile();
     },
     correct(positionSeconds) {
@@ -476,6 +534,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     detach() {
       if (detached) return;
       detached = true;
+      clearSourceRetry();
       visibility?.removeEventListener('visibilitychange', onVisibilityChange);
       visibility?.removeEventListener('freeze', suspend);
       pageLifecycle?.removeEventListener('pagehide', suspend);
@@ -510,10 +569,16 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     intent,
     /** DOM callbacks never infer user intent, including callbacks produced by remote writes. */
     observe(event: string, target: PlayerAudio): boolean {
+      if (sourceRetry?.installed && sourceRetry.source !== port.sourceGeneration()) clearSourceRetry();
       if (!matchesSource(target)) return event === 'volumechange';
+      if (sourceRetry && (target.error || (['loadedmetadata', 'canplay', 'durationchange'].includes(event)
+        && hasMetadata(target)))) clearSourceRetry();
       if (event === 'play' || event === 'playing') {
-        if (localPaused || state?.playbackAllowed === false || !playRequested || needsSeek || seekPending || seekFailed || target.seeking
+        if (localPaused || target.error || state?.playbackAllowed === false || !playRequested || needsSeek || seekPending || seekFailed || target.seeking
           || state?.status !== 'playing' || now() < state.anchorMonotonicMs) {
+          // Pausing an in-flight start must let current authorized seek/metadata completion start it again.
+          playRequested = false;
+          firstProgress = undefined;
           port.pause();
           return false;
         }
@@ -532,7 +597,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         latestCorrection = undefined;
       }
       if (event === 'error' && !target.error) return false;
-      if (event === 'error') { clearPostSeek(); seekLatency = undefined; }
+      if (event === 'error') failMedia();
       if (event === 'seeking' && target.seeking && postSeek?.completed) { clearPostSeek(); seekLatency = undefined; }
       if (event === 'seeking' && target.seeking && firstProgress) firstProgress.seeking = true;
       if (event === 'seeked' && !target.seeking) {

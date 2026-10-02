@@ -36,7 +36,7 @@ Run `npm run build` before the browser gate; the guide build validates its curat
 source references and internal links. The preview verifies document presentation,
 not production account access or deployment.
 
-The current local uncommitted candidate's 2026-08-19 MediaTrack amendment passes
+The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
 tests, both production builds, and E2E TypeScript. The focused Audio/Video
 continuity, responsive-shell, and accessibility Chromium gate passes 24/24;
@@ -47,8 +47,8 @@ pre-existing Archtree logout-header timing assertion passing its automatic
 retry; because CI deliberately fails on flaky tests, that command remains
 non-zero even though the same assertion passes an isolated CI rerun. A clean
 commit-identified CI matrix remains required before release. The largest
-initial route is Playlist Detail at 148.4 KiB gzip against the 150 KiB budget;
-CSS is 28.3 KiB gzip against the 32 KiB budget, and the build ships no bundled
+initial route was Playlist Detail at 148.4 KiB gzip against the 150 KiB budget;
+CSS was 28.3 KiB gzip against the 32 KiB budget, and that build shipped no bundled
 font or image payload. CI repeats the browser gate through
 `.github/workflows/finitude-web-release.yml`; the platform-scoped path prevents
 Linux CI from silently comparing against macOS font rendering. A separately
@@ -59,6 +59,67 @@ Passing these projects does not prove support for a branded browser release.
 Playwright WebKit is not Safari, and bundled Chromium is not a substitute for
 current and previous Chrome or Edge. The production-equivalent account and
 media-store suite is a separate release gate.
+
+## Shared Audio recovery and sustained playback
+
+`npm run test:e2e:social --workspace @archtree/finitude-web -- --project=chromium-rooms`
+keeps the strict native-background case and independently verifies reload without
+autoplay or command echoes, simultaneous Next/selection arbitration, explicit
+device takeover, native HTTP 429 media failure and explicit pinned-source retry,
+and running host transfer without replacing the queue/timeline. Linux CI with `CI=true` or `CI=1` adds
+`firefox-rooms` and `webkit-rooms`, selecting the focused recovery/transfer case
+with both accounts in that project's engine. Preserve the CI null audio sink and
+Xvfb setup; these projects are deliberately absent from local Windows/macOS.
+Retries remain zero. A platform that keeps a genuinely background native page
+visible cannot supply evidence for the strict visibility case; retain that failure
+separately from the focused recovery result.
+
+`npm run test:soak:rooms` is a separate 30-minute gate, with 2–8 synthetic members
+and configurable bounded duration/cycle spacing. See the
+[commands and limits](../../README.md#verify-sustained-audio-rooms-locally).
+It reports actual media advancement, capture-time-aligned drift, application-fixture
+Node process RSS/heap extrema, and zero upgraded sockets/media requests/pending
+playback reads after participant cleanup. Browser, MongoDB, and whole-machine
+memory are outside these measurements; extrema do not establish absence of leaks. An
+aggregate attachment remains available after playback or browser cleanup failures.
+Global teardown explicitly drains the owned fixture, including MongoDB, S3 and
+copied distribution, before acknowledging completion. Do not substitute a short
+smoke pass for endurance evidence or a local fixture pass for production capacity.
+
+The 2026-10-01 uncommitted `develop` candidate passed `npm test` (710 backend
+and 989 Web tests), `npm run test:integration` (580 tests), `npm run build`, and
+`npx tsc -p tsconfig.e2e.json --noEmit` from `web`. The focused Windows command
+below passed both selected native cases with their existing assertions and zero
+retries:
+
+```sh
+npm run test:e2e:social --workspace @archtree/finitude-web -- --project=chromium-rooms --project=chromium-audio-formats --grep "real room command races|uploaded MP3 and AAC"
+```
+
+The eight-member, 600-second smoke gate completed 12 control cycles and five
+recovery checks. Its maximum sampled drift was 43.398 ms, and participant cleanup
+reported zero upgraded sockets, active media requests, and queued playback reads;
+owned fixture listeners also closed. It recorded 124 read 429s (116 concurrency,
+eight request-window), with no media-admission denials. Shared controls retained
+their strict HTTP 200/applied and one-POST assertions. Earlier setup and
+shared-selection 429 failures are failed attempts, separate from this pass;
+read reservations and bounded known-concurrency GET recovery are in the tested
+candidate.
+
+The longer run was stopped at the user's request. Its last complete progress
+sample was at 8,528 seconds (2 h 22 min 8 s), with 171 control cycles, 16 recovery
+checks, 42 polling-fallback checks, eight upgraded connections, and maximum
+sampled drift 284.143 ms. The process exited after interruption; owned fixture
+processes and listeners on ports 4187/4188 were absent afterward. No final
+aggregate or zero-resource teardown assertion was emitted for the interrupted
+run. Source and production-bundle hashes were unchanged throughout the run and
+verified again before this documentation update. This is partial evidence, not a
+completed eight-hour pass. No further long test is requested for this change.
+Current full Linux/cross-engine, physical-device output, production-equivalent S3,
+and deployment/rollback gates remain open; selected Windows passes do not close
+them. The tested production entry bundle was `index-BMUnW763.js`; the largest
+initial route was 149.5 KiB gzip and CSS was 30.8 KiB gzip, within their existing
+150/32 KiB budgets.
 
 ## Media Range load evidence
 

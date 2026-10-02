@@ -29,6 +29,10 @@ export const createRoomRouter = (api: RoomApi = createRoomService()) => {
         if (!req.is('application/json')) return next(new SocialError(415, 'json_required'));
         next();
     });
+    // Reads cannot occupy the entire shared pool; commands and tickets still obey its original ceiling.
+    const readConcurrency = limitConcurrency('room-http-read', 4, 40);
+    router.use((req, res, next) => req.method === 'GET' || req.method === 'HEAD'
+        ? readConcurrency(req, res, next) : next());
     router.use(limitConcurrency('room-http', 6, 48), express.json({ limit: ROOM_LIMITS.commandBytes, strict: true }));
     router.get('/capabilities', (_req, res) => res.json({ socialEnabled: process.env.FINITUDE_SOCIAL_ENABLED === 'true',
         roomsEnabled: process.env.FINITUDE_SOCIAL_ENABLED === 'true' && process.env.FINITUDE_ROOMS_ENABLED === 'true' }));
@@ -79,7 +83,7 @@ export const createRoomRouter = (api: RoomApi = createRoomService()) => {
     }));
     router.use((_req, _res, next) => next(new SocialError(404, 'not_found')));
     router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
-        if (res.headersSent) return next(error);
+        if (res.headersSent || res.destroyed || res.writableEnded) return next(error);
         const parser = error as { type?: string };
         const known = error instanceof SocialError ? error : parser?.type === 'entity.too.large'
             ? new SocialError(413, 'request_too_large') : parser?.type === 'entity.parse.failed' ? invalid() : null;

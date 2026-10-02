@@ -1,5 +1,7 @@
 import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
 import { nativeSocialBrowser } from './support/nativeSocialBrowser';
+import { capturePulseAudioDiagnostics } from './support/pulseAudioDiagnostics';
+import { installMediaEventDiagnostics, readMediaEventDiagnostics } from './support/mediaEventDiagnostics';
 import type { RoomSnapshot } from '../src/api/rooms';
 import { expectNoUnownedAxeViolations } from '../e2e/support/accessibility';
 
@@ -75,7 +77,8 @@ const snapshots = (page: Page) => {
   });
   return Object.assign(() => current, { frames });
 };
-const login = async (page: Page, name: string, alias: string, baseURL: string) => {
+/** Sign in without changing pre-provisioned social identities or relationships. */
+const signIn = async (page: Page, name: string, baseURL: string) => {
   await page.goto(new URL('/finitude/login', baseURL).href);
   await page.getByLabel('Email or username').fill(`${name}@example.test`);
   await page.getByLabel('Password', { exact: true }).fill('Social-real-browser-2026!');
@@ -83,6 +86,9 @@ const login = async (page: Page, name: string, alias: string, baseURL: string) =
   await expect(page).not.toHaveURL(/\/login/);
   await page.goto(new URL('/finitude/social', baseURL).href);
   await expect(page).toHaveTitle('Listen together · Finitude');
+};
+const login = async (page: Page, name: string, alias: string, baseURL: string) => {
+  await signIn(page, name, baseURL);
   const identity = page.getByRole('form', { name: 'Your social profile' });
   await identity.getByLabel('Handle', { exact: true }).fill(name);
   await identity.getByLabel('Display name', { exact: true }).fill(alias);
@@ -118,12 +124,13 @@ const installCommandRace = async (first: Page, second: Page) => {
       expect(captured).toHaveLength(2);
       expect(captured[0].expectedPlaybackGeneration).toBe(captured[1].expectedPlaybackGeneration);
       expect(captured[0].expectedEntryId).toBe(captured[1].expectedEntryId);
+      expect(outcomes.map(value => value.status), JSON.stringify(outcomes)).toEqual([200, 200]);
       expect(outcomes.map(value => value.outcome).sort(), JSON.stringify(outcomes)).toEqual(['applied', 'rejected']);
     } finally { release(); intercept = undefined; }
   };
 };
 
-test('real social route continues background audio, arbitrates gestures, recovers locally and transfers the host', async ({ browser, baseURL }) => {
+test('real social route continues background audio, arbitrates gestures, recovers locally and transfers the host', async ({ browser, browserName, baseURL }) => {
   const native = await nativeSocialBrowser();
   let aliceContext: BrowserContext | undefined;
   try {
@@ -131,7 +138,7 @@ test('real social route continues background audio, arbitrates gestures, recover
     const contexts = [aliceContext, native.context];
     const [alice, bob] = await Promise.all(contexts.map(context => context.newPage()));
     const raceCommands = await installCommandRace(alice, bob);
-    await Promise.all([observeTransportCloses(alice), observeTransportCloses(bob)]);
+    await Promise.all([observeTransportCloses(alice), observeTransportCloses(bob), installMediaEventDiagnostics(alice)]);
     const aliceRoom = snapshots(alice); const bobRoom = snapshots(bob);
     const commands: string[] = [];
     const backgroundEvidence: Array<Record<string, unknown>> = [];
@@ -316,11 +323,196 @@ test('real social route continues background audio, arbitrates gestures, recover
     } finally {
       if (failures.length) console.log(`Non-success browser responses: ${JSON.stringify(failures)}`);
       await test.info().attach('playback-state', { body: JSON.stringify({
+        browser: browserName, phase, pulseAudio: await capturePulseAudioDiagnostics(),
         alice: { room: aliceRoom(), media: await media(alice).catch(() => []), visibility: await alice.evaluate(() => document.visibilityState).catch(() => 'unavailable'), frames: aliceRoom.frames, closes: await transportCloses(alice).catch(() => []) },
+        nativeMediaEvents: await readMediaEventDiagnostics(alice).catch(() => []),
         bob: { room: bobRoom(), media: await media(bob).catch(() => []), visibility: await bob.evaluate(() => document.visibilityState).catch(() => 'unavailable'), frames: bobRoom.frames, closes: await transportCloses(bob).catch(() => []) }, failures, backgroundEvidence
       }), contentType: 'application/json' });
     }
   } finally {
     await Promise.all([aliceContext?.close(), native.close()]);
+  }
+});
+
+/** Observe real clock advancement separately from the renderer's paused flag. */
+const advancing = async (page: Page) => {
+  await playing(page);
+  const before = (await media(page))[0].time;
+  await expect.poll(async () => {
+    const values = await media(page);
+    return values.length === 1 && !values[0].paused && values[0].ready >= 2 && values[0].time > before + .25;
+  }).toBe(true);
+};
+
+test('real room command races, controller recovery and running host transfer preserve playback', async ({ browser, browserName, baseURL }, testInfo) => {
+  const contexts: BrowserContext[] = [];
+  try {
+    contexts.push(await browser.newContext({ baseURL, reducedMotion: 'reduce' }));
+    contexts.push(await browser.newContext({ baseURL, reducedMotion: 'reduce' }));
+    const [host, guest] = await Promise.all(contexts.map(context => context.newPage()));
+    const raceCommands = await installCommandRace(host, guest);
+    await Promise.all([host, guest].map(installMediaEventDiagnostics));
+    const hostState = snapshots(host); const guestState = snapshots(guest);
+    const commands: string[] = [];
+    const guestCommands: string[] = [];
+    for (const page of [host, guest]) page.on('request', request => {
+      if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/social/v1/room-commands') return;
+      const action = request.postDataJSON().action;
+      commands.push(action);
+      if (page === guest) guestCommands.push(action);
+    });
+    let phase = 'setup';
+    try {
+      // These existing synthetic accounts have an established friendship and do not share the native-lifecycle room.
+      await signIn(host, 'invitation_host', baseURL!);
+      await signIn(guest, 'invitation_guest', baseURL!);
+      const a = roomPanel(host); const b = roomPanel(guest);
+      for (const title of ['First Light', 'Across the Water', 'Home Again']) {
+        await a.getByRole('checkbox', { name: new RegExp(title) }).check();
+      }
+      await a.getByRole('button', { name: 'Start a room', exact: true }).click();
+      await a.getByRole('button', { name: 'Invite', exact: true }).click();
+      await b.getByRole('button', { name: 'Join room', exact: true }).click();
+      await expect.poll(() => hostState()?.members.length).toBe(2);
+      for (const page of [host, guest]) {
+        const listen = roomPanel(page).getByRole('button', { name: 'Listen along', exact: true });
+        if (await listen.isVisible()) await listen.click();
+      }
+      await a.getByRole('button', { name: 'Play for everyone', exact: true }).click();
+      await Promise.all([advancing(host), advancing(guest)]);
+      await expect(b.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
+      await a.getByLabel('Playback control').selectOption('everyone');
+      await expect(b.getByRole('button', { name: 'Next', exact: true })).toBeEnabled();
+
+      // Both peers must follow the winning pinned occurrence and advance through their actual media elements.
+      const expectRacePlayback = async (generation: number, entry: RoomSnapshot['queue'][number]) => {
+        await expect.poll(() => [hostState(), guestState()].every(room => room?.timeline?.state === 'playing'
+          && room.timeline.playbackGeneration === generation && room.timeline.entryId === entry.entryId
+          && room.timeline.mediaRevision === entry.mediaRevision)).toBe(true);
+        await Promise.all([advancing(host), advancing(guest)]);
+        for (const page of [host, guest]) {
+          const values = await media(page);
+          expect(values).toHaveLength(1);
+          expect(values[0].source).toBe(new URL(entry.streamUrl, baseURL).href);
+        }
+      };
+      phase = 'concurrent-next';
+      const generation = hostState()!.timeline!.playbackGeneration;
+      const nextEntry = hostState()!.queue[1];
+      await raceCommands(
+        () => a.getByRole('button', { name: 'Next', exact: true }).click(),
+        () => b.getByRole('button', { name: 'Next', exact: true }).click());
+      await expectRacePlayback(generation + 1, nextEntry);
+      phase = 'concurrent-selection';
+      const nextGeneration = hostState()!.timeline!.playbackGeneration;
+      await raceCommands(
+        () => a.getByRole('button', { name: 'Play for everyone First Light', exact: true }).click(),
+        () => b.getByRole('button', { name: 'Play for everyone Home Again', exact: true }).click());
+      await expect.poll(() => hostState()?.timeline?.playbackGeneration).toBe(nextGeneration + 1);
+      const selectedEntry = hostState()!.queue.find(entry => entry.entryId === hostState()!.timeline!.entryId)!;
+      await expectRacePlayback(nextGeneration + 1, selectedEntry);
+
+      phase = 'local-pause';
+      const beforeLocalCommands = guestCommands.length;
+      await b.getByRole('button', { name: 'Pause only for me', exact: true }).click();
+      await expect.poll(async () => (await media(guest))[0]?.paused).toBe(true);
+      await a.getByRole('button', { name: 'Pause for everyone', exact: true }).click();
+      await expect.poll(() => hostState()?.timeline?.state).toBe('paused');
+      await a.getByRole('button', { name: 'Play for everyone', exact: true }).click();
+      await advancing(host);
+      expect((await media(guest))[0].paused).toBe(true);
+      await b.getByRole('button', { name: 'Listen along', exact: true }).click();
+      await advancing(guest);
+      expect(guestCommands).toHaveLength(beforeLocalCommands);
+
+      phase = 'native-media-429';
+      const failedEntry = hostState()!.queue.find(entry => entry.entryId !== hostState()!.timeline?.entryId)!;
+      let mediaAttempts = 0;
+      let mediaFailures = 2;
+      // Inject an HTTP response at the media boundary; the native decoder must discover the error itself.
+      await guest.route(url => url.pathname + url.search === failedEntry.streamUrl, async route => {
+        mediaAttempts++;
+        if (mediaFailures > 0) {
+          mediaFailures--;
+          await route.fulfill({ status: 429, headers: { 'Retry-After': '2', 'Cache-Control': 'no-store' },
+            contentType: 'application/json', body: JSON.stringify({ message: 'Too many concurrent media requests.' }) });
+        } else await route.continue();
+      });
+      const beforeRetryCommands = guestCommands.length;
+      await a.getByRole('button', { name: `Play for everyone ${failedEntry.title}`, exact: true }).click();
+      await expect.poll(() => guestState()?.timeline?.entryId).toBe(failedEntry.entryId);
+      const nativeError = () => guest.locator('video').evaluateAll((elements: HTMLVideoElement[]) =>
+        elements.length === 1 && Boolean(elements[0].error) && elements[0].paused);
+      await expect.poll(nativeError).toBe(true);
+      await advancing(host);
+      expect(mediaAttempts).toBe(1);
+      await guest.waitForTimeout(2100);
+      expect(mediaAttempts).toBe(1); // A media error cannot infer another download or shared command.
+      const localRetry = b.getByRole('button', { name: 'Listen along', exact: true });
+      await expect(localRetry).toBeEnabled();
+      await localRetry.click();
+      await expect.poll(() => mediaAttempts).toBe(2);
+      await expect.poll(nativeError).toBe(true);
+      await guest.waitForTimeout(2100);
+      expect(mediaAttempts).toBe(2); // Persistent failure leaves a later explicit retry available.
+      expect(guestCommands).toHaveLength(beforeRetryCommands);
+      await localRetry.click();
+      await Promise.all([advancing(host), advancing(guest)]);
+      expect((await media(guest))[0].source).toBe(new URL(failedEntry.streamUrl, baseURL).href);
+      expect(guestState()!.timeline).toMatchObject({ entryId: failedEntry.entryId, mediaRevision: failedEntry.mediaRevision });
+      expect(guestCommands).toHaveLength(beforeRetryCommands);
+      expect(await media(guest)).toHaveLength(1);
+
+      phase = 'reload';
+      const beforeReloadCommands = guestCommands.length;
+      const previousControllerGeneration = guestState()!.self.controllerGeneration;
+      await guest.reload();
+      await expect(b.getByRole('button', { name: 'Use this device', exact: true })).toBeEnabled();
+      await expect.poll(() => guestState()?.self.isController).toBe(false);
+      // An observing reload may not have created the lazy player yet; neither absence nor an existing element can autoplay.
+      expect((await media(guest)).filter(value => !value.paused)).toHaveLength(0);
+      expect(guestCommands).toHaveLength(beforeReloadCommands);
+      await b.getByRole('button', { name: 'Use this device', exact: true }).click();
+      await expect.poll(() => guestState()?.self.isController).toBe(true);
+      expect(guestState()!.self.controllerGeneration).toBe(previousControllerGeneration + 1);
+      await Promise.all([advancing(host), advancing(guest)]);
+      expect(guestCommands.slice(beforeReloadCommands)).toEqual(['takeControl']);
+
+      phase = 'host-transfer';
+      await expect.poll(() => guestState()?.timeline?.state).toBe('playing');
+      await expect.poll(() => guestState()?.preparation).toBeNull();
+      const beforeTransfer = guestState()!;
+      const beforeTransferCommands = commands.length;
+      await a.getByRole('button', { name: 'Transfer and leave', exact: true }).click();
+      await b.getByRole('button', { name: 'Accept host role', exact: true }).click();
+      await expect(b.getByRole('button', { name: 'End room', exact: true })).toBeVisible();
+      await expect.poll(() => guestState()?.hostMemberId).toBe(beforeTransfer.self.memberId);
+      // An accepted transfer changes authority while preserving the running source occurrence and clock anchor.
+      expect(guestState()).toMatchObject({ roomId: beforeTransfer.roomId, epoch: beforeTransfer.epoch,
+        controlMode: beforeTransfer.controlMode, controlGeneration: beforeTransfer.controlGeneration + 1,
+        queueRevision: beforeTransfer.queueRevision, queue: beforeTransfer.queue, timeline: beforeTransfer.timeline });
+      expect(commands.slice(beforeTransferCommands)).toEqual(['offerTransfer', 'acceptTransfer']);
+      await expect.poll(() => hostState()).toBeNull();
+      await expect.poll(async () => (await media(host))[0]?.paused).toBe(true);
+      await advancing(guest);
+      expect(await media(host)).toHaveLength(1);
+
+      phase = 'end';
+      guest.once('dialog', dialog => dialog.accept());
+      await b.getByRole('button', { name: 'End room', exact: true }).click();
+      await expect.poll(() => guestState()).toBeNull();
+      await expect.poll(async () => (await media(guest))[0]?.paused).toBe(true);
+      expect(commands.slice(beforeTransferCommands)).toEqual(['offerTransfer', 'acceptTransfer', 'end']);
+      expect(await media(guest)).toHaveLength(1);
+    } finally {
+      await testInfo.attach('controller-recovery-state', { body: JSON.stringify({ browser: browserName, phase, commands,
+        guestCommands, host: { room: hostState(), media: await media(host).catch(() => []),
+          nativeMediaEvents: await readMediaEventDiagnostics(host).catch(() => []) },
+        guest: { room: guestState(), media: await media(guest).catch(() => []),
+          nativeMediaEvents: await readMediaEventDiagnostics(guest).catch(() => []) },
+        pulseAudio: await capturePulseAudioDiagnostics() }), contentType: 'application/json' });
+    }
+  } finally {
+    await Promise.all(contexts.map(context => context.close()));
   }
 });

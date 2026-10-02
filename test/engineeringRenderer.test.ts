@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-const rendererPath = fileURLToPath(new URL('../scripts/lib/engineering-renderer.mjs', import.meta.url));
+const rendererUrl = new URL('../scripts/lib/engineering-renderer.mjs', import.meta.url);
 
 test('engineering text cannot inject HTML, attributes, or executable code', async () => {
-  const { renderEngineeringPage } = await import(rendererPath);
+  const { renderEngineeringPage } = await import(rendererUrl.href);
   const attack = '<img src=x onerror="alert(1)">';
   const page = {
     slug: '', title: attack, eyebrow: attack, description: attack, readingMinutes: 5,
@@ -21,7 +20,7 @@ test('engineering text cannot inject HTML, attributes, or executable code', asyn
 });
 
 test('working-copy previews explain why source links refer to the base commit', async () => {
-  const { renderEngineeringPage } = await import(rendererPath);
+  const { renderEngineeringPage } = await import(rendererUrl.href);
   const page = { slug: '', title: 'Overview', eyebrow: 'Guide', description: 'Start here', readingMinutes: 5, sections: [] };
   const metadata = { revision: { commit: 'a'.repeat(40), dirty: true }, sourceDigest: 'b'.repeat(64), sourceLinks: {} };
   assert.match(renderEngineeringPage(page, { pages: [page] }, metadata), /Source links open the base commit/);

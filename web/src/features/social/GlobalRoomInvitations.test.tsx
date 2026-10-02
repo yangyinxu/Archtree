@@ -86,13 +86,25 @@ test('retired room observers cannot refetch outgoing invitations or community be
   await waitFor(() => expect(mocks.ensure).toHaveBeenCalled());
   const keys = [['social', 'viewer-a', 'room-community', 'room-a', 1, 'member-a'],
     ['social', 'viewer-a', 'room-outgoing-invitations', 'room-a']];
-  for (const key of keys) client.setQueryData(key, { marker: true });
-  mocks.state.mockReturnValue({ viewerId: 'viewer-a', room: null });
-  act(() => mocks.ensure.mock.calls.at(-1)![1]('rooms'));
-  for (const key of keys) expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+  const other = keys.map(key => [key[0], 'viewer-b', ...key.slice(2)]);
+  for (const key of [...keys, ...other]) client.setQueryData(key, { marker: true });
+  for (const room of [null, { ...roomFixture(), status: 'ended' as const }]) {
+    mocks.state.mockReturnValue({ viewerId: 'viewer-a', room });
+    for (const kind of ['rooms', 'community', 'social']) {
+      act(() => mocks.ensure.mock.calls.at(-1)![1](kind));
+      for (const key of [...keys, ...other]) expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+    }
+  }
   mocks.state.mockReturnValue({ viewerId: 'viewer-a', room: roomFixture() });
   act(() => mocks.ensure.mock.calls.at(-1)![1]('rooms'));
-  for (const key of keys) expect(client.getQueryState(key)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(keys[0])?.isInvalidated).toBe(false);
+  expect(client.getQueryState(keys[1])?.isInvalidated).toBe(true);
+  for (const kind of ['community', 'social']) {
+    client.setQueryData(keys[0], { marker: true });
+    act(() => mocks.ensure.mock.calls.at(-1)![1](kind));
+    expect(client.getQueryState(keys[0])?.isInvalidated).toBe(true);
+    for (const key of other) expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+  }
 });
 
 test('resolving identity hides the reminder and a delayed previous-account invitation cannot light the new badge', async () => {

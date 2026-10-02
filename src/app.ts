@@ -1,4 +1,4 @@
-import express, { Application, NextFunction, Request, Response } from 'express';
+import express, { Application, type ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 import { configuredTrustProxyHops } from './config/trustProxy';
 import bodyParser from 'body-parser';
 import fs from 'fs';
@@ -26,7 +26,7 @@ import {
   type AuthenticatedRequest
 } from './middleware/authMiddleware';
 import { createHealthController } from './controllers/healthController';
-import { ServerLifecycle } from './services/serverLifecycleService';
+import { isCompletedRequestWorkCancellation, ServerLifecycle } from './services/serverLifecycleService';
 import { createRequestDiagnostics, safeServerErrorCategory } from './middleware/requestDiagnosticsMiddleware';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
@@ -304,18 +304,24 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     getRequestMetrics: diagnostics.snapshot
   }));
 
-  app.use((error: any, req: Request, res: Response, next: NextFunction) => {
-    if (res.headersSent) {
-      return next(error);
-    }
+  app.use(handleApplicationError);
+
+  return app;
+};
+
+/** Reports only bounded diagnostics and terminates late failures without Express's raw-error fallback. */
+export const handleApplicationError: ErrorRequestHandler = (error, req, res, _next) => {
+    if (isCompletedRequestWorkCancellation(req, error)) return;
 
     const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
     const isTooManyFiles = error?.code === 'LIMIT_FILE_COUNT';
     const isMulterInputError = typeof error?.code === 'string' && error.code.startsWith('LIMIT_');
     const isInvalidJson = error?.type === 'entity.parse.failed';
-    const status: number = isFileTooLarge || isTooManyFiles
+    const suppliedStatus = isFileTooLarge || isTooManyFiles
       ? 413
-      : isMulterInputError || isInvalidJson ? 400 : error.statusCode || 500;
+      : isMulterInputError || isInvalidJson ? 400 : error?.statusCode;
+    const status = Number.isInteger(suppliedStatus) && suppliedStatus >= 400 && suppliedStatus <= 599
+      ? suppliedStatus : 500;
     const message: string = isFileTooLarge
       ? error?.field === 'avatar'
         ? `Avatar is too large. The maximum size is ${maxAvatarUploadMb} MB.`
@@ -330,8 +336,8 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
           ? 'Invalid multipart upload.'
           : isInvalidJson
             ? 'Invalid JSON request.'
-            : error.message;
-    const data: any = error.data;
+            : error?.message;
+    const data: any = error?.data;
 
     if (status >= 500) {
       const method = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
@@ -361,20 +367,21 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
         requestId: res.locals.requestId,
         requestArea,
         method,
-        status: Number.isInteger(status) && status <= 599 ? status : 500,
+        status,
         occurredAt: new Date().toISOString()
       }));
     }
 
+    if (res.headersSent || res.destroyed || res.writableEnded) {
+      res.destroy();
+      return;
+    }
     if (status >= 500) {
       return res.status(status).json({
         message: 'The service could not complete the request.'
       });
     }
     return res.status(status).json({ message, data });
-  });
-
-  return app;
 };
 
 // Keep `tsx src/app.ts` as the runtime entry while imports remain side-effect free.

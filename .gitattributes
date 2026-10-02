@@ -5,3 +5,6 @@
 *.sh text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+
+# Canonical localization sources and generated bundles are validated byte-for-byte.
+/localization/**/*.json text eol=lf

@@ -36,7 +36,8 @@ export const useRoomInvitationConnection = (viewerId: string) => {
       void client.invalidateQueries({ queryKey: ['social', viewerId], predicate: query => {
         const key = String(query.queryKey[2]);
         // React may not have unmounted the former room yet when the authoritative singleton changes.
-        if (key === 'room-community') return Boolean(room && room.status !== 'ended' && room.roomId === query.queryKey[3]
+        // Invitation refreshes use the new singleton snapshot; its revision/identity already wakes community reads.
+        if (key === 'room-community') return kind !== 'rooms' && Boolean(room && room.status !== 'ended' && room.roomId === query.queryKey[3]
           && room.epoch === query.queryKey[4] && room.self.memberId === query.queryKey[5]);
         if (kind === 'community') return false;
         if (key === 'room-outgoing-invitations') return Boolean(room && room.status === 'open' && room.roomId === query.queryKey[3]

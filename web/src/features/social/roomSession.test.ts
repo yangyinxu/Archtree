@@ -2,7 +2,9 @@ import { roomFixture } from '../../test/roomFixture';
 import { advanceAccountEpoch } from '../../api/accountEpoch';
 import { ApiError } from '../../api/client';
 import type { RoomPlaybackOptions } from '../../player/roomPlayback';
-import type { RoomSnapshot } from '../../api/rooms';
+import type { RoomAction, RoomSnapshot } from '../../api/rooms';
+import { createPlayerStore } from '../../player/playerStore';
+import type { PlayerAudio } from '../../player/types';
 
 const mocks = vi.hoisted(() => ({
   getCurrentRoom: vi.fn(), getRealtimeTicket: vi.fn(), sendRoomCommand: vi.fn(), prepareRoomCommand: vi.fn(), getSocialOutcome: vi.fn(),
@@ -35,6 +37,24 @@ class Socket {
   }
   close() { this.readyState = 3; this.onclose?.(); }
   receive(value: unknown) { this.readyState = 1; this.onmessage?.({ data: JSON.stringify(value) }); }
+}
+
+/** Real player-store events expose readiness loss after native media failure. */
+class RoomMedia implements PlayerAudio {
+  src = ''; currentSrc = ''; currentTime = 0; duration = 120; readyState = 0;
+  volume = 1; muted = false; paused = true; ended = false; playbackRate = 1;
+  error: { code: number } | null = null;
+  loadCalls = 0; playCalls = 0;
+  listeners = new Map<string, Set<() => void>>();
+  async play() { this.playCalls++; this.paused = false; this.emit('play'); this.emit('playing'); }
+  pause() { this.paused = true; this.emit('pause'); }
+  load() { this.loadCalls++; this.readyState = 0; this.currentSrc = ''; this.error = null; this.emit('loadstart'); }
+  addEventListener(type: string, listener: () => void) {
+    const listeners = this.listeners.get(type) ?? new Set(); listeners.add(listener); this.listeners.set(type, listeners);
+  }
+  removeEventListener(type: string, listener: () => void) { this.listeners.get(type)?.delete(listener); }
+  emit(type: string) { this.listeners.get(type)?.forEach(listener => listener()); }
+  ready() { this.currentSrc = this.src; this.readyState = 4; this.emit('loadedmetadata'); this.emit('canplay'); }
 }
 
 let options: RoomPlaybackOptions;
@@ -123,6 +143,77 @@ test('an observer reaction is an explicit community intent and cannot emit playb
   expect(refresh).toHaveBeenCalledExactlyOnceWith('community');
   expect(mocks.attach).not.toHaveBeenCalled();
   expect(JSON.stringify(roomSession.getSnapshot().room)).toBe(before);
+});
+
+test.each(['play', 'pause', 'seek', 'select', 'next', 'previous'] as const)('%s settlement applies the authoritative projection without waking invitation or community queries again', async action => {
+  const room = pausedRoom(); await connected(room);
+  const refresh = vi.fn(); roomSession.ensure('viewer-1', refresh);
+  const updated = structuredClone(room); updated.revision = 2; updated.timeline!.positionMs = 1000;
+  mocks.getCurrentRoom.mockResolvedValue({ room: updated });
+  const beforeReads = mocks.getCurrentRoom.mock.calls.length;
+  await roomSession.control(action, action === 'select' ? 'entry-a' : 1);
+  expect(mocks.sendRoomCommand).toHaveBeenCalledExactlyOnceWith('viewer-1', expect.objectContaining({ action }));
+  expect(mocks.getCurrentRoom).toHaveBeenCalledTimes(beforeReads + 1);
+  expect(roomSession.getSnapshot().room).toEqual(updated);
+  expect(mocks.apply).toHaveBeenLastCalledWith(expect.objectContaining({ revision: 2, positionSeconds: 1 }));
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+test.each<RoomAction>([
+  { action: 'invite', roomId: 'room-a', memberId: 'member-a', targetSocialId: `s_${'b'.repeat(32)}` },
+  { action: 'declineInvitation', invitationId: 'invitation-a', generation: 1 },
+  { action: 'leave', roomId: 'room-a', memberId: 'member-a' },
+  { action: 'end', roomId: 'room-a', memberId: 'member-a' },
+  { action: 'offerTransfer', roomId: 'room-a', memberId: 'member-a', expectedControlGeneration: 1,
+    targetMemberId: 'member-b', targetControllerGeneration: 1 }
+])('$action settlement retains room-surface invalidation after reconciliation', async action => {
+  await connected(pausedRoom());
+  const refresh = vi.fn(); roomSession.ensure('viewer-1', refresh);
+  const beforeReads = mocks.getCurrentRoom.mock.calls.length;
+  await roomSession.run(action);
+  expect(mocks.sendRoomCommand).toHaveBeenCalledExactlyOnceWith('viewer-1', expect.objectContaining(action));
+  expect(mocks.getCurrentRoom).toHaveBeenCalledTimes(beforeReads + 1);
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('rooms');
+});
+
+test.each(['react', 'requestSong', 'dismissSongRequest', 'acceptSongRequest', 'removeQueueEntry', 'reorderQueue'] as const)('%s settlement retains its immediate community invalidation', async action => {
+  const room = pausedRoom(); await connected(room);
+  const refresh = vi.fn(); roomSession.ensure('viewer-1', refresh);
+  const member = { roomId: room.roomId, memberId: room.self.memberId };
+  const control = { ...member, controllerGeneration: 1, expectedEpoch: 1, expectedEntryId: 'entry-a',
+    expectedPlaybackGeneration: 1, expectedControlGeneration: 1, expectedQueueRevision: 1 };
+  const commands: Record<typeof action, RoomAction> = {
+    react: { ...member, action: 'react', expectedEpoch: 1, reaction: 'heart' },
+    requestSong: { ...member, action: 'requestSong', expectedEpoch: 1, mediaTrackId: '1'.repeat(24) },
+    dismissSongRequest: { ...member, action: 'dismissSongRequest', requestId: 'request-a' },
+    acceptSongRequest: { ...control, action: 'acceptSongRequest', requestId: 'request-a' },
+    removeQueueEntry: { ...control, action: 'removeQueueEntry', targetEntryId: 'entry-b' },
+    reorderQueue: { ...control, action: 'reorderQueue', entryIds: ['entry-a'] }
+  };
+  const beforeReads = mocks.getCurrentRoom.mock.calls.length;
+  await roomSession.run(commands[action]);
+  expect(mocks.sendRoomCommand).toHaveBeenCalledExactlyOnceWith('viewer-1', expect.objectContaining({ action }));
+  expect(mocks.getCurrentRoom).toHaveBeenCalledTimes(beforeReads + 1);
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('community');
+});
+
+test('explicit outcome recovery retains conservative room-surface invalidation for a transport command', async () => {
+  await connected(pausedRoom());
+  const refresh = vi.fn(); roomSession.ensure('viewer-1', refresh);
+  mocks.sendRoomCommand.mockRejectedValueOnce(new ApiError('Unknown', 'network'));
+  await roomSession.control('next');
+  const original = roomSession.getSnapshot().uncertain!;
+  expect(original.action).toBe('next'); expect(refresh).not.toHaveBeenCalled();
+  const updated = { ...pausedRoom(), revision: 2 };
+  mocks.getCurrentRoom.mockResolvedValue({ room: updated });
+  mocks.getSocialOutcome.mockResolvedValue({ outcome: { commandId: original.commandId, outcome: 'applied', replayed: true } });
+  const beforeReads = mocks.getCurrentRoom.mock.calls.length;
+  await roomSession.checkOutcome();
+  expect(mocks.getSocialOutcome).toHaveBeenCalledExactlyOnceWith('viewer-1', original);
+  expect(mocks.getCurrentRoom).toHaveBeenCalledTimes(beforeReads + 1);
+  expect(roomSession.getSnapshot()).toMatchObject({ room: updated, uncertain: null, busy: false });
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('rooms');
+  expect(mocks.sendRoomCommand).toHaveBeenCalledTimes(1);
 });
 
 test('reaction quota rejections retain no resend intent and explain the temporary limit', async () => {
@@ -236,6 +327,147 @@ test('a local media suspension immediately updates its heartbeat without creatin
   expect(socket.sent[0]).toMatchObject({ type: 'ping', heartbeat: { locallyPaused: true } });
   expect(socket.sent[1]).toMatchObject({ type: 'ready', report: { ready: false } });
   expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+});
+
+test('native media failure after real playback readiness withdraws readiness and recovers only through explicit resync', async () => {
+  const audio = new RoomMedia();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  mocks.attach.mockImplementation((...args: Parameters<typeof store.attachRoomPlayback>) => store.attachRoomPlayback(...args));
+  try {
+    const room = pausedRoom(); room.timeline!.state = 'playing';
+    room.members = room.members.map(member => ({ ...member, ready: true }));
+    const socket = await connected(room); audio.ready();
+    expect(socket.sent.filter(message => message.type === 'ready').at(-1)).toMatchObject({ report: { ready: true } });
+    expect(audio.paused).toBe(false); expect(audio.playCalls).toBe(1);
+    const pinnedSource = audio.src;
+    socket.sent = []; audio.error = { code: 2 }; audio.emit('error');
+    expect(socket.sent.filter(message => message.type === 'ready')).toEqual([
+      expect.objectContaining({ report: expect.objectContaining({ ready: false, preparationId: 'current' }) })
+    ]);
+    expect(socket.sent.find(message => message.type === 'ping')).toMatchObject({ heartbeat: { locallyPaused: true } });
+    expect(roomSession.getSnapshot()).toMatchObject({ locallyPaused: true, error: 'room.start_failed' });
+    expect(audio.paused).toBe(true); expect(store.getSnapshot().error?.code).toBe('network');
+    audio.emit('error');
+    expect(socket.sent.filter(message => message.type === 'ready')).toHaveLength(1);
+    const unready = { ...room, revision: 2, members: room.members.map(member => ({ ...member, ready: false })) };
+    socket.receive({ type: 'snapshot', room: unready }); await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(audio.loadCalls).toBe(1); expect(audio.playCalls).toBe(1);
+    socket.sent = []; await roomSession.resync();
+    expect(audio.src).toBe(pinnedSource); expect(audio.loadCalls).toBe(2); expect(audio.paused).toBe(true);
+    expect(socket.sent.some(message => message.type === 'ready' && message.report.ready)).toBe(false);
+    audio.ready();
+    expect(socket.sent.filter(message => message.type === 'ready').at(-1)).toMatchObject({ report: { ready: true } });
+    expect(audio.playCalls).toBe(1);
+    socket.receive({ type: 'snapshot', room: { ...unready, revision: 3,
+      members: unready.members.map(member => ({ ...member, ready: true })) } });
+    await vi.dynamicImportSettled();
+    expect(audio.paused).toBe(false); expect(audio.playCalls).toBe(2); expect(audio.loadCalls).toBe(2);
+    expect(roomSession.getSnapshot()).toMatchObject({ locallyPaused: false, error: null });
+    expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  } finally { roomSession.stop(); store.destroy(); }
+});
+
+test.each(['exposed-error', 'rejected-install'] as const)('a real %s source install restores local failure without waiting for a native callback', async failure => {
+  const audio = new RoomMedia();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  let rejectInstall = false;
+  mocks.attach.mockImplementation((...args: Parameters<typeof store.attachRoomPlayback>) => store.attachRoomPlayback(...args));
+  if (failure === 'rejected-install') mocks.attach.mockImplementation((...args: Parameters<typeof store.attachRoomPlayback>) =>
+    store.attachRoomPlayback(args[0], (port, playbackOptions) => args[1]!({ ...port, install: async (queue, index) => {
+      await port.install(queue, index);
+      if (rejectInstall) { rejectInstall = false; throw new Error('Synthetic source installation failure.'); }
+    } }, playbackOptions)));
+  try {
+    const room = pausedRoom(); room.timeline!.state = 'playing';
+    room.members = room.members.map(member => ({ ...member, ready: true }));
+    const socket = await connected(room); audio.ready();
+    const pinnedSource = audio.src;
+    roomSession.pauseLocally(); audio.error = { code: 2 };
+    if (failure === 'exposed-error') vi.spyOn(audio, 'load').mockImplementationOnce(() => {
+      audio.loadCalls++; audio.readyState = 0; audio.currentSrc = audio.src; audio.error = { code: 2 };
+    });
+    else rejectInstall = true;
+    socket.sent = []; await roomSession.resync();
+    expect(store.getSnapshot().error).toBeNull();
+    expect(roomSession.getSnapshot()).toMatchObject({ locallyPaused: true, error: 'room.start_failed', connected: true });
+    expect(socket.sent.filter(message => message.type === 'ready')).toEqual([
+      expect.objectContaining({ report: expect.objectContaining({ ready: false }) })
+    ]);
+    expect(socket.sent.filter(message => message.type === 'ping').at(-1)).toMatchObject({ heartbeat: { locallyPaused: true } });
+    expect(audio.paused).toBe(true); expect(audio.loadCalls).toBe(2); expect(audio.playCalls).toBe(1);
+    if (failure === 'exposed-error') { audio.emit('error'); audio.emit('error'); }
+    expect(socket.sent.filter(message => message.type === 'ready')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(audio.loadCalls).toBe(2);
+    const unready = { ...room, revision: 2, members: room.members.map(member => ({ ...member, ready: false })) };
+    socket.receive({ type: 'snapshot', room: unready }); await vi.dynamicImportSettled();
+    await roomSession.resync();
+    expect(audio.src).toBe(pinnedSource); expect(audio.loadCalls).toBe(3);
+    expect(roomSession.getSnapshot()).toMatchObject({ locallyPaused: false, error: null });
+    audio.ready();
+    expect(socket.sent.filter(message => message.type === 'ready').at(-1)).toMatchObject({ report: { ready: true } });
+    expect(audio.playCalls).toBe(1);
+    socket.receive({ type: 'snapshot', room: { ...unready, revision: 3,
+      members: unready.members.map(member => ({ ...member, ready: true })) } });
+    await vi.dynamicImportSettled();
+    expect(audio.playCalls).toBe(2); expect(audio.paused).toBe(false); expect(audio.loadCalls).toBe(3);
+    expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  } finally { roomSession.stop(); store.destroy(); }
+});
+
+test('a real metadata retry timeout restores local failure state and leaves a later explicit retry reachable', async () => {
+  const audio = new RoomMedia();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  mocks.attach.mockImplementation((...args: Parameters<typeof store.attachRoomPlayback>) => store.attachRoomPlayback(...args));
+  try {
+    const room = pausedRoom(); room.timeline!.state = 'playing';
+    room.members = room.members.map(member => ({ ...member, ready: true }));
+    const socket = await connected(room);
+    const pinnedSource = audio.src;
+    await roomSession.resync();
+    expect(audio.loadCalls).toBe(2); expect(store.getSnapshot().error).toBeNull();
+    expect(roomSession.getSnapshot().locallyPaused).toBe(false);
+    socket.sent = []; await vi.advanceTimersByTimeAsync(9999);
+    expect(roomSession.getSnapshot().locallyPaused).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(roomSession.getSnapshot()).toMatchObject({ locallyPaused: true, error: 'room.start_failed', connected: true });
+    expect(socket.sent.filter(message => message.type === 'ready')).toEqual([
+      expect.objectContaining({ report: expect.objectContaining({ ready: false }) })
+    ]);
+    expect(socket.sent.filter(message => message.type === 'ping').at(-1)).toMatchObject({ heartbeat: { locallyPaused: true } });
+    expect(audio.paused).toBe(true); expect(audio.loadCalls).toBe(2); expect(audio.playCalls).toBe(0);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(audio.loadCalls).toBe(2);
+    expect(socket.sent.filter(message => message.type === 'ready')).toHaveLength(1);
+    const unready = { ...room, revision: 2, members: room.members.map(member => ({ ...member, ready: false })) };
+    socket.receive({ type: 'snapshot', room: unready }); await vi.dynamicImportSettled();
+    await roomSession.resync();
+    expect(audio.src).toBe(pinnedSource); expect(audio.loadCalls).toBe(3);
+    expect(roomSession.getSnapshot()).toMatchObject({ locallyPaused: false, error: null });
+    audio.ready();
+    expect(socket.sent.filter(message => message.type === 'ready').at(-1)).toMatchObject({ report: { ready: true } });
+    expect(audio.playCalls).toBe(0);
+    socket.receive({ type: 'snapshot', room: { ...unready, revision: 3,
+      members: unready.members.map(member => ({ ...member, ready: true })) } });
+    await vi.dynamicImportSettled();
+    expect(audio.playCalls).toBe(1); expect(audio.paused).toBe(false); expect(audio.loadCalls).toBe(3);
+    expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  } finally { roomSession.stop(); store.destroy(); }
+});
+
+test.each(['entry', 'playback', 'account'] as const)('a stale %s media-failed observation cannot pause or withdraw current readiness', async stale => {
+  const socket = await connected();
+  const previousOptions = options;
+  const observation = { type: 'media-failed' as const, entryId: 'entry-a', playbackEpoch: 1, positionSeconds: 0, monotonicMs: 0 };
+  if (stale === 'entry') observation.entryId = 'former-entry';
+  if (stale === 'playback') observation.playbackEpoch = 0;
+  if (stale === 'account') advanceAccountEpoch();
+  socket.sent = [];
+  const before = roomSession.getSnapshot();
+  previousOptions.onObservation?.(observation);
+  expect(roomSession.getSnapshot()).toBe(before);
+  expect(socket.sent).toEqual([]); expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
 });
 
 test('observers do not attach playback, and disconnect/account changes remove active playback immediately', async () => {

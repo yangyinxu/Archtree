@@ -3,7 +3,6 @@ import { request } from 'node:http';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 /** A malformed request must fail individually rather than terminating the local preview. */
@@ -28,8 +27,8 @@ test('engineering preview survives malformed request targets and serves only its
   }
   await writeFile(path.join(distPath, 'guide.css'), 'body { color: black; }');
   await writeFile(path.join(distPath, 'guide.js'), '/* local guide */');
-  const modulePath = fileURLToPath(new URL('../scripts/preview-engineering.mjs', import.meta.url));
-  const { startEngineeringPreview } = await import(modulePath);
+  const moduleUrl = new URL('../scripts/preview-engineering.mjs', import.meta.url);
+  const { startEngineeringPreview } = await import(moduleUrl.href);
   const { server, url } = await startEngineeringPreview({ port: 0, distPath });
   t.after(() => new Promise<void>((resolve, reject) => server.close((error: Error | undefined) => error ? reject(error) : resolve())));
   const origin = new URL(url);

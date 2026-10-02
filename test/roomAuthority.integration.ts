@@ -20,13 +20,19 @@ test('only the live Mongo lease owner may commit, and takeover advances epoch wi
     assert.equal(await b.acquire(), null);
     const session = getDatabaseClient().startSession();
     try {
+        const before = await getDb()!.collection('socialAuthority').findOne({ _id: 'rooms-v1' as any });
+        session.startTransaction(); assert.equal(await a.inspect(session), 1); assert.equal(await a.inspect(session), 1); await session.abortTransaction();
+        assert.deepEqual(await getDb()!.collection('socialAuthority').findOne({ _id: 'rooms-v1' as any }), before);
         session.startTransaction(); assert.equal(await a.assert(session), 1); await session.commitTransaction();
         await getDb()!.collection<{ _id: string; expiresAt: Date }>('socialAuthority').updateOne({ _id: 'rooms-v1' }, { $set: { expiresAt: new Date(0) } });
+        session.startTransaction(); await assert.rejects(a.inspect(session)); await session.abortTransaction();
         assert.equal(await b.acquire(), 2);
+        session.startTransaction(); await assert.rejects(a.inspect(session)); await session.abortTransaction();
         session.startTransaction(); await assert.rejects(a.assert(session)); await session.abortTransaction();
         await a.release();
         session.startTransaction(); assert.equal(await b.assert(session), 2); await session.commitTransaction();
         await b.release();
+        session.startTransaction(); await assert.rejects(b.inspect(session)); await session.abortTransaction();
         session.startTransaction(); await assert.rejects(b.assert(session)); await session.abortTransaction();
     } finally { await session.endSession(); }
 });
@@ -66,6 +72,9 @@ test('malformed or exhausted authority counters cannot issue an epoch or authori
         await collection.updateOne({ _id: 'rooms-v1' as any }, { $set: { fence: value } });
         const session = getDatabaseClient().startSession();
         try {
+            const before = await collection.findOne({ _id: 'rooms-v1' as any });
+            session.startTransaction(); await assert.rejects(authority.inspect(session)); await session.abortTransaction();
+            assert.deepEqual(await collection.findOne({ _id: 'rooms-v1' as any }), before);
             session.startTransaction(); await assert.rejects(authority.assert(session)); await session.abortTransaction();
             assert.equal(await authority.acquire().catch(() => null), null);
         } finally { if (session.inTransaction()) await session.abortTransaction(); await session.endSession(); }

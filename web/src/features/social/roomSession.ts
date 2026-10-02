@@ -81,9 +81,12 @@ export const createRoomSession = () => {
       ready: ready && !state.locallyPaused } });
   };
   const observe = (observation: RoomPlaybackObservation) => {
+    const timeline = state.room?.timeline;
+    if (!current() || !timeline || observation.entryId !== timeline.entryId
+      || observation.playbackEpoch !== timeline.playbackGeneration) return;
     if (observation.type === 'suspended') { emit({ locallyPaused: true }); ping(); reportReady(false); }
-    else if (observation.type === 'ready' && observation.playbackEpoch === state.room?.timeline?.playbackGeneration) reportReady(true);
-    else if (observation.type === 'unsupported-seek') { emit({ error: 'room.start_failed', locallyPaused: true }); ping(); reportReady(false); }
+    else if (observation.type === 'ready') reportReady(true);
+    else if (observation.type === 'unsupported-seek' || observation.type === 'media-failed') { emit({ error: 'room.start_failed', locallyPaused: true }); ping(); reportReady(false); }
   };
   const transportIntent = (intent: RoomPlaybackIntent) => {
     const room = state.room;
@@ -226,8 +229,10 @@ export const createRoomSession = () => {
     // Retire ended memberships before active query observers can refetch their former room.
     const reconciled = await refresh();
     if (!reconciled || version !== generation || !current()) return;
-    // Frequent room-only gestures must not refetch every invitation and friendship surface.
-    refreshSocial(['react', 'requestSong', 'dismissSongRequest', 'acceptSongRequest', 'removeQueueEntry', 'reorderQueue'].includes(action ?? '') ? 'community' : 'rooms');
+    // Transport snapshots already refresh community; ordinary controls do not change invitations.
+    if (!['play', 'pause', 'seek', 'select', 'next', 'previous'].includes(action ?? '')) {
+      refreshSocial(['react', 'requestSong', 'dismissSongRequest', 'acceptSongRequest', 'removeQueueEntry', 'reorderQueue'].includes(action ?? '') ? 'community' : 'rooms');
+    }
     if (state.connected) ping();
   };
   const run = async (action?: RoomAction, retry?: RoomCommand) => {
@@ -349,12 +354,12 @@ export const createRoomSession = () => {
     retry: () => state.uncertain ? run(undefined, state.uncertain) : Promise.resolve(),
     async checkOutcome() {
       if (!state.uncertain || state.busy) return;
-      const action = state.uncertain.action;
       const version = generation; emit({ busy: true });
       try {
         const { getSocialOutcome } = await import('../../api/social');
         const result = await getSocialOutcome(state.viewerId, state.uncertain);
-        if (version === generation && current() && result.outcome) await settle(result.outcome, action);
+        // Outcome recovery conservatively refreshes every room surface, including invitation safety state.
+        if (version === generation && current() && result.outcome) await settle(result.outcome);
       } catch { if (version === generation && current()) emit({ error: 'social.unknown' }); }
       finally { if (version === generation) emit({ busy: false }); }
     }

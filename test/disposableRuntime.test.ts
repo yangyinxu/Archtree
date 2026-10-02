@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { DisposableResources, runDisposableRuntime } from './support/disposableRuntime';
 
 test('disposable cleanup attempts every stage in reverse order and is idempotent after failure', async () => {
@@ -50,10 +51,10 @@ test('the real demo process removes its copied-dist allocation when startup fail
     const directory = await mkdtemp(join(tmpdir(), 'archtree-demo-startup-check-'));
     try {
         await assert.rejects(promisify(execFile)(process.execPath, [
-            '--import', createRequire(resolve('package.json')).resolve('tsx'), resolve('scripts/demo-social.ts')
+            '--import', pathToFileURL(createRequire(resolve('package.json')).resolve('tsx')).href, resolve('scripts/demo-social.ts')
         ], {
             cwd: directory, timeout: 15_000,
-            env: { ...process.env, NODE_ENV: 'test', TMPDIR: directory }
+            env: { ...process.env, NODE_ENV: 'test', TMPDIR: directory, TMP: directory, TEMP: directory }
         }), error => {
             const failure = error as { code?: number; stderr?: string };
             return failure.code === 1 && Boolean(failure.stderr?.includes('The isolated social demonstration could not start.'));

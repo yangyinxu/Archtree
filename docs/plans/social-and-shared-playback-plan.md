@@ -35,7 +35,7 @@ complete:
   covers both permission modes, concurrent Next/selection, observer takeover,
   host transfer, End, and the existing accessibility blocker policy.
 
-Current validation:
+Validation at the initial September 13 checkpoint:
 
 - `npm test`: 442 backend and 386 Web tests passed.
 - `npm run build`: passed with unchanged asset budgets.
@@ -347,7 +347,44 @@ disabled without breaking approved Audio rooms or leaving unsupported queues.
 
 ## Stage 7 — Capacity, staged rollout, and rollback
 
-**Status: Not started**
+**Status: In progress**
+
+The separate local sustained-room gate now supplies bounded aggregate resource
+and real-media evidence for 2–8 members, explicit reload recovery, repeated shared
+controls, and owned fixture cleanup. Commands and evidence limits are in the
+README and Web release matrix. This starts local capacity verification; the
+actual deployment, degraded network, production-equivalent S3, staged rollout,
+and rollback exit gates below remain pending.
+
+All local browser contexts share one source IP. Playback GET admission now waits
+within a bounded two-second queue without raising active-request limits. Explicit
+local resync retries the exact pinned source, withdraws failed readiness, and
+coalesces retries through native metadata, failure, or a ten-second deadline.
+Focused Windows Chromium cases verify native 429 recovery, reload without autoplay,
+explicit takeover, and running host transfer. An earlier Linux Firefox recovery
+case passed; that result does not verify later candidates or the complete engine matrix.
+The 2026-10-01 candidate passed a ten-minute, eight-member real-media smoke gate
+(12 control cycles, five recovery checks, maximum sampled drift 43.398 ms), with
+zero sockets, media requests, and queued playback reads after participant cleanup.
+A longer run was stopped at the user's request: its last complete sample covered
+8,528 seconds, 171 control cycles, 16 recovery checks, and 42 polling-fallback
+checks, with eight upgraded connections and maximum sampled drift 284.143 ms.
+It produced no final aggregate or teardown assertion; the runner exited and the
+owned listeners and fixture processes were absent afterward. This partial run
+does not complete eight-hour endurance acceptance; further long testing is
+outside the current requested scope.
+
+Room HTTP read reservations and bounded known-concurrency GET recovery address
+the earlier shared-command and invitation-read admission failures without raising
+the total request or rate limits. The passing smoke still observed 124 read 429s
+(116 concurrency and eight request-window denials); retain these separately from
+command acceptance. Final local checks passed 710 backend tests, 989 Web tests,
+580 integration tests, the production build and E2E TypeScript, and two selected
+Windows native recovery/command and compressed-media cases. Cross-engine
+compressed-media and concurrent-command failures remain independent gates; do
+not describe selected cases or a smoke pass as a complete browser or deployment
+matrix pass. The current evidence and its limits are recorded in the Web release
+matrix.
 
 Applies to each enabled capability, beginning with Stage 4; run an Audio rollout
 gate as soon as its selected client scope is verified, without waiting for Video.
@@ -426,11 +463,14 @@ Use the [Listener release matrix](../testing/finitude-web-release-matrix.md)
 for release-facing changes. `git diff --check` applies to every stage.
 New room/load fixture commands must exist before being listed as runnable.
 
-The initial architecture review changed documentation only. Stage 1's executable
+The initial architecture review changed documentation only. At that checkpoint,
+Stage 1's executable
 test seams have passed local arbitration/player checks, with device gates still
 open. Stage 2 has passed the social transaction, authorization and lifecycle gates
 listed above. Room MongoDB arbitration, WebSocket delivery and room lifecycle gates
-remain pending; passing the in-memory prototype cannot satisfy them.
+were still pending; passing the in-memory prototype could not satisfy them.
+The current implementation and verification boundaries are recorded in the stage
+statuses above, including the remaining deployment and device gates in Stage 7.
 
 ## Plan lifecycle
 

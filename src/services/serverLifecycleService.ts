@@ -13,6 +13,18 @@ interface RequestWorkState {
 
 const requestWork = new WeakMap<Request, RequestWorkState>();
 
+/** Identifies dispatch refused solely because its original response has already ended. */
+class RequestWorkCancelledError extends Error {
+  readonly name = 'AbortError';
+  readonly statusCode = 503;
+
+  constructor() { super('The request has already ended.'); }
+}
+
+/** Only a recorded transport completion can consume this internal cancellation at the error boundary. */
+export const isCompletedRequestWorkCancellation = (req: Request, error: unknown) =>
+  error instanceof RequestWorkCancelledError && requestWork.get(req)?.responseFinished === true;
+
 /** Keeps request work observable even in isolated Routers without an application lifecycle. */
 const workState = (req: Request) => {
   let state = requestWork.get(req);
@@ -54,13 +66,13 @@ export const onRequestWorkComplete = (req: Request, res: ServerResponse, complet
 export const runRequestWork = <T>(req: Request, operation: () => T | Promise<T>): Promise<T> => {
   const state = workState(req);
   if (state.responseFinished) {
-    return Promise.reject(Object.assign(new Error('The request has already ended.'), { statusCode: 503 }));
+    return Promise.reject(new RequestWorkCancelledError());
   }
   state.pending += 1;
   const execute = () => {
     // A callback parser can finish after disconnect, even before this microtask begins.
     if (state.responseFinished) {
-      throw Object.assign(new Error('The request has already ended.'), { statusCode: 503 });
+      throw new RequestWorkCancelledError();
     }
     return operation();
   };

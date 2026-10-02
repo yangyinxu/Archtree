@@ -62,6 +62,21 @@ envelopes, which may contain only `message` (including 403 and 426). Clients mus
 handle the status even when a social error code is absent. A successful HTTP
 response alone does not mean that the requested relationship was applied.
 
+Web Social reads are serialized per viewer and account epoch. A GET 429 can cool
+subsequent GET dispatches using a positive integer `Retry-After`, capped at 60
+seconds; malformed, overflowing and HTTP-date hints are ignored. A known,
+message-only HTTP concurrency denial can recover when its safe delay fits the
+read's original active deadline. This recovery shares the existing three-attempt
+budget with transient-domain-503 GET recovery; waiting between those attempts
+counts toward the original 30 seconds. Quota, coded, unknown, and malformed
+admission failures, or delays that exceed the active deadline, remain terminal. Cooling uses a
+monotonic deadline, survives an idle read queue, retains at most 16 short-lived
+viewer entries, and clears on expiry or account transition. Cancellation settles
+a waiting caller immediately without dispatching with replacement credentials;
+the 30-second transport deadline starts after the initial admission waiting. POST listening
+status queries and durable mutations do not install or consult this GET cooling.
+Production quotas remain unchanged.
+
 After cancel/decline/remove/unblock, the pair may remain as a positive-revision
 `none` tombstone. Before an explicit new request, read the authorized pair-state
 endpoint and capture its revision; do not guess 0 or automatically rebase a failed
@@ -258,6 +273,12 @@ account viewer, reject extra query/body fields, and return allowlisted DTOs.
 Cookie writes retain the existing same-origin JSON protections. Room HTTP bodies
 are capped at 16 KiB; social identity bodies remain capped at 4 KiB.
 `X-Finitude-Room-Client` identifies a fresh tab lifetime, not authorization.
+Room HTTP keeps its shared 180-request/minute/IP window and total concurrency
+ceiling of six/IP and 48/process. GET/HEAD work has a smaller four/IP,
+40/process ceiling inside that pool, so read bursts alone cannot occupy every
+control slot. Commands and tickets still share the original total ceiling.
+Rejected admission returns HTTP 429 with `Retry-After`; occupied slots remain
+held until both the response and tracked work complete, including disconnects.
 
 | Endpoint under `/api/social/v1` | Contract |
 | --- | --- |
@@ -300,8 +321,11 @@ recover a historical URL. Acceptance still uses the original scope/command ID an
 the freshly read invitation generation.
 
 The lazy Web global invitation entry shares the room-session singleton with room
-pages. It refreshes on a fresh subscription, `socialChanged`, explicit mutation
-settlement, focus and a 15-second fallback. Local expiry timers handle TTL deletes
+pages. It refreshes on a fresh subscription, `socialChanged`, relevant explicit
+mutation settlement or outcome recovery, focus and a 15-second fallback.
+Ordinary Play, Pause, Seek, Select, Previous and Next settlement rereads the
+authoritative room without waking invitation/community queries again; snapshot
+revisions still drive the visible community refresh. Local expiry timers handle TTL deletes
 that produce no outbox bump. Queries and deferred UI callbacks remain scoped to
 the current account epoch, and the existing session privacy barrier hides them
 during identity transitions. This is a pending-action indicator, not a durable
@@ -316,8 +340,11 @@ fail without becoming new commands. Editing another entry preserves the current
 timeline and readiness barrier. Community changes advance the existing room
 revision/outbox; the visible community query coalesces snapshot-driven refreshes
 without reloading unrelated social lists. Explicit community commands also
-invalidate only that account's community queries. Member removal clears requests
-and attribution; media invalidation includes request-only references through the
+invalidate only that account's community queries. Invitation-list invalidation
+does not also refetch community; snapshot revisions and membership identity
+changes still refresh it, and social invalidation still refreshes current cards.
+Member removal clears requests and attribution; media invalidation includes
+request-only references through the
 required `socialRooms.songRequests.mediaTrackId` index.
 
 The `react` member command carries `expectedEpoch` and one token from
@@ -396,6 +423,20 @@ runs every 250 ms, validates stored session/source state and logically expires
 identities scrubbed transactionally and expire after 24 hours. Invitation TTL
 reclaims expired offers, and room-outbox hints expire after 24 hours. No TTL may
 delete an active aggregate before its participation cleanup.
+
+An unchanged sweep uses a complete read-only snapshot of the room, accounts,
+controller sessions, current media, and live authority. The same transition
+planner performs the subsequent fenced recheck when a change is needed.
+An unchanged preparation can use that same complete probe; readiness completion,
+deadline handling, cohort removal, and all other required transitions retain the
+write path. Missing or uncertain evidence also falls back to it. Before skipping
+writes, the sweep rechecks time boundaries and
+the authority in a fresh read-only transaction so the original snapshot cannot
+hide a committed lease takeover. Actual transitions retain sorted account
+fences and the authority write. Natural advancement still uses the original
+candidate's playback, queue, entry, and epoch identity across retries.
+An injected authority writer without a matching read-only probe retains the
+original transaction path.
 
 Media analysis accepts complete PCM16 WAV, mono/stereo 8–48 kHz, with a finite
 verified duration no greater than 24 hours. A private representation records
@@ -907,6 +948,11 @@ tolerance fits a five-second correction deadline; otherwise seek. A 600 ms error
 must not be assigned to a 2% correction and then claimed fixed five seconds later.
 Restore normal rate on correction completion, pause, entry change, or room exit.
 Bound seek retries and add hysteresis; persistent failure stays unsynchronized.
+Web measures dispatch-to-progress seek cost only within the existing three-second
+observation deadline. A valid measurement above two seconds still permits
+correction, while predictive lead remains capped at two seconds. Two measured
+follow-ups share one six-second occurrence budget; pause, source replacement,
+permission changes, and detachment invalidate pending work.
 Unsupported rate correction uses the same bounded seek fallback. Video,
 Bluetooth, AirPlay/Cast, background suspension, and device output latency require
 separate evidence; matching player positions
@@ -923,6 +969,27 @@ Authorized participants submit shared commands according to the current control
 mode. Every participant may mute/adjust volume, explicitly pause on their device
 and show unsynchronized state, resync, or leave. A deliberate local pause stays paused until that listener
 explicitly resumes/resynchronizes; later room events cannot override it.
+If a queued native play event interrupts an owned seek, pausing clears the
+pending start flag. Seek or metadata completion may resume only the current
+authorized occurrence; local/shared pause, permission loss, source replacement,
+and detachment still prevent resumption.
+If the native media element reports a download/decoder error or has no usable
+metadata, explicit resync reinstalls the exact pinned source in the existing
+single player. Overlapping resync gestures share one installation; persistent
+failure does not trigger automatic reloads. Retry ownership survives the source
+write until current-source metadata/error or a ten-second deadline; that deadline
+marks a local failure, exposes resync, and blocks late readiness until a later
+explicit gesture. A new local pause remains effective
+while bytes load. Completion is fenced to the playback occurrence, attachment,
+and physical source generation, and a failed element cannot publish readiness.
+A native error also withdraws already-published readiness and pauses this device;
+duplicate errors cannot repeat the report. Only current-account, exact-entry and
+playback-generation observations may update the session. Explicit recovery waits
+for fresh media readiness and server confirmation before playback resumes.
+An installation rejection or an already-exposed media error at completion uses
+the same failure path without waiting for a native error event.
+Native media errors do not expose HTTP status or Retry-After to this adapter;
+media admission and a later explicit gesture govern recovery.
 Platforms whose native controls cannot be intercepted must detect divergence
 and report/resync it rather than imply room authority.
 
@@ -1271,6 +1338,18 @@ registration, snapshot publication, and cleanup; every system action delegates t
 that same store. It does not create a player or queue, and browser integration
 errors cannot escape into transport.
 
+The store retains its derived upcoming queue array while queue identity, order,
+current entry, order position, and Repeat mode are unchanged. Media-clock updates
+still publish transport progress without allocating that array again.
+`usePlayerQueue.ts` subscribes the lazy Now Playing pane only to queue-related
+fields. The full player hook remains responsible for progress and transport UI.
+The active room-track composer is another lazy boundary: signed-out and inactive
+profile gates load their explanation before the larger composer.
+Music-share cards load their existing Save button on demand. The shared Icon
+keeps navigation and identity glyphs eager while deferring playback glyphs behind
+the same SVG dimensions and accessibility props. These boundaries retain the
+existing controls and the unchanged transitive JavaScript budget.
+
 Persistent browser-session schemas remain in `schemas.ts`. Account-route request
 and response validators live in `accountSchemas.ts`, so public browsing does not
 eagerly initialize password-recovery and account-management validation chains.
@@ -1411,6 +1490,12 @@ media sources, and the outcome is `forced`; it is never described as successful
 completion of an unfinished upload. Existing pending/replacement/deletion records
 retain the database/S3 evidence needed by normal retry and reconciliation.
 
+Work dispatch refused only because its original response has ended is an internal
+cancellation. The application consumes that exact cancellation after recorded
+transport completion, without logging a false server failure or writing another
+response. Actual service failures and shutdown admission failures retain their
+normal error handling; already-admitted business work remains tracked until it settles.
+
 - `SERVER_SHUTDOWN_GRACE_MS`: default 30000, maximum 120000.
 - `SERVER_SHUTDOWN_CLEANUP_MS`: default 5000, maximum 30000.
 - A maximum additional 100 ms allows socket-close hooks to run after a forced
@@ -1431,6 +1516,23 @@ URL, content identity, account identity, cookie, credential, or request payload 
 added. This is a per-request debugging identifier, not a stored visitor identity.
 Catalog failures use the same bounded categorization.
 
+Unexpected errors after response headers or transport completion retain the same
+bounded diagnostic, then close the response without a second JSON/header write or
+forwarding a raw exception to Express's default logger. Error statuses must be
+integer HTTP errors from 400 through 599; invalid values fall back to a generic
+500. The internal completed-request cancellation described above remains silent.
+Room and Social route adapters also forward known errors to this boundary when
+the response has started, ended, or been destroyed; an already disconnected
+socket cannot silently bypass genuine server-failure diagnostics.
+
+Legacy Audio/Video upload, probe, stream, download, deletion, metadata, and artwork
+cleanup failures use `mediaDiagnosticsService.ts` with fixed failure categories.
+HTTP handlers retain only their generated request ID and controlled error category;
+storage lifecycle recovery uses fixed categories without an HTTP identity. Logs
+never include filenames, database IDs, S3 keys, decoded service errors, or stacks.
+Storage success, deferred cleanup, and retry semantics remain in the lifecycle
+records and response contracts rather than private diagnostic payloads.
+
 Health includes process-scoped request counters and fixed latency buckets, artwork
 scheduler occupancy and limits, available/total temporary-disk bytes, existing
 media admission/stream counters, and memory. Client keys and filesystem paths are
@@ -1447,6 +1549,16 @@ remains a single application process per instance. Before multiple replicas are
 introduced, explicitly design shared abuse limits and measure the aggregate media
 and provider budget. A shared cache, queue, CDN, or worker service is not introduced
 without a measured requirement and a compatible ready/deletion/revocation contract.
+
+Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
+seconds for an existing admission slot. The pending pool is bounded to 32 per
+process and eight per client; active limits and playback reserves do not increase.
+A blocked client cannot hold up another client's available slot. HEAD and
+non-playback requests retain immediate rejection. Queue cancellation removes all
+timer/response hooks; expiration or queue overflow retains 429 with Retry-After.
+Source and lifecycle validation happen after waiting, before storage access.
+An admitted slot releases only after transport completion and all tracked handler
+or storage work settle, so an aborted stream cannot free capacity prematurely.
 
 Catalog substring searches now share a dedicated per-process limit of eight active
 requests and two per client across both public search surfaces. Rejection returns

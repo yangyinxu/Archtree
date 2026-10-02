@@ -2,9 +2,16 @@ import react from '@vitejs/plugin-react';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 /** Keeps the listener on one origin while Express remains the API authority. */
-export default defineConfig({
+export default defineConfig(({ command, mode }) => ({
   base: '/finitude/',
   plugins: [react()],
+  css: {
+    modules: {
+      // Production transfers compact identifiers; development and tests retain readable names.
+      generateScopedName: command === 'build' && mode === 'production'
+        ? 'f_[hash:base64:6]' : undefined
+    }
+  },
   build: {
     manifest: true,
     outDir: 'dist',
@@ -47,4 +54,4 @@ export default defineConfig({
     globals: true,
     restoreMocks: true
   }
-});
+}));

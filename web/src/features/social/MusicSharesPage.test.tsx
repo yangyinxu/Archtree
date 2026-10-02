@@ -112,7 +112,7 @@ test('explicit track Play resolves current media and Save requires its separate 
   fireEvent.click(play);
   await waitFor(() => expect(mocks.launchTrack).toHaveBeenCalledExactlyOnceWith(track(), 'viewer-1'));
   expect(mocks.save).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Save to Library' }));
   await waitFor(() => expect(mocks.save).toHaveBeenCalledWith('viewer-1', { contentType: 'audioTrack', contentId: 'a'.repeat(24) }));
 });
 

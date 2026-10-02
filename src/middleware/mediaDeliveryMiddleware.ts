@@ -1,4 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express';
+import { onRequestWorkComplete } from '../services/serverLifecycleService';
 import {
     createMediaDeliveryMetricsRegistry,
     defaultMediaDeliveryMetrics,
@@ -14,12 +15,17 @@ export interface MediaAdmissionControllerOptions {
     playbackReservedGlobal?: number;
     playbackReservedPerIp?: number;
     metrics?: MediaDeliveryMetricsRegistry;
+    /** Only playback GETs may briefly wait for an existing slot; active ceilings never change. */
+    playbackWaitMs?: number;
+    playbackQueueGlobal?: number;
+    playbackQueuePerIp?: number;
 }
 
 export interface MediaAdmissionController {
     limits: MediaAdmissionLimitsSnapshot;
     middleware(resourceClass: MediaResourceClass): RequestHandler;
     getMetrics(): ReturnType<MediaDeliveryMetricsRegistry['snapshot']>;
+    getQueuedPlaybackRequests(): number;
 }
 
 type ClientActivity = {
@@ -85,78 +91,131 @@ export const createMediaAdmissionController = (
     const activeByClient = new Map<string, ClientActivity>();
     let globalActive = 0;
     let globalNonPlayback = 0;
+    const waitMs = Math.min(2_000, positiveInteger(options.playbackWaitMs, 0));
+    const queueGlobal = Math.min(32, positiveInteger(options.playbackQueueGlobal, 32));
+    const queuePerIp = Math.min(8, positiveInteger(options.playbackQueuePerIp, 8));
+    type WaitingPlayback = {
+        clientId: string;
+        res: Response;
+        detach: () => void;
+        admit: () => void;
+        blocked: () => boolean;
+    };
+    const waiting: WaitingPlayback[] = [];
+    let drainingQueue = false;
+
+    /** A saturated client cannot prevent another client's available slot from being used. */
+    const drainQueue = () => {
+        if (drainingQueue) return;
+        drainingQueue = true;
+        try {
+            for (let index = 0; index < waiting.length;) {
+                const entry = waiting[index];
+                if (entry.blocked()) {
+                    index++;
+                    continue;
+                }
+                waiting.splice(index, 1);
+                entry.detach();
+                if (!entry.res.destroyed && !entry.res.writableEnded) entry.admit();
+            }
+        } finally {
+            drainingQueue = false;
+        }
+    };
 
     const middleware = (resourceClass: MediaResourceClass): RequestHandler => {
         return (req: Request, res: Response, next: NextFunction) => {
+            if (req.aborted || res.destroyed || res.writableEnded) return;
             const clientId = req.ip || req.socket.remoteAddress || 'unknown';
-            const clientActivity = activeByClient.get(clientId) ?? {
-                total: 0,
-                nonPlayback: 0
-            };
             const isPlayback = resourceClass === 'playback' || resourceClass === 'video';
             const nonPlaybackGlobalLimit = limits.global - limits.playbackReservedGlobal;
             const nonPlaybackClientLimit = limits.perIp - limits.playbackReservedPerIp;
 
-            const rejectionReason = globalActive >= limits.global
+            const rejectionReason = () => globalActive >= limits.global
                 ? 'global' as const
-                : clientActivity.total >= limits.perIp
+                : (activeByClient.get(clientId)?.total ?? 0) >= limits.perIp
                     ? 'perIp' as const
                     : !isPlayback && (
                         globalNonPlayback >= nonPlaybackGlobalLimit
-                        || clientActivity.nonPlayback >= nonPlaybackClientLimit
+                        || (activeByClient.get(clientId)?.nonPlayback ?? 0) >= nonPlaybackClientLimit
                     )
                         ? 'playbackReserved' as const
                         : null;
 
-            if (rejectionReason) {
-                metrics.markRequestRejected(resourceClass, rejectionReason);
+            const reject = () => {
+                metrics.markRequestRejected(resourceClass, rejectionReason() ?? 'perIp');
                 res.setHeader('Retry-After', '2');
                 return res.status(429).json({ message: 'Too many concurrent media requests.' });
-            }
-
-            clientActivity.total += 1;
-            globalActive += 1;
-            if (!isPlayback) {
-                clientActivity.nonPlayback += 1;
-                globalNonPlayback += 1;
-            }
-            activeByClient.set(clientId, clientActivity);
-            metrics.markRequestAccepted(resourceClass);
-            res.locals.mediaDelivery = { resourceClass, metrics };
-
-            let released = false;
-            const release = (closedBeforeFinish: boolean) => {
-                if (released) return;
-                released = true;
-                res.off('finish', onFinish);
-                res.off('close', onClose);
-
-                clientActivity.total = Math.max(0, clientActivity.total - 1);
-                globalActive = Math.max(0, globalActive - 1);
-                if (!isPlayback) {
-                    clientActivity.nonPlayback = Math.max(0, clientActivity.nonPlayback - 1);
-                    globalNonPlayback = Math.max(0, globalNonPlayback - 1);
-                }
-                if (clientActivity.total === 0) activeByClient.delete(clientId);
-                else activeByClient.set(clientId, clientActivity);
-
-                metrics.markRequestFinished(
-                    resourceClass,
-                    responseOutcome(res, closedBeforeFinish)
-                );
             };
-            const onFinish = () => release(false);
-            const onClose = () => release(!res.writableEnded);
-            res.once('finish', onFinish);
-            res.once('close', onClose);
-            return next();
+
+            const admit = () => {
+                const clientActivity = activeByClient.get(clientId) ?? { total: 0, nonPlayback: 0 };
+                clientActivity.total += 1;
+                globalActive += 1;
+                if (!isPlayback) {
+                    clientActivity.nonPlayback += 1;
+                    globalNonPlayback += 1;
+                }
+                activeByClient.set(clientId, clientActivity);
+                metrics.markRequestAccepted(resourceClass);
+                res.locals.mediaDelivery = { resourceClass, metrics };
+
+                let released = false;
+                const release = () => {
+                    if (released) return;
+                    released = true;
+                    clientActivity.total = Math.max(0, clientActivity.total - 1);
+                    globalActive = Math.max(0, globalActive - 1);
+                    if (!isPlayback) {
+                        clientActivity.nonPlayback = Math.max(0, clientActivity.nonPlayback - 1);
+                        globalNonPlayback = Math.max(0, globalNonPlayback - 1);
+                    }
+                    if (clientActivity.total === 0) activeByClient.delete(clientId);
+                    else activeByClient.set(clientId, clientActivity);
+                    metrics.markRequestFinished(resourceClass, responseOutcome(res, !res.writableEnded));
+                    drainQueue();
+                };
+                // Disconnect does not release capacity while an admitted storage/handler promise is still settling.
+                onRequestWorkComplete(req, res, release);
+                return next();
+            };
+            if (!rejectionReason()) return admit();
+            if (!waitMs || !isPlayback || req.method !== 'GET' || waiting.length >= queueGlobal
+                || waiting.filter(value => value.clientId === clientId).length >= queuePerIp) return reject();
+
+            // Queue only the original bounded read, before source validation/storage work; no command is replayed.
+            let timer: ReturnType<typeof setTimeout>;
+            const entry: WaitingPlayback = {
+                clientId, res, admit, blocked: () => Boolean(rejectionReason()),
+                detach: () => {
+                    clearTimeout(timer);
+                    res.off('close', cancel);
+                    res.off('finish', cancel);
+                }
+            };
+            const remove = () => {
+                const index = waiting.indexOf(entry);
+                if (index < 0) return false;
+                waiting.splice(index, 1);
+                entry.detach();
+                return true;
+            };
+            const cancel = () => { if (remove()) drainQueue(); };
+            timer = setTimeout(() => {
+                if (remove() && !res.destroyed && !res.writableEnded) reject();
+            }, waitMs);
+            res.once('close', cancel);
+            res.once('finish', cancel);
+            waiting.push(entry);
         };
     };
 
     return {
         limits,
         middleware,
-        getMetrics: () => metrics.snapshot()
+        getMetrics: () => metrics.snapshot(),
+        getQueuedPlaybackRequests: () => waiting.length
     };
 };
 
@@ -172,7 +231,10 @@ export const defaultMediaAdmissionController = createMediaAdmissionController({
     playbackReservedPerIp: process.env.MEDIA_PLAYBACK_RESERVED_PER_IP === undefined
         ? undefined
         : Number(process.env.MEDIA_PLAYBACK_RESERVED_PER_IP),
-    metrics: defaultMediaDeliveryMetrics
+    metrics: defaultMediaDeliveryMetrics,
+    playbackWaitMs: 2_000,
+    playbackQueueGlobal: 32,
+    playbackQueuePerIp: 8
 });
 
 /** Classifies each route without exposing that class as request-controlled input. */

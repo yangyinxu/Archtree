@@ -12,6 +12,11 @@ or use a version manager with `.nvmrc` / `.node-version`. When downloading an
 archive, verify it against the official `SHASUMS256.txt` before extraction.
 Do not reuse `node_modules` installed for another Node major.
 
+Canonical localization JSON uses LF even in Windows checkouts with
+`core.autocrlf=true`, enforced by `.gitattributes`. Keep the byte-for-byte
+two-space JSON and duplicate-key checks enabled; do not regenerate locale content
+just to repair checkout line endings.
+
 ```sh
 node --version
 npm ci
@@ -25,6 +30,12 @@ npm run test:integration
 reading `.env`, printing credentials, or contacting an application database.
 `npm test`, `npm run build`, and the server test runners reject unsupported
 Node majors before loading application checks.
+
+Node ESM loader arguments and dynamic imports use file URLs rather than native
+Windows drive paths. Disposable child tests scope `TMPDIR`, `TMP`, and `TEMP` to
+the same owned directory so cleanup assertions cover the actual allocation on
+every host. Synthetic decoder fixtures launch real Node child processes with
+bounded cleanup rather than relying on executable Unix shebang scripts.
 
 `npm start`, `npm run dev`, and `npm run dev:auth-rotation` use `cross-env` to set
 the existing environment values consistently on Windows, macOS, and Linux.
@@ -93,6 +104,16 @@ On Windows, install a trusted FFmpeg distribution linked by the
 directory to PATH or set `ROOM_AUDIO_FFMPEG_PATH` to the absolute `ffmpeg.exe` path.
 The override is an executable path, not a shell command. FFmpeg always reads a
 bounded local file and decodes to the null muxer; it never opens an audio device.
+Verify the distribution's published SHA-256 before extracting it. A portable
+installation outside the checkout avoids committing workstation executables.
+For a persistent user override, open a new shell after saving it, or load it into
+the current PowerShell process before `npm run doctor`:
+
+```powershell
+$env:ROOM_AUDIO_FFMPEG_PATH = [Environment]::GetEnvironmentVariable('ROOM_AUDIO_FFMPEG_PATH', 'User')
+npm run doctor
+```
+
 See the [FFmpeg protocol controls](https://ffmpeg.org/ffmpeg-protocols.html) and
 [command options](https://ffmpeg.org/ffmpeg.html) used by the restricted decoder.
 
@@ -108,9 +129,28 @@ configuration; the deployed Content Manager page remains its in-app equivalent. 
 ineligible with a retryable analysis reason while ordinary uploads/playback stay
 available. The analyzer tests intentionally require a real decoder; do not mark
 missing-decoder fixture checks as passed. Local checks preserve Chromium's
-`--disable-audio-output`; the compressed room scenario adds Firefox/WebKit hosts
+`--disable-audio-output`; compressed-media and focused room-recovery scenarios add Firefox/WebKit hosts
 only on Linux with `CI=true` or `CI=1`, using isolated servers and the CI null
 audio sink. Local Firefox/WebKit execution remains excluded.
+
+When transferring a Windows working copy into isolated Linux verification, use
+Git's canonical line endings and executable modes rather than treating a raw
+directory copy as a Linux checkout. Preserve reviewed image baselines byte for
+byte. Record the selected source and built bundle separately from any temporary
+diagnostic instrumentation; restore and verify both before an acceptance rerun.
+
+A Linux guest without GPU passthrough can separately diagnose WebKit rendering
+with `LIBGL_ALWAYS_SOFTWARE=true` and `GALLIUM_DRIVER=llvmpipe`, as documented by
+[Mesa](https://docs.mesa3d.org/envvars.html). These settings select a software
+renderer; they do not supply audio hardware or establish media readiness. Label
+this profile separately from default CI, retain real click and media assertions,
+and preserve a media failure even when page rendering recovers. A working
+animation or click probe is not a passing playback gate.
+
+The separate sustained-room gate and bounded options are documented in
+[`README.md`](../README.md#verify-sustained-audio-rooms-locally). It does not run
+as part of the ordinary short test matrix. It owns its resource cleanup and uses
+no workstation application database or cloud credentials.
 
 ## Disposable MongoDB tests
 

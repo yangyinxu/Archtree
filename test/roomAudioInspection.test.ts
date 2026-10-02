@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import childProcess, { type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { inspectRoomAudioFile, RoomAudioInspectionError } from '../src/services/roomAudioInspection';
 import { inspectRoomMp3 } from '../src/services/roomAudioInspectionMp3';
 import { inspectRoomMp4 } from '../src/services/roomAudioInspectionMp4';
@@ -12,6 +14,58 @@ import { createPcmWav, wavUploadFile } from './support/pcmWav';
 const fixturePath = (name: string) => resolve('test/fixtures/room-audio', name);
 const upload = (buffer: Buffer) => ({ ...wavUploadFile(buffer), originalname: 'misleading.ogg', mimetype: 'application/octet-stream' });
 const diskUpload = async (name: string) => ({ ...upload(Buffer.alloc(0)), path: fixturePath(name), size: (await stat(fixturePath(name))).size });
+
+const fixtureSetTimeout = setTimeout;
+const fixtureClearTimeout = clearTimeout;
+
+/** Only the synthetic executable is redirected to Node; decoder admission, streams and process cleanup remain real. */
+const decoderChildFixture = (context: TestContext, path: string) => {
+    const originalSpawn = childProcess.spawn;
+    const children = new Map<ChildProcess, Promise<void>>();
+    let started = 0;
+    const startWaiters = new Set<() => void>();
+    const spawnMock = context.mock.method(childProcess, 'spawn', (command: string, args?: readonly string[], options?: SpawnOptions) => {
+        if (command !== path) return originalSpawn(command, args ?? [], options ?? {});
+        assert.equal(options?.shell, false);
+        assert.equal(options?.windowsHide, true);
+        assert.deepEqual(options?.stdio, ['ignore', 'pipe', 'pipe']);
+        assert.deepEqual(Object.keys(options?.env ?? {}).sort(), ['LANG', 'LC_ALL', 'PATH']);
+        assert.equal(options?.env?.LANG, 'C'); assert.equal(options?.env?.LC_ALL, 'C');
+        assert.ok(options?.env?.PATH === process.env.PATH, 'Decoder receives only the existing executable search path.');
+        assert.ok(args?.includes('-nostdin'));
+        assert.equal(args?.[args.indexOf('-protocol_whitelist') + 1], 'file,pipe');
+        assert.equal(args?.[args.indexOf('-format_whitelist') + 1], 'mp3,mov');
+        // Windows cannot execute a POSIX shebang. Invoke the same trusted runtime on every platform.
+        const child = originalSpawn(process.execPath, [path], options);
+        children.set(child, new Promise(resolve => child.once('close', () => resolve())));
+        child.once('spawn', () => { started += 1; for (const notify of startWaiters) notify(); });
+        return child;
+    });
+    syncBuiltinESMExports();
+    return {
+        started(count = 1) {
+            if (started >= count) return Promise.resolve();
+            return new Promise<void>((resolve, reject) => {
+                const timeout = fixtureSetTimeout(() => { startWaiters.delete(notify); reject(new Error('Decoder fixture did not start.')); }, 5000);
+                const notify = () => {
+                    if (started < count) return;
+                    fixtureClearTimeout(timeout); startWaiters.delete(notify); resolve();
+                };
+                startWaiters.add(notify);
+            });
+        },
+        async close() {
+            spawnMock.mock.restore(); syncBuiltinESMExports();
+            for (const child of children.keys()) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            try {
+                await Promise.race([Promise.all(children.values()), new Promise<never>((_, reject) => {
+                    timeout = fixtureSetTimeout(() => reject(new Error('Decoder fixture did not close.')), 5000);
+                })]);
+            } finally { fixtureClearTimeout(timeout); }
+        }
+    };
+};
 
 // These original synthetic tones exercise actual decoder execution; a missing FFmpeg runtime is a failed prerequisite.
 test('full-file MP3 and AAC inspection accepts CBR, indexed VBR, MPEG2 mono and both MP4 metadata placements', async () => {
@@ -106,35 +160,35 @@ test('missing decoder is retryable, while WAV remains available independently of
     } finally { if (previous === undefined) delete process.env.ROOM_AUDIO_FFMPEG_PATH; else process.env.ROOM_AUDIO_FFMPEG_PATH = previous; }
 });
 
-test('cancellation aborts a running decoder and preserves an explicit retryable error boundary', async () => {
+test('cancellation aborts a running decoder and preserves an explicit retryable error boundary', async context => {
     const directory = await mkdtemp(join(tmpdir(), 'archtree-audio-abort-')); const previous = process.env.ROOM_AUDIO_FFMPEG_PATH;
+    const path = join(directory, 'decoder.cjs'); const fixture = decoderChildFixture(context, path);
     try {
-        const path = join(directory, 'decoder');
-        await writeFile(path, `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`, { mode: 0o700 }); await chmod(path, 0o700);
+        await writeFile(path, 'setInterval(() => {}, 1000);\n');
         process.env.ROOM_AUDIO_FFMPEG_PATH = path;
         const controller = new AbortController(); const running = inspectRoomAudioFile(await diskUpload('cbr.mp3'), { signal: controller.signal });
-        setTimeout(() => controller.abort(), 50);
-        await assert.rejects(running, (error: unknown) => error instanceof Error && error.name === 'AbortError');
+        const rejected = assert.rejects(running, (error: unknown) => error instanceof Error && error.name === 'AbortError');
+        await fixture.started(); controller.abort(); await rejected;
         const alreadyAborted = AbortSignal.abort();
         await assert.rejects(inspectRoomAudioFile(wavUploadFile(), { signal: alreadyAborted }), { name: 'AbortError' });
     } finally {
         if (previous === undefined) delete process.env.ROOM_AUDIO_FFMPEG_PATH; else process.env.ROOM_AUDIO_FFMPEG_PATH = previous;
-        await rm(directory, { recursive: true, force: true });
+        try { await fixture.close(); } finally { await rm(directory, { recursive: true, force: true }); }
     }
 });
 
-test('compressed decoder capacity is bounded and aborted jobs release slots only after cleanup', async () => {
+test('compressed decoder capacity is bounded and aborted jobs release slots only after cleanup', async context => {
     const directory = await mkdtemp(join(tmpdir(), 'archtree-audio-capacity-')); const previous = process.env.ROOM_AUDIO_FFMPEG_PATH;
     const controller = new AbortController();
+    const path = join(directory, 'decoder.cjs'); const fixture = decoderChildFixture(context, path);
     try {
-        const path = join(directory, 'decoder');
-        await writeFile(path, `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`, { mode: 0o700 });
+        await writeFile(path, 'setInterval(() => {}, 1000);\n');
         process.env.ROOM_AUDIO_FFMPEG_PATH = path;
         const file = await diskUpload('cbr.mp3');
         const first = inspectRoomAudioFile(file, { signal: controller.signal });
         const second = inspectRoomAudioFile(file, { signal: controller.signal });
         const settled = Promise.allSettled([first, second]);
-        await new Promise(resolve => setTimeout(resolve, 30));
+        await fixture.started(2);
         await assert.rejects(inspectRoomAudioFile(file), (error: unknown) => error instanceof RoomAudioInspectionError && error.code === 'analysis_failed');
         controller.abort();
         const results = await settled;
@@ -144,29 +198,30 @@ test('compressed decoder capacity is bounded and aborted jobs release slots only
     } finally {
         controller.abort();
         if (previous === undefined) delete process.env.ROOM_AUDIO_FFMPEG_PATH; else process.env.ROOM_AUDIO_FFMPEG_PATH = previous;
-        await rm(directory, { recursive: true, force: true });
+        try { await fixture.close(); } finally { await rm(directory, { recursive: true, force: true }); }
     }
 });
 
 test('decoder timeout is retryable and decoder diagnostics never escape the bounded error result', async context => {
     const directory = await mkdtemp(join(tmpdir(), 'archtree-audio-timeout-')); const previous = process.env.ROOM_AUDIO_FFMPEG_PATH;
+    const path = join(directory, 'decoder.cjs'); const fixture = decoderChildFixture(context, path);
     try {
-        const path = join(directory, 'decoder');
-        await writeFile(path, `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`, { mode: 0o700 });
+        await writeFile(path, 'setInterval(() => {}, 1000);\n');
         process.env.ROOM_AUDIO_FFMPEG_PATH = path;
         context.mock.timers.enable({ apis: ['setTimeout'] });
         const { decodeRoomAudio } = await import('../src/services/roomAudioInspectionDecoder');
         const result = decodeRoomAudio(await diskUpload('cbr.mp3'), 'mp3', 2000);
         const rejection = assert.rejects(result, (error: unknown) => error instanceof RoomAudioInspectionError && error.code === 'analysis_timeout' && error.message === 'analysis_timeout');
+        await fixture.started();
         context.mock.timers.tick(60_000);
         await rejection;
         context.mock.timers.reset();
-        await writeFile(path, `#!${process.execPath}\nprocess.stderr.write('private media metadata'.repeat(1000));\nprocess.exitCode = 1;\n`, { mode: 0o700 });
+        await writeFile(path, "process.stderr.write('private media metadata'.repeat(1000));\nprocess.exitCode = 1;\n");
         assert.equal(await inspectRoomAudioFile(await diskUpload('cbr.mp3')), null);
     } finally {
         context.mock.timers.reset();
         if (previous === undefined) delete process.env.ROOM_AUDIO_FFMPEG_PATH; else process.env.ROOM_AUDIO_FFMPEG_PATH = previous;
-        await rm(directory, { recursive: true, force: true });
+        try { await fixture.close(); } finally { await rm(directory, { recursive: true, force: true }); }
     }
 });
 
@@ -184,10 +239,11 @@ test('existing large PCM WAV inspection remains compatible above the compressed 
     } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('missing FFmpeg capabilities remain retryable and the same media succeeds after runtime repair', async () => {
+test('missing FFmpeg capabilities remain retryable and the same media succeeds after runtime repair', async context => {
     const directory = await mkdtemp(join(tmpdir(), 'archtree-audio-capability-')); const previous = process.env.ROOM_AUDIO_FFMPEG_PATH;
+    const path = join(directory, 'decoder.cjs'); const fixture = decoderChildFixture(context, path);
     try {
-        const path = join(directory, 'decoder'); const file = await diskUpload('cbr.mp3');
+        const file = await diskUpload('cbr.mp3');
         process.env.ROOM_AUDIO_FFMPEG_PATH = path;
         for (const diagnostic of [
             "Unrecognized option 'max_error_rate'.",
@@ -202,17 +258,17 @@ test('missing FFmpeg capabilities remain retryable and the same media succeeds a
         ]) {
             // Splitting the message tests the bounded overlap, while a private suffix must never escape through the error.
             const fullDiagnostic = `${diagnostic}\nprivate fixture path and metadata\n`;
-            const source = `#!${process.execPath}\nprocess.stderr.write(${JSON.stringify(fullDiagnostic.slice(0, 7))});\nsetTimeout(() => { process.stderr.write(${JSON.stringify(fullDiagnostic.slice(7))}); process.exitCode = 1; }, 10);\n`;
-            await writeFile(path, source, { mode: 0o700 });
+            const source = `process.stderr.write(${JSON.stringify(fullDiagnostic.slice(0, 7))});\nsetTimeout(() => { process.stderr.write(${JSON.stringify(fullDiagnostic.slice(7))}); process.exitCode = 1; }, 10);\n`;
+            await writeFile(path, source);
             await assert.rejects(inspectRoomAudioFile(file), (error: unknown) => error instanceof RoomAudioInspectionError
                 && error.code === 'decoder_unavailable' && error.message === 'decoder_unavailable');
         }
-        await writeFile(path, `#!${process.execPath}\nprocess.stderr.write('Error while decoding: invalid data found when processing input.'); process.exitCode = 1;\n`, { mode: 0o700 });
+        await writeFile(path, "process.stderr.write('Error while decoding: invalid data found when processing input.'); process.exitCode = 1;\n");
         assert.equal(await inspectRoomAudioFile(file), null);
         if (previous === undefined) delete process.env.ROOM_AUDIO_FFMPEG_PATH; else process.env.ROOM_AUDIO_FFMPEG_PATH = previous;
         assert.deepEqual(await inspectRoomAudioFile(file), { durationMs: 2000, format: 'mp3' });
     } finally {
         if (previous === undefined) delete process.env.ROOM_AUDIO_FFMPEG_PATH; else process.env.ROOM_AUDIO_FFMPEG_PATH = previous;
-        await rm(directory, { recursive: true, force: true });
+        try { await fixture.close(); } finally { await rm(directory, { recursive: true, force: true }); }
     }
 });

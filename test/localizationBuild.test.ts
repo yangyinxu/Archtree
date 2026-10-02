@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { buildLocalizationArtifacts } from '../scripts/build-localizations.mjs';
+import { buildLocalizationArtifacts, checkLocalizationArtifacts, writeLocalizationArtifacts } from '../scripts/build-localizations.mjs';
 import { syncPackagedNativeLocalizations } from '../scripts/sync-native-localizations.mjs';
 
 const canonicalJson = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
@@ -74,6 +75,44 @@ test('localization build accepts only aligned, valid locale contracts', async ()
         englishName: 'Simplified Chinese'
       }
     ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a Git checkout with autocrlf keeps canonical sources and generated localization bytes valid', async () => {
+  const root = await createFixture({
+    'common.count': '{count} 项',
+    'common.greeting': '你好，{name}'
+  });
+  try {
+    await writeLocalizationArtifacts(root);
+    await writeFile(path.join(root, '.gitattributes'), await readFile(path.resolve('.gitattributes')));
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    git('init', '--quiet');
+    git('config', 'core.autocrlf', 'true');
+    git('add', '.');
+    git('checkout-index', '--all', '--force');
+
+    for (const filename of git('ls-files', '--', 'localization').trim().split('\n')) {
+      const bytes = await readFile(path.join(root, filename), 'utf8');
+      assert.ok(!bytes.includes('\r'), `${filename} must retain canonical LF bytes after checkout`);
+    }
+    await checkLocalizationArtifacts(root);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('canonical locale JSON still rejects duplicate keys instead of silently dropping the earlier value', async () => {
+  const root = await createFixture({
+    'common.count': '{count} 项',
+    'common.greeting': '你好，{name}'
+  });
+  try {
+    await writeFile(path.join(root, 'localization', 'locales', 'zh-Hans.json'),
+      '{\n  "common.count": "{count} 项",\n  "common.greeting": "你好，{name}",\n  "common.greeting": "再见，{name}"\n}\n');
+    await assert.rejects(() => buildLocalizationArtifacts(root), /canonical two-space JSON without duplicate keys/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

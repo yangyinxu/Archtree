@@ -3,9 +3,14 @@ import test from 'node:test';
 import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
-import { installShutdownHandlers, ServerLifecycle } from '../src/services/serverLifecycleService';
+import {
+  installShutdownHandlers,
+  isCompletedRequestWorkCancellation,
+  ServerLifecycle
+} from '../src/services/serverLifecycleService';
 import { asyncHandler } from '../src/middleware/requestProtectionMiddleware';
 import { requireAuth } from '../src/middleware/authMiddleware';
+import { safeServerErrorCategory } from '../src/middleware/requestDiagnosticsMiddleware';
 
 /** Starts an isolated loopback server; it never uses application database configuration. */
 const listen = async (app: ReturnType<typeof express>) => {
@@ -186,7 +191,7 @@ test('a late parser callback cannot start new business work after database teard
   assert.equal(controllerStarted, false);
 });
 
-test('late authentication work reaches the Express error boundary after teardown', async () => {
+test('late authentication dispatch after teardown is distinguishable from a service failure', async () => {
   const lifecycle = new ServerLifecycle();
   const app = express();
   app.use(lifecycle.admit);
@@ -196,8 +201,11 @@ test('late authentication work reaches the Express error boundary after teardown
   const parsed = new Promise<void>(resolve => { entered = resolve; });
   const errorSeen = new Promise<void>(resolve => { failed = resolve; });
   app.get('/protected', (_req, _res, next) => { lateNext = next; entered(); }, requireAuth);
-  app.use((error: { statusCode: number }, _req: express.Request, _res: express.Response, _next: express.NextFunction) => {
+  app.use((error: { statusCode: number }, req: express.Request, _res: express.Response, _next: express.NextFunction) => {
     assert.equal(error.statusCode, 503);
+    assert.equal(isCompletedRequestWorkCancellation(req, error), true);
+    assert.equal(safeServerErrorCategory(error), 'aborted');
+    assert.equal(isCompletedRequestWorkCancellation(req, { name: 'AbortError', statusCode: 503 }), false);
     failed();
   });
   const { server, url } = await listen(app);
@@ -211,4 +219,48 @@ test('late authentication work reaches the Express error boundary after teardown
   await lifecycle.stop(server, async () => undefined, 100, 100);
   lateNext();
   await errorSeen;
+  await assert.rejects(lifecycle.track(() => assert.fail('work cannot start after teardown')), error => {
+    assert.equal(isCompletedRequestWorkCancellation({} as express.Request, error), false);
+    assert.equal((error as { statusCode: number }).statusCode, 503);
+    assert.equal(safeServerErrorCategory(error), 'internal');
+    return true;
+  });
+});
+
+test('an admitted handler failure remains visible after its client disconnects', async () => {
+  const lifecycle = new ServerLifecycle();
+  const app = express();
+  app.use(lifecycle.admit);
+  let entered!: () => void;
+  let release!: () => void;
+  let responseClosed!: () => void;
+  let failed!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const closed = new Promise<void>(resolve => { responseClosed = resolve; });
+  const errorSeen = new Promise<void>(resolve => { failed = resolve; });
+  app.get('/work', asyncHandler(async (_req, res) => {
+    res.once('close', responseClosed);
+    entered();
+    await gate;
+    throw Object.assign(new Error('service failure'), { statusCode: 503 });
+  }));
+  app.use((error: unknown, req: express.Request, _res: express.Response, _next: express.NextFunction) => {
+    assert.equal(isCompletedRequestWorkCancellation(req, error), false);
+    assert.equal(safeServerErrorCategory(error), 'internal');
+    assert.equal((error as { statusCode: number }).statusCode, 503);
+    failed();
+  });
+  const { server, url } = await listen(app);
+  const req = request(`${url}/work`);
+  req.on('error', () => undefined);
+  req.end();
+  try {
+    await started;
+    req.destroy();
+    await closed;
+    release();
+    await errorSeen;
+    assert.equal(await lifecycle.stop(server, async () => undefined, 100, 100), 'graceful');
+  } finally { release(); req.destroy(); server.closeAllConnections(); server.close(); }
 });

@@ -4,6 +4,7 @@ import type { PlayerAudio, PlayerMediaSession, PlayerMediaSessionAction, PlayerM
 import type { RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
 import { createRoomPlaybackController } from './roomPlayback';
 import { createActualPlaybackObserver, type ActualPlaybackObservation } from './actualPlayback';
+import { advanceAccountEpoch, subscribeToAccountEpoch } from '../api/accountEpoch';
 
 /** Explicit browser state controls distinguish metadata, seek completion, and actual start. */
 class RoomAudio implements PlayerAudio {
@@ -15,7 +16,7 @@ class RoomAudio implements PlayerAudio {
   muted = false;
   paused = true;
   ended = false;
-  error = null;
+  error: { code: number } | null = null;
   playbackRate = 1;
   readyState = 0;
   preload = 'metadata';
@@ -34,7 +35,7 @@ class RoomAudio implements PlayerAudio {
     if (this.autoStart) this.emit('playing');
   }
   pause() { this.paused = true; this.emit('pause'); }
-  load() { this.loadCalls += 1; this.readyState = 0; this.currentSrc = ''; this.emit('loadstart'); }
+  load() { this.loadCalls += 1; this.readyState = 0; this.currentSrc = ''; this.error = null; this.emit('loadstart'); }
   addEventListener(type: string, callback: () => void) {
     const callbacks = this.listeners.get(type) ?? new Set();
     callbacks.add(callback);
@@ -86,11 +87,55 @@ const setupLifecycle = (hidden = false) => {
   return { ...setup(undefined, { visibility, pageLifecycle }), visibility, pageLifecycle };
 };
 
+/** An explicit source installation has an independently observable physical generation and completion. */
+const setupSourceRetry = () => {
+  const audio = new RoomAudio(); audio.duration = 120;
+  let generation = 0;
+  const install = vi.fn(async (items: readonly PlayerQueueItem[], index: number) => {
+    generation++; audio.src = items[index].streamUrl; audio.currentTime = 0; audio.load();
+  });
+  const onIntent = vi.fn(), onObservation = vi.fn();
+  const port = { media: () => audio, sourceGeneration: () => generation,
+    install, updateQueue: vi.fn(), play: () => audio.play(), pause: () => audio.pause(),
+    seek: (position: number) => { audio.currentTime = position; return true; }, detach: vi.fn() };
+  const controller = createRoomPlaybackController(port,
+  { now: () => 10_000, onIntent, onObservation });
+  const ready = () => {
+    audio.currentSrc = audio.src; audio.readyState = 4;
+    controller.observe('loadedmetadata', audio); controller.observe('canplay', audio);
+  };
+  return { audio, install, port, onIntent, onObservation, controller, room: controller.attachment, ready,
+    changePhysicalSource: () => { generation++; } };
+};
+
 afterEach(() => vi.useRealTimers());
 
 test('ordinary player construction requires an explicit room controller to attach', () => {
   const store = createPlayerStore({ mediaSession: null });
   expect(() => store.attachRoomPlayback({ onIntent: vi.fn() })).toThrow('authorized room controller');
+  store.destroy();
+});
+
+test('room queue edits replace upcoming context without restarting the source and detach clears cached items', async () => {
+  const { room, audio, store, onIntent, factory } = setup();
+  const initial = { ...frame(0), status: 'paused' as const, positionSeconds: 0, anchorMonotonicMs: 10_000 };
+  await room.apply(initial); audio.ready();
+  const upcoming = store.getSnapshot().upNextItems;
+  audio.currentTime = 0.5; audio.emit('timeupdate');
+  expect(store.getSnapshot().upNextItems).toBe(upcoming);
+  const loads = audio.loadCalls;
+  await room.apply({ ...initial, revision: initial.revision + 1, queueRevision: initial.queueRevision + 1,
+    entryIds: ['entry-a', 'entry-c', 'entry-b'], queue: [queue[0], queue[2], queue[1]] });
+  expect(store.getSnapshot().upNextItems).not.toBe(upcoming);
+  expect(store.getSnapshot().upNextItems.map(item => item.id)).toEqual([queue[2].id, queue[1].id]);
+  expect(audio.loadCalls).toBe(loads);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+  expect(store.getSnapshot().upNextItems).toEqual([]);
+  await store.launchStandalone({ ...queue[2], mediaType: 'video' }, { autoplay: false });
+  expect(store.getSnapshot().currentItem?.mediaType).toBe('video');
+  expect(store.getSnapshot().upNextItems).toEqual([]);
+  expect(factory).toHaveBeenCalledTimes(1);
   store.destroy();
 });
 
@@ -196,6 +241,64 @@ test('the first advancing media clock corrects a delayed start once without repl
   expect(onIntent).not.toHaveBeenCalled();
   store.destroy();
 });
+
+test.each(['play', 'playing'] as const)('a queued %s during an owned seek does not strand the authorized player paused', async event => {
+  const audio = new RoomAudio(); audio.duration = 120; audio.readyState = 4;
+  audio.src = queue[0].streamUrl; audio.currentSrc = audio.src;
+  const seek = vi.fn((position: number) => { audio.currentTime = position; audio.seeking = true; return true; });
+  const onIntent = vi.fn();
+  const controller = createRoomPlaybackController({ media: () => audio, sourceGeneration: () => 1,
+    install: async () => undefined, updateQueue: () => undefined, play: () => audio.play(), pause: () => audio.pause(),
+    seek, detach: () => undefined }, { now: () => 10_000, onIntent });
+  await controller.attachment.apply({ ...frame(0), positionSeconds: 0, anchorMonotonicMs: 10_000,
+    status: 'playing', playbackAllowed: true });
+  expect(audio.playCalls).toBe(1);
+  expect(controller.attachment.correct(2)).toBe('seek');
+  audio.readyState = 1;
+  controller.observe(event, audio); // A queued event from the previous play can arrive while the owned seek is still pending.
+  expect(audio.paused).toBe(true);
+  audio.seeking = false; audio.readyState = 4;
+  controller.observe('seeked', audio);
+  await Promise.resolve();
+  expect(audio.playCalls).toBe(2);
+  expect(audio.paused).toBe(false);
+  controller.observe('canplay', audio);
+  expect(audio.playCalls).toBe(2);
+  expect(onIntent).not.toHaveBeenCalled();
+  controller.attachment.detach();
+});
+
+test.each(['local pause', 'shared pause', 'permission loss', 'physical source change', 'detach'] as const)(
+  '%s fences resumption after a queued playing event interrupts an owned seek', async cancellation => {
+    const audio = new RoomAudio(); audio.duration = 120; audio.readyState = 4;
+    audio.src = queue[0].streamUrl; audio.currentSrc = audio.src;
+    let generation = 1;
+    const onIntent = vi.fn();
+    const controller = createRoomPlaybackController({ media: () => audio, sourceGeneration: () => generation,
+      install: async () => undefined, updateQueue: () => undefined, play: () => audio.play(), pause: () => audio.pause(),
+      seek: position => { audio.currentTime = position; audio.seeking = true; return true; }, detach: () => undefined },
+    { now: () => 10_000, onIntent });
+    const initial = { ...frame(0), positionSeconds: 0, anchorMonotonicMs: 10_000, status: 'playing' as const, playbackAllowed: true };
+    await controller.attachment.apply(initial);
+    controller.attachment.correct(2);
+    controller.observe('playing', audio);
+    if (cancellation === 'local pause') controller.attachment.pauseLocally();
+    if (cancellation === 'shared pause') expect(await controller.attachment.apply({ ...initial,
+      revision: initial.revision + 1, playbackEpoch: initial.playbackEpoch + 1, status: 'paused' })).toBe(true);
+    if (cancellation === 'permission loss') expect(await controller.attachment.apply({ ...initial,
+      revision: initial.revision + 1, playbackAllowed: false })).toBe(true);
+    if (cancellation === 'physical source change') generation++;
+    if (cancellation === 'detach') controller.attachment.detach();
+    const before = audio.playCalls;
+    audio.seeking = false; audio.readyState = 4;
+    controller.observe('seeked', audio); controller.observe('canplay', audio);
+    await Promise.resolve();
+    expect(audio.playCalls).toBe(before);
+    expect(audio.paused).toBe(true);
+    expect(onIntent).not.toHaveBeenCalled();
+    controller.attachment.detach();
+  }
+);
 
 test('a ping correction before natural playback owns convergence without treating its time jump as progress', async () => {
   let clock = 10_000;
@@ -448,6 +551,284 @@ test('autoplay denial remains paused and needs explicit resync without claiming 
   store.destroy();
 });
 
+test('a media 429 network failure retries the exact pinned source only on explicit local resync', async () => {
+  let clock = 10_000;
+  const { room, audio, store, onIntent, onObservation, factory } = setup(undefined, { now: () => clock });
+  audio.duration = 120;
+  const initial = { ...frame(0), status: 'playing' as const, positionSeconds: 5, anchorMonotonicMs: clock,
+    canControl: false, playbackAllowed: true,
+    queue: queue.map(item => ({ ...item, streamUrl: `/content/mediaTrack/stream/${item.id}?revision=${frame(0).mediaRevision}` })) };
+  await room.apply(initial);
+  const pinnedSource = audio.src;
+  // HTMLMediaElement exposes a rejected HTTP media load as MEDIA_ERR_NETWORK, without its HTTP status.
+  audio.currentSrc = audio.src; audio.error = { code: 2 }; audio.readyState = 0; audio.emit('error');
+  expect(store.getSnapshot()).toMatchObject({ status: 'error', error: { code: 'network' } });
+  await room.apply({ ...initial, revision: initial.revision + 1 });
+  expect(audio.loadCalls).toBe(1);
+  expect(onObservation.mock.calls.map(([value]) => value.type)).toEqual(['media-failed']);
+  clock += 4000;
+  await room.resync();
+  expect(audio.loadCalls).toBe(2); expect(audio.src).toBe(pinnedSource);
+  expect(audio.paused).toBe(true); expect(audio.playCalls).toBe(0);
+  expect(store.getSnapshot().error).toBeNull();
+  audio.ready();
+  expect(audio.currentTime).toBe(9); expect(audio.paused).toBe(false);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready', entryId: initial.currentEntryId }));
+  expect(factory).toHaveBeenCalledTimes(1); expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('the real player port keeps one retry while native metadata is pending and preserves a later local pause', async () => {
+  vi.useFakeTimers();
+  const { room, audio, store, onIntent, onObservation } = setup(); audio.duration = 120;
+  const initial = { ...frame(0), status: 'playing' as const, positionSeconds: 5,
+    anchorMonotonicMs: 10_000, playbackAllowed: true };
+  await room.apply(initial);
+  audio.currentSrc = audio.src; audio.error = { code: 2 }; audio.emit('error');
+  await room.resync(); // Actual playerStore.install has already resolved, but no native metadata exists.
+  for (let index = 0; index < 20; index++) await room.resync();
+  await vi.advanceTimersByTimeAsync(9999); await room.resync();
+  expect(audio.readyState).toBe(0); expect(audio.loadCalls).toBe(2);
+  expect(audio.playCalls).toBe(0);
+  expect(onObservation.mock.calls.map(([value]) => value.type)).toEqual(['media-failed']);
+  room.pauseLocally(); audio.ready();
+  expect(audio.paused).toBe(true); expect(audio.playCalls).toBe(0);
+  expect(vi.getTimerCount()).toBe(0);
+  await room.resync();
+  expect(audio.loadCalls).toBe(2); expect(audio.playCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled(); store.destroy();
+});
+
+test('native error releases retry ownership and a missing-metadata deadline permits another explicit load', async () => {
+  vi.useFakeTimers();
+  const { room, audio, store, onObservation, onIntent } = setup(); audio.duration = 120;
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true, anchorMonotonicMs: 10_000 });
+  await room.resync(); expect(audio.loadCalls).toBe(2);
+  audio.currentSrc = audio.src; audio.error = { code: 2 }; audio.emit('error');
+  expect(vi.getTimerCount()).toBe(0);
+  await room.resync(); expect(audio.loadCalls).toBe(3);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(audio.loadCalls).toBe(3); expect(audio.playCalls).toBe(0); expect(vi.getTimerCount()).toBe(0);
+  await room.resync(); expect(audio.loadCalls).toBe(4);
+  audio.ready();
+  expect(audio.playCalls).toBe(1);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }));
+  expect(onIntent).not.toHaveBeenCalled(); store.destroy();
+});
+
+test('metadata arriving after the retry deadline cannot resume until another explicit gesture', async () => {
+  vi.useFakeTimers();
+  const { room, audio, store, onObservation, onIntent } = setup(); audio.duration = 120;
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true, anchorMonotonicMs: 10_000 });
+  await room.resync(); await vi.advanceTimersByTimeAsync(10_000); audio.ready();
+  expect(audio.loadCalls).toBe(2); expect(audio.playCalls).toBe(0);
+  expect(onObservation.mock.calls.some(([value]) => value.type === 'ready')).toBe(false);
+  await room.resync();
+  expect(audio.loadCalls).toBe(2); expect(audio.playCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled(); store.destroy();
+});
+
+test.each(['replacement', 'controller', 'account'] as const)('the real player port clears native retry ownership on %s', async transition => {
+  vi.useFakeTimers();
+  const { room, audio, store, onIntent, onObservation } = setup(); audio.duration = 120;
+  const initial = { ...frame(0), status: 'paused' as const, positionSeconds: 5, anchorMonotonicMs: 10_000 };
+  await room.apply(initial); await room.resync();
+  expect(vi.getTimerCount()).toBe(1);
+  let unsubscribe: (() => void) | undefined;
+  if (transition === 'replacement') await room.apply({ ...initial, revision: initial.revision + 1,
+    playbackEpoch: initial.playbackEpoch + 1, currentEntryId: 'entry-b', mediaRevision: 'replacement' });
+  if (transition === 'controller') {
+    const replacement = store.attachRoomPlayback({ onIntent, onObservation, now: () => 10_000 });
+    await replacement.apply(initial);
+  }
+  if (transition === 'account') {
+    unsubscribe = subscribeToAccountEpoch(() => room.detach()); advanceAccountEpoch();
+  }
+  expect(vi.getTimerCount()).toBe(0);
+  const loads = audio.loadCalls;
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(audio.loadCalls).toBe(loads); expect(audio.playCalls).toBe(0);
+  expect(onIntent).not.toHaveBeenCalled(); unsubscribe?.(); store.destroy();
+});
+
+test.each([0, NaN, Infinity])('explicit resync reloads unavailable metadata with duration=%s without creating a shared command', async duration => {
+  const { room, audio, store, onIntent } = setup(undefined, { now: () => 10_000 });
+  const initial = { ...frame(0), status: 'paused' as const, positionSeconds: 5, anchorMonotonicMs: 10_000 };
+  await room.apply(initial); audio.readyState = 1; audio.currentSrc = audio.src; audio.duration = duration;
+  await room.resync();
+  expect(audio.loadCalls).toBe(2); expect(audio.src).toBe(queue[0].streamUrl);
+  audio.duration = 120; audio.ready();
+  expect(audio.currentTime).toBe(5); expect(audio.playCalls).toBe(0);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('persistent media failure stays unready and cannot trigger an automatic source retry', async () => {
+  vi.useFakeTimers();
+  const { room, audio, store, onObservation, onIntent } = setup(); audio.duration = 120;
+  const initial = { ...frame(0), status: 'playing' as const, positionSeconds: 0, anchorMonotonicMs: 10_000, playbackAllowed: true };
+  await room.apply(initial);
+  audio.currentSrc = audio.src; audio.error = { code: 2 }; audio.emit('error');
+  await room.resync();
+  audio.currentSrc = audio.src; audio.error = { code: 2 }; audio.readyState = 4; audio.emit('error');
+  for (const event of ['loadedmetadata', 'canplay', 'seeked', 'timeupdate']) audio.emit(event);
+  audio.paused = false; audio.emit('playing');
+  await room.apply({ ...initial, revision: initial.revision + 1, playbackEpoch: initial.playbackEpoch + 1 });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(room.correct(30)).toBe('none');
+  expect(audio.loadCalls).toBe(2); expect(audio.playCalls).toBe(0);
+  expect(onObservation.mock.calls.some(([value]) => value.type === 'ready')).toBe(false);
+  expect(store.getSnapshot().error).toMatchObject({ code: 'network' });
+  expect(audio.paused).toBe(true);
+  expect(onIntent).not.toHaveBeenCalled();
+  store.destroy();
+});
+
+test('an initial load with no metadata can be retried explicitly while the shared room stays paused', async () => {
+  const { room, audio, store, onObservation, onIntent } = setup();
+  await room.apply({ ...frame(0), status: 'paused', positionSeconds: 0 });
+  expect(audio.readyState).toBe(0); expect(audio.error).toBeNull();
+  await room.resync();
+  expect(audio.loadCalls).toBe(2); expect(onObservation).not.toHaveBeenCalled();
+  audio.ready();
+  expect(audio.playCalls).toBe(0);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }));
+  expect(onIntent).not.toHaveBeenCalled(); store.destroy();
+});
+
+test('a rejected explicit source installation remains fenced without retrying automatically', async () => {
+  vi.useFakeTimers();
+  const { room, audio, install, ready, onObservation, onIntent } = setupSourceRetry();
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true });
+  audio.error = { code: 2 };
+  install.mockRejectedValueOnce(new Error('Synthetic source installation failure.'));
+  await room.resync();
+  expect(audio.paused).toBe(true);
+  expect(onObservation.mock.calls.filter(([value]) => value.type === 'media-failed')).toHaveLength(1);
+  audio.error = null; ready();
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(install).toHaveBeenCalledTimes(2); expect(audio.playCalls).toBe(0);
+  expect(onObservation.mock.calls.some(([value]) => value.type === 'ready')).toBe(false);
+  await room.resync();
+  expect(install).toHaveBeenCalledTimes(2); expect(audio.playCalls).toBe(1);
+  expect(onObservation.mock.calls.some(([value]) => value.type === 'ready')).toBe(true);
+  expect(onIntent).not.toHaveBeenCalled(); room.detach();
+});
+
+test('overlapping explicit retries share one load and a pause during that load survives its completion', async () => {
+  const { room, audio, install, ready, onIntent, onObservation } = setupSourceRetry();
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true });
+  audio.error = { code: 2 };
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const installSource = install.getMockImplementation()!;
+  install.mockImplementationOnce(async (...args) => { await installSource(...args); await pending; });
+  const retry = room.resync();
+  await room.resync();
+  expect(install).toHaveBeenCalledTimes(2);
+  ready(); expect(onObservation).not.toHaveBeenCalled();
+  room.pauseLocally(); finish(); await retry;
+  expect(audio.playCalls).toBe(0); expect(audio.paused).toBe(true);
+  await room.resync();
+  expect(install).toHaveBeenCalledTimes(2); expect(audio.playCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('an expired installation cannot release ownership of a newer retry for the same occurrence', async () => {
+  vi.useFakeTimers();
+  const { room, audio, install, ready, onIntent } = setupSourceRetry();
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true, anchorMonotonicMs: 10_000 });
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const installSource = install.getMockImplementation()!;
+  install.mockImplementationOnce(async (...args) => { await installSource(...args); await pending; });
+  const expired = room.resync();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(install).toHaveBeenCalledTimes(2);
+  await room.resync(); expect(install).toHaveBeenCalledTimes(3);
+  finish(); await expired; await room.resync();
+  expect(install).toHaveBeenCalledTimes(3); expect(audio.playCalls).toBe(0);
+  ready(); expect(audio.playCalls).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled(); room.detach();
+});
+
+test('a physical-source change clears native load ownership and ignores its stale callbacks', async () => {
+  vi.useFakeTimers();
+  const { room, controller, audio, install, ready, onObservation, changePhysicalSource } = setupSourceRetry();
+  await room.apply({ ...frame(0), status: 'playing', playbackAllowed: true, anchorMonotonicMs: 10_000 });
+  await room.resync(); expect(vi.getTimerCount()).toBe(1);
+  changePhysicalSource(); ready();
+  expect(vi.getTimerCount()).toBe(0); expect(onObservation).not.toHaveBeenCalled();
+  expect(audio.playCalls).toBe(0);
+  audio.readyState = 0; await room.resync();
+  expect(install).toHaveBeenCalledTimes(3);
+  expect(controller.observe('playing', audio)).toBe(false);
+  room.detach();
+});
+
+test('a same-occurrence preparation completion during explicit retry uses the latest readiness permission', async () => {
+  const { room, audio, install, ready, onObservation, onIntent } = setupSourceRetry();
+  const initial = { ...frame(0), status: 'preparing' as const, playbackAllowed: false, positionSeconds: 5, anchorMonotonicMs: 10_000 };
+  await room.apply(initial); audio.error = { code: 2 };
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const installSource = install.getMockImplementation()!;
+  install.mockImplementationOnce(async (...args) => { await installSource(...args); await pending; });
+  const retry = room.resync();
+  await room.apply({ ...initial, revision: initial.revision + 1, status: 'playing', playbackAllowed: true });
+  ready(); expect(onObservation).not.toHaveBeenCalled();
+  finish(); await retry;
+  expect(audio.currentTime).toBe(5); expect(audio.playCalls).toBe(1);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready', playbackEpoch: initial.playbackEpoch }));
+  expect(install).toHaveBeenCalledTimes(2); expect(onIntent).not.toHaveBeenCalled(); room.detach();
+});
+
+test('synchronous controller detachment while pausing cannot begin an explicit source retry', async () => {
+  const { room, audio, install, port, onIntent } = setupSourceRetry();
+  await room.apply(frame(0)); audio.error = { code: 2 };
+  const pause = port.pause;
+  port.pause = () => { pause(); room.detach(); };
+  await room.resync();
+  expect(install).toHaveBeenCalledTimes(1); expect(audio.playCalls).toBe(0);
+  expect(onIntent).not.toHaveBeenCalled();
+});
+
+test.each(['replacement', 'controller', 'account', 'physical-source'] as const)('%s transition fences a pending explicit source retry and its late callbacks', async transition => {
+  const { room, controller, audio, install, port, ready, onIntent, onObservation, changePhysicalSource } = setupSourceRetry();
+  const initial = { ...frame(0), status: 'playing' as const, playbackAllowed: true, anchorMonotonicMs: 10_000 };
+  await room.apply(initial); audio.error = { code: 2 };
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const installSource = install.getMockImplementation()!;
+  install.mockImplementationOnce(async (...args) => { await installSource(...args); await pending; });
+  const retry = room.resync(); ready(); expect(onObservation).not.toHaveBeenCalled();
+  let unsubscribe: (() => void) | undefined;
+  let replacement: ReturnType<typeof createRoomPlaybackController> | undefined;
+  if (transition === 'replacement') {
+    await room.apply({ ...initial, revision: initial.revision + 1, playbackEpoch: initial.playbackEpoch + 1,
+      currentEntryId: 'entry-b', mediaRevision: 'replacement-revision', positionSeconds: 12,
+      queue: [queue[0], { ...queue[1], streamUrl: '/replacement-pinned.wav' }, queue[2]] });
+    ready();
+  } else if (transition === 'account') {
+    unsubscribe = subscribeToAccountEpoch(() => room.detach()); advanceAccountEpoch();
+  } else if (transition === 'controller') {
+    room.detach();
+    replacement = createRoomPlaybackController(port, { now: () => 10_000, onIntent, onObservation });
+    await replacement.attachment.apply({ ...initial, currentEntryId: 'entry-b', status: 'paused', positionSeconds: 12 });
+    audio.currentSrc = audio.src; audio.readyState = 4;
+    replacement.observe('loadedmetadata', audio);
+  }
+  else changePhysicalSource();
+  const reports = onObservation.mock.calls.length, plays = audio.playCalls, position = audio.currentTime;
+  finish(); await retry;
+  if (transition === 'replacement') audio.currentSrc = queue[0].streamUrl;
+  for (const event of ['loadedmetadata', 'canplay', 'seeked', 'playing']) controller.observe(event, audio);
+  expect(onObservation).toHaveBeenCalledTimes(reports); expect(audio.playCalls).toBe(plays);
+  expect(audio.currentTime).toBe(position); expect(onIntent).not.toHaveBeenCalled();
+  unsubscribe?.(); replacement?.attachment.detach(); room.detach();
+});
+
 test('superseded scheduled starts and detached handles cannot resume or overwrite the current room', async () => {
   vi.useFakeTimers();
   const { room, audio, store } = setup();
@@ -495,6 +876,7 @@ test('overlapping installs retain the newer entry and old-source metadata cannot
   await Promise.all([first, second]);
   audio.currentSrc = queue[0].streamUrl;
   audio.readyState = 4;
+  audio.error = { code: 2 }; audio.emit('error'); audio.error = null;
   audio.emit('loadedmetadata'); audio.emit('seeked'); audio.emit('playing');
   expect(onObservation).not.toHaveBeenCalled();
   expect(store.getSnapshot().currentItem?.id).toBe(queue[1].id);

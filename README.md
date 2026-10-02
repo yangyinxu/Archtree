@@ -288,8 +288,11 @@ AAC-LC M4A fixtures through the production storage lifecycle. It checks pinned
 HEAD/Range responses, real decoding, readiness, seeking, cross-format advancement
 and absence of command echoes. In Linux CI (`CI=true` or `CI=1`), the same
 scenario also runs with Firefox and WebKit hosts, each paired with an isolated
-Chromium guest and its own server/database. These extra projects are never
-collected on macOS; browser-specific results remain separate from Chromium proof.
+Chromium guest and its own server/database. Dedicated Firefox/WebKit room projects
+also verify explicit controller recovery after reload and host transfer during
+playback, with both participants using the selected engine. These extra projects
+are collected only on Linux CI; browser-specific results remain separate from
+Chromium proof. Chromium retains the separate strict native-background scenario.
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
 It corrects startup drift after credible media-clock advancement. A corrective
@@ -298,8 +301,9 @@ play startup. At most two additional seeks per playback occurrence may compensat
 the measured delay, within six seconds of the first compensation. The second
 allows one refinement when the first measured decoder delay changes; concurrent
 heartbeat corrections update the clock reference
-without interrupting that observation. Measurements expire after three seconds
-and accept only delays from zero to two seconds. Later ordinary heartbeat
+without interrupting that observation. Measurements expire after three seconds.
+Valid finite, non-negative delays within that window are retained, while
+predictive lead is capped at two seconds. Later ordinary heartbeat
 corrections can reuse the measured delay until the playback effect changes.
 All pending work is cancelled by local pause, authority loss, or source changes.
 A fully buffered Audio decoder that stays paused with only current-frame data after a
@@ -514,6 +518,13 @@ Required variables:
 - `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
 
+Audio/Video playback GETs may wait up to two seconds when an older stream still
+occupies a media slot. This fixed pending pool allows 32 requests per process and
+eight per IP without raising active limits. HEAD and non-playback requests do not
+wait; a full or expired queue returns 429 with `Retry-After: 2`. Admission retains
+its slot until the response and tracked storage work both finish. Disconnecting a
+queued request cancels it before source validation or storage access.
+
 ### Naruto Mobile private analysis proxy
 
 The fixed API lives at `/naruto-mobile/api/v1`:
@@ -588,6 +599,9 @@ route exceeds the reviewed 150 KiB gzip budget. It also caps the complete
 emitted stylesheet payload at 32 KiB gzip, emitted fonts at 128 KiB, bundled
 images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
 continues to load through listener DTOs rather than being bundled into the app.
+Production CSS Modules use compact scoped identifiers; development and test
+builds retain readable defaults. Exported module keys and style declarations are
+unchanged, and `test/finitudeWebBuildPolicy.test.ts` exercises the real transform.
 
 To test MediaTrack replacement locally, sign in as an administrator at
 `http://localhost:8080/content/manage`, create or select a MediaTrack, and use
@@ -741,6 +755,61 @@ npm run test:media-load
 Run this only in an environment approved for load testing. The harness models
 concurrent clients from one runner; release evidence still needs approved
 multi-source staging traffic against the real media store.
+
+### Verify sustained Audio rooms locally
+
+After `npm ci`, `npm run doctor`, and `npm run build`, run
+`npm run test:soak:rooms`. This separate gate defaults to two members and 30
+minutes, using real browser media clocks, authenticated HTTP, WebSockets, an owned
+MongoDB replica set, and a loopback S3 protocol fixture. It never uses configured
+application databases or external storage, and Chromium hardware audio stays disabled.
+Ports 4187 and 4188 must be free.
+
+```powershell
+$env:FINITUDE_ROOM_SOAK_SECONDS = '1800'
+$env:FINITUDE_ROOM_SOAK_CYCLE_SECONDS = '45'
+$env:FINITUDE_ROOM_SOAK_MEMBERS = '2'
+npm run test:soak:rooms
+```
+
+Duration accepts 60–28,800 seconds; cycle spacing accepts 15–300 seconds and cannot
+exceed duration; members accept 2–8. Invalid settings fail before startup. The
+duration/spacing combination must also fit the real retained mutation budget;
+use the default 45-second spacing for eight hours. Reload/device recovery is
+capped at 16 per run to respect daily scope issuance, after which that cycle
+continues local pause/resume checks. No production quota is reset or relaxed.
+Every run first proves reload without autoplay or automatic takeover, followed by
+explicit **Use this device** recovery. Timed cycles repeat local pause during
+shared selection, shared pause/play, and device recovery. Each shared gesture
+honors previously observed `Retry-After` and published shared-IP request-window
+headroom before dispatch, sends one command, and must receive an
+applied outcome and the exact selected entry or transport state; continued
+playback of an old entry cannot count as a successful selection. The gate checks actual
+media-clock advancement and capture-time-adjusted pairwise drift against the
+existing 750 ms browser-test tolerance. Closing participants must release all
+upgrade transports, active media requests, and pending playback reads. A capability-protected loopback
+control plane confirms fixture resource cleanup before Windows runner termination.
+
+Evidence under ignored `web/test-results/room-soak` contains bounded aggregate
+counts, fixed-route HTTP failure/admission counts, application-fixture Node
+process RSS/heap extrema, drift, and
+cleanup status; it excludes account/media IDs,
+URLs, private payloads, raw exceptions, and a growing frame/trace history. Run this
+gate separately from builds and other load generators. Memory extrema describe
+that application process, exclude browser/MongoDB/whole-machine memory, and do
+not establish absence of leaks. A local pass does not
+certify AWS/S3 capacity, physical audio, branded browsers, or a longer duration.
+Multiple contexts share one loopback source IP and the real per-IP admission
+limits; a playback pass does not imply that every background HTTP read succeeded.
+Room GET/HEAD work is capped at four/IP and 40/process within the unchanged total
+six/IP and 48/process HTTP pool, reserving capacity from read bursts for explicit
+controls and tickets. All room requests still share the 180/minute/IP window;
+other writes can still consume the shared concurrency capacity.
+Increasing members to eight is an admission/capacity stress case, not a guaranteed
+passing profile: concurrent replacement media requests can overlap old requests
+at the per-IP media ceiling, while snapshot-triggered reads also compete for room
+HTTP capacity. Preserve any resulting 429 and playback failure as evidence; do not
+raise quotas or drop participant assertions to obtain a pass.
 
 ## AWS CodeBuild
 

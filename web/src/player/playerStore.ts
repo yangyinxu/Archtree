@@ -139,6 +139,8 @@ export const createPlayerStore = (
   let lastReportedPlaybackError = '';
   let playOrder: number[] = [];
   let playOrderPosition = -1;
+  let upcomingOrder: readonly number[] | undefined;
+  let upcomingPosition = -1;
   let actualHistory: number[] = [];
   let actualHistoryPosition = -1;
   const mediaSurfaceHosts: HTMLElement[] = [];
@@ -216,12 +218,16 @@ export const createPlayerStore = (
 
   const syncMediaSession = () => mediaSession.sync(snapshot, audio);
 
-  const updateSnapshot = (patch: Partial<PlayerSnapshot>) => {
-    if (destroyed) return;
+  /** Immutable queue/order references keep clock and transport updates independent of queue derivation. */
+  const upcomingItems = (candidate: PlayerSnapshot, validIndex: boolean) => {
+    if (candidate.queue === snapshot.queue
+      && candidate.currentIndex === snapshot.currentIndex
+      && candidate.repeatMode === snapshot.repeatMode
+      && upcomingOrder === playOrder
+      && upcomingPosition === playOrderPosition) return snapshot.upNextItems;
 
-    const candidate = { ...snapshot, ...patch };
-    const validIndex = candidate.currentIndex >= 0
-      && candidate.currentIndex < candidate.queue.length;
+    upcomingOrder = playOrder;
+    upcomingPosition = playOrderPosition;
     const upcomingIndices = !validIndex
       ? []
       : candidate.repeatMode === 'one'
@@ -234,9 +240,18 @@ export const createPlayerStore = (
                 : [])
             ]
           : [];
-    const upNextItems = Object.freeze(upcomingIndices
+    return Object.freeze(upcomingIndices
       .filter((index) => index >= 0 && index < candidate.queue.length)
       .map((index) => candidate.queue[index]));
+  };
+
+  const updateSnapshot = (patch: Partial<PlayerSnapshot>) => {
+    if (destroyed) return;
+
+    const candidate = { ...snapshot, ...patch };
+    const validIndex = candidate.currentIndex >= 0
+      && candidate.currentIndex < candidate.queue.length;
+    const upNextItems = upcomingItems(candidate, validIndex);
     const next: PlayerSnapshot = Object.freeze({
       ...candidate,
       currentIndex: validIndex ? candidate.currentIndex : -1,
@@ -866,6 +881,7 @@ export const createPlayerStore = (
         snapshot.shuffleEnabled,
         snapshot.repeatMode
       );
+      upcomingOrder = undefined;
       notify();
 
       if (audio) {

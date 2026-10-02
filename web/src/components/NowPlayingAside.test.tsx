@@ -1,4 +1,5 @@
 import { act, render, screen, within } from '@testing-library/react';
+import { Profiler } from 'react';
 
 import { createPlayerStore } from '../player';
 import type { PlayerAudio, PlayerQueueItem, PlayerStore } from '../player';
@@ -109,3 +110,30 @@ test('a Video MediaTrack shows the playback queue and no media-mode switch', asy
   expect(audio.src).toBe('/video/still-water.mp4');
   expect(audioFactory).toHaveBeenCalledTimes(1);
 });
+
+test('a 500-entry Video queue has zero panel commits during 500 elapsed-clock updates', async () => {
+  const audio = new AsideAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  stores.push(store);
+  const largeQueue = Array.from({ length: 500 }, (_, index) => ({
+    ...tracks[0], id: `large-${index}`, title: `Track ${index}`, mediaType: 'video' as const,
+    streamUrl: `/video/${index}.mp4`, artworkUrl: ''
+  }));
+  await store.launchQueue(largeQueue, 0, { autoplay: false });
+  const onRender = vi.fn();
+  render(<Profiler id="queue" onRender={onRender}><NowPlayingAside store={store} /></Profiler>);
+  expect(screen.getAllByRole('listitem')).toHaveLength(499);
+  onRender.mockClear();
+
+  for (let tick = 1; tick <= 500; tick += 1) {
+    act(() => { audio.currentTime = tick; audio.emit('timeupdate'); });
+  }
+
+  expect(store.getSnapshot().currentTime).toBe(500);
+  expect(onRender.mock.calls.length).toBe(0);
+  act(() => { store.toggleShuffle(); });
+  expect(onRender).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('Shuffled order')).toBeInTheDocument();
+  await act(async () => { await store.next(); });
+  expect(screen.getByRole('heading', { name: store.getSnapshot().currentItem!.title })).toBeInTheDocument();
+}, 30_000);

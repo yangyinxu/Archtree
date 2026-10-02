@@ -1,9 +1,9 @@
 import { Artwork } from './Artwork';
 import {
   playerStore,
-  usePlayer,
   type PlayerStore
 } from '../player';
+import { usePlayerQueue } from '../player/usePlayerQueue';
 import styles from './NowPlayingAside.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 
@@ -14,7 +14,7 @@ interface NowPlayingAsideProps {
 
 /** Presents read-only playback context without owning media, queue, or activity writes. */
 export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) => {
-  const player = usePlayer(store);
+  const player = usePlayerQueue(store);
   const { t } = useLocalization();
   const current = player.currentItem;
   const artistLabel = (item: { displayByline?: string; artistNames: readonly string[] }) =>

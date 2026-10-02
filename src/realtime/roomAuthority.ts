@@ -11,12 +11,18 @@ const integralCounters = { $and: [
     { $eq: ['$epoch', { $trunc: '$epoch' }] }, { $eq: ['$fence', { $trunc: '$fence' }] }
 ] };
 /** One process owns room scheduling; every transport/timer commit also writes this live database fence. */
-export const createRoomAuthority = (owner = randomUUID()) => {
+export const createRoomAuthority = (owner: string = randomUUID()) => {
     let epoch: number | null = null;
     const leases = () => {
         const db = getDb();
         if (!db) throw new SocialError(503, 'room_authority_unavailable');
         return db.collection<Lease>('socialAuthority');
+    };
+    const liveLease = (captured: number) => ({ _id: 'rooms-v1', owner, epoch: captured, fence: boundedCounter,
+        $expr: { $and: [{ $gt: ['$expiresAt', '$$NOW'] }, integralCounters] } });
+    const captureEpoch = () => {
+        if (epoch === null || !Number.isSafeInteger(epoch) || epoch < 1) throw new SocialError(503, 'room_authority_unavailable');
+        return epoch;
     };
     return {
         /** MongoDB time decides lease expiry; a retired process cannot rely on its local clock. */
@@ -45,11 +51,18 @@ export const createRoomAuthority = (owner = randomUUID()) => {
                 throw new SocialError(503, 'room_authority_unavailable');
             }
         },
+        /** A no-op sweep may inspect the complete live lease predicate without writing its fence. */
+        async inspect(session: ClientSession): Promise<number> {
+            if (!session.inTransaction()) throw new SocialError(503, 'room_authority_unavailable');
+            const captured = captureEpoch();
+            const lease = await leases().findOne(liveLease(captured), { session, projection: { _id: 1 } });
+            if (!lease) throw new SocialError(503, 'room_authority_unavailable');
+            return captured;
+        },
         async assert(session: ClientSession): Promise<number> {
-            if (!session.inTransaction() || epoch === null || !Number.isSafeInteger(epoch) || epoch < 1) throw new SocialError(503, 'room_authority_unavailable');
-            const captured = epoch;
-            const result = await leases().updateOne({ _id: 'rooms-v1', owner, epoch: captured, fence: boundedCounter,
-                $expr: { $and: [{ $gt: ['$expiresAt', '$$NOW'] }, integralCounters] } }, { $inc: { fence: 1 } }, { session });
+            if (!session.inTransaction()) throw new SocialError(503, 'room_authority_unavailable');
+            const captured = captureEpoch();
+            const result = await leases().updateOne(liveLease(captured), { $inc: { fence: 1 } }, { session });
             if (!result.matchedCount) throw new SocialError(503, 'room_authority_unavailable');
             return captured;
         },
@@ -66,3 +79,4 @@ export const createRoomAuthority = (owner = randomUUID()) => {
 
 export const roomAuthority = createRoomAuthority();
 export const assertRoomAuthority = (session: ClientSession) => roomAuthority.assert(session);
+export const inspectRoomAuthority = (session: ClientSession) => roomAuthority.inspect(session);

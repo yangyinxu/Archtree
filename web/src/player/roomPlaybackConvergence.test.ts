@@ -125,6 +125,26 @@ test('pending heartbeat corrections refresh the latest authority without writes 
   expect(target.currentTime).toBeCloseTo(34); // Ordinary heartbeats retain, but do not accumulate, the learned delay.
 });
 
+test.each([
+  { latency: 2.066688, completionMs: 623, progressMs: 1626, advancedSeconds: 0.182312 },
+  { latency: 2.058257, completionMs: 488, progressMs: 1613, advancedSeconds: 0.042743 },
+  { latency: 2.041669, completionMs: 274, progressMs: 1812, advancedSeconds: 0.044331 }
+])('a valid $latency second decoder delay converges with at most two seconds of predictive lead', async sample => {
+  const { room, target, seek, seeked, advance, onIntent } = await setup();
+  room.correct(21);
+  await advance(sample.completionMs); seeked();
+  await advance(sample.progressMs, sample.advancedSeconds);
+  const observedSeconds = (sample.completionMs + sample.progressMs) / 1000;
+  expect(seek).toHaveBeenCalledTimes(2);
+  expect(target.currentTime).toBeCloseTo(21 + observedSeconds + 2);
+  await advance(sample.completionMs); seeked();
+  await advance(sample.progressMs, sample.advancedSeconds);
+  expect(Math.abs(21 + observedSeconds * 2 - target.currentTime)).toBeCloseTo(sample.latency - 2);
+  expect(Math.abs(21 + observedSeconds * 2 - target.currentTime)).toBeLessThan(0.15);
+  expect(seek).toHaveBeenCalledTimes(2); expect(target.play).toHaveBeenCalledTimes(1);
+  expect(onIntent).not.toHaveBeenCalled();
+});
+
 test('a short first seek followed by stable longer seeks converges within two measured follow-ups', async () => {
   const { room, target, seek, seeked, advance, emit, onIntent } = await setup();
   room.correct(21); seeked(); await advance(650); await advance(100, 0.1);
@@ -159,6 +179,43 @@ test('continually changing latency stops automatic correction after two follow-u
   seeked(); await advance(1000); await advance(100, 0.1);
   expect(seek).toHaveBeenCalledTimes(4); // Ordinary heartbeats remain possible; they do not refill the automatic budget.
 });
+
+test('valid delays above two seconds preserve the two-follow-up budget across later heartbeats', async () => {
+  const { room, target, seek, seeked, advance, onIntent } = await setup();
+  room.correct(21); seeked(); await advance(2100); await advance(100, 0.1);
+  expect(target.currentTime).toBeCloseTo(25.2); expect(seek).toHaveBeenCalledTimes(2);
+  seeked(); await advance(300); await advance(100, 0.1);
+  expect(target.currentTime).toBeCloseTo(23.9); expect(seek).toHaveBeenCalledTimes(3);
+  seeked(); await advance(2300); await advance(100, 0.1);
+  expect(seek).toHaveBeenCalledTimes(3);
+  expect(room.correct(40)).toBe('seek'); expect(target.currentTime).toBe(42);
+  seeked(); await advance(2100); await advance(100, 0.1);
+  expect(seek).toHaveBeenCalledTimes(4); expect(onIntent).not.toHaveBeenCalled();
+});
+
+test('a clamped predictive lead retains the actual slow-decoder near-end safety check', async () => {
+  const { room, target, seek, seeked, advance, onIntent } = await setup();
+  target.duration = 25.6;
+  room.correct(21); seeked(); await advance(2100); await advance(100, 0.1);
+  // Authority23.2 + actual delay2.1 reaches the end margin even though the capped two-second lead would fit.
+  expect(target.currentTime).toBeCloseTo(21.1); expect(seek).toHaveBeenCalledTimes(1);
+  expect(room.correct(24)).toBe('seek'); expect(target.currentTime).toBe(24);
+  expect(onIntent).not.toHaveBeenCalled();
+});
+
+test.each(['source change', 'physical source change', 'detach'] as const)(
+  '%s fences a valid late decoder measurement above two seconds', async cancellation => {
+    const { room, state, target, seek, seeked, advance, replacePhysicalSource, onIntent } = await setup();
+    room.correct(21); seeked(); await advance(2050);
+    if (cancellation === 'source change') await room.apply({ ...state, revision: 2, playbackEpoch: 2,
+      mediaRevision: 'mr_b', positionSeconds: 40, status: 'paused' });
+    if (cancellation === 'physical source change') replacePhysicalSource();
+    if (cancellation === 'detach') room.detach();
+    const count = seek.mock.calls.length;
+    target.paused = false; seeked(); await advance(100, 0.1);
+    expect(seek).toHaveBeenCalledTimes(count); expect(onIntent).not.toHaveBeenCalled();
+  }
+);
 
 test.each(['local pause', 'shared pause', 'permission loss', 'source change', 'physical source change', 'detach', 'native pause'] as const)(
   '%s fences late convergence callbacks', async cancellation => {
@@ -320,7 +377,7 @@ test.each([20.4, 21])('direct correction to %s rechecks readiness after restorin
   expect(seek).not.toHaveBeenCalled();
 });
 
-test.each(['error', 'ended'] as const)('%s prevents rate-deadline seek even when the element remains ready and unpaused', async event => {
+test.each(['error', 'ended'] as const)('%s prevents rate-deadline seek even when the element retains decoded data', async event => {
   const { room, target, seek, advance, emit } = await setup();
   await advance(100, 0.1);
   expect(room.correct(20.4)).toBe('rate');
@@ -329,7 +386,7 @@ test.each(['error', 'ended'] as const)('%s prevents rate-deadline seek even when
   emit(event);
   await advance(4000);
   expect(target.readyState).toBe(4);
-  expect(target.paused).toBe(false);
+  expect(target.paused).toBe(event === 'error');
   expect(target.playbackRate).toBe(1);
   expect(seek).not.toHaveBeenCalled();
 });
@@ -356,7 +413,7 @@ test('already-normal rate is not reassigned by no-op heartbeat corrections', asy
   expect(writeRate).not.toHaveBeenCalled();
 });
 
-test.each(['excessive delay', 'clock jump', 'changed rate', 'inaccurate seek', 'near end'] as const)(
+test.each(['expired observation', 'clock jump', 'changed rate', 'inaccurate seek', 'near end'] as const)(
   '%s cannot produce a latency-compensated follow-up', async condition => {
     const { room, target, seek, seeked, advance } = await setup();
     if (condition === 'near end') target.duration = 22.5;
@@ -364,7 +421,7 @@ test.each(['excessive delay', 'clock jump', 'changed rate', 'inaccurate seek', '
     if (condition === 'inaccurate seek') target.currentTime += 1;
     seeked();
     if (condition === 'changed rate') target.playbackRate = 1.05;
-    await advance(condition === 'excessive delay' ? 2100 : 1000);
+    await advance(condition === 'expired observation' ? 3000 : 1000);
     await advance(100, condition === 'clock jump' ? 5 : 0.1);
     expect(seek).toHaveBeenCalledTimes(1);
   }

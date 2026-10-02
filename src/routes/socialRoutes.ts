@@ -182,7 +182,7 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
     // Never fall through to an unrelated router or HTML document for a private API miss.
     router.use((_req, _res, next) => next(new SocialError(404, 'not_found')));
     router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
-        if (res.headersSent) return next(error);
+        if (res.headersSent || res.destroyed || res.writableEnded) return next(error);
         const parserError = error as { type?: string; status?: number } | undefined;
         const known = error instanceof SocialError ? error
             : parserError?.type === 'entity.too.large' ? new SocialError(413, 'request_too_large')

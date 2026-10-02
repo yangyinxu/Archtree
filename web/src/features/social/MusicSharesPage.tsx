@@ -7,7 +7,6 @@ import { getSocialProfile } from '../../api/socialProfile';
 import { getMusicShares, type MusicShareDirection, type MusicShareItem } from '../../api/musicShares';
 import { saveStatusesQuery } from '../../api/listener';
 import { Artwork } from '../../components/Artwork';
-import { SaveButton } from '../../components/SaveButton';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { MusicShareRecovery, useShareActions } from './MusicShareRecovery';
 import { musicShareSession } from './musicShareSession';
@@ -16,6 +15,8 @@ import styles from './SocialPage.module.css';
 
 const RoomStatus = lazy(() => import('./MusicShareRoomActions').then(module => ({ default: module.MusicShareRoomStatus })));
 const Invite = lazy(() => import('./MusicShareRoomActions').then(module => ({ default: module.MusicShareInvite })));
+// A populated inbox loads Save's mutation machinery without adding it to the route's initial dependency graph.
+const SaveButton = lazy(() => import('../../components/SaveButton').then(module => ({ default: module.SaveButton })));
 
 const ShareList = ({ viewerId, direction }: { viewerId: string; direction: MusicShareDirection }) => {
   const { t } = useLocalization();
@@ -72,7 +73,7 @@ const ShareList = ({ viewerId, direction }: { viewerId: string; direction: Music
               </div>
               <div className={styles.actions}>
                 {item.content && <><button className={styles.button} disabled={roomActive || playing === item.shareId} onClick={() => void play(item)}>{t('common.action.play')}</button>
-                  <SaveButton viewerId={viewerId} target={{ contentType: item.contentType, contentId: item.contentId }} saved={saved} />
+                  <Suspense fallback={null}><SaveButton viewerId={viewerId} target={{ contentType: item.contentType, contentId: item.contentId }} saved={saved} /></Suspense>
                   {item.contentType === 'album' && <Link to={`/albums/${item.contentId}`}>{t('common.label.album')}</Link>}</>}
                 <button className={styles.secondary} disabled={blocked} onClick={() => {
                   if (item.expiresAtMs > Date.now()) void musicShareSession.run({ action: direction === 'incoming' ? 'dismissMusicShare' : 'withdrawMusicShare', shareId: item.shareId });
