@@ -18,11 +18,15 @@ const identity = { scopeToken: 'synthetic-signed-scope-token', commandId: 'synth
 const card = { socialId, handle: 'alice_123', alias: 'Alice', iconSeed: socialId };
 const result: SocialOutcome = { commandId: identity.commandId, outcome: 'applied', replayed: false };
 
-/** Supplies only an explicit synthetic identity; real middleware mounting has a separate HTTP assertion. */
-const authenticate: RequestHandler = (req, res, next) => {
-    if (req.get('x-test-auth') === 'missing') return res.status(401).json({ code: 'login_required' });
-    (req as AuthenticatedRequest).auth = { ...actor, email: 'private@example.test', role: 'user',
-        ...(req.get('x-test-auth') === 'legacy' ? { sessionId: undefined } : {}) };
+/**
+ * Supplies only an explicit synthetic identity and, like production, never rejects; the router's real
+ * requireAuth turns a missing identity into 401. Real middleware mounting has a separate HTTP assertion.
+ */
+const resolveIdentity: RequestHandler = (req, _res, next) => {
+    if (req.get('x-test-auth') !== 'missing') {
+        (req as AuthenticatedRequest).auth = { ...actor, userId: req.get('x-test-account') ?? actor.userId,
+            email: 'private@example.test', role: 'user', ...(req.get('x-test-auth') === 'legacy' ? { sessionId: undefined } : {}) };
+    }
     next();
 };
 
@@ -59,7 +63,7 @@ const listen = async (t: TestContext, api: SocialApi) => {
     resetRateLimitWindowsForTests();
     const app = express();
     app.use(requireSameOriginCookieMutation);
-    app.use('/api/social/v1', createSocialRouter({ api, authenticate }));
+    app.use('/api/social/v1', createSocialRouter({ api, resolveIdentity }));
     app.use((_error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
         res.status(500).json({ message: 'The service could not complete the request.' });
     });
@@ -431,7 +435,7 @@ test('disabled social admission leaves safety actions and outcome lookup reachab
     assert.equal((await request('/profiles?handle=alice_123')).status, 503);
 });
 
-test('IP rate protection returns a retry delay before invoking further service work', async t => {
+test('account rate protection returns a retry delay before service work without throttling another account on the same IP', async t => {
     const { api, actors } = fixtureApi();
     const { request } = await listen(t, api);
     for (let i = 0; i < 120; i += 1) assert.equal((await request('/me/profile')).status, 200);
@@ -440,6 +444,29 @@ test('IP rate protection returns a retry delay before invoking further service w
     assert.ok(Number(response.headers.get('retry-after')) > 0);
     assert.equal((await response.json()).code, 'rate_limited');
     assert.equal(actors.length, 120);
+    // Both accounts share the loopback address; only the exhausted account is throttled.
+    const other = await request('/me/profile', undefined, { headers: { 'x-test-account': 'synthetic-other-account' } });
+    assert.equal(other.status, 200);
+    assert.equal(other.headers.get('ratelimit-limit'), '120');
+    assert.equal(other.headers.get('ratelimit-remaining'), '119');
+    assert.deepEqual(actors.at(-1), { ...actor, userId: 'synthetic-other-account' });
+    assert.equal((await request('/me/profile')).status, 429);
+});
+
+test('unauthenticated social requests fall back to an IP window that cannot spend an account budget', async t => {
+    const { api, actors } = fixtureApi();
+    const { request } = await listen(t, api);
+    const anonymous = { headers: { 'x-test-auth': 'missing' } };
+    for (let i = 0; i < 120; i += 1) assert.equal((await request('/me/profile', undefined, anonymous)).status, 401);
+    const denied = await request('/me/profile', undefined, anonymous);
+    assert.equal(denied.status, 429);
+    assert.ok(Number(denied.headers.get('retry-after')) > 0);
+    assert.equal((await denied.json()).code, 'rate_limited');
+    assert.equal(actors.length, 0);
+    const authenticated = await request('/me/profile');
+    assert.equal(authenticated.status, 200);
+    assert.equal(authenticated.headers.get('ratelimit-remaining'), '119');
+    assert.deepEqual(actors, [actor]);
 });
 
 test('real application mounts social authentication before its general body parser', async t => {

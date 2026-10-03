@@ -269,10 +269,12 @@ reconciliation tool.
 
 Run `npm test`, `npm run build`, `npm run test:integration`, and
 `npm run test:e2e:social --workspace @archtree/finitude-web` for the real
-MongoDB/S3/WebSocket browser flows. Each social scenario owns a
-disposable server, database and object store, including a separate rate-limit
-window. Keep the ordinary listener E2E gate for playback continuity, navigation
-and accessibility changes. The social E2E uses a disposable
+MongoDB/S3/WebSocket browser flows. Each social test owns a disposable
+server, database and object store, including separate rate-limit windows; the
+two rooms tests run as the `chromium-rooms` and `chromium-rooms-recovery`
+projects so neither can exhaust the other's per-IP room quota. Keep the
+ordinary listener E2E gate for playback continuity, navigation and
+accessibility changes. The social E2E uses a disposable
 headed Chromium profile to verify real background tab visibility; run it in a
 desktop session, or use `xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web`
 on Linux with Xvfb installed. All automated Chromium launches, including this

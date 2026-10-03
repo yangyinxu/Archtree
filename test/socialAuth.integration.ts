@@ -476,3 +476,30 @@ test('social rate denials and health diagnostics retain no private route, accoun
     const diagnosticText = `${JSON.stringify(health.requests)}${logEntries.join('')}`;
     for (const value of [owner.userId, owner.email, owner.token, marker]) assert.equal(diagnosticText.includes(value), false);
 });
+
+test('social request windows follow the database-verified account and count rejected credentials by IP', async () => {
+    const send = async (token: string | undefined, path = '/missing') => {
+        const response = await fetch(`${base}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        await response.arrayBuffer();
+        return response;
+    };
+    const owner = await account(); const neighbor = await account(); const revoked = await account();
+    for (let count = 0; count < 120; count += 1) assert.equal((await send(owner.token)).status, 404);
+    assert.equal((await send(owner.token)).status, 429);
+    // Every caller here shares the loopback address; a second account keeps its own full window.
+    const neighborProfile = await send(neighbor.token, '/me/profile');
+    assert.equal(neighborProfile.status, 200);
+    assert.equal(neighborProfile.headers.get('ratelimit-remaining'), '119');
+
+    // A revoked token is unauthenticated, so it spends the address window rather than its former account's.
+    await AuthSession.revokeById(revoked.userId, revoked.sessionId);
+    for (let count = 0; count < 120; count += 1) assert.equal((await send(revoked.token)).status, 401);
+    const denied = await fetch(`${base}/me/profile`, { headers: { Authorization: `Bearer ${revoked.token}` } });
+    assert.equal((await json<{ code: string }>(denied, 429)).code, 'rate_limited');
+    assert.equal((await send(undefined)).status, 429);
+    const renewed = await createSession({ _id: revoked.id, email: revoked.email, role: 'user' });
+    const renewedProfile = await send(renewed.accessToken, '/me/profile');
+    assert.equal(renewedProfile.status, 200);
+    assert.equal(renewedProfile.headers.get('ratelimit-remaining'), '119');
+    assert.equal((await send(neighbor.token, '/me/profile')).status, 200);
+});

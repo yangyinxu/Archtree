@@ -3,8 +3,10 @@ import test from 'node:test';
 import { EventEmitter } from 'node:events';
 
 import {
+    accountOrClientKey,
     authEmailAccountRateLimit,
     authRateLimit,
+    rateLimit,
     refreshClientRateLimit,
     refreshCredentialRateLimit,
     resetRateLimitWindowsForTests,
@@ -145,6 +147,32 @@ test('refresh and login draw from separate per-address buckets without loosening
     const refresh = admit(refreshClientRateLimit);
     assert.equal(refresh.capture.status, 429, 'refresh still has a per-address ceiling');
     assert.equal(refresh.capture.headers['RateLimit-Limit'], 600);
+});
+
+test('account-keyed windows separate accounts on one IP and fall back to the IP without an account', () => {
+    resetRateLimitWindowsForTests();
+    const limiter = rateLimit('account-key-test', 2, 60_000, undefined, accountOrClientKey);
+    const invoke = (ip: string, userId?: string) => {
+        const { capture, response } = responseCapture();
+        let admitted = false;
+        limiter({ ip, socket: {}, ...(userId ? { auth: { userId } } : {}) } as any, response as any, () => { admitted = true; });
+        return { admitted, capture };
+    };
+    const sharedAddress = '203.0.113.30';
+    assert.equal(invoke(sharedAddress, 'lorem-account').admitted, true);
+    assert.equal(invoke('198.51.100.30', 'lorem-account').admitted, true);
+    // A new address cannot refill an account budget.
+    assert.equal(invoke('192.0.2.30', 'lorem-account').capture.status, 429);
+    assert.equal(invoke(sharedAddress, 'ipsum-account').admitted, true);
+    assert.equal(invoke(sharedAddress).admitted, true);
+    assert.equal(invoke(sharedAddress).admitted, true);
+    assert.equal(invoke(sharedAddress).capture.status, 429);
+    assert.equal(invoke(sharedAddress, 'ipsum-account').admitted, true);
+    // An address that spells an account ID still draws from its own IP window.
+    assert.equal(invoke('dolor-account').admitted, true);
+    assert.equal(invoke(sharedAddress, 'dolor-account').admitted, true);
+    assert.equal(accountOrClientKey({ ip: sharedAddress, socket: {} } as any), `ip:${sharedAddress}`);
+    assert.equal(accountOrClientKey({ ip: sharedAddress, socket: {}, auth: { userId: 'lorem-account' } } as any), 'account:lorem-account');
 });
 
 test('analysis capacity bounds different administrators independently from upload capacity', () => {

@@ -7,16 +7,20 @@ import {
 import { MUSIC_SHARE_LIMITS, type MusicShareDirection } from '../contracts/socialMusicV1';
 import { LISTENING_LIMITS, parseListeningReport } from '../contracts/listeningV1';
 import {
-    AuthenticatedRequest, requireAuth, requireCurrentAccountViewer
+    attachOptionalAccessAuth, AuthenticatedRequest, requireAuth, requireCurrentAccountViewer
 } from '../middleware/authMiddleware';
 import {
-    asyncHandler, limitConcurrency, rateLimit, requireSecureAuthTransport
+    accountOrClientKey, asyncHandler, limitConcurrency, rateLimit, requireSecureAuthTransport
 } from '../middleware/requestProtectionMiddleware';
 
 interface SocialRouterOptions {
     api?: SocialApi;
-    /** Tests can supply identity; production always uses database-backed authentication. */
-    authenticate?: RequestHandler;
+    /**
+     * Resolves the caller without rejecting, before the request window is charged.
+     * Tests can supply identity; production always uses database-backed
+     * authentication, and `requireAuth` still rejects an unresolved caller.
+     */
+    resolveIdentity?: RequestHandler;
 }
 
 const invalid = () => new SocialError(400, 'invalid_request');
@@ -48,9 +52,18 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
         res.vary('X-Finitude-Account-Viewer');
         next();
     });
-    router.use(requireSecureAuthTransport, rateLimit('social-api', 120, 60_000,
-        (_req, res) => res.status(429).json({ code: 'rate_limited', message: 'Too many requests. Please try again later.' })));
-    router.use(options.authenticate ?? requireAuth, requireCurrentAccountViewer);
+    // Identity resolves first so the 120/minute window belongs to the verified
+    // account; listeners behind one NAT no longer share it. Unauthenticated
+    // requests, including revoked or expired tokens, are counted by IP and then
+    // rejected, so a stale token cannot spend its former account's budget.
+    // Authenticated requests over quota still pay the session and user lookups,
+    // like other authenticated routes, but never reach social service work.
+    // requireAuth reuses a resolved context and keeps the existing 401 bodies.
+    const requestWindow = rateLimit('social-api', 120, 60_000,
+        (_req, res) => res.status(429).json({ code: 'rate_limited', message: 'Too many requests. Please try again later.' }),
+        accountOrClientKey);
+    router.use(requireSecureAuthTransport, options.resolveIdentity ?? attachOptionalAccessAuth, requestWindow);
+    router.use(requireAuth, requireCurrentAccountViewer);
     router.use((req, res, next) => {
         try { actor(req); } catch (error) { return next(error); }
         // The viewer guard writes its generic privacy header; restore the stricter shared contract.

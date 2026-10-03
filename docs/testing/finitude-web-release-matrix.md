@@ -62,12 +62,13 @@ media-store suite is a separate release gate.
 
 ## Shared Audio recovery and sustained playback
 
-`npm run test:e2e:social --workspace @archtree/finitude-web -- --project=chromium-rooms`
-keeps the strict native-background case and independently verifies reload without
+`npm run test:e2e:social --workspace @archtree/finitude-web -- --project=chromium-rooms --project=chromium-rooms-recovery`
+keeps the strict native-background case in `chromium-rooms` and, in its own fixture
+process and rate windows, `chromium-rooms-recovery` independently verifies reload without
 autoplay or command echoes, simultaneous Next/selection arbitration, explicit
 device takeover, native HTTP 429 media failure and explicit pinned-source retry,
 and running host transfer without replacing the queue/timeline. Linux CI with `CI=true` or `CI=1` adds
-`firefox-rooms` and `webkit-rooms`, selecting the focused recovery/transfer case
+`firefox-rooms-recovery` and `webkit-rooms-recovery`, selecting the focused recovery/transfer case
 with both accounts in that project's engine. Preserve the CI null audio sink and
 Xvfb setup; these projects are deliberately absent from local Windows/macOS.
 Retries remain zero. A platform that keeps a genuinely background native page
@@ -95,6 +96,9 @@ retries:
 ```sh
 npm run test:e2e:social --workspace @archtree/finitude-web -- --project=chromium-rooms --project=chromium-audio-formats --grep "real room command races|uploaded MP3 and AAC"
 ```
+
+The rooms recovery case has since moved to its own project; the same selection is
+now `--project=chromium-rooms-recovery --project=chromium-audio-formats`.
 
 The eight-member, 600-second smoke gate completed 12 control cycles and five
 recovery checks. Its maximum sampled drift was 43.398 ms, and participant cleanup

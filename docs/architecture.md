@@ -218,10 +218,12 @@ new-scope replay.
 
 Durable budgets are 24 scopes/day, 30 new mutation attempts/minute and 120 reads/minute
 per account, plus 100 newly received requests/day. Profile deactivation cannot reset
-these counters. IP throttling and mutation concurrency limits provide additional
-request protection. Retained receipts permit 1,000 admission attempts plus 128
-safety receipts and a final reserved deactivation receipt; admission exhaustion
-therefore cannot consume the privacy-exit reserve. Retries consume no new receipt.
+these counters. A 120 requests/minute HTTP window per authenticated account (per IP
+for unauthenticated requests, including revoked or expired tokens) and per-IP
+mutation concurrency limits provide additional request protection. Retained
+receipts permit 1,000 admission attempts plus 128 safety receipts and a final
+reserved deactivation receipt; admission exhaustion therefore cannot consume the
+privacy-exit reserve. Retries consume no new receipt.
 Short request-rate limits still apply to safety operations.
 
 Each canonical pair stores both account/social IDs, independent directional

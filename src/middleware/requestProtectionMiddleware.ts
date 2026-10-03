@@ -1,6 +1,7 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express';
 import crypto from 'crypto';
 import { onRequestWorkComplete, runRequestWork } from '../services/serverLifecycleService';
+import type { AuthenticatedRequest } from './authMiddleware';
 
 type WindowEntry = {
     count: number;
@@ -18,11 +19,24 @@ export const resetRateLimitWindowsForTests = () => {
 
 const clientKey = (req: Request) => req.ip || req.socket.remoteAddress || 'unknown';
 
+/**
+ * Keys a window by the account that database-backed authentication already
+ * resolved, so listeners sharing one NAT or proxy address keep separate
+ * budgets. Requests without a verified account fall back to the client IP.
+ * The prefixes keep an address bucket from ever matching an account bucket.
+ */
+export const accountOrClientKey = (req: Request) => {
+    const userId = (req as AuthenticatedRequest).auth?.userId;
+    return userId ? `account:${userId}` : `ip:${clientKey(req)}`;
+};
+
+/** Counts requests per scope in a fixed window keyed by client IP unless `keyFor` says otherwise. */
 export const rateLimit = (
     scope: string,
     maximumRequests: number,
     windowMs: number,
-    onRejected?: (req: Request, res: Response, retryAfterSeconds: number) => unknown
+    onRejected?: (req: Request, res: Response, retryAfterSeconds: number) => unknown,
+    keyFor: (req: Request) => string = clientKey
 ): RequestHandler => {
     return (req, res, next) => {
         const now = Date.now();
@@ -33,7 +47,7 @@ export const rateLimit = (
             }
         }
 
-        const key = `${scope}:${clientKey(req)}`;
+        const key = `${scope}:${keyFor(req)}`;
         const current = windows.get(key);
         const entry = !current || current.resetsAt <= now
             ? { count: 0, resetsAt: now + windowMs }
