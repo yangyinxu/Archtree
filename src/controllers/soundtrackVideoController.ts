@@ -18,6 +18,10 @@ import {
     uploadVideoObject
 } from '../services/audioStorageService';
 import {
+    retryAudioTrackPublications,
+    retryPublicationAfterUpload
+} from '../services/audioPublicationRecoveryService';
+import {
     InvalidSoundtrackVideoError,
     validateSoundtrackVideoFile
 } from '../services/videoMetadataService';
@@ -173,11 +177,33 @@ export const streamSoundtrackVideo = async (
     }
 };
 
+/** Test seams for one Video replacement followed by automatic publication recovery. */
+export interface SoundtrackVideoUploadDependencies {
+    findTrack: (audioTrackId: string) => Promise<any | null>;
+    validateVideo: typeof validateSoundtrackVideoFile;
+    uploadObject: typeof uploadVideoObject;
+    retryPublications: typeof retryAudioTrackPublications;
+}
+
+export const defaultSoundtrackVideoUploadDependencies: SoundtrackVideoUploadDependencies = {
+    findTrack: audioTrackId => AudioTrack.findById(audioTrackId),
+    validateVideo: uploadFile => validateSoundtrackVideoFile(uploadFile),
+    uploadObject: uploadVideoObject,
+    retryPublications: retryAudioTrackPublications
+};
+
+/**
+ * Replaces the active object with a validated MP4, then replays publication so
+ * a MediaTrack whose earlier publication failed becomes public without a
+ * separate audit retry. Upload and publication outcomes are reported separately.
+ */
 export const uploadSoundtrackVideoFile = async (
     req: Request,
     res: Response,
-    _next: NextFunction
+    _next: NextFunction,
+    dependencyOverrides: Partial<SoundtrackVideoUploadDependencies> = {}
 ) => {
+    const dependencies = { ...defaultSoundtrackVideoUploadDependencies, ...dependencyOverrides };
     const auth = (req as AuthenticatedRequest).auth;
     if (!auth) return res.status(401).json({ message: 'Unauthorized' });
     if (auth.role !== 'admin') {
@@ -194,19 +220,42 @@ export const uploadSoundtrackVideoFile = async (
         });
     }
     try {
-        await validateSoundtrackVideoFile(uploadFile);
-        const track: any = await AudioTrack.findById(audioTrackId);
+        await dependencies.validateVideo(uploadFile);
+        const track: any = await dependencies.findTrack(audioTrackId);
         if (!track) return res.status(404).json({ message: 'MediaTrack was not found.' });
-        const result = await uploadVideoObject(
+        const result = await dependencies.uploadObject(
             audioTrackId,
             uploadFile,
             String(track.createdBy ?? auth.userId),
             getRequestAbortSignal(req)
         );
+        const publication = await retryPublicationAfterUpload(
+            audioTrackId,
+            dependencies.retryPublications
+        );
+        if (publication.outcome !== 'ready') {
+            const outcomeUnknown = publication.outcome === 'unknown';
+            return res.status(outcomeUnknown ? 503 : 409).json({
+                message: outcomeUnknown
+                    ? 'MediaTrack Video was uploaded, but publication outcome could not be confirmed. Reconciliation is required.'
+                    : 'MediaTrack Video was uploaded, but publication failed. Retry publication without uploading the file again.',
+                audioTrackId,
+                mediaType: 'video',
+                uploadStatus: 'ready',
+                publicationStatus: publication.publicationStatus,
+                publicationOutcome: publication.outcome,
+                publicationRetryRequired: true,
+                reconciliationRequired: outcomeUnknown,
+                cleanupPending: result.cleanupPending,
+                error: publication.error
+            });
+        }
         return res.status(200).json({
             message: 'MediaTrack was replaced with Video successfully.',
+            audioTrackId,
             mediaType: 'video',
             uploadStatus: 'ready',
+            publicationStatus: publication.publicationStatus,
             cleanupPending: result.cleanupPending
         });
     } catch (error) {

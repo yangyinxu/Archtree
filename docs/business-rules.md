@@ -670,6 +670,12 @@ The wire protocol and operational bounds are documented in
   object remains public, atomically promotes the new key and kind, and only then
   deletes the old object. Failed upload, promotion, cleanup, deletion, or retry
   retains exact database/S3 lifecycle evidence for reconciliation.
+- A successful Audio or Video replacement automatically runs the idempotent
+  publication retry for that MediaTrack, so an earlier publication failure needs
+  no separate audit retry. Publication still requires a ready assigned Album,
+  when there is one, and a publishable lifecycle state; the upload and
+  publication outcomes are reported separately, and a failed publication never
+  requires uploading the file again.
 - Public metadata exposes one `mediaType` and one stream URL. Stream `HEAD` and
   `GET` require a ready/published database row and resolve the exact stored key
   allowed for that kind and MediaTrack ID. Pending, failed, deleting,

@@ -34,7 +34,9 @@ import {
 import { retryAudioTrackPublications } from '../src/services/audioPublicationRecoveryService';
 import { postAudioPublicationRetry } from '../src/controllers/adminController';
 import { updateAlbum } from '../src/controllers/albumController';
-import { updateAlbumWeb } from '../src/controllers/contentController';
+import { updateAlbumWeb, uploadSoundtrackVideoWeb } from '../src/controllers/contentController';
+import { uploadSoundtrackVideoFile } from '../src/controllers/soundtrackVideoController';
+import { uploadVideoObject } from '../src/services/audioStorageService';
 import {
     finalizeStagedCoverArtLifecycleRecord,
     prepareOwnerCoverArtDeletions,
@@ -1580,6 +1582,224 @@ test('publication retry links a storage-ready Video MediaTrack without re-upload
         (await getDb()!.collection('audioTracks').findOne({ _id: wrongKindTrackId }))!.publicationStatus,
         'pending'
     );
+});
+
+/** Stores Video replacement bytes in memory so the real lifecycle and publication code runs. */
+const memoryVideoStorage = (storedObjects: Set<string>, replacementKey: string) => ({
+    createObjectKey: () => replacementKey,
+    putObject: async (s3Key: string) => {
+        storedObjects.add(s3Key);
+        return { ETag: '"lorem-ipsum"' };
+    },
+    deleteObject: async (s3Key: string) => {
+        storedObjects.delete(s3Key);
+    }
+});
+
+const syntheticVideoFile = {
+    fieldname: 'videoFile',
+    originalname: 'lorem-ipsum.mp4',
+    encoding: '7bit',
+    mimetype: 'video/mp4',
+    size: 2048,
+    buffer: Buffer.from('synthetic-mp4')
+} as Express.Multer.File;
+
+const acceptSyntheticVideo = async () => ({ contentType: 'video/mp4' as const, durationSeconds: 1 });
+
+test('Video re-upload automatically and idempotently publishes a MediaTrack whose publication failed', async () => {
+    const albumId = new ObjectId();
+    const trackId = new ObjectId();
+    const id = trackId.toHexString();
+    const previousKey = `video/${id}/${new ObjectId().toHexString()}`;
+    const firstReplacementKey = `video/${id}/${new ObjectId().toHexString()}`;
+    const secondReplacementKey = `video/${id}/${new ObjectId().toHexString()}`;
+    const storedObjects = new Set([previousKey]);
+    await Promise.all([
+        getDb()!.collection('albums').insertOne({
+            _id: albumId,
+            title: 'Lorem Ipsum Album',
+            audioTrackIds: [],
+            lifecycleStatus: 'ready',
+            referenceRevision: 0
+        }),
+        getDb()!.collection('audioTracks').insertOne({
+            _id: trackId,
+            title: 'Dolor Sit Video',
+            albumId: albumId.toHexString(),
+            mediaType: 'video',
+            contentType: 'video/mp4',
+            uploadStatus: 'ready',
+            s3Key: previousKey,
+            publicationStatus: 'failed',
+            publicationError: 'Cover art upload failed.'
+        })
+    ]);
+    const upload = async (replacementKey: string) => {
+        const captured: { statusCode?: number; body?: any } = {};
+        const response = {
+            locals: {},
+            status(statusCode: number) {
+                captured.statusCode = statusCode;
+                return response;
+            },
+            json(body: unknown) {
+                captured.body = body;
+                return response;
+            }
+        } as any;
+        await uploadSoundtrackVideoFile({
+            auth: { userId: new ObjectId().toHexString(), role: 'admin' },
+            params: { audioTrackId: id },
+            file: syntheticVideoFile
+        } as any, response, (() => undefined) as any, {
+            validateVideo: acceptSyntheticVideo,
+            uploadObject: (audioTrackId, file, ownerId, signal) => uploadVideoObject(
+                audioTrackId,
+                file,
+                ownerId,
+                signal,
+                memoryVideoStorage(storedObjects, replacementKey)
+            )
+        });
+        return captured;
+    };
+
+    const first = await upload(firstReplacementKey);
+
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.body?.uploadStatus, 'ready');
+    assert.equal(first.body?.publicationStatus, 'ready');
+    assert.deepEqual([...storedObjects], [firstReplacementKey]);
+    const published = await getDb()!.collection('audioTracks').findOne({ _id: trackId });
+    assert.equal(published!.s3Key, firstReplacementKey);
+    assert.equal(published!.mediaType, 'video');
+    assert.equal(published!.publicationStatus, 'ready');
+    assert.equal(published!.publicationError, null);
+    assert.deepEqual(
+        (await getDb()!.collection('albums').findOne({ _id: albumId }))!.audioTrackIds,
+        [id]
+    );
+
+    const second = await upload(secondReplacementKey);
+
+    assert.equal(second.statusCode, 200);
+    assert.equal(second.body?.publicationStatus, 'ready');
+    assert.deepEqual([...storedObjects], [secondReplacementKey]);
+    assert.equal(
+        (await getDb()!.collection('audioTracks').findOne({ _id: trackId }))!.s3Key,
+        secondReplacementKey
+    );
+    assert.deepEqual(
+        (await getDb()!.collection('albums').findOne({ _id: albumId }))!.audioTrackIds,
+        [id]
+    );
+});
+
+test('Video re-upload keeps the new object but does not publish into an unavailable Album or an invalid state', async () => {
+    const deletingAlbumId = new ObjectId();
+    const readyAlbumId = new ObjectId();
+    const blockedTrackId = new ObjectId();
+    const invalidStateTrackId = new ObjectId();
+    const blockedPreviousKey = `video/${blockedTrackId.toHexString()}/${new ObjectId().toHexString()}`;
+    const blockedReplacementKey = `video/${blockedTrackId.toHexString()}/${new ObjectId().toHexString()}`;
+    const invalidPreviousKey = `video/${invalidStateTrackId.toHexString()}/${new ObjectId().toHexString()}`;
+    const invalidReplacementKey = `video/${invalidStateTrackId.toHexString()}/${new ObjectId().toHexString()}`;
+    const storedObjects = new Set([blockedPreviousKey, invalidPreviousKey]);
+    await Promise.all([
+        getDb()!.collection('albums').insertMany([
+            {
+                _id: deletingAlbumId,
+                title: 'Consectetur Deleting Album',
+                audioTrackIds: [],
+                lifecycleStatus: 'deleting',
+                referenceRevision: 0
+            },
+            {
+                _id: readyAlbumId,
+                title: 'Adipiscing Ready Album',
+                audioTrackIds: [],
+                lifecycleStatus: 'ready',
+                referenceRevision: 0
+            }
+        ]),
+        getDb()!.collection('audioTracks').insertMany([
+            {
+                _id: blockedTrackId,
+                title: 'Elit Blocked Video',
+                albumId: deletingAlbumId.toHexString(),
+                mediaType: 'video',
+                contentType: 'video/mp4',
+                uploadStatus: 'ready',
+                s3Key: blockedPreviousKey,
+                publicationStatus: 'failed',
+                publicationError: 'Cover art upload failed.'
+            },
+            {
+                _id: invalidStateTrackId,
+                title: 'Sed Invalid State Video',
+                albumId: readyAlbumId.toHexString(),
+                mediaType: 'video',
+                contentType: 'video/mp4',
+                uploadStatus: 'ready',
+                s3Key: invalidPreviousKey,
+                publicationStatus: null
+            }
+        ])
+    ]);
+    const upload = async (trackId: ObjectId, replacementKey: string) => {
+        let location = '';
+        let nextError: unknown;
+        const response = {
+            redirect(target: string) {
+                location = target;
+                return response;
+            }
+        } as any;
+        await uploadSoundtrackVideoWeb({
+            auth: { userId: new ObjectId().toHexString(), role: 'admin' },
+            body: { audioTrackId: trackId.toHexString() },
+            file: syntheticVideoFile
+        } as any, response, ((error?: unknown) => { nextError = error; }) as any, {
+            validateVideo: acceptSyntheticVideo,
+            uploadObject: (audioTrackId, file, ownerId, signal) => uploadVideoObject(
+                audioTrackId,
+                file,
+                ownerId,
+                signal,
+                memoryVideoStorage(storedObjects, replacementKey)
+            )
+        });
+        assert.equal(nextError, undefined);
+        return new URL(location, 'http://127.0.0.1').searchParams.get('message') ?? '';
+    };
+
+    assert.equal(
+        await upload(blockedTrackId, blockedReplacementKey),
+        'MediaTrack is now Video, but publication status is failed. Retry publication without uploading the file again.'
+    );
+    const blocked = await getDb()!.collection('audioTracks').findOne({ _id: blockedTrackId });
+    assert.equal(blocked!.s3Key, blockedReplacementKey);
+    assert.equal(blocked!.uploadStatus, 'ready');
+    assert.equal(blocked!.publicationStatus, 'failed');
+    assert.match(String(blocked!.publicationError), /Albums are unavailable/);
+
+    assert.equal(
+        await upload(invalidStateTrackId, invalidReplacementKey),
+        'MediaTrack is now Video, but publication status is null. Retry publication without uploading the file again.'
+    );
+    const invalidState = await getDb()!.collection('audioTracks').findOne({ _id: invalidStateTrackId });
+    assert.equal(invalidState!.s3Key, invalidReplacementKey);
+    assert.equal(invalidState!.publicationStatus, null);
+
+    assert.deepEqual(
+        new Set(storedObjects),
+        new Set([blockedReplacementKey, invalidReplacementKey])
+    );
+    const albums = await getDb()!.collection('albums')
+        .find({ _id: { $in: [deletingAlbumId, readyAlbumId] } })
+        .toArray();
+    assert.deepEqual(albums.map((album) => album.audioTrackIds), [[], []]);
 });
 
 test('publication retry endpoint returns 200 with isolated invalid, duplicate, missing, and non-ready outcomes', async () => {

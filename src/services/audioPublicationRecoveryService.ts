@@ -246,3 +246,33 @@ export const retryAudioTrackPublications = async (
         results
     };
 };
+
+/**
+ * Runs the same idempotent recovery right after one replacement upload
+ * succeeded, so an earlier publication failure needs no separate admin retry.
+ * The upload is already durable, so a thrown or missing result is reported as
+ * an unknown publication outcome rather than as a failed upload.
+ */
+export const retryPublicationAfterUpload = async (
+    audioTrackId: string,
+    retryPublications: typeof retryAudioTrackPublications = retryAudioTrackPublications
+): Promise<AudioPublicationRetryResult> => {
+    const normalizedId = audioTrackId.trim().toLowerCase();
+    const unknownResult = (error: string): AudioPublicationRetryResult => ({
+        audioTrackId: normalizedId,
+        albumId: '',
+        uploadStatus: 'ready',
+        uploadReady: true,
+        publicationStatusBefore: 'unknown',
+        publicationStatus: 'unknown',
+        outcome: 'unknown',
+        error
+    });
+    try {
+        const report = await retryPublications([normalizedId]);
+        return report.results.find((result) => result.audioTrackId === normalizedId)
+            ?? unknownResult('Publication outcome could not be read back.');
+    } catch (error) {
+        return unknownResult(`Publication retry failed: ${boundedError(error)}`);
+    }
+};

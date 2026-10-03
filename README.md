@@ -1456,6 +1456,14 @@ Upload:
   `audioTrackIds` list as authoritative.
 - S3 objects include track ID, owner ID, and encoded original filename metadata.
 - Failed or interrupted uploads remain identifiable in MongoDB and can be retried against the same track.
+- After a successful Replace with Audio or Replace with Video upload (API or
+  Content Manager), the server reruns the idempotent publication retry for that
+  MediaTrack, so a row whose earlier publication failed is published without a
+  separate audit retry. If publication still cannot commit (for example, its
+  Album is not ready or its explicit publication state is invalid), the new
+  object stays active with `uploadStatus: ready`; the API answers 409 (503 when
+  the outcome is unknown) with `publicationStatus`, `publicationOutcome`, and
+  `publicationRetryRequired`, and the retry needs no new upload.
 - Content Manager bulk-upload JSON responses include one `outcomes` row per
   selected file with its recoverable `audioTrackId` when a record was created,
   plus separate `uploadStatus`, `publicationStatus`, `cleanupPending`, and
