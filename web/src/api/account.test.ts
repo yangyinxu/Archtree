@@ -4,6 +4,7 @@ import {
   getBrowserAuthenticationCapabilities,
   inspectBrowserEmailVerification,
   inspectBrowserRegistration,
+  isEmailDomainUndeliverable,
   requestBrowserEmailVerification,
   requestBrowserPasswordReset,
   requestBrowserRegistration,
@@ -47,11 +48,17 @@ test('requests registration and verification links with only the normalized emai
   }, 202)));
   vi.stubGlobal('fetch', fetchMock);
 
+  // Each accepted request reports the exact address it sent, for the page to show.
   await expect(requestBrowserRegistration({ email: ' Listener@Example.test ' })).resolves.toEqual({
-    message: 'Check your email for the next step.'
+    message: 'Check your email for the next step.',
+    email: 'listener@example.test'
   });
-  await requestBrowserEmailVerification({ email: 'Legacy@Example.test' });
-  await requestBrowserPasswordReset({ email: 'listener@example.test' });
+  await expect(requestBrowserEmailVerification({ email: 'Legacy@Example.test' })).resolves.toMatchObject({
+    email: 'legacy@example.test'
+  });
+  await expect(requestBrowserPasswordReset({ email: ' Listener@example.test' })).resolves.toMatchObject({
+    email: 'listener@example.test'
+  });
 
   expect(fetchMock).toHaveBeenNthCalledWith(1, '/auth/browser/registration/request', expect.objectContaining({
     body: JSON.stringify({ email: 'listener@example.test' }),
@@ -65,6 +72,42 @@ test('requests registration and verification links with only the normalized emai
   expect(fetchMock).toHaveBeenNthCalledWith(3, '/auth/browser/password/forgot', expect.any(Object));
   const headers = new Headers(fetchMock.mock.calls[0][1].headers);
   expect(headers.get('Content-Type')).toBe('application/json');
+});
+
+test('maps only the undeliverable-domain 422 of an email request to a field error', async () => {
+  const undeliverable = {
+    code: 'email_domain_undeliverable',
+    message: 'This email domain cannot receive email. Check the address and try again.'
+  };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse(undeliverable, 422))
+    .mockResolvedValueOnce(jsonResponse(undeliverable, 422))
+    .mockResolvedValueOnce(jsonResponse(undeliverable, 422))
+    .mockResolvedValueOnce(jsonResponse({ message: 'Enter a valid email address.' }, 422))
+    .mockResolvedValueOnce(jsonResponse({ code: 'invalid_password', message: 'Choose a different password.' }, 422))
+    .mockResolvedValueOnce(jsonResponse({ ...undeliverable }, 400))
+    .mockResolvedValueOnce(jsonResponse({ message: 'Too many requests. Please try again later.' }, 429));
+  vi.stubGlobal('fetch', fetchMock);
+  const failure = (request: Promise<unknown>) => request.then(() => null, (error: unknown) => error);
+
+  const rejections = [
+    await failure(requestBrowserRegistration({ email: 'lorem@nomail.invalid' })),
+    await failure(requestBrowserEmailVerification({ email: 'lorem@nomail.invalid' })),
+    await failure(requestBrowserPasswordReset({ email: 'lorem@nomail.invalid' }))
+  ];
+  for (const error of rejections) {
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 422, code: 'email_domain_undeliverable' });
+    expect(isEmailDomainUndeliverable(error)).toBe(true);
+  }
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    expect(isEmailDomainUndeliverable(await failure(requestBrowserRegistration({ email: 'lorem@example.test' })))).toBe(false);
+  }
+  expect(isEmailDomainUndeliverable(new ApiError('Offline', 'network', undefined, 'email_domain_undeliverable'))).toBe(false);
+  expect(isEmailDomainUndeliverable({ status: 422, code: 'email_domain_undeliverable' })).toBe(false);
+  expect(isEmailDomainUndeliverable(undefined)).toBe(false);
+  expect(fetchMock).toHaveBeenCalledTimes(7);
+  expect(fetchMock).not.toHaveBeenCalledWith('/auth/browser/refresh', expect.anything());
 });
 
 test('link requests reject unexpected fields before any request', async () => {

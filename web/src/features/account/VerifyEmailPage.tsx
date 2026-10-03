@@ -12,10 +12,13 @@ import { browserSessionQueryKey } from '../../api/session';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import styles from './AccountSurfaces.module.css';
 import {
+  AuthEmailField,
   AuthFormFeedback,
   AuthPageFrame,
+  EmailRequestSent,
   emailFromRouteState,
   privateAccountActionError,
+  useEmailRequestForm,
   useFocusOnStateChange
 } from './AuthFormSupport';
 import { useLinkToken } from './linkToken';
@@ -30,37 +33,26 @@ interface VerificationRequestFormProps {
   initialEmail: string;
 }
 
-/** Requests a new verification link; the status never reveals whether the address needed one. */
+/**
+ * Requests a new verification link (the Web "resend"). The status never
+ * reveals whether the address needed one; only an address whose domain cannot
+ * receive mail is rejected, on the field, each time it is submitted.
+ */
 const VerificationRequestForm = ({ initialEmail }: VerificationRequestFormProps) => {
   const { t } = useLocalization();
-  const request = useMutation({ mutationFn: requestBrowserEmailVerification });
-  const error = request.isError
-    ? privateAccountActionError(request.error, t('account.common.request_error'))
+  const form = useEmailRequestForm({ request: requestBrowserEmailVerification, initialEmail });
+  const error = form.failure
+    ? privateAccountActionError(form.failure, t('account.common.request_error'))
     : '';
 
   return (
-    <form
-      aria-busy={request.isPending}
-      className={styles.formCard}
-      onSubmit={(event) => {
-        event.preventDefault();
-        request.reset();
-        const form = new FormData(event.currentTarget);
-        request.mutate({ email: String(form.get('email') ?? '') });
-      }}
-    >
+    <form aria-busy={form.isPending} className={styles.formCard} onSubmit={form.submit}>
       <h2 className={styles.formTitle}>{t('auth.verify.form_title')}</h2>
-      <AuthFormFeedback
-        error={error}
-        status={request.isSuccess ? t('auth.email_link.sent') : ''}
-        focusKey={request.submittedAt}
-      />
-      <div className={styles.field}>
-        <label htmlFor="verify-email">{t('account.field.email')}</label>
-        <input autoComplete="email" defaultValue={initialEmail} id="verify-email" maxLength={254} name="email" required type="email" />
-      </div>
-      <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={request.isPending} type="submit">
-        {request.isPending ? t('auth.email_link.sending') : t('auth.email_link.send')}
+      <AuthFormFeedback error={error} focusKey={form.failureKey} />
+      <EmailRequestSent form={form} message={t('auth.email_link.sent')} />
+      <AuthEmailField form={form} id="verify-email" />
+      <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={form.isPending} type="submit">
+        {form.isPending ? t('auth.email_link.sending') : t('auth.email_link.send')}
       </button>
       <p className={styles.authFooter}><Link className={styles.inlineLink} to="/login">{t('account.common.back_login')}</Link></p>
     </form>

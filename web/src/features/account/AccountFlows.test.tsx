@@ -123,16 +123,15 @@ test('registration asks only for an email and shows the same status for every ad
   expect(screen.queryByLabelText(/Name/)).not.toBeInTheDocument();
   await user.type(screen.getByLabelText('Email'), 'new-listener@example.test');
   await user.click(screen.getByRole('button', { name: 'Send link' }));
-  const firstStatus = (await screen.findByRole('status')).textContent;
-  expect(firstStatus).toBe(
-    'Check your email. We sent a message to this address with the next step. Registration links expire after 30 minutes.'
-  );
+  const linkSent = 'Check your email. We sent a message to this address with the next step. Registration links expire after 30 minutes.';
+  // Only the echoed address, which the listener typed, differs between addresses.
+  expect((await screen.findByRole('status')).textContent).toBe(`${linkSent} Sent to new-listener@example.test`);
 
   await user.clear(screen.getByLabelText('Email'));
   await user.type(screen.getByLabelText('Email'), 'existing-listener@example.test');
   await user.click(screen.getByRole('button', { name: 'Send link' }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-  expect((await screen.findByRole('status')).textContent).toBe(firstStatus);
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe(`${linkSent} Sent to existing-listener@example.test`));
   expect(screen.getByLabelText('Email')).toHaveValue('existing-listener@example.test');
   expect(fetchMock).toHaveBeenNthCalledWith(2, '/auth/browser/registration/request', expect.objectContaining({
     body: JSON.stringify({ email: 'new-listener@example.test' }),

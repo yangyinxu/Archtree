@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import type { z } from 'zod';
 
-import { apiRequest, apiRequestNoContent } from './client';
+import { ApiError, apiRequest, apiRequestNoContent } from './client';
 import {
   acceptedAuthenticationActionSchema,
   accountSessionsSchema,
@@ -43,14 +43,48 @@ const postAccountAction = <Output>(path: string, body: unknown, schema: z.ZodTyp
 );
 
 /**
+ * An accepted registration, verification-link or recovery request with the
+ * address it carried: trimmed and lowercased, exactly what the server sends
+ * to, so a page can show it and a mistyped address is easy to spot.
+ */
+export interface AcceptedEmailRequest {
+  message: string;
+  email: string;
+}
+
+/**
+ * Posts a request that emails the submitted address. The input is validated
+ * synchronously, so an invalid body throws before any request.
+ */
+const postEmailRequest = (path: string, input: EmailActionInput): Promise<AcceptedEmailRequest> => {
+  const body = emailActionInputSchema.parse(input);
+  return postAccountAction(path, body, acceptedAuthenticationActionSchema)
+    .then(({ message }) => ({ message, email: body.email }));
+};
+
+/** The `422` code for an address whose domain cannot receive email. */
+export const emailDomainUndeliverableCode = 'email_domain_undeliverable';
+
+/**
+ * Recognizes the `422 email_domain_undeliverable` rejection of a registration,
+ * verification-link or recovery request. The server decides it only from the
+ * domain's public DNS, never from account state, so a page may show it as an
+ * error on the email field. Other `422` responses (invalid input) do not match.
+ */
+export const isEmailDomainUndeliverable = (error: unknown) => error instanceof ApiError
+  && error.kind === 'http'
+  && error.status === 422
+  && error.code === emailDomainUndeliverableCode;
+
+/**
  * Requests a registration email. The response is identical for every account
  * state: the email holds either a registration link or an "already registered"
- * notice, so the page never learns which one was sent.
+ * notice, so the page never learns which one was sent. Only an address whose
+ * domain cannot receive email is rejected (see `isEmailDomainUndeliverable`).
  */
-export const requestBrowserRegistration = (input: EmailActionInput) => postAccountAction(
+export const requestBrowserRegistration = (input: EmailActionInput) => postEmailRequest(
   '/auth/browser/registration/request',
-  emailActionInputSchema.parse(input),
-  acceptedAuthenticationActionSchema
+  input
 );
 
 /** Reads the address a registration link was mailed to without consuming the link. */
@@ -67,11 +101,13 @@ export const completeBrowserRegistration = (input: CompleteRegistrationInput) =>
   emailLinkAddressSchema
 );
 
-/** Requests a verification link without revealing whether the address needs one. */
-export const requestBrowserEmailVerification = (input: EmailActionInput) => postAccountAction(
+/**
+ * Requests a verification link without revealing whether the address needs
+ * one; only an undeliverable domain is rejected.
+ */
+export const requestBrowserEmailVerification = (input: EmailActionInput) => postEmailRequest(
   '/auth/browser/email-verification/request',
-  emailActionInputSchema.parse(input),
-  acceptedAuthenticationActionSchema
+  input
 );
 
 /** Reads the address a verification link would verify without consuming the link. */
@@ -91,15 +127,14 @@ export const confirmBrowserEmailVerification = (input: EmailLinkTokenInput) => {
   });
 };
 
-/** Starts password recovery with the same response for every valid address. */
-export const requestBrowserPasswordReset = (input: EmailActionInput) => {
-  const body = emailActionInputSchema.parse(input);
-  return apiRequest('/auth/browser/password/forgot', acceptedAuthenticationActionSchema, {
-    method: 'POST',
-    body: JSON.stringify(body),
-    retryAuthentication: false
-  });
-};
+/**
+ * Starts password recovery with the same response for every valid address;
+ * only an undeliverable domain is rejected.
+ */
+export const requestBrowserPasswordReset = (input: EmailActionInput) => postEmailRequest(
+  '/auth/browser/password/forgot',
+  input
+);
 
 export const resetBrowserPassword = (input: ResetPasswordInput) => {
   const body = resetPasswordInputSchema.parse(input);

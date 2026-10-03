@@ -1050,6 +1050,20 @@ Finitude Web pages for these links:
 
 - `/finitude/register` asks only for an email and shows the same "check your
   email" status for every address; the form stays available to ask again.
+- `/finitude/register`, the `/finitude/verify-email` link request and
+  `/finitude/forgot-password` share one email form
+  (`web/src/features/account/AuthFormSupport.tsx`). A
+  `422 email_domain_undeliverable` is shown as an error on the email field,
+  which receives focus, for as long as the field holds the rejected address;
+  every other failure keeps the generic request error. An accepted request
+  shows the trimmed, lowercased address it was sent to with a **Use a
+  different email** action that clears the form. Sending again posts the
+  field's current address, so a resend to an undeliverable domain is rejected
+  again. While the listener types, a domain within a small Damerau-Levenshtein
+  distance of a popular provider (`web/src/features/account/emailDomainSuggestion.ts`)
+  gets a "Did you mean ...?" button in a polite live region, which replaces the
+  address only when selected; known providers and a few real look-alike
+  domains are never corrected.
 - `/finitude/register/complete#token=...` captures the token, removes the
   fragment from the address bar and history entry at once (the token stays
   only in page memory), and inspects the link. It then shows the address and
@@ -1192,7 +1206,11 @@ email is still sent and logged as `auth_email_domain_check_failed`.
 In local development, addresses at reserved domains such as `example.test` are
 rejected with `422 email_domain_undeliverable`, so use a real mailbox domain to
 receive email. Server tests preload a synthetic resolver
-(`test/support/syntheticMxResolver.ts`) and never query real DNS.
+(`test/support/syntheticMxResolver.ts`) and never query real DNS. The listener
+E2E server (`web/e2e/support/serveBuiltApp.ts`) installs
+`web/e2e/support/syntheticMx.ts`, which treats only reserved `.invalid` domains
+as undeliverable; the fake account routes in
+`web/e2e/support/emailLinkAuth.ts` apply the same rule.
 
 Auth attempts are limited per IP (20 per 15 minutes) and per account (10 per
 15 minutes). Registration and verification-link requests and password

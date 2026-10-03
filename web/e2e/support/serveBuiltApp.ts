@@ -3,6 +3,8 @@ import type { Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+import { browserTestMxResolver } from './syntheticMx';
+
 const host = '127.0.0.1';
 const port = Number(process.env.FINITUDE_E2E_PORT ?? 4173);
 const webRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -44,6 +46,10 @@ isolateEnvironment();
 
 // Dynamic import ensures dotenv/config sees only the isolated test environment.
 const { createApp } = await import('../../../src/app');
+// The authentication-email domain check answers from a synthetic resolver, so
+// a request that reaches this server never queries real DNS.
+const { setEmailDomainResolver } = await import('../../../src/services/emailDomainDeliverability');
+setEmailDomainResolver(browserTestMxResolver);
 const app = createApp({ environment: 'test', listenerDistPath });
 const server = await new Promise<Server>((resolve, reject) => {
   const listening = app.listen(port, host, () => resolve(listening));

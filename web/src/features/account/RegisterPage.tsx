@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 
 import {
@@ -8,25 +8,29 @@ import {
 import styles from './AccountSurfaces.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import {
+  AuthEmailField,
   AuthFormFeedback,
   AuthPageFrame,
-  privateAccountActionError
+  EmailRequestSent,
+  privateAccountActionError,
+  useEmailRequestForm
 } from './AuthFormSupport';
 
 /**
- * Starts Web registration with only an email address. Every address gets the
- * same "check your email" status: the email holds a registration link, or a
- * notice that the address already has an account. The form stays available so
- * the listener can ask again.
+ * Starts Web registration with only an email address. Every accepted address
+ * gets the same "check your email" status with the address it used: the email
+ * holds a registration link, or a notice that the address already has an
+ * account. An address whose domain cannot receive mail is rejected on the
+ * field. The form stays available so the listener can ask again.
  */
 export const RegisterPage = () => {
   const { t } = useLocalization();
   const capabilities = useQuery(browserAuthenticationCapabilitiesQuery());
-  const request = useMutation({ mutationFn: requestBrowserRegistration });
+  const form = useEmailRequestForm({ request: requestBrowserRegistration });
   const registrationUnavailable = capabilities.isError
     || (capabilities.isSuccess && !capabilities.data.emailRegistration);
-  const error = request.isError
-    ? privateAccountActionError(request.error, t('account.common.request_error'))
+  const error = form.failure
+    ? privateAccountActionError(form.failure, t('account.common.request_error'))
     : '';
 
   return (
@@ -35,22 +39,10 @@ export const RegisterPage = () => {
       title={t('auth.register.title')}
       description={t('auth.register.link_description')}
     >
-      <form
-        aria-busy={request.isPending}
-        className={styles.formCard}
-        onSubmit={(event) => {
-          event.preventDefault();
-          request.reset();
-          const form = new FormData(event.currentTarget);
-          request.mutate({ email: String(form.get('email') ?? '') });
-        }}
-      >
+      <form aria-busy={form.isPending} className={styles.formCard} onSubmit={form.submit}>
         <h2 className={styles.formTitle}>{t('auth.register.form_title')}</h2>
-        <AuthFormFeedback
-          error={error}
-          status={request.isSuccess ? t('auth.register.link_sent') : ''}
-          focusKey={request.submittedAt}
-        />
+        <AuthFormFeedback error={error} focusKey={form.failureKey} />
+        <EmailRequestSent form={form} message={t('auth.register.link_sent')} />
         {registrationUnavailable ? (
           <div className={styles.compactState}>
             <p>{capabilities.isError
@@ -63,12 +55,9 @@ export const RegisterPage = () => {
           </div>
         ) : (
           <>
-            <div className={styles.field}>
-              <label htmlFor="register-email">{t('account.field.email')}</label>
-              <input autoComplete="email" id="register-email" maxLength={254} name="email" required type="email" />
-            </div>
-            <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={request.isPending || capabilities.isPending} type="submit">
-              {request.isPending
+            <AuthEmailField form={form} id="register-email" />
+            <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={form.isPending || capabilities.isPending} type="submit">
+              {form.isPending
                 ? t('auth.register.sending_link')
                 : capabilities.isPending ? t('auth.register.checking') : t('auth.register.send_link')}
             </button>

@@ -1,9 +1,10 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 
 import type { Page, Request, Route } from '@playwright/test';
 
 import type { BrowserSession } from '../../src/api/schemas';
 import { installNonSocialProfileRoute } from './apiRoutes';
+import { isUndeliverableTestDomain } from './syntheticMx';
 
 /** One plain-text email the fake mailer "sent", with the server's subject and body copy. */
 export interface CapturedEmail {
@@ -64,8 +65,18 @@ const generic = {
   verificationRequired: {
     code: 'email_verification_required',
     message: 'Verify your email to sign in. Open the verification link we sent to your email address, then sign in again.'
+  },
+  recovery: { message: 'If the account can use this action, an email has been sent.' },
+  domainUndeliverable: {
+    code: 'email_domain_undeliverable',
+    message: 'This email domain cannot receive email. Check the address and try again.'
   }
 };
+
+/** Mirrors the server's up-front check: the verdict depends only on the domain, never on an account. */
+const hasUndeliverableDomain = (address: string) => isUndeliverableTestDomain(
+  address.slice(address.lastIndexOf('@') + 1)
+);
 
 const json = (route: Route, status: number, payload?: unknown, headers: Record<string, string> = {}) => route.fulfill({
   status,
@@ -80,6 +91,9 @@ const json = (route: Route, status: number, payload?: unknown, headers: Record<s
  * responses, single-use 30-minute links, non-consuming inspection, typed
  * errors) and the server's email copy, so the production bundle can be driven
  * through the whole "open the emailed link" journey without SES or MongoDB.
+ * Registration, verification-link and password-recovery requests for a
+ * `.invalid` domain get the server's `422 email_domain_undeliverable` before
+ * any account lookup and send nothing; no DNS is involved.
  * Install it after any broader route helpers: later Playwright routes win.
  */
 export const installEmailLinkAuth = async (
@@ -154,6 +168,11 @@ export const installEmailLinkAuth = async (
       ].join('\n')
     });
   };
+  const sendResetCode = (email: string) => outbox.push({
+    to: email,
+    subject: 'Reset your Finitude password',
+    text: `Use code ${String(randomInt(0, 1_000_000)).padStart(6, '0')} to reset your password. This code expires soon. If you did not request it, you can ignore this email.`
+  });
   const consumeSiblings = (purpose: LinkPurpose, email: string) => {
     for (const link of links.values()) {
       if (link.purpose === purpose && link.email === email) link.consumedAt = Date.now();
@@ -187,6 +206,7 @@ export const installEmailLinkAuth = async (
     if (path === '/auth/browser/registration/request') {
       const { email } = readBody(request, ['email']);
       const address = String(email).toLowerCase();
+      if (hasUndeliverableDomain(address)) return json(route, 422, generic.domainUndeliverable);
       const account = accounts.get(address);
       if (!account || account.state === 'pending_record') sendRegistrationLink(address);
       else sendAlreadyRegistered(address);
@@ -236,8 +256,19 @@ export const installEmailLinkAuth = async (
     if (path === '/auth/browser/email-verification/request') {
       const { email } = readBody(request, ['email']);
       const address = String(email).toLowerCase();
+      if (hasUndeliverableDomain(address)) return json(route, 422, generic.domainUndeliverable);
       if (accounts.get(address)?.state === 'legacy_unverified') sendVerificationLink(address);
       return json(route, 202, generic.verification);
+    }
+    if (path === '/auth/browser/password/forgot') {
+      const { email } = readBody(request, ['email']);
+      const address = String(email).toLowerCase();
+      if (hasUndeliverableDomain(address)) return json(route, 422, generic.domainUndeliverable);
+      const account = accounts.get(address);
+      // Like the server, a record from the earlier code-based sign-up gets a registration link instead.
+      if (account?.state === 'pending_record') sendRegistrationLink(address);
+      else if (account) sendResetCode(address);
+      return json(route, 202, generic.recovery);
     }
     if (path === '/auth/browser/email-verification/inspect') {
       const { token } = readBody(request, ['token']);

@@ -52,7 +52,10 @@ environment take precedence. The operational database commands
 `npm run migrate:catalog-credits`, and `scripts/reconcile-image-versions.ts` load
 it the same way. Application modules never read `.env` themselves, so tests, the
 disposable `npm run demo:social` and `npm run profile:search` commands, and the
-Listener E2E servers do not see private configuration. `.env.example` is a
+Listener E2E servers do not see private configuration. The listener E2E server
+also answers the authentication-email domain check from a synthetic resolver
+(`web/e2e/support/syntheticMx.ts`, where only `.invalid` domains are
+undeliverable), so browser tests never query DNS. `.env.example` is a
 template and is never loaded automatically. A passing `npm run doctor` verifies
 the development tools; it does not configure the application database or account
 secrets.

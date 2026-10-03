@@ -1160,6 +1160,14 @@ The wire protocol and operational bounds are documented in
     count toward the address's email limits, but limits per network address
     still apply.
   - When the domain cannot be checked, the request proceeds normally.
+- On the Web, sign-up, verification-link and password-recovery forms show
+  such a rejection on the email field. After an accepted request they show the
+  exact address it used and offer to start over with a different address.
+  Asking again repeats the check, so a resend to such an address is rejected
+  again and sends nothing.
+  - While the listener types, a domain that looks like a misspelling of a
+    popular email provider gets a suggested correction. The suggestion changes
+    the address only when the listener selects it.
 - Authentication emails (registration links, already-registered notices,
   verification links and password-reset codes) are never sent to an address
   whose domain cannot receive email. This also covers the email sent after a
