@@ -755,6 +755,38 @@
       ],
       "variables": {}
     },
+    "auth.email.domain_undeliverable": {
+      "description": "Inline email-field error on the Web sign-up, verification-link and password-recovery forms when the server rejects the address because its domain cannot receive email, for example a mistyped or nonexistent domain. Never implies whether an account exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email.sent_to": {
+      "description": "Status line after a Web sign-up, verification-link or password-recovery request is accepted, showing the exact address the request used so the listener can spot a typo. {email} is the submitted email address, shown verbatim. Shown the same way for every address, so it never reveals whether an account exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "email": "string"
+      }
+    },
+    "auth.email.suggestion": {
+      "description": "Clickable suggestion below an email field when the typed domain looks like a misspelling of a popular email provider. {email} is the full corrected email address; selecting it replaces the typed address.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "email": "string"
+      }
+    },
+    "auth.email.use_different": {
+      "description": "Action shown after an accepted Web sign-up, verification-link or password-recovery request that clears the form so the listener can enter a different email address.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "auth.link.checking": {
       "description": "Status while an emailed link is checked.",
       "delivery": [
@@ -871,6 +903,13 @@
     },
     "auth.native.create_account_web_hint": {
       "description": "Native hint below the Web sign-up button.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.email_domain_undeliverable": {
+      "description": "Native password-recovery error when the server rejects the address because its domain cannot receive email, for example a mistyped or nonexistent domain. Never implies whether an account exists.",
       "delivery": [
         "runtime"
       ],
