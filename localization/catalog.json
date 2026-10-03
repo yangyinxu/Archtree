@@ -95,6 +95,13 @@
       ],
       "variables": {}
     },
+    "account.field.display_name": {
+      "description": "Required display-name field on the registration completion page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "account.field.email": {
       "description": "Account email field label.",
       "delivery": [
@@ -692,6 +699,76 @@
       ],
       "variables": {}
     },
+    "auth.email_link.description": {
+      "description": "Explains the verification confirmation step; the password is unchanged.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.invalid_copy": {
+      "description": "Shown when a verification link cannot be used; offers a new link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.request_description": {
+      "description": "Explains the non-enumerating verification-link request form.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.request_title": {
+      "description": "Heading of the verification-link request form.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.send": {
+      "description": "Button that requests a verification link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.sending": {
+      "description": "Pending label while a verification link is requested.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.sent": {
+      "description": "Non-enumerating status after a verification-link request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.title": {
+      "description": "Heading on the page opened from a verification link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.link.checking": {
+      "description": "Status while an emailed link is checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.link.invalid_title": {
+      "description": "Heading when an emailed link cannot be used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "auth.login.already_listening": {
       "description": "Heading when a signed-in listener opens Log in.",
       "delivery": [
@@ -764,8 +841,50 @@
       ],
       "variables": {}
     },
+    "auth.login.verification_link_prompt": {
+      "description": "Web Log in link to request a new verification link after verification is required.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.verification_required": {
+      "description": "Web Log in error when the account must verify its email first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "auth.login.verify_prompt": {
       "description": "Link shown when login requires email verification.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.create_account_web": {
+      "description": "Native button that opens Finitude Web sign-up in the browser.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.create_account_web_hint": {
+      "description": "Native hint below the Web sign-up button.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.verification_required": {
+      "description": "Native sign-in error when the account must verify its email first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.web_signup_unavailable": {
+      "description": "Native error when the Web sign-up page cannot be opened.",
       "delivery": [
         "runtime"
       ],
@@ -827,6 +946,90 @@
       ],
       "variables": {}
     },
+    "auth.register_complete.action": {
+      "description": "Button that creates the account from a registration link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.description": {
+      "description": "Registration completion page description.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.exists_copy": {
+      "description": "Shown when the link’s address already has an account.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.exists_title": {
+      "description": "Heading when the link’s address already has an account.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.eyebrow": {
+      "description": "Eyebrow on the page opened from a registration link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.form_title": {
+      "description": "Form heading on the registration completion page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.invalid_copy": {
+      "description": "Shown when a registration link cannot be used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.name_rejected": {
+      "description": "Error when the display name is rejected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.password_rejected": {
+      "description": "Error when the server rejects the chosen password.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.request_new": {
+      "description": "Link back to the registration request page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.success": {
+      "description": "Log in notice after registration completes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.title": {
+      "description": "Heading on the registration completion page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "auth.register.accepted": {
       "description": "Non-enumerating registration acceptance status.",
       "delivery": [
@@ -878,6 +1081,34 @@
     },
     "auth.register.form_title": {
       "description": "Registration form title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.link_description": {
+      "description": "Registration request page description for email-link sign-up.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.link_sent": {
+      "description": "Non-enumerating status after a registration link request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.send_link": {
+      "description": "Button that requests a registration link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.sending_link": {
+      "description": "Pending label while a registration link is requested.",
       "delivery": [
         "runtime"
       ],
@@ -5042,6 +5273,13 @@
     },
     "route.title.create_account": {
       "description": "Document title for account registration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.finish_account": {
+      "description": "Route title announced for the registration completion page.",
       "delivery": [
         "runtime"
       ],
