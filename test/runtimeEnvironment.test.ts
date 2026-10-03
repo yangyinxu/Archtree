@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assertLinuxRuntime, assertNodeRuntime, assertRoomAudioRuntime } from '../scripts/check-runtime.mjs';
+import { serverTestArguments } from '../scripts/lib/server-test-arguments.mjs';
 
 test('runtime preflight rejects unsupported Node majors with an actionable message', () => {
   assert.doesNotThrow(() => assertNodeRuntime('24.20.0'));
@@ -30,6 +31,13 @@ test('integration runner fails once before loading suites when mongod is missing
   assert.match(result.stderr, /MongoDB test daemon is unavailable/);
   assert.doesNotMatch(result.stdout, /Subtest|TAP version|DB_CONN_STRING/);
   assert.equal((result.stderr.match(/MongoDB test daemon is unavailable/g) || []).length, 1);
+});
+
+test('server test runs bound each test so a lost callback fails instead of stalling the gate', () => {
+  assert.deepEqual(serverTestArguments('unit', [], ['test/a.test.ts']),
+    ['--import', 'tsx', '--test', '--test-timeout=120000', 'test/a.test.ts']);
+  assert.deepEqual(serverTestArguments('integration', ['--test-timeout=600000'], ['test/a.integration.ts']),
+    ['--import', 'tsx', '--test', '--test-concurrency=1', '--test-timeout=600000', 'test/a.integration.ts']);
 });
 
 test('startup environment assignments work without shell-specific syntax', () => {

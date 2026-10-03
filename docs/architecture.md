@@ -1476,11 +1476,14 @@ reject startup. Node 24 is the supported server runtime.
 SIGTERM and SIGINT start one shutdown operation. Repeated signals remain handled
 until that operation finishes. The server marks itself draining, reports 503 on
 health, refuses new requests with 503/Retry-After, and disables keep-alive on
-admitted responses. It then waits for both HTTP connections and tracked business
-Promises. A client disconnect does not mean its upload, transaction, or publication
-has finished. Every asynchronous Controller uses `asyncHandler`; async authentication
-middleware participates in the same tracker. The route-boundary test prevents new
-untracked asynchronous Controllers and duplicate wrappers.
+admitted responses. It then waits for HTTP connections, transport completion of
+every admitted response, and tracked business Promises. Node can report the server
+closed before a disconnected response emits `close`, so the response wait keeps a
+late dispatch for that request classified as cancellation. A client disconnect
+does not mean its upload, transaction, or publication has finished. Every
+asynchronous Controller uses `asyncHandler`; async authentication middleware
+participates in the same tracker. The route-boundary test prevents new untracked
+asynchronous Controllers and duplicate wrappers.
 
 Before database teardown, admission for business work is closed atomically. A late
 multipart/parser/auth callback cannot start a new Controller against the closing

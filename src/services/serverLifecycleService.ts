@@ -88,6 +88,7 @@ export class ServerLifecycle {
   draining = false;
   private shutdown?: Promise<'graceful' | 'forced'>;
   private responses = new Set<ServerResponse>();
+  private responseWaiters = new Set<() => void>();
   private work = new Set<Promise<unknown>>();
   private idleWaiters = new Set<() => void>();
   private workAdmissionClosed = false;
@@ -123,6 +124,16 @@ export class ServerLifecycle {
     return new Promise<void>(resolve => this.idleWaiters.add(resolve));
   }
 
+  /**
+   * Resolves once every admitted response has recorded transport completion. Node can close the
+   * server before a disconnected request's response emits 'close'; until then a late dispatch would
+   * look like a shutdown admission failure instead of a cancellation of an already-ended request.
+   */
+  private whenResponsesClosed() {
+    if (!this.responses.size) return Promise.resolve();
+    return new Promise<void>(resolve => this.responseWaiters.add(resolve));
+  }
+
   readonly admit: RequestHandler = (_req, res, next) => {
     if (!this.draining) {
       requestLifecycles.set(_req, this);
@@ -130,6 +141,10 @@ export class ServerLifecycle {
       this.responses.add(res);
       onResponseComplete(res, () => {
         this.responses.delete(res);
+        if (this.responses.size === 0) {
+          for (const resolve of this.responseWaiters) resolve();
+          this.responseWaiters.clear();
+        }
       });
       return next();
     }
@@ -171,7 +186,8 @@ export class ServerLifecycle {
       };
       // close() stops new connections and closes idle keep-alive connections on Node 24.
       const socketsClosed = new Promise<void>(closed => server.close(() => closed()));
-      void Promise.all([socketsClosed, this.whenIdle()]).then(complete);
+      // Draining admits no new responses, so this set only shrinks; the grace timer still bounds it.
+      void Promise.all([socketsClosed, this.whenResponsesClosed(), this.whenIdle()]).then(complete);
       timer = setTimeout(() => {
         forced = true;
         server.closeAllConnections();
@@ -180,6 +196,7 @@ export class ServerLifecycle {
       }, graceMs);
     });
     this.idleWaiters.clear();
+    this.responseWaiters.clear();
     await new Promise<void>(resolve => {
       let timer: NodeJS.Timeout | undefined;
       const complete = () => { clearTimeout(timer); resolve(); };

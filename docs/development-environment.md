@@ -183,6 +183,11 @@ Elastic Beanstalk artifact validation. Windows and macOS print their exclusion
 explicitly; these hosts cannot verify Bash/systemd behavior or POSIX executable
 bits. Those tests retain their complete assertions and remain part of Linux CI.
 
+The server test runner fails any single test that runs longer than 120 seconds,
+so a hung test fails the gate instead of stalling it. Pass a different bound
+explicitly when diagnosing a slow test, for example
+`npm run test:server -- --test-timeout=600000`.
+
 `npm run test:server:linux` runs the Linux suites explicitly and rejects other
 hosts. `npm run doctor:release` checks Linux, Bash, Node, MongoDB and FFmpeg. Deployment
 artifact staging also requires Linux so a Windows archive cannot be mistaken for
