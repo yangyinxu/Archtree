@@ -150,9 +150,14 @@ const authEmailKindNames: Record<AuthEmailKind, string> = {
  * able to receive mail. A skip is recorded with only the domain and the email
  * kind. A lookup that fails for another reason is recorded and fails open, so
  * a DNS outage sends exactly as before this check existed.
+ *
+ * The check reuses a cached verdict but never caches its own: it runs only for
+ * the account states that receive this email, so a verdict it cached would
+ * make a later request for any address at the domain answer sooner and reveal
+ * that this address has an account.
  */
 const recipientDomainAcceptsMail = async (recipient: string, kind: AuthEmailKind) => {
-    const verdict = await checkEmailDomainDeliverability(recipient);
+    const verdict = await checkEmailDomainDeliverability(recipient, { cache: 'read-only' });
     if (verdict.status === 'deliverable') return true;
     const context = { domain: verdict.domain ?? undefined, emailKind: authEmailKindNames[kind], reason: verdict.reason };
     if (verdict.status === 'undeliverable') {

@@ -51,6 +51,25 @@ export interface EmailDomainDeliverabilityOptions {
     now?: () => number;
 }
 
+/**
+ * How one check may use the verdict cache.
+ *
+ * - `read-write` (the default): for the request-time check, which runs before
+ *   any account lookup, so whether and when it runs never depends on account
+ *   state. It reuses a cached verdict and caches its own.
+ * - `read-only`: for the send-time check. It reuses a cached verdict but never
+ *   stores, refreshes, evicts or deletes one. Some emails are sent only when
+ *   an account exists (password recovery, verification links), so a verdict
+ *   cached at send time, for example after the request-time lookup failed
+ *   under flaky DNS, would make a later request for any address at that domain
+ *   answer sooner and so reveal that the earlier address had an account.
+ */
+export type DeliverabilityCacheMode = 'read-write' | 'read-only';
+
+export interface DeliverabilityCheckOptions {
+    cache?: DeliverabilityCacheMode;
+}
+
 export const emailDomainDeliverabilityDefaults = Object.freeze({
     maxEntries: 1_000,
     positiveTtlMs: 60 * 60_000,
@@ -99,8 +118,11 @@ class LookupTimeoutError extends Error {}
 
 /**
  * Creates a checker with its own bounded cache. Deliverable and undeliverable
- * verdicts are cached for their TTLs; `unknown` is never cached, so the next
- * request retries. Concurrent checks for one domain share a single lookup.
+ * verdicts from `read-write` checks are cached for their TTLs; `unknown` is
+ * never cached, so the next request retries, and a `read-only` check never
+ * caches anything (see `DeliverabilityCacheMode`). Concurrent checks for one
+ * domain share a single lookup, except that a `read-write` check never joins
+ * a lookup a `read-only` check started.
  */
 export const createEmailDomainDeliverability = (options: EmailDomainDeliverabilityOptions) => {
     const {
@@ -112,7 +134,15 @@ export const createEmailDomainDeliverability = (options: EmailDomainDeliverabili
         now = Date.now
     } = options;
     const cache = new Map<string, { verdict: DomainDeliverability; expiresAt: number }>();
+    /** Lookups started by `read-write` checks; each caches its verdict when it settles. */
     const pending = new Map<string, Promise<DomainDeliverability>>();
+    /**
+     * Lookups started by `read-only` checks, which cache nothing. They are kept
+     * apart so a `read-write` check never joins one: its verdict would then
+     * come from, and its latency depend on, a lookup that ran only because an
+     * account existed.
+     */
+    const readOnlyPending = new Map<string, Promise<DomainDeliverability>>();
 
     const remember = (domain: string, verdict: DomainDeliverability) => {
         if (verdict.status === 'unknown') return;
@@ -148,12 +178,34 @@ export const createEmailDomainDeliverability = (options: EmailDomainDeliverabili
         }
     };
 
-    /** Resolves the verdict for an address's domain; it never rejects. */
-    const check = (address: string): Promise<DomainDeliverability> => {
+    /**
+     * Looks a domain up for a `read-only` check without caching the verdict.
+     * It may join a `read-write` lookup already in flight: that lookup caches
+     * its verdict whether or not anyone joins it, so joining writes nothing.
+     */
+    const lookUpWithoutCaching = (domain: string): Promise<DomainDeliverability> => {
+        const inFlight = pending.get(domain) ?? readOnlyPending.get(domain);
+        if (inFlight) return inFlight;
+        const lookup = lookUp(domain).then(verdict => {
+            readOnlyPending.delete(domain);
+            return verdict;
+        });
+        readOnlyPending.set(domain, lookup);
+        return lookup;
+    };
+
+    /**
+     * Resolves the verdict for an address's domain; it never rejects. A
+     * `read-only` check leaves the cache exactly as it found it.
+     */
+    const check = (address: string, checkOptions: DeliverabilityCheckOptions = {}): Promise<DomainDeliverability> => {
         const domain = emailAddressDomain(address);
         if (!domain) return Promise.resolve({ status: 'undeliverable', domain: null, reason: 'invalid_domain' });
         const cached = cache.get(domain);
         if (cached && cached.expiresAt > now()) return Promise.resolve(cached.verdict);
+        // Even deleting an expired entry would change which domain is evicted next, so a
+        // read-only check leaves it for the next read-write check to replace.
+        if (checkOptions.cache === 'read-only') return lookUpWithoutCaching(domain);
         if (cached) cache.delete(domain);
         const inFlight = pending.get(domain);
         if (inFlight) return inFlight;
@@ -187,8 +239,13 @@ export const systemMxResolver: MxResolver = domain => {
 let activeResolver: MxResolver = systemMxResolver;
 let shared = createEmailDomainDeliverability({ resolveMx: activeResolver });
 
-/** Checks an address with the process-wide checker shared by every authentication email. */
-export const checkEmailDomainDeliverability = (address: string) => shared.check(address);
+/**
+ * Checks an address with the process-wide checker shared by every
+ * authentication email. Pass `{ cache: 'read-only' }` from any check whose
+ * running depends on account state (see `DeliverabilityCacheMode`).
+ */
+export const checkEmailDomainDeliverability = (address: string, options?: DeliverabilityCheckOptions) =>
+    shared.check(address, options);
 
 /**
  * Replaces the resolver behind the shared checker and starts with an empty

@@ -465,6 +465,59 @@ test('the email-time check stays as defense in depth when the request check coul
     assert.deepEqual(fakes.errors, []);
 });
 
+test('the email-time verdict is never cached, so a later request lookup cannot reveal an earlier account', async t => {
+    // Under flaky DNS each domain's first lookup fails; every later lookup finds a mail host.
+    const queries: string[] = [];
+    installResolver(t, async domain => {
+        queries.push(domain);
+        if (queries.filter(query => query === domain).length === 1) throw dnsError('ESERVFAIL');
+        return [{ exchange: `mx.${domain}`, priority: 10 }];
+    });
+    const count = (domain: string) => queries.filter(query => query === domain).length;
+    // Routes that email only some account states, so their email-time check reveals an account.
+    const cases = emailRoutes.flatMap((route, routeIndex) =>
+        (route.delivers as readonly AccountState[]).includes('absent') ? [] : [{ route, routeIndex, state: route.delivers[0] }]);
+    assert.deepEqual(cases.map(({ route }) => route.name),
+        ['verification-link request', 'app password recovery', 'browser password recovery']);
+    const domainsFor = (routeIndex: number) => ({
+        withAccount: `account-${routeIndex}.flaky.example.test`,
+        withoutAccount: `none-${routeIndex}.flaky.example.test`
+    });
+    const fakes = installFakes(t, cases.map(({ routeIndex, state }) => account(`synthetic-flaky-${routeIndex}`,
+        addressFor(routeIndex, state, domainsFor(routeIndex).withAccount), state)));
+    const url = await startApplication(t);
+
+    for (const { route, routeIndex, state } of cases) {
+        const { withAccount, withoutAccount } = domainsFor(routeIndex);
+        const owner = addressFor(routeIndex, state, withAccount);
+        const ownerShape = await postShape(url, route.path, owner);
+        assert.equal(ownerShape.status, 202, `${route.name}: an unknown verdict keeps the generic answer`);
+        assert.deepEqual(await postShape(url, route.path, addressFor(routeIndex, 'absent', withoutAccount)), ownerShape);
+        await waitFor(() => fakes.sent.some(mail => mail.recipient === owner), `${route.name}: the email to the account`);
+        await settle();
+        assert.equal(count(withAccount), 2, `${route.name}: the email-time check looked the domain up again`);
+        assert.equal(count(withoutAccount), 1, `${route.name}: no email and no email-time check without an account`);
+
+        // The next request for any address at either domain looks it up afresh: nothing was cached at send time.
+        for (const domain of [withAccount, withoutAccount]) {
+            const before = count(domain);
+            assert.deepEqual(await postShape(url, route.path, `probe@${domain}`), ownerShape);
+            assert.equal(count(domain), before + 1, `${route.name}: the request check at ${domain} missed the cache`);
+        }
+        // That request check cached its own verdict, which the following request reuses.
+        for (const domain of [withAccount, withoutAccount]) {
+            const before = count(domain);
+            assert.deepEqual(await postShape(url, route.path, `probe-again@${domain}`), ownerShape);
+            assert.equal(count(domain), before, `${route.name}: the request check at ${domain} reused its cached verdict`);
+        }
+    }
+    await settle();
+    assert.deepEqual(fakes.sent.map(mail => mail.recipient).sort(),
+        cases.map(({ routeIndex, state }) => addressFor(routeIndex, state, domainsFor(routeIndex).withAccount)).sort());
+    assert.deepEqual(fakes.eventsNamed('auth_email_domain_check_failed'), [], 'every email-time lookup succeeded');
+    assert.deepEqual(fakes.errors, []);
+});
+
 test('invalid input keeps the generic validation answer without a DNS lookup', async t => {
     const resolver = tableResolver();
     installResolver(t, resolver.resolveMx);

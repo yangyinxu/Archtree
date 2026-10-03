@@ -1192,12 +1192,17 @@ The verdict is applied at two points:
    response, so it changes no status, body or latency.
 
 No event records the address. Domains are trimmed, lowercased, stripped of one
-trailing root dot and converted to punycode when internationalized. Verdicts
-are cached in process for up to 1,000 domains, deliverable ones for 1 hour and
-undeliverable ones for 10 minutes; `unknown` verdicts are not cached. Each
-lookup is bounded at 3 seconds, and concurrent checks for one domain share one
-query, so the request check and the later send check normally cost a single
-lookup.
+trailing root dot and converted to punycode when internationalized. Only the
+request check caches verdicts, in process for up to 1,000 domains, deliverable
+ones for 1 hour and undeliverable ones for 10 minutes; `unknown` verdicts are
+not cached. The send check reuses a cached verdict but never caches its own: it
+runs only for the account states that receive an email, so a verdict it cached
+(for example after the request check failed under flaky DNS) would make a later
+request for any address at that domain answer sooner and reveal an account.
+Each lookup is bounded at 3 seconds. Concurrent request checks for one domain
+share one query, and a send check may join a request check's query but never
+the reverse, so the request check and the later send check normally cost a
+single lookup.
 
 There is no configuration. Lookups use the host's system name servers through
 `node:dns`, so the instance needs outbound DNS; without it each email request

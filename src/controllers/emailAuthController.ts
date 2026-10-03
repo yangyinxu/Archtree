@@ -74,9 +74,10 @@ const rejectInvalidRequest = (req: Request, res: Response) => {
  * counts toward the client's per-IP budget but spends neither the address's
  * attempt budget nor its link-email budget, and sends or prepares nothing.
  * A deliverable or unknown verdict (a DNS failure) passes the request on
- * unchanged; the verdict is cached, so the later `sendAuthEmail` check, kept
- * as defense in depth, normally reuses it. Invalid input is left to the
- * controller's generic validation answer without a lookup.
+ * unchanged; this check caches the verdict, so the later `sendAuthEmail`
+ * check, kept as defense in depth and never caching its own verdict, normally
+ * reuses it. Invalid input is left to the controller's generic validation
+ * answer without a lookup.
  */
 export const rejectUndeliverableEmailDomain = (req: Request, res: Response, next: NextFunction) =>
     runRequestWork(req, async () => {
