@@ -654,6 +654,90 @@ test('public cover art requires an exact ready Soundtrack owner lifecycle', asyn
     }
 });
 
+const mediaTrackOwnerId = readyAsset('audioTrack').ownerId;
+const readyVideoOwner = {
+    coverArtId: imageId,
+    uploadStatus: 'ready',
+    publicationStatus: 'ready',
+    mediaType: 'video',
+    s3Key: `video/${mediaTrackOwnerId}/64b7f0c2a1b2c3d4e5f60718`,
+    contentType: 'video/mp4'
+};
+
+test('public cover art serves a ready published Video MediaTrack on canonical and variant paths', async () => {
+    const asset = readyAsset('audioTrack');
+    const source = await sharp({
+        create: { width: 8, height: 8, channels: 3, background: '#335577' }
+    }).png().toBuffer();
+    for (const owner of [
+        readyVideoOwner,
+        {
+            ...attachedOwner,
+            mediaType: 'audio',
+            s3Key: `audio/${mediaTrackOwnerId}/64b7f0c2a1b2c3d4e5f60719`
+        }
+    ]) {
+        const original = await getCoverArtObject(imageId, {}, {
+            findAsset: async () => asset,
+            findOwner: async () => owner,
+            getObject: async () => ({ Body: Readable.from(source) })
+        });
+        assert.equal(original?.notModified, false);
+        assert.equal(original?.asset.s3Key, `images/${imageId}`);
+
+        const variant = await getCoverArtVariant(imageId, 96, {}, {
+            findAsset: async () => asset,
+            findOwner: async () => owner,
+            getObject: async () => ({ Body: Readable.from(source), ContentLength: source.length }),
+            transform: async () => Buffer.from('derived')
+        });
+        assert.equal(variant?.notModified, false);
+        assert.equal(variant?.body?.toString(), 'derived');
+        assert.equal(variant?.etag, coverArtVariantEtag(imageId, 96));
+    }
+});
+
+test('public cover art rejects wrong-kind, foreign, and unpublished Video MediaTrack owners', async () => {
+    const asset = readyAsset('audioTrack');
+    const legacyOwnerWithVideoKey = {
+        coverArtId: imageId,
+        uploadStatus: 'ready',
+        s3Key: readyVideoOwner.s3Key
+    };
+    for (const owner of [
+        { ...readyVideoOwner, mediaType: 'audio' },
+        { ...readyVideoOwner, mediaType: 'unexpected' },
+        legacyOwnerWithVideoKey,
+        { ...attachedOwner, mediaType: 'video' },
+        {
+            ...readyVideoOwner,
+            s3Key: `audio/${mediaTrackOwnerId}/64b7f0c2a1b2c3d4e5f60718`
+        },
+        {
+            ...readyVideoOwner,
+            s3Key: 'video/507f191e810c19729de860eb/64b7f0c2a1b2c3d4e5f60718'
+        },
+        { ...readyVideoOwner, publicationStatus: 'pending' },
+        { ...readyVideoOwner, publicationStatus: null },
+        { ...readyVideoOwner, uploadStatus: 'pending' },
+        { ...readyVideoOwner, uploadStatus: 'deleting' }
+    ]) {
+        let storageCalls = 0;
+        const dependencies = {
+            findAsset: async () => asset,
+            findOwner: async () => owner,
+            getObject: async () => {
+                storageCalls += 1;
+                return {};
+            },
+            transform: async () => Buffer.alloc(0)
+        };
+        assert.equal(await getCoverArtObject(imageId, {}, dependencies), null);
+        assert.equal(await getCoverArtVariant(imageId, 96, {}, dependencies), null);
+        assert.equal(storageCalls, 0);
+    }
+});
+
 test('public cover art excludes non-ready Album owners', async () => {
     const asset = readyAsset('album');
     for (const lifecycleStatus of ['deleting', 'deleteFailed']) {

@@ -29,10 +29,8 @@ import {
     readyAlbumLifecycleFilter,
     touchReadyAlbumReferences
 } from './albumReferenceFenceService';
-import {
-    isAudioObjectKeyForTrack,
-    readyAudioStorageFilter
-} from '../utils/audioStorageKey';
+import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { isMediaObjectKeyForTrack, persistedMediaType } from '../utils/mediaStorageKey';
 
 const allowedImageTypes = new Map<string, (buffer: Buffer) => boolean>([
     ['image/jpeg', (buffer) => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff],
@@ -469,13 +467,18 @@ const findPublicCoverArtOwner = async (asset: PublicCoverArtAsset) => {
                 coverArtId: 1,
                 lifecycleStatus: 1,
                 uploadStatus: 1,
-                s3Key: 1
+                s3Key: 1,
+                mediaType: 1
             }
         }
     );
 };
 
-/** Rechecks injected owner lookups so tests and alternate stores cannot bypass readiness. */
+/**
+ * Rechecks injected owner lookups so tests and alternate stores cannot bypass readiness.
+ * A MediaTrack owner must hold the exact key namespace of its recorded kind, so
+ * Video rows keep their artwork public while wrong-kind keys stay hidden.
+ */
 export const isPublicCoverArtOwnerReady = (
     asset: PublicCoverArtAsset,
     owner: Record<string, unknown>
@@ -491,7 +494,7 @@ export const isPublicCoverArtOwnerReady = (
     );
     return owner.uploadStatus === 'ready'
         && (!hasPublicationStatus || owner.publicationStatus === 'ready')
-        && isAudioObjectKeyForTrack(owner.s3Key, ownerId);
+        && isMediaObjectKeyForTrack(owner.s3Key, ownerId, persistedMediaType(owner.mediaType));
 };
 
 /** Resolves only an attached, ready catalog asset; detached assets are never public. */
