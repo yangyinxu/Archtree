@@ -194,7 +194,11 @@ bits. Those tests retain their complete assertions and remain part of Linux CI.
 The server test runner fails any single test that runs longer than 120 seconds,
 so a hung test fails the gate instead of stalling it. Pass a different bound
 explicitly when diagnosing a slow test, for example
-`npm run test:server -- --test-timeout=600000`.
+`npm run test:server -- --test-timeout=600000`. The runner also passes
+`--test-force-exit`, so a test file that finishes but leaves a socket, timer, or
+child process open still exits instead of keeping the gate alive. To find such a
+leaked handle, run with `npm run test:server -- --no-test-force-exit`; the run
+then stays open on the affected file.
 
 The server test runner starts unit, Linux, and integration test processes in an
 isolated environment so a private root `.env` never reaches them. It points

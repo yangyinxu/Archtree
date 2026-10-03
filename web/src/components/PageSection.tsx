@@ -65,6 +65,24 @@ const carouselPageTarget = (
   return Math.min(maximumScroll, Math.max(0, Math.round(rawTarget / stride) * stride));
 };
 
+/**
+ * Returns one sibling-unique React key per entry. Manual Carousels may list the same content
+ * more than once, so repeats get an occurrence suffix; the first occurrence keeps its content
+ * key so ordinary reorders preserve component identity.
+ */
+const sectionEntryKeys = (items: ReadonlyArray<AlbumSummary | AudioTrackSummary>) => {
+  const usedKeys = new Set<string>();
+  return items.map((item) => {
+    const contentKey = `${item.contentType}:${item.id}`;
+    let key = contentKey;
+    for (let occurrence = 2; usedKeys.has(key); occurrence += 1) {
+      key = `${contentKey}:${occurrence}`;
+    }
+    usedKeys.add(key);
+    return key;
+  });
+};
+
 export interface PageSectionProps {
   id: string;
   title: string;
@@ -223,6 +241,7 @@ export const PageSection = ({
     scrollCarousel(command);
   }, [scrollCarousel]);
 
+  const entryKeys = sectionEntryKeys(items);
   const collection = (
     <ul
       aria-describedby={presentation === 'carousel' ? carouselHelpId : undefined}
@@ -237,16 +256,16 @@ export const PageSection = ({
       tabIndex={presentation === 'carousel' ? 0 : undefined}
     >
       {presentation === 'list'
-        ? items.map((item) => (
+        ? items.map((item, index) => (
             <ContentListRow
               item={item}
-              key={`${item.contentType}:${item.id}`}
+              key={entryKeys[index]}
               onPlay={onPlay}
               trailing={item.contentType === 'audioTrack' ? renderTrackTrailing?.(item) : undefined}
             />
           ))
-        : items.map((item) => (
-          <li className={styles.cardItem} key={`${item.contentType}:${item.id}`}>
+        : items.map((item, index) => (
+          <li className={styles.cardItem} key={entryKeys[index]}>
             <ContentCard artworkSizes={cardArtworkSizes} item={item} onPlay={onPlay} />
           </li>
         ))}

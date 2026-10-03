@@ -25,6 +25,15 @@ export type ContentReferenceValidation = {
     message?: string;
 };
 
+/**
+ * Matches definitions whose items are curated references. Carousels created before the mode
+ * field existed are manual, and the listener and reconciliation report treat a missing or empty
+ * mode that way; cleanup must agree, or their references to deleted content would be reported
+ * forever but never removed. Grid/List definitions have always stored a mode, so matching a
+ * missing one there can only remove references to deleted content.
+ */
+const curatedDefinitionMode = { $in: ['manual', null, ''] };
+
 /** Removes one item type's matching references and renumbers the retained items contiguously. */
 const orderedManualItemCleanup = (
     contentType: 'post' | 'album' | 'audioTrack',
@@ -235,11 +244,11 @@ export const cleanupDeletedContentReferences = async (
         operations.push(
             UserLibrary.cleanupContent(contentType, canonicalContentId),
             db.collection('carousels').updateMany(
-                { mode: 'manual', items: { $elemMatch: matchingItem } },
+                { mode: curatedDefinitionMode, items: { $elemMatch: matchingItem } },
                 orderedManualItemCleanup(contentType, referenceIds) as any
             ),
             db.collection('contentCollections').updateMany(
-                { mode: 'manual', items: { $elemMatch: matchingItem } },
+                { mode: curatedDefinitionMode, items: { $elemMatch: matchingItem } },
                 orderedManualItemCleanup(contentType, referenceIds) as any
             )
         );
@@ -268,7 +277,8 @@ export const cleanupDeletedContentReferences = async (
 };
 
 /**
- * Idempotently removes a Feed Post from every manual Carousel before the Post record is deleted.
+ * Idempotently removes a Feed Post from every manual (including legacy mode-less) Carousel before
+ * the Post record is deleted.
  * Posts are kept out of ContentReferenceType because only manual Carousels can reference them;
  * they have no Library, share, listening, Grid/List, or reverse catalog references to clean.
  */
@@ -276,7 +286,7 @@ export const cleanupDeletedPostReferences = async (postId: string) => {
     const { referenceIds } = storedReferenceIds(postId);
     await getDb()!.collection('carousels').updateMany(
         {
-            mode: 'manual',
+            mode: curatedDefinitionMode,
             items: { $elemMatch: { contentType: 'post', contentId: { $in: referenceIds } } }
         },
         orderedManualItemCleanup('post', referenceIds) as any

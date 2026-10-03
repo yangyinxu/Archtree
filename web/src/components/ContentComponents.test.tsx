@@ -214,6 +214,45 @@ test.each(['carousel', 'grid', 'list'] as const)('preserves the %s presentation 
   }
 });
 
+test.each(['carousel', 'grid', 'list'] as const)('keeps every repeated %s item as its own keyed entry', (presentation) => {
+  const consoleError = vi.spyOn(console, 'error');
+  const secondAlbum: AlbumSummary = { ...album, id: 'album-2', title: 'Lorem Ipsum' };
+  const { container, rerender } = render(
+    <MemoryRouter>
+      <PageSection
+        id={`repeated-${presentation}`}
+        items={[album, audioTrack, album]}
+        presentation={presentation}
+        title="Repeated picks"
+      />
+    </MemoryRouter>
+  );
+  const entryTitles = () => Array.from(
+    container.querySelector(`[data-presentation="${presentation}"]`)!.children,
+    (entry) => entry.textContent
+  );
+
+  expect(entryTitles()).toHaveLength(3);
+  expect(entryTitles()[0]).toContain('Still Water');
+  expect(entryTitles()[2]).toContain('Still Water');
+
+  // Colliding keys would let React reuse or drop the wrong repeated entry on update.
+  rerender(
+    <MemoryRouter>
+      <PageSection
+        id={`repeated-${presentation}`}
+        items={[album, secondAlbum, album, album]}
+        presentation={presentation}
+        title="Repeated picks"
+      />
+    </MemoryRouter>
+  );
+
+  expect(entryTitles()).toHaveLength(4);
+  expect(entryTitles().map((title) => title?.includes('Lorem Ipsum'))).toEqual([false, true, false, false]);
+  expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/same key/);
+});
+
 test('shows only the available carousel directions as overflow moves between edges', async () => {
   const { container } = render(
     <MemoryRouter>

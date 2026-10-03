@@ -1120,6 +1120,155 @@ test('Feed Post deletion removes only that Post from manual Carousels and renumb
     assert.deepEqual(await carouselSnapshot(), after);
 });
 
+test('deleted content and Feed Posts leave mode-less legacy definitions like manual ones', async () => {
+    const deletedAlbumId = new ObjectId();
+    const deletedAudioTrackId = new ObjectId();
+    const deletedPostId = new ObjectId();
+    const retainedAlbumId = new ObjectId();
+    const retainedPostId = new ObjectId();
+    const missingModeCarouselId = new ObjectId();
+    const nullModeCarouselId = new ObjectId();
+    const emptyModeCarouselId = new ObjectId();
+    const missingModeCollectionId = new ObjectId();
+    const artistCarouselId = new ObjectId();
+    const personalizedCarouselId = new ObjectId();
+    await Promise.all([
+        getDb()!.collection('posts').insertMany([
+            { _id: deletedPostId, title: 'Lorem ipsum', description: 'Dolor sit amet' },
+            { _id: retainedPostId, title: 'Consectetur', description: 'Adipiscing elit' }
+        ]),
+        getDb()!.collection('albums').insertOne({ _id: retainedAlbumId, title: 'Sed do' }),
+        getDb()!.collection('carousels').insertMany([
+            {
+                // Carousels created before the mode field existed have no mode at all.
+                _id: missingModeCarouselId,
+                name: 'Lorem Legacy',
+                items: [
+                    { contentType: 'album', contentId: deletedAlbumId.toHexString(), order: 0 },
+                    { contentType: 'post', contentId: retainedPostId.toHexString(), order: 1 },
+                    { contentType: 'audioTrack', contentId: deletedAudioTrackId, order: 2 },
+                    { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 3 },
+                    { contentType: 'post', contentId: deletedPostId.toHexString(), order: 4 }
+                ]
+            },
+            {
+                _id: nullModeCarouselId,
+                name: 'Ipsum Null',
+                mode: null,
+                items: [
+                    { contentType: 'post', contentId: deletedPostId, order: 0 },
+                    { contentType: 'album', contentId: deletedAlbumId.toHexString().toUpperCase(), order: 1 },
+                    { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 2 }
+                ]
+            },
+            {
+                _id: emptyModeCarouselId,
+                name: 'Amet Empty',
+                mode: '',
+                items: [
+                    { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 0 },
+                    { contentType: 'audioTrack', contentId: deletedAudioTrackId.toHexString(), order: 1 }
+                ]
+            },
+            {
+                _id: artistCarouselId,
+                name: 'Dolor Artist',
+                mode: 'artist',
+                artistConfig: {
+                    artistId: new ObjectId().toHexString(),
+                    contentType: 'album',
+                    sort: 'releaseDateDesc',
+                    limit: 20
+                },
+                items: [
+                    { contentType: 'album', contentId: deletedAlbumId.toHexString(), order: 0 },
+                    { contentType: 'post', contentId: deletedPostId.toHexString(), order: 1 }
+                ]
+            },
+            {
+                _id: personalizedCarouselId,
+                name: 'Sit Personalized',
+                mode: 'personalized',
+                personalizedConfig: { source: 'recentlyPlayed', limit: 20 },
+                items: [{ contentType: 'audioTrack', contentId: deletedAudioTrackId, order: 0 }]
+            }
+        ]),
+        getDb()!.collection('contentCollections').insertOne({
+            _id: missingModeCollectionId,
+            contentType: 'album',
+            items: [
+                { contentType: 'album', contentId: deletedAlbumId, order: 0 },
+                { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 1 }
+            ]
+        })
+    ]);
+    const dynamicBefore = (await carouselSnapshot()).filter(carousel =>
+        carousel._id.equals(artistCarouselId) || carousel._id.equals(personalizedCarouselId)
+    );
+    const reportedBefore = (await reconcileContentReferences()).danglingCarouselItems
+        .filter(item => item.carouselId === missingModeCarouselId.toHexString())
+        .map(item => item.contentType)
+        .sort();
+    // The read-only report already treats a mode-less Carousel as manual; cleanup must agree.
+    assert.deepEqual(reportedBefore, ['album', 'audioTrack']);
+
+    await cleanupDeletedContentReferences('album', deletedAlbumId.toHexString());
+    await cleanupDeletedContentReferences('audioTrack', deletedAudioTrackId.toHexString());
+    const deleted = await deletePostAsAdmin(deletedPostId.toHexString());
+
+    assert.equal(deleted.error, undefined);
+    assert.equal(deleted.statusCode, 200);
+    const after = await carouselSnapshot();
+    const itemsOf = (carouselId: ObjectId) => after
+        .find(carousel => carousel._id.equals(carouselId))!
+        .items.map((item: any) => ({
+            contentType: item.contentType,
+            contentId: String(item.contentId),
+            order: item.order
+        }));
+    assert.deepEqual(itemsOf(missingModeCarouselId), [
+        { contentType: 'post', contentId: retainedPostId.toHexString(), order: 0 },
+        { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 1 }
+    ]);
+    assert.deepEqual(itemsOf(nullModeCarouselId), [
+        { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 0 }
+    ]);
+    assert.deepEqual(itemsOf(emptyModeCarouselId), [
+        { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 0 }
+    ]);
+    // Cleanup must not reinterpret a legacy definition by writing a mode.
+    const legacy = after.find(carousel => carousel._id.equals(missingModeCarouselId))!;
+    assert.equal('mode' in legacy, false);
+    assert.equal(after.find(carousel => carousel._id.equals(nullModeCarouselId))!.mode, null);
+    assert.deepEqual(
+        after.filter(carousel =>
+            carousel._id.equals(artistCarouselId) || carousel._id.equals(personalizedCarouselId)
+        ),
+        dynamicBefore
+    );
+    const collection = await getDb()!.collection('contentCollections')
+        .findOne({ _id: missingModeCollectionId });
+    assert.equal('mode' in collection!, false);
+    assert.deepEqual(
+        collection!.items.map((item: any) => ({ contentId: String(item.contentId), order: item.order })),
+        [{ contentId: retainedAlbumId.toHexString(), order: 0 }]
+    );
+    assert.deepEqual(
+        (await reconcileContentReferences()).danglingCarouselItems
+            .filter(item => [missingModeCarouselId, nullModeCarouselId, emptyModeCarouselId]
+                .some(carouselId => item.carouselId === carouselId.toHexString())),
+        []
+    );
+
+    const collectionsAfter = await getDb()!.collection('contentCollections').find().toArray();
+    await cleanupDeletedContentReferences('album', deletedAlbumId.toHexString().toUpperCase());
+    await cleanupDeletedContentReferences('audioTrack', deletedAudioTrackId.toHexString());
+    await cleanupDeletedPostReferences(deletedPostId.toHexString());
+
+    assert.deepEqual(await carouselSnapshot(), after);
+    assert.deepEqual(await getDb()!.collection('contentCollections').find().toArray(), collectionsAfter);
+});
+
 test('Feed Post deletion keeps the Post retryable when Carousel cleanup fails', async () => {
     const postId = new ObjectId();
     const retainedPostId = new ObjectId();

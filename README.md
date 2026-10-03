@@ -1184,6 +1184,11 @@ Artist carousels:
 
 - Manual carousels keep an explicitly managed item list.
 - Manual carousels can be renamed without changing their items.
+- Carousels stored before the `mode` field existed (no or empty `mode`) are
+  read as manual by the listener API and the content-reference report, and the
+  cleanup of deleted Album, MediaTrack, and Feed Post references removes their
+  items the same way. That cleanup also covers Grid/List definitions without a
+  `mode`; it never changes dynamic definitions.
 - Deleting a Feed Post first removes its items from every manual carousel and
   renumbers the remaining items, then deletes the Post. A failed cleanup keeps
   the Post so the delete can be retried; repeating the delete is idempotent.
