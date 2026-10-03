@@ -20,6 +20,51 @@ const visualFreezeCss = `
   }
 `;
 
+/**
+ * Scroll-container gutter width shared by every Chromium golden.
+ *
+ * Headless Chromium never paints scrollbars (Playwright passes
+ * --hide-scrollbars) but still reserves their gutter. On macOS that gutter
+ * follows the OS "Show scroll bars" setting (0px overlay or 11px classic),
+ * which moves layout breakpoints such as the Home Grid column count at
+ * 1440px. 10px matches the native thin gutter of the Linux release baselines.
+ */
+const visualScrollbarGutterPx = 10;
+
+/**
+ * Chromium-only sheet that replaces the native gutter with a transparent custom
+ * scrollbar, which is never an overlay scrollbar. Chromium ignores
+ * ::-webkit-scrollbar while scrollbar-width/scrollbar-color are set, so it
+ * resets the global thin default with `html *`. That selector still loses to
+ * component rules such as the Carousel's `scrollbar-width: none`, so hidden
+ * scrollbars stay hidden. Product CSS is not changed.
+ */
+const chromiumScrollbarGutterCss = `
+  html * {
+    scrollbar-color: auto;
+    scrollbar-width: auto;
+  }
+  html ::-webkit-scrollbar {
+    height: ${visualScrollbarGutterPx}px;
+    width: ${visualScrollbarGutterPx}px;
+  }
+  html ::-webkit-scrollbar,
+  html ::-webkit-scrollbar-corner,
+  html ::-webkit-scrollbar-thumb,
+  html ::-webkit-scrollbar-track {
+    background: transparent !important;
+    border-color: transparent !important;
+  }
+`;
+
+/** Rejects a capture whose main-pane gutter would depend on the host's scrollbar setting. */
+const expectPinnedScrollbarGutter = async (page: Page) => {
+  // The main pane declares `scrollbar-gutter: stable`, so it reserves the gutter even without overflow.
+  await expect.poll(() => page.locator('main').evaluate(
+    (main: HTMLElement) => main.offsetWidth - main.clientWidth
+  )).toBe(visualScrollbarGutterPx);
+};
+
 /** Serves original deterministic covers without copying them into the product bundle. */
 export const installQaArtworkRoutes = async (page: Page) => {
   await page.route('**/__e2e__/artwork/**', async (route) => {
@@ -37,17 +82,26 @@ export const installQaArtworkRoutes = async (page: Page) => {
   });
 };
 
-/** Freezes nondeterministic presentation details before a visual capture. */
+/**
+ * Freezes nondeterministic presentation details before a visual capture.
+ *
+ * Chromium also gets a fixed scrollbar gutter because it owns the pixel goldens;
+ * Firefox and WebKit keep product scrollbars for their review attachments.
+ */
 export const stabilizeVisualState = async (page: Page) => {
+  const pinsScrollbarGutter = page.context().browser()?.browserType().name() === 'chromium';
   await page.route(`**${visualFreezePath}`, (route) => route.fulfill({
     status: 200,
     contentType: 'text/css; charset=utf-8',
     headers: { 'Cache-Control': 'no-store' },
-    body: visualFreezeCss
+    body: pinsScrollbarGutter ? visualFreezeCss + chromiumScrollbarGutterCss : visualFreezeCss
   }));
   await page.addStyleTag({
     url: new URL(visualFreezePath, page.url()).href
   });
+  if (pinsScrollbarGutter) {
+    await expectPinnedScrollbarGutter(page);
+  }
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   await page.waitForFunction(
     () => Array.from(document.images).every((image) => {

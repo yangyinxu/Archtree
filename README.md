@@ -635,7 +635,10 @@ retain behavior and accessibility coverage. Review intentional visual changes
 before creating or updating any named Chromium screenshot rather than bulk-
 refreshing snapshots to make a failure pass. Snapshot paths are platform-
 scoped so one operating system never silently approves another system font's
-rendering.
+rendering. Before each Chromium capture, the visual helper pins scroll-container
+gutters to a transparent 10 px (the Linux baseline width), so macOS goldens do
+not depend on the System Settings scroll-bar choice and both platforms share
+one layout.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, authenticated Library,
