@@ -1158,6 +1158,9 @@ Artist carousels:
 
 - Manual carousels keep an explicitly managed item list.
 - Manual carousels can be renamed without changing their items.
+- Deleting a Feed Post first removes its items from every manual carousel and
+  renumbers the remaining items, then deletes the Post. A failed cleanup keeps
+  the Post so the delete can be retried; repeating the delete is idempotent.
 - Artist carousels dynamically resolve either Albums or MediaTracks for one existing Artist.
 - Album carousels use the Artist's `albumIds`; MediaTrack carousels query the
   compatibility `AudioTrack.artistIds` field.
@@ -1485,7 +1488,8 @@ Reconciliation:
 - Admin-only content-reference report: `GET /admin/content-references/reconciliation`
 - The content-reference report detects dangling saved/activity references,
   Page-to-Carousel and Page-to-Grid/List references (including presentation
-  mismatches), manual carousel and Grid/List items, artist-album links,
+  mismatches), manual carousel (Album, MediaTrack, and Feed Post) and Grid/List
+  items, artist-album links,
   album-track links, and track-album links, plus both directions of
   Album/MediaTrack mismatch (a stale canonical membership or a published
   reverse Track link missing from a lifecycle Album's canonical order);

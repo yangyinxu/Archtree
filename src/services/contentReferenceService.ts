@@ -25,8 +25,9 @@ export type ContentReferenceValidation = {
     message?: string;
 };
 
+/** Removes one item type's matching references and renumbers the retained items contiguously. */
 const orderedManualItemCleanup = (
-    contentType: 'album' | 'audioTrack',
+    contentType: 'post' | 'album' | 'audioTrack',
     referenceIds: Array<string | ObjectId>
 ) => ([
     {
@@ -133,6 +134,22 @@ export const validateContentReferences = async (
     return { valid: true, ids };
 };
 
+/** Lists the stored spellings (canonical hex, uppercase hex, ObjectId, raw input) of one content ID. */
+const storedReferenceIds = (contentId: string) => {
+    const referenceIds: Array<string | ObjectId> = [];
+    try {
+        const objectId = ObjectId.createFromHexString(contentId);
+        const canonicalContentId = objectId.toHexString();
+        referenceIds.push(canonicalContentId, canonicalContentId.toUpperCase(), objectId);
+        if (contentId !== canonicalContentId) referenceIds.push(contentId);
+        return { canonicalContentId, referenceIds };
+    } catch {
+        // Legacy string references can still be removed when the ID is not canonical.
+        referenceIds.push(contentId);
+        return { canonicalContentId: contentId, referenceIds };
+    }
+};
+
 /** Idempotently detaches shared references before the final content record is deleted. */
 export const cleanupDeletedContentReferences = async (
     type: ContentReferenceType,
@@ -140,17 +157,7 @@ export const cleanupDeletedContentReferences = async (
 ) => {
     const db = getDb()!;
     const operations: Promise<unknown>[] = [];
-    let canonicalContentId = contentId;
-    const referenceIds: Array<string | ObjectId> = [];
-    try {
-        const objectId = ObjectId.createFromHexString(contentId);
-        canonicalContentId = objectId.toHexString();
-        referenceIds.push(canonicalContentId, canonicalContentId.toUpperCase(), objectId);
-        if (contentId !== canonicalContentId) referenceIds.push(contentId);
-    } catch {
-        // Legacy string references can still be removed when the ID is not canonical.
-        referenceIds.push(contentId);
-    }
+    const { canonicalContentId, referenceIds } = storedReferenceIds(contentId);
 
     if (type === 'artist') {
         const removeArtistCreditPipeline = [
@@ -258,4 +265,20 @@ export const cleanupDeletedContentReferences = async (
         );
     }
     await Promise.all(operations);
+};
+
+/**
+ * Idempotently removes a Feed Post from every manual Carousel before the Post record is deleted.
+ * Posts are kept out of ContentReferenceType because only manual Carousels can reference them;
+ * they have no Library, share, listening, Grid/List, or reverse catalog references to clean.
+ */
+export const cleanupDeletedPostReferences = async (postId: string) => {
+    const { referenceIds } = storedReferenceIds(postId);
+    await getDb()!.collection('carousels').updateMany(
+        {
+            mode: 'manual',
+            items: { $elemMatch: { contentType: 'post', contentId: { $in: referenceIds } } }
+        },
+        orderedManualItemCleanup('post', referenceIds) as any
+    );
 };
