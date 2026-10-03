@@ -24,7 +24,31 @@ const issueCode = async (user: any, purpose: AuthActionPurpose) => {
     await sendAuthCode(user.email, purpose, code);
 };
 
-/** Finishes email requests uniformly so delivery failures cannot enumerate accounts. */
+/**
+ * Sends a generic response before running per-account email work.
+ *
+ * The lookup, token write, password hash, and SES send take measurably longer
+ * for some account states, so awaiting them first would let response latency
+ * reveal whether an email has an account. The work stays inside the caller's
+ * handler promise (never detached), so `asyncHandler` keeps tracking it:
+ * graceful shutdown and concurrency limits wait for it to finish. Failures
+ * are recorded only as an opaque security event, because the response has
+ * already been sent.
+ */
+export const respondBeforeAccountWork = async (
+    respond: () => void,
+    event: string,
+    operation: () => Promise<void>
+) => {
+    respond();
+    try {
+        await operation();
+    } catch {
+        recordSecurityEvent(event);
+    }
+};
+
+/** Finishes email requests uniformly so neither latency nor delivery failures enumerate accounts. */
 const acceptEmailRequest = async (
     res: Response,
     event: string,
@@ -33,12 +57,7 @@ const acceptEmailRequest = async (
     // Configuration errors are deployment-wide and safe to report before any
     // account lookup. Per-account persistence/delivery failures remain opaque.
     requireAuthEmailConfiguration();
-    try {
-        await operation();
-    } catch {
-        recordSecurityEvent(event);
-    }
-    return res.status(202).json(acceptedMessage);
+    await respondBeforeAccountWork(() => res.status(202).json(acceptedMessage), event, operation);
 };
 
 /** Creates an unverified email account and sends the same non-enumerating verification flow. */

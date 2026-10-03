@@ -23,6 +23,7 @@ let server: Server | undefined;
 let originalSesSend: typeof SESv2Client.prototype.send;
 const originalEnvironment = new Map<string, string | undefined>();
 const deliveredCodes = new Map<string, string[]>();
+const deliveryAttempts = new Map<string, number>();
 const failedRecipients = new Set<string>();
 
 const closeServer = (value?: Server) => new Promise<void>((resolve, reject) => {
@@ -38,6 +39,7 @@ const installEmailCapture = () => {
         const text = String(command.input?.Content?.Simple?.Body?.Text?.Data ?? '');
         const code = text.match(/\b(\d{6})\b/)?.[1];
         assert.ok(recipient && code, 'the auth email contains a recipient and six-digit code');
+        deliveryAttempts.set(recipient, (deliveryAttempts.get(recipient) ?? 0) + 1);
         if (failedRecipients.has(recipient)) {
             throw new Error('simulated email delivery failure');
         }
@@ -64,6 +66,21 @@ const browserPost = (
     },
     body: JSON.stringify(body)
 });
+
+/**
+ * Generic email responses are sent before account work, so assertions about a
+ * code or account wait for the mail boundary instead of the HTTP response.
+ */
+const expectDeliveryAttempt = async (email: string, request: () => Promise<Response>) => {
+    const expected = (deliveryAttempts.get(email) ?? 0) + 1;
+    const response = await request();
+    const deadline = Date.now() + 10_000;
+    while ((deliveryAttempts.get(email) ?? 0) < expected) {
+        assert.ok(Date.now() < deadline, `an email delivery was attempted for ${email}`);
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    return response;
+};
 
 const latestCode = (email: string) => {
     const codes = deliveredCodes.get(email) ?? [];
@@ -150,7 +167,7 @@ test('browser registration and verification require same-origin JSON and single-
     });
     assert.equal(formEncoded.status, 415);
 
-    const created = await browserPost('/auth/browser/register', registration);
+    const created = await expectDeliveryAttempt(email, () => browserPost('/auth/browser/register', registration));
     assert.equal(created.status, 202);
     assert.equal(created.headers.get('cache-control'), 'no-store');
     assert.equal(created.headers.get('set-cookie'), null);
@@ -160,7 +177,10 @@ test('browser registration and verification require same-origin JSON and single-
     assert.equal(user.emailVerified, false);
     const staleCode = latestCode(email);
 
-    const resent = await browserPost('/auth/browser/email/resend-verification', { email });
+    const resent = await expectDeliveryAttempt(
+        email,
+        () => browserPost('/auth/browser/email/resend-verification', { email })
+    );
     const missingResend = await browserPost('/auth/browser/email/resend-verification', {
         email: 'missing-listener@example.com'
     });
@@ -242,14 +262,14 @@ test('Web form registration stays generic across delivery and account states', a
     });
 
     failedRecipients.add(email);
-    const newAccount = await submit();
+    const newAccount = await expectDeliveryAttempt(email, submit);
     assert.equal(newAccount.status, 202);
     const genericBody = await newAccount.text();
     assert.match(genericBody, /If the account can be created, a verification code has been sent/);
     assert.doesNotMatch(genericBody, /Creating the account failed/);
     assert.equal((await User.findByEmail(email))?.emailVerified, false);
 
-    const existingUnverified = await submit();
+    const existingUnverified = await expectDeliveryAttempt(email, submit);
     assert.equal(existingUnverified.status, 202);
     assert.equal(await existingUnverified.text(), genericBody);
 
@@ -274,7 +294,10 @@ test('password recovery is non-enumerating and reset revokes every session', asy
     );
 
     failedRecipients.add(email);
-    const failedKnownRequest = await browserPost('/auth/browser/password/forgot', { email });
+    const failedKnownRequest = await expectDeliveryAttempt(
+        email,
+        () => browserPost('/auth/browser/password/forgot', { email })
+    );
     const missingRequest = await browserPost('/auth/browser/password/forgot', {
         email: 'unknown-recovery@example.com'
     });
@@ -284,7 +307,10 @@ test('password recovery is non-enumerating and reset revokes every session', asy
     assert.deepEqual(await missingRequest.json(), acceptedMessage);
 
     failedRecipients.delete(email);
-    const knownRequest = await browserPost('/auth/browser/password/forgot', { email });
+    const knownRequest = await expectDeliveryAttempt(
+        email,
+        () => browserPost('/auth/browser/password/forgot', { email })
+    );
     assert.equal(knownRequest.status, 202);
     assert.deepEqual(await knownRequest.json(), acceptedMessage);
 

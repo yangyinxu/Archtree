@@ -23,7 +23,7 @@ import {
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import AuthIdentity from '../models/authIdentity';
 import { Passkey } from '../models/passkey';
-import { registerEmailAccount } from './emailAuthController';
+import { registerEmailAccount, respondBeforeAccountWork } from './emailAuthController';
 import { normalizeUserRole } from '../services/authRoleService';
 
 /**
@@ -412,14 +412,16 @@ export const signupFromWeb = async (req: Request, res: Response, next: NextFunct
       return;
     }
 
-    try {
-      await registerEmailAccount(email, password, username, username);
-    } catch {
-      recordSecurityEvent('email_registration_request_failed');
-    }
-    return res.status(202).send(renderSignupHtml({
-      successMessage: 'If the account can be created, a verification code has been sent. Verify the email before logging in.'
-    }));
+    // Like the JSON flow, render the generic page before account work so its
+    // latency cannot reveal account state. This form keeps its existing
+    // behavior of also hiding configuration failures behind the generic page.
+    await respondBeforeAccountWork(
+      () => res.status(202).send(renderSignupHtml({
+        successMessage: 'If the account can be created, a verification code has been sent. Verify the email before logging in.'
+      })),
+      'email_registration_request_failed',
+      () => registerEmailAccount(email, password, username, username)
+    );
   } catch (error: any) {
     next(error);
   }

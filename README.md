@@ -987,9 +987,15 @@ Public Listener capability discovery:
 
 Browser authentication mutations require same-origin JSON. Registration,
 verification resend, and recovery-request responses are deliberately generic
-so account existence is not disclosed. Browser capability discovery reports
-only end-to-end browser methods; native Apple, Google, or passkey configuration
-does not expose a nonfunctional listener button.
+so account existence is not disclosed. These routes, including their app and
+HTML-form equivalents, send the generic response before the account lookup,
+password hashing, code write, and email delivery, so response latency does not
+reveal account state either. That work still runs inside the tracked request:
+graceful shutdown waits for it, registration keeps its auth concurrency slot
+until it settles, and a late failure is recorded only as an opaque security
+event. Browser capability discovery reports only end-to-end browser methods;
+native Apple, Google, or passkey configuration does not expose a nonfunctional
+listener button.
 
 App session endpoints:
 
