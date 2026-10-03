@@ -1,7 +1,7 @@
 import { ObjectId } from 'mongodb';
 
 import { getDb } from '../infrastructure/database';
-import { isAudioObjectKeyForTrack } from '../utils/audioStorageKey';
+import { isMediaObjectKeyForTrack, persistedMediaType } from '../utils/mediaStorageKey';
 import {
     confirmReadyAudioTrackAlbumUpdate,
     publishUploadedAudioTracks,
@@ -51,6 +51,7 @@ const defaultFindRecords = (audioTrackIds: readonly string[]) => getDb()!
     }).project({
         _id: 1,
         albumId: 1,
+        mediaType: 1,
         s3Key: 1,
         uploadStatus: 1,
         publicationStatus: 1,
@@ -64,8 +65,10 @@ const defaultFindRecord = (audioTrackId: string) => getDb()!.collection('audioTr
 
 /**
  * Replays only the database publication transaction for already-uploaded
- * MediaTracks. Each item is isolated so one failed Album relationship cannot
- * hide the successful outcome of another item in the same request.
+ * Audio or Video MediaTracks. An object is upload-ready only inside the S3
+ * namespace of its recorded media kind, matching readyAudioObjectFilter. Each
+ * item is isolated so one failed Album relationship cannot hide the successful
+ * outcome of another item in the same request.
  */
 export const retryAudioTrackPublications = async (
     audioTrackIds: readonly string[],
@@ -153,7 +156,11 @@ export const retryAudioTrackPublications = async (
         const albumId = String(record.albumId ?? '').trim().toLowerCase();
         const uploadStatus = String(record.uploadStatus ?? 'legacy');
         const uploadReady = uploadStatus === 'ready'
-            && isAudioObjectKeyForTrack(record.s3Key, audioTrackId);
+            && isMediaObjectKeyForTrack(
+                record.s3Key,
+                audioTrackId,
+                persistedMediaType(record.mediaType)
+            );
         const publicationStatusBefore = publicationStatusLabel(record);
         if (!uploadReady) {
             results.push({

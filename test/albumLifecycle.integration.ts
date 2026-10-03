@@ -1507,6 +1507,81 @@ test('publication retry treats only a missing status as legacy and isolates expl
     );
 });
 
+test('publication retry links a storage-ready Video MediaTrack without re-uploading it', async () => {
+    const albumId = new ObjectId();
+    const videoTrackId = new ObjectId();
+    const wrongKindTrackId = new ObjectId();
+    const videoKey = `video/${videoTrackId.toHexString()}/${new ObjectId().toHexString()}`;
+    await Promise.all([
+        getDb()!.collection('albums').insertOne({
+            _id: albumId,
+            title: 'Lorem Ipsum Album',
+            audioTrackIds: [],
+            lifecycleStatus: 'ready',
+            referenceRevision: 0
+        }),
+        getDb()!.collection('audioTracks').insertMany([
+            {
+                _id: videoTrackId,
+                title: 'Dolor Sit Video',
+                albumId: albumId.toHexString(),
+                mediaType: 'video',
+                contentType: 'video/mp4',
+                uploadStatus: 'ready',
+                s3Key: videoKey,
+                publicationStatus: 'pending',
+                publicationError: 'Cover art upload failed.'
+            },
+            {
+                _id: wrongKindTrackId,
+                title: 'Amet Wrong Kind',
+                albumId: albumId.toHexString(),
+                mediaType: 'audio',
+                uploadStatus: 'ready',
+                s3Key: `video/${wrongKindTrackId.toHexString()}/${new ObjectId().toHexString()}`,
+                publicationStatus: 'pending'
+            }
+        ])
+    ]);
+
+    const report = await retryAudioTrackPublications([
+        videoTrackId.toHexString(),
+        wrongKindTrackId.toHexString()
+    ]);
+
+    assert.deepEqual(report.results.map((result) => ({
+        audioTrackId: result.audioTrackId,
+        uploadReady: result.uploadReady,
+        publicationStatus: result.publicationStatus,
+        outcome: result.outcome
+    })), [
+        {
+            audioTrackId: videoTrackId.toHexString(),
+            uploadReady: true,
+            publicationStatus: 'ready',
+            outcome: 'ready'
+        },
+        {
+            audioTrackId: wrongKindTrackId.toHexString(),
+            uploadReady: false,
+            publicationStatus: 'pending',
+            outcome: 'failed'
+        }
+    ]);
+    assert.deepEqual(
+        (await getDb()!.collection('albums').findOne({ _id: albumId }))!.audioTrackIds,
+        [videoTrackId.toHexString()]
+    );
+    const published = await getDb()!.collection('audioTracks').findOne({ _id: videoTrackId });
+    assert.equal(published!.publicationStatus, 'ready');
+    assert.equal(published!.publicationError, null);
+    assert.equal(published!.s3Key, videoKey);
+    assert.equal(
+        (await getDb()!.collection('audioTracks').findOne({ _id: wrongKindTrackId }))!.publicationStatus,
+        'pending'
+    );
+});
+
 test('publication retry endpoint returns 200 with isolated invalid, duplicate, missing, and non-ready outcomes', async () => {
     const missingTrackId = new ObjectId();
     const nonReadyTrackId = new ObjectId();

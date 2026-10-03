@@ -1441,9 +1441,10 @@ Reconciliation:
   cleaned and partial failures retain retryable database evidence.
 - Admin-only publication retry: `POST /admin/audio-storage/publication-retry`
   with `{"audioTrackIds":["..."]}` (1–100 items). It reuses existing
-  database-confirmed ready objects, isolates every item, and returns stable
-  outcomes for ready, non-ready, missing, malformed, and duplicate IDs without
-  stopping the rest of the batch.
+  database-confirmed ready Audio or Video objects whose key matches the
+  MediaTrack's recorded `mediaType` namespace, isolates every item, and returns
+  stable outcomes for ready, non-ready, missing, malformed, and duplicate IDs
+  without stopping the rest of the batch.
 - Browser requests receive a readable audit page with lifecycle-specific
   recommendations and individually confirmed actions; append `?format=json`
   for the structured report.
@@ -1451,7 +1452,9 @@ Reconciliation:
 - Reports orphaned S3 objects, database tracks with missing objects, and
   pending/failed storage or publication lifecycle records. Incomplete rows
   include `publicationStatus`, `publicationUpdatedAt`, and bounded
-  `publicationError` evidence.
+  `publicationError` evidence. Their active, pending, and cleanup object
+  existence is checked against the S3 listing for that phase's recorded media
+  kind (Audio: legacy root and `audio/` keys; Video: `video/` keys).
 - Generating the report is read-only; it never deletes S3 objects
   automatically. Remediation requires a separate explicit administrator POST.
 - Admin-only image report: `GET /admin/image-storage/reconciliation`
