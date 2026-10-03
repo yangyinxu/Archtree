@@ -34,7 +34,8 @@ test('concurrent reuse of one refresh token leaves exactly one current pair and 
         password: 'unused-hash',
         username: '',
         posts: [],
-        role: 'user'
+        role: 'user',
+        emailVerified: true
     };
     await getDb()!.collection('users').insertOne(user);
 

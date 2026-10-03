@@ -54,6 +54,18 @@ Remaining rollout and capability gates:
       physical-device build. `/auth/me` has been verified.
 - [ ] Verify the SES sender/domain, grant the runtime only `ses:SendEmail`, and
       configure `AUTH_EMAIL_FROM` plus an `AUTH_CODE_PEPPER`.
+- [ ] Set `AUTH_LINK_ORIGIN` to the exact production Web origin
+      (`https://kashewt.com`) **before** deploying Web email-link
+      registration. Every account must now have a verified email, and most
+      existing accounts (including operator admin accounts) predate
+      verification: their next password sign-in returns `403
+      email_verification_required` and depends on a delivered verification
+      link. Without SES, `AUTH_EMAIL_FROM` and `AUTH_LINK_ORIGIN`, those
+      accounts cannot sign in again until email works (existing sessions keep
+      working). Deploy Archtree before the native releases.
+- [ ] After that deploy, send yourself a registration link, an
+      already-registered notice and a verification link, and confirm each link
+      opens the Finitude Web page on the production origin.
 - [ ] Configure the iOS Associated Domains entitlement after the production
       authentication domain exists.
 - [ ] Enable Sign in with Apple for `com.example.finitude`, refresh its

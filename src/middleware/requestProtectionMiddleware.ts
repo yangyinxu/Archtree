@@ -156,6 +156,32 @@ const refreshCredentialLimit = (
     };
 };
 
+/** Registration links, already-registered notices and verification links per address and window. */
+export const linkEmailBudgetPerWindow = 3;
+const linkEmailBudgetWindowMs = 15 * 60_000;
+
+/**
+ * Spends one unit of the per-address budget shared by every link email
+ * (registration links, already-registered notices and verification links).
+ * Resolves false when the address has no budget left; callers then send
+ * nothing, while their response stays the same. Keyed by a digest of the
+ * normalized address, process-local like the other limiters (production is a
+ * single instance), and cleared by `resetRateLimitWindowsForTests`.
+ */
+export const consumeLinkEmailBudget = (email: string) => {
+    const digest = crypto.createHash('sha256').update(String(email ?? '').trim().toLowerCase(), 'utf8').digest('hex');
+    const now = Date.now();
+    const key = `auth-link-email:${digest}`;
+    const current = windows.get(key);
+    const entry = !current || current.resetsAt <= now
+        ? { count: 0, resetsAt: now + linkEmailBudgetWindowMs }
+        : current;
+    if (entry.count >= linkEmailBudgetPerWindow) return false;
+    entry.count += 1;
+    windows.set(key, entry);
+    return true;
+};
+
 /** Rejects production credentials sent without TLS after trusted-proxy resolution. */
 export const requireSecureAuthTransport: RequestHandler = (req, res, next) => {
     if (process.env.NODE_ENV === 'production' && !req.secure) {
@@ -166,19 +192,6 @@ export const requireSecureAuthTransport: RequestHandler = (req, res, next) => {
 
 const activeByScopeAndClient = new Map<string, number>();
 const activeByScope = new Map<string, number>();
-const heldConcurrencySlots = new WeakMap<Request, Set<() => void>>();
-
-/**
- * Releases the request's concurrency slots before its tracked work settles.
- * A handler calls this once the bounded work the slot exists for is done and
- * the remaining work must not influence admission of other requests; graceful
- * shutdown still waits for that remaining work.
- */
-export const releaseConcurrencySlots = (req: Request) => {
-    const releases = heldConcurrencySlots.get(req);
-    heldConcurrencySlots.delete(req);
-    releases?.forEach(release => release());
-};
 
 export const limitConcurrency = (
     scope: string,
@@ -208,7 +221,6 @@ export const limitConcurrency = (
             else activeByScope.set(scope, remainingGlobal);
         };
         onRequestWorkComplete(req, res, release);
-        heldConcurrencySlots.set(req, (heldConcurrencySlots.get(req) ?? new Set()).add(release));
         return next();
     };
 };
@@ -235,7 +247,7 @@ export const refreshCredentialRateLimit = refreshCredentialLimit('refresh-creden
 /** Keys login attempts on the submitted `identifier`, falling back to `email` or `username`. */
 export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
 /**
- * Keys signup, verification and recovery attempts on the validated account email.
+ * Keys registration-link, verification-link and recovery attempts on the validated account email.
  * It uses the same 'auth-account' scope, so these routes and an identifier
  * login that submits the same normalized address draw from one budget.
  */

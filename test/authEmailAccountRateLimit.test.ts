@@ -18,24 +18,15 @@ const syntheticPassword = 'lorem-ipsum-dolor-sit-01';
 // Every route whose controller resolves the account from the normalized `email`.
 // Payloads are well formed so each admitted request reaches its controller.
 const emailCodeRoutes: EmailCodeRoute[] = [
-    { path: '/signup', body: (email) => ({ email, password: syntheticPassword, displayName: 'Lorem Ipsum' }) },
-    { path: '/email/verify', body: (email) => ({ email, code: '123456' }) },
-    { path: '/email/resend-verification', body: (email) => ({ email }) },
+    { path: '/browser/registration/request', body: (email) => ({ email }) },
+    { path: '/browser/email-verification/request', body: (email) => ({ email }) },
     { path: '/password/forgot', body: (email) => ({ email }) },
     { path: '/password/reset', body: (email) => ({ email, code: '123456', password: syntheticPassword }) },
-    {
-        path: '/signup-web',
-        form: true,
-        body: (email) => ({ email, password: syntheticPassword, username: 'loremipsum' })
-    },
-    { path: '/browser/register', body: (email) => ({ email, password: syntheticPassword, displayName: 'Lorem Ipsum' }) },
-    { path: '/browser/email/verify', body: (email) => ({ email, code: '123456' }) },
-    { path: '/browser/email/resend-verification', body: (email) => ({ email }) },
     { path: '/browser/password/forgot', body: (email) => ({ email }) },
     { path: '/browser/password/reset', body: (email) => ({ email, code: '123456', password: syntheticPassword }) }
 ];
 
-const authEmailEnvironment = ['AUTH_EMAIL_FROM', 'AWS_REGION', 'AUTH_CODE_PEPPER', 'JWT_SECRET'] as const;
+const authEmailEnvironment = ['AUTH_EMAIL_FROM', 'AWS_REGION', 'AUTH_CODE_PEPPER', 'JWT_SECRET', 'AUTH_LINK_ORIGIN'] as const;
 
 /**
  * Serves the real auth router without a database or mail configuration. Admitted
@@ -130,4 +121,18 @@ test('email-code attempts share the identifier login budget for the same address
     }
     const login = await post({ path: '/login' }, { identifier: 'victimname@gmail.com', password: syntheticPassword });
     assert.equal(login.status, 429);
+});
+
+test('retired registration routes answer 410 before any rate limit is counted', async (t) => {
+    const post = await listen(t);
+    for (const path of ['/signup', '/email/verify', '/email/resend-verification', '/browser/register',
+        '/browser/email/verify', '/browser/email/resend-verification']) {
+        for (let attempt = 1; attempt <= 25; attempt += 1) {
+            const response = await post({ path }, { email: 'lorem.ipsum@example.test', password: syntheticPassword, code: '123456' });
+            assert.equal(response.status, 410, `${path} attempt ${attempt}`);
+        }
+    }
+    // The retired routes spent neither the per-IP nor the per-account budget.
+    const forgot = await post({ path: '/password/forgot' }, { email: 'lorem.ipsum@example.test' });
+    assert.notEqual(forgot.status, 429);
 });

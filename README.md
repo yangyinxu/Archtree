@@ -81,7 +81,7 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. Startup verifies the `required-indexes-v4-social-participation` constraints before
+new scope after rotation. Startup verifies the `required-indexes-v5-email-link-tokens` constraints before
 admission; these are additive schema changes even when the feature is disabled.
 
 See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
@@ -447,9 +447,18 @@ Required variables:
 - `SERVER_SHUTDOWN_CLEANUP_MS`: database shutdown deadline after draining
   (defaults to 5000; capped at 30000)
 - `JWT_SECRET`: JWT signing secret
-- `AUTH_CODE_PEPPER`: optional separate HMAC secret for verification and reset
-  codes (defaults to `JWT_SECRET`)
-- `AUTH_EMAIL_FROM`: AWS SES verified sender used for verification and reset mail
+- `AUTH_CODE_PEPPER`: optional separate HMAC secret for password-reset codes
+  and emailed link tokens (defaults to `JWT_SECRET`)
+- `AUTH_EMAIL_FROM`: AWS SES verified sender used for registration links,
+  already-registered notices, verification links and reset codes
+- `AUTH_LINK_ORIGIN`: exact origin of the Web listener used in emailed links,
+  for example `https://kashewt.com` (scheme, host and optional port only; no
+  path, query or fragment). `https:` is required; `http:` is accepted only
+  outside production for `localhost`, `127.0.0.1` or `[::1]`. An invalid value
+  counts as missing. Links are never built from `Host`, `Origin` or
+  `X-Forwarded-*`. Without it, `emailRegistration` is reported as unavailable
+  and the registration and verification-link requests return `503`; password
+  recovery still sends reset codes
 - `ACCESS_TOKEN_MINUTES`: short-lived access-token lifetime from 1 to 60 minutes (defaults to 15)
 - `ACCESS_TOKEN_SECONDS`: development-only access-token lifetime from 1 to 300 seconds
   for fast refresh-rotation testing (ignored in production)
@@ -952,8 +961,8 @@ their conventional sibling directories.
 
 Web auth endpoints:
 
-- `GET /auth/signup-web`
-- `POST /auth/signup-web`
+- `GET /auth/signup-web` and `POST /auth/signup-web`: `303` to
+  `/finitude/register` without any account work (the POST body is ignored)
 - `GET /auth/login-web`
 - `POST /auth/login-web`
 - `POST /auth/logout-web`
@@ -974,9 +983,12 @@ Listener browser-session endpoints (HttpOnly cookies; credentials are never
 returned to JavaScript):
 
 - `GET /auth/browser/capabilities`
-- `POST /auth/browser/register`
-- `POST /auth/browser/email/verify`
-- `POST /auth/browser/email/resend-verification`
+- `POST /auth/browser/registration/request`
+- `POST /auth/browser/registration/inspect`
+- `POST /auth/browser/registration/complete`
+- `POST /auth/browser/email-verification/request`
+- `POST /auth/browser/email-verification/inspect`
+- `POST /auth/browser/email-verification/confirm`
 - `POST /auth/browser/password/forgot`
 - `POST /auth/browser/password/reset`
 - `POST /auth/browser/login`
@@ -990,28 +1002,65 @@ Public Listener capability discovery:
   availability. The Web client uses its `playlists` boolean to hide Playlist
   routes and controls when the server-side rollout switch is off.
 
+Email registration happens only on the Web, by emailed link:
+
+- `POST /auth/browser/registration/request` takes `{ "email" }` and always
+  answers `202 {"message":"Check your email for the next step."}`. An address
+  without an account, or with an unverified record from the earlier
+  code-based sign-up, receives a single-use registration link
+  (`AUTH_LINK_ORIGIN/finitude/register/complete#token=...`, 30 minutes). An
+  address with an account receives an "already registered" notice with Log in
+  and password-reset links, and nothing changes.
+- `POST /auth/browser/registration/inspect` takes `{ "token" }` and does not
+  consume it: `200 {"email"}`, `409 {"code":"email_already_registered"}` when
+  the address now has an account, or `400 {"code":"link_invalid"}`.
+- `POST /auth/browser/registration/complete` takes
+  `{ "token", "password", "displayName" }` (display name 1 to 80 characters
+  after trimming, no control characters). It returns `201 {"email"}` after it
+  creates a verified account or completely replaces the address's unverified
+  record (password, name, sessions, provider identities, passkeys, pending
+  enrollments, codes and links). Errors are `400 link_invalid`,
+  `409 email_already_registered`, and `422` with `code` `invalid_password` or
+  `invalid_display_name`. It installs no session; the listener logs in next.
+- `POST /auth/browser/email-verification/request` takes `{ "email" }` and
+  always answers `202`. Only an account created before verification existed
+  (no `emailVerified` field and no linked identity with the same email)
+  receives a verification link (`AUTH_LINK_ORIGIN/finitude/verify-email#token=...`).
+- `POST /auth/browser/email-verification/inspect` takes `{ "token" }` and
+  returns `200 {"email"}` or `400 link_invalid` without consuming it.
+  `POST /auth/browser/email-verification/confirm` returns `204` after it
+  verifies the email. It does not change the password or end other sessions.
+
+Link tokens travel only in the URL fragment, so they never reach server logs,
+proxies or `Referer`; pages read them with the non-consuming `inspect` calls,
+and verification requires an explicit confirm request. All three link emails
+(registration link, already-registered notice, verification link) share a
+budget of three per normalized address per 15 minutes; requests over it get
+the same response and send nothing (`auth_link_email_suppressed`).
+
+A sign-in that presents a valid credential (password through `/auth/login` or
+`/auth/browser/login`, a passkey assertion, or a linked Apple or Google
+identity) for an unverified account returns
+`403 {"code":"email_verification_required","message":"Verify your email to sign in. ..."}`
+and creates no session; the browser login leaves existing cookies untouched.
+After responding, the server mails a verification link to an account created
+before verification existed, or a registration link to an unverified record
+from the earlier code-based sign-up, within the shared budget. A wrong
+password still returns `401`. Sessions, refresh tokens and cookies that
+existed before verification became mandatory keep working; `GET /auth/me` and
+the browser session payload report `emailVerified: false` for them. Linking a
+provider or enrolling a passkey from such a session returns `403` with the
+same `code` and sends no email.
+
 Browser authentication mutations require same-origin JSON. Registration,
-verification resend, and recovery-request responses are deliberately generic
-so account existence is not disclosed. These routes, including their app and
-HTML-form equivalents, send the generic response before the account lookup,
-password hashing, code write, and email delivery, so response latency does not
-reveal account state either. That work still runs inside the tracked request:
-graceful shutdown waits for it, and a late failure is recorded only as an
-opaque security event. Registration holds its auth concurrency slot only for
-the fixed-cost password hash and releases it before the account lookup, so
-neither the slot's duration nor a resulting `429` depends on account state.
-Registration and verification resend for one normalized address then run one
-at a time in this process (production is a single instance). Registration
-queues its attempt in the same turn as its generic response, without
-awaiting the password hash first, so a resend sent as soon as that response
-arrives (while the hash, account write, code write, or email send is still
-running) waits for the earlier email, reuses it when it is delivered, and
-sends its own code when it failed. Each wait is capped at 30 seconds because the SES client has no
-request timeout; after that, later work runs alongside the stuck send, and an
-email that send delivers late carries an already-voided code. Because
-registration's slot covers only the hash, account work and SES sends across
-different addresses are bounded by the per-IP and per-account rate limits,
-not by the concurrency limit.
+verification-link, and recovery-request responses are deliberately generic
+so account existence is not disclosed. They send the generic response before
+the account lookup, token write and email delivery, so response latency does
+not reveal account state either. That work still runs inside the tracked
+request: graceful shutdown waits for it, and a late failure is recorded only
+as an opaque security event. Registration and verification-link requests hash
+no password and take no concurrency slot, so none of their `429` responses
+depend on account state.
 Browser capability discovery reports only end-to-end browser methods;
 native Apple, Google, or passkey configuration does not expose a nonfunctional
 listener button.
@@ -1020,9 +1069,6 @@ App session endpoints:
 
 - `GET /auth/capabilities`
 - `POST /auth/login`
-- `POST /auth/signup`
-- `POST /auth/email/verify`
-- `POST /auth/email/resend-verification`
 - `POST /auth/password/forgot`
 - `POST /auth/password/reset`
 - `POST /auth/password/change`
@@ -1039,12 +1085,28 @@ App session endpoints:
 - `DELETE /auth/activity/listening-history`
 - `DELETE /auth/account`
 
+Retired code-based registration endpoints answer immediately, before
+validation, rate limiting or any database access, with
+`410 {"code":"email_registration_moved","message":"Email sign-up has moved to the Finitude website. Create your account there, then sign in."}`:
+`POST /auth/signup`, `PUT /auth/signup`, `POST /auth/email/verify`,
+`POST /auth/email/resend-verification`, `POST /auth/browser/register`,
+`POST /auth/browser/email/verify`, and
+`POST /auth/browser/email/resend-verification`.
+
+Password recovery keeps its request and response contract. A verified or
+legacy account receives a six-digit reset code (15 minutes, voided by its
+fifth wrong submission). An unverified record from the earlier code-based
+sign-up receives a registration link instead, and `password/reset` never
+applies to it. A completed reset revokes every session and sets
+`emailVerified: true`; on an account that was not verified before, it also
+removes every provider identity, passkey and passkey challenge.
+
 Auth attempts are limited per IP (20 per 15 minutes) and per account (10 per
-15 minutes). Signup, `/auth/signup-web`, email verification, verification
-resend, and password recovery and reset, in both their app and
-`/auth/browser/*` forms, key the account limit on the submitted `email` after
-validation normalizes it, so Gmail dots, `+tag` suffixes and `googlemail.com`
-count as one address and extra `identifier` or `username` fields are ignored.
+15 minutes). Registration and verification-link requests and password
+recovery and reset, in both their app and `/auth/browser/*` forms, key the
+account limit on the submitted `email` after validation normalizes it, so
+Gmail dots, `+tag` suffixes and `googlemail.com` count as one address and
+extra `identifier` or `username` fields are ignored.
 Password sign-in keys it on the submitted login identifier, and both kinds of
 route draw from the same budget for the same address.
 
@@ -1330,33 +1392,39 @@ Session behavior:
   its own window, and emits a `refresh_previous_token_replayed` security
   event. Older tokens, the previous token after the window, and sessions last
   rotated before `rotatedAt` existed get `401` without any session change.
-- Email-code consumption, password/email effects, and session/listening/room
+- Reset-code consumption, password/email effects, and session/listening/room
   revocation commit together. Failed transactions leave the original code,
   credential, and sessions available for a safe retry. Password login rechecks
   its verified password hash when committing the session, so a concurrent
   reset cannot be bypassed by a delayed login.
-- `authActionTokens` keeps one hashed code slot per account and purpose.
-  Verification slots also store the bcrypt hash, display name, and username of
-  the registration attempt they were issued for; verifying applies exactly
-  those values, sets `emailVerified`, and revokes every pre-verification
-  session, provider identity, passkey, and passkey enrollment challenge in the
-  same transaction. The bound hash is removed when the code is consumed or
-  voided, and expired slots leave through the TTL index.
-- Each registration attempt on an unverified account is also kept as
-  `users.pendingRegistration` so a resend can bind the newest attempt after its
-  code expired. The account's `password` stays the first registrant's until
-  verification, so that registrant's sign-in answer (`403` "verify your email")
-  does not change when someone else registers the address. A completed reset
-  replaces `password`, clears `pendingRegistration`, and voids the outstanding
-  verification code, so the next resend binds the reset password.
-- A wrong code increments the slot's `failedAttempts` inside the account
+- `authActionTokens` keeps one hashed password-reset code slot per account. A
+  wrong code increments the slot's `failedAttempts` inside the account
   transaction; the fifth wrong submission voids the code (`voidedAt`). Codes
-  stored before per-account slots existed are no longer accepted, and
-  verification codes issued before attempt binding carry no credentials and
-  are rejected, so users mid-verification at deploy time request a new code.
-- Session creation for any sign-in method returns `403` while
-  `emailVerified` is `false`, and provider linking and passkey enrollment also
-  return `403` for such an account.
+  stored before per-account slots existed are no longer accepted. Verification
+  slots left by the earlier code-based sign-up are ignored and expire through
+  the TTL index.
+- `emailLinkTokens` stores registration and verification links only as
+  `HMAC-SHA256(AUTH_CODE_PEPPER ?? JWT_SECRET, "email-link:v1:<purpose>:<token>")`
+  in `_id`, with `purpose`, the normalized `email`, `userId` (verification
+  links only), `createdAt`, `expiresAt` (30 minutes) and `consumedAt`. Raw
+  tokens (32 random bytes, base64url) exist only in the outgoing email.
+  Consuming a link deletes the address's other links of the same purpose in
+  the same transaction; expired links leave through the TTL index. Account
+  deletion removes an account's links by `userId`.
+- `users.emailVerified` keeps three stored forms and is never backfilled:
+  `true` (verified), `false` (an unverified record from the earlier code-based
+  sign-up, kept until it is replaced), and absent (created before
+  verification existed; verified only while a linked Apple or Google identity
+  stores the same lowercase email). Completing registration for a `false`
+  record replaces the document in place (same `_id`) with only the new
+  credentials, `emailVerified: true` and `emailVerifiedAt`, and removes its
+  sessions, identities, passkeys, challenges, codes and links in one
+  account-fenced transaction. The `pendingRegistration` field that the earlier
+  sign-up stored disappears with that replacement.
+- Session creation for any sign-in method returns `403` with
+  `code: "email_verification_required"` unless the account is verified, and
+  provider linking and passkey enrollment also return that `403` for such an
+  account. Access-token checks and refresh do not check verification.
 - Provider unlink checks the remaining recovery methods inside the account
   transaction. Account-owned sessions, identities, passkeys, codes, and
   challenges share the account deletion fence; discoverable passkey challenges

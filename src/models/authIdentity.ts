@@ -31,6 +31,17 @@ class AuthIdentity {
             .toArray();
     }
 
+    /**
+     * Reports whether one of the account's linked identities carries `email`
+     * (lowercase). Provider identities store only provider-verified emails.
+     */
+    static async hasEmailForUser(userId: string, email: string, session?: ClientSession) {
+        const identity = await getDb()!
+            .collection<AuthIdentityDocument>('authIdentities')
+            .findOne({ userId, email }, { session, projection: { _id: 1 } });
+        return Boolean(identity);
+    }
+
     static async create(
         userId: string,
         provider: AuthProvider,

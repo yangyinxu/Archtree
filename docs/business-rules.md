@@ -782,10 +782,10 @@ The wire protocol and operational bounds are documented in
   Unmodified single-character shortcuts are not used; the accessible player
   help lists the available non-character keys and every action remains
   available through visible controls.
-- Public Web registration, verification, resend, and password-recovery writes
+- Public Web registration, verification-link, and password-recovery writes
   use same-origin JSON contracts and never return session credentials. Generic
-  registration, resend, and recovery responses do not reveal account
-  existence.
+  registration, verification-link, and recovery responses do not reveal
+  account existence.
 - A native Apple, Google, or passkey configuration does not make that method
   visible on Web. Web advertises an optional sign-in method only after its
   complete browser-to-HttpOnly-session flow is configured.
@@ -1079,31 +1079,74 @@ The wire protocol and operational bounds are documented in
 
 ## Authentication and Resolution
 
-- New email registrations require a single-use verification code; existing
-  accounts without an `emailVerified` migration field remain treated as verified.
-- Each registration attempt for an email without a verified account sends a new
-  code bound to that attempt's password and name and voids every earlier
-  unredeemed code for the email. Redeeming a code applies exactly the
-  credentials of the attempt it was issued for and verifies the email in one
-  step, so registering first does not keep the account. Registering an
-  already-verified email changes nothing. Unverified accounts are not expired
-  automatically.
-- A verification resend sends a new code bound to the newest registration
-  attempt. A resend made after an earlier registration or resend for the same
-  address has been answered, while that earlier request's email is still being
-  prepared (including while its password is being processed) or sent, waits
-  for it: it sends nothing more when that email is delivered and sends its own
-  code when that email failed. Pressing resend right after registering is
-  therefore never dropped: it either reuses the delivered registration email
-  or sends its own code.
-- Completing a password reset on an unverified account does not verify the
-  email. It voids the outstanding verification code, and a code from a later
-  resend applies the reset password.
-- Unverified accounts cannot sign in, open sessions, or link Apple, Google, or
-  passkey methods. Completing verification revokes every session, provider
-  identity, passkey, and pending passkey enrollment that existed before it.
-- A verification or password-reset code is voided by its fifth wrong
-  submission; the user must request a new code.
+- Email registration is available only on the Web. The Finitude apps do not
+  offer an email sign-up form. They open the Web sign-up page in the browser,
+  and they keep Apple and Google sign-in.
+- Web sign-up asks only for an email address and always answers with the same
+  "check your email" response.
+  - When the address has no account, or only an unverified record left by the
+    earlier code-based sign-up, the email contains a single-use registration
+    link that expires after 30 minutes.
+  - When the address already has an account, the email says so and links to
+    Log in and password reset, and nothing is created or changed.
+- Opening a registration link shows the address and asks for a display name
+  and password. Submitting creates the account with its email already
+  verified, and the listener then logs in with the new password on the Web or
+  in an app.
+  - A registration link works once, and completing registration voids every
+    other registration link for that address.
+  - An invalid, expired or used link changes nothing.
+- Credentials are chosen only after the inbox owner opens the link.
+  Registering an address first therefore never gives anyone control of the
+  account the inbox owner creates.
+- Unverified records left by the earlier code-based sign-up are not deleted or
+  expired automatically. They cannot sign in, open sessions, or link Apple,
+  Google or passkey methods.
+  - When the inbox owner completes registration for that address, the old
+    record is replaced completely. Its password, name, sessions, provider
+    identities, passkeys and pending passkey enrollments are removed, and the
+    account becomes verified with the new credentials.
+  - Apple or Google sign-in whose provider-verified email matches such a
+    record replaces it the same way and creates the provider account.
+- Every account must have a verified email. An account counts as verified when
+  its email was proven through a registration link, a verification link or a
+  completed password reset, or when one of its linked Apple or Google
+  identities carries that same email as provider-verified. Accounts created
+  before email verification existed are otherwise unverified.
+- Unverified accounts cannot open new sessions with any sign-in method, and
+  cannot link Apple, Google or passkey methods. Sessions, refresh tokens and
+  browser cookies that existed before this rule remain valid until they end or
+  are revoked.
+- Signing in with a valid credential for an unverified account fails with a
+  distinct verification-required result and sends an email. The result is the
+  same whether or not an email was sent.
+  - For an account created before verification existed, the email contains a
+    verification link that expires after 30 minutes. Opening it and selecting
+    Verify email verifies the address without changing the password or ending
+    other sessions, and the listener then signs in again.
+  - For an unverified record from the earlier code-based sign-up, the email
+    contains a registration link instead, so whoever set that record's
+    password never gains the verified account.
+- On the Web, a listener can request a new verification link by email address.
+  The response does not reveal whether the address needs verification.
+- Completing a password reset revokes every active session for that account
+  and proves ownership of the inbox.
+  - On an account that was not yet verified, the reset also verifies the email
+    and removes every provider identity, passkey and pending passkey enrollment
+    that existed before the reset.
+  - Password recovery for an unverified record from the earlier code-based
+    sign-up sends a registration link instead of a reset code.
+- A password-reset code is voided by its fifth wrong submission, and the user
+  must request a new code.
+- The earlier app and Web endpoints for code-based registration, verification
+  and verification resend no longer change anything. They tell the user to
+  create the account on the Web.
+- Registration, verification-link and password-recovery requests do not reveal
+  whether an email address belongs to an account, neither through their
+  content and latency nor through rate or concurrency limiting.
+  - Each address receives at most three registration links, already-registered
+    notices or verification links per 15 minutes.
+  - Further requests receive the same response without another email.
 - Apple and Google identities are keyed by each provider's stable subject ID,
   not by an email address that can change.
 - A verified provider email matching an existing account does not silently link
@@ -1120,10 +1163,6 @@ The wire protocol and operational bounds are documented in
 - Authentication entry points display only methods the connected deployment
   reports as fully configured. Password sign-in remains available as the
   compatibility fallback when optional capabilities cannot be resolved.
-- Registration, verification-resend, and password-recovery responses do not
-  reveal whether an email address belongs to an account, neither through their
-  content and latency nor through registration's concurrency limiting.
-- Completing a password reset revokes every active session for that account.
 - Each refresh rotates the session's refresh token, and a session has exactly
   one current refresh token at any time, including when the previous and
   current tokens are used concurrently. A listener whose refresh response was

@@ -52,7 +52,7 @@ const media = (index: number, title = `Melody ${index}`) => ({ _id: new ObjectId
     mediaRepresentation: { revision: `mr_${index.toString(16).padStart(32, '0')}`, objectKey: id(index), byteLength: 320_044,
         durationMs: 10_000, seekable: true, format: 'wav-pcm', etag: '"synthetic-etag"', versionId: null } });
 const account = async (active = true) => {
-    const _id = new ObjectId(), user = { _id, email: `${_id}@example.test`, role: 'user', password: 'synthetic-unused-password' };
+    const _id = new ObjectId(), user = { _id, email: `${_id}@example.test`, role: 'user', password: 'synthetic-unused-password', emailVerified: true };
     await db().collection('users').insertOne(user);
     const session = await createSession(user);
     const actor: RoomActor = { userId: _id.toHexString(), sessionId: session.sessionId, clientId: randomUUID() };

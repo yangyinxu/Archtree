@@ -3,19 +3,22 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import test, { after, before, type TestContext } from 'node:test';
 import { SESv2Client } from '@aws-sdk/client-sesv2';
-import bcrypt from 'bcryptjs';
 import { createApp } from '../src/app';
-import { registerEmailAccount } from '../src/controllers/emailAuthController';
+import { resetRateLimitWindowsForTests } from '../src/middleware/requestProtectionMiddleware';
 import AuthActionToken from '../src/models/authActionToken';
+import AuthIdentity from '../src/models/authIdentity';
+import EmailLinkToken from '../src/models/emailLinkToken';
 import User from '../src/models/user';
 import { ServerLifecycle } from '../src/services/serverLifecycleService';
-import { queueVerificationDelivery, queueVerificationResend } from '../src/services/verificationDeliveryQueue';
 
 const acceptedMessage = { message: 'If the account can use this action, an email has been sent.' };
+const registrationAccepted = { message: 'Check your email for the next step.' };
+const verificationAccepted = { message: 'If this address needs verification, a link has been sent.' };
 const emailEnvironment = {
     AUTH_EMAIL_FROM: 'auth@example.test',
     AUTH_CODE_PEPPER: 'synthetic-unit-test-pepper',
-    AWS_REGION: 'us-east-1'
+    AWS_REGION: 'us-east-1',
+    AUTH_LINK_ORIGIN: 'https://listen.example.test'
 };
 const originalEnvironment = new Map<string, string | undefined>();
 
@@ -36,13 +39,14 @@ after(() => {
 interface SyntheticAccount {
     _id: { toString(): string };
     email: string;
-    emailVerified: boolean;
+    /** Omitted for an account created before verification existed. */
+    emailVerified?: boolean;
 }
 
-const syntheticAccount = (id: string, email: string, emailVerified: boolean): SyntheticAccount => ({
+const syntheticAccount = (id: string, email: string, emailVerified?: boolean): SyntheticAccount => ({
     _id: { toString: () => id },
     email,
-    emailVerified
+    ...(emailVerified === undefined ? {} : { emailVerified })
 });
 
 /**
@@ -69,13 +73,9 @@ const installAccountFakes = (
     t.mock.method(User, 'findByEmail', async (email: string) => known.get(email) ?? null);
     t.mock.method(User, 'findById', async (id: string) =>
         [...known.values()].find(account => account._id.toString() === id) ?? null);
-    t.mock.method(User.prototype, 'save', async function (this: { email: string }) {
-        const created = syntheticAccount(`synthetic-created-${known.size}`, this.email, false);
-        known.set(created.email, created);
-        return { insertedId: created._id };
-    });
+    t.mock.method(AuthIdentity, 'hasEmailForUser', async () => false);
     t.mock.method(AuthActionToken, 'issue', async () => '135790');
-    t.mock.method(AuthActionToken, 'issueVerification', async () => '135790');
+    t.mock.method(EmailLinkToken, 'issue', async () => 'S'.repeat(43));
     t.mock.method(SESv2Client.prototype, 'send', async (command: any) => {
         recipients.push(String(command.input?.Destination?.ToAddresses?.[0] ?? ''));
         started();
@@ -109,6 +109,8 @@ const installAccountFakes = (
 
 /** Runs the real application routes on loopback with an owned lifecycle for shutdown assertions. */
 const startApplication = async (t: TestContext) => {
+    // Each case starts with fresh per-IP, per-account and link-email windows.
+    resetRateLimitWindowsForTests();
     const lifecycle = new ServerLifecycle();
     const server = createServer(createApp({ environment: 'test', lifecycle }));
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -167,147 +169,52 @@ test('password recovery answers before account email delivery, and shutdown wait
     assert.deepEqual(fakes.errors, []);
 });
 
-test('verification resend and JSON registration answer before their account work completes', async t => {
-    const unverified = 'unverified-listener@example.test';
+test('registration and verification-link requests answer before their account work completes', async t => {
     const created = 'created-listener@example.test';
-    const fakes = installAccountFakes(
-        t,
-        [syntheticAccount('synthetic-unverified', unverified, false)],
-        'delivered'
-    );
+    const legacy = 'legacy-listener@example.test';
+    const fakes = installAccountFakes(t, [syntheticAccount('synthetic-legacy', legacy)], 'delivered');
     const app = await startApplication(t);
 
-    const resent = await postJson(`${app.url}/auth/email/resend-verification`, { email: unverified });
-    assert.equal(resent.status, 202);
-    assert.deepEqual(await resent.json(), acceptedMessage);
-    fakes.timeline.push('resend-response-received');
-
-    const registered = await postJson(`${app.url}/auth/signup`, {
-        email: created,
-        password: 'Lorem ipsum dolor sit amet',
-        displayName: 'Lorem Ipsum'
-    });
+    const registered = await postJson(`${app.url}/auth/browser/registration/request`, { email: created });
     assert.equal(registered.status, 202);
-    assert.deepEqual(await registered.json(), acceptedMessage);
+    assert.deepEqual(await registered.json(), registrationAccepted);
     fakes.timeline.push('registration-response-received');
 
+    const verification = await postJson(`${app.url}/auth/browser/email-verification/request`, { email: legacy });
+    assert.equal(verification.status, 202);
+    assert.deepEqual(await verification.json(), verificationAccepted);
+    fakes.timeline.push('verification-response-received');
+
     const stopped = app.stop(fakes.timeline);
-    // Registration hashes the password after its response, then reaches the gated send.
     await waitFor(() => fakes.recipients.length === 2, 'both gated deliveries to start');
     await settleShutdownAttempt();
-    assert.deepEqual(fakes.timeline, [
-        'resend-response-received',
-        'registration-response-received',
-        'security:email_registration_created'
-    ]);
+    assert.deepEqual(fakes.timeline, ['registration-response-received', 'verification-response-received'],
+        'shutdown must not close storage under pending delivery');
 
     fakes.releaseDelivery();
     assert.equal(await stopped, 'graceful');
-    assert.deepEqual(fakes.timeline.slice(3), ['email-delivered', 'email-delivered', 'database-closed']);
-    assert.deepEqual(fakes.recipients, [unverified, created]);
+    assert.deepEqual(fakes.timeline.slice(2), ['email-delivered', 'email-delivered', 'database-closed']);
+    assert.deepEqual(fakes.recipients, [created, legacy]);
     assert.deepEqual(fakes.errors, []);
 });
 
-test('registration holds its concurrency slot only for the fixed-cost hash, never for account work', async t => {
-    const fakes = installAccountFakes(t, [], 'delivered');
-    let openHashing!: () => void;
-    const hashing = new Promise<void>(resolve => { openHashing = resolve; });
-    let hashesStarted = 0;
-    t.mock.method(bcrypt, 'hash', async () => {
-        hashesStarted += 1;
-        await hashing;
-        return 'synthetic-password-hash';
-    });
+test('registration requests take no concurrency slot, so pending account work never causes 429', async t => {
+    const fakes = installAccountFakes(t, [syntheticAccount('synthetic-known', 'known-slot@example.test', true)], 'delivered');
     const app = await startApplication(t);
-    const register = (email: string) => postJson(`${app.url}/auth/signup`, {
-        email,
-        password: 'Lorem ipsum dolor sit amet',
-        displayName: 'Lorem Ipsum'
-    });
-
-    // Responding early removes client backpressure, so the slot must still bound hashing.
-    const first = await register('first-slot@example.test');
-    const second = await register('second-slot@example.test');
-    assert.equal(first.status, 202);
-    assert.equal(second.status, 202);
-    await Promise.all([first.text(), second.text()]);
-    await waitFor(() => hashesStarted === 2, 'both password hashes to start');
-    const whileHashing = await register('hashing-overflow@example.test');
-    assert.equal(whileHashing.status, 429);
-    assert.deepEqual(await whileHashing.json(), { message: 'Too many concurrent requests.' });
-
-    // Account lookup, creation and delivery depend on the account state, so
-    // they must not hold the slot: with both new-account emails still in
-    // flight, another registration is admitted.
-    openHashing();
-    await waitFor(() => fakes.recipients.length === 2, 'both new-account deliveries to start');
-    const afterHashing = await register('after-hash-slot@example.test');
-    assert.equal(afterHashing.status, 202);
-    await afterHashing.text();
-
+    // The password concurrency limit admits two requests per client; every
+    // request below stays in flight on the closed delivery gate.
+    const emails = ['first-slot@example.test', 'known-slot@example.test', 'third-slot@example.test', 'fourth-slot@example.test'];
+    for (const email of emails) {
+        const response = await postJson(`${app.url}/auth/browser/registration/request`, { email });
+        assert.equal(response.status, 202, email);
+        assert.deepEqual(await response.json(), registrationAccepted);
+    }
+    await waitFor(() => fakes.recipients.length === emails.length, 'every gated delivery to start');
     const stopped = app.stop(fakes.timeline);
-    await waitFor(() => fakes.recipients.length === 3, 'the admitted registration delivery to start');
     fakes.releaseDelivery();
     assert.equal(await stopped, 'graceful');
-    assert.deepEqual(fakes.recipients, ['first-slot@example.test', 'second-slot@example.test', 'after-hash-slot@example.test']);
+    assert.deepEqual(fakes.recipients, emails);
     assert.deepEqual(fakes.errors, []);
-});
-
-test('registration reserves its address queue before hashing, so an immediate resend waits for it', async t => {
-    const email = 'reserved-lane@example.test';
-    const fakes = installAccountFakes(t, [], 'failed');
-    let openHashing!: () => void;
-    const hashing = new Promise<void>(resolve => { openHashing = resolve; });
-    t.mock.method(bcrypt, 'hash', async () => {
-        await hashing;
-        return 'synthetic-password-hash';
-    });
-
-    // Callers start registration in the same turn as their generic response,
-    // so a resend queued right after this call models the earliest request a
-    // client can send once the 202 arrives.
-    const registering = registerEmailAccount(email, 'Lorem ipsum dolor sit amet', 'Lorem Ipsum');
-    const resendEvents: string[] = [];
-    const resent = queueVerificationResend(email, async () => {
-        resendEvents.push('resend-sent');
-        return true;
-    });
-    await new Promise(resolve => setTimeout(resolve, 20));
-    assert.deepEqual(resendEvents, [], 'the resend waits for the registration that is still hashing');
-
-    openHashing();
-    await fakes.deliveryStarted;
-    assert.deepEqual(resendEvents, [], 'the resend waits for the registration email in flight');
-    fakes.releaseDelivery();
-    await assert.rejects(registering, /synthetic delivery failure/);
-    assert.equal(await resent, true);
-    assert.deepEqual(resendEvents, ['resend-sent'], 'the resend replaces the failed registration email');
-    assert.deepEqual(fakes.recipients, [email]);
-    assert.deepEqual(fakes.errors, []);
-});
-
-test('a failed password hash releases the registration slot even while earlier work holds the address', async t => {
-    const email = 'failed-hash@example.test';
-    const fakes = installAccountFakes(t, [], 'delivered');
-    t.mock.method(bcrypt, 'hash', async () => {
-        throw new Error('synthetic hash failure');
-    });
-    let finishEarlier!: () => void;
-    const earlier = queueVerificationDelivery(email, () => new Promise<boolean>(resolve => {
-        finishEarlier = () => resolve(true);
-    }));
-    let released = 0;
-    const registering = registerEmailAccount(email, 'Lorem ipsum dolor sit amet', 'Lorem Ipsum', '', () => {
-        released += 1;
-    });
-    await new Promise(resolve => setTimeout(resolve, 20));
-    assert.equal(released, 1, 'the slot is released when hashing settles, not when the address frees up');
-
-    finishEarlier();
-    assert.equal(await earlier, true);
-    await assert.rejects(registering, /synthetic hash failure/);
-    assert.equal(released, 1);
-    assert.deepEqual(fakes.recipients, []);
 });
 
 test('a delivery failure after the uniform response is recorded without a second response', async t => {
@@ -338,26 +245,14 @@ test('a delivery failure after the uniform response is recorded without a second
     assert.deepEqual(fakes.errors, []);
 });
 
-test('Web form registration renders its generic page before account work and records late failures', async t => {
-    const email = 'web-form-listener@example.test';
+test('a registration delivery failure after the uniform response is recorded once', async t => {
+    const email = 'failed-registration@example.test';
     const fakes = installAccountFakes(t, [], 'failed');
     const app = await startApplication(t);
 
-    const response = await fetch(`${app.url}/auth/signup-web`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Origin: app.url,
-            'Sec-Fetch-Site': 'same-origin'
-        },
-        body: new URLSearchParams({
-            email,
-            password: 'Lorem ipsum dolor sit amet',
-            username: 'Lorem Ipsum'
-        })
-    });
+    const response = await postJson(`${app.url}/auth/browser/registration/request`, { email });
     assert.equal(response.status, 202);
-    assert.match(await response.text(), /If the account can be created, a verification code has been sent/);
+    assert.deepEqual(await response.json(), registrationAccepted);
     fakes.timeline.push('response-received');
 
     await fakes.deliveryStarted;
@@ -366,7 +261,6 @@ test('Web form registration renders its generic page before account work and rec
     assert.equal(await stopped, 'graceful');
     assert.deepEqual(fakes.timeline, [
         'response-received',
-        'security:email_registration_created',
         'email-failed',
         'security:email_registration_request_failed',
         'database-closed'

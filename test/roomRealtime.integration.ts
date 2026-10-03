@@ -70,7 +70,7 @@ after(async () => {
 
 const account = async () => {
     const id = new ObjectId();
-    const user = { _id: id, email: `${id}@example.test`, role: 'user', password: 'unused-synthetic-hash' };
+    const user = { _id: id, email: `${id}@example.test`, role: 'user', password: 'unused-synthetic-hash', emailVerified: true };
     await getDb()!.collection('users').insertOne(user);
     const tokens = await createSession(user);
     const actor = { userId: id.toHexString(), sessionId: tokens.sessionId, clientId: randomUUID() };

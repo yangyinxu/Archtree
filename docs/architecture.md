@@ -249,7 +249,8 @@ outbox data. A failure rolls back the entire cleanup; no S3 object is touched.
 Deactivation retains the profile/handle, blocks, receipts and clocks so later
 reactivation cannot restore an old intent or relationship.
 
-Startup migration `required-indexes-v4-social-participation` adds mandatory unique constraints
+Startup migration `required-indexes-v4-social-participation` (now verified as part of
+`required-indexes-v5-email-link-tokens`, which adds the `emailLinkTokens` cleanup index) adds mandatory unique constraints
 and required nonunique cleanup indexes. A sparse, partial, hidden, wrong-key or
 wrong-uniqueness substitute is rejected. TTL is opportunistic reclamation and is
 never an authorization or admission decision. See the active plan for actual

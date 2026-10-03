@@ -43,13 +43,14 @@ class User {
             .next();
     }
 
-    static findByEmail(email: string) {
+    /** Finds an account by case-insensitive exact email; pass `session` to read inside a transaction. */
+    static findByEmail(email: string, session?: ClientSession) {
         const db = getDb();
         const normalized = String(email ?? '').trim().toLowerCase();
 
         return db!
             .collection('users')
-            .find({ email: { $regex: `^${escapeRegex(normalized)}$`, $options: 'i' } })
+            .find({ email: { $regex: `^${escapeRegex(normalized)}$`, $options: 'i' } }, { session })
             .maxTimeMS(3_000)
             .next();
     }
@@ -89,56 +90,70 @@ class User {
     }
 
     /**
-     * Records the newest registration attempt on an account that has not
-     * proven email ownership, for a later resend to bind. It deliberately
-     * leaves `password` alone: replacing it would let the first registrant's
-     * sign-in response change from "verify your email" to "invalid
-     * credentials" and reveal that someone else just registered the address.
-     * Resolves whether the account was still unverified.
+     * Inserts an account whose email was proven by a registration link before
+     * any credential existed. The unique email index rejects a concurrent
+     * completion for the same address.
      */
-    static async recordPendingRegistration(
-        userId: string,
-        registration: { passwordHash: string; displayName: string; username: string },
-        session: ClientSession
-    ) {
-        const result = await getDb()!.collection('users').updateOne(
-            { _id: new ObjectId(userId), emailVerified: false },
-            { $set: { pendingRegistration: registration } },
-            { session }
-        );
-        return result.matchedCount === 1;
-    }
-
-    /**
-     * Marks the email verified and applies exactly the credentials bound to the
-     * redeemed code in one write, so no reader observes a verified account with
-     * another attempt's password. Resolves whether the account was unverified.
-     */
-    static async applyVerifiedRegistration(
-        userId: string,
-        registration: { passwordHash: string; displayName: string; username: string },
+    static async insertVerified(
+        account: { email: string; password: string; displayName: string; username: string },
         session: ClientSession
     ) {
         const now = new Date();
-        const result = await getDb()!.collection('users').updateOne(
+        const result = await getDb()!.collection('users').insertOne({
+            email: account.email,
+            password: account.password,
+            username: account.username,
+            posts: [],
+            role: 'user',
+            displayName: account.displayName,
+            emailVerified: true,
+            emailVerifiedAt: now,
+            passwordUpdatedAt: now
+        }, { session });
+        return result.insertedId.toString();
+    }
+
+    /**
+     * Replaces a record left by the earlier code-based sign-up with `document`
+     * in one write. The filter matches only while the record is still
+     * unverified. Resolves whether it was replaced.
+     */
+    static async replacePendingRecord(userId: string, document: Record<string, unknown>, session: ClientSession) {
+        const result = await getDb()!.collection('users').replaceOne(
             { _id: new ObjectId(userId), emailVerified: false },
-            { $set: {
-                emailVerified: true,
-                emailVerifiedAt: now,
-                password: registration.passwordHash,
-                passwordUpdatedAt: now,
-                displayName: registration.displayName,
-                username: registration.username
-            }, $unset: { pendingRegistration: '' } },
+            document,
             { session }
         );
         return result.matchedCount === 1;
     }
 
+    /** Records proven inbox control, e.g. after a completed password reset. */
+    static markEmailVerified(userId: string, session: ClientSession) {
+        return getDb()!.collection('users').updateOne(
+            { _id: new ObjectId(userId) },
+            { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
+            { session }
+        );
+    }
+
     /**
-     * Replaces the password. On an unverified account a reset password also
-     * supersedes any pending registration attempt, so the next verification
-     * code binds the password set through the mailbox-owned reset.
+     * Verifies an account created before verification existed, without
+     * touching its password. An account that is already verified is left
+     * unchanged, and a record from the earlier code-based sign-up never
+     * matches.
+     */
+    static confirmLegacyEmail(userId: string, session: ClientSession) {
+        return getDb()!.collection('users').updateOne(
+            { _id: new ObjectId(userId), emailVerified: { $exists: false } },
+            { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
+            { session }
+        );
+    }
+
+    /**
+     * Replaces the password. `pendingRegistration` is a field the earlier
+     * code-based sign-up stored on unverified records; clearing it here is
+     * harmless and keeps no bound password hash around.
      */
     static updatePassword(userId: string, password: string, session: ClientSession) {
         const db = getDb();

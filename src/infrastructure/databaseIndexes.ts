@@ -24,6 +24,10 @@ export const databaseIndexes: Array<{
     { collection: 'authActionTokens', keys: { codeHash: 1 } },
     { collection: 'authActionTokens', keys: { userId: 1, purpose: 1, consumedAt: 1 } },
     { collection: 'authActionTokens', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    // Required: registration and verification transactions use this collection.
+    { collection: 'emailLinkTokens', keys: { email: 1, purpose: 1 }, required: true },
+    { collection: 'emailLinkTokens', keys: { userId: 1 }, options: { sparse: true } },
+    { collection: 'emailLinkTokens', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'authIdentities', keys: { provider: 1, providerSubject: 1 }, options: { unique: true } },
     { collection: 'authIdentities', keys: { userId: 1, provider: 1 }, options: { unique: true } },
     { collection: 'passkeys', keys: { credentialId: 1 }, options: { unique: true } },
@@ -116,7 +120,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v4-social-participation';
+export const requiredIndexRevision = 'required-indexes-v5-email-link-tokens';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */

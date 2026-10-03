@@ -11,7 +11,7 @@ import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import { createRoomAuthority } from '../src/realtime/roomAuthority';
 import AuthSession from '../src/models/authSession';
 import AuthActionToken from '../src/models/authActionToken';
-import { applyEmailAction, changeAccountPassword } from '../src/services/authCredentialService';
+import { applyPasswordReset, changeAccountPassword } from '../src/services/authCredentialService';
 import { deleteListenerAccountData } from '../src/services/accountDeletionService';
 import type { RoomDocument } from '../src/repositories/social/roomDocuments';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
@@ -1569,12 +1569,12 @@ test('password reset rolls back room removal with the credential and permits the
         return original.call(this, filter, ...args);
     } as typeof original;
     try {
-        await assert.rejects(applyEmailAction(guestId, 'resetPassword', code, 'new-hash'), /Synthetic late cleanup failure/);
+        await assert.rejects(applyPasswordReset(guestId, code, 'new-hash'), /Synthetic late cleanup failure/);
     } finally { Collection.prototype.deleteMany = original; }
     assert.deepEqual(await snapshot(host), state);
     assert.equal((await database().collection('users').findOne({ _id: new ObjectId(guestId) }))!.password, 'old-hash');
     assert.ok(await AuthSession.findActiveById(guest.actor.sessionId));
-    assert.equal(await applyEmailAction(guestId, 'resetPassword', code, 'new-hash'), true);
+    assert.equal(await applyPasswordReset(guestId, code, 'new-hash'), true);
     assert.equal((await snapshot(host)).members.length, 1);
     assert.equal(await AuthSession.findActiveById(guest.actor.sessionId), null);
 });

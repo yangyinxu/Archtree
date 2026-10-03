@@ -1,17 +1,50 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { validationResult } from 'express-validator';
-import { MongoServerError } from 'mongodb';
-import { releaseConcurrencySlots } from '../middleware/requestProtectionMiddleware';
-import AuthActionToken, { PendingRegistration } from '../models/authActionToken';
+import AuthActionToken from '../models/authActionToken';
+import EmailLinkToken, { isEmailLinkTokenFormat } from '../models/emailLinkToken';
 import User from '../models/user';
-import { requireAuthEmailConfiguration, sendAuthCode } from '../services/authEmailService';
-import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
-import { applyEmailAction } from '../services/authCredentialService';
-import { queueVerificationDelivery, queueVerificationResend } from '../services/verificationDeliveryQueue';
+import {
+    requireAuthEmailConfiguration,
+    requireAuthLinkConfiguration,
+    sendAuthEmail
+} from '../services/authEmailService';
+import { applyPasswordReset } from '../services/authCredentialService';
+import {
+    completeEmailRegistration,
+    confirmEmailVerificationLink,
+    inspectEmailVerificationLink,
+    sendAlreadyRegisteredNotice,
+    sendRegistrationLink,
+    sendSignInVerificationEmail,
+    sendVerificationLink
+} from '../services/emailLinkService';
+import {
+    EmailVerificationSubject,
+    emailVerificationState,
+    signInVerificationRequiredMessage
+} from '../services/emailVerificationService';
+import { evaluatePassword } from '../services/passwordPolicyService';
+import {
+    AuthenticationMethod,
+    recordAuthFunnelEvent,
+    recordSecurityEvent
+} from '../services/securityAuditService';
 
 const normalizeEmail = (value: unknown) => String(value ?? '').trim().toLowerCase();
-const acceptedMessage = { message: 'If the account can use this action, an email has been sent.' };
+const recoveryAcceptedMessage = { message: 'If the account can use this action, an email has been sent.' };
+const registrationAcceptedMessage = { message: 'Check your email for the next step.' };
+const verificationAcceptedMessage = { message: 'If this address needs verification, a link has been sent.' };
+const linkInvalidBody = { code: 'link_invalid', message: 'This link is invalid, expired, or already used.' };
+const emailAlreadyRegisteredBody = {
+    code: 'email_already_registered',
+    message: 'This email already has an account. Log in or reset your password.'
+};
+const retiredRegistrationBody = {
+    code: 'email_registration_moved',
+    message: 'Email sign-up has moved to the Finitude website. Create your account there, then sign in.'
+};
+const maximumDisplayNameLength = 80;
 
 const rejectInvalidRequest = (req: Request, res: Response) => {
     if (validationResult(req).isEmpty()) {
@@ -22,30 +55,15 @@ const rejectInvalidRequest = (req: Request, res: Response) => {
 };
 
 /**
- * Sends a verification code bound to `attempt`, or for a resend to the
- * unverified account's stored credentials. Resolves false without sending when
- * the account is not unverified.
- */
-const sendVerificationCode = async (user: any, attempt?: PendingRegistration) => {
-    const code = await AuthActionToken.issueVerification(user._id.toString(), attempt);
-    if (!code) return false;
-    await sendAuthCode(user.email, 'verifyEmail', code);
-    return true;
-};
-
-/**
  * Sends a generic response before running per-account email work.
  *
  * The lookup, token write, password hash, and SES send take measurably longer
  * for some account states, so awaiting them first would let response latency
  * reveal whether an email has an account. The work stays inside the caller's
  * handler promise (never detached), so `asyncHandler` keeps tracking it:
- * graceful shutdown waits for it to finish, and so do concurrency limits
- * unless the handler releases its slot early (registration does). Failures
- * are recorded only as an opaque security event, because the response has
- * already been sent. `operation` starts in the same synchronous turn as the
- * response, before the server can handle the client's next request;
- * registration relies on this to queue its attempt ahead of a quick resend.
+ * graceful shutdown waits for it to finish, and so do concurrency limits.
+ * Failures are recorded only as an opaque security event, because the
+ * response has already been sent.
  */
 export const respondBeforeAccountWork = async (
     respond: () => void,
@@ -60,154 +78,202 @@ export const respondBeforeAccountWork = async (
     }
 };
 
-/** Finishes email requests uniformly so neither latency nor delivery failures enumerate accounts. */
-const acceptEmailRequest = async (
+/**
+ * Finishes email requests uniformly so neither latency nor delivery failures
+ * enumerate accounts. `requireConfiguration` runs first: configuration errors
+ * are deployment-wide and safe to report before any account lookup, while
+ * per-account persistence and delivery failures stay opaque.
+ */
+export const acceptEmailRequest = async (
     res: Response,
+    accepted: { message: string },
+    requireConfiguration: () => unknown,
     event: string,
     operation: () => Promise<void>
 ) => {
-    // Configuration errors are deployment-wide and safe to report before any
-    // account lookup. Per-account persistence/delivery failures remain opaque.
-    requireAuthEmailConfiguration();
-    await respondBeforeAccountWork(() => res.status(202).json(acceptedMessage), event, operation);
-};
-
-/** Creates the unverified account for a first attempt, or returns the account another process just created. */
-const createUnverifiedAccount = async (email: string, attempt: PendingRegistration) => {
-    try {
-        const result = await new User(
-            email,
-            attempt.passwordHash,
-            attempt.username,
-            [],
-            'user',
-            attempt.displayName,
-            false
-        ).save();
-        recordSecurityEvent('email_registration_created', { userId: result.insertedId.toString() });
-        recordAuthFunnelEvent('registration', 'email', 'succeeded');
-        return User.findById(result.insertedId.toString());
-    } catch (error) {
-        // The unique email index rejected a concurrent first attempt; this
-        // attempt is newer and binds its credentials to the existing account.
-        if (error instanceof MongoServerError && error.code === 11000) return User.findByEmail(email);
-        throw error;
-    }
+    requireConfiguration();
+    await respondBeforeAccountWork(() => res.status(202).json(accepted), event, operation);
 };
 
 /**
- * Applies one registration attempt. An email without a verified account gets
- * a new code bound to this attempt's credentials, which voids every earlier
- * code; a verified account, including a legacy one without the field, is left
- * unchanged. Resolves whether a code was sent.
+ * Answers a sign-in that presented a valid credential for an unverified
+ * account with the distinct verification-required `403`, then mails the
+ * verification or registration link inside the tracked request work. The body
+ * is identical whether or not an email goes out.
  */
-const recordRegistrationAttempt = async (email: string, attempt: PendingRegistration) => {
-    const user = await User.findByEmail(email) ?? await createUnverifiedAccount(email, attempt);
-    if (!user || user.emailVerified !== false) return false;
-    return sendVerificationCode(user, attempt);
-};
-
-/**
- * Starts the password hash and, without awaiting it, queues the attempt on
- * the address's verification queue; the account-dependent work runs in its
- * turn once the hash is ready. Callers send the generic response first and
- * must call this in the same synchronous turn (`respondBeforeAccountWork`
- * does), so the attempt is queued before any later request for the address
- * can be handled. `afterPasswordHash` releases their concurrency slot once
- * hashing settles.
- */
-export const registerEmailAccount = async (
-    emailValue: unknown,
-    passwordValue: unknown,
-    displayNameValue: unknown,
-    usernameValue: unknown = '',
-    afterPasswordHash: () => void = () => undefined
+export const respondEmailVerificationRequired = (
+    res: Response,
+    account: EmailVerificationSubject,
+    method: AuthenticationMethod
 ) => {
-    requireAuthEmailConfiguration();
-    const email = normalizeEmail(emailValue);
-    const password = String(passwordValue ?? '');
-    const displayName = String(displayNameValue ?? '').trim().slice(0, 80);
-    const username = String(usernameValue ?? '').trim().slice(0, 64);
-    // Perform the same fixed-cost password work for new and existing emails.
-    const passwordHash = bcrypt.hash(password, 12);
-    // Hashing is the work the concurrency slot bounds, and it costs the same
-    // for every account state. Releasing the slot when it settles keeps how
-    // long it is held, and so any 429 it causes, independent of whether the
-    // email has an account, and of earlier work queued for the address.
-    // Graceful shutdown still waits for the remaining work.
-    void passwordHash.then(afterPasswordHash, afterPasswordHash);
-    // Queue before the hash settles: a resend sent as soon as the response
-    // arrives then finds this attempt in flight and waits for its email,
-    // instead of finding no account yet and being dropped.
-    await queueVerificationDelivery(email, async () => recordRegistrationAttempt(email, {
-        passwordHash: await passwordHash,
-        displayName,
-        username
-    }));
-};
-
-/** Registers an email account and sends a verification code without enumerating duplicates. */
-export const register = async (req: Request, res: Response) => {
-    if (rejectInvalidRequest(req, res)) return;
-    return acceptEmailRequest(
-        res,
-        'email_registration_request_failed',
-        () => registerEmailAccount(
-            req.body.email,
-            req.body.password,
-            req.body.displayName,
-            '',
-            () => releaseConcurrencySlots(req)
-        )
+    recordSecurityEvent('login_verification_required', { userId: account._id.toString() });
+    recordAuthFunnelEvent('login', method, 'rejected');
+    return respondBeforeAccountWork(
+        () => res.status(403).json({ code: 'email_verification_required', message: signInVerificationRequiredMessage }),
+        'auth_link_email_failed',
+        () => sendSignInVerificationEmail(account)
     );
 };
 
+/** Answers the retired code-based registration endpoints without validation, limits or account work. */
+export const retiredRegistrationEndpoint = (_req: Request, res: Response) => {
+    recordSecurityEvent('retired_registration_endpoint');
+    return res.status(410).json(retiredRegistrationBody);
+};
+
 /**
- * Verifies email ownership with a single-use code and applies exactly the
- * registration attempt bound to it; wrong codes count toward voiding it.
+ * Starts Web registration with only an email address. Every account state
+ * receives the same response before any account work. An address without an
+ * account, or with an unverified record from the earlier code-based sign-up,
+ * receives a registration link; an address with an account receives the
+ * "already registered" notice and nothing changes. Legacy owners reach
+ * verification through password reset.
  */
-export const verifyEmail = async (req: Request, res: Response) => {
+export const requestRegistration = async (req: Request, res: Response) => {
     if (rejectInvalidRequest(req, res)) return;
-    const user = await User.findByEmail(normalizeEmail(req.body.email));
-    const code = String(req.body.code ?? '').trim();
-    if (!user || !await applyEmailAction(user._id.toString(), 'verifyEmail', code)) {
-        return res.status(400).json({ message: 'The verification code is invalid or expired.' });
+    const email = normalizeEmail(req.body.email);
+    return acceptEmailRequest(
+        res,
+        registrationAcceptedMessage,
+        requireAuthLinkConfiguration,
+        'email_registration_request_failed',
+        async () => {
+            const user = await User.findByEmail(email);
+            if (!user || user.emailVerified === false) await sendRegistrationLink(email);
+            else await sendAlreadyRegisteredNotice(email);
+        }
+    );
+};
+
+/** Reports the address a registration link is for without consuming it. */
+export const inspectRegistration = async (req: Request, res: Response) => {
+    const token = req.body?.token;
+    const link = isEmailLinkTokenFormat(token) ? await EmailLinkToken.findLive('registration', token) : null;
+    if (!link) return res.status(400).json(linkInvalidBody);
+    const user = await User.findByEmail(link.email);
+    if (user && user.emailVerified !== false) return res.status(409).json(emailAlreadyRegisteredBody);
+    return res.status(200).json({ email: link.email });
+};
+
+/** Trims a display name and accepts 1 to 80 characters without control characters. */
+const acceptableDisplayName = (value: unknown) => {
+    const displayName = typeof value === 'string' ? value.trim() : '';
+    return displayName.length >= 1
+        && displayName.length <= maximumDisplayNameLength
+        && !/[\u0000-\u001f\u007f]/.test(displayName)
+        ? displayName
+        : null;
+};
+
+/**
+ * Creates a verified account from a registration link, with the display name
+ * and password chosen on the link page, or completely replaces the address's
+ * unverified record. The user then logs in; no session is created here.
+ */
+export const completeRegistration = async (req: Request, res: Response) => {
+    requireAuthLinkConfiguration();
+    const token = req.body?.token;
+    if (!isEmailLinkTokenFormat(token)) return res.status(400).json(linkInvalidBody);
+    const password = req.body?.password;
+    const policy = evaluatePassword(password);
+    if (!policy.accepted) return res.status(422).json({ code: 'invalid_password', message: policy.message });
+    const displayName = acceptableDisplayName(req.body?.displayName);
+    if (!displayName) {
+        return res.status(422).json({
+            code: 'invalid_display_name',
+            message: `Enter a display name between 1 and ${maximumDisplayNameLength} characters.`
+        });
     }
-    recordSecurityEvent('email_verified', { userId: user._id.toString() });
+    // Hash before any lookup: a hashing failure consumes nothing.
+    const passwordHash = await bcrypt.hash(password as string, 12);
+    const completion = await completeEmailRegistration(token, passwordHash, displayName);
+    if (completion.status === 'invalid') return res.status(400).json(linkInvalidBody);
+    if (completion.status === 'exists') return res.status(409).json(emailAlreadyRegisteredBody);
+    recordSecurityEvent(
+        completion.status === 'created' ? 'email_registration_completed' : 'email_registration_replaced_pending',
+        { userId: completion.userId }
+    );
+    recordAuthFunnelEvent('registration', 'email', 'succeeded');
+    return res.status(201).json({ email: completion.email });
+};
+
+/**
+ * Sends a new verification link to an account created before verification
+ * existed. Every other state does nothing, and every state receives the same
+ * response before any account work.
+ */
+export const requestEmailVerification = async (req: Request, res: Response) => {
+    if (rejectInvalidRequest(req, res)) return;
+    const email = normalizeEmail(req.body.email);
+    return acceptEmailRequest(
+        res,
+        verificationAcceptedMessage,
+        requireAuthLinkConfiguration,
+        'verification_link_request_failed',
+        async () => {
+            const user = await User.findByEmail(email);
+            if (user && await emailVerificationState(user) === 'legacy_unverified') {
+                await sendVerificationLink(normalizeEmail(user.email), user._id.toString());
+            }
+        }
+    );
+};
+
+/** Reports the address a verification link would verify without consuming it. */
+export const inspectEmailVerification = async (req: Request, res: Response) => {
+    const token = req.body?.token;
+    const email = isEmailLinkTokenFormat(token) ? await inspectEmailVerificationLink(token) : null;
+    if (!email) return res.status(400).json(linkInvalidBody);
+    return res.status(200).json({ email });
+};
+
+/**
+ * Verifies a legacy account's email after an explicit confirmation, so link
+ * scanners that only fetch the page cannot verify it. The password does not
+ * change and other sessions stay signed in.
+ */
+export const confirmEmailVerification = async (req: Request, res: Response) => {
+    const token = req.body?.token;
+    const userId = isEmailLinkTokenFormat(token) ? await confirmEmailVerificationLink(token) : null;
+    if (!userId) return res.status(400).json(linkInvalidBody);
+    recordSecurityEvent('email_verified', { userId });
     recordAuthFunnelEvent('verification', 'email', 'succeeded');
     return res.status(204).send();
 };
 
 /**
- * Resends verification with the same response whether the account exists or
- * not. The new code is bound to the newest registration attempt (or a later
- * reset password); a resend pressed while an earlier verification email for
- * the address is still in flight reuses that delivery when it succeeds.
+ * Starts password recovery without revealing account existence. A record from
+ * the earlier code-based sign-up receives a registration link instead of a
+ * reset code, so whoever set its password never gains the account.
  */
-export const resendVerification = async (req: Request, res: Response) => {
-    if (rejectInvalidRequest(req, res)) return;
-    const email = normalizeEmail(req.body.email);
-    return acceptEmailRequest(res, 'verification_email_request_failed', async () => {
-        await queueVerificationResend(email, async () => {
-            const user = await User.findByEmail(email);
-            return user?.emailVerified === false ? sendVerificationCode(user) : false;
-        });
-    });
-};
-
-/** Starts password recovery without revealing account existence. */
 export const forgotPassword = async (req: Request, res: Response) => {
     if (rejectInvalidRequest(req, res)) return;
-    return acceptEmailRequest(res, 'password_recovery_request_failed', async () => {
-        const user = await User.findByEmail(normalizeEmail(req.body.email));
-        if (user) {
+    return acceptEmailRequest(
+        res,
+        recoveryAcceptedMessage,
+        requireAuthEmailConfiguration,
+        'password_recovery_request_failed',
+        async () => {
+            const user = await User.findByEmail(normalizeEmail(req.body.email));
+            if (!user) return;
+            if (user.emailVerified === false) {
+                try {
+                    await sendRegistrationLink(normalizeEmail(user.email));
+                } catch {
+                    recordSecurityEvent('auth_link_email_failed');
+                }
+                return;
+            }
             const code = await AuthActionToken.issue(user._id.toString(), 'resetPassword', 15);
-            await sendAuthCode(user.email, 'resetPassword', code);
+            await sendAuthEmail(user.email, { template: 'resetCode', code });
         }
-    });
+    );
 };
 
-/** Replaces a password after consuming a reset code and revokes every active session. */
+/**
+ * Replaces a password after consuming a reset code, revokes every active
+ * session and verifies the email, because the reset proves inbox control.
+ */
 export const resetPassword = async (req: Request, res: Response) => {
     if (rejectInvalidRequest(req, res)) return;
     // Hash before account/code resolution to keep invalid attempts on the same
@@ -215,7 +281,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     const passwordHash = await bcrypt.hash(String(req.body.password), 12);
     const user = await User.findByEmail(normalizeEmail(req.body.email));
     const code = String(req.body.code ?? '').trim();
-    if (!user || !await applyEmailAction(user._id.toString(), 'resetPassword', code, passwordHash)) {
+    if (!user || !await applyPasswordReset(user._id.toString(), code, passwordHash)) {
         return res.status(400).json({ message: 'The reset code is invalid or expired.' });
     }
     recordSecurityEvent('password_reset_completed', { userId: user._id.toString() });

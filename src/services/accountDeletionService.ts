@@ -45,6 +45,7 @@ const personalCollections = [
     ['userSaves', 'userId'],
     ['userActivity', 'userId'],
     ['authActionTokens', 'userId'],
+    ['emailLinkTokens', 'userId'],
     ['authIdentities', 'userId'],
     ['passkeys', 'userId'],
     ['passkeyChallenges', 'userId'],

@@ -80,7 +80,9 @@ test('landing actions expose Finitude while reserving Content Manager for admins
   assert.doesNotMatch(signedOut.headerActions, /href="\/finitude">Open Finitude/);
   assert.match(signedOut.heroActions, /href="\/finitude"><i class="ph ph-music-notes"[^>]*><\/i>Open Finitude/);
   assert.match(signedOut.headerActions, /href="\/auth\/login-web"><i class="ph ph-sign-in"[^>]*><\/i>Log in/);
-  assert.match(signedOut.heroActions, /href="\/auth\/signup-web"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
+  assert.match(signedOut.heroActions, /href="\/finitude\/register"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
+  assert.match(signedOut.headerActions, /href="\/finitude\/register"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
+  assert.doesNotMatch(signedOut.headerActions + signedOut.heroActions, /signup-web/);
 
   const signedInUser = renderLandingActions({
     userId: 'listener-id',
@@ -158,15 +160,15 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.match(loginHtml, /ph ph-sign-in/);
     assert.match(loginHtml, /data-browser-session-login/);
     assert.doesNotMatch(loginHtml, /\/finitude\/login/);
+    assert.match(loginHtml, /Need an account\? <a href="\/finitude\/register">Create one<\/a>/);
+    assert.doesNotMatch(loginHtml, /signup-web/);
 
-    const signupPage = await fetch(`${baseUrl}/auth/signup-web`);
-    assert.equal(signupPage.status, 200);
+    // Email registration moved to the Finitude Web pages.
+    const signupPage = await fetch(`${baseUrl}/auth/signup-web`, { redirect: 'manual' });
+    assert.equal(signupPage.status, 303);
+    assert.equal(signupPage.headers.get('location'), '/finitude/register');
     assertSecurityHeaders(signupPage);
-    const signupHtml = await signupPage.text();
-    assert.match(signupHtml, /<html lang="en" class="auth-document">/);
-    assert.match(signupHtml, /<body class="auth-page auth-page--signup">/);
-    assert.match(signupHtml, /<h1>Create your account<\/h1>/);
-    assert.match(signupHtml, /ph ph-user-plus/);
+    await signupPage.text();
 
     const contentManagerRedirect = await fetch(`${baseUrl}/content/manage`, {
       redirect: 'manual'

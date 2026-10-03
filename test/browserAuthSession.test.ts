@@ -59,6 +59,21 @@ test('browser identity projection never includes tokens or a session identifier'
     assert.equal('sessionId' in payload.user, false);
 });
 
+test('the browser identity reports an email as verified only when explicitly verified', () => {
+    for (const emailVerified of [undefined, false]) {
+        assert.equal(browserSessionPayload({
+            userId: 'verification-test',
+            email: 'verification-test@example.com',
+            emailVerified
+        }).user.emailVerified, false);
+    }
+    assert.equal(browserSessionPayload({
+        userId: 'verification-test',
+        email: 'verification-test@example.com',
+        emailVerified: true
+    }).user.emailVerified, true);
+});
+
 test('roles fail closed unless the persisted value is exactly admin', () => {
     assert.equal(normalizeUserRole('admin'), 'admin');
     for (const role of ['user', 'creator', 'ADMIN', ' admin ', '', undefined, null, 1]) {

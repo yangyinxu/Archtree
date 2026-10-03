@@ -206,11 +206,11 @@ export const renderLandingActions = (
   return {
     headerActions: `<div class="header-actions">
       <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
-      <a class="button" href="/auth/signup-web"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
+      <a class="button" href="/finitude/register"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
     </div>`,
     heroActions: `<div class="action-row">
       ${listenerButton}
-      <a class="button" href="/auth/signup-web"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
+      <a class="button" href="/finitude/register"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
       <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
     </div>`
   };
@@ -383,7 +383,9 @@ export const handleApplicationError: ErrorRequestHandler = (error, req, res, _ne
         message: 'The service could not complete the request.'
       });
     }
-    return res.status(status).json({ message, data });
+    // Only errors that opt in expose their machine-readable code to clients.
+    const exposedCode = error?.exposeCode === true && typeof error?.code === 'string' ? error.code : undefined;
+    return res.status(status).json({ message, data, ...(exposedCode ? { code: exposedCode } : {}) });
 };
 
 // Keep `tsx src/app.ts` as the runtime entry while imports remain side-effect free.

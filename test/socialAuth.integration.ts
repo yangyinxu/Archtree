@@ -46,7 +46,8 @@ after(async () => {
 const account = async () => {
     const id = new ObjectId();
     const user = { _id: id, email: `social-http-${id.toHexString()}@example.test`, role: 'user',
-        username: 'Private account username', displayName: 'Private account name', password: 'unused-synthetic-password' };
+        username: 'Private account username', displayName: 'Private account name', password: 'unused-synthetic-password',
+        emailVerified: true };
     await getDb()!.collection('users').insertOne(user);
     const session = await createSession(user);
     return { id, userId: id.toHexString(), email: user.email, token: session.accessToken, sessionId: session.sessionId };

@@ -17,6 +17,8 @@ import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/security
 import { normalizeUserRole } from '../services/authRoleService';
 import { withActiveAccount } from '../services/accountReferenceFenceService';
 import { requireActiveAuthSession, requireVerifiedAccount } from '../services/authCredentialService';
+import { EmailVerificationRequiredError } from '../services/emailVerificationService';
+import { respondEmailVerificationRequired } from './emailAuthController';
 
 const configuration = () => {
     const rpID = String(process.env.WEBAUTHN_RP_ID ?? '').trim();
@@ -146,7 +148,17 @@ export const verifyAuthentication = async (req: Request, res: Response) => {
         return res.status(401).json({ message: 'Passkey authentication failed.' });
     }
     await Passkey.updateCounter(passkey.credentialId, verification.authenticationInfo.newCounter);
-    const tokens = await createSession(user as any, req);
+    let tokens: Awaited<ReturnType<typeof createSession>>;
+    try {
+        tokens = await createSession(user as any, req);
+    } catch (error) {
+        // A verified assertion is a valid credential; an unverified account
+        // gets the distinct 403 and its verification or registration link.
+        if (error instanceof EmailVerificationRequiredError && error.account) {
+            return respondEmailVerificationRequired(res, error.account, 'passkey');
+        }
+        throw error;
+    }
     recordSecurityEvent('passkey_login_succeeded', {
         userId: user._id.toString(),
         sessionId: tokens.sessionId

@@ -89,6 +89,22 @@ test('essential social cleanup indexes must exist before startup can complete', 
   }
 });
 
+test('the email-link cleanup index must exist before startup can complete', async () => {
+  const fake = databaseDouble();
+  fake.fail('emailLinkTokens');
+  await assert.rejects(initializeDatabaseIndexes(fake.db), (error: unknown) => {
+    assert.ok(error instanceof DatabaseIndexInitializationError);
+    assert.equal(error.indexId, 'emailLinkTokens:email,purpose');
+    return true;
+  });
+  assert.deepEqual(fake.receipts, []);
+
+  const initialized = databaseDouble();
+  await initializeDatabaseIndexes(initialized.db);
+  initialized.metadata.set('emailLinkTokens', []);
+  await assert.rejects(verifyRequiredDatabaseIndexes(initialized.db), /emailLinkTokens:email,purpose/);
+});
+
 test('social cleanup indexes reject unique, sparse, partial, hidden and expiring substitutes', async () => {
   for (const altered of [
     { unique: true }, { sparse: true }, { partialFilterExpression: { active: true } },

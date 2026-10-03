@@ -8,8 +8,7 @@ import {
     logout,
     logoutAll,
     me,
-    renderSignupPage,
-    signupFromWeb,
+    redirectToWebRegistration,
     renderLoginPage,
     loginFromWeb,
     logoutFromWeb,
@@ -37,11 +36,15 @@ import {
     requireBrowserAuth
 } from '../middleware/authMiddleware';
 import {
+    completeRegistration,
+    confirmEmailVerification,
     forgotPassword,
-    register,
-    resendVerification,
+    inspectEmailVerification,
+    inspectRegistration,
+    requestEmailVerification,
+    requestRegistration,
     resetPassword,
-    verifyEmail
+    retiredRegistrationEndpoint
 } from '../controllers/emailAuthController';
 import {
     authenticateWithApple,
@@ -84,25 +87,6 @@ import {
 
 const router: Router = express.Router();
 
-const signupWebValidation: RequestHandler[] = [
-    body('email')
-        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
-        .isEmail()
-        .withMessage('Please enter a valid email.')
-        .normalizeEmail(),
-    body('password').custom(requireAcceptablePassword),
-    body('username').trim().isLength({ min: 1, max: 64 })
-];
-
-const emailRegistrationValidation: RequestHandler[] = [
-    body('email')
-        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
-        .isEmail()
-        .normalizeEmail(),
-    body('password').custom(requireAcceptablePassword),
-    body('displayName').optional().trim().isLength({ max: 80 })
-];
-
 const emailOnlyValidation: RequestHandler[] = [
     body('email')
         .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
@@ -125,30 +109,27 @@ router.get('/capabilities', (_req, res) => {
     res.status(200).json(getAuthenticationCapabilities());
 });
 
-router.put('/signup', (_req, res) => {
-    res.setHeader('Allow', 'POST');
-    res.status(405).json({ message: 'Use POST /auth/signup.' });
-});
-// Email-code routes resolve the account from the normalized `email`, so their
+// Code-based registration moved to Web email links. These routes answer 410
+// before validation, rate limiting or any database access, so no hijack path
+// stays open and older clients show a clear message.
+router.put('/signup', retiredRegistrationEndpoint);
+router.post('/signup', retiredRegistrationEndpoint);
+router.post('/email/verify', retiredRegistrationEndpoint);
+router.post('/email/resend-verification', retiredRegistrationEndpoint);
+router.post('/browser/register', retiredRegistrationEndpoint);
+router.post('/browser/email/verify', retiredRegistrationEndpoint);
+router.post('/browser/email/resend-verification', retiredRegistrationEndpoint);
+
+// Email routes resolve the account from the normalized `email`, so their
 // per-account limit runs after validation; see authEmailAccountRateLimit.
-router.post(
-    '/signup',
-    authRateLimit,
-    authConcurrencyLimit,
-    ...emailRegistrationValidation,
-    authEmailAccountRateLimit,
-    asyncHandler(register)
-);
-router.post('/email/verify', authRateLimit, ...emailCodeValidation, authEmailAccountRateLimit, asyncHandler(verifyEmail));
-router.post('/email/resend-verification', authRateLimit, ...emailOnlyValidation, authEmailAccountRateLimit, asyncHandler(resendVerification));
 router.post('/password/forgot', authRateLimit, ...emailOnlyValidation, authEmailAccountRateLimit, asyncHandler(forgotPassword));
 router.post('/password/reset', authRateLimit, authConcurrencyLimit, ...passwordResetValidation, authEmailAccountRateLimit, asyncHandler(resetPassword));
 router.post('/apple', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithApple));
 router.post('/google', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithGoogle));
 
-router.get('/signup-web', renderSignupPage);
-
-router.post('/signup-web', requireSameOriginBrowserFormMutation, authRateLimit, authConcurrencyLimit, signupWebValidation, authEmailAccountRateLimit, asyncHandler(signupFromWeb));
+// The Archtree sign-up page is retired; its POST body is ignored.
+router.get('/signup-web', redirectToWebRegistration);
+router.post('/signup-web', redirectToWebRegistration);
 
 router.get('/login-web', attachOptionalAuth, renderLoginPage);
 
@@ -161,30 +142,48 @@ router.get('/browser/capabilities', (_req, res) => {
     res.status(200).json(getBrowserAuthenticationCapabilities());
 });
 
+// Registration requests hash no password, so they take no concurrency slot:
+// every 429 they can return is independent of the address's account state.
 router.post(
-    '/browser/register',
-    requireSameOriginBrowserMutation,
-    authRateLimit,
-    authConcurrencyLimit,
-    ...emailRegistrationValidation,
-    authEmailAccountRateLimit,
-    asyncHandler(register)
-);
-router.post(
-    '/browser/email/verify',
-    requireSameOriginBrowserMutation,
-    authRateLimit,
-    ...emailCodeValidation,
-    authEmailAccountRateLimit,
-    asyncHandler(verifyEmail)
-);
-router.post(
-    '/browser/email/resend-verification',
+    '/browser/registration/request',
     requireSameOriginBrowserMutation,
     authRateLimit,
     ...emailOnlyValidation,
     authEmailAccountRateLimit,
-    asyncHandler(resendVerification)
+    asyncHandler(requestRegistration)
+);
+router.post(
+    '/browser/registration/inspect',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    asyncHandler(inspectRegistration)
+);
+router.post(
+    '/browser/registration/complete',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    authConcurrencyLimit,
+    asyncHandler(completeRegistration)
+);
+router.post(
+    '/browser/email-verification/request',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    ...emailOnlyValidation,
+    authEmailAccountRateLimit,
+    asyncHandler(requestEmailVerification)
+);
+router.post(
+    '/browser/email-verification/inspect',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    asyncHandler(inspectEmailVerification)
+);
+router.post(
+    '/browser/email-verification/confirm',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    asyncHandler(confirmEmailVerification)
 );
 router.post(
     '/browser/password/forgot',

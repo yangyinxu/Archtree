@@ -6,6 +6,7 @@ import User from '../models/user';
 import { normalizeUserRole, UserRole } from './authRoleService';
 import { withActiveAccount } from './accountReferenceFenceService';
 import { recordSecurityEvent } from './securityAuditService';
+import { EmailVerificationRequiredError, emailVerificationState } from './emailVerificationService';
 
 export interface SessionUser {
     _id: { toString(): string };
@@ -130,10 +131,10 @@ export const createSession = async (user: SessionUser, req?: Request, expectedPa
     // wins the account fence invalidates that earlier verification result.
     const sessionId = await withActiveAccount(user._id.toString(), async session => {
         const current = await User.findById(user._id.toString(), session);
-        // No sign-in method may open a session before email ownership is
-        // proven; verification also revokes any session that predates it.
-        if (current?.emailVerified === false) {
-            throw Object.assign(new Error('Verify your email before signing in.'), { statusCode: 403 });
+        // No sign-in method may open a session for an unverified account. The
+        // error carries the account so the caller can mail its link.
+        if (current && await emailVerificationState(current, session) !== 'verified') {
+            throw new EmailVerificationRequiredError(current);
         }
         if (expectedPassword !== undefined && current?.password !== expectedPassword) {
             throw Object.assign(new Error('Invalid credentials.'), { statusCode: 401 });
