@@ -25,6 +25,8 @@ import {
     authEmailAccountRateLimit,
     authRateLimit,
     browserRefreshRateLimit,
+    refreshClientRateLimit,
+    refreshCredentialRateLimit,
     requireSecureAuthTransport
 } from '../middleware/requestProtectionMiddleware';
 import {
@@ -228,7 +230,9 @@ router.post(
 
 router.post('/login', authRateLimit, authAccountRateLimit, authConcurrencyLimit, asyncHandler(login));
 
-router.post('/refresh', authRateLimit, asyncHandler(refresh));
+// Refresh has its own buckets: sharing the login bucket let failed sign-ins
+// from one address turn valid refreshes into 429s.
+router.post('/refresh', refreshClientRateLimit, refreshCredentialRateLimit, asyncHandler(refresh));
 
 router.post('/logout', authRateLimit, asyncHandler(logout));
 

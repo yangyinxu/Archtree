@@ -54,16 +54,16 @@ export const rateLimit = (
     };
 };
 
-/** Counts one attempt in a per-account window keyed by a digest, never the raw account value. */
-const consumeAccountAttempt = (
+/** Counts one attempt in a window keyed by a digest, never the raw identifier or credential. */
+const consumeDigestKeyedAttempt = (
     scope: string,
-    account: string,
+    identifier: string,
     maximumRequests: number,
     windowMs: number,
     res: Response,
     next: NextFunction
 ) => {
-    const digest = crypto.createHash('sha256').update(account, 'utf8').digest('hex');
+    const digest = crypto.createHash('sha256').update(identifier, 'utf8').digest('hex');
     const now = Date.now();
     const key = `${scope}:${digest}`;
     const current = windows.get(key);
@@ -93,7 +93,7 @@ const accountRateLimit = (
         if (!identifier) {
             return next();
         }
-        return consumeAccountAttempt(scope, identifier, maximumRequests, windowMs, res, next);
+        return consumeDigestKeyedAttempt(scope, identifier, maximumRequests, windowMs, res, next);
     };
 };
 
@@ -118,7 +118,27 @@ const emailAccountRateLimit = (
             // No account can be resolved; the controller rejects the request as invalid.
             return next();
         }
-        return consumeAccountAttempt(scope, email, maximumRequests, windowMs, res, next);
+        return consumeDigestKeyedAttempt(scope, email, maximumRequests, windowMs, res, next);
+    };
+};
+
+/**
+ * Limits refresh attempts per presented refresh token, so listeners behind one
+ * shared address (carrier NAT, offices) do not spend each other's budget and a
+ * replayed token cannot be retried without bound. The token is keyed only by
+ * digest. A request without a usable token falls back to its client address.
+ */
+const refreshCredentialLimit = (
+    scope: string,
+    maximumRequests: number,
+    windowMs: number
+): RequestHandler => {
+    return (req, res, next) => {
+        const token = req.body?.refreshToken;
+        const credential = typeof token === 'string' && token.length > 0 && token.length <= 512
+            ? `token:${token}`
+            : `client:${clientKey(req)}`;
+        return consumeDigestKeyedAttempt(scope, credential, maximumRequests, windowMs, res, next);
     };
 };
 
@@ -189,6 +209,15 @@ export const asyncHandler = (
 
 export const authRateLimit = rateLimit('auth', 20, 15 * 60_000);
 export const browserRefreshRateLimit = rateLimit('browser-refresh', 120, 15 * 60_000);
+/**
+ * Bounds native token refresh per client address with a ceiling far above one
+ * address's normal refresh traffic, so random-token floods stay bounded. It is
+ * separate from the login 'auth' bucket: failed sign-ins cannot block refresh
+ * and refresh traffic cannot consume sign-in attempts.
+ */
+export const refreshClientRateLimit = rateLimit('refresh-client', 600, 15 * 60_000);
+/** Keys native token refresh on the presented refresh token; see refreshCredentialLimit. */
+export const refreshCredentialRateLimit = refreshCredentialLimit('refresh-credential', 10, 15 * 60_000);
 /** Keys login attempts on the submitted `identifier`, falling back to `email` or `username`. */
 export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
 /**

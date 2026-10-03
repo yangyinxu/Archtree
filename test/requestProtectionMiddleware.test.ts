@@ -4,6 +4,9 @@ import { EventEmitter } from 'node:events';
 
 import {
     authEmailAccountRateLimit,
+    authRateLimit,
+    refreshClientRateLimit,
+    refreshCredentialRateLimit,
     resetRateLimitWindowsForTests,
     uploadRateLimit,
     searchConcurrencyLimit,
@@ -87,6 +90,61 @@ test('email account limits key only on the validated email and skip requests wit
     assert.deepEqual(rejected.capture.body, { message: 'Too many requests. Please try again later.' });
     assert.equal(Number(rejected.capture.headers['Retry-After']) > 0, true);
     assert.equal(invoke({ email: 'dolor.sit@example.test' }).admitted, true);
+});
+
+test('refresh credential limits key on the presented token digest and fall back to the client address', () => {
+    resetRateLimitWindowsForTests();
+    const invoke = (ip: string, body: Record<string, unknown>) => {
+        const { capture, response } = responseCapture();
+        let admitted = false;
+        refreshCredentialRateLimit({ ip, socket: {}, body } as any, response as any, () => {
+            admitted = true;
+        });
+        return { admitted, capture };
+    };
+
+    // Ten presentations of one token from different addresses share its budget.
+    for (let index = 0; index < 10; index += 1) {
+        assert.equal(invoke(`198.51.100.${index}`, { refreshToken: 'lorem-ipsum-token' }).admitted, true);
+    }
+    const rejected = invoke('198.51.100.99', { refreshToken: 'lorem-ipsum-token' });
+    assert.equal(rejected.admitted, false);
+    assert.equal(rejected.capture.status, 429);
+    assert.deepEqual(rejected.capture.body, { message: 'Too many requests. Please try again later.' });
+    assert.equal(Number(rejected.capture.headers['Retry-After']) > 0, true);
+    assert.equal(invoke('198.51.100.0', { refreshToken: 'dolor-sit-token' }).admitted, true,
+        'listeners behind one address keep separate token budgets');
+
+    // Missing, non-string, and oversized tokens fall back to one per-address bucket.
+    for (const body of [{}, { refreshToken: ['lorem'] }, { refreshToken: 'x'.repeat(513) }]) {
+        for (let index = 0; index < 3; index += 1) {
+            assert.equal(invoke('203.0.113.30', body).admitted, true);
+        }
+    }
+    assert.equal(invoke('203.0.113.30', {}).admitted, true);
+    assert.equal(invoke('203.0.113.30', {}).capture.status, 429);
+    assert.equal(invoke('203.0.113.31', {}).admitted, true);
+});
+
+test('refresh and login draw from separate per-address buckets without loosening login', () => {
+    resetRateLimitWindowsForTests();
+    const request = { ip: '203.0.113.40', socket: {} };
+    const admit = (limiter: typeof authRateLimit) => {
+        const { capture, response } = responseCapture();
+        let admitted = false;
+        limiter(request as any, response as any, () => { admitted = true; });
+        return { admitted, capture };
+    };
+
+    for (let index = 0; index < 20; index += 1) assert.equal(admit(authRateLimit).admitted, true);
+    const login = admit(authRateLimit);
+    assert.equal(login.capture.status, 429, 'login keeps 20 attempts per 15 minutes');
+    assert.equal(login.capture.headers['RateLimit-Limit'], 20);
+
+    for (let index = 0; index < 600; index += 1) assert.equal(admit(refreshClientRateLimit).admitted, true);
+    const refresh = admit(refreshClientRateLimit);
+    assert.equal(refresh.capture.status, 429, 'refresh still has a per-address ceiling');
+    assert.equal(refresh.capture.headers['RateLimit-Limit'], 600);
 });
 
 test('analysis capacity bounds different administrators independently from upload capacity', () => {

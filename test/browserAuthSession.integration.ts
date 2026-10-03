@@ -237,7 +237,7 @@ test('Archtree HTML logout revokes the session and returns to the Archtree homep
     })).status, 401);
 });
 
-test('browser login, one-time refresh, session read, and logout keep tokens out of JSON', async () => {
+test('browser login, rotating refresh, session read, and logout keep tokens out of JSON', async () => {
     const crossSite = await browserMutation('/auth/browser/login', {
         origin: 'https://attacker.example',
         body: { identifier: 'listener@example.com', password: 'correct horse battery staple' }
@@ -333,15 +333,27 @@ test('browser login, one-time refresh, session read, and logout keep tokens out 
     assert.notEqual(rotatedRefresh, initialRefresh);
     assert.doesNotMatch(refreshText, new RegExp(`${rotatedAccess}|${rotatedRefresh}`));
 
+    // A browser whose rotation response was lost still holds the previous
+    // cookie; inside the replay window it rotates the same session again.
     const replay = await browserMutation('/auth/browser/refresh', {
         cookie: loginJar,
         viewerId: loginBody.user.id
     });
-    assert.equal(replay.status, 401, 'a rotated refresh cookie can be consumed only once');
-    assert.equal(setCookieHeaders(replay).length, 0, 'a losing refresh must not clear a winning response');
+    assert.equal(replay.status, 200, 'the previous refresh cookie recovers a lost rotation response');
+    const replayJar = cookieJar(setCookieHeaders(replay));
+    const replayRefresh = cookieValue(replayJar, 'refresh_token');
+    assert.ok(replayRefresh);
+    assert.notEqual(replayRefresh, rotatedRefresh, 'the replay issues a fresh refresh cookie');
+
+    const superseded = await browserMutation('/auth/browser/refresh', {
+        cookie: rotatedJar,
+        viewerId: loginBody.user.id
+    });
+    assert.equal(superseded.status, 401, 'the pair superseded by the replay cannot rotate again');
+    assert.equal(setCookieHeaders(superseded).length, 0, 'a losing refresh must not clear a winning response');
 
     const logout = await browserMutation('/auth/browser/logout', {
-        cookie: rotatedJar,
+        cookie: replayJar,
         viewerId: loginBody.user.id
     });
     assert.equal(logout.status, 204);
@@ -351,7 +363,7 @@ test('browser login, one-time refresh, session read, and logout keep tokens out 
     assert.ok(cleared.every((header) => header.includes('Max-Age=0')));
 
     const revokedSession = await fetch(`${baseUrl}/auth/browser/session`, {
-        headers: { Cookie: rotatedJar }
+        headers: { Cookie: replayJar }
     });
     assert.equal(revokedSession.status, 401);
 });

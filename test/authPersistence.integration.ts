@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../src/infrastructure/database';
 import AuthActionToken from '../src/models/authActionToken';
-import AuthSession from '../src/models/authSession';
+import AuthSession, { AuthSessionDocument } from '../src/models/authSession';
 import { PasskeyChallenge } from '../src/models/passkey';
 import {
     createSession,
@@ -25,7 +26,7 @@ after(async () => {
     await harness?.stop();
 });
 
-test('refresh rotation permits exactly one concurrent use and revocation is immediate', async () => {
+test('concurrent reuse of one refresh token leaves exactly one current pair and revocation is immediate', async () => {
     const userId = new ObjectId();
     const user = {
         _id: userId,
@@ -41,14 +42,26 @@ test('refresh rotation permits exactly one concurrent use and revocation is imme
     const attempts = await Promise.all(
         Array.from({ length: 8 }, () => refreshSession(initial.refreshToken))
     );
-    const successful = attempts.filter(
+    const issued = attempts.filter(
         (tokens): tokens is NonNullable<typeof tokens> => tokens !== null
     );
-    assert.equal(successful.length, 1);
-    assert.equal(await refreshSession(initial.refreshToken), null);
+    // One attempt rotates the current token; every later one presents the
+    // immediately previous token inside its replay window and supersedes the
+    // pair issued before it, so only one issued pair stays usable.
+    assert.equal(issued.length, 8);
+    const hash = (token: string) => crypto.createHash('sha256').update(token, 'utf8').digest('hex');
+    const stored = await getDb()!.collection<AuthSessionDocument>('authSessions')
+        .findOne({ _id: new ObjectId(initial.sessionId) });
+    assert.equal(stored?.previousRefreshTokenHash, hash(initial.refreshToken));
+    const current = issued.filter(tokens => hash(tokens.refreshToken) === stored?.refreshTokenHash);
+    assert.equal(current.length, 1);
+    for (const superseded of issued.filter(tokens => tokens !== current[0])) {
+        assert.equal(await refreshSession(superseded.refreshToken), null);
+    }
 
-    await revokeRefreshSession(successful[0].refreshToken);
-    assert.equal(await refreshSession(successful[0].refreshToken), null);
+    await revokeRefreshSession(current[0].refreshToken);
+    assert.equal(await refreshSession(current[0].refreshToken), null);
+    assert.equal(await refreshSession(initial.refreshToken), null, 'revocation also ends the replay window');
     assert.equal(await AuthSession.findActiveById(initial.sessionId), null);
 });
 

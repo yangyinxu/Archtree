@@ -1043,6 +1043,13 @@ count as one address and extra `identifier` or `username` fields are ignored.
 Password sign-in keys it on the submitted login identifier, and both kinds of
 route draw from the same budget for the same address.
 
+`POST /auth/refresh` does not use the sign-in buckets. It is limited per
+presented refresh token (10 per 15 minutes, keyed by a SHA-256 digest; a
+request without a usable token falls back to a per-IP bucket of the same size)
+under a separate per-IP ceiling of 600 per 15 minutes, so failed sign-ins
+cannot turn a valid refresh into `429` and refresh traffic cannot consume
+sign-in attempts.
+
 Account roles:
 
 - Public registration and federated sign-in create ordinary `user` accounts.
@@ -1292,10 +1299,20 @@ User Playlists:
 Session behavior:
 - API login returns a short-lived access token and a rotating opaque refresh
   token. `authSessions` stores only SHA-256 hashes; the immediately previous
-  hash is retained as revocation-only evidence so logout wins a refresh race.
+  hash is also retained so logout wins a refresh race and a lost rotation
+  response can be recovered.
 - Access tokens default to 15 minutes. Refresh sessions have an absolute
   lifetime of 30 days by default.
-- Refresh rotation is atomic, so a refresh token can succeed only once.
+- Refresh rotation is atomic: the current token rotates at most once, which
+  moves its hash to `previousRefreshTokenHash` and stamps `rotatedAt`. For 60
+  seconds after `rotatedAt`, presenting that previous token replaces only the
+  current hash with a fresh one (both `/auth/refresh` and
+  `/auth/browser/refresh`), so the pair from a lost response stops working and
+  the session keeps exactly one current token. Such a replay leaves
+  `previousRefreshTokenHash` and `rotatedAt` unchanged, so it cannot extend
+  its own window, and emits a `refresh_previous_token_replayed` security
+  event. Older tokens, the previous token after the window, and sessions last
+  rotated before `rotatedAt` existed get `401` without any session change.
 - Email-code consumption, password/email effects, and session/listening/room
   revocation commit together. Failed transactions leave the original code,
   credential, and sessions available for a safe retry. Password login rechecks

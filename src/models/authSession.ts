@@ -8,6 +8,8 @@ export interface AuthSessionDocument {
     userId: string;
     refreshTokenHash: string;
     previousRefreshTokenHash?: string;
+    /** When `previousRefreshTokenHash` was rotated out; anchors its lost-response replay window. */
+    rotatedAt?: Date;
     createdAt: Date;
     updatedAt: Date;
     expiresAt: Date;
@@ -43,20 +45,58 @@ class AuthSession {
         return result.insertedId.toString();
     }
 
-    /** Rotates a refresh token atomically so concurrent reuse can only succeed once. */
-    static async rotate(refreshTokenHash: string, replacementHash: string) {
+    /**
+     * Rotates the current refresh token atomically, so concurrent presentations
+     * of one current token can rotate it only once. The replaced hash becomes
+     * the session's only previous token and starts its replay window.
+     */
+    static async rotate(refreshTokenHash: string, replacementHash: string, now = new Date()) {
         const db = getDb();
         const result = await db!.collection<AuthSessionDocument>('authSessions').findOneAndUpdate(
             {
                 refreshTokenHash,
                 revokedAt: { $exists: false },
-                expiresAt: { $gt: new Date() }
+                expiresAt: { $gt: now }
             },
             {
                 $set: {
                     previousRefreshTokenHash: refreshTokenHash,
                     refreshTokenHash: replacementHash,
-                    updatedAt: new Date()
+                    rotatedAt: now,
+                    updatedAt: now
+                }
+            },
+            { returnDocument: 'after' }
+        );
+        return result.value;
+    }
+
+    /**
+     * Re-runs the latest rotation for a client whose rotation response was lost
+     * and that presents the immediately previous token again. Only the current
+     * hash is replaced, so the pair issued by the lost response stops working
+     * and the session still has exactly one current token. The previous hash
+     * and `rotatedAt` stay unchanged: a replay can never extend its own window,
+     * and a normal rotation of the current token ends it immediately.
+     */
+    static async rotateFromPrevious(
+        previousRefreshTokenHash: string,
+        replacementHash: string,
+        rotatedAfter: Date,
+        now = new Date()
+    ) {
+        const db = getDb();
+        const result = await db!.collection<AuthSessionDocument>('authSessions').findOneAndUpdate(
+            {
+                previousRefreshTokenHash,
+                rotatedAt: { $gt: rotatedAfter },
+                revokedAt: { $exists: false },
+                expiresAt: { $gt: now }
+            },
+            {
+                $set: {
+                    refreshTokenHash: replacementHash,
+                    updatedAt: now
                 }
             },
             { returnDocument: 'after' }

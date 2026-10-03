@@ -1112,6 +1112,20 @@ The wire protocol and operational bounds are documented in
   reveal whether an email address belongs to an account, neither through their
   content and latency nor through registration's concurrency limiting.
 - Completing a password reset revokes every active session for that account.
+- Each refresh rotates the session's refresh token, and a session has exactly
+  one current refresh token at any time, including when the previous and
+  current tokens are used concurrently. A listener whose refresh response was
+  lost is not signed out: for about 60 seconds after a rotation, presenting the
+  immediately previous token rotates the same session again and returns a
+  fresh pair, and the pair from the lost response stops working. Replays do not
+  extend that window. Older tokens, or the previous token after the window,
+  are rejected with `401` and leave the session unchanged. Revoked or expired
+  sessions cannot be recovered this way.
+- Token refresh is rate limited separately from sign-in, so failed sign-ins
+  do not block a valid refresh and refreshing does not consume sign-in
+  attempts. Native refresh is limited per presented refresh token, so other
+  listeners sharing a network address do not spend its budget. Sign-in limits
+  are unchanged.
 - Listeners can view and revoke active sessions, sign out everywhere, and
   delete their account in-app.
 - Active-session UI uses familiar device and browser descriptions and never
