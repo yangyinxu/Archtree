@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import { MongoServerError, ObjectId } from 'mongodb';
 import { createSocialService, type SocialServiceOptions } from '../src/application/social/socialService';
@@ -11,6 +11,7 @@ import type { RoomCommand } from '../src/contracts/roomV1';
 import { getDb } from '../src/infrastructure/database';
 import type { ListeningPublicationDocument, ListeningStateDocument } from '../src/repositories/social/listeningDocuments';
 import AuthSession from '../src/models/authSession';
+import { ROOM_AUDIO_ANALYSIS_VERSION, type MediaRepresentation } from '../src/models/mediaRepresentation';
 import { deleteListenerAccountData } from '../src/services/accountDeletionService';
 import { updateMediaTrackStorageState } from '../src/services/mediaRepresentationLifecycleService';
 import { cleanupDeletedContentReferences } from '../src/services/contentReferenceService';
@@ -237,6 +238,40 @@ test('replaced ordinary source is hidden immediately and the same loaded source 
     const fresh = await claim(a); assert.equal((await api.reportListening(a.actor, playing(fresh, playback()))).accepted, true);
     assert.equal((await status(b, a))[0].track.id, tracks[0]);
 });
+
+// Room-audio analysis records new evidence for the same stored object; only replacing that object changes the source.
+const sameBytes = { byteLength: 4_096, etag: '"synthetic-unchanged-bytes"', versionId: null };
+const analysisCases: Array<{ name: string; prior: Partial<MediaRepresentation> | null; result: Partial<MediaRepresentation> }> = [
+    { name: 'a legacy source without evidence', prior: null,
+        result: { durationMs: 120_000, seekable: true, format: 'mp3' } },
+    { name: 'an outdated analysis version', prior: { durationMs: 120_000, seekable: true, format: 'mp3', analysisVersion: ROOM_AUDIO_ANALYSIS_VERSION - 1 },
+        result: { durationMs: 120_000, seekable: true, format: 'mp3' } },
+    { name: 'a retryable failed analysis', prior: { durationMs: null, seekable: false, format: 'unsupported', analysisFailure: 'decoder_unavailable' },
+        result: { durationMs: null, seekable: false, format: 'unsupported' } }
+];
+for (const { name, prior, result } of analysisCases) {
+    test(`room-audio analysis of an unchanged source keeps friend status and the publisher lease after ${name}`, async () => {
+        // Mirrors roomAudioAnalysisService finish(): a fresh revision for the unchanged active key and its validators.
+        const analyze = (fields: Partial<MediaRepresentation>) => db().collection('audioTracks').updateOne({ _id: new ObjectId(tracks[0]) },
+            { $set: { mediaRepresentation: { revision: `mr_${randomBytes(16).toString('hex')}`, objectKey: tracks[0], ...sameBytes,
+                analysisVersion: ROOM_AUDIO_ANALYSIS_VERSION, ...fields } } });
+        if (prior) await analyze(prior);
+        const { a, b } = await pair(); const { publisher, value } = await begin(a);
+        const lease = (await api.ownListening(a.actor)).publisherRevision;
+        const priorRevision = (await db().collection('audioTracks').findOne({ _id: new ObjectId(tracks[0]) }))?.mediaRepresentation?.revision ?? null;
+        assert.equal((await status(b, a))[0]?.track.id, tracks[0]);
+        await analyze(result);
+        const analyzed = (await db().collection('audioTracks').findOne({ _id: new ObjectId(tracks[0]) }))?.mediaRepresentation;
+        assert.notEqual(analyzed?.revision, priorRevision); assert.equal(analyzed?.objectKey, tracks[0]);
+        assert.equal((await status(b, a))[0]?.track.id, tracks[0], 'Analysis of unchanged bytes must not hide the friend status.');
+        now += LISTENING_LIMITS.renewMs;
+        const renewed = await api.reportListening(a.actor, playing(publisher, { ...value, positionMs: 10_500 }));
+        assert.equal(renewed.accepted, true, 'The existing lease keeps renewing without a new explicit gesture.');
+        assert.equal(renewed.expiresAtMs, now + LISTENING_LIMITS.freshnessMs);
+        assert.equal((await api.ownListening(a.actor)).publisherRevision, lease);
+        assert.equal((await status(b, a))[0]?.track.id, tracks[0]);
+    });
+}
 
 for (const action of ['remove', 'block', 'deactivate', 'delete'] as const) {
     test(`${action} removes friend visibility and account cleanup never restores a former publication`, async () => {

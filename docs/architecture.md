@@ -148,7 +148,10 @@ entry and pinned media revision). The per-document client matches the room clien
 Ordinary Audio uses the current ready source without requiring room WAV analysis.
 The source ID survives pause/buffering recovery; a new actual run changes the
 occurrence. Same-source resumes retain the source fingerprint, preventing an old
-loaded source from rebinding to replaced media inside its lease. Room reads and
+loaded source from rebinding to replaced media inside its lease. The fingerprint
+hashes only the active object key, which every replacement mints anew, so
+room-audio analysis of unchanged bytes keeps the status and lease; room reports
+compare the pinned representation revision separately. Room reads and
 reports also verify current authority, admission, controller, readiness and the
 exact playing timeline. These private fields never enter friend projections.
 

@@ -30,7 +30,12 @@ export const createListeningService = (options: { now: () => number; enabled: ()
     const result = (accepted: boolean, publication?: ListeningPublicationDocument | null): ListeningReportResult => ({ accepted,
         serverTimeMs: now(), expiresAtMs: publication?.visible ? publication.expiresAt.getTime() : null });
 
-    /** A source's active private identity is hashed, never exposed as a URL or public version requirement. */
+    /**
+     * A source's active private identity is hashed, never exposed as a URL or public version requirement.
+     * The fingerprint covers only the active object key: every replacement mints a new versioned key, so it
+     * changes exactly when the stored bytes are replaced or removed. Representation metadata is deliberately
+     * excluded because room-audio analysis rewrites it for the same bytes. Room checks use `revision` instead.
+     */
     const source = async (mediaTrackId: string, session: ClientSession, touch = false) => {
         const filter = { _id: new ObjectId(mediaTrackId), ...readyAudioStorageFilter };
         const track = touch ? (await db().collection('audioTracks').findOneAndUpdate(filter,
@@ -38,10 +43,8 @@ export const createListeningService = (options: { now: () => number; enabled: ()
             : await db().collection('audioTracks').findOne(filter, { session });
         if (!track || activeMediaTypeForTrack(track) !== 'audio') return null;
         const key = activeMediaObjectKeyForTrack(track); if (!key) return null;
-        const representation = track.mediaRepresentation;
-        const fingerprint = createHash('sha256').update(JSON.stringify([key, representation?.revision ?? null,
-            representation?.objectKey ?? null, representation?.etag ?? null, representation?.versionId ?? null])).digest('hex');
-        return { fingerprint, revision: representation?.revision };
+        const fingerprint = createHash('sha256').update(JSON.stringify(['listening-source-v2', key])).digest('hex');
+        return { fingerprint, revision: track.mediaRepresentation?.revision };
     };
 
     /** Shared playback claims only the exact ready controller occurrence under a live room authority. */
