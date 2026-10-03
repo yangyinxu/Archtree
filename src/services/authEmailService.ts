@@ -171,8 +171,12 @@ const recipientDomainAcceptsMail = async (recipient: string, kind: AuthEmailKind
  * The recipient's domain is checked first; when it cannot receive mail,
  * nothing is prepared or sent. `prepare` runs only after that check, so a link
  * token is never written, and an earlier reset code never replaced, for an
- * address that cannot receive the email. Callers have already sent their
- * response, so a skip changes no status, body or latency.
+ * address that cannot receive the email. Request routes already answer such a
+ * domain with `422` before any account work (`rejectUndeliverableEmailDomain`),
+ * so this check is defense in depth: it covers the sign-in verification email,
+ * which goes to the account's stored address, and a domain whose lookup failed
+ * at request time but now resolves as undeliverable. Callers have already sent
+ * their response, so a skip changes no status, body or latency.
  * Resolves true when SES accepted the email and false when it was skipped.
  */
 export const sendAuthEmail = async <K extends AuthEmailKind>(

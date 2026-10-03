@@ -214,8 +214,8 @@ answers from a synthetic MX resolver and no test queries real DNS. Suites that
 need real services start their own disposable MongoDB and S3-compatible
 fixtures. Running one file directly with `node --import tsx --test` bypasses
 this environment and the resolver preload, so tests that spawn the app or
-script entries can then read a root `.env`, and authentication emails would
-look up real MX records; add `--import ./test/support/syntheticMxResolver.ts`
+script entries can then read a root `.env`, and authentication email requests
+and emails would look up real MX records; add `--import ./test/support/syntheticMxResolver.ts`
 from the repository root to keep DNS synthetic.
 `test/serverTestEnvironment.test.ts` fails if a test process can see a value
 from a sentinel `.env` in its working directory, or if any `src/` module other

@@ -34,6 +34,10 @@ const registrationAccepted = { message: 'Check your email for the next step.' };
 const recoveryAccepted = { message: 'If the account can use this action, an email has been sent.' };
 const verificationAccepted = { message: 'If this address needs verification, a link has been sent.' };
 const linkInvalid = { code: 'link_invalid', message: 'This link is invalid, expired, or already used.' };
+const domainUndeliverable = {
+    code: 'email_domain_undeliverable',
+    message: 'This email domain cannot receive email. Check the address and try again.'
+};
 const alreadyRegistered = {
     code: 'email_already_registered',
     message: 'This email already has an account. Log in or reset your password.'
@@ -616,31 +620,57 @@ const failingDomains = (codes: Record<string, string>): MxResolver => async doma
     return [{ exchange: `mx.${domain}`, priority: 10 }];
 };
 
-test('addresses whose domain cannot receive mail get identical responses and no email, link or code', async t => {
+test('requests for a domain that cannot receive mail get one 422 for every account state and change nothing', async t => {
     const previous = setEmailDomainResolver(failingDomains({ 'typo.example.test': 'ENOTFOUND' }));
     t.after(() => setEmailDomainResolver(previous));
     const fresh = 'lorem.fresh@typo.example.test';
     const verified = 'lorem.verified@typo.example.test';
     const legacy = 'lorem.legacy@typo.example.test';
+    const pending = 'lorem.pending@typo.example.test';
     const legacyPassword = 'Typo legacy lorem 252';
     const verifiedId = await verifiedAccount(verified, 'Typo verified lorem 262');
     await legacyAccount(legacy, legacyPassword);
+    const { userId: pendingId } = await pendingRecord(pending, 'Typo pending lorem 242');
+    const pendingBefore = await accessCounts(pendingId);
 
-    const control = await requestRegistration('lorem.control@example.test');
-    assert.equal(await requestRegistration(fresh), control);
-    assert.equal(await requestRegistration(verified), control);
-    await expectStatus(browserPost('/auth/browser/email-verification/request', { email: legacy }), 202, verificationAccepted);
-    await expectStatus(postJson('/auth/password/forgot', { email: verified }), 202, recoveryAccepted);
+    const rejectedBodies = new Set<string>();
+    const expectRejected = async (response: Promise<Response>) => {
+        const body = await expectStatus(response, 422, domainUndeliverable);
+        rejectedBodies.add(JSON.stringify(body));
+    };
+    // Three requests for the fresh address would spend its whole link-email budget if they counted.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        await expectRejected(browserPost('/auth/browser/registration/request', { email: fresh }));
+    }
+    await expectRejected(browserPost('/auth/browser/registration/request', { email: verified }));
+    await expectRejected(browserPost('/auth/browser/registration/request', { email: pending }));
+    await expectRejected(browserPost('/auth/browser/email-verification/request', { email: legacy }));
+    await expectRejected(browserPost('/auth/browser/email-verification/request', { email: fresh }));
+    await expectRejected(postJson('/auth/password/forgot', { email: verified }));
+    await expectRejected(postJson('/auth/password/forgot', { email: fresh }));
+    await expectRejected(browserPost('/auth/browser/password/forgot', { email: pending }));
+    await expectRejected(browserPost('/auth/browser/password/forgot', { email: fresh }));
+    assert.equal(rejectedBodies.size, 1, 'the rejection is identical with and without an account');
+    assert.equal(eventCount('auth_email_domain_rejected'), 11);
+
+    // A sign-in still answers 403 and skips the email at send time (defense in depth).
     const blocked = await login(legacy, legacyPassword);
     assert.equal(blocked.status, 403);
     assert.deepEqual(blocked.body, verificationRequired, 'the sign-in answer does not reveal the skipped email');
-
-    await waitForEmail('lorem.control@example.test', 1);
-    await waitForEvent('auth_email_undeliverable_domain', 5);
+    await waitForEvent('auth_email_undeliverable_domain', 1);
     await pause(50);
     assert.deepEqual(sent.filter(mail => mail.recipient.endsWith('@typo.example.test')), []);
-    assert.equal(await linkTokens().countDocuments({ email: { $in: [fresh, verified, legacy] } }), 0);
+    assert.equal(await linkTokens().countDocuments({ email: { $in: [fresh, verified, legacy, pending] } }), 0);
     assert.equal(await getDb()!.collection('authActionTokens').countDocuments({ userId: verifiedId }), 0);
+    assert.deepEqual(await accessCounts(pendingId), pendingBefore, 'the pending record keeps every slot it had');
+
+    // Once the domain receives mail, the address still has its full link-email budget.
+    setEmailDomainResolver(failingDomains({}));
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        assert.deepEqual(JSON.parse(await requestRegistration(fresh)), registrationAccepted);
+    }
+    await waitForEmail(fresh, 3);
+    assert.equal(eventCount('auth_link_email_suppressed'), 0);
 });
 
 test('an undeliverable request never replaces a delivered reset code, and a DNS failure still sends', async t => {
@@ -654,9 +684,11 @@ test('an undeliverable request never replaces a delivered reset code, and a DNS 
 
     // The domain later stops resolving (a fresh resolver also drops the cached verdict).
     setEmailDomainResolver(failingDomains({ 'mail.example.test': 'ENODATA' }));
-    await expectStatus(postJson('/auth/password/forgot', { email }), 202, recoveryAccepted);
-    await waitForEvent('auth_email_undeliverable_domain', 1);
+    await expectStatus(postJson('/auth/password/forgot', { email }), 422, domainUndeliverable);
+    await expectStatus(browserPost('/auth/browser/password/forgot', { email }), 422, domainUndeliverable);
+    await pause(50);
     assert.equal(sentTo(email).length, 1);
+    assert.equal(eventCount('auth_email_domain_rejected'), 2);
     await expectStatus(postJson('/auth/password/reset', { email, code, password: 'Code kept replacement 282' }), 204);
 
     setEmailDomainResolver(failingDomains({ 'mail.example.test': 'ESERVFAIL' }));

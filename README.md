@@ -450,8 +450,9 @@ Required variables:
 - `AUTH_CODE_PEPPER`: optional separate HMAC secret for password-reset codes
   and emailed link tokens (defaults to `JWT_SECRET`)
 - `AUTH_EMAIL_FROM`: AWS SES verified sender used for registration links,
-  already-registered notices, verification links and reset codes. Recipients
-  whose domain publishes no usable MX record are skipped; see the
+  already-registered notices, verification links and reset codes. Requests for
+  an address whose domain publishes no usable MX record are rejected with
+  `422 email_domain_undeliverable`, and no email is ever sent to one; see the
   recipient-domain check in
   [Browser Auth and Content Management](#browser-auth-and-content-management)
 - `AUTH_LINK_ORIGIN`: exact origin of the Web listener used in emailed links,
@@ -1007,13 +1008,15 @@ Public Listener capability discovery:
 
 Email registration happens only on the Web, by emailed link:
 
-- `POST /auth/browser/registration/request` takes `{ "email" }` and always
-  answers `202 {"message":"Check your email for the next step."}`. An address
-  without an account, or with an unverified record from the earlier
-  code-based sign-up, receives a single-use registration link
+- `POST /auth/browser/registration/request` takes `{ "email" }` and answers
+  `202 {"message":"Check your email for the next step."}` for every account
+  state. An address without an account, or with an unverified record from the
+  earlier code-based sign-up, receives a single-use registration link
   (`AUTH_LINK_ORIGIN/finitude/register/complete#token=...`, 30 minutes). An
   address with an account receives an "already registered" notice with Log in
-  and password-reset links, and nothing changes.
+  and password-reset links, and nothing changes. An address whose domain
+  cannot receive mail gets `422 {"code":"email_domain_undeliverable"}` instead
+  (see the recipient-domain check below).
 - `POST /auth/browser/registration/inspect` takes `{ "token" }` and does not
   consume it: `200 {"email"}`, `409 {"code":"email_already_registered"}` when
   the address now has an account, or `400 {"code":"link_invalid"}`.
@@ -1026,9 +1029,11 @@ Email registration happens only on the Web, by emailed link:
   `409 email_already_registered`, and `422` with `code` `invalid_password` or
   `invalid_display_name`. It installs no session; the listener logs in next.
 - `POST /auth/browser/email-verification/request` takes `{ "email" }` and
-  always answers `202`. Only an account created before verification existed
-  (no `emailVerified` field and no linked identity with the same email)
-  receives a verification link (`AUTH_LINK_ORIGIN/finitude/verify-email#token=...`).
+  answers `202` for every account state, or
+  `422 {"code":"email_domain_undeliverable"}` when the domain cannot receive
+  mail. Only an account created before verification existed (no
+  `emailVerified` field and no linked identity with the same email) receives a
+  verification link (`AUTH_LINK_ORIGIN/finitude/verify-email#token=...`).
 - `POST /auth/browser/email-verification/inspect` takes `{ "token" }` and
   returns `200 {"email"}` or `400 link_invalid` without consuming it.
   `POST /auth/browser/email-verification/confirm` returns `204` after it
@@ -1076,11 +1081,13 @@ Browser authentication mutations require same-origin JSON. Registration,
 verification-link, and recovery-request responses are deliberately generic
 so account existence is not disclosed. They send the generic response before
 the account lookup, token write and email delivery, so response latency does
-not reveal account state either. That work still runs inside the tracked
-request: graceful shutdown waits for it, and a late failure is recorded only
-as an opaque security event. Registration and verification-link requests hash
-no password and take no concurrency slot, so none of their `429` responses
-depend on account state.
+not reveal account state either. The `422 email_domain_undeliverable`
+rejection is decided from the domain's public DNS before any account lookup,
+so it does not depend on account state either. The account work still runs
+inside the tracked request: graceful shutdown waits for it, and a late failure
+is recorded only as an opaque security event. Registration and
+verification-link requests hash no password and take no concurrency slot, so
+none of their `429` responses depend on account state.
 Browser capability discovery reports only end-to-end browser methods;
 native Apple, Google, or passkey configuration does not expose a nonfunctional
 listener button.
@@ -1113,54 +1120,79 @@ validation, rate limiting or any database access, with
 `POST /auth/browser/email/verify`, and
 `POST /auth/browser/email/resend-verification`.
 
-Password recovery keeps its request and response contract. A verified or
-legacy account receives a six-digit reset code (15 minutes, voided by its
-fifth wrong submission). An unverified record from the earlier code-based
-sign-up receives a registration link instead, and `password/reset` never
-applies to it. A completed reset revokes every session and sets
-`emailVerified: true`; on an account that was not verified before, it also
-removes every provider identity, passkey and passkey challenge.
+Password recovery (`POST /auth/password/forgot` and
+`POST /auth/browser/password/forgot`) takes `{ "email" }` and answers
+`202 {"message":"If the account can use this action, an email has been sent."}`
+for every account state, or `422 {"code":"email_domain_undeliverable"}` when
+the domain cannot receive mail. A verified or legacy account receives a
+six-digit reset code (15 minutes, voided by its fifth wrong submission). An
+unverified record from the earlier code-based sign-up receives a registration
+link instead, and `password/reset` never applies to it. A completed reset
+revokes every session and sets `emailVerified: true`; on an account that was
+not verified before, it also removes every provider identity, passkey and
+passkey challenge.
 
 Recipient-domain check for authentication email:
 
-Before any authentication email (registration link, already-registered notice,
-verification link or reset code) goes to SES, `sendAuthEmail` checks the
-recipient domain's MX records (`src/services/emailDomainDeliverability.ts`):
+`src/services/emailDomainDeliverability.ts` decides from the recipient
+domain's MX records whether an address can receive mail:
 
-- At least one MX record that is not an RFC 7505 null MX (`.`): the email is
-  sent.
-- `ENOTFOUND` (NXDOMAIN), `ENODATA` (no MX records), only a null MX, or a
-  domain that is not a valid hostname: no link or code is issued, nothing is
-  sent, and the security event `auth_email_undeliverable_domain` records only
-  `domain`, `emailKind` (`registration_link`, `already_registered_notice`,
-  `verification_link` or `password_reset_code`) and `reason` (`nxdomain`,
-  `no_mx`, `null_mx` or `invalid_domain`), never the address. There is
-  deliberately no fallback to A/AAAA records (the RFC 5321 implicit MX):
-  mistyped domains are often parked with only an A record.
-- Any other DNS failure (timeout, `SERVFAIL`, refused, network): the check fails
-  open, the email is sent as before, and `auth_email_domain_check_failed`
-  records `domain`, `emailKind` and the DNS error code as `reason`.
+- `deliverable`: at least one MX record that is not an RFC 7505 null MX (`.`).
+- `undeliverable`: `ENOTFOUND` (NXDOMAIN), `ENODATA` (no MX records), only a
+  null MX, or a domain that is not a valid hostname. There is deliberately no
+  fallback to A/AAAA records (the RFC 5321 implicit MX): mistyped domains are
+  often parked with only an A record.
+- `unknown`: any other DNS failure (timeout, `SERVFAIL`, refused, network).
 
-The check runs after the generic response, inside the tracked request work, so
-it changes no status, body or latency. It runs before a link token or reset
-code is written, so a skipped reset request never voids a code that was already
-delivered. A skipped link email still spends the address's three-per-15-minutes
-link-email budget, like a failed delivery, and reset requests keep their
-per-address request limit, which is counted before any account work. Domains
-are trimmed, lowercased, stripped of one trailing root dot and converted to
-punycode when internationalized. Verdicts are cached in process for up to 1,000
-domains, deliverable ones for 1 hour and undeliverable ones for 10 minutes;
-failures are not cached. Each lookup is bounded at 3 seconds, and concurrent
-checks for one domain share one query.
+The verdict is applied at two points:
+
+1. Before the response, on every route that emails a submitted address:
+   `POST /auth/browser/registration/request`,
+   `POST /auth/browser/email-verification/request`,
+   `POST /auth/password/forgot` and `POST /auth/browser/password/forgot`.
+   `rejectUndeliverableEmailDomain` runs after the per-IP limit and email
+   validation, and before the per-account limit and any account lookup. An
+   `undeliverable` verdict answers at once with
+   `422 {"code":"email_domain_undeliverable","message":"This email domain cannot receive email. Check the address and try again."}`:
+   nothing is looked up, prepared or sent, the per-account attempt limit and
+   the link-email budget are not spent (the per-IP limit is), and the security
+   event `auth_email_domain_rejected` records only `domain` and `reason`
+   (`nxdomain`, `no_mx`, `null_mx` or `invalid_domain`). The verdict depends
+   only on the domain, never on account state, so the `422` is identical for
+   every account state. `deliverable` and `unknown` continue exactly as
+   before, with the generic `202` and the account work after it. The response
+   now waits for the domain lookup, whose latency also depends only on the
+   domain. Invalid input keeps the generic validation `422` without a lookup.
+2. Before sending, in `sendAuthEmail`, for every authentication email, as
+   defense in depth: it covers the sign-in verification email, which goes to
+   the account's stored address after a `403`, and a domain that was `unknown`
+   when the request arrived. It runs before a link token or reset code is
+   written, so a skipped email never voids a code that was already delivered.
+   An `undeliverable` verdict skips the email, still spends the address's
+   link-email budget like a failed delivery, and records
+   `auth_email_undeliverable_domain` with `domain`, `emailKind`
+   (`registration_link`, `already_registered_notice`, `verification_link` or
+   `password_reset_code`) and `reason`. An `unknown` verdict fails open: the
+   email is sent and `auth_email_domain_check_failed` records `domain`,
+   `emailKind` and the DNS error code as `reason`. This check runs after the
+   response, so it changes no status, body or latency.
+
+No event records the address. Domains are trimmed, lowercased, stripped of one
+trailing root dot and converted to punycode when internationalized. Verdicts
+are cached in process for up to 1,000 domains, deliverable ones for 1 hour and
+undeliverable ones for 10 minutes; `unknown` verdicts are not cached. Each
+lookup is bounded at 3 seconds, and concurrent checks for one domain share one
+query, so the request check and the later send check normally cost a single
+lookup.
 
 There is no configuration. Lookups use the host's system name servers through
-`node:dns`, so the instance needs outbound DNS; without it every email is still
-sent, at the latest when the 3-second bound expires, and logged as
-`auth_email_domain_check_failed`.
+`node:dns`, so the instance needs outbound DNS; without it each email request
+waits up to the 3-second bound, then proceeds with the generic `202`, and every
+email is still sent and logged as `auth_email_domain_check_failed`.
 In local development, addresses at reserved domains such as `example.test` are
-skipped, so use a real mailbox domain to receive email. Server tests preload a
-synthetic resolver (`test/support/syntheticMxResolver.ts`) and never query real
-DNS.
+rejected with `422 email_domain_undeliverable`, so use a real mailbox domain to
+receive email. Server tests preload a synthetic resolver
+(`test/support/syntheticMxResolver.ts`) and never query real DNS.
 
 Auth attempts are limited per IP (20 per 15 minutes) and per account (10 per
 15 minutes). Registration and verification-link requests and password
@@ -1169,7 +1201,8 @@ account limit on the submitted `email` after validation normalizes it, so
 Gmail dots, `+tag` suffixes and `googlemail.com` count as one address and
 extra `identifier` or `username` fields are ignored.
 Password sign-in keys it on the submitted login identifier, and both kinds of
-route draw from the same budget for the same address.
+route draw from the same budget for the same address. A request rejected with
+`422 email_domain_undeliverable` counts toward the per-IP limit only.
 
 `POST /auth/refresh` does not use the sign-in buckets. It is limited per
 presented refresh token (10 per 15 minutes, keyed by a SHA-256 digest; a
@@ -1715,10 +1748,12 @@ Reconciliation:
 
 - `EADDRINUSE`: another process is already using the chosen port.
 - Authentication email not arriving: look for the security events
-  `auth_email_undeliverable_domain` (the recipient domain has no usable MX
-  record, so nothing was sent) and `auth_email_domain_check_failed` (the DNS
-  lookup failed and the email was sent anyway); see the recipient-domain check
-  in [Browser Auth and Content Management](#browser-auth-and-content-management).
+  `auth_email_domain_rejected` (the request was answered with
+  `422 email_domain_undeliverable`), `auth_email_undeliverable_domain` (the
+  recipient domain has no usable MX record, so nothing was sent) and
+  `auth_email_domain_check_failed` (the DNS lookup failed and the email was
+  sent anyway); see the recipient-domain check in
+  [Browser Auth and Content Management](#browser-auth-and-content-management).
 - Buildspec path errors (`buildspect.yml` not found): check AWS buildspec override settings in CodeBuild/CodePipeline and set path to `buildspec.yml`.
 - S3 upload/delete errors: verify IAM permissions and required S3 environment variables.
 - `413 Request Entity Too Large`: increase upload limits in both places:

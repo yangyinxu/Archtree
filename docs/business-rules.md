@@ -1147,15 +1147,26 @@ The wire protocol and operational bounds are documented in
   - Each address receives at most three registration links, already-registered
     notices or verification links per 15 minutes.
   - Further requests receive the same response without another email.
+- Registration, verification-link and password-recovery requests for an
+  address whose domain cannot receive email, for example a mistyped or
+  nonexistent domain, are rejected with a message asking the listener to check
+  the address.
+  - Whether a domain can receive email is public information that does not
+    depend on any account, so the rejection is the same whether or not the
+    address belongs to an account, and responses still never reveal account
+    existence.
+  - A rejected request sends no email and issues no link or code, so a
+    password-reset code the listener already holds stays valid. It does not
+    count toward the address's email limits, but limits per network address
+    still apply.
+  - When the domain cannot be checked, the request proceeds normally.
 - Authentication emails (registration links, already-registered notices,
-  verification links and password-reset codes) are not sent to an address
-  whose domain cannot receive email, for example a mistyped or nonexistent
-  domain.
-  - The request receives exactly the same response, with the same timing, as
-    when an email is sent. No link or code is issued, so a password-reset code
-    the listener already holds stays valid.
-  - The request still counts toward the address's email limits.
-  - When the domain cannot be checked, the email is sent as usual.
+  verification links and password-reset codes) are never sent to an address
+  whose domain cannot receive email. This also covers the email sent after a
+  sign-in for an unverified account, whose response stays the same, and a
+  domain that could not be checked when the request arrived. Such a skipped
+  email issues no link or code and still counts toward the address's email
+  limits.
 - Apple and Google identities are keyed by each provider's stable subject ID,
   not by an email address that can change.
 - A verified provider email matching an existing account does not silently link

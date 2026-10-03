@@ -249,7 +249,9 @@ export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60
 /**
  * Keys registration-link, verification-link and recovery attempts on the validated account email.
  * It uses the same 'auth-account' scope, so these routes and an identifier
- * login that submits the same normalized address draw from one budget.
+ * login that submits the same normalized address draw from one budget. Those
+ * routes mount it after `rejectUndeliverableEmailDomain`, so a request rejected
+ * because its domain cannot receive mail never counts here.
  */
 export const authEmailAccountRateLimit = emailAccountRateLimit('auth-account', 10, 15 * 60_000);
 export const authConcurrencyLimit = limitConcurrency('auth-password', 2, 20);

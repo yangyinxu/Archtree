@@ -41,6 +41,7 @@ import {
     forgotPassword,
     inspectEmailVerification,
     inspectRegistration,
+    rejectUndeliverableEmailDomain,
     requestEmailVerification,
     requestRegistration,
     resetPassword,
@@ -122,7 +123,16 @@ router.post('/browser/email/resend-verification', retiredRegistrationEndpoint);
 
 // Email routes resolve the account from the normalized `email`, so their
 // per-account limit runs after validation; see authEmailAccountRateLimit.
-router.post('/password/forgot', authRateLimit, ...emailOnlyValidation, authEmailAccountRateLimit, asyncHandler(forgotPassword));
+// Routes that email a submitted address reject a domain that cannot receive
+// mail between the two limits: the rejection counts per IP but not per address.
+router.post(
+    '/password/forgot',
+    authRateLimit,
+    ...emailOnlyValidation,
+    rejectUndeliverableEmailDomain,
+    authEmailAccountRateLimit,
+    asyncHandler(forgotPassword)
+);
 router.post('/password/reset', authRateLimit, authConcurrencyLimit, ...passwordResetValidation, authEmailAccountRateLimit, asyncHandler(resetPassword));
 router.post('/apple', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithApple));
 router.post('/google', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithGoogle));
@@ -149,6 +159,7 @@ router.post(
     requireSameOriginBrowserMutation,
     authRateLimit,
     ...emailOnlyValidation,
+    rejectUndeliverableEmailDomain,
     authEmailAccountRateLimit,
     asyncHandler(requestRegistration)
 );
@@ -170,6 +181,7 @@ router.post(
     requireSameOriginBrowserMutation,
     authRateLimit,
     ...emailOnlyValidation,
+    rejectUndeliverableEmailDomain,
     authEmailAccountRateLimit,
     asyncHandler(requestEmailVerification)
 );
@@ -190,6 +202,7 @@ router.post(
     requireSameOriginBrowserMutation,
     authRateLimit,
     ...emailOnlyValidation,
+    rejectUndeliverableEmailDomain,
     authEmailAccountRateLimit,
     asyncHandler(forgotPassword)
 );

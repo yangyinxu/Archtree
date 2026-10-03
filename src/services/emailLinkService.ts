@@ -15,9 +15,11 @@ const lowercaseEmail = (value: unknown) => String(value ?? '').trim().toLowerCas
 /**
  * Spends the address's shared link-email budget before any token is written.
  * Over budget, nothing is stored or sent and only an opaque event is recorded,
- * so the caller's response never changes. The budget is spent before
- * `sendAuthEmail` checks the recipient's domain, so an email skipped because
- * the domain cannot receive mail still counts, exactly like a failed delivery.
+ * so the caller's response never changes. A request rejected up front because
+ * its domain cannot receive mail never reaches this point and spends nothing.
+ * Past that point the budget is spent before `sendAuthEmail` checks the
+ * recipient's domain again, so an email skipped by that defense-in-depth check
+ * still counts, exactly like a failed delivery.
  */
 const withinLinkEmailBudget = async (email: string, send: () => Promise<unknown>) => {
     requireAuthLinkConfiguration();

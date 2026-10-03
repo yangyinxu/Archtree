@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { validationResult } from 'express-validator';
 import AuthActionToken from '../models/authActionToken';
@@ -10,6 +10,7 @@ import {
     sendAuthEmail
 } from '../services/authEmailService';
 import { applyPasswordReset } from '../services/authCredentialService';
+import { checkEmailDomainDeliverability } from '../services/emailDomainDeliverability';
 import {
     completeEmailRegistration,
     confirmEmailVerificationLink,
@@ -30,6 +31,7 @@ import {
     recordAuthFunnelEvent,
     recordSecurityEvent
 } from '../services/securityAuditService';
+import { runRequestWork } from '../services/serverLifecycleService';
 
 const normalizeEmail = (value: unknown) => String(value ?? '').trim().toLowerCase();
 const recoveryAcceptedMessage = { message: 'If the account can use this action, an email has been sent.' };
@@ -39,6 +41,10 @@ const linkInvalidBody = { code: 'link_invalid', message: 'This link is invalid, 
 const emailAlreadyRegisteredBody = {
     code: 'email_already_registered',
     message: 'This email already has an account. Log in or reset your password.'
+};
+const emailDomainUndeliverableBody = {
+    code: 'email_domain_undeliverable',
+    message: 'This email domain cannot receive email. Check the address and try again.'
 };
 const retiredRegistrationBody = {
     code: 'email_registration_moved',
@@ -55,14 +61,42 @@ const rejectInvalidRequest = (req: Request, res: Response) => {
 };
 
 /**
+ * Rejects a registration, verification-link or password-recovery request with
+ * `422 email_domain_undeliverable` when the submitted address's domain cannot
+ * receive mail (NXDOMAIN, no MX, only a null MX, or not a valid hostname), so
+ * the listener can correct a mistyped address instead of waiting for an email
+ * that will never arrive.
+ *
+ * The verdict comes only from public DNS for the domain and runs before any
+ * account lookup, so neither the answer nor its latency can depend on whether
+ * the address has an account. Mount it after the route's per-IP limit and
+ * email validation, and before the per-address limit: a rejected request
+ * counts toward the client's per-IP budget but spends neither the address's
+ * attempt budget nor its link-email budget, and sends or prepares nothing.
+ * A deliverable or unknown verdict (a DNS failure) passes the request on
+ * unchanged; the verdict is cached, so the later `sendAuthEmail` check, kept
+ * as defense in depth, normally reuses it. Invalid input is left to the
+ * controller's generic validation answer without a lookup.
+ */
+export const rejectUndeliverableEmailDomain = (req: Request, res: Response, next: NextFunction) =>
+    runRequestWork(req, async () => {
+        if (!validationResult(req).isEmpty()) return next();
+        const verdict = await checkEmailDomainDeliverability(normalizeEmail(req.body?.email));
+        if (verdict.status !== 'undeliverable') return next();
+        recordSecurityEvent('auth_email_domain_rejected', { domain: verdict.domain ?? undefined, reason: verdict.reason });
+        return res.status(422).json(emailDomainUndeliverableBody);
+    }).catch(next);
+
+/**
  * Sends a generic response before running per-account email work.
  *
  * The lookup, token write, password hash, recipient-domain DNS check, and SES
  * send take measurably longer for some account states, so awaiting them first
- * would let response latency reveal whether an email has an account. The work
- * stays inside the caller's handler promise (never detached), so
- * `asyncHandler` keeps tracking it: graceful shutdown waits for it to finish,
- * and so do concurrency limits.
+ * would let response latency reveal whether an email has an account. (Request
+ * routes have already passed `rejectUndeliverableEmailDomain`, whose latency
+ * depends only on the domain.) The work stays inside the caller's handler
+ * promise (never detached), so `asyncHandler` keeps tracking it: graceful
+ * shutdown waits for it to finish, and so do concurrency limits.
  * Failures are recorded only as an opaque security event, because the
  * response has already been sent.
  */
@@ -128,7 +162,8 @@ export const retiredRegistrationEndpoint = (_req: Request, res: Response) => {
  * account, or with an unverified record from the earlier code-based sign-up,
  * receives a registration link; an address with an account receives the
  * "already registered" notice and nothing changes. Legacy owners reach
- * verification through password reset.
+ * verification through password reset. An address whose domain cannot
+ * receive mail was already rejected by `rejectUndeliverableEmailDomain`.
  */
 export const requestRegistration = async (req: Request, res: Response) => {
     if (rejectInvalidRequest(req, res)) return;
@@ -201,7 +236,8 @@ export const completeRegistration = async (req: Request, res: Response) => {
 /**
  * Sends a new verification link to an account created before verification
  * existed. Every other state does nothing, and every state receives the same
- * response before any account work.
+ * response before any account work. An address whose domain cannot receive
+ * mail was already rejected by `rejectUndeliverableEmailDomain`.
  */
 export const requestEmailVerification = async (req: Request, res: Response) => {
     if (rejectInvalidRequest(req, res)) return;
@@ -245,7 +281,9 @@ export const confirmEmailVerification = async (req: Request, res: Response) => {
 /**
  * Starts password recovery without revealing account existence. A record from
  * the earlier code-based sign-up receives a registration link instead of a
- * reset code, so whoever set its password never gains the account.
+ * reset code, so whoever set its password never gains the account. An address
+ * whose domain cannot receive mail was already rejected by
+ * `rejectUndeliverableEmailDomain`.
  */
 export const forgotPassword = async (req: Request, res: Response) => {
     if (rejectInvalidRequest(req, res)) return;
