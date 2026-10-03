@@ -208,13 +208,18 @@ that tests spawn load nothing, and replaces `DB_CONN_STRING`, `DB_NAME`,
 `S3_BUCKET_NAME`, `AWS_ENDPOINT_URL`, and `AWS_EC2_METADATA_DISABLED` with
 synthetic loopback values, including values exported in the terminal;
 `AWS_SESSION_TOKEN` is removed. An unmocked database or AWS call therefore fails
-against `127.0.0.1:9`. Suites that need real services start their own disposable
-MongoDB and S3-compatible fixtures. Running one file directly with
-`node --import tsx --test` bypasses this environment, so tests that spawn the app
-or script entries can then read a root `.env`. `test/serverTestEnvironment.test.ts`
-fails if a test process can see a value from a sentinel `.env` in its working
-directory, or if any `src/` module other than `src/config/entryEnvironment.ts`
-imports `dotenv`.
+against `127.0.0.1:9`. The runner also preloads
+`test/support/syntheticMxResolver.ts`, so the authentication-email domain check
+answers from a synthetic MX resolver and no test queries real DNS. Suites that
+need real services start their own disposable MongoDB and S3-compatible
+fixtures. Running one file directly with `node --import tsx --test` bypasses
+this environment and the resolver preload, so tests that spawn the app or
+script entries can then read a root `.env`, and authentication emails would
+look up real MX records; add `--import ./test/support/syntheticMxResolver.ts`
+from the repository root to keep DNS synthetic.
+`test/serverTestEnvironment.test.ts` fails if a test process can see a value
+from a sentinel `.env` in its working directory, or if any `src/` module other
+than `src/config/entryEnvironment.ts` imports `dotenv`.
 
 `npm run test:server:linux` runs the Linux suites explicitly and rejects other
 hosts. `npm run doctor:release` checks Linux, Bash, Node, MongoDB and FFmpeg. Deployment

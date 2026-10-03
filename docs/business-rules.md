@@ -1147,6 +1147,15 @@ The wire protocol and operational bounds are documented in
   - Each address receives at most three registration links, already-registered
     notices or verification links per 15 minutes.
   - Further requests receive the same response without another email.
+- Authentication emails (registration links, already-registered notices,
+  verification links and password-reset codes) are not sent to an address
+  whose domain cannot receive email, for example a mistyped or nonexistent
+  domain.
+  - The request receives exactly the same response, with the same timing, as
+    when an email is sent. No link or code is issued, so a password-reset code
+    the listener already holds stays valid.
+  - The request still counts toward the address's email limits.
+  - When the domain cannot be checked, the email is sent as usual.
 - Apple and Google identities are keyed by each provider's stable subject ID,
   not by an email address that can change.
 - A verified provider email matching an existing account does not silently link

@@ -57,11 +57,12 @@ const rejectInvalidRequest = (req: Request, res: Response) => {
 /**
  * Sends a generic response before running per-account email work.
  *
- * The lookup, token write, password hash, and SES send take measurably longer
- * for some account states, so awaiting them first would let response latency
- * reveal whether an email has an account. The work stays inside the caller's
- * handler promise (never detached), so `asyncHandler` keeps tracking it:
- * graceful shutdown waits for it to finish, and so do concurrency limits.
+ * The lookup, token write, password hash, recipient-domain DNS check, and SES
+ * send take measurably longer for some account states, so awaiting them first
+ * would let response latency reveal whether an email has an account. The work
+ * stays inside the caller's handler promise (never detached), so
+ * `asyncHandler` keeps tracking it: graceful shutdown waits for it to finish,
+ * and so do concurrency limits.
  * Failures are recorded only as an opaque security event, because the
  * response has already been sent.
  */
@@ -264,8 +265,12 @@ export const forgotPassword = async (req: Request, res: Response) => {
                 }
                 return;
             }
-            const code = await AuthActionToken.issue(user._id.toString(), 'resetPassword', 15);
-            await sendAuthEmail(user.email, { template: 'resetCode', code });
+            // The code is issued only once the domain can receive it, so a request for an
+            // undeliverable address never replaces a code the owner already holds.
+            await sendAuthEmail(user.email, 'resetCode', async () => ({
+                template: 'resetCode',
+                code: await AuthActionToken.issue(user._id.toString(), 'resetPassword', 15)
+            }));
         }
     );
 };

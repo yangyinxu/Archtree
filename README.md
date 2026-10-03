@@ -450,7 +450,10 @@ Required variables:
 - `AUTH_CODE_PEPPER`: optional separate HMAC secret for password-reset codes
   and emailed link tokens (defaults to `JWT_SECRET`)
 - `AUTH_EMAIL_FROM`: AWS SES verified sender used for registration links,
-  already-registered notices, verification links and reset codes
+  already-registered notices, verification links and reset codes. Recipients
+  whose domain publishes no usable MX record are skipped; see the
+  recipient-domain check in
+  [Browser Auth and Content Management](#browser-auth-and-content-management)
 - `AUTH_LINK_ORIGIN`: exact origin of the Web listener used in emailed links,
   for example `https://kashewt.com` (scheme, host and optional port only; no
   path, query or fragment). `https:` is required; `http:` is accepted only
@@ -1118,6 +1121,47 @@ applies to it. A completed reset revokes every session and sets
 `emailVerified: true`; on an account that was not verified before, it also
 removes every provider identity, passkey and passkey challenge.
 
+Recipient-domain check for authentication email:
+
+Before any authentication email (registration link, already-registered notice,
+verification link or reset code) goes to SES, `sendAuthEmail` checks the
+recipient domain's MX records (`src/services/emailDomainDeliverability.ts`):
+
+- At least one MX record that is not an RFC 7505 null MX (`.`): the email is
+  sent.
+- `ENOTFOUND` (NXDOMAIN), `ENODATA` (no MX records), only a null MX, or a
+  domain that is not a valid hostname: no link or code is issued, nothing is
+  sent, and the security event `auth_email_undeliverable_domain` records only
+  `domain`, `emailKind` (`registration_link`, `already_registered_notice`,
+  `verification_link` or `password_reset_code`) and `reason` (`nxdomain`,
+  `no_mx`, `null_mx` or `invalid_domain`), never the address. There is
+  deliberately no fallback to A/AAAA records (the RFC 5321 implicit MX):
+  mistyped domains are often parked with only an A record.
+- Any other DNS failure (timeout, `SERVFAIL`, refused, network): the check fails
+  open, the email is sent as before, and `auth_email_domain_check_failed`
+  records `domain`, `emailKind` and the DNS error code as `reason`.
+
+The check runs after the generic response, inside the tracked request work, so
+it changes no status, body or latency. It runs before a link token or reset
+code is written, so a skipped reset request never voids a code that was already
+delivered. A skipped link email still spends the address's three-per-15-minutes
+link-email budget, like a failed delivery, and reset requests keep their
+per-address request limit, which is counted before any account work. Domains
+are trimmed, lowercased, stripped of one trailing root dot and converted to
+punycode when internationalized. Verdicts are cached in process for up to 1,000
+domains, deliverable ones for 1 hour and undeliverable ones for 10 minutes;
+failures are not cached. Each lookup is bounded at 3 seconds, and concurrent
+checks for one domain share one query.
+
+There is no configuration. Lookups use the host's system name servers through
+`node:dns`, so the instance needs outbound DNS; without it every email is still
+sent, at the latest when the 3-second bound expires, and logged as
+`auth_email_domain_check_failed`.
+In local development, addresses at reserved domains such as `example.test` are
+skipped, so use a real mailbox domain to receive email. Server tests preload a
+synthetic resolver (`test/support/syntheticMxResolver.ts`) and never query real
+DNS.
+
 Auth attempts are limited per IP (20 per 15 minutes) and per account (10 per
 15 minutes). Registration and verification-link requests and password
 recovery and reset, in both their app and `/auth/browser/*` forms, key the
@@ -1670,6 +1714,11 @@ Reconciliation:
 ## Troubleshooting
 
 - `EADDRINUSE`: another process is already using the chosen port.
+- Authentication email not arriving: look for the security events
+  `auth_email_undeliverable_domain` (the recipient domain has no usable MX
+  record, so nothing was sent) and `auth_email_domain_check_failed` (the DNS
+  lookup failed and the email was sent anyway); see the recipient-domain check
+  in [Browser Auth and Content Management](#browser-auth-and-content-management).
 - Buildspec path errors (`buildspect.yml` not found): check AWS buildspec override settings in CodeBuild/CodePipeline and set path to `buildspec.yml`.
 - S3 upload/delete errors: verify IAM permissions and required S3 environment variables.
 - `413 Request Entity Too Large`: increase upload limits in both places:

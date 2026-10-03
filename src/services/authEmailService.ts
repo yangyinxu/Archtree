@@ -1,4 +1,6 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { checkEmailDomainDeliverability } from './emailDomainDeliverability';
+import { recordSecurityEvent } from './securityAuditService';
 
 type ConfigurationError = Error & { statusCode?: number };
 
@@ -132,10 +134,56 @@ export const renderAuthEmail = (email: AuthEmailTemplate, origin: string | null)
     };
 };
 
-/** Sends an authentication email through SES without writing its token, code or address to logs. */
-export const sendAuthEmail = async (recipient: string, email: AuthEmailTemplate) => {
+export type AuthEmailKind = AuthEmailTemplate['template'];
+type AuthEmailOfKind<K extends AuthEmailKind> = Extract<AuthEmailTemplate, { template: K }>;
+
+/** Bounded, readable names for log lines; they never carry the address, token or code. */
+const authEmailKindNames: Record<AuthEmailKind, string> = {
+    T1: 'registration_link',
+    T2: 'already_registered_notice',
+    T3: 'verification_link',
+    resetCode: 'password_reset_code'
+};
+
+/**
+ * Whether an authentication email may go to `recipient`: its domain must be
+ * able to receive mail. A skip is recorded with only the domain and the email
+ * kind. A lookup that fails for another reason is recorded and fails open, so
+ * a DNS outage sends exactly as before this check existed.
+ */
+const recipientDomainAcceptsMail = async (recipient: string, kind: AuthEmailKind) => {
+    const verdict = await checkEmailDomainDeliverability(recipient);
+    if (verdict.status === 'deliverable') return true;
+    const context = { domain: verdict.domain ?? undefined, emailKind: authEmailKindNames[kind], reason: verdict.reason };
+    if (verdict.status === 'undeliverable') {
+        recordSecurityEvent('auth_email_undeliverable_domain', context);
+        return false;
+    }
+    recordSecurityEvent('auth_email_domain_check_failed', context);
+    return true;
+};
+
+/**
+ * Sends one authentication email to a user-supplied address through SES,
+ * without writing its token, code or address to logs. Every authentication
+ * email goes through here.
+ *
+ * The recipient's domain is checked first; when it cannot receive mail,
+ * nothing is prepared or sent. `prepare` runs only after that check, so a link
+ * token is never written, and an earlier reset code never replaced, for an
+ * address that cannot receive the email. Callers have already sent their
+ * response, so a skip changes no status, body or latency.
+ * Resolves true when SES accepted the email and false when it was skipped.
+ */
+export const sendAuthEmail = async <K extends AuthEmailKind>(
+    recipient: string,
+    kind: K,
+    prepare: () => AuthEmailOfKind<K> | Promise<AuthEmailOfKind<K>>
+): Promise<boolean> => {
     const sender = requireAuthEmailConfiguration();
-    const { subject, text } = renderAuthEmail(email, email.template === 'resetCode' ? null : requireAuthLinkConfiguration());
+    const origin = kind === 'resetCode' ? null : requireAuthLinkConfiguration();
+    if (!await recipientDomainAcceptsMail(recipient, kind)) return false;
+    const { subject, text } = renderAuthEmail(await prepare(), origin);
     const client = new SESv2Client({ region: process.env.AWS_REGION });
     await client.send(new SendEmailCommand({
         FromEmailAddress: sender,
@@ -147,4 +195,5 @@ export const sendAuthEmail = async (recipient: string, email: AuthEmailTemplate)
             }
         }
     }));
+    return true;
 };

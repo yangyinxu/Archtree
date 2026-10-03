@@ -34,10 +34,11 @@ test('integration runner fails once before loading suites when mongod is missing
 });
 
 test('server test runs bound each test so a lost callback fails instead of stalling the gate', () => {
+  const preload = ['--import', 'tsx', '--import', './test/support/syntheticMxResolver.ts'];
   assert.deepEqual(serverTestArguments('unit', [], ['test/a.test.ts']),
-    ['--import', 'tsx', '--test', '--test-force-exit', '--test-timeout=120000', 'test/a.test.ts']);
+    [...preload, '--test', '--test-force-exit', '--test-timeout=120000', 'test/a.test.ts']);
   assert.deepEqual(serverTestArguments('integration', ['--test-timeout=600000'], ['test/a.integration.ts']),
-    ['--import', 'tsx', '--test', '--test-force-exit', '--test-concurrency=1', '--test-timeout=600000',
+    [...preload, '--test', '--test-force-exit', '--test-concurrency=1', '--test-timeout=600000',
       'test/a.integration.ts']);
   // Node applies the last occurrence, so a forwarded opt-out can expose a leaked handle.
   const diagnostic = serverTestArguments('unit', ['--no-test-force-exit'], ['test/a.test.ts']);

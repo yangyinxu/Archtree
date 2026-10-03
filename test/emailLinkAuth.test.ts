@@ -114,7 +114,7 @@ test('link emails are built from AUTH_LINK_ORIGIN and sent through SES as plain 
     });
     const commands: any[] = [];
     t.mock.method(SESv2Client.prototype, 'send', async (command: any) => { commands.push(command.input); return {}; });
-    await sendAuthEmail('lorem@example.test', { template: 'T1', token });
+    assert.equal(await sendAuthEmail('lorem@example.test', 'T1', () => ({ template: 'T1', token })), true);
     assert.equal(commands.length, 1);
     assert.equal(commands[0].FromEmailAddress, 'auth@example.test');
     assert.deepEqual(commands[0].Destination, { ToAddresses: ['lorem@example.test'] });
@@ -122,8 +122,8 @@ test('link emails are built from AUTH_LINK_ORIGIN and sent through SES as plain 
     assert.match(commands[0].Content.Simple.Body.Text.Data, /https:\/\/listen\.example\.test\/finitude\/register\/complete#token=/);
 
     withEnvironment(t, { AUTH_LINK_ORIGIN: undefined });
-    await assert.rejects(sendAuthEmail('lorem@example.test', { template: 'T3', token }), { statusCode: 503 });
-    await sendAuthEmail('lorem@example.test', { template: 'resetCode', code: '135790' });
+    await assert.rejects(sendAuthEmail('lorem@example.test', 'T3', () => ({ template: 'T3', token })), { statusCode: 503 });
+    await sendAuthEmail('lorem@example.test', 'resetCode', () => ({ template: 'resetCode', code: '135790' }));
     assert.equal(commands.length, 2, 'reset codes need delivery but no link origin');
 });
 

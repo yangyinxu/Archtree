@@ -1,7 +1,11 @@
-/** Emits structured security events without credentials, tokens, or email addresses. */
+/**
+ * Emits structured security events without credentials, tokens, or email
+ * addresses. `domain` is only ever an email domain, and `emailKind` and
+ * `reason` are bounded codes.
+ */
 export const recordSecurityEvent = (
     event: string,
-    context: { userId?: string; sessionId?: string } = {}
+    context: { userId?: string; sessionId?: string; domain?: string; emailKind?: string; reason?: string } = {}
 ) => {
     console.info(JSON.stringify({
         category: 'security',

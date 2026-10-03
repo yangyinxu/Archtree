@@ -15,9 +15,11 @@ const lowercaseEmail = (value: unknown) => String(value ?? '').trim().toLowerCas
 /**
  * Spends the address's shared link-email budget before any token is written.
  * Over budget, nothing is stored or sent and only an opaque event is recorded,
- * so the caller's response never changes.
+ * so the caller's response never changes. The budget is spent before
+ * `sendAuthEmail` checks the recipient's domain, so an email skipped because
+ * the domain cannot receive mail still counts, exactly like a failed delivery.
  */
-const withinLinkEmailBudget = async (email: string, send: () => Promise<void>) => {
+const withinLinkEmailBudget = async (email: string, send: () => Promise<unknown>) => {
     requireAuthLinkConfiguration();
     if (!consumeLinkEmailBudget(email)) {
         recordSecurityEvent('auth_link_email_suppressed');
@@ -27,22 +29,20 @@ const withinLinkEmailBudget = async (email: string, send: () => Promise<void>) =
     return true;
 };
 
-/** Stores a registration link for `email`, then mails it (T1). A token is never sent before it is stored. */
-export const sendRegistrationLink = (email: string) => withinLinkEmailBudget(email, async () => {
-    const token = await EmailLinkToken.issue('registration', email);
-    await sendAuthEmail(email, { template: 'T1', token });
-});
+/**
+ * Stores a registration link for `email`, then mails it (T1). A token is never
+ * sent before it is stored, and never stored when the domain cannot receive it.
+ */
+export const sendRegistrationLink = (email: string) => withinLinkEmailBudget(email, () =>
+    sendAuthEmail(email, 'T1', async () => ({ template: 'T1', token: await EmailLinkToken.issue('registration', email) })));
 
 /** Mails the "already registered" notice (T2); it carries no token and changes nothing. */
-export const sendAlreadyRegisteredNotice = (email: string) => withinLinkEmailBudget(email, async () => {
-    await sendAuthEmail(email, { template: 'T2' });
-});
+export const sendAlreadyRegisteredNotice = (email: string) => withinLinkEmailBudget(email, () =>
+    sendAuthEmail(email, 'T2', () => ({ template: 'T2' })));
 
 /** Stores a verification link for a legacy account, then mails it (T3). */
-export const sendVerificationLink = (email: string, userId: string) => withinLinkEmailBudget(email, async () => {
-    const token = await EmailLinkToken.issue('verifyEmail', email, userId);
-    await sendAuthEmail(email, { template: 'T3', token });
-});
+export const sendVerificationLink = (email: string, userId: string) => withinLinkEmailBudget(email, () =>
+    sendAuthEmail(email, 'T3', async () => ({ template: 'T3', token: await EmailLinkToken.issue('verifyEmail', email, userId) })));
 
 /**
  * Mails the follow-up for a sign-in that presented a valid credential for an
