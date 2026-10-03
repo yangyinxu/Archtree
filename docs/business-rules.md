@@ -1069,6 +1069,29 @@ The wire protocol and operational bounds are documented in
 
 - New email registrations require a single-use verification code; existing
   accounts without an `emailVerified` migration field remain treated as verified.
+- Each registration attempt for an email without a verified account sends a new
+  code bound to that attempt's password and name and voids every earlier
+  unredeemed code for the email. Redeeming a code applies exactly the
+  credentials of the attempt it was issued for and verifies the email in one
+  step, so registering first does not keep the account. Registering an
+  already-verified email changes nothing. Unverified accounts are not expired
+  automatically.
+- A verification resend sends a new code bound to the newest registration
+  attempt. A resend made after an earlier registration or resend for the same
+  address has been answered, while that earlier request's email is still being
+  prepared (including while its password is being processed) or sent, waits
+  for it: it sends nothing more when that email is delivered and sends its own
+  code when that email failed. Pressing resend right after registering is
+  therefore never dropped: it either reuses the delivered registration email
+  or sends its own code.
+- Completing a password reset on an unverified account does not verify the
+  email. It voids the outstanding verification code, and a code from a later
+  resend applies the reset password.
+- Unverified accounts cannot sign in, open sessions, or link Apple, Google, or
+  passkey methods. Completing verification revokes every session, provider
+  identity, passkey, and pending passkey enrollment that existed before it.
+- A verification or password-reset code is voided by its fifth wrong
+  submission; the user must request a new code.
 - Apple and Google identities are keyed by each provider's stable subject ID,
   not by an email address that can change.
 - A verified provider email matching an existing account does not silently link
@@ -1085,8 +1108,9 @@ The wire protocol and operational bounds are documented in
 - Authentication entry points display only methods the connected deployment
   reports as fully configured. Password sign-in remains available as the
   compatibility fallback when optional capabilities cannot be resolved.
-- Password-recovery and verification request responses do not reveal whether an
-  email address belongs to an account.
+- Registration, verification-resend, and password-recovery responses do not
+  reveal whether an email address belongs to an account, neither through their
+  content and latency nor through registration's concurrency limiting.
 - Completing a password reset revokes every active session for that account.
 - Listeners can view and revoke active sessions, sign out everywhere, and
   delete their account in-app.

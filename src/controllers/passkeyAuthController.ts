@@ -16,7 +16,7 @@ import { createSession } from '../services/authSessionService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import { normalizeUserRole } from '../services/authRoleService';
 import { withActiveAccount } from '../services/accountReferenceFenceService';
-import { requireActiveAuthSession } from '../services/authCredentialService';
+import { requireActiveAuthSession, requireVerifiedAccount } from '../services/authCredentialService';
 
 const configuration = () => {
     const rpID = String(process.env.WEBAUTHN_RP_ID ?? '').trim();
@@ -56,6 +56,7 @@ export const registrationOptions = async (req: Request, res: Response) => {
     });
     const flowId = await withActiveAccount(auth.userId, async session => {
         if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+        await requireVerifiedAccount(auth.userId, session);
         return PasskeyChallenge.issue('register', options.challenge, auth.userId, session);
     });
     return res.status(200).json({ flowId, options });
@@ -68,6 +69,8 @@ export const verifyRegistration = async (req: Request, res: Response) => {
     if (!flow || flow.userId !== auth.userId) {
         return res.status(400).json({ message: 'The passkey request expired. Please try again.' });
     }
+    // Fail before attestation work; the transaction below rechecks atomically.
+    await requireVerifiedAccount(auth.userId);
     const config = configuration();
     const verification = await verifyRegistrationResponse({
         response: req.body.credential as RegistrationResponseJSON,
@@ -83,6 +86,7 @@ export const verifyRegistration = async (req: Request, res: Response) => {
         verification.registrationInfo;
     await withActiveAccount(auth.userId, async session => {
         if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+        await requireVerifiedAccount(auth.userId, session);
         await Passkey.create({
             credentialId: credential.id,
             userId: auth.userId,

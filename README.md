@@ -991,9 +991,23 @@ so account existence is not disclosed. These routes, including their app and
 HTML-form equivalents, send the generic response before the account lookup,
 password hashing, code write, and email delivery, so response latency does not
 reveal account state either. That work still runs inside the tracked request:
-graceful shutdown waits for it, registration keeps its auth concurrency slot
-until it settles, and a late failure is recorded only as an opaque security
-event. Browser capability discovery reports only end-to-end browser methods;
+graceful shutdown waits for it, and a late failure is recorded only as an
+opaque security event. Registration holds its auth concurrency slot only for
+the fixed-cost password hash and releases it before the account lookup, so
+neither the slot's duration nor a resulting `429` depends on account state.
+Registration and verification resend for one normalized address then run one
+at a time in this process (production is a single instance). Registration
+queues its attempt in the same turn as its generic response, without
+awaiting the password hash first, so a resend sent as soon as that response
+arrives (while the hash, account write, code write, or email send is still
+running) waits for the earlier email, reuses it when it is delivered, and
+sends its own code when it failed. Each wait is capped at 30 seconds because the SES client has no
+request timeout; after that, later work runs alongside the stuck send, and an
+email that send delivers late carries an already-voided code. Because
+registration's slot covers only the hash, account work and SES sends across
+different addresses are bounded by the per-IP and per-account rate limits,
+not by the concurrency limit.
+Browser capability discovery reports only end-to-end browser methods;
 native Apple, Google, or passkey configuration does not expose a nonfunctional
 listener button.
 
@@ -1287,6 +1301,28 @@ Session behavior:
   credential, and sessions available for a safe retry. Password login rechecks
   its verified password hash when committing the session, so a concurrent
   reset cannot be bypassed by a delayed login.
+- `authActionTokens` keeps one hashed code slot per account and purpose.
+  Verification slots also store the bcrypt hash, display name, and username of
+  the registration attempt they were issued for; verifying applies exactly
+  those values, sets `emailVerified`, and revokes every pre-verification
+  session, provider identity, passkey, and passkey enrollment challenge in the
+  same transaction. The bound hash is removed when the code is consumed or
+  voided, and expired slots leave through the TTL index.
+- Each registration attempt on an unverified account is also kept as
+  `users.pendingRegistration` so a resend can bind the newest attempt after its
+  code expired. The account's `password` stays the first registrant's until
+  verification, so that registrant's sign-in answer (`403` "verify your email")
+  does not change when someone else registers the address. A completed reset
+  replaces `password`, clears `pendingRegistration`, and voids the outstanding
+  verification code, so the next resend binds the reset password.
+- A wrong code increments the slot's `failedAttempts` inside the account
+  transaction; the fifth wrong submission voids the code (`voidedAt`). Codes
+  stored before per-account slots existed are no longer accepted, and
+  verification codes issued before attempt binding carry no credentials and
+  are rejected, so users mid-verification at deploy time request a new code.
+- Session creation for any sign-in method returns `403` while
+  `emailVerified` is `false`, and provider linking and passkey enrollment also
+  return `403` for such an account.
 - Provider unlink checks the remaining recovery methods inside the account
   transaction. Account-owned sessions, identities, passkeys, codes, and
   challenges share the account deletion fence; discoverable passkey challenges

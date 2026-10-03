@@ -275,7 +275,7 @@ test('Web form registration stays generic across delivery and account states', a
 
     const user = await User.findByEmail(email);
     assert.ok(user);
-    await User.markEmailVerified(user._id.toString());
+    await getDb()!.collection('users').updateOne({ _id: user._id }, { $set: { emailVerified: true } });
     const existingVerified = await submit();
     assert.equal(existingVerified.status, 202);
     assert.equal(await existingVerified.text(), genericBody);

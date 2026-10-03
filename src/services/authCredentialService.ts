@@ -1,8 +1,8 @@
 import { ClientSession, TransactionOptions } from 'mongodb';
-import AuthActionToken, { AuthActionPurpose } from '../models/authActionToken';
+import AuthActionToken, { AuthActionPurpose, PendingRegistration } from '../models/authActionToken';
 import AuthIdentity, { AuthProvider } from '../models/authIdentity';
 import AuthSession from '../models/authSession';
-import { Passkey } from '../models/passkey';
+import { Passkey, PasskeyChallenge } from '../models/passkey';
 import User from '../models/user';
 import { notifyRoomChanges } from '../realtime/roomEvents';
 import { AccountReferenceUnavailableError, withActiveAccount } from './accountReferenceFenceService';
@@ -21,27 +21,61 @@ export const requireActiveAuthSession = async (userId: string, sessionId: string
     }
 };
 
-/** Consuming a recovery code and its durable effect commit together, including session/room cleanup. */
+/**
+ * Refuses to link a provider or passkey until the account proves email
+ * ownership. Pass the linking transaction so the check serializes with
+ * verification through the account fence.
+ */
+export const requireVerifiedAccount = async (userId: string, session?: ClientSession) => {
+    const user = await User.findById(userId, session);
+    if (user?.emailVerified === false) {
+        throw Object.assign(new Error('Verify your email before adding a sign-in method.'), { statusCode: 403 });
+    }
+};
+
+/**
+ * Applies exactly the registration attempt bound to the redeemed code, then
+ * removes every session, provider identity, passkey and pending enrollment
+ * that existed before ownership was proven: whoever created them never had to
+ * control the mailbox. Resolves false when the code carries no credentials or
+ * the account is no longer unverified.
+ */
+const completeEmailVerification = async (
+    userId: string, registration: PendingRegistration | undefined, session: ClientSession
+) => {
+    if (!registration || !await User.applyVerifiedRegistration(userId, registration, session)) return false;
+    // MongoDB transactions do not support parallel operations on one session.
+    await AuthSession.revokeAll(userId, session);
+    await AuthIdentity.deleteForUser(userId, session);
+    await Passkey.deleteForUser(userId, session);
+    await PasskeyChallenge.deleteForUser(userId, session);
+    return true;
+};
+
+/** Consuming an email code and its durable effect commit together, including session/room cleanup. */
 export const applyEmailAction = async (
     userId: string, purpose: AuthActionPurpose, code: string, passwordHash?: string
 ): Promise<boolean> => {
     let applied: boolean;
     try {
         applied = await withActiveAccount(userId, async session => {
-            if (!await AuthActionToken.consume(userId, purpose, code, session)) return false;
-            if (purpose === 'verifyEmail') await User.markEmailVerified(userId, session);
-            else {
-                if (!passwordHash) throw new Error('Password reset requires a password hash.');
-                await User.updatePassword(userId, passwordHash, session);
-                await AuthSession.revokeAll(userId, session);
-            }
+            const token = await AuthActionToken.consume(userId, purpose, code, session);
+            if (!token) return false;
+            if (purpose === 'verifyEmail') return completeEmailVerification(userId, token.registration, session);
+            if (!passwordHash) throw new Error('Password reset requires a password hash.');
+            await User.updatePassword(userId, passwordHash, session);
+            await AuthSession.revokeAll(userId, session);
+            // On an unverified account an outstanding verification code is bound
+            // to an earlier registration attempt and would overwrite this reset
+            // password. A resend binds the reset password instead.
+            await AuthActionToken.voidCurrent(userId, 'verifyEmail', session);
             return true;
         }, undefined, credentialTransactionOptions);
     } catch (error) {
         if (error instanceof AccountReferenceUnavailableError) return false;
         throw error;
     }
-    if (applied && purpose === 'resetPassword') notifyRoomChanges();
+    if (applied) notifyRoomChanges();
     return applied;
 };
 

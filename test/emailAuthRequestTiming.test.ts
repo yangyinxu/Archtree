@@ -3,10 +3,13 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import test, { after, before, type TestContext } from 'node:test';
 import { SESv2Client } from '@aws-sdk/client-sesv2';
+import bcrypt from 'bcryptjs';
 import { createApp } from '../src/app';
+import { registerEmailAccount } from '../src/controllers/emailAuthController';
 import AuthActionToken from '../src/models/authActionToken';
 import User from '../src/models/user';
 import { ServerLifecycle } from '../src/services/serverLifecycleService';
+import { queueVerificationDelivery, queueVerificationResend } from '../src/services/verificationDeliveryQueue';
 
 const acceptedMessage = { message: 'If the account can use this action, an email has been sent.' };
 const emailEnvironment = {
@@ -72,6 +75,7 @@ const installAccountFakes = (
         return { insertedId: created._id };
     });
     t.mock.method(AuthActionToken, 'issue', async () => '135790');
+    t.mock.method(AuthActionToken, 'issueVerification', async () => '135790');
     t.mock.method(SESv2Client.prototype, 'send', async (command: any) => {
         recipients.push(String(command.input?.Destination?.ToAddresses?.[0] ?? ''));
         started();
@@ -204,8 +208,16 @@ test('verification resend and JSON registration answer before their account work
     assert.deepEqual(fakes.errors, []);
 });
 
-test('registration work after the response still holds its concurrency slot until it settles', async t => {
+test('registration holds its concurrency slot only for the fixed-cost hash, never for account work', async t => {
     const fakes = installAccountFakes(t, [], 'delivered');
+    let openHashing!: () => void;
+    const hashing = new Promise<void>(resolve => { openHashing = resolve; });
+    let hashesStarted = 0;
+    t.mock.method(bcrypt, 'hash', async () => {
+        hashesStarted += 1;
+        await hashing;
+        return 'synthetic-password-hash';
+    });
     const app = await startApplication(t);
     const register = (email: string) => postJson(`${app.url}/auth/signup`, {
         email,
@@ -213,23 +225,89 @@ test('registration work after the response still holds its concurrency slot unti
         displayName: 'Lorem Ipsum'
     });
 
+    // Responding early removes client backpressure, so the slot must still bound hashing.
     const first = await register('first-slot@example.test');
     const second = await register('second-slot@example.test');
     assert.equal(first.status, 202);
     assert.equal(second.status, 202);
     await Promise.all([first.text(), second.text()]);
-    await waitFor(() => fakes.recipients.length === 2, 'both gated deliveries to start');
+    await waitFor(() => hashesStarted === 2, 'both password hashes to start');
+    const whileHashing = await register('hashing-overflow@example.test');
+    assert.equal(whileHashing.status, 429);
+    assert.deepEqual(await whileHashing.json(), { message: 'Too many concurrent requests.' });
 
-    // Responding early removes client backpressure, so the limiter must keep bounding the work.
-    const overflow = await register('third-slot@example.test');
-    assert.equal(overflow.status, 429);
-    assert.deepEqual(await overflow.json(), { message: 'Too many concurrent requests.' });
+    // Account lookup, creation and delivery depend on the account state, so
+    // they must not hold the slot: with both new-account emails still in
+    // flight, another registration is admitted.
+    openHashing();
+    await waitFor(() => fakes.recipients.length === 2, 'both new-account deliveries to start');
+    const afterHashing = await register('after-hash-slot@example.test');
+    assert.equal(afterHashing.status, 202);
+    await afterHashing.text();
 
     const stopped = app.stop(fakes.timeline);
+    await waitFor(() => fakes.recipients.length === 3, 'the admitted registration delivery to start');
     fakes.releaseDelivery();
     assert.equal(await stopped, 'graceful');
-    assert.deepEqual(fakes.recipients, ['first-slot@example.test', 'second-slot@example.test']);
+    assert.deepEqual(fakes.recipients, ['first-slot@example.test', 'second-slot@example.test', 'after-hash-slot@example.test']);
     assert.deepEqual(fakes.errors, []);
+});
+
+test('registration reserves its address queue before hashing, so an immediate resend waits for it', async t => {
+    const email = 'reserved-lane@example.test';
+    const fakes = installAccountFakes(t, [], 'failed');
+    let openHashing!: () => void;
+    const hashing = new Promise<void>(resolve => { openHashing = resolve; });
+    t.mock.method(bcrypt, 'hash', async () => {
+        await hashing;
+        return 'synthetic-password-hash';
+    });
+
+    // Callers start registration in the same turn as their generic response,
+    // so a resend queued right after this call models the earliest request a
+    // client can send once the 202 arrives.
+    const registering = registerEmailAccount(email, 'Lorem ipsum dolor sit amet', 'Lorem Ipsum');
+    const resendEvents: string[] = [];
+    const resent = queueVerificationResend(email, async () => {
+        resendEvents.push('resend-sent');
+        return true;
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(resendEvents, [], 'the resend waits for the registration that is still hashing');
+
+    openHashing();
+    await fakes.deliveryStarted;
+    assert.deepEqual(resendEvents, [], 'the resend waits for the registration email in flight');
+    fakes.releaseDelivery();
+    await assert.rejects(registering, /synthetic delivery failure/);
+    assert.equal(await resent, true);
+    assert.deepEqual(resendEvents, ['resend-sent'], 'the resend replaces the failed registration email');
+    assert.deepEqual(fakes.recipients, [email]);
+    assert.deepEqual(fakes.errors, []);
+});
+
+test('a failed password hash releases the registration slot even while earlier work holds the address', async t => {
+    const email = 'failed-hash@example.test';
+    const fakes = installAccountFakes(t, [], 'delivered');
+    t.mock.method(bcrypt, 'hash', async () => {
+        throw new Error('synthetic hash failure');
+    });
+    let finishEarlier!: () => void;
+    const earlier = queueVerificationDelivery(email, () => new Promise<boolean>(resolve => {
+        finishEarlier = () => resolve(true);
+    }));
+    let released = 0;
+    const registering = registerEmailAccount(email, 'Lorem ipsum dolor sit amet', 'Lorem Ipsum', '', () => {
+        released += 1;
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(released, 1, 'the slot is released when hashing settles, not when the address frees up');
+
+    finishEarlier();
+    assert.equal(await earlier, true);
+    await assert.rejects(registering, /synthetic hash failure/);
+    assert.equal(released, 1);
+    assert.deepEqual(fakes.recipients, []);
 });
 
 test('a delivery failure after the uniform response is recorded without a second response', async t => {

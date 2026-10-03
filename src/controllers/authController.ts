@@ -25,6 +25,7 @@ import AuthIdentity from '../models/authIdentity';
 import { Passkey } from '../models/passkey';
 import { registerEmailAccount, respondBeforeAccountWork } from './emailAuthController';
 import { normalizeUserRole } from '../services/authRoleService';
+import { releaseConcurrencySlots } from '../middleware/requestProtectionMiddleware';
 
 /**
  * Interface for Error object with statusCode property
@@ -420,7 +421,7 @@ export const signupFromWeb = async (req: Request, res: Response, next: NextFunct
         successMessage: 'If the account can be created, a verification code has been sent. Verify the email before logging in.'
       })),
       'email_registration_request_failed',
-      () => registerEmailAccount(email, password, username, username)
+      () => registerEmailAccount(email, password, username, username, () => releaseConcurrencySlots(req))
     );
   } catch (error: any) {
     next(error);

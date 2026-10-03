@@ -4,7 +4,7 @@ import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import express from 'express';
-import { asyncHandler, limitConcurrency } from '../src/middleware/requestProtectionMiddleware';
+import { asyncHandler, limitConcurrency, releaseConcurrencySlots } from '../src/middleware/requestProtectionMiddleware';
 import { onRequestWorkComplete, runRequestWork, ServerLifecycle } from '../src/services/serverLifecycleService';
 
 /** Holds only synthetic work so abort tests cannot affect external resources. */
@@ -75,6 +75,48 @@ for (const [name, perClientLimit, globalLimit, capacity] of [
     }
   });
 }
+
+test('an early slot release admits the next request once while the released work continues', { timeout: 10_000 }, async () => {
+  const firstWork = deferred(); const secondWork = deferred(); const secondEntered = deferred();
+  const app = express();
+  app.use(new ServerLifecycle().admit);
+  let calls = 0;
+  app.get('/work', limitConcurrency('early-release', 1, 1), asyncHandler(async (req, res) => {
+    calls += 1;
+    res.end('accepted');
+    if (calls === 1) {
+      releaseConcurrencySlots(req);
+      await firstWork.promise;
+    } else {
+      secondEntered.resolve();
+      await secondWork.promise;
+    }
+  }));
+  const server = createServer(app);
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/work`;
+  try {
+    const first = await fetch(url);
+    assert.equal(first.status, 200);
+    await first.text();
+    const second = await fetch(url);
+    assert.equal(second.status, 200, 'the released slot admits a request while the first work is pending');
+    await second.text();
+    await secondEntered.promise;
+
+    // The first request's completion must not release a second time and free the slot the second request holds.
+    firstWork.resolve();
+    await new Promise(resolve => setImmediate(resolve));
+    const blocked = await fetch(url);
+    assert.equal(blocked.status, 429);
+    await blocked.text();
+  } finally {
+    firstWork.resolve(); secondWork.resolve();
+    await new Promise(resolve => setImmediate(resolve));
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
 
 test('response completion waits for all nested work, including rejection, before releasing once', async () => {
   const req = {} as express.Request;

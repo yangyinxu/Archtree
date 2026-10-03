@@ -132,6 +132,19 @@ export const requireSecureAuthTransport: RequestHandler = (req, res, next) => {
 
 const activeByScopeAndClient = new Map<string, number>();
 const activeByScope = new Map<string, number>();
+const heldConcurrencySlots = new WeakMap<Request, Set<() => void>>();
+
+/**
+ * Releases the request's concurrency slots before its tracked work settles.
+ * A handler calls this once the bounded work the slot exists for is done and
+ * the remaining work must not influence admission of other requests; graceful
+ * shutdown still waits for that remaining work.
+ */
+export const releaseConcurrencySlots = (req: Request) => {
+    const releases = heldConcurrencySlots.get(req);
+    heldConcurrencySlots.delete(req);
+    releases?.forEach(release => release());
+};
 
 export const limitConcurrency = (
     scope: string,
@@ -161,6 +174,7 @@ export const limitConcurrency = (
             else activeByScope.set(scope, remainingGlobal);
         };
         onRequestWorkComplete(req, res, release);
+        heldConcurrencySlots.set(req, (heldConcurrencySlots.get(req) ?? new Set()).add(release));
         return next();
     };
 };

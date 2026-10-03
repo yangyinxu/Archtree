@@ -34,6 +34,11 @@ export class Passkey {
         }, { session: transaction }), session);
     }
 
+    /** Removes every passkey, e.g. ones enrolled before the account proved email ownership. */
+    static deleteForUser(userId: string, session?: ClientSession) {
+        return getDb()!.collection<PasskeyDocument>('passkeys').deleteMany({ userId }, { session });
+    }
+
     static updateCounter(credentialId: string, counter: number) {
         return getDb()!.collection<PasskeyDocument>('passkeys').updateOne(
             { credentialId },
@@ -64,6 +69,11 @@ export class PasskeyChallenge {
         if (userId) await withActiveAccount(userId, insert, session);
         else await insert(session);
         return flowId;
+    }
+
+    /** Cancels the account's pending enrollment challenges. */
+    static deleteForUser(userId: string, session?: ClientSession) {
+        return getDb()!.collection('passkeyChallenges').deleteMany({ userId }, { session });
     }
 
     static async consume(flowId: string, purpose: PasskeyChallengePurpose) {

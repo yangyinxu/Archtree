@@ -8,6 +8,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { changePassword, unlinkProvider } from '../src/controllers/accountController';
 import { resetPassword, verifyEmail } from '../src/controllers/emailAuthController';
 import { authenticateWithGoogle } from '../src/controllers/federatedAuthController';
+import { registrationOptions, verifyRegistration } from '../src/controllers/passkeyAuthController';
 import { requireAuthWhenPresented } from '../src/middleware/authMiddleware';
 import { getDb } from '../src/infrastructure/database';
 import AuthActionToken from '../src/models/authActionToken';
@@ -119,18 +120,130 @@ test('failure before password persistence preserves the reset code', async () =>
     assert.equal(await applyEmailAction(userId, 'resetPassword', code, 'synthetic-new-hash'), true);
 });
 
-test('email verification also rolls back consumption when its durable effect fails', async () => {
-    const { user, userId } = await account();
-    await getDb()!.collection('users').updateOne({ _id: user._id }, { $set: { emailVerified: false } });
-    const code = await AuthActionToken.issue(userId, 'verifyEmail', 15);
-    const original = User.markEmailVerified;
-    User.markEmailVerified = async () => { throw new Error('Synthetic verification failure'); };
+/** An account that has not proven email ownership yet, holding its first registrant's credentials. */
+const unverifiedAccount = async (password = 'synthetic-first-registrant-hash') => {
+    const created = await account(password);
+    await getDb()!.collection('users').updateOne({ _id: created.user._id }, { $set: { emailVerified: false } });
+    return created;
+};
+const attempt = (label: string) => ({
+    passwordHash: `synthetic-${label}-hash`, displayName: `Lorem ${label}`, username: `lorem-${label}`
+});
+const preVerificationAccess = async (userId: string) => {
+    const sessionId = await sessionFor(userId);
+    await AuthIdentity.create(userId, 'apple', randomUUID());
+    await Passkey.create({ userId, credentialId: randomUUID(), publicKey: 'synthetic', counter: 0,
+        transports: [], deviceType: 'singleDevice', backedUp: false });
+    await PasskeyChallenge.issue('register', 'synthetic-enrollment', userId);
+    return sessionId;
+};
+const remainingAccess = async (userId: string) => ({
+    identities: await getDb()!.collection('authIdentities').countDocuments({ userId }),
+    passkeys: await getDb()!.collection('passkeys').countDocuments({ userId }),
+    challenges: await getDb()!.collection('passkeyChallenges').countDocuments({ userId })
+});
+
+test('verification rolls back as a whole on cleanup failure, then applies only its bound attempt on retry', async () => {
+    const { user, userId } = await unverifiedAccount();
+    const earlier = await AuthActionToken.issueVerification(userId, attempt('earlier'));
+    const code = (await AuthActionToken.issueVerification(userId, attempt('newer')))!;
+    const sessionId = await preVerificationAccess(userId);
+    const req = { body: { email: user.email, code } } as Request;
+    const restore = failCleanup(userId);
     try {
-        await assert.rejects(verifyEmail({ body: { email: user.email, code } } as Request, response().res), /Synthetic verification failure/);
-    } finally { User.markEmailVerified = original; }
-    assert.equal((await User.findById(userId))!.emailVerified, false);
-    assert.equal(await applyEmailAction(userId, 'verifyEmail', code), true);
-    assert.equal((await User.findById(userId))!.emailVerified, true);
+        await assert.rejects(verifyEmail(req, response().res), /Synthetic cleanup failure/);
+    } finally { restore(); }
+    const unchanged = (await User.findById(userId))!;
+    assert.equal(unchanged.emailVerified, false);
+    assert.equal(unchanged.password, 'synthetic-first-registrant-hash');
+    assert.ok(await AuthSession.findActiveById(sessionId));
+    assert.deepEqual(await remainingAccess(userId), { identities: 1, passkeys: 1, challenges: 1 });
+
+    assert.equal(await applyEmailAction(userId, 'verifyEmail', earlier!), false, 'the newer attempt voided this code');
+    const retried = response(); await verifyEmail(req, retried.res);
+    assert.equal(retried.result.statusCode, 204);
+    const verified = (await User.findById(userId))!;
+    assert.equal(verified.emailVerified, true);
+    assert.equal(verified.password, 'synthetic-newer-hash');
+    assert.equal(verified.displayName, 'Lorem newer');
+    assert.equal(verified.username, 'lorem-newer');
+    assert.equal(verified.pendingRegistration, undefined);
+    assert.equal(await AuthSession.findActiveById(sessionId), null);
+    assert.deepEqual(await remainingAccess(userId), { identities: 0, passkeys: 0, challenges: 0 });
+    const replay = response(); await verifyEmail(req, replay.res);
+    assert.equal(replay.result.statusCode, 400);
+});
+
+test('a resend binds the newest attempt even after its code expired, and verified accounts ignore codes', async () => {
+    const { userId } = await unverifiedAccount();
+    await AuthActionToken.issueVerification(userId, attempt('expired'));
+    await getDb()!.collection('authActionTokens').deleteMany({ userId });
+    const resent = (await AuthActionToken.issueVerification(userId))!;
+    assert.equal(await applyEmailAction(userId, 'verifyEmail', resent), true);
+    assert.equal((await User.findById(userId))!.password, 'synthetic-expired-hash');
+
+    const { userId: verifiedId } = await account('synthetic-verified-hash');
+    assert.equal(await AuthActionToken.issueVerification(verifiedId, attempt('ignored')), null);
+    assert.equal((await User.findById(verifiedId))!.pendingRegistration, undefined);
+});
+
+test('a reset on an unverified account voids the outstanding code so the next code binds the reset password', async () => {
+    const { userId } = await unverifiedAccount();
+    const squatted = (await AuthActionToken.issueVerification(userId, attempt('squatter')))!;
+    const resetCode = await AuthActionToken.issue(userId, 'resetPassword', 15);
+    assert.equal(await applyEmailAction(userId, 'resetPassword', resetCode, 'synthetic-reset-hash'), true);
+    assert.equal(await applyEmailAction(userId, 'verifyEmail', squatted), false);
+    assert.equal((await User.findById(userId))!.emailVerified, false, 'a reset does not verify the email');
+
+    const resent = (await AuthActionToken.issueVerification(userId))!;
+    assert.equal(await applyEmailAction(userId, 'verifyEmail', resent), true);
+    const verified = (await User.findById(userId))!;
+    assert.equal(verified.password, 'synthetic-reset-hash');
+    assert.equal(verified.emailVerified, true);
+});
+
+test('an unverified account cannot open a session or link a provider or passkey', async () => {
+    const { user, userId } = await unverifiedAccount();
+    await assert.rejects(createSession(user as any), { statusCode: 403 });
+    await assert.rejects(createSession(user as any, undefined, 'synthetic-first-registrant-hash'), { statusCode: 403 });
+    assert.equal(await getDb()!.collection('authSessions').countDocuments({ userId }), 0);
+
+    // A session inserted directly models access that predates these guards.
+    const sessionId = await sessionFor(userId);
+    const originalVerifier = OAuth2Client.prototype.verifyIdToken;
+    const originalAudience = process.env.GOOGLE_CLIENT_IDS;
+    const originalRpId = process.env.WEBAUTHN_RP_ID;
+    const originalOrigin = process.env.WEBAUTHN_ORIGIN;
+    const subject = randomUUID();
+    process.env.GOOGLE_CLIENT_IDS = 'synthetic-google-client';
+    process.env.WEBAUTHN_RP_ID = 'listener.example.test';
+    process.env.WEBAUTHN_ORIGIN = 'https://listener.example.test';
+    OAuth2Client.prototype.verifyIdToken = (async () => ({ getPayload: () => ({
+        sub: subject, email: 'lorem-provider@example.test', email_verified: true, nonce: 'synthetic-nonce'
+    }) })) as typeof originalVerifier;
+    try {
+        let linkError: any;
+        await authenticateWithGoogle(
+            request(userId, sessionId, { identityToken: 'synthetic-google-token', nonce: 'synthetic-nonce' }),
+            response().res,
+            error => { linkError = error; }
+        );
+        assert.equal(linkError?.statusCode, 403);
+        assert.equal(await AuthIdentity.find('google', subject), null);
+
+        await assert.rejects(registrationOptions(request(userId, sessionId), response().res), { statusCode: 403 });
+        const flowId = await PasskeyChallenge.issue('register', 'synthetic-enrollment', userId);
+        await assert.rejects(verifyRegistration(request(userId, sessionId, { flowId }), response().res), { statusCode: 403 });
+        assert.equal(await getDb()!.collection('passkeys').countDocuments({ userId }), 0);
+        assert.equal(await getDb()!.collection('passkeyChallenges').countDocuments({ userId }), 0);
+    } finally {
+        OAuth2Client.prototype.verifyIdToken = originalVerifier;
+        for (const [name, value] of [['GOOGLE_CLIENT_IDS', originalAudience], ['WEBAUTHN_RP_ID', originalRpId],
+            ['WEBAUTHN_ORIGIN', originalOrigin]] as const) {
+            if (value === undefined) delete process.env[name];
+            else process.env[name] = value;
+        }
+    }
 });
 
 test('password change rolls back on cleanup failure and preserves only the caller on retry', async () => {

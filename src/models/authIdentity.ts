@@ -49,8 +49,9 @@ class AuthIdentity {
         }, { session: transaction }), session);
     }
 
-    static deleteForUser(userId: string) {
-        return getDb()!.collection<AuthIdentityDocument>('authIdentities').deleteMany({ userId });
+    /** Removes every provider identity, e.g. ones linked before the account proved email ownership. */
+    static deleteForUser(userId: string, session?: ClientSession) {
+        return getDb()!.collection<AuthIdentityDocument>('authIdentities').deleteMany({ userId }, { session });
     }
 
     /** Removes one linked provider only after account recovery safeguards are checked. */

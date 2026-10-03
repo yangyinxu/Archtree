@@ -12,7 +12,7 @@ import {
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import { normalizeUserRole } from '../services/authRoleService';
 import { withActiveAccount } from '../services/accountReferenceFenceService';
-import { requireActiveAuthSession } from '../services/authCredentialService';
+import { requireActiveAuthSession, requireVerifiedAccount } from '../services/authCredentialService';
 
 const conflict = () => {
     const error = new Error(
@@ -52,6 +52,7 @@ const resolveFederatedUser = async (
         const auth = req.auth;
         await withActiveAccount(auth.userId, async session => {
             if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+            await requireVerifiedAccount(auth.userId, session);
             await AuthIdentity.create(
                 auth.userId,
                 identity.provider,
