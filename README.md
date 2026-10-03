@@ -1285,6 +1285,13 @@ Session behavior:
   recheck their session before writing.
 - Protected requests verify that the access token's backing session is still
   active, allowing logout and logout-all to revoke access immediately.
+- Optional-auth reads (`GET /api/listener/v1/home`,
+  `GET /api/listener/v1/pages/home/items/:itemId`, and the legacy
+  `GET /content/pages/:slug/expanded` for public pages such as Home) still
+  serve requests without credentials anonymously. A presented
+  `Authorization: Bearer` token that is expired, revoked, or malformed returns
+  `401` before the account-viewer check so native clients refresh instead of
+  silently receiving anonymous content or `account_viewer_mismatch`.
 - Web login stores the access and refresh credentials in separate HttpOnly
   cookies and rotates them transparently when the access cookie expires.
 - Cookie-authenticated Web requests for account-owned or personalized reads

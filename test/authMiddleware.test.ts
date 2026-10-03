@@ -105,6 +105,62 @@ test('optional personalized reads remain anonymous only without a claimed viewer
     });
 });
 
+test('optional personalized reads reject a presented Bearer token that failed verification', () => {
+    // Optional auth leaves `auth` unset for an expired, revoked, or malformed
+    // token, so the guard sees only the presented Authorization header.
+    for (const requestedViewer of ['listener-1', 'listener-2', undefined]) {
+        const request = requestFor(requestedViewer, 'Bearer expired-token') as AuthenticatedRequest;
+        delete request.auth;
+        const { capture, response } = responseCapture();
+        let proceeded = false;
+        requireCurrentAccountViewerWhenAuthenticated(request, response, () => { proceeded = true; });
+        assert.equal(proceeded, false, `viewer ${String(requestedViewer)} must not read anonymously`);
+        assert.equal(capture.statusCode, 401);
+        assert.deepEqual(capture.body, { message: 'Missing or invalid credentials.' });
+        assert.equal(capture.headers['cache-control'], 'no-store');
+    }
+});
+
+test('optional personalized reads keep verified Bearer and cookie viewer behavior', () => {
+    for (const requestedViewer of ['listener-1', 'listener-2', undefined]) {
+        const { capture, response } = responseCapture();
+        let proceeded = false;
+        requireCurrentAccountViewerWhenAuthenticated(
+            requestFor(requestedViewer, 'Bearer native-token'),
+            response,
+            () => { proceeded = true; }
+        );
+        assert.equal(proceeded, true, `Bearer viewer ${String(requestedViewer)} must proceed`);
+        assert.equal(capture.statusCode, 200);
+    }
+
+    const staleCookie = responseCapture();
+    let staleCookieProceeded = false;
+    requireCurrentAccountViewerWhenAuthenticated(
+        requestFor('listener-2'),
+        staleCookie.response,
+        () => { staleCookieProceeded = true; }
+    );
+    assert.equal(staleCookieProceeded, false);
+    assert.equal(staleCookie.capture.statusCode, 409);
+    assert.equal(
+        (staleCookie.capture.body as { code?: string }).code,
+        'account_viewer_mismatch'
+    );
+
+    // A non-Bearer scheme is not a native credential and keeps the cookie path.
+    const basicAnonymous = requestFor(undefined, 'Basic ignored') as AuthenticatedRequest;
+    delete basicAnonymous.auth;
+    const basic = responseCapture();
+    let basicProceeded = false;
+    requireCurrentAccountViewerWhenAuthenticated(
+        basicAnonymous,
+        basic.response,
+        () => { basicProceeded = true; }
+    );
+    assert.equal(basicProceeded, true);
+});
+
 test('account viewer guard rejects a headerless cookie action', () => {
     const { capture, response } = responseCapture();
     let proceeded = false;
