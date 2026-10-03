@@ -22,6 +22,7 @@ import {
     asyncHandler,
     authAccountRateLimit,
     authConcurrencyLimit,
+    authEmailAccountRateLimit,
     authRateLimit,
     browserRefreshRateLimit,
     requireSecureAuthTransport
@@ -126,24 +127,26 @@ router.put('/signup', (_req, res) => {
     res.setHeader('Allow', 'POST');
     res.status(405).json({ message: 'Use POST /auth/signup.' });
 });
+// Email-code routes resolve the account from the normalized `email`, so their
+// per-account limit runs after validation; see authEmailAccountRateLimit.
 router.post(
     '/signup',
     authRateLimit,
-    authAccountRateLimit,
     authConcurrencyLimit,
     ...emailRegistrationValidation,
+    authEmailAccountRateLimit,
     asyncHandler(register)
 );
-router.post('/email/verify', authRateLimit, authAccountRateLimit, ...emailCodeValidation, asyncHandler(verifyEmail));
-router.post('/email/resend-verification', authRateLimit, authAccountRateLimit, ...emailOnlyValidation, asyncHandler(resendVerification));
-router.post('/password/forgot', authRateLimit, authAccountRateLimit, ...emailOnlyValidation, asyncHandler(forgotPassword));
-router.post('/password/reset', authRateLimit, authAccountRateLimit, authConcurrencyLimit, ...passwordResetValidation, asyncHandler(resetPassword));
+router.post('/email/verify', authRateLimit, ...emailCodeValidation, authEmailAccountRateLimit, asyncHandler(verifyEmail));
+router.post('/email/resend-verification', authRateLimit, ...emailOnlyValidation, authEmailAccountRateLimit, asyncHandler(resendVerification));
+router.post('/password/forgot', authRateLimit, ...emailOnlyValidation, authEmailAccountRateLimit, asyncHandler(forgotPassword));
+router.post('/password/reset', authRateLimit, authConcurrencyLimit, ...passwordResetValidation, authEmailAccountRateLimit, asyncHandler(resetPassword));
 router.post('/apple', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithApple));
 router.post('/google', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithGoogle));
 
 router.get('/signup-web', renderSignupPage);
 
-router.post('/signup-web', requireSameOriginBrowserFormMutation, authRateLimit, authAccountRateLimit, authConcurrencyLimit, signupWebValidation, asyncHandler(signupFromWeb));
+router.post('/signup-web', requireSameOriginBrowserFormMutation, authRateLimit, authConcurrencyLimit, signupWebValidation, authEmailAccountRateLimit, asyncHandler(signupFromWeb));
 
 router.get('/login-web', attachOptionalAuth, renderLoginPage);
 
@@ -160,42 +163,42 @@ router.post(
     '/browser/register',
     requireSameOriginBrowserMutation,
     authRateLimit,
-    authAccountRateLimit,
     authConcurrencyLimit,
     ...emailRegistrationValidation,
+    authEmailAccountRateLimit,
     asyncHandler(register)
 );
 router.post(
     '/browser/email/verify',
     requireSameOriginBrowserMutation,
     authRateLimit,
-    authAccountRateLimit,
     ...emailCodeValidation,
+    authEmailAccountRateLimit,
     asyncHandler(verifyEmail)
 );
 router.post(
     '/browser/email/resend-verification',
     requireSameOriginBrowserMutation,
     authRateLimit,
-    authAccountRateLimit,
     ...emailOnlyValidation,
+    authEmailAccountRateLimit,
     asyncHandler(resendVerification)
 );
 router.post(
     '/browser/password/forgot',
     requireSameOriginBrowserMutation,
     authRateLimit,
-    authAccountRateLimit,
     ...emailOnlyValidation,
+    authEmailAccountRateLimit,
     asyncHandler(forgotPassword)
 );
 router.post(
     '/browser/password/reset',
     requireSameOriginBrowserMutation,
     authRateLimit,
-    authAccountRateLimit,
     authConcurrencyLimit,
     ...passwordResetValidation,
+    authEmailAccountRateLimit,
     asyncHandler(resetPassword)
 );
 

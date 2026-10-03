@@ -54,6 +54,32 @@ export const rateLimit = (
     };
 };
 
+/** Counts one attempt in a per-account window keyed by a digest, never the raw account value. */
+const consumeAccountAttempt = (
+    scope: string,
+    account: string,
+    maximumRequests: number,
+    windowMs: number,
+    res: Response,
+    next: NextFunction
+) => {
+    const digest = crypto.createHash('sha256').update(account, 'utf8').digest('hex');
+    const now = Date.now();
+    const key = `${scope}:${digest}`;
+    const current = windows.get(key);
+    const entry = !current || current.resetsAt <= now
+        ? { count: 0, resetsAt: now + windowMs }
+        : current;
+    entry.count += 1;
+    windows.set(key, entry);
+
+    if (entry.count > maximumRequests) {
+        res.setHeader('Retry-After', Math.max(1, Math.ceil((entry.resetsAt - now) / 1000)));
+        return res.status(429).json({ message: 'Too many requests. Please try again later.' });
+    }
+    return next();
+};
+
 /** Limits credential attempts across IPs without retaining the raw identifier. */
 const accountRateLimit = (
     scope: string,
@@ -67,22 +93,32 @@ const accountRateLimit = (
         if (!identifier) {
             return next();
         }
+        return consumeAccountAttempt(scope, identifier, maximumRequests, windowMs, res, next);
+    };
+};
 
-        const digest = crypto.createHash('sha256').update(identifier, 'utf8').digest('hex');
-        const now = Date.now();
-        const key = `${scope}:${digest}`;
-        const current = windows.get(key);
-        const entry = !current || current.resetsAt <= now
-            ? { count: 0, resetsAt: now + windowMs }
-            : current;
-        entry.count += 1;
-        windows.set(key, entry);
-
-        if (entry.count > maximumRequests) {
-            res.setHeader('Retry-After', Math.max(1, Math.ceil((entry.resetsAt - now) / 1000)));
-            return res.status(429).json({ message: 'Too many requests. Please try again later.' });
+/**
+ * Limits email-code attempts per account across IPs. It keys only on the
+ * `email` field, normalized exactly as the email-auth controllers normalize it
+ * before the account lookup, and ignores `identifier` and `username`.
+ *
+ * Mount it after the route's express-validator chain. That chain rewrites
+ * `req.body.email` with normalizeEmail(), which folds dots, +tags and
+ * googlemail.com into one address. Counting the raw body instead would give
+ * each extra field or address variant a fresh bucket for the same account.
+ */
+const emailAccountRateLimit = (
+    scope: string,
+    maximumRequests: number,
+    windowMs: number
+): RequestHandler => {
+    return (req, res, next) => {
+        const email = String(req.body?.email ?? '').trim().toLowerCase();
+        if (!email) {
+            // No account can be resolved; the controller rejects the request as invalid.
+            return next();
         }
-        return next();
+        return consumeAccountAttempt(scope, email, maximumRequests, windowMs, res, next);
     };
 };
 
@@ -139,7 +175,14 @@ export const asyncHandler = (
 
 export const authRateLimit = rateLimit('auth', 20, 15 * 60_000);
 export const browserRefreshRateLimit = rateLimit('browser-refresh', 120, 15 * 60_000);
+/** Keys login attempts on the submitted `identifier`, falling back to `email` or `username`. */
 export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
+/**
+ * Keys signup, verification and recovery attempts on the validated account email.
+ * It uses the same 'auth-account' scope, so these routes and an identifier
+ * login that submits the same normalized address draw from one budget.
+ */
+export const authEmailAccountRateLimit = emailAccountRateLimit('auth-account', 10, 15 * 60_000);
 export const authConcurrencyLimit = limitConcurrency('auth-password', 2, 20);
 export const publicReadRateLimit = rateLimit('public-read', 120, 60_000);
 /** Bounds substring search work independently of lightweight catalog metadata reads. */

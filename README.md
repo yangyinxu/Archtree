@@ -1014,6 +1014,15 @@ App session endpoints:
 - `DELETE /auth/activity/listening-history`
 - `DELETE /auth/account`
 
+Auth attempts are limited per IP (20 per 15 minutes) and per account (10 per
+15 minutes). Signup, `/auth/signup-web`, email verification, verification
+resend, and password recovery and reset, in both their app and
+`/auth/browser/*` forms, key the account limit on the submitted `email` after
+validation normalizes it, so Gmail dots, `+tag` suffixes and `googlemail.com`
+count as one address and extra `identifier` or `username` fields are ignored.
+Password sign-in keys it on the submitted login identifier, and both kinds of
+route draw from the same budget for the same address.
+
 Account roles:
 
 - Public registration and federated sign-in create ordinary `user` accounts.

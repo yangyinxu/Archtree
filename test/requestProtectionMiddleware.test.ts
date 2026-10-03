@@ -3,6 +3,7 @@ import test from 'node:test';
 import { EventEmitter } from 'node:events';
 
 import {
+    authEmailAccountRateLimit,
     resetRateLimitWindowsForTests,
     uploadRateLimit,
     searchConcurrencyLimit,
@@ -56,6 +57,36 @@ test('account-owned upload mutations retain their hourly abuse-protection quota'
     assert.equal(rejected.capture.headers['RateLimit-Limit'], 20);
     assert.equal(rejected.capture.headers['RateLimit-Remaining'], 0);
     assert.equal(typeof rejected.capture.headers['RateLimit-Reset'], 'number');
+});
+
+test('email account limits key only on the validated email and skip requests without one', () => {
+    resetRateLimitWindowsForTests();
+    const invoke = (body: Record<string, unknown>) => {
+        const { capture, response } = responseCapture();
+        let admitted = false;
+        authEmailAccountRateLimit({ ip: '203.0.113.20', socket: {}, body } as any, response as any, () => {
+            admitted = true;
+        });
+        return { admitted, capture };
+    };
+
+    // A missing email cannot resolve an account, so it neither counts nor is rejected here.
+    for (let index = 0; index < 12; index += 1) {
+        assert.equal(invoke({ identifier: 'lorem.ipsum@example.test', username: 'lorem' }).admitted, true);
+    }
+    for (let index = 0; index < 10; index += 1) {
+        assert.equal(invoke({
+            email: ' Lorem.Ipsum@Example.Test ',
+            identifier: `probe-${index}@example.test`,
+            username: `probe-${index}`
+        }).admitted, true);
+    }
+    const rejected = invoke({ email: 'lorem.ipsum@example.test', identifier: 'fresh@example.test' });
+    assert.equal(rejected.admitted, false);
+    assert.equal(rejected.capture.status, 429);
+    assert.deepEqual(rejected.capture.body, { message: 'Too many requests. Please try again later.' });
+    assert.equal(Number(rejected.capture.headers['Retry-After']) > 0, true);
+    assert.equal(invoke({ email: 'dolor.sit@example.test' }).admitted, true);
 });
 
 test('analysis capacity bounds different administrators independently from upload capacity', () => {
