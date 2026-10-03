@@ -1111,6 +1111,11 @@ The wire protocol and operational bounds are documented in
 - The expanded Library page requires valid authentication and returns `401`
   for missing or expired credentials so clients can refresh their sessions.
 - Expanded public pages such as Home may use optional authentication.
+- A request to an optional-authentication page that presents a Bearer
+  credential which fails verification, such as an expired, revoked, or
+  malformed access token, receives `401` so native clients refresh their
+  session instead of silently receiving anonymous content. Requests without
+  credentials remain anonymous.
 - Cookie-authenticated Web requests for account-owned or personalized data are
   bound to the account identity currently displayed by that tab. A missing or
   stale tab identity fails closed before private data is read or changed;
