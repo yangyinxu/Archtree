@@ -1226,6 +1226,13 @@ Personalized Library:
   or Recently Played and resolve for the viewer requesting an expanded page.
 - Each recent history is capped at 20 mixed-content entries; the full saved
   relationship is retained separately.
+- Library items expose `lastPlayedAt` and `lastActivityAt`. A new save seeds
+  `lastPlayedAt` from the item's Recently Played entry when one is still in
+  the 20-entry history. `DELETE /auth/activity/listening-history` empties
+  Recently Played and, in the same account-fenced transaction, removes
+  `lastPlayedAt` and resets `lastActivityAt` to `savedAt` on that listener's
+  saves. Like Save and Unsave, it fails with 409 instead of writing once the
+  account has been deleted.
 - Expanded page responses include allowlisted resolved Album, MediaTrack, and
   Feed Post documents in an additive `included` payload. Referenced Posts are
   hydrated independently of the default Feed page, so older configured items

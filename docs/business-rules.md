@@ -343,6 +343,12 @@ The wire protocol and operational bounds are documented in
   sorting. Recent Activity uses the newest saved, played, or downloaded event.
   Items without the selected sort event follow items that have one, using a
   deterministic fallback order.
+- Library play times stay consistent with Recently Played. Saving content that
+  is still in Recently Played carries that play into Library sorting, including
+  after an Unsave and re-save. Clearing Recently Played also removes the
+  Library's play times in the same atomic change: Recently Played sorting then
+  treats saved items as unplayed and Recent Activity falls back to their Save
+  time. Saves, Save times, and Recently Saved are unchanged.
 - Completed downloaded content displays a download checkmark in its Library
   row. In-progress, paused, failed, and corrupted content displays its actual
   state rather than the completed checkmark.
@@ -1135,7 +1141,7 @@ The wire protocol and operational bounds are documented in
 - Apple or Google can be unlinked only when another password, provider, or
   passkey method remains available for account recovery.
 - Listeners can clear Recently Played activity without removing saved albums
-  or MediaTracks.
+  or MediaTracks. Clearing also removes those plays from Library sorting.
 - Listener deletion removes saved content, recent activity, Playlists,
   authentication actions, provider identities, and sessions before removing
   the user.

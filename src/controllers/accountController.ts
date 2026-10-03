@@ -1,10 +1,10 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { getDb } from '../infrastructure/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import AuthSession from '../models/authSession';
 import { AuthProvider } from '../models/authIdentity';
 import User from '../models/user';
+import { UserLibrary } from '../models/userLibrary';
 import { recordSecurityEvent } from '../services/securityAuditService';
 import { evaluatePassword } from '../services/passwordPolicyService';
 import { describeSessionDevice } from '../services/deviceSessionService';
@@ -84,13 +84,10 @@ export const changePassword = async (req: Request, res: Response) => {
     return res.status(204).send();
 };
 
-/** Clears listening activity while preserving the user's saved Library. */
+/** Clears listening activity and its Library play times while preserving saved content. */
 export const clearListeningHistory = async (req: Request, res: Response) => {
     const auth = (req as AuthenticatedRequest).auth!;
-    await getDb()!.collection('userActivity').updateOne(
-        { userId: auth.userId },
-        { $set: { recentlyPlayed: [], updatedAt: new Date() } }
-    );
+    await UserLibrary.clearRecentlyPlayed(auth.userId);
     recordSecurityEvent('listening_history_cleared', { userId: auth.userId });
     return res.status(204).send();
 };

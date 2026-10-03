@@ -70,6 +70,10 @@ export class UserLibrary {
             .next());
     }
 
+    /**
+     * Saves one item. A new save inherits the item's play time from Recently Played, so a
+     * play that happened before the save still orders the Library like the history does.
+     */
     static async save(userId: string, contentType: LibraryContentType, contentId: string) {
         const now = new Date();
         await withReadyCatalogItemReferences(
@@ -77,6 +81,11 @@ export class UserLibrary {
             async (session, [reference]) => {
                 await touchActiveAccount(userId, session);
                 const normalizedContentId = String(reference.contentId);
+                // Read inside the account-fenced transaction so a racing clear or play
+                // serializes with this seed instead of reintroducing a cleared play time.
+                const lastPlayedAt = await this.recentlyPlayedAt(
+                    userId, contentType, normalizedContentId, session
+                );
                 await getDb()!.collection(savesCollection).updateOne(
                     { userId, contentType, contentId: normalizedContentId },
                     {
@@ -85,7 +94,8 @@ export class UserLibrary {
                             contentType,
                             contentId: normalizedContentId,
                             savedAt: now,
-                            lastActivityAt: now
+                            ...(lastPlayedAt ? { lastPlayedAt } : {}),
+                            lastActivityAt: lastPlayedAt && lastPlayedAt > now ? lastPlayedAt : now
                         }
                     },
                     { upsert: true, session }
@@ -108,6 +118,28 @@ export class UserLibrary {
             await getDb()!.collection(activityCollection).updateOne(
                 { userId },
                 { $pull: { recentlySaved: { contentType, contentId } } } as any,
+                { session }
+            );
+        });
+    }
+
+    /**
+     * Empties Recently Played and drops the Library play times derived from those plays in
+     * one transaction, so cleared plays stop ordering the Library. Saves, Save times, and
+     * Recently Saved are unchanged.
+     */
+    static async clearRecentlyPlayed(userId: string) {
+        await withActiveAccount(userId, async (session) => {
+            await getDb()!.collection(activityCollection).updateOne(
+                { userId },
+                { $set: { recentlyPlayed: [], updatedAt: new Date() } },
+                { session }
+            );
+            // Downloads are device-local, so without plays the save is the item's newest
+            // server event. Unplayed saves already hold lastActivityAt === savedAt.
+            await getDb()!.collection(savesCollection).updateMany(
+                { userId, lastPlayedAt: { $exists: true } },
+                [{ $set: { lastActivityAt: '$savedAt' } }, { $unset: 'lastPlayedAt' }],
                 { session }
             );
         });
@@ -136,7 +168,8 @@ export class UserLibrary {
                 await touchActiveAccount(userId, session);
                 const normalizedContentId = String(reference.contentId);
                 // Only saved items belong to the server Library. Recent playback history
-                // still records unsaved items through the existing bounded activity list.
+                // still records unsaved items through the existing bounded activity list,
+                // which save() reads to seed the play time if the item is saved later.
                 await getDb()!.collection(savesCollection).updateOne(
                     { userId, contentType, contentId: normalizedContentId },
                     { $set: { lastPlayedAt: now, lastActivityAt: now } },
@@ -386,6 +419,24 @@ export class UserLibrary {
             getDb()!.collection(savesCollection).deleteMany({ userId }),
             getDb()!.collection(activityCollection).deleteMany({ userId })
         ]);
+    }
+
+    /** Returns when one item was last played while it is still in the bounded Recently Played history. */
+    private static async recentlyPlayedAt(
+        userId: string,
+        contentType: LibraryContentType,
+        contentId: string,
+        session: ClientSession
+    ): Promise<Date | null> {
+        const activity = await getDb()!.collection(activityCollection).findOne(
+            { userId },
+            {
+                projection: { _id: 0, recentlyPlayed: { $elemMatch: { contentType, contentId } } },
+                session
+            }
+        );
+        const occurredAt = activity?.recentlyPlayed?.[0]?.occurredAt;
+        return occurredAt instanceof Date && !Number.isNaN(occurredAt.getTime()) ? occurredAt : null;
     }
 
     private static async recordActivity(

@@ -261,6 +261,167 @@ const observeAccountFence = (context: TestContext, userId: string) => {
     return attempted.promise;
 };
 
+/** Reads one listener's stored save row, including fields the Library DTO normalizes away. */
+const findSave = (userId: string, contentType: string, contentId: string) =>
+    getDb()!.collection('userSaves').findOne({ userId, contentType, contentId });
+
+test('saving content already in Recently Played carries that play into Library sorting', async () => {
+    const userId = new ObjectId().toHexString();
+    const playedAlbumId = new ObjectId().toHexString();
+    const unplayedAlbumId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.com` });
+    await getDb()!.collection('albums').insertMany([
+        { _id: new ObjectId(playedAlbumId), title: 'Lorem Played' },
+        { _id: new ObjectId(unplayedAlbumId), title: 'Ipsum Unplayed' }
+    ]);
+
+    await UserLibrary.recordPlayed(userId, 'album', playedAlbumId);
+    const [played] = await UserLibrary.recent(userId, 'recentlyPlayed');
+    await UserLibrary.save(userId, 'album', playedAlbumId);
+    await UserLibrary.save(userId, 'album', unplayedAlbumId);
+
+    const playedSave = await findSave(userId, 'album', playedAlbumId);
+    assert.deepEqual(playedSave?.lastPlayedAt, played.occurredAt);
+    // The save itself is newer than the earlier play, so it leads Recent Activity.
+    assert.deepEqual(playedSave?.lastActivityAt, playedSave?.savedAt);
+    assert.ok(playedSave!.savedAt >= played.occurredAt);
+    const unplayedSave = await findSave(userId, 'album', unplayedAlbumId);
+    assert.equal(unplayedSave?.lastPlayedAt, undefined);
+    assert.deepEqual(unplayedSave?.lastActivityAt, unplayedSave?.savedAt);
+
+    const page = await UserLibrary.list(userId, { sort: 'recentlyPlayed' });
+    assert.deepEqual(page.items.map((item: any) => item.contentId), [playedAlbumId, unplayedAlbumId]);
+    assert.deepEqual(page.items[0].lastPlayedAt, played.occurredAt);
+    assert.equal(page.items[1].lastPlayedAt, null);
+});
+
+test('re-saving after Unsave restores the play time still kept in Recently Played', async () => {
+    const { userId, albumId } = await seedSavedAlbum();
+    await UserLibrary.recordPlayed(userId, 'album', albumId);
+    const [played] = await UserLibrary.recent(userId, 'recentlyPlayed');
+    await UserLibrary.unsave(userId, 'album', albumId);
+
+    await UserLibrary.save(userId, 'album', albumId);
+
+    assert.deepEqual((await findSave(userId, 'album', albumId))?.lastPlayedAt, played.occurredAt);
+});
+
+test('save seeds play time only from the same listener and content type', async () => {
+    const userId = new ObjectId().toHexString();
+    const otherUserId = new ObjectId().toHexString();
+    const albumId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.com` });
+    await getDb()!.collection('albums').insertOne({ _id: new ObjectId(albumId), title: 'Dolor Album' });
+    await getDb()!.collection('userActivity').insertMany([
+        {
+            userId: otherUserId,
+            recentlyPlayed: [{ contentType: 'album', contentId: albumId, occurredAt: new Date('2026-08-01T10:00:00Z') }]
+        },
+        {
+            userId,
+            recentlyPlayed: [{ contentType: 'audioTrack', contentId: albumId, occurredAt: new Date('2026-08-01T10:00:00Z') }]
+        }
+    ]);
+
+    await UserLibrary.save(userId, 'album', albumId);
+
+    const save = await findSave(userId, 'album', albumId);
+    assert.equal(save?.lastPlayedAt, undefined);
+    assert.deepEqual(save?.lastActivityAt, save?.savedAt);
+});
+
+test('clearing Recently Played clears only that listener\'s Library play times', async () => {
+    const { userId, albumId } = await seedSavedAlbum();
+    const otherUserId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(otherUserId), email: `${otherUserId}@example.com` });
+    await UserLibrary.save(otherUserId, 'album', albumId);
+    await UserLibrary.recordPlayed(userId, 'album', albumId);
+    await UserLibrary.recordPlayed(otherUserId, 'album', albumId);
+
+    await UserLibrary.clearRecentlyPlayed(userId);
+
+    const save = await findSave(userId, 'album', albumId);
+    assert.ok(save, 'clearing history must not unsave content');
+    assert.equal(save.lastPlayedAt, undefined);
+    assert.deepEqual(save.lastActivityAt, save.savedAt);
+    assert.deepEqual(await UserLibrary.recent(userId, 'recentlyPlayed'), []);
+    assert.equal((await UserLibrary.recent(userId, 'recentlySaved'))[0].contentId, albumId);
+    const page = await UserLibrary.list(userId, { sort: 'recentActivity' });
+    assert.equal(page.items[0].lastPlayedAt, null);
+    assert.deepEqual(page.items[0].lastActivityAt, save.savedAt);
+
+    const otherSave = await findSave(otherUserId, 'album', albumId);
+    assert.ok(otherSave?.lastPlayedAt instanceof Date);
+    assert.equal((await UserLibrary.recent(otherUserId, 'recentlyPlayed'))[0].contentId, albumId);
+});
+
+for (const failing of [
+    { collection: 'userActivity', method: 'updateOne' },
+    { collection: 'userSaves', method: 'updateMany' }
+] as const) {
+    test(`clearing Recently Played changes nothing when the ${failing.collection} write fails`, async (context) => {
+        const { userId, albumId } = await seedSavedAlbum();
+        await UserLibrary.recordPlayed(userId, 'album', albumId);
+        const before = await findSave(userId, 'album', albumId);
+        const original = Collection.prototype[failing.method];
+        context.mock.method(Collection.prototype, failing.method, function (this: Collection, ...args: any[]) {
+            if (this.collectionName === failing.collection && args[0]?.userId === userId) {
+                return Promise.reject(new Error('Synthetic clear failure'));
+            }
+            return (original as any).apply(this, args);
+        });
+
+        await assert.rejects(UserLibrary.clearRecentlyPlayed(userId), /Synthetic clear failure/);
+
+        context.mock.restoreAll();
+        assert.deepEqual(await findSave(userId, 'album', albumId), before);
+        assert.equal((await UserLibrary.recent(userId, 'recentlyPlayed'))[0].contentId, albumId);
+    });
+}
+
+test('a clear racing an admitted save removes the play time that save seeded', async (context) => {
+    const userId = new ObjectId().toHexString();
+    const albumId = new ObjectId().toHexString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.com` });
+    await getDb()!.collection('albums').insertOne({ _id: new ObjectId(albumId), title: 'Sit Amet Album' });
+    await UserLibrary.recordPlayed(userId, 'album', albumId);
+    const seeded = deferred();
+    const release = deferred();
+    const original = Collection.prototype.updateOne;
+    context.mock.method(Collection.prototype, 'updateOne', async function (this: Collection, ...args: any[]) {
+        const result = await (original as any).apply(this, args);
+        if (this.collectionName === 'userSaves' && args[0]?.userId === userId) {
+            seeded.resolve();
+            await release.promise;
+        }
+        return result;
+    });
+    const save = UserLibrary.save(userId, 'album', albumId);
+    await seeded.promise;
+    const fenceAttempted = observeAccountFence(context, userId);
+    const clear = UserLibrary.clearRecentlyPlayed(userId);
+    try { await fenceAttempted; } finally { release.resolve(); }
+    await Promise.all([save, clear]);
+
+    const stored = await findSave(userId, 'album', albumId);
+    assert.ok(stored);
+    assert.equal(stored.lastPlayedAt, undefined);
+    assert.deepEqual(stored.lastActivityAt, stored.savedAt);
+    assert.deepEqual(await UserLibrary.recent(userId, 'recentlyPlayed'), []);
+});
+
+test('clearing Recently Played for a deleted account rejects without writing', async () => {
+    const userId = new ObjectId().toHexString();
+    await getDb()!.collection('userActivity').insertOne({
+        userId,
+        recentlyPlayed: [{ contentType: 'album', contentId: new ObjectId().toHexString(), occurredAt: new Date() }]
+    });
+
+    await assert.rejects(UserLibrary.clearRecentlyPlayed(userId), AccountReferenceUnavailableError);
+
+    assert.equal((await UserLibrary.recent(userId, 'recentlyPlayed')).length, 1);
+});
+
 test('unsave rolls back the save removal when its activity write fails', async (context) => {
     const { userId, albumId } = await seedSavedAlbum();
     const original = Collection.prototype.updateOne;
