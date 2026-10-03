@@ -214,6 +214,13 @@ test('announces the Social route with its product title', async () => {
   expect(document.title).toBe('Listen together · Finitude');
 });
 
+test('announces the registration completion route by its own title', async () => {
+  renderRoute('/register/complete');
+  expect(await screen.findByText('Finish creating account page')).toBeInTheDocument();
+  expect(document.title).toBe('Finish creating account · Finitude');
+  expect(await screen.findByRole('heading', { level: 1, name: 'This link can’t be used' })).toBeInTheDocument();
+});
+
 test('logs in through the browser session endpoint and returns Home', async () => {
   const user = userEvent.setup();
   const fetchMock = vi.fn(async (path: string) => new Response(JSON.stringify(

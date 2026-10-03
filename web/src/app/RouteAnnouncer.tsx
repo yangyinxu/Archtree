@@ -18,6 +18,7 @@ const titleKeyFor = (pathname: string): MessageKey => {
   if (/^\/artists\/[^/]+$/.test(pathname)) return 'route.title.artist';
   if (/^\/organizations\/[^/]+$/.test(pathname)) return 'route.title.organization';
   if (pathname === '/register') return 'route.title.create_account';
+  if (pathname === '/register/complete') return 'route.title.finish_account';
   if (pathname === '/verify-email') return 'route.title.verify_email';
   if (pathname === '/forgot-password') return 'route.title.forgot_password';
   if (pathname === '/reset-password') return 'route.title.reset_password';

@@ -1,4 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
+import type { z } from 'zod';
 
 import { apiRequest, apiRequestNoContent } from './client';
 import {
@@ -6,15 +7,16 @@ import {
   accountSessionsSchema,
   browserAuthenticationCapabilitiesSchema,
   changePasswordInputSchema,
+  completeRegistrationInputSchema,
   emailActionInputSchema,
-  registerInputSchema,
+  emailLinkAddressSchema,
+  emailLinkTokenInputSchema,
   resetPasswordInputSchema,
-  verificationInputSchema,
   type ChangePasswordInput,
+  type CompleteRegistrationInput,
   type EmailActionInput,
-  type RegisterInput,
-  type ResetPasswordInput,
-  type VerificationInput
+  type EmailLinkTokenInput,
+  type ResetPasswordInput
 } from './accountSchemas';
 
 export const browserAuthenticationCapabilitiesQueryKey = ['auth', 'browser-capabilities'] as const;
@@ -33,37 +35,60 @@ export const browserAuthenticationCapabilitiesQuery = () => queryOptions({
   staleTime: 5 * 60 * 1000
 });
 
-/** Starts verification with a response that is identical for new and existing addresses. */
-export const registerBrowserAccount = (input: RegisterInput) => {
-  const body = registerInputSchema.parse(input);
-  return apiRequest('/auth/browser/register', acceptedAuthenticationActionSchema, {
+/** Posts one validated JSON body to a public browser account endpoint that never refreshes cookies. */
+const postAccountAction = <Output>(path: string, body: unknown, schema: z.ZodType<Output>) => apiRequest(
+  path,
+  schema,
+  { method: 'POST', body: JSON.stringify(body), retryAuthentication: false }
+);
+
+/**
+ * Requests a registration email. The response is identical for every account
+ * state: the email holds either a registration link or an "already registered"
+ * notice, so the page never learns which one was sent.
+ */
+export const requestBrowserRegistration = (input: EmailActionInput) => postAccountAction(
+  '/auth/browser/registration/request',
+  emailActionInputSchema.parse(input),
+  acceptedAuthenticationActionSchema
+);
+
+/** Reads the address a registration link was mailed to without consuming the link. */
+export const inspectBrowserRegistration = (input: EmailLinkTokenInput) => postAccountAction(
+  '/auth/browser/registration/inspect',
+  emailLinkTokenInputSchema.parse(input),
+  emailLinkAddressSchema
+);
+
+/** Creates the verified account from a registration link; it installs no session. */
+export const completeBrowserRegistration = (input: CompleteRegistrationInput) => postAccountAction(
+  '/auth/browser/registration/complete',
+  completeRegistrationInputSchema.parse(input),
+  emailLinkAddressSchema
+);
+
+/** Requests a verification link without revealing whether the address needs one. */
+export const requestBrowserEmailVerification = (input: EmailActionInput) => postAccountAction(
+  '/auth/browser/email-verification/request',
+  emailActionInputSchema.parse(input),
+  acceptedAuthenticationActionSchema
+);
+
+/** Reads the address a verification link would verify without consuming the link. */
+export const inspectBrowserEmailVerification = (input: EmailLinkTokenInput) => postAccountAction(
+  '/auth/browser/email-verification/inspect',
+  emailLinkTokenInputSchema.parse(input),
+  emailLinkAddressSchema
+);
+
+/** Verifies the email after an explicit click; the password and other sessions stay unchanged. */
+export const confirmBrowserEmailVerification = (input: EmailLinkTokenInput) => {
+  const body = emailLinkTokenInputSchema.parse(input);
+  return apiRequestNoContent('/auth/browser/email-verification/confirm', {
     method: 'POST',
     body: JSON.stringify(body),
     retryAuthentication: false
   });
-};
-
-export const verifyBrowserEmail = (input: VerificationInput) => {
-  const body = verificationInputSchema.parse(input);
-  return apiRequestNoContent('/auth/browser/email/verify', {
-    method: 'POST',
-    body: JSON.stringify(body),
-    retryAuthentication: false
-  });
-};
-
-/** Requests another code without allowing the response to enumerate accounts. */
-export const resendBrowserVerification = (input: EmailActionInput) => {
-  const body = emailActionInputSchema.parse(input);
-  return apiRequest(
-    '/auth/browser/email/resend-verification',
-    acceptedAuthenticationActionSchema,
-    {
-      method: 'POST',
-      body: JSON.stringify(body),
-      retryAuthentication: false
-    }
-  );
 };
 
 /** Starts password recovery with the same response for every valid address. */

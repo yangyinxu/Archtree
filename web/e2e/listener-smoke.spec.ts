@@ -11,6 +11,9 @@ test('opens the listener from the Archtree landing page without replacing accoun
   await expect(page.getByRole('link', { name: 'Open Finitude' })).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'Log in' })).toHaveCount(2);
   await expect(page.getByRole('link', { name: 'Create account' })).toHaveCount(2);
+  for (const link of await page.getByRole('link', { name: 'Create account' }).all()) {
+    await expect(link).toHaveAttribute('href', '/finitude/register');
+  }
 
   await page.getByRole('link', { name: 'Open Finitude' }).click();
   await expect(page).toHaveURL(/\/finitude$/);
@@ -25,6 +28,7 @@ test('keeps the landing-page login on the Archtree surface', async ({ page }) =>
   await expect(page).toHaveURL(/\/auth\/login-web$/);
   await expect(page.getByRole('heading', { name: 'Log in to Archtree' })).toBeVisible();
   await expect(page.locator('form[data-browser-session-login]')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Create one' })).toHaveAttribute('href', '/finitude/register');
 });
 
 test('submits the Archtree login through the coordinated session endpoint', async ({ page }) => {

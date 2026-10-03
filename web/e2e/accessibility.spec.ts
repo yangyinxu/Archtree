@@ -42,6 +42,16 @@ const publicPages = [
     ready: (page: Page) => page.getByRole('heading', { name: 'Pick up where the music left you.' })
   },
   {
+    label: 'register',
+    path: '/finitude/register',
+    ready: (page: Page) => page.getByRole('button', { name: 'Send link' })
+  },
+  {
+    label: 'verify-email-request',
+    path: '/finitude/verify-email',
+    ready: (page: Page) => page.getByRole('heading', { name: 'Get a verification link.' })
+  },
+  {
     label: 'account-signed-out',
     path: '/finitude/account',
     ready: (page: Page) => page.getByRole('heading', { name: 'You are not logged in' })
@@ -60,6 +70,37 @@ for (const target of publicPages) {
     await expectNoUnownedAxeViolations(page, target.label);
   });
 }
+
+/** A syntactically valid link token; the mocked inspection decides what the page shows. */
+const mockedLinkToken = 'Abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE';
+
+test('registration completion form has no unowned axe findings', async ({ page }) => {
+  await page.route('**/auth/browser/registration/inspect', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json; charset=utf-8',
+    body: JSON.stringify({ email: 'lorem-listener@example.test' })
+  }));
+  await page.goto(`/finitude/register/complete#token=${mockedLinkToken}`);
+  await expect(page.getByLabel('Display name')).toBeVisible();
+  await expectNoUnownedAxeViolations(page, 'register-complete');
+});
+
+test('invalid registration link state has no unowned axe findings', async ({ page }) => {
+  await page.goto('/finitude/register/complete');
+  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used' })).toBeVisible();
+  await expectNoUnownedAxeViolations(page, 'register-complete-invalid');
+});
+
+test('verification confirmation has no unowned axe findings', async ({ page }) => {
+  await page.route('**/auth/browser/email-verification/inspect', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json; charset=utf-8',
+    body: JSON.stringify({ email: 'ipsum-listener@example.test' })
+  }));
+  await page.goto(`/finitude/verify-email#token=${mockedLinkToken}`);
+  await expect(page.getByRole('button', { name: 'Verify email' })).toBeVisible();
+  await expectNoUnownedAxeViolations(page, 'verify-email-confirm');
+});
 
 test('grouped Search results have no unowned axe findings', async ({ page }) => {
   await page.goto('/finitude/search?q=Night');

@@ -481,3 +481,15 @@
     min-height: var(--control-min-size);
   }
 }
+
+/* A read-only field shows a fixed value, such as the address an emailed link belongs to. */
+.field input[readonly] {
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.panelNotice {
+  margin: 0.9rem auto 0;
+  max-width: 34rem;
+}

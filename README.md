@@ -1038,6 +1038,23 @@ and verification requires an explicit confirm request. All three link emails
 budget of three per normalized address per 15 minutes; requests over it get
 the same response and send nothing (`auth_link_email_suppressed`).
 
+Finitude Web pages for these links:
+
+- `/finitude/register` asks only for an email and shows the same "check your
+  email" status for every address; the form stays available to ask again.
+- `/finitude/register/complete#token=...` captures the token, removes the
+  fragment from the address bar and history entry at once (the token stays
+  only in page memory), and inspects the link. It then shows the address and
+  asks for a display name and password. Success sends the listener to Log in
+  with the address prefilled; it never signs in or changes a signed-in browser
+  session. Invalid, expired or used links offer a new link, and an address that
+  now has an account links to Log in and password recovery.
+- `/finitude/verify-email#token=...` shows the address and verifies it only
+  after **Verify email** is selected, then returns to Log in. Without a token,
+  or after an unusable link, the page offers a non-enumerating request for a
+  new verification link. Log in maps `403 email_verification_required` to a
+  verification message with a link to that request form.
+
 A sign-in that presents a valid credential (password through `/auth/login` or
 `/auth/browser/login`, a passkey assertion, or a linked Apple or Google
 identity) for an unverified account returns

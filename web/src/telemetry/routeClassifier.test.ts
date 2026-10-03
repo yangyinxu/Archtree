@@ -8,10 +8,14 @@ test('reduces dynamic listener URLs to bounded route names', () => {
   expect(classifyListenerRoute('/finitude/playlists')).toBe('playlists');
   expect(classifyListenerRoute('/finitude/playlists/private-playlist-id')).toBe('playlist');
   expect(classifyListenerRoute('/finitude/reset-password/private-token')).toBe('auth');
+  expect(classifyListenerRoute('/finitude/register/complete')).toBe('auth');
+  expect(classifyListenerRoute('/finitude/verify-email')).toBe('auth');
   expect(classifyListenerRoute('/finitude/unrecognized/private-content-id')).toBe('other');
 });
 
 test('maps only allowlisted listener operations and excludes every auth endpoint', () => {
+  expect(classifyApiOperation('/auth/browser/registration/complete', 'POST')).toBeNull();
+  expect(classifyApiOperation('/auth/browser/email-verification/confirm', 'POST')).toBeNull();
   expect(classifyApiOperation('/api/listener/v1/capabilities')).toBe('listener_capabilities');
   expect(classifyApiOperation('/api/listener/v1/search?q=private-term')).toBe('listener_search');
   expect(classifyApiOperation('/api/listener/v1/tracks/private-id')).toBe('listener_track');

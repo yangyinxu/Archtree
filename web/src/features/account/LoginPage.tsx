@@ -13,7 +13,16 @@ import {
 import { Icon } from '../../components/Icon';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import styles from './AccountSurfaces.module.css';
-import { AuthFormFeedback, noticeFromRouteState } from './AuthFormSupport';
+import {
+  AuthFormFeedback,
+  emailFromRouteState,
+  noticeFromRouteState
+} from './AuthFormSupport';
+
+/** Only the server's typed verification-required result gets the verification guidance. */
+export const isEmailVerificationRequired = (error: unknown) => error instanceof ApiError
+  && error.status === 403
+  && error.code === 'email_verification_required';
 
 /** Permits known internal destinations; invitation identifiers never grant redirect authority. */
 export const safeLoginDestination = (state: unknown, query: string) => {
@@ -74,6 +83,8 @@ export const LoginPage = () => {
     session.data?.user.id
   ]);
 
+  const routeNotice = noticeFromRouteState(location.state);
+
   if (session.data) {
     const destination = safeLoginDestination(location.state, location.search);
     const continueInvitation = destination === '/social/invitations' || destination.startsWith('/social/invitations/');
@@ -83,6 +94,8 @@ export const LoginPage = () => {
           <div>
             <span className={styles.panelIcon}><Icon name="account" /></span>
             <h1 className={styles.panelTitle}>{t('auth.login.already_listening', { name: session.data.user.displayName || session.data.user.email })}</h1>
+            {/* A registration or verification for another address finishes here without switching accounts. */}
+            {routeNotice && <p className={`${styles.success} ${styles.panelNotice}`} role="status">{routeNotice}</p>}
             <div className={styles.actions}>
               {continueInvitation && <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => navigate(destination, { replace: true })}>{t('room.invitation_continue')}</button>}
               <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => navigate('/')}>{t('account.common.return_home')}</button>
@@ -93,9 +106,10 @@ export const LoginPage = () => {
     );
   }
 
-  const errorMessage = login.isError ? t('auth.login.error') : '';
-  const verificationRequired = login.error instanceof ApiError && login.error.status === 403;
-  const routeNotice = noticeFromRouteState(location.state);
+  const verificationRequired = isEmailVerificationRequired(login.error);
+  const errorMessage = login.isError
+    ? t(verificationRequired ? 'auth.login.verification_required' : 'auth.login.error')
+    : '';
 
   return (
     <div className={styles.page}>
@@ -124,20 +138,18 @@ export const LoginPage = () => {
             <p className={styles.assistiveAction}>
               <Link
                 className={styles.inlineLink}
-                state={{
-                  email: login.variables?.identifier.includes('@')
-                    ? login.variables.identifier
-                    : undefined
-                }}
+                state={login.variables?.identifier.includes('@')
+                  ? { email: login.variables.identifier.trim() }
+                  : undefined}
                 to="/verify-email"
               >
-                {t('auth.login.verify_prompt')}
+                {t('auth.login.verification_link_prompt')}
               </Link>
             </p>
           )}
           <div className={styles.field}>
             <label htmlFor="login-identifier">{t('account.field.email_or_username')}</label>
-            <input autoComplete="username" id="login-identifier" maxLength={254} name="identifier" required type="text" />
+            <input autoComplete="username" defaultValue={emailFromRouteState(location.state)} id="login-identifier" maxLength={254} name="identifier" required type="text" />
           </div>
           <div className={styles.field}>
             <label htmlFor="login-password">{t('account.field.password')}</label>

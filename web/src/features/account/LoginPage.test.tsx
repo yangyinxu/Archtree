@@ -1,4 +1,5 @@
-import { safeLoginDestination } from './LoginPage';
+import { ApiError } from '../../api/client';
+import { isEmailVerificationRequired, safeLoginDestination } from './LoginPage';
 
 test.each(['/social', '/social/shares', '/finitude/social/shares', '/social/invitations', '/social/invitations/i_abc-123', '/finitude/social/invitations/i_abc-123'])('preserves the narrow internal social continuation %s across login reloads', candidate => {
   expect(safeLoginDestination(undefined, `?returnTo=${encodeURIComponent(candidate)}`)).toBe(candidate.replace(/^\/finitude/, ''));
@@ -17,4 +18,12 @@ test('existing account, catalog and manager destinations keep their allowlisted 
   }
   expect(safeLoginDestination({ from: '/account' }, '?returnTo=%2Fsocial%2Finvitations')).toBe('/account');
   expect(safeLoginDestination({ from: '//evil.example' }, '?returnTo=%2Fsocial%2Finvitations')).toBe('/');
+});
+
+test('only a 403 with the typed verification code counts as verification-required', () => {
+  expect(isEmailVerificationRequired(new ApiError('Verify.', 'http', 403, 'email_verification_required'))).toBe(true);
+  expect(isEmailVerificationRequired(new ApiError('Forbidden.', 'http', 403))).toBe(false);
+  expect(isEmailVerificationRequired(new ApiError('Forbidden.', 'http', 403, 'csrf_rejected'))).toBe(false);
+  expect(isEmailVerificationRequired(new ApiError('Invalid.', 'http', 401, 'email_verification_required'))).toBe(false);
+  expect(isEmailVerificationRequired(new Error('email_verification_required'))).toBe(false);
 });
