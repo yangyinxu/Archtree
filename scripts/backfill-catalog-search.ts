@@ -1,3 +1,5 @@
+// Operational entry point: load the private `.env` before any application module reads configuration.
+import 'dotenv/config';
 import { connectToDatabase, disconnectFromDatabase } from '../src/infrastructure/database';
 import { backfillCatalogSearch } from '../src/services/catalogSearchBackfillService';
 import { catalogSearchCollections, type SearchCollection } from '../src/utils/catalogSearch';

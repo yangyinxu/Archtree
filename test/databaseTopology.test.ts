@@ -67,7 +67,6 @@ test('startup rejects standalone before indexes and closes the unpublished clien
   const originalName = process.env.DB_NAME;
   process.env.DB_CONN_STRING = 'mongodb://127.0.0.1:1';
   process.env.DB_NAME = 'synthetic';
-  t.mock.method(require('dotenv'), 'config', () => ({ parsed: {} }));
   let closed = 0;
   const db = topologyDatabase({ isWritablePrimary: true, maxWireVersion: 25 });
   t.mock.method(MongoClient.prototype, 'connect', async function (this: MongoClient) { return this; });
@@ -90,7 +89,6 @@ test('cached readiness rechecks topology after expiry and recovers without new i
   const originalName = process.env.DB_NAME;
   process.env.DB_CONN_STRING = 'mongodb://127.0.0.1:1';
   process.env.DB_NAME = 'synthetic';
-  t.mock.method(require('dotenv'), 'config', () => ({ parsed: {} }));
   let now = 1_000;
   let hello: Document = replicaSetHello;
   let writes = 0;
@@ -146,7 +144,6 @@ test('receipt collection permission failure closes the unpublished client and le
   const originalName = process.env.DB_NAME;
   process.env.DB_CONN_STRING = 'mongodb://127.0.0.1:1';
   process.env.DB_NAME = 'synthetic';
-  t.mock.method(require('dotenv'), 'config', () => ({ parsed: {} }));
   let closed = 0;
   const db = {
     ...topologyDatabase(replicaSetHello),

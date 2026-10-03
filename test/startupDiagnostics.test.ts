@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MongoClient, MongoNetworkError, MongoParseError, MongoServerError, MongoServerSelectionError } from 'mongodb';
 import { connectToDatabase, getDb } from '../src/infrastructure/database';
@@ -63,7 +66,9 @@ test('diagnostics ignore spoofed payloads and preserve the innermost stage', () 
 test('missing database configuration reports every absent name before connecting', async t => {
   const savedUri = process.env.DB_CONN_STRING;
   const savedName = process.env.DB_NAME;
-  t.mock.method(require('dotenv'), 'config', () => ({ parsed: {} }));
+  // Configuration comes only from process.env: the database module must never read a .env itself.
+  let dotenvLoads = 0;
+  t.mock.method(require('dotenv'), 'config', () => { dotenvLoads++; return { parsed: {} }; });
   let connections = 0;
   t.mock.method(MongoClient.prototype, 'connect', async () => { connections++; throw new Error('must not connect'); });
   try {
@@ -82,6 +87,7 @@ test('missing database configuration reports every absent name before connecting
       });
     }
     assert.equal(connections, 0);
+    assert.equal(dotenvLoads, 0);
     assert.equal(getDb(), null);
   } finally {
     if (savedUri === undefined) delete process.env.DB_CONN_STRING; else process.env.DB_CONN_STRING = savedUri;
@@ -113,4 +119,29 @@ test('real app entry exits once with actionable missing-variable diagnostics and
   assert.ok(Number.isFinite(Date.parse(diagnostic.occurredAt)));
   assert.equal(JSON.stringify(diagnostic).includes('synthetic-private-env-value'), false);
   assert.deepEqual(Object.keys(diagnostic).sort(), ['action', 'category', 'missingVariables', 'occurredAt', 'reason', 'stage']);
+});
+
+test('real app entry still loads .env from its working directory', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'archtree-entry-dotenv-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(join(directory, '.env'), 'DB_NAME=lorem-ipsum-entry-dotenv\n');
+  const preload = fileURLToPath(new URL('./support/startupDatabaseGuardPreload.cjs', import.meta.url));
+  const entry = fileURLToPath(new URL('../src/app.ts', import.meta.url));
+  const tsx = fileURLToPath(new URL('../node_modules/tsx/dist/cli.mjs', import.meta.url));
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_OPTIONS: '', NODE_ENV: 'develop', DB_CONN_STRING: '',
+    JWT_SECRET: '', AWS_ACCESS_KEY_ID: '', AWS_SECRET_ACCESS_KEY: '', AWS_SESSION_TOKEN: '',
+    AWS_EC2_METADATA_DISABLED: 'true' };
+  // The runner points dotenv at the null device; this test needs the entry's default cwd lookup.
+  delete env.DOTENV_CONFIG_PATH;
+  delete env.DB_NAME;
+  const result = spawnSync(process.execPath, ['--require', preload, tsx, '--require', preload, entry], {
+    cwd: directory, env, encoding: 'utf8', timeout: 15_000, windowsHide: true
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 1, result.stderr);
+  const diagnostic = JSON.parse(result.stderr.trim());
+  assert.equal(diagnostic.reason, 'configuration_missing');
+  // DB_NAME came from the sentinel .env; only the variable absent from both sources is reported.
+  assert.deepEqual(diagnostic.missingVariables, ['DB_CONN_STRING']);
+  assert.equal(`${result.stdout}${result.stderr}`.includes('lorem-ipsum-entry-dotenv'), false);
 });

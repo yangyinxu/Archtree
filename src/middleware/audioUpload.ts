@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import multer from 'multer';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';

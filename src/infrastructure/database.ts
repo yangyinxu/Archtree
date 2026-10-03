@@ -1,4 +1,3 @@
-import * as dotenv from 'dotenv';
 import * as mongoDb from 'mongodb';
 import { initializeDatabaseIndexes, verifyRequiredDatabaseIndexes } from './databaseIndexes';
 import { initializeAvatarMutationRecovery } from '../services/avatarMutationService';
@@ -15,12 +14,14 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 };
 
-/** Operational reads can verify existing constraints without implicitly creating collections or indexes. */
+/**
+ * Operational reads can verify existing constraints without implicitly creating collections or indexes.
+ * Configuration comes only from `process.env`; process entry points own `.env` loading so test imports never read it.
+ */
 export const connectToDatabase = async (options: { initializeIndexes?: boolean; logReady?: boolean } = {}): Promise<mongoDb.Db> => {
   let stage: StartupStage = 'configuration';
   let client: mongoDb.MongoClient | undefined;
   try {
-    dotenv.config();
     const missingVariables = (['DB_CONN_STRING', 'DB_NAME'] as const)
       .filter(name => !String(process.env[name] ?? '').trim());
     if (missingVariables.length) throw new MissingStartupConfigurationError(missingVariables);

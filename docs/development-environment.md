@@ -44,8 +44,15 @@ the test daemon does not provide development or production data.
 
 ## Configure application startup
 
-`npm run dev` loads `.env` from the repository working directory, in addition to
-settings already present in the terminal environment. `.env.example` is a
+`npm start`, `npm run dev`, and `npm run dev:auth-rotation` load `.env` from the
+working directory when `src/app.ts` starts as the process entry, before any
+application module reads configuration. Settings already present in the terminal
+environment take precedence. The operational database commands
+`npm run analyze:room-audio`, `npm run backfill:catalog-search`,
+`npm run migrate:catalog-credits`, and `scripts/reconcile-image-versions.ts` load
+it the same way. Application modules never read `.env` themselves, so tests, the
+disposable `npm run demo:social` and `npm run profile:search` commands, and the
+Listener E2E servers do not see private configuration. `.env.example` is a
 template and is never loaded automatically. A passing `npm run doctor` verifies
 the development tools; it does not configure the application database or account
 secrets.
@@ -82,7 +89,8 @@ occupied ports. These diagnostics do not bypass the original startup checks.
 Regression coverage in `test/startupDiagnostics.test.ts` exercises the actual
 `src/app.ts` command entry with environment loading and database connections
 disabled. It checks the exit status, missing-variable list, and secret-safe log
-shape. `test/serverStartup.test.ts` covers successful listening, occupied ports,
+shape, and separately confirms that the entry still reads a `.env` in its working
+directory. `test/serverStartup.test.ts` covers successful listening, occupied ports,
 invalid ports, and application initialization failures.
 
 ## Room audio analysis runtime
@@ -187,6 +195,22 @@ The server test runner fails any single test that runs longer than 120 seconds,
 so a hung test fails the gate instead of stalling it. Pass a different bound
 explicitly when diagnosing a slow test, for example
 `npm run test:server -- --test-timeout=600000`.
+
+The server test runner starts unit, Linux, and integration test processes in an
+isolated environment so a private root `.env` never reaches them. It points
+`DOTENV_CONFIG_PATH` at the null device, so the app and operational script entries
+that tests spawn load nothing, and replaces `DB_CONN_STRING`, `DB_NAME`,
+`JWT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`,
+`S3_BUCKET_NAME`, `AWS_ENDPOINT_URL`, and `AWS_EC2_METADATA_DISABLED` with
+synthetic loopback values, including values exported in the terminal;
+`AWS_SESSION_TOKEN` is removed. An unmocked database or AWS call therefore fails
+against `127.0.0.1:9`. Suites that need real services start their own disposable
+MongoDB and S3-compatible fixtures. Running one file directly with
+`node --import tsx --test` bypasses this environment, so tests that spawn the app
+or script entries can then read a root `.env`. `test/serverTestEnvironment.test.ts`
+fails if a test process can see a value from a sentinel `.env` in its working
+directory, or if any `src/` module other than `src/config/entryEnvironment.ts`
+imports `dotenv`.
 
 `npm run test:server:linux` runs the Linux suites explicitly and rejects other
 hosts. `npm run doctor:release` checks Linux, Bash, Node, MongoDB and FFmpeg. Deployment

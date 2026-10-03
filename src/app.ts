@@ -1,3 +1,5 @@
+// Must stay first: loads `.env` for the `tsx src/app.ts` entry before any module reads configuration.
+import './config/entryEnvironment';
 import express, { Application, type ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 import { configuredTrustProxyHops } from './config/trustProxy';
 import bodyParser from 'body-parser';

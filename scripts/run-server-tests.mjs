@@ -3,6 +3,7 @@ import { globSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { assertLinuxRuntime, assertMongoRuntime, assertNodeRuntime } from './check-runtime.mjs';
 import { serverTestArguments } from './lib/server-test-arguments.mjs';
+import { serverTestEnvironment } from './lib/server-test-environment.mjs';
 
 /** Expands test paths consistently without depending on shell glob support. */
 const run = () => {
@@ -23,8 +24,9 @@ const run = () => {
   if (mode === 'unit' && excluded.length) {
     console.log(`Linux release suites are separate on ${process.platform}: ${excluded.join(', ')}. CI runs these with npm run test:server:linux.`);
   }
+  // Every mode gets the isolated environment: tests run from the root, next to any private .env.
   const child = spawn(process.execPath, serverTestArguments(mode, process.argv.slice(3), files),
-    { cwd: root, stdio: 'inherit', windowsHide: true });
+    { cwd: root, env: serverTestEnvironment(process.env), stdio: 'inherit', windowsHide: true });
   child.once('error', () => { console.error('Could not start the test runner. Run npm ci and retry.'); process.exitCode = 1; });
   child.once('exit', (code, signal) => { process.exitCode = code ?? (signal ? 1 : 0); });
 };
