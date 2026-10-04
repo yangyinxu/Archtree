@@ -76,7 +76,9 @@ export const RoomSongRequests = ({ viewerId, room }: { viewerId: string; room: R
     <section aria-label={t('room.queue')}>
       <h3>{t('room.queue')}</h3>
       {hostController && <p className={styles.muted}>{t('room.queue_current_hint')}</p>}
-      <ol className={`${styles.list} ${styles.queue}`}>{room.queue.map((entry, index) => {
+      {/* The queue scrolls beyond 18rem (sooner at narrow widths, with the current-song label). Its own tab stop
+          keeps it keyboard-scrollable when every row control is disabled, as for an observer or a host-only guest. */}
+      <ol className={`${styles.list} ${styles.queue}`} tabIndex={0} aria-label={t('room.queue')}>{room.queue.map((entry, index) => {
         const requestedBy = data?.queueCredits.find(credit => credit.entryId === entry.entryId)?.requestedBy;
         const requester = requestedBy && profiles.get(requestedBy.socialId);
         const current = entry.entryId === room.timeline?.entryId;
