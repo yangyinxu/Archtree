@@ -25,10 +25,18 @@ class RoomAudio implements PlayerAudio {
   playCalls = 0;
   autoStart = true;
   rejectPlay = false;
+  /** Starts the browser itself interrupts: play is dispatched, then the element pauses and the promise aborts. */
+  interruptPlays = 0;
   listeners = new Map<string, Set<() => void>>();
   async play() {
     this.playCalls += 1;
     if (this.rejectPlay) throw new DOMException('Gesture needed', 'NotAllowedError');
+    if (this.interruptPlays > 0) {
+      this.interruptPlays -= 1;
+      this.paused = false; this.emit('play');
+      this.paused = true; this.emit('pause');
+      throw new DOMException('The play() request was interrupted.', 'AbortError');
+    }
     this.paused = false;
     this.ended = false;
     this.emit('play');
@@ -548,6 +556,62 @@ test('autoplay denial remains paused and needs explicit resync without claiming 
   audio.rejectPlay = false;
   await room.resync();
   expect(store.getSnapshot().status).toBe('playing');
+  store.destroy();
+});
+
+test('an interrupted room start retries from the live anchor instead of staying paused until the next timeline', async () => {
+  vi.useFakeTimers();
+  let clock = 10_000;
+  const { room, audio, store, onIntent, onObservation } = setup(undefined, { now: () => clock });
+  audio.duration = 120; audio.autoStart = false; audio.interruptPlays = 1;
+  const initial = { ...frame(0), status: 'playing' as const, positionSeconds: 5, anchorMonotonicMs: clock, playbackAllowed: true };
+  await room.apply(initial); audio.ready();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(audio.playCalls).toBe(1); expect(audio.paused).toBe(true);
+  expect(store.getSnapshot()).toMatchObject({ status: 'error', error: { code: 'unknown' } });
+  // Native readiness callbacks cannot start a second attempt while the refused one waits for its fenced retry.
+  audio.emit('canplay'); audio.emit('seeked');
+  await vi.advanceTimersByTimeAsync(499); clock += 499;
+  expect(audio.playCalls).toBe(1);
+  clock += 1; await vi.advanceTimersByTimeAsync(1);
+  expect(audio.playCalls).toBe(2); expect(audio.paused).toBe(false);
+  expect(audio.currentTime).toBeCloseTo(5.5, 3);
+  audio.readyState = 4; audio.emit('playing');
+  expect(store.getSnapshot()).toMatchObject({ status: 'playing', error: null });
+  expect(onObservation.mock.calls.filter(([value]) => value.type === 'actual-start')).toHaveLength(1);
+  expect(onIntent).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+  store.destroy();
+});
+
+test('refused room starts retry twice per occurrence, never after a newer timeline, and autoplay refusal waits for resync', async () => {
+  vi.useFakeTimers();
+  let clock = 10_000;
+  const { room, audio, store, onIntent } = setup(undefined, { now: () => clock });
+  audio.duration = 120; audio.interruptPlays = 10;
+  const initial = { ...frame(0), status: 'playing' as const, positionSeconds: 5, anchorMonotonicMs: clock, playbackAllowed: true };
+  await room.apply(initial); audio.ready();
+  for (let index = 0; index < 6; index++) { clock += 500; await vi.advanceTimersByTimeAsync(500); }
+  expect(audio.playCalls).toBe(3); expect(audio.paused).toBe(true); expect(vi.getTimerCount()).toBe(0);
+  // A newer timeline is a new occurrence with its own budget; it cancels a retry that belongs to the old one.
+  const next = { ...initial, revision: initial.revision + 1, playbackEpoch: initial.playbackEpoch + 1, positionSeconds: 20, anchorMonotonicMs: clock };
+  await room.apply(next); await vi.advanceTimersByTimeAsync(0);
+  expect(audio.playCalls).toBe(4); expect(vi.getTimerCount()).toBe(1);
+  await room.apply({ ...next, revision: next.revision + 1, playbackEpoch: next.playbackEpoch + 1, status: 'paused', anchorMonotonicMs: clock });
+  expect(vi.getTimerCount()).toBe(0);
+  clock += 2000; await vi.advanceTimersByTimeAsync(2000);
+  expect(audio.playCalls).toBe(4); expect(audio.paused).toBe(true);
+  // Autoplay refusal never schedules an automatic retry; an explicit resync still starts directly once allowed.
+  audio.interruptPlays = 0; audio.rejectPlay = true;
+  const resumed = { ...initial, revision: next.revision + 2, playbackEpoch: next.playbackEpoch + 2, positionSeconds: 30, anchorMonotonicMs: clock };
+  await room.apply(resumed); await vi.advanceTimersByTimeAsync(0);
+  expect(audio.playCalls).toBe(5);
+  expect(store.getSnapshot()).toMatchObject({ status: 'paused', error: { code: 'autoplayBlocked' } });
+  clock += 5000; await vi.advanceTimersByTimeAsync(5000);
+  expect(audio.playCalls).toBe(5); expect(vi.getTimerCount()).toBe(0);
+  audio.rejectPlay = false;
+  await room.resync();
+  expect(audio.playCalls).toBe(6); expect(audio.paused).toBe(false);
+  expect(onIntent).not.toHaveBeenCalled();
   store.destroy();
 });
 

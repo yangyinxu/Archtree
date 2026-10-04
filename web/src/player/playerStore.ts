@@ -401,7 +401,8 @@ export const createPlayerStore = (
     }
   };
 
-  const attemptPlay = async (expectedSourceGeneration: number): Promise<void> => {
+  /** Resolves the failure of this still-current attempt; pauses, loads and source changes supersede it silently. */
+  const attemptPlay = async (expectedSourceGeneration: number): Promise<PlayerErrorCode | undefined> => {
     if (destroyed || expectedSourceGeneration !== sourceGeneration || !snapshot.currentItem) return;
     const target = ensureAudio();
     if (!target) return;
@@ -427,6 +428,7 @@ export const createPlayerStore = (
         isBuffering: false,
         error: playerError(code)
       });
+      return code;
     }
   };
 
@@ -838,7 +840,10 @@ export const createPlayerStore = (
           await activateIndex(index, false, index);
         },
         updateQueue: updateRoomQueue,
-        play: () => attemptPlay(sourceGeneration),
+        play: async () => {
+          const failure = await attemptPlay(sourceGeneration);
+          return failure === undefined ? undefined : failure === 'autoplayBlocked' ? 'blocked' : 'failed';
+        },
         pause: pauseMedia,
         seek: seekMedia,
         detach: () => { clearQueue(); room = null; observedRoom = null; }

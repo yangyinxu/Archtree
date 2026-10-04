@@ -1155,6 +1155,11 @@ If a queued native play event interrupts an owned seek, pausing clears the
 pending start flag. Seek or metadata completion may resume only the current
 authorized occurrence; local/shared pause, permission loss, source replacement,
 and detachment still prevent resumption.
+A current start that the browser rejects for a reason other than autoplay policy,
+including an interrupted start, does not leave a paused element waiting for the
+next timeline. It retries at most twice per playback occurrence, 500 ms after
+each rejection, seeking to the live anchor first. The same fences cancel those
+retries, and autoplay refusal still waits for explicit resync.
 If the native media element reports a download/decoder error or has no usable
 metadata, explicit resync reinstalls the exact pinned source in the existing
 single player. Overlapping resync gestures share one installation; persistent

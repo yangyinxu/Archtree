@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 
 /** Native event snapshots contain only media state and an allowlisted source identity. */
 type MediaEventDiagnostic = {
-  event: 'canplay' | 'seeked' | 'seeking' | 'ratechange' | 'waiting' | 'playing' | 'pause' | 'error' | 'timeupdate';
+  event: 'loadedmetadata' | 'canplay' | 'seeked' | 'seeking' | 'ratechange' | 'play' | 'waiting' | 'stalled' | 'playing' | 'pause' | 'error' | 'timeupdate';
   trusted: boolean;
   observedAtMs: number;
   capturedAtMs: number;
@@ -24,7 +24,8 @@ export const installMediaEventDiagnostics = (page: Page) => page.addInitScript((
   const records: MediaEventDiagnostic[] = [];
   (window as DiagnosticWindow).__archtreeMediaEventDiagnostics = records;
   const finite = (value: number) => Number.isFinite(value) ? value : null;
-  for (const name of ['canplay', 'seeked', 'seeking', 'ratechange', 'waiting', 'playing', 'pause', 'error', 'timeupdate'] as const) {
+  // `play` shows that a start was dispatched, separating a refused or interrupted start from one never requested.
+  for (const name of ['loadedmetadata', 'canplay', 'seeked', 'seeking', 'ratechange', 'play', 'waiting', 'stalled', 'playing', 'pause', 'error', 'timeupdate'] as const) {
     document.addEventListener(name, event => {
       const target = event.target;
       if (!(target instanceof HTMLMediaElement)) return;

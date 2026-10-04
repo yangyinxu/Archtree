@@ -73,7 +73,8 @@ export interface RoomPlaybackPort {
   sourceGeneration(): number;
   install(queue: readonly PlayerQueueItem[], index: number): Promise<void>;
   updateQueue(queue: readonly PlayerQueueItem[], index: number): void;
-  play(): Promise<void>;
+  /** Names a refused current start; a started or superseded attempt (pause, load, new source) resolves without one. */
+  play(): Promise<'blocked' | 'failed' | void>;
   pause(): void;
   seek(position: number): boolean;
   detach(): void;
@@ -105,6 +106,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let seekTarget = 0;
   let seekFailed = false;
   let playRequested = false;
+  // A refused start would otherwise leave playRequested set on a paused element until the next timeline change.
+  let startRetry: ReturnType<typeof setTimeout> | undefined;
+  let startRetryBudget: { occurrence: string; attempts: number } | undefined;
   let firstProgress: { position: number; monotonicMs: number; seeking: boolean } | undefined;
   // The dispatch clock measures seek cost; seeked only establishes a separate proof-of-progress baseline.
   let postSeek: { occurrence: string; effect: number; source: number; target: number; dispatchedAt: number;
@@ -148,9 +152,11 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     clearTimeout(scheduled);
     clearTimeout(correction);
     clearTimeout(decoderRecovery);
+    clearTimeout(startRetry);
     scheduled = undefined;
     correction = undefined;
     decoderRecovery = undefined;
+    startRetry = undefined;
     playRequested = false;
     firstProgress = undefined;
     clearPostSeek();
@@ -348,7 +354,31 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     if (playRequested || (!target.paused && !target.ended)) return;
     playRequested = true;
     firstProgress = { position: target.currentTime, monotonicMs: now(), seeking: false };
-    await port.play();
+    const expectedEffect = effect;
+    // Autoplay refusal keeps waiting for an explicit resync; a pause, load or new source supersedes without a result.
+    if (await port.play() !== 'failed' || detached || effect !== expectedEffect || !playRequested) return;
+    firstProgress = undefined;
+    retryStart();
+  };
+
+  /** A refused start retries twice per occurrence from the live anchor; beyond that it waits, as before, for a new timeline or resync. */
+  const retryStart = () => {
+    const key = occurrence();
+    if (!key || startRetry !== undefined) return;
+    if (startRetryBudget?.occurrence !== key) startRetryBudget = { occurrence: key, attempts: 0 };
+    if (startRetryBudget.attempts >= 2) return;
+    startRetryBudget.attempts += 1;
+    const expectedEffect = effect, expectedSource = source;
+    startRetry = setTimeout(() => {
+      startRetry = undefined;
+      const target = port.media();
+      if (!state || detached || effect !== expectedEffect || source !== expectedSource || occurrence() !== key
+        || !target || !target.paused || !hasMetadata(target) || desiredPosition() >= target.duration - 0.35) return;
+      playRequested = false;
+      // The refused start left the decoder behind the anchor; seek once before starting, as a late scheduled start does.
+      needsSeek = true;
+      void reconcile();
+    }, 500);
   };
 
   const intent = (action: RoomPlaybackAction): boolean => {
