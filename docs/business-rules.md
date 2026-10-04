@@ -96,7 +96,18 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - The first backend release permits at most 500 friends, 50 combined incoming and
   outgoing pending requests, 1,000 owned blocks and 2,048 retained relationship
   pairs per account. Existing-pair safety operations remain possible at the pair
-  limit. New requests also have sender and recipient abuse limits.
+  limit. New requests also have sender and recipient abuse limits per UTC day:
+  - A listener can send at most 50 friend requests per day, and at most 3 of
+    them to the same listener.
+  - A listener can receive requests from at most 100 different listeners per
+    day. More requests that day from a listener already counted use no more of
+    this allowance, so one sender cannot use it up for everyone else.
+  - Every request sent counts, even if it is later cancelled, declined or
+    accepted, so cancelling and re-sending cannot get around these limits.
+    Repeating a request that is still pending, or a request that is rejected,
+    does not count.
+  - A request over any limit is rejected without being created, and the
+    rejection does not say which limit applied.
 - Every durable social action uses its original server-issued mutation scope and
   command ID. Identical retries return a status-only outcome and never restore
   revoked access. Reusing the identity with a different action fails. Expired

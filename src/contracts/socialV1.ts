@@ -1,10 +1,15 @@
 import { isMusicShareId, type MusicShareAction, type MusicShareDirection, type MusicSharePage } from './socialMusicV1';
 import type { ListeningAction, OwnListeningState, ListeningReport, ListeningReportResult, FriendListeningStatus } from './listeningV1';
 
-/** Additive social-v1 contract; no private User or listener-v1 DTO is reused. */
+/**
+ * Additive social-v1 contract; no private User or listener-v1 DTO is reused.
+ * Friend-request day budgets: `outgoingPerDay` caps the requests one sender sends, `pairRequestsPerDay`
+ * caps one sender's requests to the same listener, and `incomingPerDay` caps the distinct senders that
+ * may reach one recipient. Sent requests are never refunded, so request-then-cancel loops stay bounded.
+ */
 export const SOCIAL_LIMITS = Object.freeze({ friends: 500, pending: 50, blocks: 1_000,
     edges: 2_048, receipts: 1_000, safetyReceipts: 128, scopesPerDay: 24, commandsPerMinute: 30, readsPerMinute: 120,
-    incomingPerDay: 100, page: 20, maximumPage: 50, scopeMs: 86_400_000,
+    incomingPerDay: 100, outgoingPerDay: 50, pairRequestsPerDay: 3, page: 20, maximumPage: 50, scopeMs: 86_400_000,
     receiptGraceMs: 3_600_000, handleReservationMs: 30 * 86_400_000, reportsPerDay: 10, reportNoteLength: 500 });
 
 /** Report reasons are a closed list so moderation views never render caller-chosen categories. */

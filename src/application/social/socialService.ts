@@ -236,7 +236,8 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
             _id: id, accountIds, socialIds: accountIds.map(accountId => accountId === actor.userId ? current._id : target._id),
             state: 'none', blockedBy: [], revision: 0, updatedAt: new Date(now())
         };
-        let consumeIncoming = false;
+        // Day budgets a new request spends; `incoming` is null when this sender already reached the recipient today.
+        let requestBudget: { day: number; outgoing: number; incoming: number | null } | undefined;
         if (command.action === 'block') {
             if (edge.blockedBy.includes(actor.userId)) return emptyPlan();
             await capacity(actor.userId, session, 'blocks');
@@ -252,11 +253,28 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 if (edge.state === 'accepted' || (edge.state === 'pending' && edge.requestedBy === actor.userId)) return emptyPlan();
                 if (edge.state === 'pending') throw new SocialError(409, 'request_pending');
                 if (!target.discoverable) throw new SocialError(404, 'profile_unavailable');
+                const day = Math.floor(now() / SOCIAL_LIMITS.scopeMs);
+                const side = edge.accountIds.indexOf(actor.userId);
+                const pairCounts = edge.requestDay === day && edge.requestCounts?.length === 2 ? [...edge.requestCounts] : [0, 0];
+                // A sent request is spent even if it is later cancelled or declined, so a request-then-cancel
+                // loop runs out of both the per-pair and the per-sender allowance instead of cycling forever.
+                if (pairCounts[side] >= SOCIAL_LIMITS.pairRequestsPerDay) throw new SocialError(429, 'social_limit');
+                const sender = await budgets().findOne({ _id: actor.userId }, { session });
+                const outgoing = sender?.outgoingDay === day ? sender.outgoing ?? 0 : 0;
+                if (outgoing >= SOCIAL_LIMITS.outgoingPerDay) throw new SocialError(429, 'social_limit');
                 await capacity(actor.userId, session, 'pending');
                 await capacity(target.accountId, session, 'pending');
-                const budget = await budgets().findOne({ _id: target.accountId }, { session });
-                if (budget?.incomingDay === Math.floor(now() / SOCIAL_LIMITS.scopeMs) && (budget.incoming ?? 0) >= SOCIAL_LIMITS.incomingPerDay) throw new SocialError(429, 'social_limit');
-                consumeIncoming = true;
+                // The recipient's allowance counts distinct senders per day: a repeat request from a sender
+                // already counted today is not charged again, so one sender cannot drain it for everyone else.
+                let incoming: number | null = null;
+                if (!pairCounts[side]) {
+                    const recipient = await budgets().findOne({ _id: target.accountId }, { session });
+                    incoming = recipient?.incomingDay === day ? recipient.incoming ?? 0 : 0;
+                    if (incoming >= SOCIAL_LIMITS.incomingPerDay) throw new SocialError(429, 'social_limit');
+                }
+                pairCounts[side] += 1;
+                edge.requestDay = day; edge.requestCounts = pairCounts;
+                requestBudget = { day, outgoing: outgoing + 1, incoming: incoming === null ? null : incoming + 1 };
                 edge.state = 'pending'; edge.requestedBy = actor.userId;
             } else if (command.action === 'accept') {
                 if (edge.state !== 'pending' || edge.requestedBy === actor.userId) throw new SocialError(409, 'relationship_unavailable');
@@ -284,11 +302,11 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
         return { outcome: 'applied', affected: [actor.userId, target.accountId], write: async () => {
             await relationships().replaceOne({ _id: edge._id }, edge, { upsert: true, session });
             await retainRelationshipRevision(accountIds, edge.revision, session);
-            if (consumeIncoming) {
-                const previous = await budgets().findOne({ _id: target.accountId }, { session });
-                const day = Math.floor(now() / SOCIAL_LIMITS.scopeMs);
-                await budgets().updateOne({ _id: target.accountId }, { $set: { accountId: target.accountId, incomingDay: day,
-                    incoming: previous?.incomingDay === day ? (previous.incoming ?? 0) + 1 : 1 } }, { upsert: true, session });
+            if (requestBudget) {
+                const { day, outgoing, incoming } = requestBudget;
+                await budgets().updateOne({ _id: actor.userId }, { $set: { accountId: actor.userId, outgoingDay: day, outgoing } }, { upsert: true, session });
+                if (incoming !== null) await budgets().updateOne({ _id: target.accountId },
+                    { $set: { accountId: target.accountId, incomingDay: day, incoming } }, { upsert: true, session });
             }
         } };
     };

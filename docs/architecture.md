@@ -98,6 +98,18 @@ are mutation preconditions, not item counts or continuous client event sequences
 Cursor signatures bind the viewer and list kind for 15 minutes. Each page freshly
 projects visible rows in opaque social-ID order; it is not a retained list snapshot.
 
+A request that would create a pending row spends three UTC-day budgets in the
+same transaction. The pair row's `requestDay`/`requestCounts` (aligned with
+`accountIds`) allow 3 requests per direction; the sender's
+`socialBudgets.outgoingDay/outgoing` allows 50; the recipient's
+`incomingDay/incoming` allows 100 and is charged only by the sender's first
+request to that recipient that day. Cancel, decline and later transitions keep
+the pair counters, and a `none` tombstone expires 25 hours after its last change,
+so it outlives the day it counts. Account deletion removes both the pair rows and
+the budget row. An exhausted budget is a durable `rejected` `social_limit` that
+writes no pair or budget change; a noop repeat and a rejected request spend
+nothing.
+
 ### Reports and administrator suspension
 
 `POST /reports` captures `{action: 'report', targetSocialId, reason, note}`.

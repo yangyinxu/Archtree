@@ -10,7 +10,7 @@ import {
 import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import AuthSession from '../src/models/authSession';
 import type {
-    SocialHandleDocument, SocialProfileDocument, SocialReceiptDocument, SocialRelationshipDocument
+    SocialBudgetDocument, SocialHandleDocument, SocialProfileDocument, SocialReceiptDocument, SocialRelationshipDocument
 } from '../src/repositories/social/socialDocuments';
 import { MongoReplicaSetHarness, startMongoReplicaSet } from './support/mongoReplicaSet';
 
@@ -624,6 +624,92 @@ test('recipient daily incoming budget rejects before creating another request', 
     assert.equal(rejected.outcome, 'rejected');
     assert.equal(rejected.code, 'social_limit');
     assert.equal(await getDb()!.collection('socialRelationships').countDocuments({}), 0);
+});
+
+/** Friend-request day budgets: per sender, per sender-recipient pair, and distinct senders per recipient. */
+const budgetRow = (identity: Member) =>
+    getDb()!.collection<SocialBudgetDocument>('socialBudgets').findOne({ _id: identity.actor.userId });
+const pairRevision = async (from: Member, to: Member) => (await service.relationship(from.actor, to.profile.socialId))!.revision;
+const pairCount = (a: Member, b: Member) => getDb()!.collection('socialRelationships')
+    .countDocuments({ accountIds: { $all: [a.actor.userId, b.actor.userId] } });
+const answer = async (from: Member, to: Member, action: 'cancel' | 'decline') =>
+    service.mutate(from.actor, command(from.scope, { action, targetSocialId: to.profile.socialId, expectedRevision: await pairRevision(from, to) }));
+const today = () => Math.floor(now / SOCIAL_LIMITS.scopeMs);
+
+test('a request-then-cancel loop stops at the pair cap and charges the recipient once per day', async () => {
+    const alice = await member('alice');
+    const bob = await member('bobby');
+    for (let cycle = 0; cycle < SOCIAL_LIMITS.pairRequestsPerDay; cycle += 1) {
+        assert.equal((await request(alice, bob, await pairRevision(alice, bob))).outcome, 'applied');
+        if (cycle === 0) {
+            // Repeating a still-pending request and a stale request spend no allowance.
+            assert.equal((await request(alice, bob, await pairRevision(alice, bob))).outcome, 'noop');
+            assert.equal((await request(alice, bob, 0)).code, 'relationship_changed');
+            assert.equal((await budgetRow(alice))?.outgoing, 1);
+        }
+        assert.equal((await answer(alice, bob, 'cancel')).outcome, 'applied');
+    }
+    const capped = await request(alice, bob, await pairRevision(alice, bob));
+    assert.equal(capped.outcome, 'rejected');
+    assert.equal(capped.code, 'social_limit');
+    assert.equal((await service.relationship(alice.actor, bob.profile.socialId))?.state, 'none');
+    // Cancelling refunded nothing, and the recipient counted alice only once.
+    assert.equal((await budgetRow(alice))?.outgoing, SOCIAL_LIMITS.pairRequestsPerDay);
+    assert.deepEqual([(await budgetRow(bob))?.incomingDay, (await budgetRow(bob))?.incoming], [today(), 1]);
+
+    // The cap is directional, and a decline refunds nothing either.
+    assert.equal((await request(bob, alice, await pairRevision(bob, alice))).outcome, 'applied');
+    assert.equal((await answer(alice, bob, 'decline')).outcome, 'applied');
+    assert.equal((await budgetRow(bob))?.outgoing, 1);
+    assert.equal((await budgetRow(alice))?.incoming, 1);
+
+    // The next UTC day starts every allowance over; the 24-hour scope must be reissued.
+    now += SOCIAL_LIMITS.scopeMs;
+    alice.scope = await service.issueScope(alice.actor);
+    assert.equal((await request(alice, bob, await pairRevision(alice, bob))).outcome, 'applied');
+    assert.deepEqual([(await budgetRow(alice))?.outgoingDay, (await budgetRow(alice))?.outgoing], [today(), 1]);
+    assert.deepEqual([(await budgetRow(bob))?.incomingDay, (await budgetRow(bob))?.incoming], [today(), 1]);
+});
+
+test('the sender daily budget spans recipients and rejects without charging or creating anything', async () => {
+    const alice = await member('alice');
+    const bob = await member('bobby');
+    const carol = await member('carol');
+    await getDb()!.collection<SocialBudgetDocument>('socialBudgets').updateOne({ _id: alice.actor.userId },
+        { $set: { outgoingDay: today(), outgoing: SOCIAL_LIMITS.outgoingPerDay - 1 } });
+    assert.equal((await request(alice, bob)).outcome, 'applied');
+    assert.equal((await answer(alice, bob, 'cancel')).outcome, 'applied');
+    const rejected = await request(alice, carol);
+    assert.equal(rejected.outcome, 'rejected');
+    assert.equal(rejected.code, 'social_limit');
+    assert.equal(await pairCount(alice, carol), 0);
+    assert.equal((await budgetRow(carol))?.incoming, undefined);
+    assert.equal((await budgetRow(alice))?.outgoing, SOCIAL_LIMITS.outgoingPerDay);
+    // Other listeners can still reach the same recipient.
+    assert.equal((await request(bob, carol)).outcome, 'applied');
+
+    now += SOCIAL_LIMITS.scopeMs;
+    alice.scope = await service.issueScope(alice.actor);
+    assert.equal((await request(alice, carol)).outcome, 'applied');
+    assert.deepEqual([(await budgetRow(alice))?.outgoingDay, (await budgetRow(alice))?.outgoing], [today(), 1]);
+});
+
+test('a used-up recipient allowance still admits a repeat from a counted sender but no new sender', async () => {
+    const alice = await member('alice');
+    const bob = await member('bobby');
+    const carol = await member('carol');
+    assert.equal((await request(alice, bob)).outcome, 'applied');
+    assert.equal((await answer(alice, bob, 'cancel')).outcome, 'applied');
+    await getDb()!.collection<SocialBudgetDocument>('socialBudgets').updateOne({ _id: bob.actor.userId },
+        { $set: { incomingDay: today(), incoming: SOCIAL_LIMITS.incomingPerDay } });
+    assert.equal((await request(alice, bob, await pairRevision(alice, bob))).outcome, 'applied');
+    assert.equal((await budgetRow(bob))?.incoming, SOCIAL_LIMITS.incomingPerDay);
+    const rejected = await request(carol, bob);
+    assert.equal(rejected.outcome, 'rejected');
+    assert.equal(rejected.code, 'social_limit');
+    assert.equal(await pairCount(carol, bob), 0);
+    assert.equal((await budgetRow(carol))?.outgoing, undefined);
+    assert.equal((await budgetRow(bob))?.incoming, SOCIAL_LIMITS.incomingPerDay);
 });
 
 test('retained receipt cap is account-scoped and expired receipt cleanup frees capacity', async () => {

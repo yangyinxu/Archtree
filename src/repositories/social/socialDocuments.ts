@@ -13,11 +13,17 @@ export interface SocialProfileDocument {
     active: boolean; discoverable: boolean; revision: number; updatedAt: Date;
     suspension?: SocialSuspension;
 }
-/** Canonical unordered pair, with independent directional blocks and a request incarnation. */
+/**
+ * Canonical unordered pair, with independent directional blocks and a request incarnation.
+ * `requestCounts` (aligned with `accountIds`) records how many requests each side sent on UTC day
+ * `requestDay`. Cancel, decline and every other transition keep it, and a `none` tombstone outlives the
+ * day, so cycling a request cannot reset the per-pair cap or re-charge the recipient's daily budget.
+ */
 export interface SocialRelationshipDocument {
     _id: string; accountIds: string[]; socialIds: string[];
     state: 'none' | 'pending' | 'accepted'; requestedBy?: string;
     blockedBy: string[]; revision: number; updatedAt: Date; expiresAt?: Date;
+    requestDay?: number; requestCounts?: number[];
 }
 /** Status-only receipts retain no peer identity or replayable private projection. */
 export interface SocialReceiptDocument {
@@ -30,6 +36,7 @@ export interface SocialOutboxDocument { _id: string; accountId: string; revision
 export interface SocialBudgetDocument {
     _id: string; accountId: string; scopeDay?: number; scopes?: number;
     commandMinute?: number; commands?: number; incomingDay?: number; incoming?: number;
+    outgoingDay?: number; outgoing?: number;
     relationshipRevision?: number;
     readMinute?: number; reads?: number;
     musicIncomingDay?: number; musicIncoming?: number;
