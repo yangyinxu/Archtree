@@ -12,6 +12,7 @@
     "test:e2e": "playwright test",
     "test:e2e:chromium": "playwright test --project=chromium",
     "test:e2e:social": "playwright test --config playwright.social.config.ts",
+    "test:e2e:social:quarantined": "playwright test --config playwright.social-quarantine.config.ts",
     "test:soak:rooms": "playwright test --config playwright.soak.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",

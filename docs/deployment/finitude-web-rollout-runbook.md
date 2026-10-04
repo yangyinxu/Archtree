@@ -67,7 +67,13 @@ room recovery, invitations, song requests, music shares, room interactions,
 listening status, catalog room entry, and compressed-audio formats. Once the
 browser environment is ready, the ordinary browser/visual gate runs even if a
 social assertion failed so both suites retain diagnostic evidence. Both gates must pass before artifact staging. Their traces and failure
-screenshots remain under the retained `web/test-results` evidence.
+screenshots remain under the retained `web/test-results` evidence. The blocking
+social gate excludes the quarantined `firefox-audio-formats` and
+`webkit-audio-formats` projects. CI runs them afterwards in a non-blocking step
+(locally on Linux:
+`CI=1 xvfb-run -a npm run test:e2e:social:quarantined --workspace @archtree/finitude-web`),
+and rooms stay off in production until they return to the gate (see the
+[social rollout runbook](social-rollout-runbook.md#quarantined-cross-engine-audio-drift-blocks-enabling-rooms)).
 
 Local staging requires a clean committed worktree so `RELEASE.json` cannot
 misidentify uncommitted bytes. CI supplies the immutable source identity

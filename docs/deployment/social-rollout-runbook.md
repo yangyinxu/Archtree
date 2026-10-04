@@ -202,10 +202,58 @@ On the Atlas side, watch the cluster's operation counters, connections and
    listener's account or data for smoke tests.
 4. Optionally rehearse locally with `npm run build` and `npm run demo:social`,
    which uses its own MongoDB and fixtures.
+5. **Prerequisite for `FINITUDE_ROOMS_ENABLED=true`:** the quarantined
+   cross-engine audio drift projects must be stable and back in the blocking
+   release gate (next section). Until then, enable at most
+   `FINITUDE_SOCIAL_ENABLED` (social without rooms).
+
+### Quarantined cross-engine audio drift (blocks enabling rooms)
+
+The release workflow's `social-e2e` job runs every social browser project in its
+blocking step except `firefox-audio-formats` and `webkit-audio-formats`. Those
+two run the
+[compressed-audio room scenario](../../web/e2e-social/audio-formats.spec.ts) in
+Firefox and WebKit with real Linux decoders, and they fail intermittently with
+different timing symptoms:
+
+- [`expectPlaying`](../../web/e2e-social/audio-formats.spec.ts#L99) saw no
+  playing media element. Commit `4edc79c` fixed one root cause, a source whose
+  metadata reported a zero duration and was never reloaded.
+- After a seek, the host's `playbackGeneration` stayed at the previous value
+  instead of advancing by one
+  ([line 261](../../web/e2e-social/audio-formats.spec.ts#L261); CI saw 4, not 5).
+- Within the 10-second deadline, the synchronization poll never saw both
+  members' clocks advancing smoothly for more than a second in samples captured
+  within 50 ms of each other
+  ([`expectSynchronized`, line 184](../../web/e2e-social/audio-formats.spec.ts#L184)).
+
+`chromium-audio-formats` and every other project, including
+`firefox-rooms-recovery` and `webkit-rooms-recovery`, stay blocking. Each CI
+attempt still runs the quarantined pair in a separate `continue-on-error` step
+after the gate. The step summary and a warning annotation report the outcome as
+non-blocking. Their traces, screenshots and drift evidence are in the
+`social-quarantined/` folder of the `finitude-social-browser-evidence` artifact.
+Their result never fails the job or enters release provenance. To reproduce on
+Linux with an isolated audio sink:
+`CI=1 xvfb-run -a npm run test:e2e:social:quarantined --workspace @archtree/finitude-web`.
+
+Before rooms are enabled in production:
+
+1. Find and fix each remaining cause; do not widen tolerances or add retries
+   to hide drift.
+2. Remove the projects from `quarantinedSocialProjects` in
+   `web/playwright.social.config.ts`, so the blocking step runs them again.
+   Remove the non-blocking workflow step with them, and update
+   `test/socialBrowserConfig.test.ts` and
+   `test/finitudeWebReleaseWorkflow.test.ts`.
+3. Record consecutive passing `main` and pull-request runs of the blocking
+   gate with both projects in the evidence record.
 
 ## 2. Enable for testing
 
 1. Pick a quiet window and record the start time, owner and stop conditions.
+   Confirm the cross-engine audio drift projects are back in the blocking gate
+   (section 1, step 5); otherwise do not set `FINITUDE_ROOMS_ENABLED`.
 2. Set `FINITUDE_SOCIAL_ENABLED=true` and `FINITUDE_ROOMS_ENABLED=true` in one
    update. To test social without rooms, set only social to `true`.
 3. After the environment is **Ok**, verify `/health` `rooms.enabled: true`,
@@ -281,6 +329,7 @@ resumes by itself. Repeat the checks in section 2, step 3.
 | Field | Required value |
 | --- | --- |
 | Release | `RELEASE.json` commit and environment version |
+| Cross-engine audio gate | Before enabling rooms: the change returning `firefox-audio-formats` and `webkit-audio-formats` to the blocking gate, and the passing run links |
 | Flags | Values before and after each change, time and owner |
 | Enablement | `/health` rooms snapshot, probe result, smoke-test result, `social_capacity_config` line |
 | Kill switch rehearsal | Restart time, time to pause, time to `inactive`, probe result, social reads with rooms off |

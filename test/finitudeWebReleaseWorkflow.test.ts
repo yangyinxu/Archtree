@@ -120,3 +120,49 @@ test('browser evidence is retained even when a browser gate fails', async () => 
     assert.match(step, /if: \$\{\{ !cancelled\(\)/, `${artifact} must upload after a failed gate`);
   }
 });
+
+/** Splits one job block into its steps; each step starts with `- name:` at six spaces. */
+const stepBlocks = (job: string) => job.split(/^ {6}- name: /m).slice(1).map(step => ({ name: step.split('\n')[0], body: step }));
+
+test('only the quarantined cross-engine audio projects run outside the blocking social gate', async () => {
+  const jobs = jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n'));
+  const social = jobs.get('social-e2e')!;
+  const steps = stepBlocks(social);
+  const gate = steps.find(step => /^ {8}id: social$/m.test(step.body));
+  const quarantined = steps.find(step => /^ {8}id: social_quarantined$/m.test(step.body));
+  assert.ok(gate && quarantined, 'social-e2e must keep the blocking gate step and the quarantined step.');
+  assert.ok(gate.body.includes('run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web\n'));
+  assert.doesNotMatch(gate.body, /continue-on-error|^ {8}if:/m, 'The blocking social step must fail the job.');
+  assert.ok(steps.indexOf(gate) < steps.indexOf(quarantined));
+  assert.ok(quarantined.body.includes('run: xvfb-run -a npm run test:e2e:social:quarantined --workspace @archtree/finitude-web\n'));
+  assert.match(quarantined.body, /^ {8}continue-on-error: true$/m);
+  // It runs after a failed gate too, so its evidence exists whenever the browser environment does.
+  assert.match(quarantined.body, /^ {8}if: \$\{\{ !cancelled\(\) && steps\.browser_environment\.outcome == 'success' \}\}$/m);
+  assert.match(quarantined.name, /quarantined.*non-blocking/i);
+  // No other step in any gate job may ignore its own failure.
+  for (const name of gateJobs) {
+    for (const step of stepBlocks(jobs.get(name)!)) {
+      if (step.body !== quarantined.body) assert.doesNotMatch(step.body, /continue-on-error/, `${name}: ${step.name} must stay blocking`);
+    }
+  }
+  // Release provenance records only the blocking social outcome.
+  assert.match(social, /^ {6}social: \$\{\{ steps\.social\.outcome \}\}$/m);
+  assert.doesNotMatch(social, /^ {6}[a-z0-9_]+: \$\{\{ steps\.social_quarantined\./m);
+  assert.doesNotMatch(jobs.get('release-artifact')!, /quarantined/);
+});
+
+test('the quarantined social result is announced as non-blocking and its evidence is retained', async () => {
+  const steps = stepBlocks(jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n')).get('social-e2e')!);
+  const report = steps.find(step => step.body.includes('steps.social_quarantined.outcome }}'));
+  assert.ok(report, 'A step must report the quarantined outcome.');
+  assert.match(report.body, /^ {8}if: \$\{\{ !cancelled\(\) && steps\.social_quarantined\.outcome != 'skipped' \}\}$/m);
+  assert.ok(report.body.includes('>> "$GITHUB_STEP_SUMMARY"'));
+  assert.ok(report.body.includes('::warning title=Quarantined social projects'));
+  for (const project of ['firefox-audio-formats', 'webkit-audio-formats', 'non-blocking', 'FINITUDE_ROOMS_ENABLED']) {
+    assert.ok(report.body.includes(project), `The quarantine report must mention ${project}`);
+  }
+  const evidence = steps.find(step => step.body.includes('name: finitude-social-browser-evidence'))!;
+  for (const directory of ['web/test-results/social-real', 'web/test-results/social-quarantined']) {
+    assert.match(evidence.body, new RegExp(`^ {12}${directory}$`, 'm'));
+  }
+});

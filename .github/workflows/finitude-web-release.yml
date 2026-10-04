@@ -167,6 +167,7 @@ jobs:
           pactl set-default-sink archtree_ci
           pactl list short sinks
 
+      # Blocking gate: every social project except the quarantined cross-engine audio drift pair below.
       - name: Run real social MongoDB, media, and WebSocket browser tests
         id: social
         env:
@@ -174,12 +175,46 @@ jobs:
           PULSE_LATENCY_MSEC: '100'
         run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web
 
+      # QUARANTINED, NON-BLOCKING: firefox-audio-formats and webkit-audio-formats drift intermittently on real
+      # Linux decoders. They still run on every attempt and keep evidence, but never fail this job or bind
+      # release provenance. Rooms stay disabled in production until they return to the blocking step above
+      # (docs/deployment/social-rollout-runbook.md).
+      - name: Run quarantined cross-engine audio drift browser tests (non-blocking)
+        id: social_quarantined
+        if: ${{ !cancelled() && steps.browser_environment.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 8
+        env:
+          PULSE_LATENCY_MSEC: '100'
+        run: xvfb-run -a npm run test:e2e:social:quarantined --workspace @archtree/finitude-web
+
+      - name: Report quarantined cross-engine audio drift result
+        if: ${{ !cancelled() && steps.social_quarantined.outcome != 'skipped' }}
+        env:
+          QUARANTINED_OUTCOME: ${{ steps.social_quarantined.outcome }}
+        run: |
+          {
+            echo '### Quarantined social projects (non-blocking)'
+            echo ''
+            echo '`firefox-audio-formats` and `webkit-audio-formats` are quarantined from the blocking social gate.'
+            echo "Outcome: **${QUARANTINED_OUTCOME}**. This result does not fail the job or enter release provenance."
+            echo 'Evidence: `social-quarantined/` in the finitude-social-browser-evidence artifact.'
+            echo 'Return them to the blocking gate before enabling FINITUDE_ROOMS_ENABLED (docs/deployment/social-rollout-runbook.md).'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$QUARANTINED_OUTCOME" = 'success' ]; then
+            echo '::notice title=Quarantined social projects passed::firefox-audio-formats and webkit-audio-formats passed; they remain non-blocking until returned to the gate.'
+          else
+            echo "::warning title=Quarantined social projects ${QUARANTINED_OUTCOME} (non-blocking)::firefox-audio-formats and webkit-audio-formats did not pass. They are quarantined and do not block release; see the social-quarantined evidence."
+          fi
+
       - name: Retain social browser evidence
         if: ${{ !cancelled() && steps.browser_environment.outcome == 'success' }}
         uses: actions/upload-artifact@v5
         with:
           name: finitude-social-browser-evidence
-          path: web/test-results/social-real
+          path: |
+            web/test-results/social-real
+            web/test-results/social-quarantined
           if-no-files-found: ignore
           retention-days: 30
 

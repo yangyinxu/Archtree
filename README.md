@@ -424,6 +424,14 @@ also verify explicit controller recovery after reload and host transfer during
 playback, with both participants using the selected engine. These extra projects
 are collected only on Linux CI; browser-specific results remain separate from
 Chromium proof. Chromium retains the separate strict native-background scenario.
+The Firefox and WebKit compressed-media projects (`firefox-audio-formats`,
+`webkit-audio-formats`) are currently quarantined because their cross-engine
+drift checks fail intermittently. `npm run test:e2e:social` runs every other
+project; CI runs the pair in a separate non-blocking step with retained evidence.
+On Linux, run them with
+`CI=1 xvfb-run -a npm run test:e2e:social:quarantined --workspace @archtree/finitude-web`.
+Rooms must not be enabled in production until they return to the blocking gate
+(see the [social rollout runbook](docs/deployment/social-rollout-runbook.md#quarantined-cross-engine-audio-drift-blocks-enabling-rooms)).
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
 It corrects startup drift after credible media-clock advancement. A corrective
@@ -1002,6 +1010,11 @@ application, or substitute a bundle produced by a smaller test suite.
 The `.github/workflows/finitude-web-release.yml` workflow runs unit/component
 tests, Mongo lifecycle integration, production builds, E2E type checking, real
 social scenarios, and all three browser/axe projects before staging its bundle.
+The `social-e2e` job's blocking step runs every social project except the
+quarantined `firefox-audio-formats` and `webkit-audio-formats` pair. A later
+`continue-on-error` step runs that pair, reports the outcome as non-blocking in
+the step summary and a warning annotation, and uploads its evidence. Only the
+blocking step's outcome is bound into the provenance as the `social` gate.
 These gates are parallel jobs, each with its own timeout of 30 minutes or less:
 `build` (production build and E2E type check), `unit-integration`,
 `social-e2e` and `browser-e2e`. The two browser jobs test the one production
@@ -1011,7 +1024,7 @@ gate succeeds. It stages those same build bytes without rebuilding and binds eac
 gate step's outcome into the provenance. A run normally finishes in about 20–25
 minutes, inside the promoter's wait. If branch protection is added, require every
 gate job's check, not only `release-artifact`: GitHub reports a skipped job as
-passing. Both Playwright configurations reject focused tests in CI. The workflow uploads
+passing. Every Playwright configuration rejects focused tests in CI. The workflow uploads
 `archtree-eb-<commit>-<run-id>-<attempt>` for 30 days, containing the runtime ZIP
 and `release-provenance.json` with the bundle SHA-256, exact source/run/attempt,
 and all successful gate names. PR artifacts are review evidence only.
