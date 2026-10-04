@@ -159,6 +159,8 @@ jobs:
       - name: Provide isolated browser audio and display
         id: browser_environment
         run: |
+          # Refresh package lists here so this step never depends on an earlier step's apt-get update.
+          sudo apt-get update
           sudo apt-get install --yes pulseaudio xvfb
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=archtree_ci
@@ -214,6 +216,8 @@ jobs:
       - name: Provide isolated browser audio and display
         id: browser_environment
         run: |
+          # Refresh package lists here so this step never depends on an earlier step's apt-get update.
+          sudo apt-get update
           sudo apt-get install --yes pulseaudio xvfb
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=archtree_ci
