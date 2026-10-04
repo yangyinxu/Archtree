@@ -1,9 +1,17 @@
-import type { SocialOutcome } from '../../contracts/socialV1';
+import type { SocialOutcome, SocialReportReason } from '../../contracts/socialV1';
 
+/**
+ * An administrator suspension hides the profile by holding `active` and `discoverable` false.
+ * The listener's own choices are kept here so unsuspension restores them exactly.
+ */
+export interface SocialSuspension {
+    suspendedAt: Date; suspendedBy: string; restoreActive: boolean; restoreDiscoverable: boolean;
+}
 /** Private persisted social state; project only through social-v1 allowlists. */
 export interface SocialProfileDocument {
     _id: string; accountId: string; handle: string; alias: string;
     active: boolean; discoverable: boolean; revision: number; updatedAt: Date;
+    suspension?: SocialSuspension;
 }
 /** Canonical unordered pair, with independent directional blocks and a request incarnation. */
 export interface SocialRelationshipDocument {
@@ -27,6 +35,22 @@ export interface SocialBudgetDocument {
     musicIncomingDay?: number; musicIncoming?: number;
     roomReactionMinute?: number; roomReactions?: number;
     listeningReportMinute?: number; listeningReports?: number;
+    reportDay?: number; reports?: number;
 }
 /** Active handles have an owner; deletion leaves only the handle and its reservation deadline. */
 export interface SocialHandleDocument { _id: string; accountId?: string; expiresAt?: Date }
+/**
+ * Moderation evidence for one reporter, target and UTC day. The target is never told.
+ * The handle and nickname are snapshots of what was reported. Deleting the reporter's
+ * account removes the reporter fields and note; deleting the target removes the report.
+ * Resolved reports expire after their retention period; open reports wait for an admin.
+ */
+export interface SocialReportDocument {
+    _id: string; dedupeKey: string;
+    reporterAccountId?: string; reporterSocialId?: string;
+    targetAccountId: string; targetSocialId: string; targetHandle: string; targetAlias: string;
+    reason: SocialReportReason; note?: string;
+    state: 'open' | 'resolved'; createdAt: Date;
+    resolution?: 'dismissed' | 'actioned' | 'suspended'; resolvedAt?: Date; resolvedBy?: string;
+    anonymizedAt?: Date; expiresAt?: Date;
+}

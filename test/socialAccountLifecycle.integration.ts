@@ -8,7 +8,7 @@ import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import { databaseIndexes, verifyRequiredDatabaseIndexes } from '../src/infrastructure/databaseIndexes';
 import type {
     SocialHandleDocument, SocialOutboxDocument, SocialProfileDocument,
-    SocialReceiptDocument, SocialRelationshipDocument
+    SocialReceiptDocument, SocialRelationshipDocument, SocialReportDocument
 } from '../src/repositories/social/socialDocuments';
 import { deleteListenerAccountData } from '../src/services/accountDeletionService';
 import { AccountReferenceUnavailableError, touchActiveAccount } from '../src/services/accountReferenceFenceService';
@@ -16,7 +16,7 @@ import { deleteSocialAccountData } from '../src/services/socialAccountLifecycleS
 import { MongoReplicaSetHarness, startMongoReplicaSet } from './support/mongoReplicaSet';
 
 const socialCollections = [
-    'socialProfiles', 'socialRelationships', 'socialMutations', 'socialOutbox', 'socialBudgets', 'socialHandles'
+    'socialProfiles', 'socialRelationships', 'socialMutations', 'socialOutbox', 'socialBudgets', 'socialHandles', 'socialReports'
 ] as const;
 let harness: MongoReplicaSetHarness | undefined;
 before(async () => { harness = await startMongoReplicaSet('archtree-social-account-lifecycle-test'); });
@@ -63,6 +63,18 @@ const seedRelationship = async (
         ...(state === 'pending' ? { requestedBy: left.accountId } : {})
     };
     await getDb()!.collection<SocialRelationshipDocument>('socialRelationships').insertOne(row);
+    return row;
+};
+
+/** Persists the report shape written by the social report command. */
+const seedReport = async (reporter: SeededAccount, target: SeededAccount, note = 'Synthetic reporter note') => {
+    const row: SocialReportDocument = {
+        _id: `rp_${new ObjectId().toHexString()}00000000`, dedupeKey: `synthetic:${reporter.accountId}:${target.accountId}`,
+        reporterAccountId: reporter.accountId, reporterSocialId: reporter.socialId,
+        targetAccountId: target.accountId, targetSocialId: target.socialId, targetHandle: target.handle, targetAlias: 'Synthetic listener',
+        reason: 'harassment', note, state: 'open', createdAt: new Date()
+    };
+    await getDb()!.collection<SocialReportDocument>('socialReports').insertOne(row);
     return row;
 };
 
@@ -177,6 +189,8 @@ test('a failure after social cleanup rolls back the graph, handles, invalidation
         userId: owner.accountId, refreshTokenHash: `rollback-${owner.accountId}`, expiresAt: new Date(Date.now() + 60_000)
     });
     await getDb()!.collection('playlists').insertOne({ ownerUserId: owner.accountId, name: 'Keep on rollback' });
+    const authored = await seedReport(owner, peer);
+    const received = await seedReport(peer, owner);
     const original = await snapshot();
     await assert.rejects(deleteListenerAccountData(owner.accountId, {
         afterSocialCleanup: async () => { throw new Error('synthetic cleanup failure'); }
@@ -185,6 +199,20 @@ test('a failure after social cleanup rolls back the graph, handles, invalidation
     assert.deepEqual(await deleteListenerAccountData(owner.accountId), { status: 'deleted' });
     assert.equal(await getDb()!.collection('authSessions').countDocuments({ userId: owner.accountId }), 0);
     assert.equal(await getDb()!.collection('playlists').countDocuments({ ownerUserId: owner.accountId }), 0);
+    // A report about the deleted listener goes; one it wrote stays as anonymous evidence about the peer.
+    const reports = getDb()!.collection<SocialReportDocument>('socialReports');
+    assert.equal(await reports.findOne({ _id: received._id }), null);
+    const anonymized = await reports.findOne({ _id: authored._id });
+    assert.ok(anonymized?.anonymizedAt);
+    assert.equal(anonymized.dedupeKey, `anonymized:${authored._id}`);
+    const { reporterAccountId: _account, reporterSocialId: _social, note: _note, dedupeKey: _key, ...kept } = authored;
+    assert.deepEqual({ ...anonymized, anonymizedAt: undefined, dedupeKey: undefined }, { ...kept, anonymizedAt: undefined, dedupeKey: undefined });
+    assert.equal(JSON.stringify(anonymized).includes(owner.accountId), false);
+    assert.equal(JSON.stringify(anonymized).includes(owner.socialId), false);
+    assert.equal(JSON.stringify(anonymized).includes('Synthetic reporter note'), false);
+    // Deleting the reported listener later removes the anonymous evidence about them too.
+    assert.deepEqual(await deleteListenerAccountData(peer.accountId), { status: 'deleted' });
+    assert.equal(await reports.countDocuments({ _id: { $in: [authored._id, received._id] } }), 0);
 });
 
 /** A synthetic writer takes the production user fences before inserting both-party state. */

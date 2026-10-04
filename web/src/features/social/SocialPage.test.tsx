@@ -96,3 +96,71 @@ test('a failed background profile refresh preserves the current room and identit
   expect(screen.getByRole('region', { name: 'Listening room' })).toBe(room);
   expect(screen.getByRole('button', { name: 'Save profile' })).toBeInTheDocument();
 });
+
+test('reporting a listener is an explicit, confirmed report with the chosen reason and optional note', async () => {
+  current = own; show();
+  fireEvent.click(await screen.findByRole('tab', { name: 'Incoming requests' }));
+  const trigger = await screen.findByRole('button', { name: 'Report' });
+  fireEvent.click(trigger);
+  let dialog = await screen.findByRole('dialog', { name: 'Report this listener' });
+  expect(within(dialog).getByText('Bob (@bobby)')).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(mutations).toHaveLength(0);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+  dialog = await screen.findByRole('dialog', { name: 'Report this listener' });
+  expect(within(dialog).getByRole('button', { name: 'Send report' })).toBeDisabled();
+  fireEvent.click(within(dialog).getByLabelText('Harassment or bullying'));
+  fireEvent.change(within(dialog).getByLabelText('Details (optional)'), { target: { value: '  Keeps sending requests  ' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Send report' }));
+  await screen.findByText("Report sent. The listener won't be told who reported them.");
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(mutations).toHaveLength(1);
+  expect(mutations[0].path).toBe('/api/social/v1/reports');
+  expect(mutations[0].body).toMatchObject({ targetSocialId: peer.socialId, reason: 'harassment', note: 'Keeps sending requests' });
+  expect(Object.keys(mutations[0].body).sort()).toEqual(['commandId', 'note', 'reason', 'scopeToken', 'targetSocialId']);
+});
+
+test('a suspended profile explains the suspension and cannot be edited or reactivated', async () => {
+  current = { ...own, active: false, discoverable: false, revision: 4, suspended: true }; show();
+  expect(await screen.findByText(/Your social profile is suspended/)).toBeInTheDocument();
+  expect(screen.queryByText('Your social profile is inactive.')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Reactivate profile' })).toBeDisabled();
+  expect(within(screen.getByRole('form', { name: 'Find a friend' })).getByRole('button', { name: 'Find' })).toBeDisabled();
+  expect(screen.queryByRole('region', { name: 'Listening room' })).not.toBeInTheDocument();
+});
+
+test('a looked-up listener can be reported with only the chosen reason', async () => {
+  current = own; show();
+  const form = await screen.findByRole('form', { name: 'Find a friend' });
+  fireEvent.change(within(form).getByLabelText('Handle'), { target: { value: 'bobby' } });
+  fireEvent.submit(form);
+  await screen.findByRole('button', { name: 'Add friend' });
+  const lookup = form.closest('section')!;
+  fireEvent.click(within(lookup).getByRole('button', { name: 'Report' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Report this listener' });
+  fireEvent.click(within(dialog).getByLabelText('Something else'));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Send report' }));
+  await waitFor(() => expect(mutations).toHaveLength(1));
+  expect(mutations[0].body).toMatchObject({ targetSocialId: peer.socialId, reason: 'other' });
+  expect('note' in mutations[0].body).toBe(false);
+});
+
+test('looking up your own handle never offers a self-report', async () => {
+  const delegate = fetch as unknown as (path: string, options?: RequestInit) => Promise<Response>;
+  const reads: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
+    if (path.startsWith('/api/social/v1/profiles?')) return response({ profile: { socialId: own.socialId, handle: own.handle, alias: own.alias, iconSeed: own.iconSeed } });
+    if (path === `/api/social/v1/relationships/${own.socialId}`) { reads.push(path); return response({ relationship: null }); }
+    return delegate(path, options);
+  }));
+  current = own; show();
+  const form = await screen.findByRole('form', { name: 'Find a friend' });
+  fireEvent.change(within(form).getByLabelText('Handle'), { target: { value: 'alice' } });
+  fireEvent.submit(form);
+  const lookup = form.closest('section')!;
+  await within(lookup).findByText('@alice');
+  await waitFor(() => expect(reads).toHaveLength(1));
+  expect(within(lookup).queryByRole('button', { name: 'Report' })).not.toBeInTheDocument();
+});

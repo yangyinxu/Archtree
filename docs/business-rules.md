@@ -16,8 +16,8 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   the account's lifetime; the nickname and discoverability can change.
 - Names that could pass for Finitude, its staff or a system account are
   reserved, and the rejection says whether the handle or the nickname must
-  change. This is a closed-beta safeguard; blocking remains the only listener
-  recourse, and reporting and moderation tooling are not part of this release.
+  change. This is a closed-beta safeguard; listeners can also block and report,
+  and administrators can suspend a social profile (see below).
   - A new handle cannot be a staff role (such as admin, administrator,
     moderator, mod, staff, official, support, helpdesk, security or system) or a
     system or mailbox name (such as root, help, api, www, mail, no-reply, null or
@@ -53,6 +53,41 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   independent, and unblocking restores no relationship. A private block list
   exposes only the owner's blocked opaque IDs and mutation revisions; it does
   not unlock the blocked person's current profile.
+- A listener with a social profile, including a deactivated or suspended one,
+  can report another existing social identity, including one it has blocked or
+  that is no longer active. A report has an optional reason (pretending to be
+  someone else, harassment or bullying, spam or unwanted requests, offensive
+  name or content, or something else, the default) and an optional note of up
+  to 500 characters. Finitude Web asks for the reason and note in a
+  confirmation dialog before sending.
+  - Reporting never blocks, removes or notifies anyone. The reported listener
+    is never told that they were reported or by whom, and nothing they can see
+    changes. A report keeps the handle and nickname as they were when reported.
+  - Each reporter files at most one report about the same listener per UTC day;
+    repeating it that day succeeds without creating another report or using
+    allowance. Each reporter can file at most 10 reports per UTC day. Reporting
+    follows the mutation-scope and command-ID rules and remains available while
+    new social participation is disabled.
+  - Administrators review open reports, oldest first, with the reporter's
+    current handle. They can dismiss a report, mark it handled, or suspend the
+    reported listener, which resolves every open report about that listener.
+    Resolved reports are deleted 90 days after resolution; open reports remain
+    until an administrator resolves them.
+- An administrator can suspend a social profile from social features and lift
+  the suspension later. Suspending or lifting again has no further effect.
+  - While suspended, the profile cannot be looked up and appears on no friend
+    list, request, music share, listening status, room or invitation. The
+    listener cannot edit or reactivate the profile, send or accept requests,
+    share music, share listening, or create, join or be invited to rooms.
+  - Suspension cancels pending requests in both directions, removes music
+    shares, turns listening sharing off, removes room participation (ending a
+    room the listener hosts) and revokes invitations, as deactivation does.
+    Accepted friendships and blocks are kept but hidden from both sides.
+  - The suspended listener sees that the profile is suspended and can still
+    block, unblock, report, look up command outcomes and delete the account.
+  - Lifting a suspension restores the listener's own active or deactivated
+    state, discoverability and retained friendships. Cancelled requests,
+    removed shares, listening sharing and room participation are not restored.
 - Turning discovery off preserves existing friends and pending requests.
   Deactivation hides the profile, cancels requests and removes friendships, while
   retaining the listener's identity, handle and private blocks. Reactivation
@@ -72,9 +107,14 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   reserved for 30 days without retaining its former account/social ID, then may
   be reused with a new opaque identity. Existing avatar and shared-provenance
   deletion blockers remain unchanged and preserve social state on failure.
+  Deletion removes every report about the account. Reports the account wrote
+  remain as anonymous evidence about the reported listener: the reporter's
+  identity and note are removed, and the reason and reported name stay until
+  the report is resolved and expires.
 - Disabling new social participation preserves reads, discovery opt-out without
   changing the handle/nickname, explicit cancellation, removal, block/unblock,
-  deactivation, outcome lookup and account cleanup. Admission attempts cannot
+  reporting, deactivation, outcome lookup, administrator suspension and account
+  cleanup. Admission attempts cannot
   consume the reserved receipt capacity for safety actions and final deactivation;
   short request-rate limits still apply.
   Social participation adds no public Feed, collaborative Playlist, chat,
@@ -100,8 +140,8 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   The recipient can dismiss a card; its sender can withdraw it. Both remove that
   share, and an old action cannot affect a later share incarnation.
 - Current friendship, active profiles and no block are required on every read.
-  Removing friendship, blocking, deactivation or account deletion clears affected
-  shares. Reconnecting friendship never restores them. Turning discoverability
+  Removing friendship, blocking, deactivation, administrator suspension or account
+  deletion clears affected shares. Reconnecting friendship never restores them. Turning discoverability
   off preserves current shares. Disabling social admission preserves authorized
   reads, dismiss/withdraw and outcome recovery while preventing new sends.
 - Shares retain catalog identity rather than copied media bytes or versioned
@@ -115,7 +155,8 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   change by an active social profile. It supports ordinary and shared-room Audio;
   Video, readiness, play intent and historical activity never establish status.
   Turning discoverability off preserves this independent preference. Deactivation
-  resets it to off; reactivation does not restore it.
+  and administrator suspension reset it to off; reactivation or lifting the
+  suspension does not restore it.
 - Only current friends with active social profiles and no block can see a fresh
   status. It exposes the current ready Audio and chosen social identity, without
   playback position, room/device/session identity, last-seen data or history.
@@ -277,8 +318,9 @@ Playlist access retain their existing rules.
   room can inspect or decline another invitation and must explicitly leave or
   end the current room before joining the other one.
 - A blocked pair cannot share a room. If the blocker hosts, remove the blocked
-  member; otherwise remove the blocker. Deactivation and account deletion remove
-  participation, ending a hosted room. These changes take effect atomically.
+  member; otherwise remove the blocker. Deactivation, administrator suspension
+  and account deletion remove participation, ending a hosted room. These changes
+  take effect atomically.
 - The host can End room for everyone or offer Transfer and leave to a connected
   participant. The selected controller must accept within 30 seconds. Acceptance
   transfers the role and removes the old host atomically, preserving the mode,

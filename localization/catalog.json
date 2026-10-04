@@ -5981,6 +5981,97 @@
       ],
       "variables": {}
     },
+    "social.report": {
+      "description": "Social listener interface: open the dialog to report another listener.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_hint": {
+      "description": "Social listener interface: explains who sees a report and that the reported listener is not told.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_limit": {
+      "description": "Social listener interface: the listener has sent the most reports allowed today.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_note": {
+      "description": "Social listener interface: label for optional extra details in a report.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason": {
+      "description": "Social listener interface: label for the list of report reasons.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_harassment": {
+      "description": "Social listener interface: report reason, harassment or bullying.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_impersonation": {
+      "description": "Social listener interface: report reason, the listener pretends to be someone else.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_inappropriate": {
+      "description": "Social listener interface: report reason, an offensive name or content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_other": {
+      "description": "Social listener interface: report reason, something not listed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_spam": {
+      "description": "Social listener interface: report reason, spam or unwanted friend requests.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_send": {
+      "description": "Social listener interface: button that sends a report.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_sent": {
+      "description": "Social listener interface: confirmation after a report is sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_title": {
+      "description": "Social listener interface: title of the dialog for reporting another listener.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "social.request": {
       "description": "Social listener interface: request.",
       "delivery": [
@@ -6020,6 +6111,20 @@
     },
     "social.stale": {
       "description": "Social listener interface: stale.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.suspended": {
+      "description": "Social listener interface: the listener's social profile has been suspended by an administrator.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.suspended_action": {
+      "description": "Social listener interface: an action was refused because the listener's social profile is suspended.",
       "delivery": [
         "runtime"
       ],

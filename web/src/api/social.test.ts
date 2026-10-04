@@ -16,6 +16,12 @@ test('social projections reject private additions and retain null blocked profil
   expect(socialOutcomeSchema.safeParse({ commandId: crypto.randomUUID(), outcome: 'applied', replayed: true, profile }).success).toBe(false);
 });
 
+test('an own profile carries suspension only as an explicit true marker', () => {
+  expect(socialProfileSchema.safeParse({ ...profile, active: false, discoverable: false, suspended: true }).success).toBe(true);
+  expect(socialProfileSchema.safeParse({ ...profile, suspended: false }).success).toBe(false);
+  expect(socialCardSchema.safeParse({ socialId: profile.socialId, handle: 'alice', alias: 'Alice', iconSeed: 'alice', suspended: true }).success).toBe(false);
+});
+
 test('account-bound social commands preserve one captured scope and key on explicit retry', async () => {
   const fetcher = vi.fn().mockResolvedValueOnce(reply({ scopeToken: 'synthetic-scope-token-123', expiresAt: new Date(Date.now() + 60_000).toISOString() }));
   vi.stubGlobal('fetch', fetcher);
@@ -86,4 +92,16 @@ test.each([['dismissMusicShare', 'dismiss'], ['withdrawMusicShare', 'withdraw']]
   expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual(identity);
   expect(() => sendSocialCommand('viewer-1', { action, shareId: '../other', ...identity })).toThrow();
   expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+test('a report sends the captured target, reason and note to the report route', async () => {
+  const fetcher = vi.fn().mockResolvedValue(reply({ commandId: 'synthetic-command-01', outcome: 'applied', replayed: false }));
+  vi.stubGlobal('fetch', fetcher);
+  const command = { action: 'report' as const, targetSocialId: profile.socialId, reason: 'harassment' as const, note: 'Repeated requests',
+    scopeToken: 'synthetic-signed-scope-token', commandId: 'synthetic-command-01' };
+  await sendSocialCommand('viewer-1', command);
+  expect(fetcher.mock.calls[0][0]).toBe('/api/social/v1/reports');
+  expect(fetcher.mock.calls[0][1].method).toBe('POST');
+  const { action: _action, ...body } = command;
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual(body);
 });

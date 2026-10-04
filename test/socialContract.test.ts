@@ -96,3 +96,21 @@ test('music shares capture exact catalog identity and observed friendship withou
         assert.equal(parseSocialCommand({ ...command, targetSocialId: socialId }), null);
     }
 });
+
+test('report commands capture a closed reason, a bounded note and defaults that keep retries identical', () => {
+    const report = { ...identity, action: 'report', targetSocialId: socialId };
+    const bare = parseSocialCommand(report);
+    assert.deepEqual(bare, { ...report, reason: 'other', note: '' });
+    assert.ok(Object.isFrozen(bare));
+    assert.deepEqual(parseSocialCommand({ ...report, reason: 'harassment', note: '  Line one\r\nLine two  ' }),
+        { ...report, reason: 'harassment', note: 'Line one\nLine two' });
+    assert.equal(parseSocialCommand({ ...report, note: 'é' })?.action, 'report');
+    assert.equal((parseSocialCommand({ ...report, note: 'é' }) as { note: string }).note, 'é');
+    assert.ok(parseSocialCommand({ ...report, note: '😀'.repeat(500) }));
+    for (const invalid of [
+        { ...report, reason: 'abuse' }, { ...report, reason: null }, { ...report, reason: 'Spam' },
+        { ...report, note: '😀'.repeat(501) }, { ...report, note: 'tab\tinside' }, { ...report, note: 'zero​width' },
+        { ...report, note: 7 }, { ...report, targetSocialId: 'a'.repeat(24) }, { ...report, expectedRevision: 1 },
+        { ...report, accountId: 'private' }
+    ]) assert.equal(parseSocialCommand(invalid), null, JSON.stringify(invalid));
+});

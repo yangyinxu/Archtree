@@ -42,3 +42,22 @@ test.each([
   expect(result.current.uncertain).toBeNull();
   unmount(); queryClient.clear(); mocks.prepare.mockReset(); mocks.send.mockReset();
 });
+
+test.each([
+  [{ action: 'report' as const, targetSocialId: `s_${'b'.repeat(32)}`, reason: 'spam' as const }, 'applied', undefined, 'social.report_sent'],
+  [{ action: 'report' as const, targetSocialId: `s_${'b'.repeat(32)}`, reason: 'spam' as const }, 'noop', undefined, 'social.report_sent'],
+  [{ action: 'report' as const, targetSocialId: `s_${'b'.repeat(32)}`, reason: 'spam' as const }, 'rejected', 'social_limit', 'social.report_limit'],
+  [{ action: 'report' as const, targetSocialId: `s_${'b'.repeat(32)}`, reason: 'spam' as const }, 'rejected', 'profile_unavailable', 'social.stale'],
+  [{ action: 'request' as const, targetSocialId: `s_${'b'.repeat(32)}`, expectedRevision: 0 }, 'rejected', 'social_limit', 'social.stale'],
+  [{ action: 'profile' as const, expectedRevision: 2, handle: 'alice', alias: 'Alice', discoverable: true }, 'rejected', 'social_suspended', 'social.suspended_action']
+] as const)('%o settling as %s %s shows %s', async (action, outcome, code, message) => {
+  mocks.prepare.mockResolvedValue({ ...action, commandId: 'captured-command-03', scopeToken: 'captured-scope-token' });
+  mocks.send.mockResolvedValue({ commandId: 'captured-command-03', outcome, replayed: false, ...(code ? { code } : {}) });
+  const queryClient = new QueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  const { result, unmount } = renderHook(() => useSocialActions('alice'), { wrapper });
+  await act(async () => { await result.current.run(action); });
+  expect(result.current.message).toBe(message);
+  expect(result.current.uncertain).toBeNull();
+  unmount(); queryClient.clear(); mocks.prepare.mockReset(); mocks.send.mockReset();
+});

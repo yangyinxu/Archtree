@@ -81,7 +81,7 @@ test('mandatory index failure prevents migration success without disclosing data
 });
 
 test('essential social cleanup indexes must exist before startup can complete', async () => {
-  for (const collection of ['socialRelationships', 'socialHandles', 'socialMusicShares', 'socialListeningPublications']) {
+  for (const collection of ['socialRelationships', 'socialHandles', 'socialMusicShares', 'socialListeningPublications', 'socialReports']) {
     const fake = databaseDouble();
     fake.fail(collection);
     await assert.rejects(initializeDatabaseIndexes(fake.db), DatabaseIndexInitializationError);
@@ -119,6 +119,29 @@ test('social cleanup indexes reject unique, sparse, partial, hidden and expiring
   await initializeDatabaseIndexes(fake.db);
   fake.metadata.set('socialHandles', []);
   await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /socialHandles:accountId/);
+});
+
+test('report deduplication and deletion cleanup indexes are mandatory, while the triage sort index is optional', async () => {
+  const initialized = databaseDouble();
+  await initializeDatabaseIndexes(initialized.db);
+  const keys = initialized.metadata.get('socialReports')!.map(index => JSON.stringify(index.key));
+  for (const expected of [{ dedupeKey: 1 }, { reporterAccountId: 1 }, { targetAccountId: 1, state: 1 }]) {
+    assert.ok(keys.includes(JSON.stringify(expected)), JSON.stringify(expected));
+  }
+  for (const [kept, pattern] of [
+    [(index: Document) => JSON.stringify(index.key) !== JSON.stringify({ dedupeKey: 1 }), /socialReports:dedupeKey/],
+    [(index: Document) => JSON.stringify(index.key) !== JSON.stringify({ targetAccountId: 1, state: 1 }), /socialReports:targetAccountId,state/]
+  ] as const) {
+    const fake = databaseDouble();
+    await initializeDatabaseIndexes(fake.db);
+    fake.metadata.set('socialReports', fake.metadata.get('socialReports')!.filter(kept));
+    await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), pattern);
+  }
+  const optional = databaseDouble();
+  await initializeDatabaseIndexes(optional.db);
+  optional.metadata.set('socialReports', optional.metadata.get('socialReports')!
+    .filter(index => JSON.stringify(index.key) !== JSON.stringify({ state: 1, createdAt: 1, _id: 1 })));
+  await verifyRequiredDatabaseIndexes(optional.db);
 });
 
 test('nonunique, sparse, partial, and incompatible collation constraints fail verification', async () => {

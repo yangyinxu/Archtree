@@ -100,7 +100,8 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
         noQuery(req);
         const profile = await api.ownProfile(actor(req));
         res.status(200).json({ profile: profile === null ? null : {
-            ...card(profile), active: profile.active, discoverable: profile.discoverable, revision: profile.revision
+            ...card(profile), active: profile.active, discoverable: profile.discoverable, revision: profile.revision,
+            ...(profile.suspended === true ? { suspended: true } : {})
         } });
     }));
     router.get('/me/listening', asyncHandler(async (req, res) => {
@@ -187,6 +188,16 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
     router.post('/me/deactivate', asyncHandler(mutate('deactivate', [])));
     router.post('/friend-requests', asyncHandler(mutate('request', ['targetSocialId', 'expectedRevision'])));
     router.post('/music-shares', asyncHandler(mutate('shareMusic', ['targetSocialId', 'expectedRevision', 'contentType', 'contentId'])));
+    // Reason and note are optional, so this route checks an allowlist instead of an exact key set.
+    router.post('/reports', asyncHandler(async (req, res) => {
+        noQuery(req);
+        const keys = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? Object.keys(req.body) : null;
+        if (!keys || !['scopeToken', 'commandId', 'targetSocialId'].every(key => keys.includes(key))
+            || !keys.every(key => ['scopeToken', 'commandId', 'targetSocialId', 'reason', 'note'].includes(key))) throw invalid();
+        const command = parseSocialCommand({ ...req.body, action: 'report' });
+        if (!command) throw invalid();
+        res.status(200).json(outcome(await api.mutate(actor(req), command)));
+    }));
     router.post('/music-shares/:shareId/dismiss', asyncHandler(mutate('dismissMusicShare', [], false, true)));
     router.post('/music-shares/:shareId/withdraw', asyncHandler(mutate('withdrawMusicShare', [], false, true)));
     for (const action of ['accept', 'decline', 'cancel', 'remove', 'block', 'unblock']) {

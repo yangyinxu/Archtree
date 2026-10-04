@@ -9,9 +9,12 @@
 .panel h2 { font-size: 1.25rem; letter-spacing: -.025em; margin-bottom: .8rem; }
 .panel h3 { font-size: 1rem; margin-bottom: .6rem; }
 .field { display: grid; gap: .45rem; margin-top: 1rem; font-size: .85rem; color: var(--color-text-muted); }
-.field input, .field select { width: 100%; min-width: 0; border: 1px solid var(--color-border-control); border-radius: .45rem; background: var(--color-surface); color: var(--color-text); min-height: 2.8rem; padding: .55rem .8rem; }
+.field input, .field select, .field textarea { width: 100%; min-width: 0; border: 1px solid var(--color-border-control); border-radius: .45rem; background: var(--color-surface); color: var(--color-text); min-height: 2.8rem; padding: .55rem .8rem; }
 .check { display: flex; align-items: start; gap: .6rem; margin: 1rem 0; font-size: .86rem; color: var(--color-text-muted); }
 .check input { accent-color: var(--color-accent); margin-top: .2rem; }
+.reasons { display: grid; border: 0; padding: 0; margin: 0; }
+.reasons legend { font-size: .85rem; color: var(--color-text-muted); margin-bottom: .2rem; }
+.reasons .check { margin: .45rem 0; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: 1rem; }
 .roomSettings { align-items: flex-end; }
 .roomSettings .field { margin-top: 0; max-width: 100%; }

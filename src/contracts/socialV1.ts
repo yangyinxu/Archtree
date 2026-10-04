@@ -5,11 +5,16 @@ import type { ListeningAction, OwnListeningState, ListeningReport, ListeningRepo
 export const SOCIAL_LIMITS = Object.freeze({ friends: 500, pending: 50, blocks: 1_000,
     edges: 2_048, receipts: 1_000, safetyReceipts: 128, scopesPerDay: 24, commandsPerMinute: 30, readsPerMinute: 120,
     incomingPerDay: 100, page: 20, maximumPage: 50, scopeMs: 86_400_000,
-    receiptGraceMs: 3_600_000, handleReservationMs: 30 * 86_400_000 });
+    receiptGraceMs: 3_600_000, handleReservationMs: 30 * 86_400_000, reportsPerDay: 10, reportNoteLength: 500 });
+
+/** Report reasons are a closed list so moderation views never render caller-chosen categories. */
+export const SOCIAL_REPORT_REASONS = ['impersonation', 'harassment', 'spam', 'inappropriate', 'other'] as const;
+export type SocialReportReason = typeof SOCIAL_REPORT_REASONS[number];
 
 export interface SocialActor { userId: string; sessionId: string }
 export interface SocialCard { socialId: string; handle: string; alias: string; iconSeed: string }
-export interface SocialOwnProfile extends SocialCard { active: boolean; discoverable: boolean; revision: number }
+/** `suspended` appears only while an administrator has suspended the profile, so older clients keep parsing. */
+export interface SocialOwnProfile extends SocialCard { active: boolean; discoverable: boolean; revision: number; suspended?: true }
 export type SocialListKind = 'friends' | 'incoming' | 'outgoing' | 'blocks';
 export interface SocialListRow { socialId: string; profile: SocialCard | null; revision: number }
 export interface SocialPage { items: SocialListRow[]; nextCursor: string | null }
@@ -21,6 +26,7 @@ export type SocialCommand = SocialMutationIdentity & (
     | { action: 'deactivate' }
     | { action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove' | 'unblock'; targetSocialId: string; expectedRevision: number }
     | { action: 'block'; targetSocialId: string }
+    | { action: 'report'; targetSocialId: string; reason: SocialReportReason; note: string }
     | MusicShareAction
     | ListeningAction
 );
@@ -50,6 +56,13 @@ const aliasValue = (value: unknown): string | null => {
     if (typeof value !== 'string' || value.length > 200) return null;
     const alias = value.trim().normalize('NFC');
     return [...alias].length >= 1 && [...alias].length <= 50 && !/[\p{Cc}\p{Cf}]/u.test(alias) ? alias : null;
+};
+/** A report note is optional moderator context; line breaks are the only control characters kept. */
+const reportNoteValue = (value: unknown): string | null => {
+    if (value === undefined) return '';
+    if (typeof value !== 'string' || value.length > SOCIAL_LIMITS.reportNoteLength * 2) return null;
+    const note = value.replace(/\r\n?/g, '\n').trim().normalize('NFC');
+    return [...note].length <= SOCIAL_LIMITS.reportNoteLength && !/[\p{Cf}]|(?!\n)\p{Cc}/u.test(note) ? note : null;
 };
 
 /** Parsing captures immutable intent before any database callback can be retried. */
@@ -87,6 +100,16 @@ export const parseSocialCommand = (input: unknown): SocialCommand | null => {
             ? Object.freeze({ ...input }) as unknown as SocialCommand : null;
     }
     if (input.action === 'block') return exactSocialKeys(input, [...base, 'targetSocialId']) ? Object.freeze({ ...input }) as unknown as SocialCommand : null;
+    if (input.action === 'report') {
+        // Reason and note are optional on the wire; defaults are captured so a retry has the same digest.
+        const keys = Object.keys(input);
+        const reason = input.reason === undefined ? 'other' : input.reason;
+        const note = reportNoteValue(input.note);
+        if (!keys.every(key => [...base, 'targetSocialId', 'reason', 'note'].includes(key))
+            || !SOCIAL_REPORT_REASONS.includes(reason as SocialReportReason) || note === null) return null;
+        return Object.freeze({ scopeToken: input.scopeToken, commandId: input.commandId, action: 'report',
+            targetSocialId: input.targetSocialId, reason: reason as SocialReportReason, note });
+    }
     if (!['request', 'accept', 'decline', 'cancel', 'remove', 'unblock'].includes(String(input.action))
         || typeof input.action !== 'string' || !isSocialRevision(input.expectedRevision)
         || !exactSocialKeys(input, [...base, 'targetSocialId', 'expectedRevision'])) return null;

@@ -9,8 +9,8 @@ import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { touchActiveAccount, AccountReferenceUnavailableError } from '../../services/accountReferenceFenceService';
 import { getJwtSecret } from '../../services/authSessionService';
 import type {
-    SocialBudgetDocument, SocialHandleDocument, SocialOutboxDocument, SocialProfileDocument,
-    SocialReceiptDocument, SocialRelationshipDocument
+    SocialBudgetDocument, SocialHandleDocument, SocialProfileDocument,
+    SocialReceiptDocument, SocialRelationshipDocument, SocialReportDocument
 } from '../../repositories/social/socialDocuments';
 import { readSocialToken, signSocialToken } from './socialTokens';
 import { applyRoomSafety, roomSafetyAccountIds } from '../rooms/roomLifecycle';
@@ -22,6 +22,9 @@ import { createListeningService } from './listeningService';
 import { clearListeningAccount } from './listeningLifecycle';
 import { LISTENING_LIMITS, parseListeningReport } from '../../contracts/listeningV1';
 import { isReservedSocialAlias, isReservedSocialHandle } from './socialNamePolicy';
+import {
+    invalidateSocialAccounts, nextRelationshipRevision, nextSocialRevision, retainRelationshipRevision
+} from './socialGraphWrites';
 
 export interface SocialServiceOptions {
     now?: () => number;
@@ -45,10 +48,7 @@ const objectId = (value: string) => /^[a-f0-9]{24}$/.test(value);
 const card = (profile: SocialProfileDocument): SocialCard => ({
     socialId: profile._id, handle: profile.handle, alias: profile.alias, iconSeed: profile._id
 });
-const nextRevision = (revision: number) => {
-    if (!Number.isSafeInteger(revision) || revision < 0 || revision === Number.MAX_SAFE_INTEGER) throw new SocialError(503, 'social_unavailable');
-    return revision + 1;
-};
+const nextRevision = nextSocialRevision;
 
 /**
  * Transactional social identity and relationship boundary. Account/session fences,
@@ -67,7 +67,7 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
     const receipts = () => db().collection<SocialReceiptDocument>('socialMutations');
     const budgets = () => db().collection<SocialBudgetDocument>('socialBudgets');
     const handles = () => db().collection<SocialHandleDocument>('socialHandles');
-    const outbox = () => db().collection<SocialOutboxDocument>('socialOutbox');
+    const reports = () => db().collection<SocialReportDocument>('socialReports');
 
     /** Bounded known-aborted retries preserve the original intent; uncertain commits are never replayed. */
     const transaction = async <T>(actor: SocialActor, work: (session: ClientSession) => Promise<T>, hooks = false,
@@ -129,25 +129,8 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
         return work(session);
     });
 
-    const invalidate = async (accountIds: string[], session: ClientSession) => {
-        const unique = [...new Set(accountIds)].sort();
-        if (unique.length) await outbox().bulkWrite(unique.map(accountId => ({ updateOne: {
-            filter: { _id: accountId }, update: {
-                $set: { accountId, updatedAt: new Date(now()) }, $inc: { revision: 1 }
-            }, upsert: true
-        } })), { session, ordered: true });
-    };
-
-    /** Account-held clocks outlive pair tombstones, preventing a new pair from reusing an old revision. */
-    const relationshipRevision = async (accountIds: string[], minimum: number, session: ClientSession) => {
-        const values = await budgets().find({ _id: { $in: accountIds } }, { session }).toArray();
-        return nextRevision(Math.max(minimum, ...values.map(value => value.relationshipRevision ?? 0)));
-    };
-    const retainRelationshipRevision = async (accountIds: string[], revision: number, session: ClientSession) => {
-        await budgets().bulkWrite(accountIds.map(accountId => ({ updateOne: {
-            filter: { _id: accountId }, update: { $set: { accountId, relationshipRevision: revision } }, upsert: true
-        } })), { session, ordered: true });
-    };
+    const invalidate = (accountIds: string[], session: ClientSession) => invalidateSocialAccounts(accountIds, session, now());
+    const relationshipRevision = nextRelationshipRevision;
 
     /** Admission limits are read only after owning the corresponding user-row write fence. */
     const capacity = async (accountId: string, session: ClientSession, kind: 'pending' | 'friends' | 'blocks' | 'edges') => {
@@ -157,12 +140,42 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
         if (await relationships().countDocuments(filter, { session, limit: SOCIAL_LIMITS[kind] }) >= SOCIAL_LIMITS[kind]) throw new SocialError(429, 'social_limit');
     };
 
+    /**
+     * Reporting is a safety action: a deactivated or suspended reporter may still report any other existing
+     * profile whose social ID it holds, including a blocked pair. Nothing is written for, or signalled to,
+     * the target. A repeat for the same target on the same UTC day is a noop and spends no daily allowance.
+     */
+    const planReport = async (actor: SocialActor, command: Extract<SocialCommand, { action: 'report' }>,
+        current: SocialProfileDocument | null, session: ClientSession): Promise<MutationPlan> => {
+        if (!current) throw new SocialError(404, 'profile_unavailable');
+        const target = await profiles().findOne({ _id: command.targetSocialId }, { session });
+        if (!target || target.accountId === actor.userId) throw new SocialError(404, 'profile_unavailable');
+        const day = Math.floor(now() / SOCIAL_LIMITS.scopeMs);
+        const dedupeKey = hash(JSON.stringify(['social-report-v1', actor.userId, target.accountId, day]));
+        if (await reports().findOne({ dedupeKey }, { session, projection: { _id: 1 } })) return emptyPlan();
+        const budget = await budgets().findOne({ _id: actor.userId }, { session });
+        const count = budget?.reportDay === day ? budget.reports ?? 0 : 0;
+        if (count >= SOCIAL_LIMITS.reportsPerDay) throw new SocialError(429, 'social_limit');
+        const report: SocialReportDocument = {
+            _id: `rp_${randomBytes(16).toString('hex')}`, dedupeKey,
+            reporterAccountId: actor.userId, reporterSocialId: current._id,
+            targetAccountId: target.accountId, targetSocialId: target._id, targetHandle: target.handle, targetAlias: target.alias,
+            reason: command.reason, ...(command.note ? { note: command.note } : {}), state: 'open', createdAt: new Date(now())
+        };
+        return { outcome: 'applied', affected: [], write: async () => {
+            await reports().insertOne(report, { session });
+            await budgets().updateOne({ _id: actor.userId }, { $set: { accountId: actor.userId, reportDay: day, reports: count + 1 } }, { upsert: true, session });
+        } };
+    };
+
     /** Validation is separate from writes, so a rejected receipt cannot commit partial domain changes. */
     const plan = async (actor: SocialActor, command: SocialCommand, session: ClientSession): Promise<MutationPlan> => {
         if (command.action === 'setListeningSharing' || command.action === 'claimListening') return listening.plan(actor, command, session);
         if ('shareId' in command || command.action === 'shareMusic') return music.plan(actor, command, session);
         const current = await profiles().findOne({ accountId: actor.userId }, { session });
         if (command.action === 'profile') {
+            // A suspension is lifted only by an administrator; the listener cannot edit or reactivate meanwhile.
+            if (current?.suspension) throw new SocialError(403, 'social_suspended');
             if ((current?.revision ?? 0) !== command.expectedRevision) throw new SocialError(409, 'profile_revision_changed');
             if (current && current.handle !== command.handle) throw new SocialError(409, 'handle_immutable');
             // Only new choices are screened: a profile created before the name policy keeps its handle and
@@ -203,6 +216,7 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 await retainRelationshipRevision(accounts, edgeRevision, session);
             } };
         }
+        if (command.action === 'report') return planReport(actor, command, current, session);
         if (!current || (!current.active && command.action !== 'block' && command.action !== 'unblock')) throw new SocialError(404, 'profile_unavailable');
         const target = await profiles().findOne({ _id: command.targetSocialId }, { session });
         if (!target || target.accountId === actor.userId) {
@@ -308,7 +322,8 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
         async ownProfile(actor) {
             return readTransaction(actor, async session => {
                 const profile = await profiles().findOne({ accountId: actor.userId }, { session });
-                return profile ? { ...card(profile), active: profile.active, discoverable: profile.discoverable, revision: profile.revision } : null;
+                return profile ? { ...card(profile), active: profile.active, discoverable: profile.discoverable, revision: profile.revision,
+                    ...(profile.suspension ? { suspended: true as const } : {}) } : null;
             });
         },
         async lookup(actor, input) {
@@ -393,7 +408,7 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                     || (command.action === 'setListeningSharing' && command.enabled)) && !privacyOnlyProfile) throw new SocialError(503, 'social_disabled');
                 await receipts().deleteMany({ accountId: actor.userId, expiresAt: { $lte: new Date(now()) } }, { session });
                 const safety = privacyOnlyProfile || (command.action === 'setListeningSharing' && !command.enabled)
-                    || ['block', 'unblock', 'deactivate', 'remove', 'decline', 'cancel', 'dismissMusicShare', 'withdrawMusicShare'].includes(command.action);
+                    || ['block', 'unblock', 'deactivate', 'remove', 'decline', 'cancel', 'report', 'dismissMusicShare', 'withdrawMusicShare'].includes(command.action);
                 // Admission cannot consume privacy-exit capacity; the final slot is reserved for deactivation.
                 const receiptLimit = SOCIAL_LIMITS.receipts + (safety ? SOCIAL_LIMITS.safetyReceipts : 0) + (command.action === 'deactivate' ? 1 : 0);
                 if (await receipts().countDocuments({ accountId: actor.userId }, { session, limit: receiptLimit }) >= receiptLimit) throw new SocialError(429, 'social_limit');
@@ -452,7 +467,8 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 }
                 return [...roomAccounts, ...shareAccounts];
             });
-            if (result.outcome === 'applied' && !result.replayed && command.action !== 'setListeningSharing' && command.action !== 'claimListening') notifyRoomChanges();
+            // Listening and reports change no room or peer-visible state, so they wake no realtime delivery.
+            if (result.outcome === 'applied' && !result.replayed && !['setListeningSharing', 'claimListening', 'report'].includes(command.action)) notifyRoomChanges();
             return result;
         },
         async outcome(actor, identity: SocialMutationIdentity) {

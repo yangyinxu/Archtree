@@ -18,7 +18,9 @@ export type SocialAction = { action: 'profile'; handle: string; alias: string; d
   | { action: 'deactivate' }
   | { action: 'block'; targetSocialId: string }
   | { action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove' | 'unblock'; targetSocialId: string; expectedRevision: number }
+  | { action: 'report'; targetSocialId: string; reason: SocialReportReason; note?: string }
   | MusicShareAction | ListeningAction;
+export type SocialReportReason = 'impersonation' | 'harassment' | 'spam' | 'inappropriate' | 'other';
 export type SocialCommand = SocialAction & { readonly scopeToken: string; readonly commandId: string };
 
 export { getSocialProfile } from './socialProfile';
@@ -71,6 +73,7 @@ export const sendSocialCommand = (viewerId: string, command: SocialCommand) => {
     body = remaining;
   }
   else if (action === 'request') path = '/friend-requests';
+  else if (action === 'report') path = '/reports';
   else if ('targetSocialId' in input) {
     path = `/relationships/${socialIdSchema.parse(input.targetSocialId)}/${action}`;
     const { targetSocialId: _target, ...remaining } = input;

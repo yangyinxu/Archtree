@@ -81,13 +81,13 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. Startup verifies the `required-indexes-v5-email-link-tokens` constraints before
+new scope after rotation. Startup verifies the `required-indexes-v6-social-reports` constraints before
 admission; these are additive schema changes even when the feature is disabled.
 
 See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
 for exact routes, envelopes, limits, retention and recovery behavior. Narrow
-checks are `node --import tsx --test test/socialContract.test.ts test/socialRoutes.test.ts`
-and `node --import tsx --test --test-concurrency=1 test/socialLifecycle.integration.ts test/socialAccountLifecycle.integration.ts test/socialAuth.integration.ts`.
+checks are `node --import tsx --test test/socialContract.test.ts test/socialRoutes.test.ts test/socialModerationRoutes.test.ts test/socialModerationView.test.ts`
+and `node --import tsx --test --test-concurrency=1 test/socialLifecycle.integration.ts test/socialAccountLifecycle.integration.ts test/socialAuth.integration.ts test/socialModeration.integration.ts`.
 The integration harness starts an isolated local MongoDB replica set; it does
 not connect to the configured application database. Full gates remain `npm test`,
 `npm run build` and `npm run test:integration`.
@@ -107,6 +107,40 @@ device. **Listening with friends** refreshes while visible; status expires withi
 Viewing a status does not play anything. Invite a friend into a room you host,
 or explicitly confirm creation of a paused room with eligible Audio before
 sending the invitation. If invitation fails, the created room remains available.
+
+**Report** appears on friends, requests, blocked rows and lookup results in
+**Together**. It opens a dialog for an optional reason and note and sends only
+after **Send report**. The reported listener is never told. A listener can report
+each person once per UTC day and file up to 10 reports a day. A suspended
+listener sees a notice in place of the profile controls.
+
+Administrators review reports at `/admin/social/reports`, linked as **Social
+reports** under Content Manager operations. Each open report can be dismissed,
+marked handled, or resolved by suspending the reported listener, which resolves
+all of that listener's open reports. The page also lists suspended listeners
+for unsuspension and looks up any handle. Resolved reports are deleted 90 days
+after resolution. The same routes return JSON for scripted use with an
+administrator access token from `POST /auth/login` (Bearer requests skip the
+browser same-origin check; keep the token out of shell history and logs):
+
+```sh
+curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H 'Accept: application/json' \
+  'https://<host>/admin/social/reports?state=open&limit=50'
+curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" 'https://<host>/admin/social/profiles?handle=<handle>'
+curl -X POST -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"resolution":"dismissed"}' 'https://<host>/admin/social/reports/<reportId>/resolve'
+curl -X POST -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{}' 'https://<host>/admin/social/profiles/<socialId>/suspend'
+curl -X POST -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{}' 'https://<host>/admin/social/profiles/<socialId>/unsuspend'
+```
+
+Each change is idempotent: repeating it returns `noop`, so a
+`mutation_outcome_unknown` response can be retried after reading the current
+state. Suspension and moderation work whether or not `FINITUDE_SOCIAL_ENABLED`
+is set. See
+[reports and suspension](docs/architecture.md#reports-and-administrator-suspension)
+for the stored evidence, transactions and account-deletion handling.
 
 ## Listening rooms and local demonstration
 

@@ -53,6 +53,7 @@ export const databaseIndexes: Array<{
     },
     { collection: 'socialProfiles', keys: { accountId: 1 }, options: { unique: true } },
     { collection: 'socialProfiles', keys: { handle: 1 }, options: { unique: true } },
+    { collection: 'socialProfiles', keys: { 'suspension.suspendedAt': -1 }, options: { sparse: true } },
     { collection: 'socialRelationships', keys: { accountIds: 1 }, required: true },
     { collection: 'socialRelationships', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     {
@@ -90,6 +91,13 @@ export const databaseIndexes: Array<{
     { collection: 'socialAuthority', keys: { owner: 1 }, required: true },
     { collection: 'socialRealtimeTickets', keys: { accountId: 1, expiresAt: 1 }, required: true },
     { collection: 'socialRealtimeTickets', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    // One report per reporter, target and UTC day; anonymized reports get a unique replacement key.
+    { collection: 'socialReports', keys: { dedupeKey: 1 }, options: { unique: true } },
+    // Required: account deletion and suspension clean these up inside their transactions.
+    { collection: 'socialReports', keys: { reporterAccountId: 1 }, required: true },
+    { collection: 'socialReports', keys: { targetAccountId: 1, state: 1 }, required: true },
+    { collection: 'socialReports', keys: { state: 1, createdAt: 1, _id: 1 } },
+    { collection: 'socialReports', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'contentWorkflowOperations', keys: { adminUserId: 1, updatedAt: -1 } },
     {
@@ -120,7 +128,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v5-email-link-tokens';
+export const requiredIndexRevision = 'required-indexes-v6-social-reports';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */

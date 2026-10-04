@@ -5,6 +5,7 @@ import { Collection, MongoServerError, ObjectId, type ClientSession } from 'mong
 import { createRoomService, type RoomServiceOptions } from '../src/application/rooms/roomService';
 import { applyRoomSafety, invalidateRoomsForMedia } from '../src/application/rooms/roomLifecycle';
 import { createSocialService } from '../src/application/social/socialService';
+import { createSocialModerationService } from '../src/application/social/socialModerationService';
 import { ROOM_LIMITS, type RoomActor, type RoomApi, type RoomCommand, type RoomMediaDescriptor, type RoomSnapshot } from '../src/contracts/roomV1';
 import { SOCIAL_LIMITS, SocialError, type SocialApi, type SocialScope } from '../src/contracts/socialV1';
 import { getDatabaseClient, getDb } from '../src/infrastructure/database';
@@ -1050,6 +1051,29 @@ for (const action of ['accept', 'decline', 'end', 'removeFriend', 'block', 'deac
         assert.deepEqual(await api.invitations(guest.actor), []);
     });
 }
+
+test('administrator suspension removes a guest, ends a hosted room with its invitations and blocks new rooms', async () => {
+    const moderation = createSocialModerationService({ now: () => now });
+    const admin = { userId: new ObjectId().toHexString() };
+    const { host, guest } = await pair();
+    const third = await person('third'); await friendship(host, third);
+    const pending = await invite(host, third);
+    assert.equal((await moderation.suspend(admin, guest.profile.socialId)).outcome, 'applied');
+    assert.equal(await api.currentRoom(guest.actor), null);
+    const hostView = await snapshot(host);
+    assert.equal(hostView.status, 'open');
+    assert.deepEqual(hostView.members.map(value => value.memberId), [hostView.self.memberId]);
+    assert.equal((await api.invitation(third.actor, pending.invitationId))?.invitationId, pending.invitationId);
+
+    assert.equal((await moderation.suspend(admin, host.profile.socialId)).outcome, 'applied');
+    assert.equal(await api.currentRoom(host.actor), null);
+    assert.equal(await api.invitation(third.actor, pending.invitationId), null);
+    assert.equal(await database().collection('socialRoomParticipation').countDocuments(), 0);
+    const reopened = await api.mutate(host.actor, command(host, { action: 'create', mediaTrackIds: media.map(value => value.mediaTrackId) }));
+    assert.deepEqual([reopened.outcome, reopened.code], ['rejected', 'profile_unavailable']);
+    const blockedInvite = await create(third).then(room => api.mutate(third.actor, command(third, { action: 'invite', ...memberBody(room), targetSocialId: host.profile.socialId })));
+    assert.deepEqual([blockedInvite.outcome, blockedInvite.code], ['rejected', 'profile_unavailable']);
+});
 
 test('invitation link reads retain actual session fences and hide inactive recipients', async () => {
     const host = await person('host'); const guest = await person('guest'); await friendship(host, guest); const room = await create(host);

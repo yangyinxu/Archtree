@@ -17,6 +17,7 @@ import {
     publicReadRateLimit,
     reconciliationConcurrencyLimit
 } from '../middleware/requestProtectionMiddleware';
+import { createSocialModerationRouter } from './socialModerationRoutes';
 
 const router: Router = express.Router();
 
@@ -29,5 +30,7 @@ router.post('/audio-storage/missing-track-delete', requireAuth, requireAdmin, re
 router.post('/audio-storage/publication-retry', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(postAudioPublicationRetry));
 router.get('/image-storage/reconciliation', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(getImageStorageReconciliation));
 router.get('/content-references/reconciliation', requireAuth, requireAdmin, reconciliationConcurrencyLimit, asyncHandler(getContentReferenceReconciliation));
+// The moderation router installs requireAuth and requireAdmin before any of its routes.
+router.use('/social', createSocialModerationRouter());
 
 export default router;

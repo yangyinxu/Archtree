@@ -2,7 +2,7 @@ import { ClientSession, ObjectId } from 'mongodb';
 
 import { SOCIAL_LIMITS } from '../contracts/socialV1';
 import { getDb } from '../infrastructure/database';
-import type { SocialOutboxDocument, SocialRelationshipDocument } from '../repositories/social/socialDocuments';
+import type { SocialOutboxDocument, SocialRelationshipDocument, SocialReportDocument } from '../repositories/social/socialDocuments';
 import { applyRoomSafety } from '../application/rooms/roomLifecycle';
 import { deleteMusicShares } from '../application/social/socialShareLifecycle';
 import { clearListeningAccount } from '../application/social/listeningLifecycle';
@@ -46,6 +46,15 @@ export const deleteSocialAccountData = async (
         await db.collection(collection).deleteMany({ accountId }, { session });
     }
     await db.collection('socialRealtimeTickets').deleteMany({ accountId }, { session });
+    // Reports about a deleted listener have nothing left to moderate and would retain its old name.
+    // Reports it wrote may still concern a current listener, so they stay as anonymous evidence:
+    // the reporter identity and free-text note go, the reason and reported-name snapshot remain.
+    const reports = db.collection<SocialReportDocument>('socialReports');
+    await reports.deleteMany({ targetAccountId: accountId }, { session });
+    await reports.updateMany({ reporterAccountId: accountId }, [
+        { $set: { dedupeKey: { $concat: ['anonymized:', '$_id'] }, anonymizedAt: now } },
+        { $unset: ['reporterAccountId', 'reporterSocialId', 'note'] }
+    ], { session });
     // The temporary reservation keeps only the handle and deadline, never its former owner.
     await db.collection('socialHandles').updateMany(
         { accountId },

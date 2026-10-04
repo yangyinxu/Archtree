@@ -478,3 +478,41 @@ test('real application mounts social authentication before its general body pars
     assert.match(response.headers.get('cache-control')!, /no-store/);
     assert.doesNotMatch(await response.text(), /private/);
 });
+
+test('the report route captures one frozen report from an allowlisted body and rejects overrides', async t => {
+    const { api, commands, actors } = fixtureApi();
+    const { request } = await listen(t, api);
+    const minimal = await request('/reports', { ...identity, targetSocialId: socialId });
+    assert.equal(minimal.status, 200);
+    assert.deepEqual(await minimal.json(), { commandId: identity.commandId, outcome: 'applied', replayed: false });
+    assert.deepEqual(commands[0], { ...identity, action: 'report', targetSocialId: socialId, reason: 'other', note: '' });
+    assert.equal((await request('/reports', { ...identity, targetSocialId: socialId, reason: 'spam', note: ' Repeated invites ' })).status, 200);
+    assert.deepEqual(commands[1], { ...identity, action: 'report', targetSocialId: socialId, reason: 'spam', note: 'Repeated invites' });
+    assert.ok(commands.every(Object.isFrozen));
+    assert.deepEqual(actors, [actor, actor]);
+    const cases: unknown[] = [
+        identity, { ...identity, targetSocialId: socialId, action: 'block' }, { ...identity, targetSocialId: socialId, reason: 'abuse' },
+        { ...identity, targetSocialId: socialId, note: 'x'.repeat(501) }, { ...identity, targetSocialId: socialId, accountId: 'other-account' },
+        { ...identity, targetSocialId: 'not-a-social-id' }, [identity]
+    ];
+    for (const body of cases) {
+        const response = await request('/reports', body);
+        assert.equal(response.status, 400, JSON.stringify(body));
+        assert.equal((await response.json()).code, 'invalid_request');
+    }
+    assert.equal((await request('/reports?reason=spam', { ...identity, targetSocialId: socialId })).status, 400);
+    assert.equal(commands.length, 2);
+    // Reporting is a safety action: it stays reachable while admission is disabled.
+    api.admissionEnabled = () => false;
+    assert.equal((await request('/reports', { ...identity, targetSocialId: socialId })).status, 200);
+});
+
+test('an own profile projects suspension only as an explicit true marker', async t => {
+    const { api } = fixtureApi();
+    let suspended = true;
+    api.ownProfile = async () => ({ ...card, active: false, discoverable: false, revision: 5, ...(suspended ? { suspended: true as const } : {}) });
+    const { request } = await listen(t, api);
+    assert.deepEqual(await (await request('/me/profile')).json(), { profile: { ...card, active: false, discoverable: false, revision: 5, suspended: true } });
+    suspended = false;
+    assert.deepEqual(await (await request('/me/profile')).json(), { profile: { ...card, active: false, discoverable: false, revision: 5 } });
+});

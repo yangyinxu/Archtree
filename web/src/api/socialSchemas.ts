@@ -7,8 +7,9 @@ export const socialCardSchema = z.object({
   socialId: socialIdSchema, handle: z.string().regex(/^[a-z][a-z0-9_]{2,23}$/),
   alias: z.string().min(1).max(200), iconSeed: z.string().min(1).max(100)
 }).strict();
+/** `suspended` is present only while an administrator has suspended the profile. */
 export const socialProfileSchema = socialCardSchema.extend({
-  active: z.boolean(), discoverable: z.boolean(), revision: socialRevisionSchema
+  active: z.boolean(), discoverable: z.boolean(), revision: socialRevisionSchema, suspended: z.literal(true).optional()
 }).strict();
 export const socialPageSchema = z.object({
   items: z.array(z.object({ socialId: socialIdSchema, profile: socialCardSchema.nullable(), revision: socialRevisionSchema }).strict()).max(50),

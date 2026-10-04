@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { browserSessionQuery, browserSessionResolvingQuery } from '../../api/session';
@@ -12,6 +12,8 @@ const tabs = ['friends', 'incoming', 'outgoing', 'blocks'] as const;
 const ListeningSharingSettings = lazy(() => import('./ListeningSharingSettings').then(module => ({ default: module.ListeningSharingSettings })));
 const FriendsListening = lazy(() => import('./FriendsListening').then(module => ({ default: module.FriendsListening })));
 const RoomsPanel = lazy(() => import('./RoomsPanel').then(module => ({ default: module.RoomsPanel })));
+const ReportDialog = lazy(() => import('./ReportDialog'));
+type Report = (socialId: string, label: string, trigger: HTMLElement) => void;
 /** Generated public identity uses only the explicitly chosen social alias. */
 export const SocialAvatar = ({ profile }: { profile: SocialCard | null }) => <span className={styles.avatar} aria-hidden="true">
   {profile ? [...profile.alias][0].toLocaleUpperCase() : '·'}
@@ -26,15 +28,18 @@ const IdentityForm = ({ profile, actions }: { profile: SocialProfile | null; act
     event.preventDefault();
     void actions.run({ action: 'profile', expectedRevision: profile?.revision ?? 0, handle: handle.toLowerCase(), alias, discoverable });
   };
+  // A suspended listener cannot edit or reactivate, so the form stays visible but read-only.
+  const suspended = profile?.suspended === true;
   return <section className={styles.panel}>
     <h2>{t('social.identity')}</h2>
-    {profile && !profile.active && <p className={styles.status}>{t('social.inactive')}</p>}
+    {suspended ? <p className={styles.error} role="status">{t('social.suspended')}</p>
+      : profile && !profile.active && <p className={styles.status}>{t('social.inactive')}</p>}
     <p className={styles.muted}>{t('social.identity_hint')}</p>
     <form aria-label={t('social.identity')} onSubmit={submit}>
       <label className={styles.field}>{t('social.handle')}<input required autoComplete="off" pattern="[a-zA-Z][a-zA-Z0-9_]{2,23}" minLength={3} maxLength={24} value={handle} disabled={Boolean(profile)} onChange={event => setHandle(event.target.value)} /></label>
       <label className={styles.field}>{t('social.alias')}<input required autoComplete="off" maxLength={50} value={alias} onChange={event => setAlias(event.target.value)} /></label>
       <label className={styles.check}><input type="checkbox" checked={discoverable} onChange={event => setDiscoverable(event.target.checked)} />{t('social.discoverable')}</label>
-      <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)}>{t(profile ? profile.active ? 'social.save_profile' : 'social.reactivate' : 'social.create_profile')}</button>
+      <button className={styles.button} disabled={suspended || actions.busy || Boolean(actions.uncertain)}>{t(profile ? profile.active ? 'social.save_profile' : 'social.reactivate' : 'social.create_profile')}</button>
     </form>
     {profile?.active && <div className={styles.actions}><button className={styles.danger} disabled={actions.busy || Boolean(actions.uncertain)} type="button" onClick={() => {
       if (window.confirm(t('social.deactivate_confirm'))) void actions.run({ action: 'deactivate' });
@@ -42,7 +47,7 @@ const IdentityForm = ({ profile, actions }: { profile: SocialProfile | null; act
   </section>;
 };
 
-const FriendLookup = ({ viewerId, enabled, actions }: { viewerId: string; enabled: boolean; actions: ReturnType<typeof useSocialActions> }) => {
+const FriendLookup = ({ viewerId, enabled, actions, report }: { viewerId: string; enabled: boolean; actions: ReturnType<typeof useSocialActions>; report: Report }) => {
   const { t } = useLocalization();
   const [handle, setHandle] = useState('');
   const [submitted, setSubmitted] = useState('');
@@ -66,11 +71,13 @@ const FriendLookup = ({ viewerId, enabled, actions }: { viewerId: string; enable
       {relation?.state === 'outgoing' && <span className={styles.muted}>{t('social.outgoing')}</span>}
       {relation?.state === 'friends' && <span className={styles.muted}>{t('social.friends')}</span>}
       {relation?.state === 'incoming' && <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'accept', targetSocialId: profile.socialId, expectedRevision: relation.revision })}>{t('social.accept')}</button>}
+      {/* The pair state is null for the viewer's own handle, so a listener is never offered a self-report. */}
+      {relation && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(profile.socialId, `${profile.alias} (@${profile.handle})`, event.currentTarget)}>{t('social.report')}</button>}
     </div>}
   </section>;
 };
 
-const Relationships = ({ viewerId, actions }: { viewerId: string; actions: ReturnType<typeof useSocialActions> }) => {
+const Relationships = ({ viewerId, actions, report }: { viewerId: string; actions: ReturnType<typeof useSocialActions>; report: Report }) => {
   const { t } = useLocalization();
   const [kind, setKind] = useState<SocialListKind>('friends');
   const result = useInfiniteQuery({ queryKey: ['social', viewerId, 'relationships', kind],
@@ -91,6 +98,9 @@ const Relationships = ({ viewerId, actions }: { viewerId: string; actions: Retur
           <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: kind === 'friends' ? 'remove' : kind === 'incoming' ? 'decline' : kind === 'outgoing' ? 'cancel' : 'unblock', targetSocialId: row.socialId, expectedRevision: row.revision })}>
             {t(kind === 'friends' ? 'social.remove' : kind === 'incoming' ? 'social.decline' : kind === 'outgoing' ? 'social.cancel_request' : 'social.unblock')}</button>
           {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'block', targetSocialId: row.socialId })}>{t('social.block')}</button>}
+          {/* Blocked rows stay reportable: blocking and then reporting is a common safety sequence. */}
+          <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(row.socialId,
+            row.profile ? `${row.profile.alias} (@${row.profile.handle})` : `${t('social.blocked_profile')} ${row.socialId.slice(-8)}`, event.currentTarget)}>{t('social.report')}</button>
         </div>
       </li>)}</ul>}
     {result.hasNextPage && <button className={styles.secondary} disabled={result.isFetchingNextPage} onClick={() => result.fetchNextPage()}>{t('common.action.load_more')}</button>}
@@ -101,6 +111,9 @@ const SocialSpace = ({ viewerId }: { viewerId: string }) => {
   const { t } = useLocalization();
   const profile = useQuery({ queryKey: ['social', viewerId, 'profile'], queryFn: ({ signal }) => getSocialProfile(viewerId, signal), retry: false });
   const actions = useSocialActions(viewerId);
+  const [reporting, setReporting] = useState<{ socialId: string; label: string } | null>(null);
+  const reportTrigger = useRef<HTMLElement | null>(null);
+  const report: Report = (socialId, label, trigger) => { reportTrigger.current = trigger; setReporting({ socialId, label }); };
   useEffect(() => {
     if (profile.data?.profile && !profile.data.profile.active) void import('./roomSession').then(module => module.roomSession.stop());
   }, [profile.data]);
@@ -113,10 +126,12 @@ const SocialSpace = ({ viewerId }: { viewerId: string }) => {
     {profile.isError && <p className={styles.error} role="alert">{t('social.error')}</p>}
     {profile.isPending ? <p role="status">{t('social.loading')}</p> : profile.data && <div className={styles.grid}>
       {profile.data.profile?.active && <Suspense fallback={<section className={styles.panel} role="status">{t('social.loading')}</section>}><RoomsPanel viewerId={viewerId} profile={profile.data.profile} /></Suspense>}
-      <div className={styles.stack}><Relationships viewerId={viewerId} actions={actions} /><FriendLookup viewerId={viewerId} enabled={profile.data.profile?.active ?? false} actions={actions} /></div>
+      <div className={styles.stack}><Relationships viewerId={viewerId} actions={actions} report={report} /><FriendLookup viewerId={viewerId} enabled={profile.data.profile?.active ?? false} actions={actions} report={report} /></div>
       {profile.data.profile?.active && !profile.isError && <Suspense fallback={null}><ListeningSharingSettings viewerId={viewerId} /><FriendsListening viewerId={viewerId} /></Suspense>}
       <IdentityForm key={profile.data.profile?.revision ?? 0} profile={profile.data.profile} actions={actions} />
     </div>}
+    {reporting && <Suspense fallback={null}><ReportDialog target={reporting} busy={actions.busy || Boolean(actions.uncertain)} run={actions.run}
+      onClose={() => setReporting(null)} returnFocusRef={reportTrigger} /></Suspense>}
   </>;
 };
 

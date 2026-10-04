@@ -33,6 +33,7 @@ database documents. Unknown JSON/query fields and repeated query values fail.
 | `GET /relationships/:socialId` | No query | `{relationship: {socialId,state,revision} or null}`; state is none/incoming/outgoing/friends/own blocked |
 | `POST /friend-requests` | Mutation identity plus `targetSocialId`, `expectedRevision` | `SocialOutcome` |
 | `POST /relationships/:socialId/:action` | Mutation identity and observed `expectedRevision`; block omits revision | `SocialOutcome`; action is accept/decline/cancel/remove/block/unblock |
+| `POST /reports` | Mutation identity plus `targetSocialId`; optional `reason` and `note` | `SocialOutcome`; see [reports and suspension](#reports-and-administrator-suspension) |
 
 A mutation identity is `{scopeToken, commandId}`. Command IDs contain 16–80 ASCII
 letters, digits, underscores or hyphens. The server normalizes a handle to lower
@@ -52,7 +53,10 @@ it writes no profile or handle row. There is no staff provisioning path for
 official accounts; one would need a separate, role-guarded change.
 
 `SocialCard` contains exactly `socialId`, `handle`, `alias`, and `iconSeed`.
-`SocialOwnProfile` additionally contains `active`, `discoverable`, and `revision`.
+`SocialOwnProfile` additionally contains `active`, `discoverable`, and `revision`,
+plus `suspended: true` only while an administrator suspension is in effect; the
+key is absent otherwise, so strict clients written before suspension keep parsing
+every unsuspended profile.
 List rows contain `socialId`, a permitted `profile` card or null, and the
 relationship `revision`. Block-list cards are always null: retaining a private
 block reference never grants current profile access. A peer's private block is
@@ -93,6 +97,76 @@ command. Revision 0 denotes a currently absent pair. These numbers can skip: the
 are mutation preconditions, not item counts or continuous client event sequences.
 Cursor signatures bind the viewer and list kind for 15 minutes. Each page freshly
 projects visible rows in opaque social-ID order; it is not a retained list snapshot.
+
+### Reports and administrator suspension
+
+`POST /reports` captures `{action: 'report', targetSocialId, reason, note}`.
+`reason` is one of `impersonation`, `harassment`, `spam`, `inappropriate` or
+`other` (the default when omitted). `note` is optional, trimmed, NFC-normalized,
+CRLF-folded and at most 500 characters; line feeds are the only control
+characters kept. Defaults are applied before the receipt digest, so a retry with
+or without the optional keys is the same intent. The command is a safety action:
+it is accepted while admission is disabled and may use the reserved safety
+receipt capacity.
+
+The plan in `socialService.ts` requires the reporter to own a social profile in
+any state and the target profile to exist and differ from the reporter. Missing
+and self targets are a durable `rejected` `profile_unavailable`. One
+`socialReports` row per reporter, target and UTC day is enforced by a unique
+SHA-256 `dedupeKey`; a repeat that day is a `noop` that spends no allowance. A
+new report spends the durable `socialBudgets.reportDay/reports` allowance of 10
+per day, or is rejected with `social_limit`. The row keeps the reporter and
+target account and social IDs, the target's handle and nickname at report time,
+the reason, the note and `createdAt`. The transaction fences both accounts (so a
+concurrent deletion cannot orphan a row) but writes no outbox signal, receipt,
+profile or relationship for the target, and wakes no realtime delivery.
+
+`src/application/social/socialModerationService.ts` and
+`src/routes/socialModerationRoutes.ts` implement administrator moderation under
+`/admin/social`. The router installs `requireAuth` and `requireAdmin` before any
+route; cookie POSTs also pass the application's same-origin mutation guard.
+Responses are `private, no-store`. GET responses are JSON unless the browser
+prefers HTML; forms post back and redirect with a fixed `notice` code, so no
+listener identity or caller text is placed in a redirect URL.
+
+| Method and path | Input | Response |
+| --- | --- | --- |
+| `GET /admin/social/reports` | `state=open\|resolved` (default open), `limit` 1–100 (default 50), `cursor` | `{items, nextCursor}`; open oldest first, resolved newest first. HTML adds the suspended list and a `handle` lookup |
+| `GET /admin/social/profiles` | `handle=...` or `suspended=true` | `{items: SocialModerationProfile[]}` |
+| `POST /admin/social/reports/:reportId/resolve` | `{resolution: 'dismissed' \| 'actioned'}` | `{outcome: applied\|noop, value: SocialModerationReport}` |
+| `POST /admin/social/profiles/:socialId/suspend` | Empty body | `{outcome, value: SocialModerationProfile}` |
+| `POST /admin/social/profiles/:socialId/unsuspend` | Empty body | `{outcome, value: SocialModerationProfile}` |
+
+A moderation profile contains `socialId`, `handle`, `alias`, `status`
+(`active`, `inactive` or `suspended`), the listener's own `discoverable` choice,
+`suspendedAt` and its open report count. A moderation report contains its ID,
+reason, note, state, timestamps, resolution, the reported snapshot with the
+current moderation profile (or null), and the reporter's social ID and current
+handle (or null once anonymized). Neither contains email, account IDs or avatars.
+
+Every moderation change is idempotent by state, so an administrator may retry a
+`mutation_outcome_unknown` result. Resolution is a single-document transition
+that stamps `resolvedAt`, `resolvedBy` (the administrator account ID) and a TTL
+`expiresAt` 90 days later. Suspension runs in a snapshot transaction that fences
+the target, every relationship peer, room co-members and live music-share peers
+in sorted order, then: moves pending edges to `none` under a fresh relationship
+revision; stores `suspension {suspendedAt, suspendedBy, restoreActive,
+restoreDiscoverable}` while holding `active` and `discoverable` false; applies
+the deactivation room safety change, music-share deletion and listening reset;
+resolves open reports about the target as `suspended`; and invalidates the
+target and peers. Because every read and admission path already requires an
+active profile, the inactive profile is hidden without new read predicates. The
+profile plan rejects any profile command from a suspended profile with
+`social_suspended` (403). Unsuspension restores the stored choices, removes the
+suspension and invalidates the target and retained peers. Accepted edges and
+blocks are untouched by both.
+
+Account deletion deletes reports whose `targetAccountId` is the account and
+anonymizes reports it wrote by removing `reporterAccountId`, `reporterSocialId`
+and `note`, stamping `anonymizedAt` and replacing `dedupeKey` with
+`anonymized:<reportId>`, in the same transaction. Startup requires the unique
+`dedupeKey` index and the `reporterAccountId` and `targetAccountId,state` cleanup
+indexes; the triage sort, TTL and sparse suspension indexes are optional.
 
 ### Direct music share API
 
@@ -251,15 +325,17 @@ identity payload in another account's receipt.
 
 Account deletion keeps the existing synchronous transaction and all avatar/shared
 provenance preconditions. `socialAccountLifecycleService.ts` removes the deleted
-account's profile, both-sided relationships, receipts, budget and outbox, fences
-existing peers before their invalidation, and removes the owner identifier from
-the 30-day handle reservation. Concurrent peer deletion cannot recreate orphaned
+account's profile, both-sided relationships, receipts, budget, outbox and the
+reports about it (anonymizing the reports it wrote), fences existing peers before
+their invalidation, and removes the owner identifier from the 30-day handle
+reservation. Concurrent peer deletion cannot recreate orphaned
 outbox data. A failure rolls back the entire cleanup; no S3 object is touched.
 Deactivation retains the profile/handle, blocks, receipts and clocks so later
 reactivation cannot restore an old intent or relationship.
 
 Startup migration `required-indexes-v4-social-participation` (now verified as part of
-`required-indexes-v5-email-link-tokens`, which adds the `emailLinkTokens` cleanup index) adds mandatory unique constraints
+`required-indexes-v6-social-reports`, which follows v5's `emailLinkTokens` cleanup
+index with the `socialReports` constraints) adds mandatory unique constraints
 and required nonunique cleanup indexes. A sparse, partial, hidden, wrong-key or
 wrong-uniqueness substitute is rejected. TTL is opportunistic reclamation and is
 never an authorization or admission decision. See the active plan for actual
