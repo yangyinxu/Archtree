@@ -104,3 +104,23 @@ Completion evidence:
 - A signed physical-device build completes password login over HTTPS.
 - Refresh, profile, and session-revocation operations complete over HTTPS
   before the full authentication lifecycle is considered verified.
+
+## Room Audio Decoder and Catalog Backfill
+
+Status: Repository support added. The Elastic Beanstalk prebuild hook installs a
+pinned, SHA-256-verified FFmpeg and the operator backfill analyzes existing Audio
+(see the README's room audio decoder and catalog backfill sections). Nothing has
+been deployed or run against production yet.
+
+- [ ] Deploy the FFmpeg-enabled release and confirm `/var/log/eb-hooks.log` shows
+      the verified install, `/usr/local/bin/ffmpeg -hide_banner -version` runs,
+      and `ROOM_AUDIO_FFMPEG_PATH` resolves to `/usr/local/bin/ffmpeg`.
+- [ ] Upload a short original MP3 through Content Manager and confirm the Room
+      audio analysis page lists it as eligible.
+- [ ] From an operator machine with FFmpeg, run the backfill dry run against
+      production and review its `wouldAnalyze` count.
+- [ ] Apply the backfill in paced runs until a summary reports `finished=true`,
+      then rerun once without `--after` to retry any `retryLater` tracks.
+- [ ] Keep the backfill log's final summary with the rooms release evidence.
+- [ ] Refresh the FFmpeg pin before upstream retention ends (about 2028-09) or
+      sooner for FFmpeg security fixes.

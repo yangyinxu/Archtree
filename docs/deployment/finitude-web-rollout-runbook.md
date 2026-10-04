@@ -228,6 +228,13 @@ size is Express's JSON response, so the proxy dropped `Upgrade`/`Connection`;
 rooms disabled at runtime). Then confirm that a signed-in test account's room
 connects over `wss://` in the browser.
 
+Before enabling rooms on a target, confirm the room audio decoder: the deployment
+log shows the pinned FFmpeg install verified by size and SHA-256,
+`/usr/local/bin/ffmpeg -hide_banner -version` runs on the instance, and a short
+original MP3 uploaded through Content Manager is listed as eligible on the Room
+audio analysis page. Run the README's room audio catalog backfill (dry run first)
+for existing tracks after this check passes.
+
 Run the checked-in media workload only on a target explicitly approved for
 load testing. Remote targets require `ALLOW_REMOTE_MEDIA_LOAD=1` and an exact
 `MEDIA_LOAD_ALLOWED_HOSTS` entry. Retain only its aggregate result and server
@@ -297,7 +304,11 @@ infrastructure such as issued TLS certificates or systemd timer state. Inspect
 those separately if a release changed `.platform` or `.ebextensions`. The HTTPS
 timer installer keeps a stable copy of the configurator under
 `/usr/local/sbin`, so explicitly verify that persisted copy and both timer unit
-definitions when rolling back across this recovery change. The
+definitions when rolling back across this recovery change. The pinned FFmpeg under
+`/opt/archtree-ffmpeg` and its `/usr/local/bin` links also persist across an
+application rollback. An older release can still reach that decoder through
+`ROOM_AUDIO_FFMPEG_PATH` or PATH; remove them by hand only if the rollback must
+also remove the decoder. Analysis results written by the backfill remain valid. The
 additive Playlist collections and receipts must remain intact during rollback;
 the previous application may ignore them, but rollback must not delete listener
 data or remove their indexes. Playlist artwork has no persistent derivative or

@@ -265,7 +265,8 @@ Read-only implementation audit identified the next seams:
 - Metadata duration and HTTP byte ranges do not establish seekability. Add a
   bounded finite-file/seek-structure probe and actual client seek readiness;
   unknown analysis preserves ordinary playback but cannot admit a room entry.
-  No media-probe deployment dependency currently exists.
+  Elastic Beanstalk now provisions a pinned FFmpeg through a prebuild hook, and
+  an operator-run catalog backfill analyzes existing Audio (see README).
 - Extend the unified MediaTrack HEAD/GET route with a strict optional revision
   fence and recorded object validators. Pin GET after HEAD, including If-Range
   fallback; preserve the versionless path and legacy Audio aliases.

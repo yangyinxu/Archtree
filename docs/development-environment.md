@@ -128,15 +128,20 @@ npm run doctor
 See the [FFmpeg protocol controls](https://ffmpeg.org/ffmpeg-protocols.html) and
 [command options](https://ffmpeg.org/ffmpeg.html) used by the restricted decoder.
 
-Deployments must provision and patch this executable separately; the application
-archive does not bundle a workstation binary or the repository scripts. Use
+Elastic Beanstalk deployments install a pinned, SHA-256-verified build through
+`.platform/hooks/prebuild/02_install_ffmpeg.sh` (see the README's room audio
+decoder section); other deployment targets must provision and patch this
+executable separately. The application archive never bundles a workstation binary
+or the repository scripts. Use
 `npm run doctor` in a full Linux checkout with the test runtimes; a deployment
 host does not require a local MongoDB test daemon. To inspect only FFmpeg from a
 full checkout using the deployment's executable, run
 `node scripts/check-runtime.mjs --room-audio`. Then verify original MP3/M4A
 uploads and room preparation, play and seeking through the deployed app before
-rollout. Run the batch CLI from a full administrator checkout with explicit
-configuration; the deployed Content Manager page remains its in-app equivalent. Missing runtime makes compressed uploads
+rollout. Run the batch CLI or the paced catalog backfill
+(`npm run backfill:room-audio-analysis`) from a full administrator checkout with
+explicit configuration and a local FFmpeg; the deployed Content Manager page
+remains their in-app equivalent. Missing runtime makes compressed uploads
 ineligible with a retryable analysis reason while ordinary uploads/playback stay
 available. The analyzer tests intentionally require a real decoder; do not mark
 missing-decoder fixture checks as passed. Local checks preserve Chromium's

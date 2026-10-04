@@ -225,9 +225,10 @@ rollout. `ROOM_AUDIO_FFMPEG_PATH` may select an absolute executable path; otherw
 `ffmpeg` is resolved on PATH. Each process permits at most two simultaneous
 single-threaded decodes, with a 60-second decode deadline. Operational decoder
 errors preserve retryable evidence; successful source metadata is never inferred
-from a filename, MIME type, display duration or a missing runtime. Provision the
-same decoder in the deployment environment before admitting compressed sources;
-local installation and CI provisioning do not install it on Elastic Beanstalk.
+from a filename, MIME type, display duration or a missing runtime. On Elastic
+Beanstalk a prebuild hook installs a pinned, SHA-256-verified FFmpeg and
+`.ebextensions/room-audio-decoder.config` points `ROOM_AUDIO_FFMPEG_PATH` at it;
+see [Room audio decoder on Elastic Beanstalk](#room-audio-decoder-on-elastic-beanstalk).
 See [runtime setup](docs/development-environment.md#room-audio-analysis-runtime).
 
 Administrators can open **Content Manager → Operations → Room audio analysis**
@@ -261,8 +262,65 @@ retryable attempts retain their original ID. Inspect the current status before
 retrying an unknown outcome. This command needs the normal private database/S3
 configuration and an existing admin account. The Elastic Beanstalk bundle excludes
 repository scripts; use the deployed administrator page for in-app operations.
-Do not run the CLI against production
-until that catalog operation is explicitly authorized.
+Use it for targeted recovery; the catalog backfill below covers the whole catalog.
+Run either command against production only as the approved launch backfill or
+another explicitly authorized catalog operation.
+
+#### Room audio catalog backfill
+
+MP3/M4A uploads made while Elastic Beanstalk had no decoder recorded
+`decoder_unavailable`, and older tracks have no verified analysis, so none of
+them can be chosen in a room. `npm run backfill:room-audio-analysis` walks the
+whole catalog from an operator checkout and analyzes, one source at a time,
+every ready/published Audio track whose analysis is missing, retryable or from
+an older analyzer version. Eligible, terminally unsupported and leased tracks are
+skipped without storage reads, and unpublished or unfinished uploads are never
+listed, so rerunning a finished backfill analyzes nothing. It calls the same
+source-fenced service as the administrator page: pinned S3 HEAD/GET, no object
+writes, analysis metadata only, and a recorded attempt keeps its identity.
+
+```sh
+# 1. Preview (the default): catalog reads only, no storage reads or database writes.
+npm run backfill:room-audio-analysis -- --admin-id=<admin-account-id> --log=room-audio-backfill.jsonl
+# 2. Apply in bounded, paced runs (defaults: 100 analyses per run, 2 s apart, 25 rows per page).
+npm run backfill:room-audio-analysis -- --admin-id=<admin-account-id> --log=room-audio-backfill.jsonl \
+  --apply --confirm=BACKFILL_ROOM_AUDIO
+# 3. Continue after the previous summary's resumeAfter until a summary reports finished=true.
+npm run backfill:room-audio-analysis -- --admin-id=<admin-account-id> --log=room-audio-backfill.jsonl \
+  --after=<resumeAfter> --apply --confirm=BACKFILL_ROOM_AUDIO
+```
+
+`--max-analyses=1..1000` bounds one run, `--delay-ms=0..60000` paces analyses,
+and `--page-size=1..100` sizes catalog reads. Each listed track produces one JSON
+line (`mediaTrackId`, `listed` status, `result`, bounded `reason`, `resumeAfter`)
+and the run ends with a `summary` line. `--log` appends the same lines to a
+private (0600) file, so resumed runs extend one audit trail. Titles, storage keys,
+validators and attempt IDs are never printed. Exit codes: 0 finished, 2 stopped
+and resumable, 1 could not run, 130/143 interrupted.
+
+Busy, stale, timed-out and other per-source failures are logged and passed over
+(`retryLater` counts them); a later run started without `--after` retries them.
+A missing local decoder, unavailable storage, an uncertain outcome, or SIGINT/SIGTERM
+stops the run before its cursor passes that track. `--apply` refuses to start
+unless the local FFmpeg passes `node scripts/check-runtime.mjs --room-audio`, so
+a broken decoder cannot turn every source into a failed attempt.
+
+Run it safely:
+
+- Use a trusted operator machine with FFmpeg installed and the target's private
+  `.env` (`DB_CONN_STRING`, `DB_NAME`, `S3_BUCKET_NAME`, `AWS_REGION` and AWS
+  credentials). Analysis needs only `s3:GetObject`/`s3:GetObjectVersion` on the
+  media bucket; prefer credentials limited to those reads.
+- Check the target before every command; the dry run is the default and writes nothing.
+  Compare its `wouldAnalyze` count with expectations before applying.
+- Each analysis downloads the full source (up to 512 MiB) into the local
+  temporary directory and counts as S3 data transfer out. Keep the default
+  pacing on the free-tier MongoDB Atlas cluster and run one backfill at a time.
+  The deployed administrator page can keep working: a two-minute source lease
+  makes either side skip a track the other is analyzing.
+- The rooms launch decision approves one production backfill after the
+  FFmpeg-enabled deployment has been verified; keep the log's final summary with
+  the release evidence.
 
 Verified room response MIME types come from the inspected format rather than an
 upload declaration. Room URLs pin an opaque media revision and HEAD/GET validate the same stored S3
@@ -943,6 +1001,45 @@ The timers retrieve `HTTPS_DOMAIN` and `ACME_EMAIL` from Elastic Beanstalk with
 process environment directly. Configuration-only deployments also rerun the
 same idempotent configurator, so correcting the domain or ACME properties does
 not require an unrelated application release.
+
+### Room audio decoder on Elastic Beanstalk
+
+Amazon Linux 2023 has no FFmpeg package, so
+`.platform/hooks/prebuild/02_install_ffmpeg.sh` installs one on every deployment
+before the new version starts. It downloads a single pinned LGPL static build of
+FFmpeg 9.0 from the [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)
+GitHub releases (linux arm64 for t4g Graviton instances, plus an x86_64 pin so an
+instance-type change does not break deployments), checks its exact byte size and
+hard-coded SHA-256, extracts only `ffmpeg` and `ffprobe` into
+`/opt/archtree-ffmpeg/<build>/`, verifies the decoding capabilities the analyzer
+needs, and then atomically links `/usr/local/bin/ffmpeg` and
+`/usr/local/bin/ffprobe`. `.ebextensions/room-audio-decoder.config` sets
+`ROOM_AUDIO_FFMPEG_PATH=/usr/local/bin/ffmpeg`, so the decoder never depends on
+the service PATH; a value set directly on the environment still takes precedence.
+Later deployments reuse the verified installation without downloading, and a new
+pin replaces the previous directory only after the new build passes.
+
+A failed download, size or digest mismatch, unexpected archive layout or missing
+capability fails the deployment loudly (see `/var/log/eb-hooks.log`) before the
+new version is activated, rather than leaving compressed uploads without a
+decoder. A replacement instance downloads the build again (about 117 MB for
+arm64), so GitHub must be reachable, just as the Certbot hook needs PyPI. Upstream
+keeps the pinned month-end build until about September 2028; refresh the pin
+earlier for FFmpeg security fixes by updating the tag, archive names, sizes and
+digests together, checking each digest against the release's `checksums.sha256`
+and GitHub's asset digest.
+
+Decoding stays within the 1 GiB instance budget: room analysis remains one job
+per process (the administrator page admits one request at a time), each decode is
+single-threaded with at most two per process (upload inspection plus analysis),
+each FFmpeg allocation is capped at 32 MiB, decodes have a 60-second deadline, and
+analysis keeps its 90-second deadline and 512-MiB temporary-file limit. Keep
+`TMPDIR=/var/tmp` so temporary analysis files use the EBS disk.
+
+After deploying, run `/usr/local/bin/ffmpeg -hide_banner -version` on the instance,
+upload a short MP3 through Content Manager, and confirm the Room audio analysis
+page lists it as eligible. Then run the
+[room audio catalog backfill](#room-audio-catalog-backfill) for existing tracks.
 
 Important:
 - Build phase should not run `npm start`.

@@ -275,6 +275,11 @@ Playlist access retain their existing rules.
   a database write already dispatched is reconciled and may have committed.
   Completed analysis remains durable. Unsupported input
   has a terminal result; replacing that file creates a new analysis opportunity.
+- An administrator-started catalog backfill applies that same explicit analysis,
+  one source at a time, to every ready published Audio source without a current
+  verified result. It skips eligible, terminally unsupported and in-progress
+  sources, so a repeated run only revisits sources that still lack a result, and
+  it follows the same source, retry and recovery rules as analyzing one source.
 - Preparing a play, seek or selection waits up to three seconds for the connected
   playing cohort. Ready participants start on the shared schedule; unready or late
   participants remain silent until their own player reports readiness for the

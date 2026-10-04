@@ -55,6 +55,7 @@ export const createSourceFixture = async () => {
   for (const hook of [
     '.platform/confighooks/postdeploy/01_configure_https.sh',
     '.platform/hooks/prebuild/01_install_certbot.sh',
+    '.platform/hooks/prebuild/02_install_ffmpeg.sh',
     '.platform/hooks/postdeploy/01_configure_https.sh',
     '.platform/hooks/postdeploy/02_install_certbot_timer.sh'
   ]) {
@@ -63,6 +64,7 @@ export const createSourceFixture = async () => {
   }
   await writeFixtureFile(root, '.platform/nginx/conf.d/fixture.conf', 'send_timeout 120s;\n');
   await writeFixtureFile(root, '.ebextensions/https-instance.config', 'Resources: {}\n');
+  await writeFixtureFile(root, '.ebextensions/room-audio-decoder.config', 'option_settings: {}\n');
   await writeFixtureFile(root, 'README.md', 'must not be staged\n');
   await writeFixtureFile(root, '.gitignore', 'engineering/dist\nelastic-beanstalk-artifact\n');
   await writeEngineeringFixture(root);

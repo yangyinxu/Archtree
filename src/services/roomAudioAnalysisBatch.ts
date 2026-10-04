@@ -30,6 +30,26 @@ const id = /^[0-9a-f]{24}$/;
 const reasonValues = new Set<RoomAudioAnalysisReason>(['unsupported_audio', 'decoder_unavailable', 'analysis_timeout', 'analysis_failed', 'storage_unavailable', 'source_changed', 'cancelled', 'interrupted']);
 const stopValues = new Set<StopReason>(['busy', 'unknown', 'failed', 'cancelled', 'stale']);
 
+/** Keeps only the bounded reason vocabulary; anything else is reported as no reason. */
+export const knownRoomAudioAnalysisReason = (reason: RoomAudioAnalysisReason | null | undefined) =>
+    reason && reasonValues.has(reason) ? reason : null;
+
+/**
+ * Rejects a page that could skip or repeat rows: IDs must be valid, strictly ascending after the
+ * requested cursor and within the limit, and the next cursor must not move backwards.
+ */
+export const verifyRoomAudioAnalysisPage = (page: RoomAudioAnalysisPage, after: string | undefined, limit: number) => {
+    let previousId = after ?? '';
+    if (page.items.length > limit || page.items.some(item => {
+        if (!id.test(item.mediaTrackId) || item.mediaTrackId <= previousId) return true;
+        previousId = item.mediaTrackId;
+        return false;
+    }) || page.nextAfter !== null && (!id.test(page.nextAfter) || page.nextAfter < previousId
+        || page.nextAfter <= (after ?? ''))) {
+        throw new Error('The analysis page could not be verified.');
+    }
+};
+
 /** A fixed message keeps invalid CLI values and connection details out of command output. */
 export class RoomAudioAnalysisArgumentError extends Error {
     constructor() {
@@ -85,20 +105,12 @@ export const runRoomAudioAnalysisBatch = async (
     };
     if (signal?.aborted) return stop('cancelled');
     const page = await dependencies.list({ actorId: options.actorId, after: options.after, limit: options.limit });
-    let previousId = options.after ?? '';
-    if (page.items.length > options.limit || page.items.some(item => {
-        if (!id.test(item.mediaTrackId) || item.mediaTrackId <= previousId) return true;
-        previousId = item.mediaTrackId;
-        return false;
-    }) || page.nextAfter !== null && (!id.test(page.nextAfter) || page.nextAfter < previousId
-        || page.nextAfter <= (options.after ?? ''))) {
-        throw new Error('The analysis page could not be verified.');
-    }
+    verifyRoomAudioAnalysisPage(page, options.after, options.limit);
     report.listedCount = page.items.length;
     report.nextAfter = page.nextAfter;
     if (signal?.aborted) return stop('cancelled');
     const record = (mediaTrackId: string, outcome: BatchOutcome, reason: RoomAudioAnalysisReason | null = null) => {
-        report.results.push({ mediaTrackId, outcome, reason: reason && reasonValues.has(reason) ? reason : null });
+        report.results.push({ mediaTrackId, outcome, reason: knownRoomAudioAnalysisReason(reason) });
         report.counts[outcome] = (report.counts[outcome] ?? 0) + 1;
     };
     for (const item of page.items) {

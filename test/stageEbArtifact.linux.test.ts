@@ -179,6 +179,19 @@ test('rejects an artifact without the port 443 security-group contract', async (
   await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
 });
 
+test('rejects an artifact without the room audio decoder hook or its path setting', async (t) => {
+  for (const required of [
+    '.platform/hooks/prebuild/02_install_ffmpeg.sh',
+    '.ebextensions/room-audio-decoder.config'
+  ]) {
+    const sourceRoot = await createSourceFixture();
+    t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+    await rm(path.join(sourceRoot, required));
+
+    await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i, required);
+  }
+});
+
 test('rejects a manifest reference whose asset is not content-hashed', async (t) => {
   const sourceRoot = await createSourceFixture();
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));

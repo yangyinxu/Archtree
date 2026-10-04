@@ -74,12 +74,14 @@ const expectedRootEntries = new Set([
 const requiredPlatformHooks = [
   '.platform/confighooks/postdeploy/01_configure_https.sh',
   '.platform/hooks/prebuild/01_install_certbot.sh',
+  '.platform/hooks/prebuild/02_install_ffmpeg.sh',
   '.platform/hooks/postdeploy/01_configure_https.sh',
   '.platform/hooks/postdeploy/02_install_certbot_timer.sh'
 ];
 
 const requiredDeploymentFiles = [
   '.ebextensions/https-instance.config',
+  '.ebextensions/room-audio-decoder.config',
   ...requiredPlatformHooks
 ];
 
