@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 import { browserSessionQuery, browserSessionResolvingQuery } from '../../api/session';
@@ -7,8 +7,11 @@ import { getRoomInvitation, type RoomInvitation } from '../../api/rooms';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { useInvitationNow, useRoomInvitationConnection, useRoomInvitations } from './roomInvitationQueries';
 import { roomSession, useRoomSession } from './roomSession';
-import { SocialAvatar } from './SocialAvatar';
 import styles from './SocialPage.module.css';
+
+// The colored identity icon loads on demand to keep this route's initial JavaScript in budget; the empty
+// avatar it replaces has the same size, so the row does not shift.
+const SocialAvatar = lazy(() => import('./SocialAvatar').then(module => ({ default: module.SocialAvatar })));
 
 const validInvitationId = (id: string) => /^[A-Za-z0-9_-]{1,80}$/.test(id) && !/\s/.test(id);
 
@@ -57,7 +60,7 @@ const InvitationActions = ({ viewerId, invitations, unavailable = false, showEmp
     {unavailable ? <p className={styles.empty}>{t('room.invitation_unavailable')}</p>
       : !invitations.length ? showEmpty && <p className={styles.empty}>{t('room.invitations_empty')}</p>
         : <ul className={styles.list}>{invitations.map(invitation => <li className={styles.row} key={invitation.invitationId}>
-          <SocialAvatar profile={invitation.inviter} />
+          <Suspense fallback={<span className={styles.avatar} aria-hidden="true" />}><SocialAvatar profile={invitation.inviter} /></Suspense>
           <div className={styles.rowContent}>
             <strong>{t('room.incoming_invite', { alias: invitation.inviter.alias })}</strong>
             <span>@{invitation.inviter.handle}</span>

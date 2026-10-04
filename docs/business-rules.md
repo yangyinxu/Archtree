@@ -339,8 +339,8 @@ Playlist access retain their existing rules.
   temporarily unavailable instead of appearing to connect. It offers no room
   creation or reconnection and stops background reconnects until rooms are
   enabled again; leaving, ending and declining remain available.
-- A refused room action names its reason: a full room (eight people), too many
-  open rooms service-wide, the host's 20 pending invitations, a current room on
+- A refused room action names its reason: a full room, rooms at capacity
+  service-wide, the host's 20 pending invitations, a current room on
   this or another device, a host-only action or one the current control mode
   does not allow, a disconnected host, a host leaving without ending the room or
   transferring the role, an ended room, an expired invitation or transfer, a song

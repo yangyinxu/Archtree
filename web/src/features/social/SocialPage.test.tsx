@@ -174,6 +174,8 @@ test('a suspended profile explains the suspension and cannot be edited or reacti
   expect(screen.getByRole('button', { name: 'Reactivate profile' })).toBeDisabled();
   expect(within(screen.getByRole('form', { name: 'Find a friend' })).getByRole('button', { name: 'Find' })).toBeDisabled();
   expect(screen.queryByRole('region', { name: 'Listening room' })).not.toBeInTheDocument();
+  // An inactive profile stops the room session through a dynamic import; let it finish before teardown.
+  await vi.dynamicImportSettled();
 });
 
 test('a looked-up listener can be reported with only the chosen reason', async () => {
