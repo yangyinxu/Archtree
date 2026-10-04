@@ -750,11 +750,13 @@ Invitation previews expose only the inviter's consented discovery card, expiry,
 and invitation status; membership lists, queue and current media require admission.
 
 The implemented social limits include 500 friends and 50 combined incoming and
-outgoing pending requests per account. Proposed room limits are 20 outstanding
-invitations per host, one joined active room per account, eight
-members per room, and 100 queue entries. Enforce limits transactionally; revise
-them only with measured capacity and UX evidence. Apply both sender and recipient
-abuse controls so one account cannot flood another through repeated operations.
+outgoing pending requests per account. The implemented room limits are 20
+outstanding invitations per host (replacing a friend's still-pending invitation
+does not use another), one joined active room per account, eight members per
+room, 100 queue entries and 100 open rooms per deployment. Enforce limits
+transactionally; revise them only with measured capacity and UX evidence. Apply
+both sender and recipient abuse controls so one account cannot flood another
+through repeated operations.
 
 ### Room permissions and host management
 

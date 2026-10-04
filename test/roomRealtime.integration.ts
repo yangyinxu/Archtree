@@ -5,12 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { ObjectId } from 'mongodb';
 import { WebSocket } from 'ws';
 import { createApp } from '../src/app';
-import { getDb } from '../src/infrastructure/database';
+import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import { getS3 } from '../src/infrastructure/s3';
 import { createSession } from '../src/services/authSessionService';
 import { uploadAudioObject } from '../src/services/audioStorageService';
 import { createSocialService } from '../src/application/social/socialService';
 import { createRoomService } from '../src/application/rooms/roomService';
+import { removeRoomMember } from '../src/application/rooms/roomLifecycle';
+import type { RoomDocument } from '../src/repositories/social/roomDocuments';
 import type { RoomCommand, RoomCommunity, RoomInvitation, RoomOutgoingInvitation, RoomSnapshot } from '../src/contracts/roomV1';
 import type { SocialScope, SocialOutcome } from '../src/contracts/socialV1';
 import { roomAuthority } from '../src/realtime/roomAuthority';
@@ -326,4 +328,44 @@ test('unchanged heartbeats and duplicate readiness do not fan out fresh room rea
     const changed = (await current(who))!;
     await submit(who, { action: 'end', roomId: changed.roomId, memberId: changed.self.memberId });
     await waitFor(() => connection.frames.some(frame => frame.type === 'snapshot' && frame.room === null));
+});
+
+test('an unsupported protocol version is refused before its ticket is redeemed', async () => {
+    const user = await account();
+    const { ticket } = await request<{ ticket: string }>(user, '/realtime-tickets', { clientId: user.clientId });
+    const url = base.replace('http:', 'ws:') + '/api/social/v1/realtime';
+    const refusal = (protocols: string[]) => new Promise<number>(resolve => {
+        const socket = new WebSocket(url, protocols, { origin: base }); sockets.push(socket);
+        socket.on('unexpected-response', (_req, response) => { response.resume(); resolve(response.statusCode!); socket.terminate(); });
+        socket.on('error', () => undefined);
+    });
+    for (const protocols of [['archtree-room-v2', ticket], ['archtree-room-v0', ticket], [ticket, 'archtree-room-v1'], ['archtree-room-v1']]) {
+        assert.equal(await refusal(protocols), 401, protocols[0]);
+    }
+    // The refused attempts redeemed nothing, so the same single-use ticket still opens a v1 subscription.
+    const socket = new WebSocket(url, ['archtree-room-v1', ticket], { origin: base }); sockets.push(socket);
+    const frames: Array<{ type: string; protocolVersion?: number }> = [];
+    socket.on('message', data => { frames.push(JSON.parse(data.toString())); });
+    socket.on('error', () => undefined);
+    await waitFor(() => frames.some(frame => frame.type === 'subscribed'));
+    assert.equal(socket.protocol, 'archtree-room-v1');
+    assert.equal(frames.find(frame => frame.type === 'subscribed')?.protocolVersion, 1);
+});
+
+test('a room change committed without its wakeup still reaches subscribers through the periodic recovery read', async () => {
+    const { a, b, sb } = await joinedPair();
+    const room = (await current(a))!; const seen = sb.frames.length;
+    // Commit a removal outside the room service, as a process that stopped after commit and before fanout would.
+    const session = getDatabaseClient().startSession();
+    try {
+        await session.withTransaction(async () => {
+            const stored = await getDb()!.collection<RoomDocument>('socialRooms').findOne({ _id: room.roomId }, { session }); assert.ok(stored);
+            const guest = stored.members.find(member => member.accountId === b.userId); assert.ok(guest);
+            await removeRoomMember(stored, guest.membershipId, session, Date.now());
+        });
+    } finally { await session.endSession(); }
+    assert.equal(await current(b), null);
+    // Recovery reads run every five seconds; the wider bound only absorbs a loaded test machine.
+    await waitFor(() => sb.frames.slice(seen).some(frame => frame.type === 'snapshot' && frame.room === null), 10_000);
+    assert.equal((await current(a))!.members.length, 1);
 });

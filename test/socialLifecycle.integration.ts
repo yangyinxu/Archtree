@@ -9,6 +9,7 @@ import {
 } from '../src/contracts/socialV1';
 import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import AuthSession from '../src/models/authSession';
+import { deleteListenerAccountData } from '../src/services/accountDeletionService';
 import type {
     SocialBudgetDocument, SocialHandleDocument, SocialProfileDocument, SocialReceiptDocument, SocialRelationshipDocument
 } from '../src/repositories/social/socialDocuments';
@@ -1071,4 +1072,120 @@ test('block listing and admission examine only owned edges in a large unrelated 
     context.diagnostic(JSON.stringify({ unrelatedEdges, blockListDocsExamined: list.docsExamined,
         blockCapacityDocsExamined: capacity.docsExamined, blockListKeysExamined: list.keysExamined,
         blockCapacityKeysExamined: capacity.keysExamined }));
+});
+
+/** Reads the stored pair revision directly, since an inactive listener's relationship view is hidden. */
+const storedRevision = async (a: Member, b: Member) => (await getDb()!.collection<SocialRelationshipDocument>('socialRelationships')
+    .findOne({ accountIds: { $all: [a.actor.userId, b.actor.userId] } }))?.revision ?? 0;
+const relationshipCommand = async (from: Member, to: Member, action: 'request' | 'accept' | 'decline' | 'cancel' | 'remove' | 'unblock') =>
+    service.mutate(from.actor, command(from.scope, { action, targetSocialId: to.profile.socialId, expectedRevision: await storedRevision(from, to) }));
+const blockCommand = (from: Member, to: Member) => service.mutate(from.actor, command(from.scope, { action: 'block', targetSocialId: to.profile.socialId }));
+
+test('only the sender cancels, only the recipient answers, and non-friends have nothing to accept or remove', async () => {
+    const alice = await member('alice');
+    const bob = await member('bobby');
+    const carol = await member('carol');
+    await request(alice, bob);
+    const pending = await storedRevision(alice, bob);
+    for (const [from, to, action] of [[alice, bob, 'decline'], [bob, alice, 'cancel'], [bob, alice, 'remove']] as const) {
+        assert.deepEqual([action, (await relationshipCommand(from, to, action)).code], [action, 'relationship_unavailable']);
+    }
+    assert.equal(await storedRevision(alice, bob), pending);
+    assert.equal((await service.relationship(bob.actor, alice.profile.socialId))?.state, 'incoming');
+    // With no relationship at all there is nothing to accept, and removing or declining changes nothing.
+    assert.equal((await relationshipCommand(carol, alice, 'accept')).code, 'relationship_unavailable');
+    for (const action of ['remove', 'decline'] as const) assert.equal((await relationshipCommand(carol, alice, action)).outcome, 'noop');
+    assert.equal(await pairCount(alice, carol), 0);
+});
+
+test('a deactivated listener keeps only block and unblock, and its hidden profile refuses every relationship action', async () => {
+    const alice = await member('alice');
+    const bob = await member('bobby');
+    await friendship(alice, bob);
+    assert.equal((await service.mutate(bob.actor, command(bob.scope, { action: 'deactivate' }))).outcome, 'applied');
+    for (const action of ['request', 'accept', 'remove', 'cancel'] as const) {
+        assert.deepEqual([action, (await relationshipCommand(bob, alice, action)).code], [action, 'profile_unavailable']);
+        assert.deepEqual([action, (await relationshipCommand(alice, bob, action)).code], [action, 'profile_unavailable']);
+    }
+    assert.equal(await service.relationship(alice.actor, bob.profile.socialId), null);
+    // Blocking remains available to both sides, including against an inactive profile.
+    assert.equal((await blockCommand(bob, alice)).outcome, 'applied');
+    assert.equal((await blockCommand(alice, bob)).outcome, 'applied');
+    assert.equal((await relationshipCommand(bob, alice, 'unblock')).outcome, 'applied');
+    const edge = await getDb()!.collection<SocialRelationshipDocument>('socialRelationships').findOne({ accountIds: { $all: [alice.actor.userId, bob.actor.userId] } });
+    assert.deepEqual([edge?.state, edge?.blockedBy], ['none', [alice.actor.userId]]);
+});
+
+test('existing-pair safety actions stay available at the retained pair limit while new pairs are refused', async () => {
+    const alice = await member('alice');
+    const friend = await member('friend');
+    const incoming = await member('incoming');
+    const outgoing = await member('outgoing');
+    const blocked = await member('blocked');
+    const stranger = await member('stranger');
+    await friendship(alice, friend);
+    assert.equal((await request(incoming, alice)).outcome, 'applied');
+    assert.equal((await request(alice, outgoing)).outcome, 'applied');
+    assert.equal((await blockCommand(alice, blocked)).outcome, 'applied');
+    const relationships = getDb()!.collection<SocialRelationshipDocument>('socialRelationships');
+    const present = await relationships.countDocuments({ accountIds: alice.actor.userId });
+    // Retained tombstones with unrelated peers fill the rest of the pair allowance.
+    await relationships.insertMany(Array.from({ length: SOCIAL_LIMITS.edges - present }, () => {
+        const accountIds = [alice.actor.userId, new ObjectId().toHexString()].sort();
+        return { _id: accountIds.join(':'), accountIds, state: 'none' as const, blockedBy: [], revision: 1, updatedAt: new Date(now),
+            socialIds: accountIds.map(id => id === alice.actor.userId ? alice.profile.socialId : `s_${randomUUID().replace(/-/g, '')}`) };
+    }));
+    // A new pair is refused from either side, a new block included, and nothing is written.
+    for (const [from, mutation] of [
+        [alice, command(alice.scope, { action: 'request', targetSocialId: stranger.profile.socialId, expectedRevision: 0 })],
+        [alice, command(alice.scope, { action: 'block', targetSocialId: stranger.profile.socialId })],
+        [stranger, command(stranger.scope, { action: 'request', targetSocialId: alice.profile.socialId, expectedRevision: 0 })]
+    ] as const) {
+        const result = await service.mutate(from.actor, mutation);
+        assert.deepEqual([mutation.action, result.outcome, result.code], [mutation.action, 'rejected', 'social_limit']);
+    }
+    assert.equal(await pairCount(alice, stranger), 0);
+    // Every existing pair keeps its exits: remove, decline, cancel, unblock and a fresh block.
+    for (const [to, action] of [[friend, 'remove'], [incoming, 'decline'], [outgoing, 'cancel'], [blocked, 'unblock']] as const) {
+        assert.deepEqual([action, (await relationshipCommand(alice, to, action)).outcome], [action, 'applied']);
+    }
+    for (const [from, to] of [[friend, alice], [alice, outgoing]] as const) assert.equal((await blockCommand(from, to)).outcome, 'applied');
+    assert.equal(await relationships.countDocuments({ accountIds: alice.actor.userId }), SOCIAL_LIMITS.edges);
+});
+
+test('a deleted handle stays reserved for thirty days and then admits a new owner with a new identity', async () => {
+    const original = await member('reused');
+    // The synthetic avatar fields would otherwise hit the existing avatar deletion blocker.
+    await getDb()!.collection('users').updateOne({ _id: new ObjectId(original.actor.userId) }, { $unset: { avatarAssetId: '', avatarUrl: '' } });
+    assert.deepEqual(await deleteListenerAccountData(original.actor.userId), { status: 'deleted' });
+    const handles = getDb()!.collection<SocialHandleDocument>('socialHandles');
+    const reservation = await handles.findOne({ _id: 'reused' });
+    assert.ok(reservation?.expiresAt);
+    let claimants = 0;
+    const claim = async () => {
+        const identity = await actor(`claimant${claimants += 1}`);
+        const scope = await service.issueScope(identity);
+        const result = await service.mutate(identity, command(scope, {
+            action: 'profile', expectedRevision: 0, handle: 'Reused', alias: 'New owner', discoverable: true
+        }));
+        return { identity, result };
+    };
+    // The reservation keeps no owner, so every new account is refused until the deadline.
+    for (const at of [now, reservation.expiresAt.getTime() - 1]) {
+        now = at;
+        const { identity, result } = await claim();
+        assert.deepEqual([result.outcome, result.code], ['rejected', 'handle_unavailable']);
+        assert.equal(await service.ownProfile(identity), null);
+    }
+    assert.deepEqual(await handles.findOne({ _id: 'reused' }), reservation);
+    now = reservation.expiresAt.getTime();
+    const { identity, result } = await claim();
+    assert.equal(result.outcome, 'applied');
+    const profile = await service.ownProfile(identity);
+    assert.ok(profile);
+    assert.equal(profile.handle, 'reused');
+    assert.notEqual(profile.socialId, original.profile.socialId);
+    assert.deepEqual(await handles.findOne({ _id: 'reused' }), { _id: 'reused', accountId: identity.userId });
+    const viewer = await member('viewer');
+    assert.equal((await service.lookup(viewer.actor, 'reused'))?.socialId, profile.socialId);
 });

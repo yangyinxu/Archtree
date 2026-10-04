@@ -409,6 +409,9 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             return changed(() => removeRoomMember(room, me.membershipId, session, now()));
         }
         if (command.action === 'end') {
+            // End is an exit like Leave: any signed-in tab of the host account may use it, including an
+            // observing one, so closing never requires a takeover first. Kick, invite, transfer and mode
+            // changes below still require the host's active controller.
             if (!isHost) return fail('room_forbidden', 403);
             return changed(async () => {
                 await closeRoom(room, session, now());
@@ -476,9 +479,12 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             if (!target || target.accountId === actor.userId || !await friends(actor.userId, target.accountId, session)) return fail('profile_unavailable', 404);
             await noBlocks(target.accountId, room, session);
             if (room.members.some(value => value.accountId === target.accountId)) return noop();
-            if (await invitations().countDocuments({ senderAccountId: actor.userId, state: 'pending', expiresAt: { $gt: new Date(now()) } },
-                { session, limit: ROOM_LIMITS.invitations }) >= ROOM_LIMITS.invitations) return fail('room_invitation_capacity', 429);
             const old = await invitations().findOne({ _id: `${room._id}:${target.accountId}` }, { session });
+            // The limit bounds outstanding invitations. Replacing this host's own still-pending invitation
+            // leaves that count unchanged, so only a new recipient can be refused at the limit.
+            const replacesPending = old?.state === 'pending' && old.senderAccountId === actor.userId && old.expiresAt.getTime() > now();
+            if (!replacesPending && await invitations().countDocuments({ senderAccountId: actor.userId, state: 'pending', expiresAt: { $gt: new Date(now()) } },
+                { session, limit: ROOM_LIMITS.invitations }) >= ROOM_LIMITS.invitations) return fail('room_invitation_capacity', 429);
             const invitation: RoomInvitationDocument = { _id: `${room._id}:${target.accountId}`, invitationId: identifier('i'), roomId: room._id,
                 senderAccountId: actor.userId, recipientAccountId: target.accountId, generation: old ? incrementRoomVersion(old.generation) : 1,
                 state: 'pending', createdAt: new Date(now()), expiresAt: new Date(now() + ROOM_LIMITS.invitationMs) };

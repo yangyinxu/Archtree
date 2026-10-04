@@ -311,6 +311,9 @@ Playlist access retain their existing rules.
   24 hours, expose only the inviter's social card before acceptance, and require
   current friendship, capacity and block checks at admission. Removing friendship
   cancels unused invitations but preserves an already admitted membership.
+  A host can have at most 20 pending invitations at a time; sending a fresh
+  invitation to a friend who already has a pending one replaces it without
+  using another.
 - Finitude Web shows a global, silent reminder for current pending room
   invitations, including while browsing outside Together or participating in a
   different room. The indicator means an invitation still needs a response; it
@@ -337,6 +340,10 @@ Playlist access retain their existing rules.
   transfers the role and removes the old host atomically, preserving the mode,
   queue and running timeline; an in-progress preparation is cancelled and paused.
   There is no automatic host promotion.
+  End room, like a guest's Leave, works from any of that account's signed-in
+  tabs or devices, including one that is only observing. Inviting, removing
+  members, transferring and changing the mode need the host's active playback
+  device.
 - Host absence is measured from the last confirmed controller heartbeat,
   with a 30-second grace period. Both control modes suspend
   after that grace, and five minutes of host absence ends the room. Reconnection
