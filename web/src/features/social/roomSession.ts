@@ -37,6 +37,7 @@ export const createRoomSession = () => {
   let attachedIdentity = '';
   let refreshSocial: (kind: 'social' | 'rooms' | 'community') => void = () => undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let socialFallback: Promise<{ tick(): Promise<void> }> | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let opening = false;
   let realtimeEnabled = true;
@@ -338,7 +339,7 @@ export const createRoomSession = () => {
     document.removeEventListener('freeze', onSuspend); document.removeEventListener('resume', onResume);
     document.removeEventListener('visibilitychange', onVisibilityChange);
     window.removeEventListener('pagehide', onSuspend); window.removeEventListener('pageshow', onResume);
-    const previous = socket; socket = undefined; previous?.close(); detachPlayer();
+    const previous = socket; socket = undefined; previous?.close(); detachPlayer(); socialFallback = undefined;
     for (const complete of pendingPongs.values()) complete(false);
     clockPings = new Set(); lastHeartbeatIdentity = ''; lastHeartbeat = -Infinity; state = initialState; for (const listener of listeners) listener();
   };
@@ -357,13 +358,20 @@ export const createRoomSession = () => {
         return;
       }
       stop(); realtimeEnabled = enabled; guard = captureAccountOperation(viewerId); emit({ viewerId });
+      const version = generation;
       document.addEventListener('freeze', onSuspend); document.addEventListener('resume', onResume);
       document.addEventListener('visibilitychange', onVisibilityChange);
       window.addEventListener('pagehide', onSuspend); window.addEventListener('pageshow', onResume);
       void refresh(); void connect();
       heartbeat = setInterval(() => {
         if (!current()) { stop(); return; }
-        if (suspended || !realtimeEnabled) return;
+        if (suspended) return;
+        // Without a live socket nothing delivers socialChanged, so social works with rooms off. The
+        // lazy fallback loads only after a heartbeat finds no socket; a failed load retries next tick.
+        if (!state.connected) void (socialFallback ??= import('./socialChangeFallback').then(module => module.createSocialChangeFallback(
+          viewerId, () => version === generation && current(), () => refreshSocial('social'))))
+          .then(fallback => fallback.tick(), () => { socialFallback = undefined; });
+        if (!realtimeEnabled) return;
         if (state.connected) {
           if (connectionFresh()) ping();
         } else {

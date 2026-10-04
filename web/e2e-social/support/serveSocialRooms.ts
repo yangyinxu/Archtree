@@ -16,6 +16,8 @@ if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error('I
 const soak = process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'soak' ? readRoomSoakOptions() : undefined;
 // Only the room-lifecycle scenario may age a recorded host absence; every other scenario keeps real time alone.
 const lifecycleScenario = process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'room-lifecycle';
+// Social can ship before rooms; this scenario runs the production flags and gateway wiring for that rollout.
+const roomsEnabled = process.env.FINITUDE_SOCIAL_E2E_SCENARIO !== 'social-without-rooms';
 const soakNames = ['listener_one', 'listener_two', 'listener_three', 'listener_four', 'listener_five', 'listener_six', 'listener_seven', 'listener_eight'];
 
 // This process never connects to a developer database or external object store.
@@ -25,7 +27,7 @@ for (const key of Object.keys(process.env)) {
 Object.assign(process.env, {
   NODE_ENV: 'test', DOTENV_CONFIG_PATH: fileURLToPath(new URL('../../e2e/support/empty.env', import.meta.url)),
   JWT_SECRET: 'social-real-browser-fixture', AUTH_CODE_PEPPER: 'social-real-browser-fixture',
-  FINITUDE_SOCIAL_ENABLED: 'true', FINITUDE_ROOMS_ENABLED: 'true', ALLOW_LEGACY_AUTH_TOKENS: 'false'
+  FINITUDE_SOCIAL_ENABLED: 'true', FINITUDE_ROOMS_ENABLED: roomsEnabled ? 'true' : 'false', ALLOW_LEGACY_AUTH_TOKENS: 'false'
 });
 const [{ ObjectId }, { default: bcrypt }, { createApp }, { getDb }, { getS3 }, { uploadAudioObject },
   { installRoomGateway }, { ServerLifecycle }, { startMongoReplicaSet },
@@ -196,7 +198,8 @@ await runDisposableRuntime(async resources => {
       upgrades.add(transport); transport.once('close', () => upgrades.delete(transport));
     });
   }
-  await resources.own(installRoomGateway(server, lifecycle), async gateway => { gateway.stop(); await gateway.release(); });
+  // Like src/server.ts, a rooms-disabled deployment installs no realtime gateway at all.
+  if (roomsEnabled) await resources.own(installRoomGateway(server, lifecycle), async gateway => { gateway.stop(); await gateway.release(); });
   await resources.own(server, async value => {
     if (await lifecycle.stop(value, async () => {}, 5000, 10_000) !== 'graceful') throw new Error('Fixture server drain failed.');
   });

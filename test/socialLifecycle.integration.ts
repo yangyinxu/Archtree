@@ -551,6 +551,40 @@ test('missing accounts, revoked sessions, and mismatched session owners cannot a
     await assert.rejects(service.ownProfile(bob.actor), assertSocialError());
 });
 
+test('the change cursor follows coalesced invalidations read-only and requires a current session', async () => {
+    const alice = await member('alice');
+    const bob = await member('bobby');
+    const outbox = getDb()!.collection('socialOutbox');
+    // Profile creation already invalidated the creator's own surfaces.
+    const before = await service.changeRevision(bob.actor);
+    assert.equal(before, (await outbox.findOne({ _id: bob.actor.userId as never }))!.revision);
+    const fences = async (identity: SocialActor) => Promise.all([
+        getDb()!.collection('authSessions').findOne({ _id: new ObjectId(identity.sessionId) }),
+        getDb()!.collection('users').findOne({ _id: new ObjectId(identity.userId) }),
+        getDb()!.collection('socialBudgets').findOne({ _id: identity.userId as never })
+    ]);
+    const fenced = await fences(bob.actor);
+    // Idle polls neither move the cursor nor write the session, account or read-budget rows.
+    for (let poll = 0; poll < 3; poll += 1) assert.equal(await service.changeRevision(bob.actor), before);
+    assert.deepEqual(await fences(bob.actor), fenced);
+
+    assert.equal((await request(alice, bob)).outcome, 'applied');
+    const afterRequest = await service.changeRevision(bob.actor);
+    assert.notEqual(afterRequest, before);
+    assert.equal(afterRequest, (await outbox.findOne({ _id: bob.actor.userId as never }))!.revision);
+    const carol = await actor('carol');
+    assert.equal(await service.changeRevision(carol), 0);
+    await outbox.insertOne({ _id: carol.userId as never, accountId: carol.userId, revision: -1, updatedAt: new Date(now) });
+    await assert.rejects(service.changeRevision(carol), assertSocialError(503));
+
+    await assert.rejects(service.changeRevision({ ...alice.actor, sessionId: bob.actor.sessionId }), assertSocialError(401));
+    await assert.rejects(service.changeRevision({ userId: 'not-an-account', sessionId: alice.actor.sessionId }), assertSocialError(401));
+    await AuthSession.revokeById(alice.actor.userId, alice.actor.sessionId);
+    await assert.rejects(service.changeRevision(alice.actor), assertSocialError(401));
+    now += 8 * SOCIAL_LIMITS.scopeMs;
+    await assert.rejects(service.changeRevision(bob.actor), assertSocialError(401));
+});
+
 test('scope and command admission budgets persist across service recreation and profile deactivation', async () => {
     const alice = await member('alice');
     for (let issued = 1; issued < SOCIAL_LIMITS.scopesPerDay; issued += 1) await service.issueScope(alice.actor);

@@ -110,6 +110,11 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
             ...(profile.suspended === true ? { suspended: true } : {})
         } });
     }));
+    // Polling stand-in for the room socket's socialChanged signal; it exposes only an opaque counter.
+    router.get('/me/changes', asyncHandler(async (req, res) => {
+        noQuery(req);
+        res.status(200).json({ revision: await api.changeRevision(actor(req)) });
+    }));
     router.get('/me/listening', asyncHandler(async (req, res) => {
         noQuery(req);
         const value = await api.ownListening(actor(req));

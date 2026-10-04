@@ -26,6 +26,7 @@ database documents. Unknown JSON/query fields and repeated query values fail.
 | `POST /mutation-scopes` | Empty JSON object | `{scopeToken, expiresAt}` |
 | `POST /mutation-outcomes` | `{scopeToken, commandId}` | `{outcome: SocialOutcome or null}`; expired signed scopes may query retained outcomes |
 | `GET /me/profile` | No query | `{profile: SocialOwnProfile or null}` |
+| `GET /me/changes` | No query | `{revision}`; the account's opaque change counter, compared for inequality only |
 | `PATCH /me/profile` | Mutation identity plus `handle`, `alias`, `discoverable`, `expectedRevision` | `SocialOutcome`; creates with revision 0 or updates/reactivates the observed revision |
 | `POST /me/deactivate` | Mutation identity | `SocialOutcome` |
 | `GET /profiles?handle=...` | Exact normalized handle | `{profile: SocialCard or null}`; hidden/missing/bilaterally blocked are identical |
@@ -341,6 +342,14 @@ delivery from these current-state markers. Scope receipts likewise contain no
 peer reference or private projection, so deleting a target cannot leave cached
 identity payload in another account's receipt.
 
+`GET /me/changes` exposes the same revision for clients without the room socket,
+for example when rooms are disabled. It is a missing-row-means-zero counter with
+no payload. Unlike other social reads it skips the transactional read fence: a
+read-only check of the current session replaces the session, account and read
+budget writes, so an idle poll never writes to MongoDB. The router's 120-per-minute
+account window still bounds it. Account deletion removes every session, so a valid
+session also implies a live account.
+
 Account deletion keeps the existing synchronous transaction and all avatar/shared
 provenance preconditions. `socialAccountLifecycleService.ts` removes the deleted
 account's profile, both-sided relationships, receipts, budget, outbox and the
@@ -440,6 +449,19 @@ the freshly read invitation generation.
 The lazy Web global invitation entry shares the room-session singleton with room
 pages. It refreshes on a fresh subscription, `socialChanged`, relevant explicit
 mutation settlement or outcome recovery, focus and a 15-second fallback.
+
+The same singleton delivers social changes without the socket. When a five-second
+heartbeat finds no connected socket (rooms disabled, still connecting, or lost),
+it lazily loads `socialChangeFallback.ts` and ticks it on each later heartbeat
+while the socket stays down. In a visible tab the fallback polls `GET /me/changes`
+15 seconds after its previous poll. Each unchanged or failed poll doubles that wait
+up to 60 seconds, and returning to the tab restores the 15-second wait. A changed
+revision runs the same `social` refresh as `socialChanged`: friend requests,
+relationship lists, music shares, profile and invitation reads. The first poll
+always refreshes, like a fresh subscription. The last seen revision survives
+connected periods, so the first poll after a socket loss refreshes only if
+something changed. A connected socket stops the polling, and the music-share list
+has no fixed poll of its own, so a live socket adds no polling.
 Ordinary Play, Pause, Seek, Select, Previous and Next settlement rereads the
 authoritative room without waking invitation/community queries again; snapshot
 revisions still drive the visible community refresh. Local expiry timers handle TTL deletes

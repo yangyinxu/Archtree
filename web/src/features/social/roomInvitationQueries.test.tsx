@@ -58,6 +58,26 @@ test('invitation-only settlement refreshes invitation observers without an extra
   expect(mocks.community).toHaveBeenCalledTimes(1);
 });
 
+test('a social change signal, from the socket or its HTTP fallback, refreshes friend requests and received shares', async () => {
+  const requests = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+  const shares = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client);
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  renderHook(() => {
+    useRoomInvitationConnection('viewer-1');
+    useQuery({ queryKey: ['social', 'viewer-1', 'relationships', 'incoming'], queryFn: requests });
+    useQuery({ queryKey: ['social', 'viewer-1', 'music-shares', 'incoming'], queryFn: shares });
+  }, { wrapper });
+  await tick();
+  expect(requests).toHaveBeenCalledOnce(); expect(shares).toHaveBeenCalledOnce();
+  await notify('social');
+  expect(requests).toHaveBeenCalledTimes(2); expect(shares).toHaveBeenCalledTimes(2);
+  // Room-only settlement and community changes leave the friendship and share reads alone.
+  await notify('rooms'); await notify('community');
+  expect(requests).toHaveBeenCalledTimes(2); expect(shares).toHaveBeenCalledTimes(2);
+  expect(mocks.capabilities).toHaveBeenCalledOnce();
+});
+
 test.each(['requestSong', 'react'])('%s with only a newer room revision still refreshes the complete community', async action => {
   const view = show(); await tick();
   const room = { ...mocks.state.room!, revision: 2 }; const actor = cardFor(room);

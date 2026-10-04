@@ -22,10 +22,12 @@ const ShareList = ({ viewerId, direction }: { viewerId: string; direction: Music
   const { t } = useLocalization();
   const actions = useShareActions(viewerId);
   const [roomActive, setRoomActive] = useState(false);
+  // No fixed poll: the account-wide room session refreshes this list on socialChanged, or through
+  // its HTTP change fallback when the socket is off or lost, so a connected socket adds no list polling.
   const result = useInfiniteQuery({ queryKey: ['social', viewerId, 'music-shares', direction],
     queryFn: ({ pageParam, signal }) => getMusicShares(viewerId, direction, pageParam, signal),
     initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined,
-    refetchInterval: 15_000, refetchOnWindowFocus: 'always', retry: false });
+    refetchOnWindowFocus: 'always', retry: false });
   const allItems = useMemo(() => [...new Map((result.data?.pages ?? []).flatMap(page => page.items).map(item => [item.shareId, item])).values()], [result.data]);
   const nextExpiry = allItems.reduce((next, item) => item.expiresAtMs > Date.now() ? Math.min(next, item.expiresAtMs) : next, Infinity);
   const now = useInvitationNow(Number.isFinite(nextExpiry) ? nextExpiry : undefined);

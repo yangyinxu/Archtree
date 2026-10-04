@@ -100,6 +100,14 @@ test('logical expiry removes a displayed card without waiting for polling or ser
   expect(screen.queryByText('From Alice')).not.toBeInTheDocument(); expect(screen.getByText('No received music shares.')).toBeVisible();
 });
 
+test('the share list adds no fixed poll; the room session change signal drives refreshes', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  show(); expect(await screen.findByText('From Alice')).toBeVisible();
+  const reads = mocks.shares.mock.calls.length;
+  await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+  expect(mocks.shares).toHaveBeenCalledTimes(reads);
+});
+
 test('unavailable content exposes no historical metadata or play/save but retains explicit dismissal', async () => {
   mocks.shares.mockResolvedValue({ items: [share({ content: null })], nextCursor: null }); show();
   const card = await screen.findByRole('article', { name: 'This music is unavailable.' });

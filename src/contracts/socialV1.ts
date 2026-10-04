@@ -126,6 +126,11 @@ export interface SocialApi {
     admissionEnabled(): boolean;
     issueScope(actor: SocialActor): Promise<SocialScope>;
     ownProfile(actor: SocialActor): Promise<SocialOwnProfile | null>;
+    /**
+     * Payload-free change cursor for clients without the room socket: the same per-account
+     * revision that triggers realtime `socialChanged`. Only inequality is meaningful.
+     */
+    changeRevision(actor: SocialActor): Promise<number>;
     lookup(actor: SocialActor, handle: string): Promise<SocialCard | null>;
     relationship(actor: SocialActor, targetSocialId: string): Promise<SocialRelationshipView | null>;
     list(actor: SocialActor, kind: SocialListKind, limit: number, cursor?: string): Promise<SocialPage>;

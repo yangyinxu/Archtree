@@ -234,6 +234,13 @@ Disabled room capabilities suppress background ticket retries while keeping
 explicit safety actions available. No notification sound or push permission is
 requested.
 
+Social works with `FINITUDE_ROOMS_ENABLED=false`. Whenever no room socket is
+connected, the Web client polls the payload-free `GET /api/social/v1/me/changes`
+cursor in a visible tab. It polls 15 seconds after its previous poll and doubles
+that wait up to 60 seconds while nothing changes. A changed cursor refreshes
+incoming requests, shares and other social reads. Each poll reads two small
+documents and writes nothing. A connected socket stops the polling.
+
 The implemented [room API](docs/architecture.md#implemented-audio-room-api) uses
 HTTP for version-fenced commands and complete authorized WebSocket snapshots for
 delivery. The server uses pinned `ws` with compression disabled; no Redis or

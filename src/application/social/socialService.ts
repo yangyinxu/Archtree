@@ -9,7 +9,7 @@ import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { touchActiveAccount, AccountReferenceUnavailableError } from '../../services/accountReferenceFenceService';
 import { getJwtSecret } from '../../services/authSessionService';
 import type {
-    SocialBudgetDocument, SocialHandleDocument, SocialProfileDocument,
+    SocialBudgetDocument, SocialHandleDocument, SocialOutboxDocument, SocialProfileDocument,
     SocialReceiptDocument, SocialRelationshipDocument, SocialReportDocument
 } from '../../repositories/social/socialDocuments';
 import { readSocialToken, signSocialToken } from './socialTokens';
@@ -68,6 +68,7 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
     const budgets = () => db().collection<SocialBudgetDocument>('socialBudgets');
     const handles = () => db().collection<SocialHandleDocument>('socialHandles');
     const reports = () => db().collection<SocialReportDocument>('socialReports');
+    const outbox = () => db().collection<SocialOutboxDocument>('socialOutbox');
 
     /** Bounded known-aborted retries preserve the original intent; uncertain commits are never replayed. */
     const transaction = async <T>(actor: SocialActor, work: (session: ClientSession) => Promise<T>, hooks = false,
@@ -352,6 +353,35 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 return profile ? { ...card(profile), active: profile.active, discoverable: profile.discoverable, revision: profile.revision,
                     ...(profile.suspension ? { suspended: true as const } : {}) } : null;
             });
+        },
+        /**
+         * Clients poll this when no room socket can deliver `socialChanged`, so it must stay cheap:
+         * a read-only session check replaces the transactional read fence, whose session, account
+         * and budget writes would turn every idle poll into database writes. The router's
+         * per-account request window still bounds it. Account deletion removes every session, so
+         * a valid session also implies the account still exists.
+         */
+        async changeRevision(actor) {
+            if (!objectId(actor.userId) || !objectId(actor.sessionId)) throw new SocialError(401, 'social_session_required');
+            let current: [unknown, Pick<SocialOutboxDocument, 'revision'> | null];
+            try {
+                current = await Promise.all([
+                    db().collection('authSessions').findOne({
+                        _id: new ObjectId(actor.sessionId), userId: actor.userId,
+                        revokedAt: { $exists: false }, expiresAt: { $gt: new Date(now()) }
+                    }, { projection: { _id: 1 } }),
+                    outbox().findOne({ _id: actor.userId }, { projection: { revision: 1 } })
+                ]);
+            } catch (error) {
+                if (error instanceof SocialError) throw error;
+                throw new SocialError(503, 'social_unavailable');
+            }
+            const [session, change] = current;
+            if (!session) throw new SocialError(401, 'social_session_required');
+            // A missing row means nothing has changed yet; a corrupt counter must not look like a valid cursor.
+            const revision = change?.revision ?? 0;
+            if (!Number.isSafeInteger(revision) || revision < 0) throw new SocialError(503, 'social_unavailable');
+            return revision;
         },
         async lookup(actor, input) {
             const handle = normalizeSocialHandle(input);

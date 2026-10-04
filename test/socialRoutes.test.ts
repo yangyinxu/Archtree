@@ -39,6 +39,7 @@ const fixtureApi = () => {
         admissionEnabled: () => true,
         issueScope: async (who) => { actors.push(who); return { scopeToken: identity.scopeToken, expiresAt: '2026-09-14T00:00:00.000Z' }; },
         ownProfile: async (who) => { actors.push(who); return { ...card, active: true, discoverable: true, revision: 3 }; },
+        changeRevision: async (who) => { actors.push(who); reads.push(['changeRevision']); return 7; },
         lookup: async (who, handle) => { actors.push(who); reads.push(['lookup', handle]); return handle === card.handle ? card : null; },
         list: async (who, ...args) => { actors.push(who); reads.push(['list', ...args]); return { items: [{ socialId, profile: card, revision: 4 }], nextCursor: null }; },
         musicShares: async (who, ...args) => { actors.push(who); reads.push(['musicShares', ...args]); return { items: [], nextCursor: null }; },
@@ -382,6 +383,29 @@ test('private profile reads and exact lookup return only minimal allowlisted car
     for (const path of ['/profiles', '/profiles?handle=alice&handle=bob', '/profiles?handle=alice&email=private', '/me/profile?userId=other']) {
         assert.equal((await request(path)).status, 400);
     }
+});
+
+test('the change cursor returns only an opaque revision for the authenticated actor', async t => {
+    const { api, actors, reads } = fixtureApi();
+    const { base, request } = await listen(t, api);
+    const response = await request('/me/changes');
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { revision: 7 });
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.match(response.headers.get('vary')!, /X-Finitude-Account-Viewer/);
+    assert.deepEqual(actors, [actor]);
+    assert.deepEqual(reads, [['changeRevision']]);
+    // The cursor never accepts a caller-chosen account, baseline or long-poll parameter.
+    for (const path of ['/me/changes?since=6', '/me/changes?userId=other']) {
+        assert.equal((await request(path)).status, 400, path);
+    }
+    assert.equal((await request('/me/changes', undefined, { headers: { 'x-test-auth': 'missing' } })).status, 401);
+    assert.equal((await fetch(`${base}/api/social/v1/me/changes`, { headers: { 'x-finitude-account-viewer': 'other-account' } })).status, 409);
+    assert.equal(reads.length, 1);
+    api.changeRevision = async () => { throw new SocialError(503, 'social_unavailable'); };
+    const unavailable = await request('/me/changes');
+    assert.equal(unavailable.status, 503);
+    assert.equal((await unavailable.json()).code, 'social_unavailable');
 });
 
 test('relationship lists parse bounded exact queries and preserve opaque cursors', async t => {

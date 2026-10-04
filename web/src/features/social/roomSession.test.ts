@@ -8,12 +8,14 @@ import type { PlayerAudio } from '../../player/types';
 
 const mocks = vi.hoisted(() => ({
   getCurrentRoom: vi.fn(), getRealtimeTicket: vi.fn(), sendRoomCommand: vi.fn(), prepareRoomCommand: vi.fn(), getSocialOutcome: vi.fn(),
+  getSocialChangeRevision: vi.fn(),
   attach: vi.fn(), apply: vi.fn(), detach: vi.fn(), pause: vi.fn(), resync: vi.fn(), correct: vi.fn(), playbackIntent: vi.fn()
 }));
 vi.mock('../../api/rooms', async importOriginal => ({ ...await importOriginal<typeof import('../../api/rooms')>(),
   getCurrentRoom: mocks.getCurrentRoom, getRealtimeTicket: mocks.getRealtimeTicket,
   prepareRoomCommand: mocks.prepareRoomCommand, sendRoomCommand: mocks.sendRoomCommand }));
 vi.mock('../../api/social', async importOriginal => ({ ...await importOriginal<typeof import('../../api/social')>(), getSocialOutcome: mocks.getSocialOutcome }));
+vi.mock('../../api/socialChanges', () => ({ getSocialChangeRevision: mocks.getSocialChangeRevision }));
 vi.mock('../../player', () => ({ playerStore: { attachRoomPlayback: mocks.attach, notePlaybackIntent: mocks.playbackIntent } }));
 /** Lets a test switch accounts while the on-demand refusal copy is being applied. */
 const refusalHook = vi.hoisted(() => ({ beforeExplain: undefined as undefined | (() => void) }));
@@ -70,6 +72,7 @@ beforeEach(() => {
   roomSession.stop(); vi.useFakeTimers(); vi.clearAllMocks(); Socket.instances = []; refusalHook.beforeExplain = undefined;
   vi.stubGlobal('WebSocket', Socket);
   mocks.getCurrentRoom.mockResolvedValue({ room: null });
+  mocks.getSocialChangeRevision.mockResolvedValue({ revision: 1 });
   mocks.getRealtimeTicket.mockResolvedValue({ ticket: 'single-use-ticket', expiresAt: new Date(Date.now() + 30_000).toISOString() });
   mocks.prepareRoomCommand.mockImplementation(async (_viewer, action) => ({ ...action, commandId: 'immutable-command-123', scopeToken: 'original-scope-token-123' }));
   mocks.sendRoomCommand.mockResolvedValue({ commandId: 'immutable-command-123', outcome: 'applied', replayed: false });
@@ -489,6 +492,65 @@ test('disabling rooms while connected is not reported as a lost connection', asy
   expect(mocks.detach).toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(16_000);
   expect(mocks.getRealtimeTicket).toHaveBeenCalledOnce();
+});
+
+/** Advances one heartbeat and lets the lazily loaded social change fallback finish its poll. */
+const heartbeat = async () => {
+  await vi.advanceTimersByTimeAsync(5_000); await vi.dynamicImportSettled(); await vi.advanceTimersByTimeAsync(0);
+};
+
+test('disabled rooms still deliver social changes through HTTP change polling without a socket', async () => {
+  const refresh = vi.fn();
+  roomSession.ensure('viewer-1', refresh, { realtimeEnabled: false });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.getSocialChangeRevision).not.toHaveBeenCalled();
+  await heartbeat();
+  // The first poll covers anything that changed after the first reads, like a fresh subscription.
+  expect(mocks.getSocialChangeRevision).toHaveBeenCalledExactlyOnceWith('viewer-1');
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('social');
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(mocks.getSocialChangeRevision).toHaveBeenCalledTimes(2);
+  expect(refresh).toHaveBeenCalledOnce();
+  mocks.getSocialChangeRevision.mockResolvedValue({ revision: 2 });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(refresh).toHaveBeenCalledTimes(2);
+  expect(refresh).toHaveBeenLastCalledWith('social');
+  expect(mocks.getRealtimeTicket).not.toHaveBeenCalled(); expect(Socket.instances).toHaveLength(0);
+});
+
+test('a connected socket suppresses HTTP change polling, which covers only the time it is lost', async () => {
+  const socket = await connected(null);
+  const refresh = vi.fn(); roomSession.ensure('viewer-1', refresh);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(mocks.getSocialChangeRevision).not.toHaveBeenCalled();
+  socket.close();
+  await heartbeat();
+  expect(roomSession.getSnapshot().connected).toBe(false);
+  expect(mocks.getSocialChangeRevision).toHaveBeenCalledOnce();
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('social');
+  Socket.instances.at(-1)!.receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_100_000, room: null });
+  expect(refresh).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(mocks.getSocialChangeRevision).toHaveBeenCalledOnce();
+  expect(refresh).toHaveBeenCalledTimes(2);
+});
+
+test('a replaced account discards the former account fallback and its in-flight change poll', async () => {
+  const pending = deferred<{ revision: number }>();
+  mocks.getSocialChangeRevision.mockReturnValueOnce(pending.promise);
+  const former = vi.fn();
+  roomSession.ensure('viewer-1', former, { realtimeEnabled: false });
+  await heartbeat();
+  expect(mocks.getSocialChangeRevision).toHaveBeenCalledExactlyOnceWith('viewer-1');
+  advanceAccountEpoch();
+  const next = vi.fn();
+  roomSession.ensure('viewer-2', next, { realtimeEnabled: false });
+  pending.resolve({ revision: 3 }); await vi.advanceTimersByTimeAsync(0);
+  expect(former).not.toHaveBeenCalled(); expect(next).not.toHaveBeenCalled();
+  await heartbeat();
+  expect(mocks.getSocialChangeRevision).toHaveBeenLastCalledWith('viewer-2');
+  expect(next).toHaveBeenCalledExactlyOnceWith('social');
+  expect(former).not.toHaveBeenCalled();
 });
 
 test('a song request can be explicitly withdrawn without live transport while new requests remain blocked', async () => {

@@ -516,6 +516,11 @@ send no social request, and a `social_disabled`/`rooms_disabled` refusal refresh
 them while open. The listener Chromium gate covers flags off, social without rooms
 and a refusal while open; production rollout and rollback rehearsal remain pending.
 
+Social can be enabled before rooms. With rooms off, Web friend requests and shares
+arrive through the change-cursor polling fallback instead of the room socket. The
+`social-without-rooms` browser scenario covers this, running without a realtime
+gateway.
+
 All local browser contexts share one source IP. Playback GET admission now waits
 within a bounded two-second queue without raising active-request limits. Explicit
 local resync retries the exact pinned source, withdraws failed readiness, and

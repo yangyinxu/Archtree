@@ -18,7 +18,7 @@ test('social hardware-audio projects remain restricted to explicitly enabled Lin
       const suites = socialBrowserSuites(platform, ci);
       const hardwareAudio = suites.filter(suite => suite.browser !== 'chromium');
       assert.equal(hardwareAudio.length > 0, platform === 'linux' && (ci === 'true' || ci === '1'));
-      assert.equal(suites.filter(suite => suite.browser === 'chromium').length, 10);
+      assert.equal(suites.filter(suite => suite.browser === 'chromium').length, 11);
     }
   }
 });

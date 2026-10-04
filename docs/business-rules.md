@@ -164,6 +164,12 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   that lost a race against a newer relationship, profile or listening revision
   says the state changed and shows the latest state. None of these refusals
   offers outcome recovery or keeps the action for a resend.
+- Social does not depend on Shared Playback Rooms. While its page is visible,
+  Finitude Web refreshes new friend requests and received shares, with or
+  without rooms. It uses the live room connection when one exists. Otherwise it
+  checks for changes about every 15 seconds and slows to once a minute while
+  nothing changes. These refreshes are silent: no unread count, sound, system
+  notification, push or email. A hidden page does not check.
 
 ## Direct Music Shares
 
