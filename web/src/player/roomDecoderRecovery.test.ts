@@ -206,3 +206,127 @@ test('a failed reload does not mark a decoder as requiring the recovered-rate fa
   expect(target.playbackRate).toBe(1.05);
   room.detach();
 });
+
+/** WebKitGTK/GStreamer can fire loadedmetadata and canplay at HAVE_ENOUGH_DATA with a zero duration and empty ranges. */
+const missingDuration = (target: ReturnType<typeof setup>['target'], controller: ReturnType<typeof setup>['controller'],
+  duration = 0, readyState = 4) => {
+  target.duration = duration; target.readyState = readyState;
+  target.buffered = { length: 0, start: () => 0, end: () => 0 };
+  controller.observe('loadedmetadata', target);
+  controller.observe('canplay', target);
+};
+const healthy = (target: ReturnType<typeof setup>['target']) => {
+  target.duration = 120;
+  target.buffered = { length: 1, start: () => 0, end: () => 120 };
+};
+const readyEpochs = (onObservation: ReturnType<typeof setup>['onObservation']) =>
+  onObservation.mock.calls.filter(([event]) => event.type === 'ready').map(([event]) => event.playbackEpoch);
+
+test('metadata without a duration reloads the source once, then still requires real readiness before starting', async () => {
+  const { room, state, target, install, controller, decoded, onObservation, onIntent } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  expect(readyEpochs(onObservation)).toEqual([]);
+  await vi.advanceTimersByTimeAsync(999); expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1); expect(install).toHaveBeenCalledTimes(2);
+  expect(target.readyState).toBe(0);
+  expect(target.play).not.toHaveBeenCalled();
+  healthy(target); decoded(4);
+  expect(target.currentTime).toBe(66);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  expect(target.play).not.toHaveBeenCalled();
+  await room.apply({ ...state, revision: 2, status: 'playing', playbackAllowed: true, anchorMonotonicMs: 10000 + performance.now() });
+  expect(target.play).toHaveBeenCalledTimes(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a second duration-less load in the same occurrence waits for an explicit resync instead of looping', async () => {
+  const { room, state, target, install, controller, decoded, onObservation } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(1000); expect(install).toHaveBeenCalledTimes(2);
+  missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(2);
+  expect(readyEpochs(onObservation)).toEqual([]);
+  await room.resync();
+  expect(install).toHaveBeenCalledTimes(3);
+  healthy(target); decoded(4);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a duration that arrives late through durationchange reports readiness without a reload', async () => {
+  const { room, state, target, install, controller, onObservation } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(500);
+  healthy(target);
+  controller.observe('durationchange', target);
+  expect(target.currentTime).toBe(66);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(1);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['local-pause', 'detach', 'replacement', 'duration-corrected', 'error'] as const)(
+  '%s cancels a pending duration reload', async action => {
+    const { room, state, target, install, controller } = setup();
+    await room.apply(state); missingDuration(target, controller);
+    if (action === 'local-pause') room.pauseLocally();
+    if (action === 'detach') room.detach();
+    if (action === 'replacement') await room.apply({ ...state, revision: 2, playbackEpoch: 2, mediaRevision: 'mr_b',
+      queue: [{ ...state.queue[0], streamUrl: '/replacement.mp3' }] });
+    if (action === 'duration-corrected') healthy(target); // No event: the timer itself must re-check the condition.
+    if (action === 'error') target.error = { code: 4 };
+    const count = install.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(install).toHaveBeenCalledTimes(count);
+    expect(target.play).not.toHaveBeenCalled();
+    room.detach();
+  });
+
+test.each(['loading', 'infinite', 'video', 'ended', 'paused-locally', 'explicit-retry'] as const)(
+  '%s cannot trigger a duration reload', async condition => {
+    const { room, state, target, install, controller } = setup();
+    const incoming = condition === 'video' ? { ...state, queue: [{ ...state.queue[0], mediaType: 'video' as const }] }
+      : condition === 'ended' ? { ...state, status: 'ended' as const } : state;
+    await room.apply(incoming);
+    if (condition === 'paused-locally') room.pauseLocally();
+    if (condition === 'explicit-retry') await room.resync(); // Its own 10s deadline decides failure.
+    const count = install.mock.calls.length;
+    missingDuration(target, controller, condition === 'loading' ? NaN : condition === 'infinite' ? Infinity : 0,
+      condition === 'loading' ? 0 : 4);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(install).toHaveBeenCalledTimes(count);
+    expect(target.play).not.toHaveBeenCalled();
+    room.detach();
+  });
+
+test('a reload pending for a missing duration yields to a decoder stall once the duration arrives', async () => {
+  const { room, state, target, install, controller, decoded } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(600);
+  healthy(target); decoded(2);
+  await vi.advanceTimersByTimeAsync(999); expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1); expect(install).toHaveBeenCalledTimes(2);
+  room.detach();
+});
+
+test('a duration reload that misses the preparation deadline still joins the started room', async () => {
+  const { room, state, target, install, controller, decoded, onObservation } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  // The server starts without this device and keeps it unauthorized; the reload is re-armed for the same occurrence.
+  await vi.advanceTimersByTimeAsync(500);
+  const started = { ...state, revision: 2, status: 'playing' as const, anchorMonotonicMs: 10000 + performance.now() };
+  await room.apply(started);
+  await vi.advanceTimersByTimeAsync(1000); expect(install).toHaveBeenCalledTimes(2);
+  healthy(target); decoded(4);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  expect(target.play).not.toHaveBeenCalled();
+  // The late ready report authorizes this member on the unchanged timeline.
+  await room.apply({ ...started, revision: 3, playbackAllowed: true });
+  expect(target.play).toHaveBeenCalledTimes(1);
+  room.detach();
+});

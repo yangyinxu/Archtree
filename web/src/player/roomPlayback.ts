@@ -95,6 +95,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let scheduled: ReturnType<typeof setTimeout> | undefined;
   let correction: ReturnType<typeof setTimeout> | undefined;
   let decoderRecovery: ReturnType<typeof setTimeout> | undefined;
+  let decoderRecoveryCondition: ((target: PlayerAudio) => boolean) | undefined;
   let recoveredOccurrence: string | null = null;
   let reloadingOccurrence: string | null = null;
   // install() only writes the source; native metadata can arrive much later than its promise.
@@ -268,14 +269,33 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     } catch { return false; }
   };
 
-  /** A fully downloaded paused decoder can stall after seeking; retry its source once, never manufacture readiness. */
-  const recoverDecoder = (target: PlayerAudio) => {
+  /**
+   * A native pipeline can announce metadata (even HAVE_ENOUGH_DATA) with a zero or unknown duration and never
+   * correct it, as WebKitGTK's GStreamer backend intermittently does; readiness would then never be reported.
+   * An explicit source retry owns its own failure deadline, and an infinite duration is a stream, not a glitch.
+   */
+  const missingDuration = (target: PlayerAudio) => Boolean(state && !localPaused && !sourceRetry && matchesSource(target)
+    && state.status !== 'ended' && state.queue[state.entryIds.indexOf(state.currentEntryId)].mediaType === 'audio'
+    && !seekFailed && !target.error && (target.readyState ?? 0) >= 1
+    && !(Number.isFinite(target.duration) && target.duration > 0) && target.duration !== Infinity);
+
+  /**
+   * Retries the current source once per occurrence while a native decoder condition persists; never manufactures
+   * readiness. The conditions are mutually exclusive, so a pending retry whose condition no longer holds yields.
+   */
+  const scheduleSourceReload = (target: PlayerAudio, condition: (target: PlayerAudio) => boolean) => {
     const key = occurrence();
-    if (!key || decoderRecovery !== undefined || key === recoveredOccurrence || !stalledDecoder(target)) return;
+    if (!key || key === recoveredOccurrence || !condition(target)) return;
+    if (decoderRecovery !== undefined) {
+      if (decoderRecoveryCondition === condition) return;
+      clearTimeout(decoderRecovery);
+    }
+    decoderRecoveryCondition = condition;
     const expectedEffect = effect, expectedSource = source;
     decoderRecovery = setTimeout(() => {
       decoderRecovery = undefined;
-      if (!state || detached || effect !== expectedEffect || source !== expectedSource || occurrence() !== key || !stalledDecoder(target)) return;
+      // A duration or readiness that arrived meanwhile cancels the reload.
+      if (!state || detached || effect !== expectedEffect || source !== expectedSource || occurrence() !== key || !condition(target)) return;
       recoveredOccurrence = key;
       reloadingOccurrence = key;
       cancelEffects();
@@ -304,11 +324,15 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     }, 1000);
   };
 
+  /** A fully downloaded paused decoder can stall after seeking; retry its source once. */
+  const recoverDecoder = (target: PlayerAudio) => scheduleSourceReload(target, stalledDecoder);
+
   /** Readiness requires real metadata, a completed seek, and enough decoded data to start. */
   const reconcile = async (): Promise<void> => {
     const target = port.media();
     if (!state || !target || !matchesSource(target) || seekFailed || target.error) return;
-    if (!hasMetadata(target)) return;
+    // The 1s retry lands well inside the server's 3s preparation window, so the device can still join the cohort.
+    if (!hasMetadata(target)) { scheduleSourceReload(target, missingDuration); return; }
     if (needsSeek) {
       needsSeek = false;
       seekPending = true;
@@ -653,7 +677,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         }
         report('seek-complete');
       }
-      if (['loadedmetadata', 'canplay', 'seeked'].includes(event)) void reconcile();
+      // A duration may arrive after loadedmetadata/canplay; it must still be able to report readiness.
+      if (['loadedmetadata', 'canplay', 'durationchange', 'seeked'].includes(event)) void reconcile();
       if (event === 'timeupdate' && postSeek) observePostSeekProgress(target);
       if (event === 'timeupdate' && firstProgress && !firstProgress.seeking && correctionAllowed(target)
         && !target.ended && !target.error && state && now() >= state.anchorMonotonicMs
