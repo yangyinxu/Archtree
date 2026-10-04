@@ -7,6 +7,7 @@ import { getRoomInvitation, type RoomInvitation } from '../../api/rooms';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { useInvitationNow, useRoomInvitationConnection, useRoomInvitations } from './roomInvitationQueries';
 import { roomSession, useRoomSession } from './roomSession';
+import { SocialAvatar } from './SocialAvatar';
 import styles from './SocialPage.module.css';
 
 const validInvitationId = (id: string) => /^[A-Za-z0-9_-]{1,80}$/.test(id) && !/\s/.test(id);
@@ -56,7 +57,7 @@ const InvitationActions = ({ viewerId, invitations, unavailable = false, showEmp
     {unavailable ? <p className={styles.empty}>{t('room.invitation_unavailable')}</p>
       : !invitations.length ? showEmpty && <p className={styles.empty}>{t('room.invitations_empty')}</p>
         : <ul className={styles.list}>{invitations.map(invitation => <li className={styles.row} key={invitation.invitationId}>
-          <span className={styles.avatar} aria-hidden="true">{[...invitation.inviter.alias][0]?.toLocaleUpperCase()}</span>
+          <SocialAvatar profile={invitation.inviter} />
           <div className={styles.rowContent}>
             <strong>{t('room.incoming_invite', { alias: invitation.inviter.alias })}</strong>
             <span>@{invitation.inviter.handle}</span>

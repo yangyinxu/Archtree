@@ -79,8 +79,11 @@ export const RoomSongRequests = ({ viewerId, room }: { viewerId: string; room: R
       <ol className={`${styles.list} ${styles.queue}`}>{room.queue.map((entry, index) => {
         const requestedBy = data?.queueCredits.find(credit => credit.entryId === entry.entryId)?.requestedBy;
         const requester = requestedBy && profiles.get(requestedBy.socialId);
-        return <li className={styles.row} key={entry.entryId}>
-          <span className={styles.muted}>{index + 1}</span><div className={styles.rowContent}><strong className={entry.entryId === room.timeline?.entryId ? styles.selected : undefined}>{entry.title}</strong>
+        const current = entry.entryId === room.timeline?.entryId;
+        // The accent color alone would not reach screen readers or listeners who cannot tell colors apart.
+        return <li className={styles.row} key={entry.entryId} aria-current={current ? 'true' : undefined}>
+          <span className={styles.muted}>{index + 1}</span><div className={styles.rowContent}><strong className={current ? styles.selected : undefined}>{entry.title}</strong>
+            {current && <span>{t('room.queue_current')}</span>}
             <span>{`${Math.floor(entry.durationMs / 60_000)}:${String(Math.floor(entry.durationMs / 1000) % 60).padStart(2, '0')}`}</span>
             {requester && <span>{t('room.requested_by', { alias: requester.alias })}</span>}</div>
           <div className={styles.rowActions}>
@@ -88,7 +91,7 @@ export const RoomSongRequests = ({ viewerId, room }: { viewerId: string; room: R
             {hostController && <>
               <button className={styles.secondary} aria-label={t('room.queue_move_up', { title: entry.title })} disabled={!canEdit || index === 0} onClick={() => move(index, -1)}>↑</button>
               <button className={styles.secondary} aria-label={t('room.queue_move_down', { title: entry.title })} disabled={!canEdit || index === room.queue.length - 1} onClick={() => move(index, 1)}>↓</button>
-              <button className={styles.secondary} aria-label={t('room.queue_remove', { title: entry.title })} disabled={!canEdit || entry.entryId === room.timeline?.entryId || room.queue.length <= 1} onClick={() => submit({ action: 'removeQueueEntry', ...roomControlPreconditions(room), targetEntryId: entry.entryId })}>×</button>
+              <button className={styles.secondary} aria-label={t('room.queue_remove', { title: entry.title })} disabled={!canEdit || current || room.queue.length <= 1} onClick={() => submit({ action: 'removeQueueEntry', ...roomControlPreconditions(room), targetEntryId: entry.entryId })}>×</button>
             </>}
           </div>
         </li>;

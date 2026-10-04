@@ -416,6 +416,18 @@ friends beyond the first 20 of the friend list are visible with Load more. The
 host's invitation list and member actions load on demand, which returned the
 room panel to about 1 KiB under the initial JavaScript budget.
 
+The Together relationship lists are WAI-ARIA tabs (each tab controls a labelled
+panel; arrows, Home and End move selection). A failed relationship read after a
+handle lookup is announced with Retry, Deactivate uses the same accessible
+confirmation, the current queue entry carries `aria-current` and a text label,
+member rows show connection, and the room seek slider speaks elapsed and total
+time. Social identities share one generated icon colored by `iconSeed`, share
+cards add the @handle, setup describes the handle format and validates the
+nickname by code points, and the signed-out Login link returns to Together.
+End room keeps the native confirmation for now because the social Playwright
+suite drives it through browser dialog handlers; moving it to the shared dialog
+should land together with those specs.
+
 ## Stage 5 — Native social and Audio room adoption
 
 **Status: Not started**

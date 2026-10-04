@@ -43,6 +43,12 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   opaque social ID and generated-icon seed. Missing, undiscoverable and blocked
   results are indistinguishable. Email, account IDs, private avatars, saves and
   activity are never projected into social cards.
+- Finitude Web shows a social identity by nickname and @handle beside a
+  generated icon: the nickname's first character on a color derived from the
+  generated-icon seed, never a private account avatar. Profile setup states the
+  handle format before submission and counts the nickname in Unicode characters
+  with the backend's trimming and character rules, so a nickname of 50 emoji is
+  accepted and one the backend would refuse is explained before sending.
 - Friendship requires an explicit request and recipient acceptance. Crossing
   requests do not automatically become friends. Only the sender may cancel a
   pending request and only the recipient may accept or decline it. Either friend
@@ -93,7 +99,8 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   and blocking first ask for confirmation that says what changes for both
   people; declining or cancelling a request and unblocking stay single explicit
   actions because they are easily redone. A confirmation acts on the
-  relationship revision observed when it was opened.
+  relationship revision observed when it was opened. Deactivating the social
+  profile likewise asks first and says what is removed and what is kept.
 - Turning discovery off preserves existing friends and pending requests.
   Deactivation hides the profile, cancels requests and removes friendships, while
   retaining the listener's identity, handle and private blocks. Reactivation
@@ -383,6 +390,9 @@ Playlist access retain their existing rules.
   member; otherwise remove the blocker. Deactivation, administrator suspension
   and account deletion remove participation, ending a hosted room. These changes
   take effect atomically.
+- The Web member list shows each member's role and whether they are connected,
+  with readiness for connected members, and the room queue names its current
+  song in text rather than by color alone.
 - The host can End room for everyone or offer Transfer and leave to a connected
   participant. The selected controller must accept within 30 seconds. Acceptance
   transfers the role and removes the old host atomically, preserving the mode,

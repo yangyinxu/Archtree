@@ -69,6 +69,8 @@ const ShareList = ({ viewerId, direction }: { viewerId: string; direction: Music
                 <div className={styles.rowContent}><strong>{item.content?.title || t('music_shares.unavailable')}</strong>
                   {item.content && <span>{item.content.artistNames.join(', ')}</span>}
                   <span>{t(direction === 'incoming' ? 'music_shares.from' : 'music_shares.to', { alias: item.peer.alias })}</span>
+                  {/* Nicknames are not unique; the handle identifies who the share is with, as in every other social row. */}
+                  <span>@{item.peer.handle}</span>
                 </div>
               </div>
               <div className={styles.actions}>

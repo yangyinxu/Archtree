@@ -18,6 +18,8 @@ let profileUnavailable = false;
 let admissionDisabled = false;
 let friendsListed = false;
 let lastCommandId = '';
+/** Relationship reads that fail before the synthetic server answers again. */
+let relationshipFailures = 0;
 /** Mutation paths the synthetic server refuses with a recorded outcome code. */
 let refusals: Record<string, string> = {};
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: {
@@ -25,7 +27,7 @@ const response = (body: unknown) => new Response(JSON.stringify(body), { headers
 } });
 beforeEach(() => {
   advanceAccountEpoch(); current = null; mutations = []; unknown = false; profileUnavailable = false; admissionDisabled = false; lastCommandId = '';
-  friendsListed = false;
+  friendsListed = false; relationshipFailures = 0;
   refusals = {};
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const body = options?.body ? JSON.parse(String(options.body)) : {};
@@ -46,7 +48,10 @@ beforeEach(() => {
       : friendsListed && path.includes('kind=friends') ? [{ socialId: peer.socialId, profile: peer, revision: 5 }] : [], nextCursor: null });
     if (path.startsWith('/api/social/v1/profiles?')) return response({ profile: path.includes('handle=alice')
       ? { socialId: own.socialId, handle: own.handle, alias: own.alias, iconSeed: own.iconSeed } : peer });
-    if (path === `/api/social/v1/relationships/${peer.socialId}`) return response({ relationship: { socialId: peer.socialId, state: 'none', revision: 3 } });
+    if (path === `/api/social/v1/relationships/${peer.socialId}`) {
+      if (relationshipFailures > 0) { relationshipFailures--; return new Response(JSON.stringify({ code: 'unavailable' }), { status: 503 }); }
+      return response({ relationship: { socialId: peer.socialId, state: 'none', revision: 3 } });
+    }
     // The relationship read has no state for the viewer's own profile.
     if (path === `/api/social/v1/relationships/${own.socialId}`) return response({ relationship: null });
     if (admissionDisabled && path === '/api/social/v1/friend-requests') {
@@ -66,7 +71,8 @@ const show = (signedIn = true, social?: SocialRollout) => {
 test('signed-out route offers login without requesting social state', async () => {
   show(false);
   expect(screen.getByRole('heading', { name: 'Listen together' })).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'Log in' })).toHaveAttribute('href', '/login');
+  // Signing in returns here, like every other social entry point.
+  expect(screen.getByRole('link', { name: 'Log in' })).toHaveAttribute('href', '/login?returnTo=%2Fsocial');
   expect(screen.queryByText(/temporarily unavailable/)).not.toBeInTheDocument();
   expect(fetch).not.toHaveBeenCalled();
 });
@@ -282,4 +288,98 @@ test('someone found by handle can be blocked with no relationship, and the own p
   await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/social/v1/relationships/${own.socialId}`, expect.anything()));
   expect(within(lookup).queryByRole('button', { name: 'Block' })).not.toBeInTheDocument();
   expect(within(lookup).queryByRole('button', { name: 'Add friend' })).not.toBeInTheDocument();
+});
+
+test('relationship tabs follow the tabs pattern: each tab controls its labelled panel and arrows, Home and End move selection', async () => {
+  current = own; friendsListed = true; const user = userEvent.setup(); show();
+  const friends = await screen.findByRole('tab', { name: 'Friends' });
+  const incoming = screen.getByRole('tab', { name: 'Incoming requests' });
+  const blocked = screen.getByRole('tab', { name: 'Blocked' });
+  // Only the selected tab is in the Tab order, and every tab names a panel that exists.
+  expect(screen.getAllByRole('tab').map(tab => tab.tabIndex)).toEqual([0, -1, -1, -1]);
+  for (const tab of screen.getAllByRole('tab')) expect(document.getElementById(tab.getAttribute('aria-controls')!)).toHaveAttribute('role', 'tabpanel');
+  const friendsPanel = screen.getByRole('tabpanel', { name: 'Friends' });
+  expect(friendsPanel).toHaveAttribute('id', friends.getAttribute('aria-controls'));
+  expect(await within(friendsPanel).findByText('Bob')).toBeInTheDocument();
+  expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+
+  friends.focus();
+  await user.keyboard('{ArrowRight}');
+  expect(incoming).toHaveFocus(); expect(incoming).toHaveAttribute('aria-selected', 'true'); expect(incoming.tabIndex).toBe(0);
+  expect(friends).toHaveAttribute('aria-selected', 'false'); expect(friends.tabIndex).toBe(-1);
+  expect(await within(screen.getByRole('tabpanel', { name: 'Incoming requests' })).findByRole('button', { name: 'Accept' })).toBeInTheDocument();
+  await user.keyboard('{End}');
+  expect(blocked).toHaveFocus(); expect(blocked).toHaveAttribute('aria-selected', 'true');
+  await user.keyboard('{ArrowRight}');
+  expect(friends).toHaveFocus();
+  await user.keyboard('{ArrowLeft}');
+  expect(blocked).toHaveFocus();
+  await user.keyboard('{Home}');
+  expect(friends).toHaveFocus(); expect(friends).toHaveAttribute('aria-selected', 'true');
+  // Other keys keep their default behavior: Tab leaves the tab list for the selected panel.
+  await user.keyboard('{Tab}');
+  expect(screen.getByRole('tabpanel', { name: 'Friends' })).toHaveFocus();
+  expect(mutations).toEqual([]);
+});
+
+test('a failed relationship read after a lookup is announced with Retry instead of silently offering no action', async () => {
+  current = own; relationshipFailures = 1; show();
+  const form = await screen.findByRole('form', { name: 'Find a friend' });
+  fireEvent.change(within(form).getByLabelText('Handle'), { target: { value: 'bobby' } });
+  fireEvent.submit(form);
+  const lookup = form.closest('section')!;
+  const alert = await within(lookup).findByRole('alert');
+  expect(alert).toHaveTextContent('We couldn’t check your connection with this person. Try again.');
+  expect(within(lookup).queryByRole('button', { name: 'Add friend' })).not.toBeInTheDocument();
+  expect(within(lookup).queryByRole('button', { name: 'Block' })).not.toBeInTheDocument();
+  fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+  expect(await within(lookup).findByRole('button', { name: 'Add friend' })).toBeEnabled();
+  expect(within(lookup).queryByRole('alert')).not.toBeInTheDocument();
+  expect(mutations).toEqual([]);
+});
+
+test('deactivating asks in the accessible dialog, says what is removed and kept, and Cancel sends nothing', async () => {
+  current = own; const user = userEvent.setup(); const nativeConfirm = vi.spyOn(window, 'confirm'); show();
+  const deactivate = await screen.findByRole('button', { name: 'Deactivate social profile' });
+  await user.click(deactivate);
+  const dialog = await screen.findByRole('dialog', { name: 'Deactivate your social profile?' });
+  expect(dialog).toHaveAccessibleDescription(/friendships, shared music and listening status sharing are removed.*Your handle and blocks are kept/);
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(deactivate).toHaveFocus(); expect(mutations).toEqual([]);
+  await user.click(deactivate);
+  await user.click(within(await screen.findByRole('dialog', { name: 'Deactivate your social profile?' })).getByRole('button', { name: 'Deactivate social profile' }));
+  await waitFor(() => expect(mutations).toHaveLength(1));
+  expect(mutations[0].path).toBe('/api/social/v1/me/deactivate');
+  expect(nativeConfirm).not.toHaveBeenCalled();
+  nativeConfirm.mockRestore();
+});
+
+test('setup describes the handle format and counts the display name in characters, as the server does', async () => {
+  show();
+  const form = await screen.findByRole('form', { name: 'Your social profile' });
+  const handle = within(form).getByLabelText('Handle');
+  const alias = within(form).getByLabelText('Display name') as HTMLInputElement;
+  expect(handle).toHaveAccessibleDescription('3–24 letters, numbers or underscores, starting with a letter.');
+  expect(alias).toHaveAccessibleDescription('Up to 50 characters. Friends see this name.');
+  fireEvent.change(handle, { target: { value: 'alice' } });
+  for (const [value, message] of [['A'.repeat(51), 'Use 1 to 50 characters.'], ['   ', 'Use 1 to 50 characters.'],
+    ['Ali\u200dce', 'Remove invisible formatting characters. Some combined emoji include them.']]) {
+    fireEvent.change(alias, { target: { value } });
+    expect(alias.validationMessage).toBe(message);
+    fireEvent.submit(form);
+  }
+  expect(mutations).toEqual([]);
+  // Fifty emoji are 100 UTF-16 units but 50 characters, so the browser must not cut or refuse them.
+  const emoji = '🎧'.repeat(50);
+  fireEvent.change(alias, { target: { value: emoji } });
+  expect(alias.validationMessage).toBe(''); expect(alias).not.toHaveAttribute('maxlength');
+  fireEvent.submit(form);
+  await waitFor(() => expect(mutations).toHaveLength(1));
+  expect(mutations[0].body).toMatchObject({ handle: 'alice', alias: emoji });
+  // A set handle cannot change, so the format hint goes away with the editable field.
+  const saved = within(await screen.findByRole('form', { name: 'Your social profile' })).getByLabelText('Handle');
+  await waitFor(() => expect(saved).toBeDisabled());
+  expect(saved).not.toHaveAccessibleDescription();
 });

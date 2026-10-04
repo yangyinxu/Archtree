@@ -1,44 +1,51 @@
-import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { browserSessionQuery, browserSessionResolvingQuery } from '../../api/session';
 import { getSocialPage, getSocialProfile, getSocialRelationship, lookupSocialProfile,
-  type SocialCard, type SocialListKind, type SocialProfile } from '../../api/social';
+  type SocialListKind, type SocialProfile } from '../../api/social';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { useSocialActions } from './useSocialActions';
 import { listenerCapabilitiesQuery } from '../../api/listenerCapabilities';
+import { SocialAvatar } from './SocialAvatar';
+import { aliasProblem, socialHandlePattern } from './socialIdentityInput';
 import styles from './SocialPage.module.css';
 
-const tabs = ['friends', 'incoming', 'outgoing', 'blocks'] as const;
+const tabs: readonly SocialListKind[] = ['friends', 'incoming', 'outgoing', 'blocks'];
 const ListeningSharingSettings = lazy(() => import('./ListeningSharingSettings').then(module => ({ default: module.ListeningSharingSettings })));
 const FriendsListening = lazy(() => import('./FriendsListening').then(module => ({ default: module.FriendsListening })));
 const RoomsPanel = lazy(() => import('./RoomsPanel').then(module => ({ default: module.RoomsPanel })));
 const ReportDialog = lazy(() => import('./ReportDialog'));
 type Report = (socialId: string, label: string, trigger: HTMLElement) => void;
 const ConfirmActionDialog = lazy(() => import('./ConfirmActionDialog').then(module => ({ default: module.ConfirmActionDialog })));
-/** Generated public identity uses only the explicitly chosen social alias. */
-export const SocialAvatar = ({ profile }: { profile: SocialCard | null }) => <span className={styles.avatar} aria-hidden="true">
-  {profile ? [...profile.alias][0].toLocaleUpperCase() : '·'}
-</span>;
-
-/** A Remove or Block gesture captured when its dialog opened; Remove keeps the relationship revision observed then. */
+/**
+ * A Remove, Block or Deactivate gesture captured when its dialog opened; Remove keeps the relationship revision
+ * observed then.
+ */
 type SafetyIntent = { action: 'remove'; targetSocialId: string; expectedRevision: number; alias: string }
-  | { action: 'block'; targetSocialId: string; alias: string };
+  | { action: 'block'; targetSocialId: string; alias: string }
+  | { action: 'deactivate' };
+
+const safetyCopy = {
+  remove: ['social.remove_confirm_title', 'social.remove_confirm_copy', 'social.remove'],
+  block: ['social.block_confirm_title', 'social.block_confirm_copy', 'social.block'],
+  deactivate: ['social.deactivate_confirm_title', 'social.deactivate_confirm', 'social.deactivate']
+} as const;
 
 /**
- * Removing a friend and blocking cannot simply be undone (reconnecting needs a new request, unblocking restores
- * nothing), so both ask first. Confirming closes the dialog and runs the captured gesture; its outcome appears in
- * the page's shared action status.
+ * Removing a friend, blocking and deactivating cannot simply be undone (reconnecting needs a new request,
+ * unblocking and reactivating restore nothing), so each asks first and says what changes. Confirming closes the
+ * dialog and runs the captured gesture; its outcome appears in the page's shared action status.
  */
 const SafetyConfirmation = ({ intent, actions, onClose }: { intent: SafetyIntent; actions: ReturnType<typeof useSocialActions>; onClose: () => void }) => {
   const { t } = useLocalization();
-  const block = intent.action === 'block';
-  return <Suspense fallback={null}><ConfirmActionDialog
-    title={t(block ? 'social.block_confirm_title' : 'social.remove_confirm_title', { alias: intent.alias })}
-    description={t(block ? 'social.block_confirm_copy' : 'social.remove_confirm_copy', { alias: intent.alias })}
-    confirmLabel={t(block ? 'social.block' : 'social.remove')} confirmDisabled={actions.busy || Boolean(actions.uncertain)}
+  const [title, description, confirmLabel] = safetyCopy[intent.action];
+  const variables = intent.action === 'deactivate' ? undefined : { alias: intent.alias };
+  return <Suspense fallback={null}><ConfirmActionDialog title={t(title, variables)} description={t(description, variables)}
+    confirmLabel={t(confirmLabel)} confirmDisabled={actions.busy || Boolean(actions.uncertain)}
     onCancel={onClose} onConfirm={() => {
       onClose();
+      if (intent.action === 'deactivate') { void actions.run(intent); return; }
       const { alias: _alias, ...action } = intent;
       void actions.run(action);
     }} /></Suspense>;
@@ -46,11 +53,15 @@ const SafetyConfirmation = ({ intent, actions, onClose }: { intent: SafetyIntent
 
 const IdentityForm = ({ profile, actions }: { profile: SocialProfile | null; actions: ReturnType<typeof useSocialActions> }) => {
   const { t } = useLocalization();
+  const id = useId();
   const [handle, setHandle] = useState(profile?.handle ?? '');
   const [alias, setAlias] = useState(profile?.alias ?? '');
   const [discoverable, setDiscoverable] = useState(profile?.discoverable ?? true);
+  const [deactivating, setDeactivating] = useState(false);
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    // The browser already blocks an invalid nickname; this guard also covers programmatic submission.
+    if (aliasProblem(alias)) return;
     void actions.run({ action: 'profile', expectedRevision: profile?.revision ?? 0, handle: handle.toLowerCase(), alias, discoverable });
   };
   // A suspended listener cannot edit or reactivate, so the form stays visible but read-only.
@@ -61,19 +72,30 @@ const IdentityForm = ({ profile, actions }: { profile: SocialProfile | null; act
       : profile && !profile.active && <p className={styles.status}>{t('social.inactive')}</p>}
     <p className={styles.muted}>{t('social.identity_hint')}</p>
     <form aria-label={t('social.identity')} onSubmit={submit}>
-      <label className={styles.field}>{t('social.handle')}<input required autoComplete="off" pattern="[a-zA-Z][a-zA-Z0-9_]{2,23}" minLength={3} maxLength={24} value={handle} disabled={Boolean(profile)} onChange={event => setHandle(event.target.value)} /></label>
-      <label className={styles.field}>{t('social.alias')}<input required autoComplete="off" maxLength={50} value={alias} onChange={event => setAlias(event.target.value)} /></label>
+      {/* The format hint matters only while the handle can still be chosen; a set handle is locked. */}
+      <label className={styles.field}>{t('social.handle')}<input required autoComplete="off" pattern={socialHandlePattern} minLength={3} maxLength={24}
+        title={profile ? undefined : t('social.handle_format')} aria-describedby={profile ? undefined : `${id}-handle`}
+        value={handle} disabled={Boolean(profile)} onChange={event => setHandle(event.target.value)} /></label>
+      {!profile && <p className={styles.fieldHint} id={`${id}-handle`}>{t('social.handle_format')}</p>}
+      {/* No maxLength: it counts UTF-16 units, which would refuse 50 emoji the server accepts. */}
+      <label className={styles.field}>{t('social.alias')}<input required autoComplete="off" aria-describedby={`${id}-alias`} value={alias} onChange={event => {
+        const problem = aliasProblem(event.target.value);
+        event.target.setCustomValidity(problem ? t(problem) : '');
+        setAlias(event.target.value);
+      }} /></label>
+      <p className={styles.fieldHint} id={`${id}-alias`}>{t('social.alias_hint')}</p>
       <label className={styles.check}><input type="checkbox" checked={discoverable} onChange={event => setDiscoverable(event.target.checked)} />{t('social.discoverable')}</label>
       <button className={styles.button} disabled={suspended || actions.busy || Boolean(actions.uncertain)}>{t(profile ? profile.active ? 'social.save_profile' : 'social.reactivate' : 'social.create_profile')}</button>
     </form>
-    {profile?.active && <div className={styles.actions}><button className={styles.danger} disabled={actions.busy || Boolean(actions.uncertain)} type="button" onClick={() => {
-      if (window.confirm(t('social.deactivate_confirm'))) void actions.run({ action: 'deactivate' });
-    }}>{t('social.deactivate')}</button></div>}
+    {profile?.active && <div className={styles.actions}><button className={styles.danger} disabled={actions.busy || Boolean(actions.uncertain)} type="button"
+      onClick={() => setDeactivating(true)}>{t('social.deactivate')}</button></div>}
+    {deactivating && <SafetyConfirmation intent={{ action: 'deactivate' }} actions={actions} onClose={() => setDeactivating(false)} />}
   </section>;
 };
 
 const FriendLookup = ({ viewerId, enabled, actions, report }: { viewerId: string; enabled: boolean; actions: ReturnType<typeof useSocialActions>; report: Report }) => {
   const { t } = useLocalization();
+  const hintId = useId();
   const [handle, setHandle] = useState('');
   const [submitted, setSubmitted] = useState('');
   const result = useQuery({ queryKey: ['social', viewerId, 'lookup', submitted],
@@ -84,9 +106,10 @@ const FriendLookup = ({ viewerId, enabled, actions, report }: { viewerId: string
   const relation = relationship.data?.relationship;
   const [blocking, setBlocking] = useState<SafetyIntent | null>(null);
   return <section className={styles.panel}>
-    <h2>{t('social.find')}</h2><p className={styles.muted}>{t('social.find_hint')}</p>
+    <h2>{t('social.find')}</h2><p className={styles.muted} id={hintId}>{t('social.find_hint')}</p>
     <form aria-label={t('social.find')} className={styles.search} onSubmit={event => { event.preventDefault(); setSubmitted(handle.trim().toLowerCase()); }}>
-      <label className={styles.field}>{t('social.handle')}<input required maxLength={24} pattern="[a-zA-Z][a-zA-Z0-9_]{2,23}" value={handle} disabled={!enabled} onChange={event => setHandle(event.target.value)} /></label>
+      <label className={styles.field}>{t('social.handle')}<input required maxLength={24} pattern={socialHandlePattern} title={t('social.handle_format')} aria-describedby={hintId}
+        value={handle} disabled={!enabled} onChange={event => setHandle(event.target.value)} /></label>
       <button className={styles.button} disabled={!enabled || result.isFetching}>{t('social.lookup')}</button>
     </form>
     {result.isFetching && <p className={styles.empty} role="status">{t('social.loading')}</p>}
@@ -103,6 +126,9 @@ const FriendLookup = ({ viewerId, enabled, actions, report }: { viewerId: string
       {/* The pair state is null for the viewer's own handle, so a listener is never offered a self-report. */}
       {relation && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(profile.socialId, `${profile.alias} (@${profile.handle})`, event.currentTarget)}>{t('social.report')}</button>}
     </div>}
+    {/* Without the relationship no action can be offered safely, so a failed read says so instead of showing nothing. */}
+    {profile && relationship.isError && <p className={styles.error} role="alert">{t('social.relationship_error')} <button type="button" className={styles.secondary}
+      disabled={relationship.isFetching} onClick={() => relationship.refetch()}>{t('common.action.retry')}</button></p>}
     {blocking && <SafetyConfirmation intent={blocking} actions={actions} onClose={() => setBlocking(null)} />}
   </section>;
 };
@@ -115,29 +141,49 @@ const Relationships = ({ viewerId, actions, report }: { viewerId: string; action
     initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined, retry: false });
   const rows = [...new Map((result.data?.pages ?? []).flatMap(page => page.items).map(row => [row.socialId, row])).values()];
   const [confirming, setConfirming] = useState<SafetyIntent | null>(null);
+  const id = useId();
+  /**
+   * WAI-ARIA tabs with automatic activation: arrows wrap, Home and End jump, and only the selected tab is in the
+   * Tab order so one Tab press moves on to the list.
+   */
+  const moveTab = (event: KeyboardEvent, from: SocialListKind) => {
+    const index = tabs.indexOf(from);
+    const target = ({ ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 } as Record<string, number>)[event.key];
+    if (target === undefined) return;
+    event.preventDefault();
+    const next = tabs[(target + tabs.length) % tabs.length];
+    setKind(next);
+    document.getElementById(`${id}-tab-${next}`)?.focus();
+  };
+  const content = result.isPending ? <p className={styles.empty} role="status">{t('social.loading')}</p>
+    : result.isError ? <p className={styles.error} role="alert">{t('social.error')}</p>
+    : !rows.length ? <p className={styles.empty}>{t('social.empty')}</p>
+    : <ul className={styles.list}>{rows.map(row => <li className={styles.row} key={row.socialId}>
+      <SocialAvatar profile={row.profile} /><div className={styles.rowContent}><strong>{row.profile?.alias ?? t('social.blocked_profile')}</strong>
+        <span>{row.profile ? `@${row.profile.handle}` : row.socialId.slice(-8)}</span></div>
+      <div className={styles.rowActions}>
+        {kind === 'incoming' && <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'accept', targetSocialId: row.socialId, expectedRevision: row.revision })}>{t('social.accept')}</button>}
+        {/* Declining, cancelling and unblocking are easily redone, so only Remove and Block ask first. */}
+        <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => kind === 'friends'
+          ? setConfirming({ action: 'remove', targetSocialId: row.socialId, expectedRevision: row.revision, alias: row.profile?.alias ?? '' })
+          : actions.run({ action: kind === 'incoming' ? 'decline' : kind === 'outgoing' ? 'cancel' : 'unblock', targetSocialId: row.socialId, expectedRevision: row.revision })}>
+          {t(kind === 'friends' ? 'social.remove' : kind === 'incoming' ? 'social.decline' : kind === 'outgoing' ? 'social.cancel_request' : 'social.unblock')}</button>
+        {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => setConfirming({ action: 'block', targetSocialId: row.socialId, alias: row.profile?.alias ?? '' })}>{t('social.block')}</button>}
+        {/* Blocked rows stay reportable: blocking and then reporting is a common safety sequence. */}
+        <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(row.socialId,
+          row.profile ? `${row.profile.alias} (@${row.profile.handle})` : `${t('social.blocked_profile')} ${row.socialId.slice(-8)}`, event.currentTarget)}>{t('social.report')}</button>
+      </div>
+    </li>)}</ul>;
   return <section className={styles.panel}>
     <h2>{t('social.friends')}</h2>
-    <div className={styles.tabs} role="tablist" aria-label={t('social.friends')}>{tabs.map(tab => <button type="button" className={styles.tab} role="tab" aria-selected={kind === tab} key={tab} onClick={() => setKind(tab)}>{t(`social.${tab}`)}</button>)}</div>
-    {result.isPending ? <p className={styles.empty} role="status">{t('social.loading')}</p>
-      : result.isError ? <p className={styles.error} role="alert">{t('social.error')}</p>
-      : !rows.length ? <p className={styles.empty}>{t('social.empty')}</p>
-      : <ul className={styles.list}>{rows.map(row => <li className={styles.row} key={row.socialId}>
-        <SocialAvatar profile={row.profile} /><div className={styles.rowContent}><strong>{row.profile?.alias ?? t('social.blocked_profile')}</strong>
-          <span>{row.profile ? `@${row.profile.handle}` : row.socialId.slice(-8)}</span></div>
-        <div className={styles.rowActions}>
-          {kind === 'incoming' && <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'accept', targetSocialId: row.socialId, expectedRevision: row.revision })}>{t('social.accept')}</button>}
-          {/* Declining, cancelling and unblocking are easily redone, so only Remove and Block ask first. */}
-          <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => kind === 'friends'
-            ? setConfirming({ action: 'remove', targetSocialId: row.socialId, expectedRevision: row.revision, alias: row.profile?.alias ?? '' })
-            : actions.run({ action: kind === 'incoming' ? 'decline' : kind === 'outgoing' ? 'cancel' : 'unblock', targetSocialId: row.socialId, expectedRevision: row.revision })}>
-            {t(kind === 'friends' ? 'social.remove' : kind === 'incoming' ? 'social.decline' : kind === 'outgoing' ? 'social.cancel_request' : 'social.unblock')}</button>
-          {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => setConfirming({ action: 'block', targetSocialId: row.socialId, alias: row.profile?.alias ?? '' })}>{t('social.block')}</button>}
-          {/* Blocked rows stay reportable: blocking and then reporting is a common safety sequence. */}
-          <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(row.socialId,
-            row.profile ? `${row.profile.alias} (@${row.profile.handle})` : `${t('social.blocked_profile')} ${row.socialId.slice(-8)}`, event.currentTarget)}>{t('social.report')}</button>
-        </div>
-      </li>)}</ul>}
-    {result.hasNextPage && <button className={styles.secondary} disabled={result.isFetchingNextPage} onClick={() => result.fetchNextPage()}>{t('common.action.load_more')}</button>}
+    <div className={styles.tabs} role="tablist" aria-label={t('social.friends')}>{tabs.map(tab => <button type="button" className={styles.tab} role="tab" key={tab}
+      id={`${id}-tab-${tab}`} aria-controls={`${id}-panel-${tab}`} aria-selected={kind === tab} tabIndex={kind === tab ? 0 : -1}
+      onKeyDown={event => moveTab(event, tab)} onClick={() => setKind(tab)}>{t(`social.${tab}`)}</button>)}</div>
+    {/* Every tab's panel exists so each aria-controls resolves; only the selected one is shown and filled. */}
+    {tabs.map(tab => <div role="tabpanel" key={tab} id={`${id}-panel-${tab}`} aria-labelledby={`${id}-tab-${tab}`} tabIndex={0} hidden={kind !== tab}>
+      {kind === tab && <>{content}
+        {result.hasNextPage && <button className={styles.secondary} disabled={result.isFetchingNextPage} onClick={() => result.fetchNextPage()}>{t('common.action.load_more')}</button>}</>}
+    </div>)}
     {confirming && <SafetyConfirmation intent={confirming} actions={actions} onClose={() => setConfirming(null)} />}
   </section>;
 };
@@ -184,6 +230,6 @@ export const SocialPage = () => {
     {session.isPending || resolving.data ? <p role="status">{t('social.loading')}</p> : session.isError
       ? <section className={styles.panel}><p role="alert">{t('social.error')}</p><button className={styles.secondary} onClick={() => session.refetch()}>{t('social.refresh')}</button></section> : session.data
       ? <SocialSpace key={session.data.user.id} viewerId={session.data.user.id} />
-      : <section className={styles.panel}><h1>{t('social.title')}</h1><p className={styles.description}>{t('social.sign_in')}</p><div className={styles.actions}><Link className={styles.button} to="/login">{t('common.action.log_in')}</Link></div></section>}
+      : <section className={styles.panel}><h1>{t('social.title')}</h1><p className={styles.description}>{t('social.sign_in')}</p><div className={styles.actions}><Link className={styles.button} to="/login?returnTo=%2Fsocial">{t('common.action.log_in')}</Link></div></section>}
   </div>;
 };

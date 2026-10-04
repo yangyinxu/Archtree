@@ -148,8 +148,8 @@ for the stored evidence, transactions and account-deletion handling.
 Finitude Web exposes **Together** at `/finitude/social`: opt-in identity, exact
 handle lookup (anyone found can also be blocked), friend requests, invitations, queue selection, shared transport,
 Host/Everyone permissions, local pause/resync and accepted host transfer. It uses
-the existing player. **Remove friend**, **Block** and **Remove from room** ask for
-confirmation first and say what changes. Enable both `FINITUDE_SOCIAL_ENABLED=true` and
+the existing player. **Remove friend**, **Block**, **Deactivate social profile** and
+**Remove from room** ask for confirmation first and say what changes. Enable both `FINITUDE_SOCIAL_ENABLED=true` and
 `FINITUDE_ROOMS_ENABLED=true`; both default to false. Leave/end/decline and account
 cleanup remain available when new room admission is disabled. With the flags off,
 Finitude Web shows no social entry point and sends no social request; `/finitude/social`

@@ -53,6 +53,8 @@ it writes no profile or handle row. There is no staff provisioning path for
 official accounts; one would need a separate, role-guarded change.
 
 `SocialCard` contains exactly `socialId`, `handle`, `alias`, and `iconSeed`.
+Finitude Web colors its generated icon from `iconSeed` (a stable hash to an
+OKLCH hue behind the alias initial); clients must treat the seed as opaque.
 `SocialOwnProfile` additionally contains `active`, `discoverable`, and `revision`,
 plus `suspended: true` only while an administrator suspension is in effect; the
 key is absent otherwise, so strict clients written before suspension keep parsing

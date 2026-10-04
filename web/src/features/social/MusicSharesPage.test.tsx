@@ -69,6 +69,8 @@ test('signed-out and resolving sessions read no private profiles or shares', asy
 
 test('opening and switching private lists has no playback, save, mutation or room side effects', async () => {
   show(); expect(await screen.findByText('From Alice')).toBeVisible();
+  // Nicknames are not unique, so the card also names the handle.
+  expect(screen.getByText('@alice')).toBeVisible();
   expect(mocks.track).not.toHaveBeenCalled(); expect(mocks.album).not.toHaveBeenCalled();
   expect(mocks.launchTrack).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled(); expect(mocks.roomRun).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
   const sent = screen.getByRole('button', { name: 'Sent' }); sent.focus();

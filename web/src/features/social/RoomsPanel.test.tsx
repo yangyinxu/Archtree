@@ -82,6 +82,14 @@ test('dragging the seek bar retains the playback precondition seen at gesture st
   expect(mocks.control).not.toHaveBeenCalled();
 });
 
+test('the seek bar speaks the shown time, following a drag before it is committed', () => {
+  show();
+  const slider = screen.getByRole('slider', { name: 'Room playback position' });
+  expect(slider).toHaveAttribute('aria-valuetext', '0:00 of 0:30');
+  fireEvent.pointerDown(slider); fireEvent.change(slider, { target: { value: '12.5' } });
+  expect(slider).toHaveAttribute('aria-valuetext', '0:12 of 0:30');
+});
+
 test('a suspended room allows its returning host to resume and keeps guest controls disabled', () => {
   mocks.room = { ...mocks.room!, status: 'suspended', controlMode: 'everyone', hostMemberId: 'other-member' };
   const rerender = show();
@@ -220,4 +228,19 @@ test('guests see neither member management nor host invitations', async () => {
   expect(screen.queryByRole('button', { name: 'Remove from room' })).not.toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Invite a friend' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Invite' })).not.toBeInTheDocument();
+});
+
+test('member rows say who is connected and show readiness only for connected members', async () => {
+  mocks.room = { ...roomFixture(), members: [...roomFixture().members,
+    { ...bob, memberId: 'member-b', role: 'guest', controllerGeneration: 1, connected: false, ready: true }] };
+  show();
+  const members = screen.getByRole('heading', { name: 'In this room' }).nextElementSibling as HTMLElement;
+  const [alice, guest] = within(members).getAllByRole('listitem');
+  expect(within(alice).getByText('Host · Connected · Not ready')).toBeVisible();
+  expect(within(guest).getByText('Guest · Not connected')).toBeVisible();
+  expect(guest).not.toHaveTextContent('Ready');
+  // Each member gets the same generated icon as everywhere else in Together.
+  expect(guest.querySelector('[aria-hidden="true"]')).toHaveTextContent('B');
+  // Only a connected member can take over, so Transfer stays disabled for the disconnected guest.
+  expect(await within(guest).findByRole('button', { name: 'Transfer and leave' })).toBeDisabled();
 });

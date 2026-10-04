@@ -5004,6 +5004,13 @@
       ],
       "variables": {}
     },
+    "room.member_disconnected": {
+      "description": "Shared listening interface: member list status for a member who is not currently connected to the room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.members": {
       "description": "Shared listening interface: members.",
       "delivery": [
@@ -5065,6 +5072,13 @@
     },
     "room.queue": {
       "description": "Shared listening interface: queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_current": {
+      "description": "Shared listening interface: label marking the room queue entry that is currently playing or prepared.",
       "delivery": [
         "runtime"
       ],
@@ -5294,6 +5308,16 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "room.seek_value": {
+      "description": "Shared listening interface: spoken value of the room playback position slider, as elapsed and total time.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "duration": "string",
+        "elapsed": "string"
+      }
     },
     "room.selected": {
       "description": "Shared listening interface: selected.",
@@ -5884,6 +5908,27 @@
       ],
       "variables": {}
     },
+    "social.alias_characters": {
+      "description": "Social listener interface: validation message when the display name contains invisible control or formatting characters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.alias_hint": {
+      "description": "Social listener interface: display name field hint stating its length limit and who sees it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.alias_length": {
+      "description": "Social listener interface: validation message when the display name is empty after trimming or longer than 50 characters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "social.alias_reserved": {
       "description": "Social listener interface: the chosen display name impersonates Finitude or its staff.",
       "delivery": [
@@ -5966,7 +6011,14 @@
       "variables": {}
     },
     "social.deactivate_confirm": {
-      "description": "Social listener interface: deactivate confirm.",
+      "description": "Social listener interface: deactivation confirmation body stating what deactivating removes and keeps.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.deactivate_confirm_title": {
+      "description": "Social listener interface: title of the confirmation shown before deactivating the social profile.",
       "delivery": [
         "runtime"
       ],
@@ -6037,6 +6089,13 @@
     },
     "social.handle": {
       "description": "Social listener interface: handle.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle_format": {
+      "description": "Social listener interface: handle format hint (length, allowed characters, first character) shown while choosing or looking up a handle.",
       "delivery": [
         "runtime"
       ],
@@ -6149,6 +6208,13 @@
     },
     "social.refresh": {
       "description": "Social listener interface: refresh.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.relationship_error": {
+      "description": "Social listener interface: alert when the relationship with a profile found by handle could not be read, so no action can be offered.",
       "delivery": [
         "runtime"
       ],

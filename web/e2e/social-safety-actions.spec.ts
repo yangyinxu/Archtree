@@ -116,6 +116,46 @@ test.describe('Together safety actions and listening friends', () => {
     expect(social.unexpected).toEqual([]);
   });
 
+  test('relationship tabs work from the keyboard, deactivation asks first and Together has no unowned axe findings', async ({ page }) => {
+    const social = await installSocial(page);
+    await page.goto('/finitude/social');
+    await expect(page.getByRole('heading', { level: 1, name: 'Listen together' })).toBeVisible();
+    const friendsPanel = page.getByRole('tabpanel', { name: 'Friends' });
+    await expect(friendsPanel.getByText('Bob', { exact: true })).toBeVisible();
+    await expectNoUnownedAxeViolations(page, 'together-page');
+
+    // Arrows, Home and End move selection and focus together; Tab then leaves the tab list for the panel.
+    const friends = page.getByRole('tab', { name: 'Friends', exact: true });
+    const incoming = page.getByRole('tab', { name: 'Incoming requests' });
+    await friends.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(incoming).toBeFocused();
+    await expect(incoming).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tabpanel', { name: 'Incoming requests' })).toContainText('Nothing here yet.');
+    await page.keyboard.press('End');
+    await expect(page.getByRole('tab', { name: 'Blocked' })).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(friends).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('Home');
+    await expect(friends).toBeFocused();
+    await expect(friendsPanel.getByText('Bob', { exact: true })).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(friendsPanel).toBeFocused();
+
+    const deactivate = page.getByRole('button', { name: 'Deactivate social profile' });
+    await deactivate.click();
+    const dialog = page.getByRole('dialog', { name: 'Deactivate your social profile?' });
+    await expect(dialog).toContainText('Your handle and blocks are kept.');
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await expectNoUnownedAxeViolations(page, 'deactivate-confirmation');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(deactivate).toBeFocused();
+    expect(social.mutations).toEqual([]);
+    expect(social.unexpected).toEqual([]);
+  });
+
   test('Listening with friends shows friends beyond the first page after Load more', async ({ page }) => {
     const social = await installSocial(page);
     await page.goto('/finitude/social');

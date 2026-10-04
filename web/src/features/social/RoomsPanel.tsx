@@ -6,6 +6,7 @@ import { usePlayer } from '../../player';
 import { Icon } from '../../components/Icon';
 import { roomSession, useRoomSession } from './roomSession';
 import { useRoomInvitationConnection, useRoomInvitations } from './roomInvitationQueries';
+import { SocialAvatar } from './SocialAvatar';
 import styles from './SocialPage.module.css';
 
 const seconds = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
@@ -54,6 +55,7 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
   const current = room.queue.find(entry => entry.entryId === room.timeline?.entryId);
   const elapsed = player.currentItem?.id === current?.mediaTrackId ? player.currentTime : (room.timeline?.positionMs ?? 0) / 1000;
   const duration = (room.timeline?.durationMs ?? 0) / 1000;
+  const seekValue = seek ?? Math.min(elapsed, duration);
   const offer = room.transferOffer;
   const transferTarget = offer?.targetMemberId === room.self.memberId;
   return <>
@@ -62,8 +64,9 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
     {!room.self.isController && <div className={styles.status}>{t('room.observing')}<div className={styles.actions}><button className={styles.button} disabled={!state.connected || state.busy} onClick={() => roomSession.run({ action: 'takeControl', ...member })}>{t('room.take_control')}</button></div></div>}
     <div className={styles.nowPlaying}><div className={styles.artwork}><Icon name="brand" /></div><div><strong>{current?.title ?? t('room.title')}</strong><p className={styles.muted}>{room.timeline?.state === 'preparing' ? t('room.preparing') : state.locallyPaused ? t('room.locally_paused') : t('room.position', { elapsed: seconds(elapsed), duration: seconds(duration) })}</p></div></div>
     {!room.self.canControl && !playing && room.status === 'open' && <p className={styles.status}>{t('room.waiting_for_host')}</p>}
+    {/* Spoken as a time ("1:05 of 3:20") rather than the raw seconds the range carries. */}
     <input className={styles.seek} aria-label={t('room.seek')} type="range" min={0} max={Math.max(duration, 1)} step={.1}
-      value={seek ?? Math.min(elapsed, duration)} disabled={!allowed}
+      value={seekValue} aria-valuetext={t('room.seek_value', { elapsed: seconds(seekValue), duration: seconds(duration) })} disabled={!allowed}
       onPointerDown={captureSeek} onKeyDown={captureSeek}
       onChange={event => { captureSeek(); setSeek(Number(event.target.value)); }}
       onPointerUp={commitSeek} onPointerCancel={() => { seekExpected.current = null; setSeek(null); }}
@@ -91,8 +94,11 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
       {host && <button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.run({ action: 'cancelTransfer', ...member, offerId: offer.offerId })}>{t('room.cancel_transfer')}</button>}
     </div></div>}
     <div className={styles.grid} style={{ marginTop: '1.5rem' }}><section>
+      {/* Connection is shown because only a connected member can take over as host; readiness is meaningful only
+          while connected. */}
       <h3>{t('room.members')}</h3><ul className={styles.list}>{room.members.map(participant => <li className={styles.row} key={participant.memberId}>
-        <span className={styles.avatar} aria-hidden="true">{[...participant.alias][0]}</span><div className={styles.rowContent}><strong>{participant.alias}</strong><span>{t(participant.role === 'host' ? 'room.host' : 'room.guest')} · {t(participant.ready ? 'room.ready' : 'room.not_ready')}</span></div>
+        <SocialAvatar profile={participant} /><div className={styles.rowContent}><strong>{participant.alias}</strong><span>{t(participant.role === 'host' ? 'room.host' : 'room.guest')}
+          {' · '}{participant.connected ? <>{t('room.connected')} · {t(participant.ready ? 'room.ready' : 'room.not_ready')}</> : t('room.member_disconnected')}</span></div>
         {host && participant.memberId !== room.self.memberId && <Suspense fallback={null}><RoomMemberActions room={room} participant={participant} /></Suspense>}
       </li>)}</ul>
       {host && <Suspense fallback={null}><RoomInviteFriends room={room} viewerId={viewerId} /></Suspense>}

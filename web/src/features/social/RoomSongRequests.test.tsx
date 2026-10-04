@@ -103,6 +103,19 @@ test('queue removal protects the current entry and reordering sends a complete i
   expect(mocks.control).not.toHaveBeenCalled();
 });
 
+test('the current queue entry is exposed as current, not only by color, and moves with the shared timeline', async () => {
+  asGuest(); const view = show();
+  const queue = screen.getByRole('region', { name: 'Room queue' });
+  const [first, second] = within(queue).getAllByRole('listitem');
+  expect(first).toHaveAttribute('aria-current', 'true'); expect(first).toHaveTextContent('Current song');
+  expect(second).not.toHaveAttribute('aria-current'); expect(second).not.toHaveTextContent('Current song');
+  mocks.state.room = { ...mocks.state.room!, timeline: { ...mocks.state.room!.timeline!, entryId: 'entry-b' } };
+  view.rerender();
+  expect(first).not.toHaveAttribute('aria-current'); expect(second).toHaveAttribute('aria-current', 'true');
+  expect(within(queue).getAllByText('Current song')).toHaveLength(1);
+  expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.control).not.toHaveBeenCalled();
+});
+
 test('Everyone playback permission never grants queue moderation to a guest', async () => {
   asGuest(); mocks.state.room!.controlMode = 'everyone'; mocks.state.room!.self.canControl = true; show();
   await screen.findByText('A requested song');
