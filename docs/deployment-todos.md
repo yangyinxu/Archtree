@@ -105,16 +105,77 @@ Completion evidence:
 - Refresh, profile, and session-revocation operations complete over HTTPS
   before the full authentication lifecycle is considered verified.
 
-## Room Audio Decoder and Catalog Backfill
+## Web-only Audio Social Launch
 
-Status: Repository support added. The Elastic Beanstalk prebuild hook installs a
-pinned, SHA-256-verified FFmpeg and the operator backfill analyzes existing Audio
-(see the README's room audio decoder and catalog backfill sections). Nothing has
-been deployed or run against production yet.
+Status: Repository support added; nothing has been deployed or enabled in
+production. The first social release is Finitude Web only, with Audio-only
+rooms, behind `FINITUDE_SOCIAL_ENABLED` and `FINITUDE_ROOMS_ENABLED` (both
+default `false`). It reaches production in the same `develop` to `main` merge
+as email verification. Native social and rooms, and shared Video, are deferred
+(see the [social plan](plans/social-and-shared-playback-plan.md)). The
+procedures are in the [social rollout runbook](deployment/social-rollout-runbook.md)
+and the [Finitude Web runbook](deployment/finitude-web-rollout-runbook.md); this
+list tracks what has been done on the production environment. Keep the evidence
+in the social runbook's evidence record.
 
-- [ ] Deploy the FFmpeg-enabled release and confirm `/var/log/eb-hooks.log` shows
-      the verified install, `/usr/local/bin/ffmpeg -hide_banner -version` runs,
-      and `ROOM_AUDIO_FFMPEG_PATH` resolves to `/usr/local/bin/ffmpeg`.
+Repository support for this launch: the HTTPS Nginx server forwards WebSocket
+upgrades for the room connection, a prebuild hook installs a pinned,
+digest-verified FFmpeg, an operator backfill analyzes existing Audio, a process
+started with rooms off pauses and winds down open rooms, and `/health`, the
+minutely `ops_summary` log line and `.ebextensions/social-capacity.config`
+(1 open room, 2 members, 10 realtime sockets) cover signals and capacity.
+
+### Before the release reaches production
+
+- [ ] Complete the email items under Production HTTPS for Authentication
+      above: the verified SES sender/domain, a runtime limited to
+      `ses:SendEmail`, `AUTH_EMAIL_FROM`, `AUTH_CODE_PEPPER` and
+      `AUTH_LINK_ORIGIN`. The same merge requires a verified email at password
+      sign-in, so most existing accounts cannot sign in again until email
+      delivery works.
+- [ ] Merge `develop` into `main` through a pull request and require the
+      release workflow on both the pull request and the merged-main push:
+      unit, integration, the nine social browser scenarios, the three-engine
+      browser/axe gate and artifact staging. Artifact staging refuses a
+      bundle without the FFmpeg prebuild hook, `room-audio-decoder.config` or
+      `social-capacity.config`.
+- [ ] Record the release owner, rollback owner, observation window and stop
+      conditions, and keep the current production artifact retrievable for
+      rollback.
+- [ ] Confirm both rollout flags are absent or `false` on the environment with
+      the social runbook's query, which prints only the `FINITUDE_*` values.
+- [ ] Deploy in a quiet window. The first deployment downloads about 117 MB of
+      FFmpeg from GitHub, and `npm install` runs beside the old process on the
+      1 GiB instance, where an earlier configuration update stalled.
+
+### Deploy with both flags off
+
+- [ ] `/health` returns 200. Startup creates the social and room indexes and
+      stops if a unique or required index cannot be verified; the log shows no
+      `optional_index_unavailable` line.
+- [ ] The `/health` `rooms` object reports `enabled: false` and
+      `authorityState: "inactive"`, and the log shows `room_wind_down`
+      `complete` after the latest `server_listening`.
+- [ ] The Nginx WebSocket upgrade fix is live. The deployment rewrites the
+      existing HTTPS configuration in place without reissuing the certificate.
+      The Finitude Web runbook's WebSocket probe returns `503 0` while rooms
+      are off: the empty refusal comes from the application's upgrade handler,
+      so Nginx forwarded the upgrade. A `401` with a body means Nginx dropped
+      `Upgrade`/`Connection`.
+- [ ] For a signed-in test account, `GET /api/social/v1/capabilities` reports
+      `socialEnabled: false` and `roomsEnabled: false`, and Finitude Web shows
+      no Together entry or social actions.
+- [ ] The Finitude Web runbook's listener smoke checks and the email-link
+      checks above pass.
+
+### Room audio decoder and catalog backfill
+
+The prebuild hook installs FFmpeg and the operator backfill analyzes existing
+Audio (see the README's room audio decoder and catalog backfill sections).
+
+- [ ] Confirm `/var/log/eb-hooks.log` shows the verified install,
+      `/usr/local/bin/ffmpeg -hide_banner -version` runs, and
+      `ROOM_AUDIO_FFMPEG_PATH` resolves to `/usr/local/bin/ffmpeg`.
 - [ ] Upload a short original MP3 through Content Manager and confirm the Room
       audio analysis page lists it as eligible.
 - [ ] From an operator machine with FFmpeg, run the backfill dry run against
@@ -122,5 +183,60 @@ been deployed or run against production yet.
 - [ ] Apply the backfill in paced runs until a summary reports `finished=true`,
       then rerun once without `--after` to retry any `retryLater` tracks.
 - [ ] Keep the backfill log's final summary with the rooms release evidence.
+
+### Monitoring and alarms
+
+- [ ] Stream the instance logs to CloudWatch Logs with about seven days of
+      retention and confirm an `ops_summary` line arrives every minute.
+- [ ] Create the social runbook's eight metric filters and alarms with an SNS
+      topic that reaches the operator. Set the open-socket alarm at 80% of the
+      effective socket limit (8 with the shipped 10). Check that other custom
+      metrics and alarms in the account leave room within the free tier's ten
+      of each.
+- [ ] Confirm the `OpsSummary` alarm is `OK`. It treats missing data as
+      breaching, so it also reports a stopped or hung process.
+- [ ] Enable the alerts the free-tier Atlas project offers and note where its
+      operation counters, connections and Network Out are watched.
+
+### Enable for testing
+
+Enabling a flag exposes it to every signed-in Web account; there is no
+per-account cohort.
+
+- [ ] In a quiet window, set both flags to `true` in one environment update.
+      The restart is a short outage on the single instance.
+- [ ] `/health` shows `rooms.enabled: true`, `authorityState: "ready"` and a
+      `lastSuccessfulSweepAgeMs` of a few seconds or less. The
+      `social_capacity_config` log line shows 1 open room, 2 members and 10
+      sockets with no `invalidSettings`. The probe returns `403 0`, and a test
+      room connects over `wss://`.
+- [ ] Run the social runbook's two-account smoke test with operator-owned
+      accounts only, including an MP3 track that became eligible through the
+      backfill.
+- [ ] With one playing two-member room, record the `ops_summary` peaks,
+      instance memory, and Atlas operation counters and Network Out. Compare
+      them with the capacity budget (about 46 operations per second).
+- [ ] Redeploy the same application version while a test room is playing. The
+      new process reports `authorityState: "ready"` within about 10 seconds of
+      `server_listening`, both tabs reconnect, the room is paused, and nothing
+      resumes until the host starts it.
+- [ ] Rehearse the kill switch (social runbook section 3). Switch rooms off
+      during room playback and confirm the pause within seconds, then
+      `authorityState: "inactive"` and `room_wind_down` `complete` within about
+      six minutes, the probe at `503 0`, and friends and shares still
+      readable. Switch rooms back on and confirm nothing resumes by itself.
+- [ ] Complete the social runbook's evidence record.
+
+### After the test window
+
+- [ ] Leave both flags on (the public launch) or switch them off until any
+      stop condition is resolved, and record the decision and its owner.
+- [ ] Raise a capacity limit only after measurements show Atlas headroom, or
+      after the room sweep's reads are reduced or the cluster is upgraded (see
+      the [capacity budget](testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04)).
 - [ ] Refresh the FFmpeg pin before upstream retention ends (about 2028-09) or
       sooner for FFmpeg security fixes.
+
+Not part of this launch: native social and rooms on iOS and Android (iOS
+invitation links also need the Associated Domains item above) and shared Video,
+which will add its own flag.
