@@ -50,18 +50,28 @@ const isProcessActive = (pid: number) => {
     }
 };
 
-/** Confirms that cleanup actually removed the isolated database directory. */
-const verifyDirectoryRemoved = async (directory: string) => {
+/** Returns undefined for a missing path; any other lstat failure still propagates. */
+const lstatIfPresent = async (path: string) => {
     try {
-        await lstat(directory);
+        return await lstat(path);
     } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
         throw error;
     }
-    throw new Error(`Temporary MongoDB directory was not removed: ${directory}`);
 };
 
-/** Removes only abandoned harness directories, never arbitrary temporary paths. */
+/** Confirms that cleanup actually removed the isolated database directory. */
+const verifyDirectoryRemoved = async (directory: string) => {
+    if (await lstatIfPresent(directory)) {
+        throw new Error(`Temporary MongoDB directory was not removed: ${directory}`);
+    }
+};
+
+/**
+ * Removes only abandoned harness directories, never arbitrary temporary paths. Runs that share
+ * tmpdir() (parallel worktrees) delete their own directories at any moment, so an entry that
+ * vanishes after readdir is already clean and the sweep moves on.
+ */
 export const removeStaleMongoTestDirectories = async (now = Date.now()) => {
     const temporaryRoot = tmpdir();
     const entries = await readdir(temporaryRoot, { withFileTypes: true });
@@ -69,8 +79,8 @@ export const removeStaleMongoTestDirectories = async (now = Date.now()) => {
         if (!entry.isDirectory() || !testDirectoryPattern.test(entry.name)) continue;
 
         const directory = join(temporaryRoot, entry.name);
-        const directoryStats = await lstat(directory);
-        if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) continue;
+        const directoryStats = await lstatIfPresent(directory);
+        if (!directoryStats || !directoryStats.isDirectory() || directoryStats.isSymbolicLink()) continue;
 
         let abandoned = false;
         try {
@@ -79,10 +89,12 @@ export const removeStaleMongoTestDirectories = async (now = Date.now()) => {
             ) as TestDirectoryOwner;
             abandoned = !isProcessActive(owner.pid);
         } catch {
+            // Also reached when the directory vanished after lstat; removing it below is then a no-op.
             abandoned = now - directoryStats.mtimeMs >= unmarkedStaleAgeMilliseconds;
         }
         if (!abandoned) continue;
 
+        // force accepts a path that is already gone; recursive rm treats entries removed mid-walk as done.
         await rm(directory, { recursive: true, force: true });
         await verifyDirectoryRemoved(directory);
     }
