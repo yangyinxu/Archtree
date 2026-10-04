@@ -446,8 +446,9 @@ This may produce a brief jump for smaller drift, but avoids repeated rate
 transitions on a decoder that already needed recovery. A new occurrence resumes
 normal rate correction. Rate restoration never authorizes a seek from stale
 readiness or permission state.
-CI uploads `finitude-social-browser-evidence` immediately after these scenarios,
-before running the remaining MongoDB integration and ordinary browser gates.
+CI runs these scenarios in their own job and uploads `finitude-social-browser-evidence`
+from it whether they pass or fail; the MongoDB integration and ordinary browser
+gates run in parallel jobs.
 The isolated PulseAudio sink uses a requested 100 ms device-buffer budget
 (`PULSE_LATENCY_MSEC=100`); its unrestricted default can introduce seconds of
 output buffering (see [PulseAudio latency control](https://www.freedesktop.org/software/pulseaudio/doxygen/structpa__buffer__attr.html)).
@@ -1001,7 +1002,16 @@ application, or substitute a bundle produced by a smaller test suite.
 The `.github/workflows/finitude-web-release.yml` workflow runs unit/component
 tests, Mongo lifecycle integration, production builds, E2E type checking, real
 social scenarios, and all three browser/axe projects before staging its bundle.
-Both Playwright configurations reject focused tests in CI. The workflow uploads
+These gates are parallel jobs, each with its own timeout of 30 minutes or less:
+`build` (production build and E2E type check), `unit-integration`,
+`social-e2e` and `browser-e2e`. The two browser jobs test the one production
+build that `build` shares as the short-lived `finitude-web-release-build`
+artifact. `release-artifact` needs all four jobs, so it is skipped unless every
+gate succeeds. It stages those same build bytes without rebuilding and binds each
+gate step's outcome into the provenance. A run normally finishes in about 20–25
+minutes, inside the promoter's wait. If branch protection is added, require every
+gate job's check, not only `release-artifact`: GitHub reports a skipped job as
+passing. Both Playwright configurations reject focused tests in CI. The workflow uploads
 `archtree-eb-<commit>-<run-id>-<attempt>` for 30 days, containing the runtime ZIP
 and `release-provenance.json` with the bundle SHA-256, exact source/run/attempt,
 and all successful gate names. PR artifacts are review evidence only.

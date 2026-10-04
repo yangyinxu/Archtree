@@ -142,6 +142,15 @@ API permission. Permit HTTPS to GitHub's API and artifact blob storage. The
 promoter strips the GitHub credential before downloading the signed storage URL.
 The repository does not provision these account-side settings.
 
+The release workflow runs its gates as parallel jobs (`build`,
+`unit-integration`, `social-e2e`, `browser-e2e`), so a normal run takes about
+20–25 minutes, well inside the 35-minute wait. Only the final `release-artifact`
+job, which needs all four, stages and uploads the bundle. It stages the
+production build that both browser jobs tested, and never rebuilds it. A failed or
+timed-out gate skips that job and fails the run, so nothing is promoted. Use
+**Re-run all jobs** for a fresh attempt; the new attempt identity is bound into
+the provenance as before.
+
 The successful main workflow retains
 `archtree-eb-<commit>-<run-id>-<attempt>` containing
 `archtree-eb-<commit>.zip` and `release-provenance.json`. CodeBuild validates both

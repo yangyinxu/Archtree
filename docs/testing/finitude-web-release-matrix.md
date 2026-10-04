@@ -170,7 +170,9 @@ allowlist, validates the Vite manifest and hashed assets, rejects environment,
 dependency, report, and symbolic-link pollution, verifies platform-hook
 permissions, and writes bounded source/build identity to `RELEASE.json`. The CI
 release gate retains a commit-named archive for 30 days after all automated
-gates pass.
+gates pass. Its final `release-artifact` job runs only after the parallel
+`build`, `unit-integration`, `social-e2e` and `browser-e2e` jobs succeed. It
+stages the same production build those browser jobs tested.
 
 Follow
 [`../deployment/finitude-web-rollout-runbook.md`](../deployment/finitude-web-rollout-runbook.md)
