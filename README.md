@@ -393,7 +393,11 @@ grace and verifies the visible countdowns, suspension in both control modes,
 host return without automatic resume, five-minute closure in both modes, and
 observer logout versus sign out everywhere. Only that disposable fixture exposes
 `POST /__fixture/room-host-absence`, which moves a recorded absence start into
-the past; the application's own sweep still suspends or closes the room. Keep the
+the past; the application's own sweep still suspends or closes the room. The
+`chromium-social-safety` project runs request cancel and decline, friend removal,
+block, unblock, deactivation and reactivation through the Together page against the
+real social service; `chromium-room-membership` covers removing a member, leaving,
+Reconnect after a lost transport, and the room exit that a block causes. Keep the
 ordinary listener E2E gate for playback continuity, navigation and
 accessibility changes. The social E2E uses a disposable
 headed Chromium profile to verify real background tab visibility; run it in a

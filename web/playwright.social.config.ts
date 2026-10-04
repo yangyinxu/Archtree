@@ -15,7 +15,10 @@ const suites: SocialSuite[] = [{ name: 'rooms', port: 4175, grep: /real social r
   { name: 'invitations', port: 4176 }, { name: 'song-requests', port: 4177 }, { name: 'music-shares', port: 4178 },
   { name: 'room-interactions', port: 4179 }, { name: 'listening-status', port: 4180 },
   { name: 'catalog-room', port: 4181 }, { name: 'audio-formats', port: 4182 }, { name: 'room-lifecycle', port: 4191 },
-  { name: 'social-without-rooms', port: 4192 }];
+  { name: 'social-without-rooms', port: 4192 },
+  // Both safety flows change the same provisioned friendships, so each runs against its own fresh fixture.
+  { name: 'social-safety', port: 4193, spec: 'social-safety', grep: /friend requests, removal, blocking and deactivation/ },
+  { name: 'room-membership', port: 4194, spec: 'social-safety', grep: /room members are removed, leave, reconnect/ }];
 
 /** Limit hardware-audio engines to isolated Linux CI and the two critical real-media scenarios. */
 export const socialBrowserSuites = (platform: NodeJS.Platform, ci: string | undefined): SocialBrowserSuite[] => [

@@ -395,7 +395,11 @@ successful commit is not displayed as proof that every participant is playing.
 Web shows host-absence grace, suspended-room closing and transfer-offer countdowns.
 The `chromium-room-lifecycle` social project covers the client E2E items for
 30-second suspension and five-minute close in both modes, host return without
-automatic resume, and observer logout versus logout-all.
+automatic resume, and observer logout versus logout-all. The
+`chromium-social-safety` and `chromium-room-membership` projects cover the Web
+safety and management flows: request cancel and decline, friend removal,
+block/unblock, deactivation/reactivation, member removal, leave, Reconnect and
+the room exit a block causes.
 
 **Exit gate:** real streaming and autoplay evidence in the supported browser
 matrix; one player/queue; no feedback-loop commands, phantom activity or old

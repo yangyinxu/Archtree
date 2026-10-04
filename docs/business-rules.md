@@ -102,10 +102,11 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   relationship revision observed when it was opened. Deactivating the social
   profile likewise asks first and says what is removed and what is kept.
 - Turning discovery off preserves existing friends and pending requests.
-  Deactivation hides the profile, cancels requests and removes friendships, while
-  retaining the listener's identity, handle and private blocks. Reactivation
-  restores none of those removed relationships. A new request after removal uses
-  a fresh, authorized relationship-state read.
+  Deactivation hides the profile, turns discovery off, cancels requests and
+  removes friendships, while retaining the listener's identity, handle and private
+  blocks. Reactivation restores none of those removed relationships, and the
+  profile stays undiscoverable until the listener turns discovery back on. A new
+  request after removal uses a fresh, authorized relationship-state read.
 - The first backend release permits at most 500 friends, 50 combined incoming and
   outgoing pending requests, 1,000 owned blocks and 2,048 retained relationship
   pairs per account. Existing-pair safety operations remain possible at the pair
