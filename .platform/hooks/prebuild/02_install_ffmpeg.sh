@@ -138,9 +138,11 @@ download_and_install() {
   archive="${WORK_DIR}/ffmpeg.tar.xz"
 
   log "Downloading ${ARCHIVE} from ${FFMPEG_RELEASE_TAG}."
+  # Each attempt and the whole retry window stay well inside Elastic Beanstalk's
+  # 600 s command timeout, so the hook fails with its own message before EB kills it.
   if ! "${CURL}" --fail --silent --show-error --location \
     --proto '=https' --proto-redir '=https' --tlsv1.2 \
-    --connect-timeout 20 --max-time 900 --retry 3 --retry-delay 5 \
+    --connect-timeout 20 --max-time 180 --retry 2 --retry-delay 5 --retry-max-time 180 \
     --max-filesize "${ARCHIVE_BYTES}" \
     --output "${archive}" "${ARCHIVE_URL}"; then
     fail "Downloading the pinned FFmpeg archive failed; the deployment stops so the decoder is not left missing."

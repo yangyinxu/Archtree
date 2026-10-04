@@ -98,9 +98,11 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   by handle lookup, with or without an existing relationship. Removing a friend
   and blocking first ask for confirmation that says what changes for both
   people; declining or cancelling a request and unblocking stay single explicit
-  actions because they are easily redone. A confirmation acts on the
-  relationship revision observed when it was opened. Deactivating the social
-  profile likewise asks first and says what is removed and what is kept.
+  actions because they are easily redone. A Remove confirmation acts on the
+  relationship revision observed when it was opened; Block carries no revision
+  and applies to whatever relationship exists when it is confirmed. Deactivating
+  the social profile likewise asks first and says what is removed and what is
+  kept.
 - Turning discovery off preserves existing friends and pending requests.
   Deactivation hides the profile, turns discovery off, cancels requests and
   removes friendships, while retaining the listener's identity, handle and private
@@ -498,7 +500,8 @@ Playlist access retain their existing rules.
   as a household, office or campus, do not spend each other's allowance, and
   changing networks does not add to an account's allowance. Signed-out requests
   and requests with expired or revoked credentials are limited by network
-  address and never spend an account's allowance.
+  address and never spend an account's allowance. Media stream admission is not
+  a room or social allowance and stays per network address.
 
 The wire protocol and operational bounds are documented in
 [the room API contract](architecture.md#implemented-audio-room-api).

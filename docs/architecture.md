@@ -449,6 +449,13 @@ the freshly read invitation generation.
 The lazy Web global invitation entry shares the room-session singleton with room
 pages. It refreshes on a fresh subscription, `socialChanged`, relevant explicit
 mutation settlement or outcome recovery, focus and a 15-second fallback.
+Ordinary Play, Pause, Seek, Select, Previous and Next settlement rereads the
+authoritative room without waking invitation/community queries again; snapshot
+revisions still drive the visible community refresh. Local expiry timers handle TTL deletes
+that produce no outbox bump. Queries and deferred UI callbacks remain scoped to
+the current account epoch, and the existing session privacy barrier hides them
+during identity transitions. This is a pending-action indicator, not a durable
+notification inbox or read-status model.
 
 The same singleton delivers social changes without the socket. When a five-second
 heartbeat finds no connected socket (rooms disabled, still connecting, or lost),
@@ -461,14 +468,9 @@ relationship lists, music shares, profile and invitation reads. The first poll
 always refreshes, like a fresh subscription. The last seen revision survives
 connected periods, so the first poll after a socket loss refreshes only if
 something changed. A connected socket stops the polling, and the music-share list
-has no fixed poll of its own, so a live socket adds no polling.
-Ordinary Play, Pause, Seek, Select, Previous and Next settlement rereads the
-authoritative room without waking invitation/community queries again; snapshot
-revisions still drive the visible community refresh. Local expiry timers handle TTL deletes
-that produce no outbox bump. Queries and deferred UI callbacks remain scoped to
-the current account epoch, and the existing session privacy barrier hides them
-during identity transitions. This is a pending-action indicator, not a durable
-notification inbox or read-status model.
+has no fixed poll of its own, so a live socket adds no music-share polling.
+Invitations keep their 15-second fallback refetch and capabilities their 30-second
+poll while connected.
 
 Community reads preserve the strict room-v1 playback snapshot and WebSocket
 schemas. Song requests retain a bounded pending member incarnation and pinned
@@ -1267,8 +1269,9 @@ any preparation, fences timers, and rejects non-Pause playback commands with
 suspension. Everyone control does not bypass that suspension, even after the host
 reconnects. A host that returns must authenticate, reclaim its controller through
 the normal generation fence, and synchronize; the paused room resumes only through
-the host's subsequent explicit Play. If host absence
-reaches five minutes, close the room even if guests are still connected. No
+a subsequent explicit host playback command (Play, Seek, Select, Previous or
+Next), because each one starts a new preparation. If host absence reaches five
+minutes, close the room even if guests are still connected. No
 automatic promotion is performed. A successful explicit transfer before departure
 lets the room continue under its new host.
 

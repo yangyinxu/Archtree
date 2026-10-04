@@ -232,8 +232,13 @@ curl --http1.1 -sS -o /dev/null -w '%{http_code} %{size_download}\n' \
 size is Express's JSON response, so the proxy dropped `Upgrade`/`Connection`;
 `503 0` means the realtime path is not admitting: no authority lease, draining,
 or rooms switched off (a process started with rooms off refuses every upgrade;
-see the [social rollout runbook](social-rollout-runbook.md)). Then confirm that
-a signed-in test account's room connects over `wss://` in the browser.
+see the [social rollout runbook](social-rollout-runbook.md)). `429 0` means the
+gateway's per-IP upgrade attempt, pending-upgrade or per-address limiter refused
+the request; wait and retry. `401 0` means the upgrade reached the gateway, but
+`Sec-WebSocket-Protocol` arrived malformed or stripped (or `Origin` was
+missing): the subprotocol is checked before the `Origin` comparison. Then
+confirm that a signed-in test account's room connects over `wss://` in the
+browser.
 
 Before enabling rooms on a target, confirm the room audio decoder: the deployment
 log shows the pinned FFmpeg install verified by size and SHA-256,

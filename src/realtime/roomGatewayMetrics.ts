@@ -1,3 +1,4 @@
+import { socialRollout } from '../config/socialRollout';
 import { writeOperationalLog, type OperationalLog } from '../infrastructure/operationalLog';
 
 /** Fixed operational categories cannot grow with account, room, session or error values. */
@@ -20,8 +21,7 @@ const boundedCount = (value: number) => Number.isSafeInteger(value) && value >= 
  */
 export const createRoomGatewayMetrics = (
     now: () => number = Date.now,
-    isEnabled: () => boolean = () => process.env.FINITUDE_SOCIAL_ENABLED === 'true'
-        && process.env.FINITUDE_ROOMS_ENABLED === 'true',
+    isEnabled: () => boolean = () => socialRollout().roomsEnabled,
     log: OperationalLog = () => undefined
 ) => {
     const failures: Record<RoomGatewayFailure, number> = {

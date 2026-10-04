@@ -5,8 +5,10 @@ import type { MessageKey } from '../../localization/contract';
  * Backend refusal codes that have a specific, actionable explanation. The codes
  * come from the Archtree social, music-share, listening and room planners. A
  * definite rejection that is not listed is a lost race against a newer revision,
- * epoch, queue or controller generation, which keeps the generic "this changed"
- * copy because the refreshed state already explains it. `profile_unavailable`
+ * epoch or queue, which keeps the generic "this changed" copy because the
+ * refreshed state already explains it. `stale_controller` is different: the room
+ * planner returns it when this device no longer holds the controller generation,
+ * so it explains that this tab is now only observing. `profile_unavailable`
  * deliberately does not distinguish missing, hidden, deactivated or blocked
  * profiles, so a block stays private. A Map ignores prototype keys in a code.
  */
@@ -49,7 +51,10 @@ const refusals = new Map<string, MessageKey>([
  * report it is the daily report limit. Room creation past the deployment's
  * open-room limit is `room_capacity`, and a join into a room at its member limit
  * is `room_full`, so neither needs the gesture. A listening profile refusal can
- * only concern the listener's own inactive profile.
+ * only concern the listener's own inactive profile, and so can one for room
+ * creation or accepting an invitation: the room planner checks the actor's own
+ * profile first, and neither gesture names another profile. An invite also checks
+ * the invited friend's profile, so its refusal keeps the general explanation.
  */
 const actionRefusals = new Map<string, MessageKey>([
   ['social_limit:request', 'social.request_limit'],
@@ -57,7 +62,9 @@ const actionRefusals = new Map<string, MessageKey>([
   ['social_limit:block', 'social.block_limit'],
   ['social_limit:report', 'social.report_limit'],
   ['profile_unavailable:setListeningSharing', 'social.inactive'],
-  ['profile_unavailable:claimListening', 'social.inactive']
+  ['profile_unavailable:claimListening', 'social.inactive'],
+  ['profile_unavailable:create', 'social.inactive'],
+  ['profile_unavailable:acceptInvitation', 'social.inactive']
 ]);
 
 /** Explains a definite `rejected` outcome for the action that was refused. */

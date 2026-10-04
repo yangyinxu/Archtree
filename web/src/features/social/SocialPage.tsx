@@ -146,7 +146,9 @@ const Relationships = ({ viewerId, actions, report }: { viewerId: string; action
    * WAI-ARIA tabs with automatic activation: arrows wrap, Home and End jump, and only the selected tab is in the
    * Tab order so one Tab press moves on to the list.
    */
+  /** Roving tab focus for unmodified keys only, so browser shortcuts such as Alt+ArrowLeft (Back) still work. */
   const moveTab = (event: KeyboardEvent, from: SocialListKind) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
     const index = tabs.indexOf(from);
     const target = ({ ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 } as Record<string, number>)[event.key];
     if (target === undefined) return;
@@ -165,10 +167,10 @@ const Relationships = ({ viewerId, actions, report }: { viewerId: string; action
         {kind === 'incoming' && <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'accept', targetSocialId: row.socialId, expectedRevision: row.revision })}>{t('social.accept')}</button>}
         {/* Declining, cancelling and unblocking are easily redone, so only Remove and Block ask first. */}
         <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => kind === 'friends'
-          ? setConfirming({ action: 'remove', targetSocialId: row.socialId, expectedRevision: row.revision, alias: row.profile?.alias ?? '' })
+          ? setConfirming({ action: 'remove', targetSocialId: row.socialId, expectedRevision: row.revision, alias: row.profile?.alias ?? row.socialId.slice(-8) })
           : actions.run({ action: kind === 'incoming' ? 'decline' : kind === 'outgoing' ? 'cancel' : 'unblock', targetSocialId: row.socialId, expectedRevision: row.revision })}>
           {t(kind === 'friends' ? 'social.remove' : kind === 'incoming' ? 'social.decline' : kind === 'outgoing' ? 'social.cancel_request' : 'social.unblock')}</button>
-        {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => setConfirming({ action: 'block', targetSocialId: row.socialId, alias: row.profile?.alias ?? '' })}>{t('social.block')}</button>}
+        {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => setConfirming({ action: 'block', targetSocialId: row.socialId, alias: row.profile?.alias ?? row.socialId.slice(-8) })}>{t('social.block')}</button>}
         {/* Blocked rows stay reportable: blocking and then reporting is a common safety sequence. */}
         <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(row.socialId,
           row.profile ? `${row.profile.alias} (@${row.profile.handle})` : `${t('social.blocked_profile')} ${row.socialId.slice(-8)}`, event.currentTarget)}>{t('social.report')}</button>

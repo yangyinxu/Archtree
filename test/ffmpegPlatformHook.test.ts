@@ -54,6 +54,23 @@ test('the environment can relocate test paths but never replace the pinned URL, 
     assert.match(source, /--max-filesize "\$\{ARCHIVE_BYTES\}"/);
 });
 
+test('bounds every download attempt and the retry window inside the Elastic Beanstalk command timeout', async () => {
+    const source = await read(hookPath);
+    // No .ebextensions entry raises EB's 600 s command timeout, so the hook must fail on its own first.
+    const option = (name: string) => {
+        const match = new RegExp(`--${name} (\\d+)\\b`).exec(source);
+        assert.ok(match, `the download must set --${name}`);
+        return Number(match[1]);
+    };
+    const maxTime = option('max-time');
+    const retryMaxTime = option('retry-max-time');
+    const retryDelay = option('retry-delay');
+    assert.ok(option('retry') >= 1, 'a transient failure deserves one retry');
+    assert.ok(maxTime * 2 < 600, 'two full-length attempts must fit inside the 600 s command timeout');
+    // The last retry starts before --retry-max-time elapses and runs for at most --max-time.
+    assert.ok(retryMaxTime + retryDelay + maxTime < 600, 'the whole retry window must fit inside the 600 s command timeout');
+});
+
 test('verifies the size and digest before listing or extracting, and fails loudly on any mismatch', async () => {
     const source = await read(hookPath);
     assert.equal(source.split('\n')[1], 'set -euo pipefail');

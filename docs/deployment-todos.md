@@ -130,9 +130,9 @@ minutely `ops_summary` log line and `.ebextensions/social-capacity.config`
 - [ ] Complete the email items under Production HTTPS for Authentication
       above: the verified SES sender/domain, a runtime limited to
       `ses:SendEmail`, `AUTH_EMAIL_FROM`, `AUTH_CODE_PEPPER` and
-      `AUTH_LINK_ORIGIN`. The same merge requires a verified email at password
-      sign-in, so most existing accounts cannot sign in again until email
-      delivery works.
+      `AUTH_LINK_ORIGIN`. The same merge stops unverified accounts from
+      opening new sessions with any sign-in method, so most existing accounts
+      cannot sign in again until email delivery works.
 - [ ] Merge `develop` into `main` through a pull request and require the
       release workflow on both the pull request and the merged-main push:
       unit, integration, the nine social browser scenarios, the three-engine
@@ -155,13 +155,14 @@ minutely `ops_summary` log line and `.ebextensions/social-capacity.config`
       `optional_index_unavailable` line.
 - [ ] The `/health` `rooms` object reports `enabled: false` and
       `authorityState: "inactive"`, and the log shows `room_wind_down`
-      `complete` after the latest `server_listening`.
+      `complete` for the latest process start (it can appear just before
+      `server_listening`).
 - [ ] The Nginx WebSocket upgrade fix is live. The deployment rewrites the
       existing HTTPS configuration in place without reissuing the certificate.
       The Finitude Web runbook's WebSocket probe returns `503 0` while rooms
       are off: the empty refusal comes from the application's upgrade handler,
-      so Nginx forwarded the upgrade. A `401` with a body means Nginx dropped
-      `Upgrade`/`Connection`.
+      so Nginx forwarded the upgrade. Any status with a non-empty body means
+      Nginx dropped `Upgrade`/`Connection`.
 - [ ] For a signed-in test account, `GET /api/social/v1/capabilities` reports
       `socialEnabled: false` and `roomsEnabled: false`, and Finitude Web shows
       no Together entry or social actions.
@@ -179,7 +180,11 @@ Audio (see the README's room audio decoder and catalog backfill sections).
 - [ ] Upload a short original MP3 through Content Manager and confirm the Room
       audio analysis page lists it as eligible.
 - [ ] From an operator machine with FFmpeg, run the backfill dry run against
-      production and review its `wouldAnalyze` count.
+      production and review its `wouldAnalyze` count. The dry run counts each
+      `wouldAnalyze` row toward `--max-analyses` (default 100), so a default
+      preview stops at 100 with `stopReason: "limit"`. To see the full count,
+      pass `--max-analyses=1000` and follow `resumeAfter` until
+      `finished=true`.
 - [ ] Apply the backfill in paced runs until a summary reports `finished=true`,
       then rerun once without `--after` to retry any `retryLater` tracks.
 - [ ] Keep the backfill log's final summary with the rooms release evidence.
@@ -215,7 +220,10 @@ per-account cohort.
       backfill.
 - [ ] With one playing two-member room, record the `ops_summary` peaks,
       instance memory, and Atlas operation counters and Network Out. Compare
-      them with the capacity budget (about 46 operations per second).
+      them with the capacity budget: one playing two-member room costs about
+      46 operations per second, and the shipped worst case (adding the sweep,
+      lease, the other sockets and tab polling) is about 64 (see
+      `docs/testing/t4g-micro-capacity-screen.md`).
 - [ ] Redeploy the same application version while a test room is playing. The
       new process reports `authorityState: "ready"` within about 10 seconds of
       `server_listening`, both tabs reconnect, the room is paused, and nothing

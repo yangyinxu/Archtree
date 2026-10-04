@@ -21,6 +21,8 @@ test.each([
   ['music_share_limit', 'shareMusic', 'music_shares.limit'],
   ['profile_unavailable', 'setListeningSharing', 'social.inactive'],
   ['profile_unavailable', 'claimListening', 'social.inactive'],
+  ['profile_unavailable', 'create', 'social.inactive'],
+  ['profile_unavailable', 'acceptInvitation', 'social.inactive'],
   ['room_capacity', 'create', 'room.capacity'],
   ['room_full', 'acceptInvitation', 'room.full'],
   ['room_invitation_capacity', 'invite', 'room.invitation_limit'],
@@ -66,6 +68,13 @@ test('an action-specific code without a matching gesture uses its general explan
   expect(socialRejectionMessage('profile_unavailable')).toBe('social.profile_unavailable');
 });
 
+test('only gestures that name no other profile explain profile_unavailable as the own inactive profile', () => {
+  // Create and accept can only fail on the actor's own profile; an invite may concern the invited friend.
+  expect(roomRefusalMessage({ outcome: 'rejected', code: 'profile_unavailable' }, 'create')).toBe('social.inactive');
+  expect(roomRefusalMessage({ outcome: 'rejected', code: 'profile_unavailable' }, 'acceptInvitation')).toBe('social.inactive');
+  expect(roomRefusalMessage({ outcome: 'rejected', code: 'profile_unavailable' }, 'invite')).toBe('social.profile_unavailable');
+});
+
 test('a definite failure distinguishes a rollout gate, a rate limit and other errors', () => {
   expect(socialFailureMessage(new ApiError('Disabled', 'http', 503, 'social_disabled'), 'social.unavailable')).toBe('social.unavailable');
   expect(socialFailureMessage(new ApiError('Disabled', 'http', 503, 'rooms_disabled'), 'room.unavailable')).toBe('room.unavailable');
@@ -96,7 +105,7 @@ test('every explanation exists in both shipped locales', () => {
     'music_share_capacity', 'room_capacity', 'room_full', 'room_invitation_capacity', 'already_in_room', 'host_absent', 'host_exit_required',
     'room_forbidden', 'room_unavailable', 'invitation_unavailable', 'room_media_unavailable', 'room_queue_capacity', 'room_queue_empty',
     'current_entry_required', 'room_request_capacity', 'room_request_unavailable', 'room_reaction_limit', 'transfer_unavailable', 'stale_controller'];
-  const actions = [undefined, 'request', 'accept', 'block', 'report', 'create', 'setListeningSharing'];
+  const actions = [undefined, 'request', 'accept', 'block', 'report', 'create', 'acceptInvitation', 'setListeningSharing'];
   const keys = new Set([...codes.flatMap(code => actions.map(action => socialRejectionMessage(code, action))), 'social.rate_limited']);
   for (const key of keys) {
     expect(enBundle.messages).toHaveProperty([key]);

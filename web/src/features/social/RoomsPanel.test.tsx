@@ -253,6 +253,16 @@ test('a replacement dialog closes without sending when its invitation is no long
   expect(mocks.run).not.toHaveBeenCalled();
 });
 
+test('a friend without a visible profile is named by the short opaque label, never by an empty name', async () => {
+  const label = bob.socialId.slice(-8);
+  mocks.friends = [{ socialId: bob.socialId, profile: null, revision: 2 }];
+  mocks.outgoing = [{ invitationId: 'invitation-b', generation: 1, recipientSocialId: bob.socialId, expiresAtMs: Date.now() + 60_000 }];
+  show();
+  expect(await screen.findByText(label)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Send new invitation' }));
+  expect(await screen.findByRole('dialog', { name: `Send ${label} a new invitation?` })).toBeInTheDocument();
+});
+
 test('a friend without a pending invitation gets an ordinary Invite and no replacement', async () => {
   mocks.friends = [{ socialId: bob.socialId, profile: bob, revision: 2 }];
   show();

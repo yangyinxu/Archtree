@@ -60,6 +60,20 @@ test('the host removes a guest by explicit action and has no removal control for
   expect(mocks.control).not.toHaveBeenCalled();
 });
 
+test('an observing host tab cannot transfer or remove members, because only the active playback device may', async () => {
+  const room = sharedRoom('member-a');
+  mocks.room = { ...room, self: { ...room.self, isController: false, canControl: false } };
+  show();
+  const row = memberRow('Bob');
+  expect(await within(row).findByRole('button', { name: 'Remove from room' })).toBeDisabled();
+  expect(within(row).getByRole('button', { name: 'Transfer and leave' })).toBeDisabled();
+  fireEvent.click(within(row).getByRole('button', { name: 'Remove from room' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(mocks.run).not.toHaveBeenCalled();
+  // Ending the room stays an exit any signed-in host tab may use.
+  expect(screen.getByRole('button', { name: 'End room' })).toBeEnabled();
+});
+
 test('a guest leaves at once without ending the room or managing other members', () => {
   mocks.room = sharedRoom('member-b'); show();
   expect(screen.queryByRole('button', { name: 'End room' })).not.toBeInTheDocument();

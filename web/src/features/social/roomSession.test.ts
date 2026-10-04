@@ -25,6 +25,16 @@ vi.mock('./socialRefusal', async importOriginal => {
     refusalHook.beforeExplain?.(); return actual.roomRefusalMessage(...args);
   } };
 });
+/** Counts fallback creations and lets a test hold one creation open, standing in for a slow lazy load. */
+const fallbackLoads = vi.hoisted(() => ({ created: 0, hold: undefined as undefined | Promise<never> }));
+vi.mock('./socialChangeFallback', async importOriginal => {
+  const actual = await importOriginal<typeof import('./socialChangeFallback')>();
+  return { ...actual, createSocialChangeFallback: (...args: Parameters<typeof actual.createSocialChangeFallback>) => {
+    fallbackLoads.created += 1;
+    const held = fallbackLoads.hold; fallbackLoads.hold = undefined;
+    return held ?? actual.createSocialChangeFallback(...args);
+  } };
+});
 import { roomSession } from './roomSession';
 
 class Socket {
@@ -70,6 +80,7 @@ class RoomMedia implements PlayerAudio {
 let options: RoomPlaybackOptions;
 beforeEach(() => {
   roomSession.stop(); vi.useFakeTimers(); vi.clearAllMocks(); Socket.instances = []; refusalHook.beforeExplain = undefined;
+  fallbackLoads.created = 0; fallbackLoads.hold = undefined;
   vi.stubGlobal('WebSocket', Socket);
   mocks.getCurrentRoom.mockResolvedValue({ room: null });
   mocks.getSocialChangeRevision.mockResolvedValue({ revision: 1 });
@@ -551,6 +562,27 @@ test('a replaced account discards the former account fallback and its in-flight 
   expect(mocks.getSocialChangeRevision).toHaveBeenLastCalledWith('viewer-2');
   expect(next).toHaveBeenCalledExactlyOnceWith('social');
   expect(former).not.toHaveBeenCalled();
+});
+
+test('a failed fallback load from a superseded session leaves the newer session fallback in place', async () => {
+  const stale = deferred<never>();
+  fallbackLoads.hold = stale.promise;
+  roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: false });
+  await heartbeat();
+  expect(fallbackLoads.created).toBe(1);
+  roomSession.stop();
+  const refresh = vi.fn();
+  roomSession.ensure('viewer-1', refresh, { realtimeEnabled: false });
+  await heartbeat();
+  expect(fallbackLoads.created).toBe(2);
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('social');
+  // The former generation's load fails only now; it must not clear the current generation's fallback.
+  stale.reject(new Error('Chunk load failed.')); await vi.advanceTimersByTimeAsync(0);
+  await heartbeat(); await heartbeat();
+  expect(fallbackLoads.created).toBe(2);
+  // A recreated fallback would refresh again on its first poll; the kept one is still inside its 15-second wait.
+  expect(refresh).toHaveBeenCalledOnce();
+  expect(mocks.getSocialChangeRevision).toHaveBeenCalledOnce();
 });
 
 test('a song request can be explicitly withdrawn without live transport while new requests remain blocked', async () => {

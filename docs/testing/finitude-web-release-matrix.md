@@ -80,7 +80,8 @@ covers host absence with two real accounts and actual media. In Host control it
 waits through the real 30-second grace while the guest's audio keeps advancing
 and its countdown ticks, then requires a server suspension no earlier than the
 grace deadline, paused media and a closing countdown. The returning host's device
-reclaims control and the room stays suspended until its explicit Play. Everyone
+reclaims control and the room stays suspended until an explicit host playback
+command (Play, Seek, Select, Previous or Next). Everyone
 control keeps guest controls during the grace and disables them after suspension;
 a guest who leaves Together for six seconds while no snapshot arrives returns to a
 closing countdown at least that much lower, not one restarted from the old snapshot.

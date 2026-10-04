@@ -367,10 +367,11 @@ export const createRoomSession = () => {
         if (!current()) { stop(); return; }
         if (suspended) return;
         // Without a live socket nothing delivers socialChanged, so social works with rooms off. The
-        // lazy fallback loads only after a heartbeat finds no socket; a failed load retries next tick.
+        // lazy fallback loads only after a heartbeat finds no socket; a failed load retries next tick, and
+        // a superseded generation's failure leaves the newer generation's load alone.
         if (!state.connected) void (socialFallback ??= import('./socialChangeFallback').then(module => module.createSocialChangeFallback(
           viewerId, () => version === generation && current(), () => refreshSocial('social'))))
-          .then(fallback => fallback.tick(), () => { socialFallback = undefined; });
+          .then(fallback => fallback.tick(), () => { if (version === generation) socialFallback = undefined; });
         if (!realtimeEnabled) return;
         if (state.connected) {
           if (connectionFresh()) ping();

@@ -8,6 +8,7 @@ import { recordStartupFailureStage, type StartupStage } from './infrastructure/s
 import { installRoomGateway } from './realtime/roomGateway';
 import { installRoomWindDown } from './realtime/roomWindDown';
 import { resolveSocialCapacity } from './config/socialCapacity';
+import { socialRollout } from './config/socialRollout';
 import { createOperationalSummary } from './services/operationalSummaryService';
 import { writeOperationalLog } from './infrastructure/operationalLog';
 
@@ -50,7 +51,7 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
     server.on('request', app);
     // Rooms admit traffic only with both rollout flags. Otherwise a switched-off process still winds down the
     // rooms an earlier process left open instead of leaving them silently playing.
-    const roomsEnabled = process.env.FINITUDE_SOCIAL_ENABLED === 'true' && process.env.FINITUDE_ROOMS_ENABLED === 'true';
+    const { roomsEnabled } = socialRollout();
     if (roomsEnabled) {
       // Names, never values, of unusable capacity settings, so an operator sees a typo that fell back to a ceiling.
       const { capacity, invalid } = resolveSocialCapacity();

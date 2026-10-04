@@ -5,6 +5,7 @@ import { ROOM_LIMITS, ROOM_MEDIA_DISCOVERY_LIMITS, normalizeRoomMediaQuery, isRo
     type RoomCommunity, type RoomReadyReport, type RoomSnapshot } from '../../contracts/roomV1';
 import { SOCIAL_LIMITS, SocialError, exactSocialKeys, type SocialOutcome } from '../../contracts/socialV1';
 import { socialCapacity, type SocialCapacity } from '../../config/socialCapacity';
+import { socialRollout } from '../../config/socialRollout';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { touchActiveAccount, AccountReferenceUnavailableError } from '../../services/accountReferenceFenceService';
 import { getJwtSecret } from '../../services/authSessionService';
@@ -54,7 +55,7 @@ const limitRejection = /(_capacity|_limit|_full)$/;
 /** Durable room authority: every user intent, timer and readiness transition commits before delivery. */
 export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => {
     const now = options.now ?? Date.now;
-    const enabled = options.enabled ?? (() => process.env.FINITUDE_ROOMS_ENABLED === 'true' && process.env.FINITUDE_SOCIAL_ENABLED === 'true');
+    const enabled = options.enabled ?? (() => socialRollout().roomsEnabled);
     const secret = options.secret ?? getJwtSecret;
     const authority = options.assertAuthority ?? assertRoomAuthority;
     // An injected writer must supply its own matching probe; never mix authority implementations.

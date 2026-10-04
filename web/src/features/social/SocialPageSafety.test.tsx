@@ -132,6 +132,18 @@ test('blocking clears the relationship, the Blocked tab shows only an opaque ide
   expect(sent).toHaveLength(2);
 });
 
+test('a row without a visible profile names its short opaque label in the confirmation, never an empty name', async () => {
+  const label = bob.socialId.slice(-8);
+  lists.friends = [{ socialId: bob.socialId, profile: null, revision: 5 }]; show();
+  fireEvent.click(within(await listed('Blocked profile')).getByRole('button', { name: 'Remove friend' }));
+  const remove = await screen.findByRole('dialog', { name: `Remove ${label} from your friends?` });
+  fireEvent.click(within(remove).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  fireEvent.click(within(await listed('Blocked profile')).getByRole('button', { name: 'Block' }));
+  expect(await screen.findByRole('dialog', { name: `Block ${label}?` })).toHaveAccessibleDescription(new RegExp(`shared music with ${label}\\.`));
+  expect(sent).toEqual([]);
+});
+
 test('a sent request is cancelled and an incoming one declined, each against its observed revision', async () => {
   lists.outgoing = [row(carol, 2)]; lists.incoming = [row(bob, 4)]; show();
   fireEvent.click(await screen.findByRole('tab', { name: 'Sent requests' }));

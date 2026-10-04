@@ -1191,10 +1191,18 @@ test('a deleted handle stays reserved for thirty days and then admits a new owne
     const original = await member('reused');
     // The synthetic avatar fields would otherwise hit the existing avatar deletion blocker.
     await getDb()!.collection('users').updateOne({ _id: new ObjectId(original.actor.userId) }, { $unset: { avatarAssetId: '', avatarUrl: '' } });
+    // Account deletion stamps the reservation with the wall clock, not the social service's injected clock.
+    const deletedFrom = Date.now();
     assert.deepEqual(await deleteListenerAccountData(original.actor.userId), { status: 'deleted' });
+    const deletedBy = Date.now();
     const handles = getDb()!.collection<SocialHandleDocument>('socialHandles');
     const reservation = await handles.findOne({ _id: 'reused' });
     assert.ok(reservation?.expiresAt);
+    // Literal thirty days, so a wrong reservation constant fails here instead of moving the deadline with it.
+    const thirtyDaysMs = 30 * 86_400_000;
+    const expiresAt = reservation.expiresAt.getTime();
+    assert.ok(expiresAt >= deletedFrom + thirtyDaysMs && expiresAt <= deletedBy + thirtyDaysMs,
+        `the reservation must last thirty days from deletion, not ${(expiresAt - deletedFrom) / 86_400_000} days`);
     let claimants = 0;
     const claim = async () => {
         const identity = await actor(`claimant${claimants += 1}`);

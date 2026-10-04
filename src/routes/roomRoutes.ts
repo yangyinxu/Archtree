@@ -106,7 +106,7 @@ export const createRoomRouter = (api: RoomApi = createRoomService(), options: Ro
         res.json(outcome);
     }));
     router.post('/realtime-tickets', asyncHandler(async (req, res) => {
-        if (process.env.FINITUDE_SOCIAL_ENABLED !== 'true' || process.env.FINITUDE_ROOMS_ENABLED !== 'true') throw new SocialError(503, 'rooms_disabled');
+        if (!socialRollout().roomsEnabled) throw new SocialError(503, 'rooms_disabled');
         if (!exactSocialKeys(req.body, ['clientId']) || !isRoomClientId(req.body.clientId)) throw invalid();
         if (req.get('X-Finitude-Room-Client') && req.get('X-Finitude-Room-Client') !== req.body.clientId) throw invalid();
         const origin = new URL(`${req.protocol}://${req.get('Host')}`).origin;

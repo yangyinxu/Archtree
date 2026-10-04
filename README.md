@@ -361,7 +361,10 @@ Run it safely:
   credentials). Analysis needs only `s3:GetObject`/`s3:GetObjectVersion` on the
   media bucket; prefer credentials limited to those reads.
 - Check the target before every command; the dry run is the default and writes nothing.
-  Compare its `wouldAnalyze` count with expectations before applying.
+  Compare its `wouldAnalyze` count with expectations before applying. The dry
+  run counts each `wouldAnalyze` row toward `--max-analyses` (default 100), so a
+  default preview stops at 100 with `stopReason: "limit"`. To see the full count,
+  pass `--max-analyses=1000` and follow `resumeAfter` until `finished=true`.
 - Each analysis downloads the full source (up to 512 MiB) into the local
   temporary directory and counts as S3 data transfer out. Keep the default
   pacing on the free-tier MongoDB Atlas cluster and run one backfill at a time.
@@ -620,7 +623,10 @@ Required variables:
   the t4g.micro with free-tier Atlas; values set on the environment take
   precedence. Lowering a limit refuses new rooms, joins and connections without
   removing anything already admitted. Each connected room member's first socket
-  has a reserved seat; the runbook describes the seat rule. See the
+  has a reserved seat; the runbook describes the seat rule. At most half of the
+  sockets are reserved: with unset values (256 sockets, 100 rooms of 8 seats)
+  128 sockets are reserved for room members, so sockets outside rooms stop at
+  128. See the
   [capacity budget](docs/testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04)
   before raising them.
 - `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web

@@ -324,6 +324,21 @@ test('relationship tabs follow the tabs pattern: each tab controls its labelled 
   expect(mutations).toEqual([]);
 });
 
+test('modified arrow keys stay browser shortcuts, so Alt+ArrowLeft (Back) neither moves nor is swallowed', async () => {
+  current = own; show();
+  const friends = await screen.findByRole('tab', { name: 'Friends' });
+  friends.focus();
+  // fireEvent returns false only when a handler prevented the default action.
+  for (const modifier of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }]) {
+    expect(fireEvent.keyDown(friends, { key: 'ArrowLeft', ...modifier })).toBe(true);
+    expect(fireEvent.keyDown(friends, { key: 'ArrowRight', ...modifier })).toBe(true);
+    expect(friends).toHaveFocus(); expect(friends).toHaveAttribute('aria-selected', 'true');
+  }
+  // The unmodified key still moves within the tab list.
+  expect(fireEvent.keyDown(friends, { key: 'ArrowLeft' })).toBe(false);
+  expect(screen.getByRole('tab', { name: 'Blocked' })).toHaveAttribute('aria-selected', 'true');
+});
+
 test('a failed relationship read after a lookup is announced with Retry instead of silently offering no action', async () => {
   current = own; relationshipFailures = 1; show();
   const form = await screen.findByRole('form', { name: 'Find a friend' });

@@ -37,8 +37,9 @@
 .rowContent span, .muted { color: var(--color-text-subtle); font-size: .8rem; line-height: 1.55; }
 .rowActions { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: end; }
 .avatar { flex-shrink: 0; display: grid; place-items: center; width: 2.8rem; height: 2.8rem; border-radius: 50%; background: var(--color-accent-soft); color: var(--color-accent-bright); font-weight: 720; font-size: 1.1rem; }
-/* A generated icon's seed sets the hue; the fixed OKLCH lightness keeps white initials above 5.9:1 at every hue.
-   Browsers without OKLCH keep the neutral accent pair above. */
+/* A generated icon's seed sets the hue at a fixed OKLCH lightness. oklch(.48 .1 h) is outside sRGB for some hues
+   (roughly 80-230), so the rendered contrast relies on the browser's gamut mapping: white initials stay at least
+   about 6:1 (AA) after clipping or chroma reduction. Browsers without OKLCH keep the neutral accent pair above. */
 @supports (color: oklch(0 0 0)) { .generatedAvatar { background: oklch(.48 .1 var(--avatar-hue)); color: #fff; } }
 .status { padding: .85rem 1rem; border-radius: .5rem; background: var(--color-accent-soft); margin-bottom: 1rem; line-height: 1.5; }
 .error { background: var(--color-danger-soft); color: var(--color-danger); padding: .85rem 1rem; border-radius: .5rem; margin-bottom: 1rem; }

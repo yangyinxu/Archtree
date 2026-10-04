@@ -5,6 +5,7 @@ import {
     type SocialActor, type SocialApi, type SocialCard, type SocialCommand, type SocialListKind,
     type SocialMutationIdentity, type SocialOutcome, type SocialPage
 } from '../../contracts/socialV1';
+import { socialRollout } from '../../config/socialRollout';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { touchActiveAccount, AccountReferenceUnavailableError } from '../../services/accountReferenceFenceService';
 import { getJwtSecret } from '../../services/authSessionService';
@@ -58,7 +59,7 @@ const nextRevision = nextSocialRevision;
 export const createSocialService = (options: SocialServiceOptions = {}): SocialApi => {
     const now = options.now ?? Date.now;
     const secret = options.secret ?? getJwtSecret;
-    const enabled = options.enabled ?? (() => process.env.FINITUDE_SOCIAL_ENABLED === 'true');
+    const enabled = options.enabled ?? (() => socialRollout().socialEnabled);
     const music = createMusicShareService({ now, secret, resolveContent: options.resolveMusicShareContent });
     const listening = createListeningService({ now, enabled, secret, resolveContent: options.resolveListeningContent, roomsEnabled: options.listeningRoomsEnabled });
     const db = () => { const value = getDb(); if (!value) throw new SocialError(503, 'social_unavailable'); return value; };

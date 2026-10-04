@@ -417,7 +417,7 @@ test('shared-room status requires the exact current ready playing controller and
     assert.equal((await status(b, a)).length, 1, 'Room cleanup cannot clear an ordinary publisher on another controller.');
 });
 
-test('the listening-friends read pages every fresh friend in social-ID order beyond one friend-list page', async () => {
+test('the listening-friends read pages every fresh friend in social-ID order across several listening pages', async () => {
     const viewer = await person('viewer'); const outsider = await person('outsider'); const quiet = await person('quiet');
     const listeners: Person[] = [];
     for (const name of ['first', 'second', 'third', 'fourth']) {

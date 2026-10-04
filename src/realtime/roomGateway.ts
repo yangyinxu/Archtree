@@ -6,6 +6,7 @@ import { createRoomService } from '../application/rooms/roomService';
 import { exactSocialKeys, SocialError } from '../contracts/socialV1';
 import { parseRoomHeartbeat, parseRoomReady, ROOM_LIMITS, type RoomActor, type RoomApi } from '../contracts/roomV1';
 import { admitRealtimeSeat, generalRealtimeSeats, realtimeSeatRefusal, socialCapacity, type RealtimeSeatState, type SocialCapacity } from '../config/socialCapacity';
+import { socialRollout } from '../config/socialRollout';
 import { getDb } from '../infrastructure/database';
 import type { ServerLifecycle } from '../services/serverLifecycleService';
 import { roomAuthority } from './roomAuthority';
@@ -44,7 +45,7 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
     const redeemTicket = options.redeemTicket ?? redeemRoomTicket;
     const upgradeContext = createRoomUpgradeContext();
     const allowUpgradeAttempt = createRoomUpgradeRateLimit();
-    const enabled = () => process.env.FINITUDE_SOCIAL_ENABLED === 'true' && process.env.FINITUDE_ROOMS_ENABLED === 'true';
+    const enabled = () => socialRollout().roomsEnabled;
     const wss = new WebSocketServer({ noServer: true, maxPayload: 2_048, perMessageDeflate: false,
         handleProtocols: protocols => protocols.has('archtree-room-v1') ? 'archtree-room-v1' : false });
     const connections = new Map<string, Connection>();

@@ -41,7 +41,8 @@ export const RoomInviteFriends = ({ room, viewerId }: { room: RoomSnapshot; view
     <ul className={styles.list}>{friends.data?.pages.flatMap(page => page.items).filter(friend => !participants.has(friend.socialId)).map(friend => {
       const invitation = room.self.isController && !outgoing.isError
         ? outgoing.data?.invitations.find(value => value.recipientSocialId === friend.socialId && value.expiresAtMs > now) : undefined;
-      const alias = friend.profile?.alias ?? '';
+      // A friend whose profile is not visible keeps the short opaque label the relationship lists show.
+      const alias = friend.profile?.alias ?? friend.socialId.slice(-8);
       return <li className={`${styles.row} ${styles.invitationRow}`} key={friend.socialId}><div className={styles.rowContent}><strong>{alias}</strong>{invitation && <span>{t('room.invitation_pending')}</span>}</div>
         {invitation ? <>
           <CopyInvitationLink key={invitation.invitationId} viewerId={viewerId} invitationId={invitation.invitationId} alias={alias} disabled={disabled} />

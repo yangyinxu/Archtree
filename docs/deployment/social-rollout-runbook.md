@@ -94,8 +94,11 @@ the effective values and names any setting that could not be used.
   `authorityState` is `ready` while rooms are enabled, `windingDown` while a
   process started with rooms off is ending rooms left open, `unavailable` after a
   lease or database failure, and `inactive` when nothing holds the room authority.
-  Its `requests.byArea.social` counts `/api/social/v1` traffic, with `limited`
-  for 429 refusals and `failed` for 5xx responses.
+  On a flags-off boot it briefly reports `starting`, and it can report
+  `unavailable` until the next five-second tick if the first pre-listen tick hits
+  a transient database error. The room state never changes the `/health` status
+  code. Its `requests.byArea.social` counts `/api/social/v1` traffic, with
+  `limited` for 429 refusals and `failed` for 5xx responses.
 - The application log (`/var/log/web.stdout.log`, included in `eb logs`) contains
   `{"category":"server_listening",...}` after each restart. A process started with
   rooms off adds `{"category":"room_wind_down","state":"started"}` when it finds an
@@ -243,7 +246,8 @@ What happens after the restart:
 Verify within about six minutes of the restart:
 
 - `/health` shows `rooms.enabled: false` and `authorityState: "inactive"`.
-- The log shows `room_wind_down` `complete` after the latest `server_listening`.
+- The log shows `room_wind_down` `complete` for the latest process start (it can
+  appear just before `server_listening`).
 - The WebSocket probe returns `503 0`.
 - With only rooms off, a test account can still read friends and shares.
 
