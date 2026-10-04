@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-bt7Q8Kc6yuv5kDU7EM3pzIjgyZFzLaG7en-gCO3aSvY",
+  "revision": "sha256-As5BeOpGGEUcRfj-oLJRIhjUxD57cusm1XrlBCgJ1xw",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.back_login": "Back to Log in",
@@ -800,6 +800,7 @@
     "shell.skip_to_main": "Skip to main content",
     "social.accept": "Accept",
     "social.alias": "Display name",
+    "social.alias_reserved": "That display name looks like Finitude or its staff. Choose a different display name.",
     "social.block": "Block",
     "social.blocked_profile": "Blocked profile",
     "social.blocks": "Blocked",
@@ -817,6 +818,7 @@
     "social.find_hint": "Enter their exact handle.",
     "social.friends": "Friends",
     "social.handle": "Handle",
+    "social.handle_reserved": "That handle is reserved. Choose one that does not look like Finitude, its staff or a system name.",
     "social.identity": "Your social profile",
     "social.identity_hint": "Your handle stays yours. Your email and private avatar are never shared.",
     "social.inactive": "Your social profile is inactive.",

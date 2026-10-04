@@ -42,6 +42,15 @@ account-bound, expire after 24 hours and are never accepted in a query string.
 They are domain-separated from both access tokens and list cursors. A signing-key
 rotation invalidates scopes/cursors rather than weakening verification.
 
+The closed-beta name policy in `src/application/social/socialNamePolicy.ts` holds
+the reserved-term lists and look-alike folding described in the business rules.
+The parser deliberately accepts reserved names; the profile plan checks a handle
+only when it is first claimed and a nickname only when it differs from the stored
+one, so profiles created earlier keep saving unchanged values. A violation is a
+durable `rejected` outcome with code `handle_reserved` or `alias_reserved`, and
+it writes no profile or handle row. There is no staff provisioning path for
+official accounts; one would need a separate, role-guarded change.
+
 `SocialCard` contains exactly `socialId`, `handle`, `alias`, and `iconSeed`.
 `SocialOwnProfile` additionally contains `active`, `discoverable`, and `revision`.
 List rows contain `socialId`, a permitted `profile` card or null, and the

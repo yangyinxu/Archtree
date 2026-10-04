@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-DKUdpDCdvEeiaWVLCKQmHM8FEgnNJ8ZPWy08F-GHqwg",
+  "revision": "sha256-9euS-e1nbbHLIsjdIlEojvQaiUIVtIxzbpUkEYmVnGk",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.back_login": "返回登录",
@@ -800,6 +800,7 @@
     "shell.skip_to_main": "跳转到主要内容",
     "social.accept": "接受",
     "social.alias": "昵称",
+    "social.alias_reserved": "该昵称看起来像 Finitude 或其工作人员。请换一个昵称。",
     "social.block": "屏蔽",
     "social.blocked_profile": "已屏蔽的用户",
     "social.blocks": "已屏蔽",
@@ -817,6 +818,7 @@
     "social.find_hint": "输入对方的完整用户名。",
     "social.friends": "好友",
     "social.handle": "用户名",
+    "social.handle_reserved": "该用户名为保留名称。请选择一个不像 Finitude、其工作人员或系统名称的用户名。",
     "social.identity": "社交身份",
     "social.identity_hint": "用户名创建后不可更改。邮箱和私人头像不会公开。",
     "social.inactive": "你的社交身份已停用。",

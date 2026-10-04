@@ -23,3 +23,22 @@ test('a social dialog does not dispatch under a replacement login after awaiting
   expect(result.current.uncertain).toBeNull();
   unmount(); queryClient.clear();
 });
+
+test.each([
+  ['handle_reserved', 'social.handle_reserved'],
+  ['alias_reserved', 'social.alias_reserved'],
+  ['handle_unavailable', 'social.stale'],
+  [undefined, 'social.stale']
+] as const)('a durable %s profile rejection shows %s without retaining the command', async (code, message) => {
+  const action = { action: 'profile' as const, expectedRevision: 0, handle: 'adm1n', alias: 'Finitude Support', discoverable: true };
+  mocks.prepare.mockResolvedValue({ ...action, commandId: 'captured-command-02', scopeToken: 'captured-scope-token' });
+  mocks.send.mockResolvedValue({ commandId: 'captured-command-02', outcome: 'rejected', replayed: false, ...(code ? { code } : {}) });
+  const queryClient = new QueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  const { result, unmount } = renderHook(() => useSocialActions('alice'), { wrapper });
+  await act(async () => { await result.current.run(action); });
+  expect(mocks.send).toHaveBeenCalledTimes(1);
+  expect(result.current.message).toBe(message);
+  expect(result.current.uncertain).toBeNull();
+  unmount(); queryClient.clear(); mocks.prepare.mockReset(); mocks.send.mockReset();
+});

@@ -21,6 +21,7 @@ import { deleteMusicShares, invalidateMusicShareAccounts, musicShareAccountIds }
 import { createListeningService } from './listeningService';
 import { clearListeningAccount } from './listeningLifecycle';
 import { LISTENING_LIMITS, parseListeningReport } from '../../contracts/listeningV1';
+import { isReservedSocialAlias, isReservedSocialHandle } from './socialNamePolicy';
 
 export interface SocialServiceOptions {
     now?: () => number;
@@ -164,6 +165,10 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
         if (command.action === 'profile') {
             if ((current?.revision ?? 0) !== command.expectedRevision) throw new SocialError(409, 'profile_revision_changed');
             if (current && current.handle !== command.handle) throw new SocialError(409, 'handle_immutable');
+            // Only new choices are screened: a profile created before the name policy keeps its handle and
+            // nickname (including through reactivation and discovery changes) until the nickname is edited.
+            if (!current && isReservedSocialHandle(command.handle)) throw new SocialError(422, 'handle_reserved');
+            if (current?.alias !== command.alias && isReservedSocialAlias(command.alias)) throw new SocialError(422, 'alias_reserved');
             const reservation = await handles().findOne({ _id: command.handle }, { session });
             if (reservation && reservation.accountId !== actor.userId && (!reservation.expiresAt || reservation.expiresAt.getTime() > now())) throw new SocialError(409, 'handle_unavailable');
             if (await profiles().findOne({ handle: command.handle, accountId: { $ne: actor.userId } }, { session })) throw new SocialError(409, 'handle_unavailable');

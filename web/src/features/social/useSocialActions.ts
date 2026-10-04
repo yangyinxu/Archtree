@@ -5,6 +5,13 @@ import { captureAccountOperation, isAccountOperationCurrent } from '../../api/ac
 import { getSocialOutcome, prepareSocialCommand, sendSocialCommand, type SocialAction, type SocialCommand, type SocialOutcome } from '../../api/social';
 import type { MessageKey } from '../../localization/contract';
 
+/**
+ * Name-policy rejections tell the listener which field to change; any other
+ * rejection means the state moved on and the refreshed view is now current.
+ */
+const rejectionMessage = (code: string | undefined): MessageKey => code === 'handle_reserved' ? 'social.handle_reserved'
+  : code === 'alias_reserved' ? 'social.alias_reserved' : 'social.stale';
+
 /** Keeps an uncertain original command for explicit outcome lookup or same-intent retry. */
 export const useSocialActions = (viewerId: string) => {
   const queryClient = useQueryClient();
@@ -15,7 +22,7 @@ export const useSocialActions = (viewerId: string) => {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['social', viewerId] });
   const settle = async (outcome: SocialOutcome) => {
     setUncertain(null);
-    setMessage(outcome.outcome === 'rejected' ? 'social.stale' : 'social.updated');
+    setMessage(outcome.outcome === 'rejected' ? rejectionMessage(outcome.code) : 'social.updated');
     await refresh();
   };
   const perform = async (action?: SocialAction, retry?: SocialCommand) => {

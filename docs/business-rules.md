@@ -14,6 +14,31 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   of 1–50 Unicode characters, and a case-insensitive handle of 3–24 ASCII letters,
   digits or underscores beginning with a letter. The handle cannot change during
   the account's lifetime; the nickname and discoverability can change.
+- Names that could pass for Finitude, its staff or a system account are
+  reserved, and the rejection says whether the handle or the nickname must
+  change. This is a closed-beta safeguard; blocking remains the only listener
+  recourse, and reporting and moderation tooling are not part of this release.
+  - A new handle cannot be a staff role (such as admin, administrator,
+    moderator, mod, staff, official, support, helpdesk, security or system) or a
+    system or mailbox name (such as root, help, api, www, mail, no-reply, null or
+    undefined), and cannot contain Finitude, Archtree or Kashewt. A staff role
+    is also reserved as an underscore-separated part of a handle, such as
+    support_team.
+  - The handle comparison ignores case, underscores and a trailing number, and
+    treats common look-alikes as the same letter (0 and o, 1 and i or l, 3 and e,
+    4 and a, 5 and s, 7 and t, 8 and b, rn and m, vv and w), so adm1n and
+    admin_2024 are reserved too.
+  - A nickname cannot use a staff role as a whole word, including camel-case
+    and spaced-out spellings such as SupportBot and A D M I N, and cannot contain
+    Finitude, Archtree or Kashewt. The same look-alike and trailing-number
+    rules apply, plus capital I and lowercase l, accents, full-width and other
+    Unicode compatibility forms, and common Cyrillic or Greek look-alike
+    letters. The Chinese staff terms 管理员, 官方, 客服, 版主 and 工作人员 (and
+    their traditional forms) are rejected anywhere in a nickname. System and
+    mailbox names stay allowed in nicknames.
+  - Existing profiles are not modified. A handle or nickname that predates
+    these rules stays usable, including for discovery changes, deactivation and
+    reactivation. The nickname rules apply once its owner changes the nickname.
 - Authenticated exact-handle lookup returns only the opted-in handle, nickname,
   opaque social ID and generated-icon seed. Missing, undiscoverable and blocked
   results are indistinguishable. Email, account IDs, private avatars, saves and

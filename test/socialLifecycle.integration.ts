@@ -9,7 +9,9 @@ import {
 } from '../src/contracts/socialV1';
 import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import AuthSession from '../src/models/authSession';
-import type { SocialReceiptDocument, SocialRelationshipDocument } from '../src/repositories/social/socialDocuments';
+import type {
+    SocialHandleDocument, SocialProfileDocument, SocialReceiptDocument, SocialRelationshipDocument
+} from '../src/repositories/social/socialDocuments';
 import { MongoReplicaSetHarness, startMongoReplicaSet } from './support/mongoReplicaSet';
 
 let harness: MongoReplicaSetHarness | undefined;
@@ -160,6 +162,60 @@ test('one handle cannot be claimed by two different accounts under concurrency',
     assert.equal(results.filter(result => result.outcome === 'applied').length, 1);
     assert.equal(results.filter(result => result.code === 'handle_unavailable').length, 1);
     assert.equal(await getDb()!.collection('socialProfiles').countDocuments({ handle: 'shared' }), 1);
+});
+
+test('new profiles cannot claim reserved handles or staff-like nicknames, and a rejection writes no identity', async () => {
+    const alice = await actor('alice');
+    const scope = await service.issueScope(alice);
+    const reservedHandle = command(scope, { action: 'profile', expectedRevision: 0,
+        handle: 'Adm1n', alias: 'Alice', discoverable: true });
+    const rejected = await service.mutate(alice, reservedHandle);
+    assert.deepEqual(rejected, { commandId: reservedHandle.commandId, outcome: 'rejected', code: 'handle_reserved', replayed: false });
+    assert.deepEqual(await service.mutate(alice, reservedHandle), { ...rejected, replayed: true });
+    const reservedAlias = await service.mutate(alice, command(scope, { action: 'profile', expectedRevision: 0,
+        handle: 'alice', alias: 'Finitude Support', discoverable: true }));
+    assert.equal(reservedAlias.outcome, 'rejected');
+    assert.equal(reservedAlias.code, 'alias_reserved');
+    assert.equal(await service.ownProfile(alice), null);
+    assert.equal(await getDb()!.collection('socialProfiles').countDocuments({}), 0);
+    assert.equal(await getDb()!.collection('socialHandles').countDocuments({}), 0);
+    assert.equal((await service.mutate(alice, command(scope, { action: 'profile', expectedRevision: 0,
+        handle: 'alice', alias: 'Alice', discoverable: true }))).outcome, 'applied');
+    const edit = await service.mutate(alice, command(scope, { action: 'profile', expectedRevision: 1,
+        handle: 'alice', alias: 'Alice (Moderator)', discoverable: true }));
+    assert.equal(edit.code, 'alias_reserved');
+    const unchanged = (await service.ownProfile(alice))!;
+    assert.deepEqual([unchanged.alias, unchanged.revision], ['Alice', 1]);
+});
+
+test('a profile created before the name policy keeps its reserved handle and nickname until the nickname changes', async () => {
+    const legacy = await actor('legacy');
+    const socialId = `s_${'b'.repeat(32)}`;
+    // Seeded directly: the policy cannot create this record, but existing records are deliberately not migrated.
+    await getDb()!.collection<SocialProfileDocument>('socialProfiles').insertOne({ _id: socialId, accountId: legacy.userId,
+        handle: 'support', alias: 'Official Support', active: true, discoverable: true, revision: 1, updatedAt: new Date(now) });
+    await getDb()!.collection<SocialHandleDocument>('socialHandles').insertOne({ _id: 'support', accountId: legacy.userId });
+    const scope = await service.issueScope(legacy);
+    const disabled = createSocialService({ now: () => now, enabled: () => false, secret: () => secret });
+    assert.equal((await disabled.mutate(legacy, command(scope, { action: 'profile', expectedRevision: 1,
+        handle: 'support', alias: 'Official Support', discoverable: false }))).outcome, 'applied');
+    assert.equal((await service.mutate(legacy, command(scope, { action: 'profile', expectedRevision: 2,
+        handle: 'support', alias: 'Official Support', discoverable: true }))).outcome, 'applied');
+    assert.equal((await service.mutate(legacy, command(scope, { action: 'deactivate' }))).outcome, 'applied');
+    const inactive = (await service.ownProfile(legacy))!;
+    assert.equal((await service.mutate(legacy, command(scope, { action: 'profile', expectedRevision: inactive.revision,
+        handle: 'support', alias: 'Official Support', discoverable: true }))).outcome, 'applied');
+    const reactivated = (await service.ownProfile(legacy))!;
+    assert.deepEqual([reactivated.handle, reactivated.alias, reactivated.active], ['support', 'Official Support', true]);
+    const bob = await member('bobby');
+    assert.equal((await service.lookup(bob.actor, 'support'))?.socialId, socialId);
+    const renamed = await service.mutate(legacy, command(scope, { action: 'profile', expectedRevision: reactivated.revision,
+        handle: 'support', alias: 'Staff', discoverable: true }));
+    assert.equal(renamed.code, 'alias_reserved');
+    assert.equal((await service.mutate(legacy, command(scope, { action: 'profile', expectedRevision: reactivated.revision,
+        handle: 'support', alias: 'Sam', discoverable: true }))).outcome, 'applied');
+    const final = (await service.ownProfile(legacy))!;
+    assert.deepEqual([final.handle, final.alias], ['support', 'Sam']);
 });
 
 test('requests require recipient acceptance and removing friendship invalidates stale actions', async () => {

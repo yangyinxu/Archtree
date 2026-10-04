@@ -5764,6 +5764,13 @@
       ],
       "variables": {}
     },
+    "social.alias_reserved": {
+      "description": "Social listener interface: the chosen display name impersonates Finitude or its staff.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "social.block": {
       "description": "Social listener interface: block.",
       "delivery": [
@@ -5878,6 +5885,13 @@
     },
     "social.handle": {
       "description": "Social listener interface: handle.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle_reserved": {
+      "description": "Social listener interface: the chosen handle is reserved for Finitude, staff or system use.",
       "delivery": [
         "runtime"
       ],
