@@ -72,3 +72,11 @@ test('rollout admission remains separate from an installed gateway authority sta
     assert.equal(metrics.snapshot().enabled, false);
     assert.equal(metrics.snapshot().authorityState, 'ready');
 });
+
+test('a disabled wind-down reports its own authority state while rollout stays disabled', () => {
+    const metrics = createRoomGatewayMetrics(Date.now, () => false);
+    for (const state of ['starting', 'windingDown', 'unavailable', 'inactive'] as const) {
+        metrics.setAuthorityState(state);
+        assert.deepEqual([metrics.snapshot().enabled, metrics.snapshot().authorityState], [false, state]);
+    }
+});

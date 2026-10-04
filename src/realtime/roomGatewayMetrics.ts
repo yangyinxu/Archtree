@@ -3,8 +3,12 @@ export const roomGatewayFailureCategories = [
     'authorityAcquisition', 'sweep', 'refresh', 'report', 'disconnect'
 ] as const;
 export type RoomGatewayFailure = typeof roomGatewayFailureCategories[number];
-export type RoomGatewayAuthorityState = 'inactive' | 'starting' | 'ready' | 'unavailable' | 'stopped';
-const authorityStates: readonly RoomGatewayAuthorityState[] = ['inactive', 'starting', 'ready', 'unavailable', 'stopped'];
+/**
+ * `ready` belongs to an admitting gateway; `windingDown` means a process that started with rooms switched off
+ * holds the authority only to pause and end rooms left open, and returns to `inactive` once none remain.
+ */
+export type RoomGatewayAuthorityState = 'inactive' | 'starting' | 'ready' | 'windingDown' | 'unavailable' | 'stopped';
+const authorityStates: readonly RoomGatewayAuthorityState[] = ['inactive', 'starting', 'ready', 'windingDown', 'unavailable', 'stopped'];
 
 /** Stores only five saturated counters, one state and one local successful-sweep timestamp. */
 export const createRoomGatewayMetrics = (
@@ -36,7 +40,7 @@ export const createRoomGatewayMetrics = (
             const age = lastSuccessfulSweep === null ? null : now() - lastSuccessfulSweep;
             return {
                 scope: 'process' as const,
-                // Rollout admission can be disabled while an installed gateway still owns its lease.
+                // Rollout admission can be disabled while a gateway or a wind-down still owns the lease.
                 enabled: isEnabled() === true,
                 authorityState,
                 lastSuccessfulSweepAgeMs: age === null || !Number.isFinite(age)

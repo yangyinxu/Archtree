@@ -414,10 +414,15 @@ in the controlled test harness; production diagnostics retain bounded aggregates
 not private room/member/media identifiers. Player-position agreement does not
 certify speaker/display output alignment; test output routes separately.
 
-Deploy flags off; validate cleanup/indexes; enable social, rooms, Audio and Video
-independently. Rehearse disable, forced restart, expired sessions and rollback
-while preserving leave/block/deletion/reconciliation. Verify disabled Video pauses
-or ends Video entries explicitly rather than reporting an Audio fallback. Extract
+Deploy flags off; validate cleanup/indexes; enable social and rooms
+independently. The first Web release keeps only those two flags because rooms are
+Audio-only; shared Video adds its own flag. Rehearse disable, forced restart,
+expired sessions and rollback while preserving leave/block/deletion/reconciliation.
+A process started with rooms off pauses open rooms and ends them under the ordinary
+host-absence and expiry rules; the procedure and rehearsal are in
+[the social rollout runbook](../deployment/social-rollout-runbook.md). When shared
+Video ships, verify disabled Video pauses or ends Video entries explicitly rather
+than reporting an Audio fallback. Extract
 realtime workers or add Redis only for measured bottlenecks. Keep this stage in
 progress until the selected release scope and its required deployment gates pass.
 

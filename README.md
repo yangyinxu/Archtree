@@ -542,8 +542,16 @@ Required variables:
 - `FINITUDE_SOCIAL_ENABLED`: set to `true` to enable social profile/friend admission,
   music sharing and opt-in listening publication; defaults to `false`
 - `FINITUDE_ROOMS_ENABLED`: set to `true` alongside social enablement to admit
-  Audio rooms and realtime connections; defaults to `false`. Disabling pauses
-  shared playback and closes realtime connections while preserving safety exits.
+  Audio rooms and realtime connections; defaults to `false`. A process started
+  with either flag off runs no realtime gateway: upgrades get an empty `503`,
+  and rooms left open by an earlier process are wound down. Shared playback
+  pauses, rooms end through the ordinary host-absence rules (suspended after 30
+  seconds, ended after five minutes) or the 24-hour expiry, and the room
+  authority is released once no room is open. HTTP room reads and safety exits
+  keep working, and social features stay available when only rooms are off.
+  Flag changes take effect on restart; enabling, the kill switch, verification
+  and rollback are in the
+  [social rollout runbook](docs/deployment/social-rollout-runbook.md).
 - `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in

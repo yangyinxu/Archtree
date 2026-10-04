@@ -6,6 +6,7 @@ import { accessTokenDurationSeconds } from './services/authSessionService';
 import { installShutdownHandlers, ServerLifecycle } from './services/serverLifecycleService';
 import { recordStartupFailureStage, type StartupStage } from './infrastructure/startupDiagnostics';
 import { installRoomGateway } from './realtime/roomGateway';
+import { installRoomWindDown } from './realtime/roomWindDown';
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -19,15 +20,17 @@ export interface ServerDependencies {
   createApplication?: typeof createApp;
   port?: number;
   stopped?: (outcome: 'graceful' | 'forced') => void;
+  installRoomGateway?: typeof installRoomGateway;
+  installRoomWindDown?: typeof installRoomWindDown;
 }
 
 /** Resolves only after listening, and releases infrastructure on every startup failure. */
 export const startServer = async (dependencies: ServerDependencies = {}): Promise<Server> => {
   const disconnectDatabase = dependencies.closeDatabase ?? disconnectFromDatabase;
-  let gateway: ReturnType<typeof installRoomGateway> | undefined;
+  let rooms: { stop: () => void; release: () => Promise<void> } | undefined;
   const closeDatabase = async () => {
-    gateway?.stop();
-    try { await gateway?.release(); } finally { await disconnectDatabase(); }
+    rooms?.stop();
+    try { await rooms?.release(); } finally { await disconnectDatabase(); }
   };
   const lifecycle = new ServerLifecycle();
   const server = new Server();
@@ -38,7 +41,11 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
     stage = 'application';
     const app = (dependencies.createApplication ?? createApp)({ lifecycle });
     server.on('request', app);
-    if (process.env.FINITUDE_ROOMS_ENABLED === 'true') gateway = installRoomGateway(server, lifecycle);
+    // Rooms admit traffic only with both rollout flags. Otherwise a switched-off process still winds down the
+    // rooms an earlier process left open instead of leaving them silently playing.
+    rooms = process.env.FINITUDE_SOCIAL_ENABLED === 'true' && process.env.FINITUDE_ROOMS_ENABLED === 'true'
+      ? (dependencies.installRoomGateway ?? installRoomGateway)(server, lifecycle)
+      : (dependencies.installRoomWindDown ?? installRoomWindDown)(server, lifecycle);
     stage = 'listener_configuration';
     const port = dependencies.port ?? Number(process.env.PORT || process.env.port || 8080);
     if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('PORT must be a valid TCP port.');

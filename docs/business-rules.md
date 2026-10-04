@@ -305,6 +305,18 @@ Playlist access retain their existing rules.
   cannot be selected or automatically started. No room action mutates a source
   Playlist or another member's Recently Played. This initial Web room mode does
   not record room playback in Recently Played.
+- Switching rooms off, directly or by switching social off, is a temporary stop.
+  It removes no social identity, friendship, share or setting, and rooms already
+  open do not silently continue. Shared playback in every open room pauses, no
+  device can connect to a room, start shared playback, or create or join a room,
+  and open rooms end through the ordinary rules while rooms stay off: suspension
+  after the 30-second host-absence grace, the end after five minutes of host
+  absence, or the 24-hour expiry. Leaving, ending, removal, declining, shared
+  Pause and account cleanup remain available. Each device stops room playback;
+  a fresh page load shows the room's current paused, suspended or ended state.
+  Switching rooms back on resumes no paused or suspended room by itself. With
+  only rooms off, social identity, friendships, music shares and ordinary
+  listening status keep working; listening status from room playback stops.
 
 The wire protocol and operational bounds are documented in
 [the room API contract](architecture.md#implemented-audio-room-api).

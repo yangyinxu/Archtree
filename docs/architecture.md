@@ -1189,10 +1189,27 @@ Separate media CDN/HLS work needs its own readiness, replacement, revocation,
 Range, and client contract. Add WebRTC/SFU only for an explicitly requested
 microphone/camera capability, with separate permissions and moderation.
 
-Feature flags separate social admission, room admission, Audio sync, and Video
-sync. Rollback disables new joins/commands safely, ends or pauses rooms with a
-clear client state, and retains leave/block/deletion/reconciliation. Never leave
-connected clients applying invisible room state after a flag is disabled.
+The first Web release keeps two rollout flags: `FINITUDE_SOCIAL_ENABLED` for
+social admission (profiles, friendships, music shares and listening status) and
+`FINITUDE_ROOMS_ENABLED`, which admits rooms only together with social. Shares and
+listening status already have per-user opt-in/out and safety exits, and rooms are
+Audio-only, so separate share, listening or Audio/Video flags would only multiply
+untested combinations that each cost a restart on the single instance. A Video
+sync flag arrives with shared Video. A flag change takes effect through a process
+restart; an Elastic Beanstalk environment-property update restarts the application.
+
+A process that starts with rooms disabled never installs the gateway. Instead
+`src/realtime/roomWindDown.ts` answers every upgrade with an empty `503`, and while
+any room is open it holds the room authority to run the ordinary sweep with rooms
+disabled every five seconds: shared playback pauses, absent hosts suspend after the
+30-second grace and rooms end after five minutes of host absence or at the 24-hour
+expiry. Once no room is open it releases the lease and stops polling; a disabled
+process cannot open another room. HTTP reads and the safety commands (`leave`,
+`end`, `kick`, `declineInvitation`, `cancelTransfer`, `pause`, `dismissSongRequest`)
+stay available. Web clients lose the realtime connection, detach room playback and
+stop requesting tickets once capabilities report rooms off, so no client applies
+invisible room state; HTTP reads return the current paused, suspended or ended
+room. Operations are in the [social rollout runbook](deployment/social-rollout-runbook.md).
 
 ### External constraints consulted
 
@@ -1443,11 +1460,14 @@ A failed metadata read retains its diagnostic slot until all sibling reads settl
 Both successful and unavailable health responses include a `rooms` snapshot
 with `scope: "process"`, `enabled`, `authorityState`,
 `lastSuccessfulSweepAgeMs`, and `failures`. `enabled` reflects both social and
-room rollout flags; authority state is independently `inactive` before gateway
-installation, `starting` during acquisition, `ready` while authority is held,
-`unavailable` after acquisition/lease failure, or `stopped` after shutdown.
-Disabling admission can leave an installed gateway holding its lease. The sweep
-age is null until a sweep succeeds, then a nonnegative millisecond age. Failure
+room rollout flags; authority state is independently `inactive` while nothing in
+the process holds authority, `starting` during acquisition, `ready` while an
+admitting gateway holds it, `windingDown` while a process started with rooms
+disabled holds it to pause and end rooms left open, `unavailable` after
+acquisition/lease failure, or `stopped` after shutdown. A disabled process returns
+to `inactive` once no room is open. A runtime flag change (tests only; deployments
+restart) can leave an installed gateway holding its lease. The sweep age is null
+until a sweep succeeds, then a nonnegative millisecond age. Failure
 counters use only `authorityAcquisition`, `sweep`, `refresh`, `report`, and
 `disconnect`, saturate at `Number.MAX_SAFE_INTEGER`, and reset on process restart.
 No account/room/session identifiers, raw exceptions, URLs, or caller-defined
