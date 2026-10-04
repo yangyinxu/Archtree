@@ -6,6 +6,7 @@ import { getSocialPage, getSocialProfile, getSocialRelationship, lookupSocialPro
   type SocialCard, type SocialListKind, type SocialProfile } from '../../api/social';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { useSocialActions } from './useSocialActions';
+import { listenerCapabilitiesQuery } from '../../api/listenerCapabilities';
 import styles from './SocialPage.module.css';
 
 const tabs = ['friends', 'incoming', 'outgoing', 'blocks'] as const;
@@ -135,12 +136,17 @@ const SocialSpace = ({ viewerId }: { viewerId: string }) => {
   </>;
 };
 
-/** Account-keyed route prevents one listener's social state from surviving identity changes. */
+/**
+ * Account-keyed route prevents one listener's social state from surviving identity changes. While social is
+ * disabled the route is no longer advertised but stays reachable for the preserved reads and safety actions.
+ */
 export const SocialPage = () => {
   const { t } = useLocalization();
   const session = useQuery(browserSessionQuery());
   const resolving = useQuery(browserSessionResolvingQuery());
+  const capabilities = useQuery(listenerCapabilitiesQuery());
   return <div className={styles.page}>
+    {capabilities.data && !capabilities.data.social?.enabled && <p className={styles.status} role="status">{t('social.unavailable')}</p>}
     {session.isPending || resolving.data ? <p role="status">{t('social.loading')}</p> : session.isError
       ? <section className={styles.panel}><p role="alert">{t('social.error')}</p><button className={styles.secondary} onClick={() => session.refetch()}>{t('social.refresh')}</button></section> : session.data
       ? <SocialSpace key={session.data.user.id} viewerId={session.data.user.id} />

@@ -3,6 +3,7 @@ import { createRoomService } from '../application/rooms/roomService';
 import { isRoomClientId, isRoomIdentifier, normalizeRoomMediaQuery, parseRoomCommand, ROOM_LIMITS, ROOM_MEDIA_DISCOVERY_LIMITS, type RoomActor, type RoomApi } from '../contracts/roomV1';
 import { exactSocialKeys, SocialError } from '../contracts/socialV1';
 import { socialCapacity, type SocialCapacity } from '../config/socialCapacity';
+import { socialRollout } from '../config/socialRollout';
 import { attachOptionalAccessAuth, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { accountOrClientKey, asyncHandler, limitConcurrency, rateLimit, requireSecureAuthTransport } from '../middleware/requestProtectionMiddleware';
 import { realtimeSeats, type RealtimeSeatCheck } from '../realtime/realtimeSeats';
@@ -65,8 +66,7 @@ export const createRoomRouter = (api: RoomApi = createRoomService(), options: Ro
     router.use((req, res, next) => req.method === 'GET' || req.method === 'HEAD'
         ? readConcurrency(req, res, next) : next());
     router.use(limitConcurrency('room-http', 6, 48, accountOrClientKey), express.json({ limit: ROOM_LIMITS.commandBytes, strict: true }));
-    router.get('/capabilities', (_req, res) => res.json({ socialEnabled: process.env.FINITUDE_SOCIAL_ENABLED === 'true',
-        roomsEnabled: process.env.FINITUDE_SOCIAL_ENABLED === 'true' && process.env.FINITUDE_ROOMS_ENABLED === 'true' }));
+    router.get('/capabilities', (_req, res) => res.json(socialRollout()));
     router.get('/rooms/current', asyncHandler(async (req, res) => { res.json({ room: await api.currentRoom(actor(req)) }); }));
     router.get('/rooms/:roomId', asyncHandler(async (req, res) => {
         if (!isRoomIdentifier(req.params.roomId)) throw invalid();

@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router';
 
 import type { AudioTrackSummary, HomeSection } from '../api/contentSchemas';
 import { PaginatedPageSection } from './PaginatedPageSection';
+import { seedListenerCapabilities } from '../test/listenerCapabilities';
 
 const pageItemId = '64b000000000000000000001';
 const track = (id: string, title: string): AudioTrackSummary => ({
@@ -64,7 +65,8 @@ const pageResponse = (
 });
 
 const renderSection = () => {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // Seeded rollout state keeps the cursor request assertions free of the shell's capability read.
+  const queryClient = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>

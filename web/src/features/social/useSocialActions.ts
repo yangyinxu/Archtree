@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { isUncertainSocialFailure } from '../../api/socialFailure';
+import { isSocialRolloutFailure, isUncertainSocialFailure } from '../../api/socialFailure';
 import { captureAccountOperation, isAccountOperationCurrent } from '../../api/accountEpoch';
 import { getSocialOutcome, prepareSocialCommand, sendSocialCommand, type SocialAction, type SocialCommand, type SocialOutcome } from '../../api/social';
 import type { MessageKey } from '../../localization/contract';
@@ -42,7 +42,8 @@ export const useSocialActions = (viewerId: string) => {
       if (!isAccountOperationCurrent(guard)) return;
       const unknown = command && isUncertainSocialFailure(error);
       setUncertain(unknown ? command! : null);
-      setMessage(unknown ? 'social.unknown' : 'social.error');
+      // A disabled rollout is definite and explained; the shell refreshes capabilities from the same response.
+      setMessage(unknown ? 'social.unknown' : isSocialRolloutFailure(error) ? 'social.unavailable' : 'social.error');
     } finally { locked.current = false; setBusy(false); }
   };
   const check = async () => {

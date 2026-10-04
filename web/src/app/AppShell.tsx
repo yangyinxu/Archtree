@@ -15,6 +15,7 @@ import { listenerCapabilitiesQuery } from '../api/listenerCapabilities';
 import { Icon, type IconName } from '../components/Icon';
 import { SearchQueryProvider, useSearchQuery } from '../features/search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
+import { useSocialAvailability } from '../features/social/socialAvailability';
 import { RouteAnnouncer } from './RouteAnnouncer';
 import { useLocalization } from '../localization/LocalizationProvider';
 import type { MessageKey } from '../localization/contract';
@@ -56,12 +57,14 @@ const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
 const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => {
   const location = useLocation();
   const { t } = useLocalization();
+  // Together stays reachable by address for preserved safety actions, but is not advertised while disabled.
+  const { socialEnabled } = useSocialAvailability();
   return (
     <nav
       className={mobile ? styles.mobileNavigation : styles.navigation}
       aria-label={t('shell.nav.primary_label')}
     >
-      {destinations.map((destination) => {
+      {destinations.filter((destination) => socialEnabled || destination.path !== '/social').map((destination) => {
         const label = t(destination.labelKey);
         const libraryOwnsRoute = destination.path === '/library'
           && (location.pathname === '/playlists' || location.pathname.startsWith('/playlists/'));
@@ -203,7 +206,7 @@ const AppShellContent = () => {
           <LanguageSelector placement="mobile" />
         </Suspense>
         <div className={styles.accountActions}>
-          <Suspense fallback={null}><GlobalRoomInvitations /></Suspense>
+          {capabilities.data?.social?.enabled && <Suspense fallback={null}><GlobalRoomInvitations /></Suspense>}
           <Suspense fallback={<span className={styles.accountLoading} aria-hidden="true" />}><AccountEntry /></Suspense>
         </div>
       </header>

@@ -46,7 +46,8 @@ export const useRoomInvitationConnection = (viewerId: string) => {
           || kind === 'social' && !key.startsWith('room-');
       } });
     }, { realtimeEnabled: capabilities.data.roomsEnabled });
-  }, [viewerId, client, capabilities.data]);
+    // Every successful read re-applies the switch, so a transport stopped by a rollout gate resumes once enabled.
+  }, [viewerId, client, capabilities.data, capabilities.dataUpdatedAt]);
   return { ready: Boolean(capabilities.data), roomsEnabled: capabilities.data?.roomsEnabled ?? false,
     error: capabilities.isError, retry: capabilities.refetch };
 };

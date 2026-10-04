@@ -225,7 +225,7 @@ const routeApplicationRequest = async (
     return true;
   }
   if (request.method === 'GET' && pathname === '/api/listener/v1/capabilities') {
-    sendJson(response, 200, { playlists: true });
+    sendJson(response, 200, { playlists: true, social: { enabled: true, rooms: true } });
     return true;
   }
   if (request.method === 'GET' && pathname === '/api/listener/v1/home') {

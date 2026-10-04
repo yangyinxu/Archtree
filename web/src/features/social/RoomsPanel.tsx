@@ -28,7 +28,7 @@ const RoomCreationPicker = ({ viewerId, disabled }: { viewerId: string; disabled
   </>;
 };
 
-const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }) => {
+const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: string; status: string }) => {
   const { t } = useLocalization();
   const state = useRoomSession();
   const player = usePlayer();
@@ -64,7 +64,7 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
   const offer = room.transferOffer;
   const transferTarget = offer?.targetMemberId === room.self.memberId;
   return <>
-    <div className={styles.roomHeading}><h2>{t('room.title')}</h2><span className={styles.muted}>{state.connected ? t('room.connected') : t('room.connecting')}</span></div>
+    <div className={styles.roomHeading}><h2>{t('room.title')}</h2><span className={styles.muted}>{status}</span></div>
     {room.status !== 'open' && <p className={styles.status}>{t(room.status === 'ended' ? 'room.ended' : 'room.suspended')}</p>}
     {!room.self.isController && <div className={styles.status}>{t('room.observing')}<div className={styles.actions}><button className={styles.button} disabled={!state.connected || state.busy} onClick={() => roomSession.run({ action: 'takeControl', ...member })}>{t('room.take_control')}</button></div></div>}
     <div className={styles.nowPlaying}><div className={styles.artwork}><Icon name="brand" /></div><div><strong>{current?.title ?? t('room.title')}</strong><p className={styles.muted}>{room.timeline?.state === 'preparing' ? t('room.preparing') : state.locallyPaused ? t('room.locally_paused') : t('room.position', { elapsed: seconds(elapsed), duration: seconds(duration) })}</p></div></div>
@@ -121,28 +121,34 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
   </>;
 };
 
-/** The formal room surface creates and joins only server-authorized rooms. */
+/**
+ * The formal room surface creates and joins only server-authorized rooms. Disabled rooms say so instead of
+ * appearing to connect; leaving, ending and declining stay available as safety actions.
+ */
 export const RoomsPanel = ({ viewerId, profile }: { viewerId: string; profile: SocialProfile }) => {
   const { t } = useLocalization();
   const state = useRoomSession();
-  useRoomInvitationConnection(viewerId);
+  const connection = useRoomInvitationConnection(viewerId);
+  const unavailable = connection.ready && !connection.roomsEnabled;
+  const status = t(unavailable ? 'room.unavailable' : state.connected ? 'room.connected' : 'room.connecting');
   const invitations = useRoomInvitations(viewerId);
   const room = state.viewerId === viewerId ? state.room : null;
   const busy = state.busy || Boolean(state.uncertain);
   return <section className={`${styles.panel} ${styles.roomPanel}`} aria-label={t('room.title')}>
     {(state.error || state.uncertain) && <div className={styles.error} role="status">{t(state.error ?? 'social.unknown')}
-      {!state.connected && <div className={styles.actions}><button className={styles.secondary} onClick={() => roomSession.reconnect()}>{t('room.reconnect')}</button></div>}
+      {!state.connected && !unavailable && <div className={styles.actions}><button className={styles.secondary} onClick={() => roomSession.reconnect()}>{t('room.reconnect')}</button></div>}
       {state.uncertain && <div className={styles.actions}><button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.checkOutcome()}>{t('social.check_outcome')}</button><button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.retry()}>{t('social.retry_same')}</button></div>}
     </div>}
-    {room ? <ActiveRoom room={room} viewerId={viewerId} /> : <>
-      <div className={styles.roomHeading}><h2>{t('room.title')}</h2><span className={styles.muted}>{state.connected ? t('room.connected') : t('room.connecting')}</span></div>
-      <p className={styles.description}>{t('room.empty')}</p><p className={styles.muted}>{t('social.signed_in', { alias: profile.alias })}</p>
+    {room ? <ActiveRoom room={room} viewerId={viewerId} status={status} /> : <>
+      <div className={styles.roomHeading}><h2>{t('room.title')}</h2><span className={styles.muted}>{status}</span></div>
+      {connection.roomsEnabled && <p className={styles.description}>{t('room.empty')}</p>}<p className={styles.muted}>{t('social.signed_in', { alias: profile.alias })}</p>
       {invitations.data?.invitations.length ? <div style={{ marginTop: '1rem' }}><h3>{t('room.invitations')}</h3><ul className={styles.list}>{invitations.data.invitations.map(invitation => <li className={styles.row} key={invitation.invitationId}>
         <div className={styles.rowContent}><strong>{t('room.incoming_invite', { alias: invitation.inviter.alias })}</strong></div>
         <button className={styles.button} disabled={!(state.connected || state.realtimeBusy) || busy} onClick={() => roomSession.run({ action: 'acceptInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('room.join')}</button>
         <button className={styles.secondary} disabled={busy} onClick={() => roomSession.run({ action: 'declineInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('social.decline')}</button>
       </li>)}</ul></div> : null}
-      <RoomCreationPicker key={viewerId} viewerId={viewerId} disabled={!(state.connected || state.realtimeBusy) || busy} />
+      {/* Creation reads eligible media only once rooms are known to be enabled. */}
+      {connection.roomsEnabled && <RoomCreationPicker key={viewerId} viewerId={viewerId} disabled={!(state.connected || state.realtimeBusy) || busy} />}
     </>}
   </section>;
 };

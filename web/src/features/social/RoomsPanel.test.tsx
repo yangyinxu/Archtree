@@ -7,15 +7,16 @@ import { RoomsPanel } from './RoomsPanel';
 const mocks = vi.hoisted(() => ({ room: null as RoomSnapshot | null, run: vi.fn(), control: vi.fn(), ensure: vi.fn(),
   media: vi.fn(),
   resync: vi.fn(), pauseLocally: vi.fn(), retry: vi.fn(), checkOutcome: vi.fn(), uncertain: null as RoomCommand | null,
-  connected: true, locallyPaused: false, playerError: false }));
+  connected: true, locallyPaused: false, playerError: false, roomsEnabled: true, error: null as string | null,
+  invitations: [] as unknown[], reconnect: vi.fn() }));
 vi.mock('./roomSession', () => ({ roomSession: { run: mocks.run, control: mocks.control, ensure: mocks.ensure,
-  resync: mocks.resync, pauseLocally: mocks.pauseLocally, retry: mocks.retry, checkOutcome: mocks.checkOutcome },
-  useRoomSession: () => ({ viewerId: 'viewer-1', room: mocks.room, connected: mocks.connected, locallyPaused: mocks.locallyPaused, busy: false, error: null, uncertain: mocks.uncertain }) }));
+  resync: mocks.resync, pauseLocally: mocks.pauseLocally, retry: mocks.retry, checkOutcome: mocks.checkOutcome, reconnect: mocks.reconnect },
+  useRoomSession: () => ({ viewerId: 'viewer-1', room: mocks.room, connected: mocks.connected, locallyPaused: mocks.locallyPaused, busy: false, error: mocks.error, uncertain: mocks.uncertain }) }));
 vi.mock('./RoomSongRequests', () => ({ RoomSongRequests: ({ room }: { room: RoomSnapshot }) => <section aria-label="Song requests">{room.roomId}</section> }));
 vi.mock('../../player', () => ({ usePlayer: () => ({ currentItem: null, currentTime: 0, error: mocks.playerError ? 'blocked' : null }) }));
 vi.mock('../../api/rooms', async original => ({ ...await original<typeof import('../../api/rooms')>(),
-  getRoomInvitations: async () => ({ invitations: [] }),
-  getRoomCapabilities: async () => ({ socialEnabled: true, roomsEnabled: true }),
+  getRoomInvitations: async () => ({ invitations: mocks.invitations }),
+  getRoomCapabilities: async () => ({ socialEnabled: mocks.roomsEnabled, roomsEnabled: mocks.roomsEnabled }),
   getOutgoingRoomInvitations: async () => ({ invitations: [] }) }));
 vi.mock('../../api/roomMedia', () => ({ searchRoomMedia: mocks.media }));
 vi.mock('../../api/social', () => ({ getSocialPage: async () => ({ items: [], nextCursor: null }) }));
@@ -29,6 +30,7 @@ const show = () => {
   return () => rendered.rerender(content());
 };
 beforeEach(() => { mocks.room = roomFixture(); mocks.connected = true; mocks.locallyPaused = false; mocks.playerError = false; mocks.uncertain = null; vi.clearAllMocks();
+  mocks.roomsEnabled = true; mocks.error = null; mocks.invitations = [];
   mocks.media.mockReset(); mocks.media.mockResolvedValue({ items: [], nextCursor: null }); });
 
 test('creation selects songs across search pages and sends only the explicit independent queue', async () => {
@@ -118,4 +120,37 @@ test('an autoplay failure uses the primary recovery action and recovery remains 
   expect(screen.getByRole('button', { name: 'Listen along' })).toBeEnabled();
   mocks.connected = false; rerender();
   expect(screen.getByRole('button', { name: 'Listen along' })).toBeDisabled();
+});
+
+test('disabled rooms explain unavailability instead of connecting and keep only safety actions', async () => {
+  mocks.room = null; mocks.connected = false; mocks.roomsEnabled = false; mocks.error = 'room.disconnected';
+  mocks.invitations = [{ invitationId: 'invitation-a', generation: 2, expiresAtMs: Date.now() + 60_000,
+    inviter: { socialId: `s_${'b'.repeat(32)}`, handle: 'bobby', alias: 'Bob', iconSeed: 'bob' } }];
+  show();
+  expect(await screen.findByText('Listening rooms are temporarily unavailable.')).toBeVisible();
+  expect(screen.queryByText('Connecting…')).not.toBeInTheDocument();
+  expect(screen.queryByText('Start a room, choose a few songs, and invite your friends.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Start a room' })).not.toBeInTheDocument();
+  // Reconnecting cannot succeed while the rollout is off, so it is not offered as a repair.
+  expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Join room' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'declineInvitation', invitationId: 'invitation-a', generation: 2 });
+  expect(mocks.media).not.toHaveBeenCalled();
+});
+
+test('a current room stays exitable while rooms are disabled', async () => {
+  mocks.connected = false; mocks.roomsEnabled = false; show();
+  expect(await screen.findByText('Listening rooms are temporarily unavailable.')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: 'End room' }));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'end', roomId: 'room-a', memberId: 'member-a' });
+});
+
+test('an enabled but disconnected room still offers reconnection', async () => {
+  mocks.connected = false; mocks.error = 'room.disconnected'; show();
+  fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+  expect(mocks.reconnect).toHaveBeenCalledOnce();
+  expect(screen.getByText('Connecting…')).toBeVisible();
 });

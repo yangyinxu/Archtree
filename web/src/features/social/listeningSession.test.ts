@@ -1,4 +1,5 @@
 import { advanceAccountEpoch } from '../../api/accountEpoch';
+import { ApiError } from '../../api/client';
 import type { ListeningReport, OwnListeningState } from '../../api/listening';
 import { createListeningSession, type ListeningSample } from './listeningSession';
 const deferred = <T,>() => { let resolve!: (value: T) => void, reject!: (error: unknown) => void;
@@ -130,6 +131,13 @@ test('unknown preference survives pause and ensure, off stops locally without pr
   f.session.pause(); f.session.ensure('alice', 'client-document-01'); await f.session.setEnabled(true);
   expect(f.send).toHaveBeenCalledTimes(1); expect(f.session.getSnapshot().uncertain).toBe(original);
   await f.session.retry(); expect(f.send.mock.calls[1][1]).toBe(original); f.session.reset();
+});
+test('opting in while social is disabled is explained as unavailable and leaves nothing to recover', async () => {
+  const f = setup(false); await flush();
+  f.send.mockRejectedValueOnce(new ApiError('Social participation is disabled.', 'http', 503, 'social_disabled'));
+  await f.session.setEnabled(true); await flush();
+  expect(f.session.getSnapshot()).toMatchObject({ error: 'social.unavailable', uncertain: null });
+  expect(f.send).toHaveBeenCalledTimes(1); expect(f.report).not.toHaveBeenCalled(); f.session.reset();
 });
 test('account switch fences delayed scope, report response and private preference', async () => {
   const f = setup(); await flush(); const held = deferred<any>(); f.prepare.mockReturnValueOnce(held.promise); f.session.useDevice(); await flush();

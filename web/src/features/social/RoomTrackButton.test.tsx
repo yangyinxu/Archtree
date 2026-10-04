@@ -9,6 +9,7 @@ import * as socialApi from '../../api/social';
 import * as roomMediaApi from '../../api/roomMedia';
 import { roomFixture } from '../../test/roomFixture';
 import RoomTrackButton from './RoomTrackButton';
+import { seedListenerCapabilities } from '../../test/listenerCapabilities';
 
 const mocks = vi.hoisted(() => ({ profile: vi.fn(), friends: vi.fn(), current: vi.fn(), media: vi.fn(), community: vi.fn(), outgoing: vi.fn(),
   run: vi.fn(), refresh: vi.fn(), check: vi.fn(), retry: vi.fn(), connectionRetry: vi.fn(),
@@ -39,7 +40,7 @@ const community = (pending = false) => ({ community: { roomId: 'room-a', epoch: 
   requests: pending ? [{ requestId: 'request-a', mediaTrackId: track.mediaTrackId, title: track.title,
     requestedBy: { socialId: profile.socialId, handle: profile.handle, alias: profile.alias, iconSeed: profile.iconSeed }, createdAtMs: 1000 }] : [] } });
 const show = ({ viewer = 'viewer-1' as string | null, strict = false, resolving = false } = {}) => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   client.setQueryData(browserSessionQueryKey, viewer ? { user: { id: viewer } } : null);
   client.setQueryData(browserSessionResolvingQueryKey, resolving);
   const content = <QueryClientProvider client={client}><MemoryRouter><RoomTrackButton {...track} /></MemoryRouter></QueryClientProvider>;
@@ -97,6 +98,24 @@ test('disabled admission keeps the explanation and blocks creation without eligi
   mocks.connection.roomsEnabled = false; show(); await open();
   expect(await screen.findByText('Joining rooms is temporarily unavailable.')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Create paused room and invite' })).toBeDisabled(); expect(mocks.media).not.toHaveBeenCalled(); expect(mocks.run).not.toHaveBeenCalled();
+});
+
+test('the room action is not offered while rooms are disabled', async () => {
+  const { client } = show();
+  expect(screen.getByRole('button', { name: 'Listen together: Quiet track' })).toBeVisible();
+  act(() => { seedListenerCapabilities(client, { enabled: true, rooms: false }); });
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Listen together: Quiet track' })).not.toBeInTheDocument());
+});
+
+test('a rollout change while the dialog is open keeps it to explain, then removes the action on close', async () => {
+  const { client } = show(); await open();
+  act(() => { mocks.connection = { ready: true, roomsEnabled: false, error: false }; seedListenerCapabilities(client, { enabled: true, rooms: false }); });
+  expect(await screen.findByText('Joining rooms is temporarily unavailable.')).toBeVisible();
+  expect(screen.getByRole('dialog', { name: 'Listen together: Quiet track' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.queryByRole('button', { name: 'Listen together: Quiet track' })).not.toBeInTheDocument();
+  expect(mocks.run).not.toHaveBeenCalled();
 });
 
 test('StrictMode creates a paused room then separately invites only after explicit friend confirmation', async () => {

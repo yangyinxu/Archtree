@@ -3,7 +3,7 @@ import type { ListeningAction, ListeningPlayback, ListeningRoomOccurrence } from
 import { captureAccountOperation, isAccountOperationCurrent, subscribeToAccountEpoch } from '../../api/accountEpoch';
 import { getOwnListening, sendListeningReport, type ListeningOwnerRead, type ListeningReport, type OwnListeningState } from '../../api/listening';
 import { prepareSocialCommand, sendSocialCommand, getSocialOutcome, type SocialCommand, type SocialOutcome } from '../../api/social';
-import { isUncertainSocialFailure } from '../../api/socialFailure';
+import { isSocialRolloutFailure, isUncertainSocialFailure } from '../../api/socialFailure';
 import type { MessageKey } from '../../localization/contract';
 
 export interface ListeningSample {
@@ -139,7 +139,8 @@ export const createListeningSession = (options: {
     } catch (error) {
       if (!current(captured)) return;
       const unknown = dispatched && command && isUncertainSocialFailure(error);
-      uncertainIntent = observedIntent; emit({ uncertain: unknown ? command! : null, error: unknown ? 'social.unknown' : 'social.error' });
+      uncertainIntent = observedIntent; emit({ uncertain: unknown ? command! : null,
+        error: unknown ? 'social.unknown' : isSocialRolloutFailure(error) ? 'social.unavailable' : 'social.error' });
     } finally { if (current(captured)) { emit({ busy: false }); if (optedIn) noteIntent();
       // A distinct explicit gesture received while a scope was pending remains that user's pending intent.
       else if (observedIntent !== intentId && !blockedOff) void claim(intentId);

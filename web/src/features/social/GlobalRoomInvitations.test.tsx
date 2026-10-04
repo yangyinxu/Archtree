@@ -3,12 +3,15 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { browserSessionQueryKey, browserSessionResolvingQueryKey } from '../../api/session';
 import { advanceAccountEpoch } from '../../api/accountEpoch';
+import { socialRolloutGateEvent } from '../../api/client';
+import { listenerCapabilitiesQueryKey } from '../../api/listenerCapabilities';
 import type { RoomInvitation } from '../../api/rooms';
 import { GlobalRoomInvitations } from './GlobalRoomInvitations';
 import { roomFixture } from '../../test/roomFixture';
+import { seedListenerCapabilities, type SocialRollout } from '../../test/listenerCapabilities';
 
-const mocks = vi.hoisted(() => ({ invitations: vi.fn(), profile: vi.fn(), ensure: vi.fn(), stop: vi.fn(), state: vi.fn() }));
-vi.mock('./GlobalListeningPublisher', () => ({ GlobalListeningPublisher: () => null }));
+const mocks = vi.hoisted(() => ({ invitations: vi.fn(), profile: vi.fn(), ensure: vi.fn(), stop: vi.fn(), state: vi.fn(), publisher: vi.fn(() => null) }));
+vi.mock('./GlobalListeningPublisher', () => ({ GlobalListeningPublisher: mocks.publisher }));
 vi.mock('../../api/social', () => ({ getSocialProfile: mocks.profile }));
 vi.mock('../../api/rooms', () => ({ getRoomInvitations: mocks.invitations,
   getRoomCapabilities: async () => ({ socialEnabled: true, roomsEnabled: true }) }));
@@ -17,8 +20,8 @@ vi.mock('./roomSession', () => ({ useRoomSession: mocks.state, roomSession: { en
 const profile = { socialId: 'social-alice', handle: 'alice', alias: 'Alice', iconSeed: 'alice', active: true, discoverable: true, revision: 1 };
 const invitation = (): RoomInvitation => ({ invitationId: 'invitation-a', generation: 1,
   inviter: { socialId: 'social-bob', handle: 'bobby', alias: 'Bob', iconSeed: 'bob' }, expiresAtMs: Date.now() + 60_000 });
-const show = (viewerId: string | null = 'viewer-a') => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+const show = (viewerId: string | null = 'viewer-a', social?: SocialRollout) => {
+  const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }), social);
   client.setQueryData(browserSessionQueryKey, viewerId ? { user: { id: viewerId } } : null);
   const view = render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/search']}>
     <GlobalRoomInvitations />
@@ -136,4 +139,33 @@ test('a failed invalidation refresh does not present a cached invitation as curr
   mocks.invitations.mockRejectedValue(new Error('Refresh unavailable'));
   act(() => mocks.ensure.mock.calls.at(-1)![1]('social'));
   expect(await screen.findByRole('link', { name: 'Room invitations' })).not.toHaveAttribute('data-has-pending');
+});
+
+test('social without rooms hides room entry points while transport and listening status keep their own rules', async () => {
+  const { client } = show('viewer-a', { enabled: true, rooms: false });
+  await waitFor(() => expect(mocks.publisher).toHaveBeenCalled());
+  // The transport still follows the account room capability so a later enablement or safety exit is not lost.
+  await waitFor(() => expect(mocks.ensure).toHaveBeenCalledWith('viewer-a', expect.any(Function), { realtimeEnabled: true }));
+  expect(screen.queryByRole('link', { name: /^Room invitations/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /^Open room/ })).not.toBeInTheDocument();
+  expect(mocks.invitations).not.toHaveBeenCalled();
+  act(() => { seedListenerCapabilities(client); });
+  expect(await screen.findByRole('link', { name: 'Room invitations' })).toBeVisible();
+  expect(screen.getByRole('link', { name: /^Open room/ })).toBeVisible();
+});
+
+test('a rollout gate response refreshes public and account room capabilities until unmounted', async () => {
+  vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+  const { client, unmount } = show(null);
+  const invalidate = vi.spyOn(client, 'invalidateQueries');
+  act(() => { window.dispatchEvent(new Event(socialRolloutGateEvent)); });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: listenerCapabilitiesQueryKey });
+  const accountCapabilities = invalidate.mock.calls.map(([filters]) => filters?.predicate).find(Boolean)!;
+  const query = (queryKey: unknown[]) => ({ queryKey }) as unknown as Parameters<typeof accountCapabilities>[0];
+  expect(accountCapabilities(query(['social', 'viewer-a', 'room-capabilities']))).toBe(true);
+  expect(accountCapabilities(query(['social', 'viewer-a', 'room-invitations']))).toBe(false);
+  expect(accountCapabilities(query(['listener', 'capabilities']))).toBe(false);
+  unmount(); invalidate.mockClear();
+  window.dispatchEvent(new Event(socialRolloutGateEvent));
+  expect(invalidate).not.toHaveBeenCalled();
 });

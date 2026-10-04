@@ -177,7 +177,8 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
       return;
     }
     if (call.method === 'GET' && call.pathname === '/api/listener/v1/capabilities') {
-      await jsonResponse(route, 200, { playlists: true });
+      // Goldens and keyboard order cover a social-enabled deployment; rollout specs override this explicitly.
+      await jsonResponse(route, 200, { playlists: true, social: { enabled: true, rooms: true } });
       return;
     }
     if (call.method === 'GET' && call.pathname === '/api/listener/v1/home') {

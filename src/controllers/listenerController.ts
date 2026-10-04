@@ -24,6 +24,7 @@ import {
 import { boundedSearchQuery } from '../utils/search';
 import { isPlaylistFeatureEnabled } from '../services/playlistFeatureService';
 import { catalogCreditRollout } from '../config/catalogCreditRollout';
+import { socialRollout } from '../config/socialRollout';
 
 const setPublicCatalogCache = (res: Response) => {
     res.setHeader('Cache-Control', 'public, max-age=60');
@@ -33,13 +34,16 @@ const setPublicCatalogCache = (res: Response) => {
 export const capabilities = async (_req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-store');
     const creditRollout = catalogCreditRollout();
+    const social = socialRollout();
     return res.status(200).json({
         playlists: isPlaylistFeatureEnabled(),
         catalogCredits: {
             reads: creditRollout.readsEnabled,
             sections: creditRollout.sectionsEnabled,
             organizations: creditRollout.organizationSurfacesEnabled
-        }
+        },
+        // Public so signed-out visitors are not offered social entry points a disabled rollout would reject.
+        social: { enabled: social.socialEnabled, rooms: social.roomsEnabled }
     });
 };
 

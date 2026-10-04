@@ -1,12 +1,17 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render as renderView, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { browserSessionQueryKey } from '../api/session';
+import { listenerCapabilitiesWrapper, seedListenerCapabilities } from '../test/listenerCapabilities';
 
 import { createPlayerStore } from '../player';
 import type { PlayerAudio, PlayerQueueItem, PlayerStore } from '../player';
 import { PlayerBar } from './PlayerBar';
+
+// The room action reads the shell's rollout capabilities, so every render supplies a rooms-enabled query context.
+const render = (ui: ReactElement) => renderView(ui, { wrapper: listenerCapabilitiesWrapper() });
 
 class PlayerBarAudio implements PlayerAudio {
   src = '';
@@ -320,7 +325,7 @@ test('a song dialog owns keyboard input without triggering playback or seeks', a
 test('touches in a portaled room dialog cannot swipe the compact player underneath it', async () => {
   setMobileViewport(true);
   const { store } = await playerFixture();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   client.setQueryData(browserSessionQueryKey, null);
   render(<QueryClientProvider client={client}><MemoryRouter><PlayerBar store={store} /></MemoryRouter></QueryClientProvider>);
   fireEvent.click(await screen.findByRole('button', { name: 'Listen together: Still Water' }));

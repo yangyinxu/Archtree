@@ -331,7 +331,8 @@ test('a realtime backoff belongs to its session and never delays the next accoun
 });
 
 test('other ticket failures keep the ordinary disconnected message and five-second retry', async () => {
-  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Unavailable.', 'http', 503, 'rooms_disabled'));
+  // A rollout gate (rooms_disabled) stops reconnects instead; any other 503 is an ordinary connection loss.
+  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Unavailable.', 'http', 503, 'room_unavailable'));
   roomSession.ensure('viewer-1', vi.fn());
   await vi.advanceTimersByTimeAsync(0);
   expect(roomSession.getSnapshot().error).toBe('room.disconnected');
@@ -366,6 +367,41 @@ test('disabled rooms allow an explicit invitation decline without background tic
   roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: true });
   await vi.advanceTimersByTimeAsync(0);
   expect(Socket.instances).toHaveLength(1);
+});
+
+test('a ticket refused by a disabled rollout stops background reconnects until capabilities enable rooms again', async () => {
+  mocks.getRealtimeTicket.mockRejectedValue(new ApiError('Disabled', 'http', 503, 'rooms_disabled'));
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledOnce();
+  // Unavailability is not presented as a connection the user could repair.
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: false, error: null });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledOnce(); expect(Socket.instances).toHaveLength(0);
+  await roomSession.reconnect();
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledOnce();
+  mocks.getRealtimeTicket.mockResolvedValue({ ticket: 'single-use-ticket', expiresAt: new Date(Date.now() + 30_000).toISOString() });
+  roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: true });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2); expect(Socket.instances).toHaveLength(1);
+});
+
+test('an ordinary ticket failure still retries in the background', async () => {
+  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Unavailable', 'http', 503, 'room_unavailable'));
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: false, error: 'room.disconnected' });
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+});
+
+test('disabling rooms while connected is not reported as a lost connection', async () => {
+  await connected();
+  roomSession.ensure('viewer-1', vi.fn(), { realtimeEnabled: false });
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: false, error: null, locallyPaused: true });
+  expect(mocks.detach).toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(16_000);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledOnce();
 });
 
 test('a song request can be explicitly withdrawn without live transport while new requests remain blocked', async () => {
@@ -418,7 +454,7 @@ test('a definite disabled-feature rejection leaves room exit available', async (
   await connected();
   mocks.sendRoomCommand.mockRejectedValueOnce(new ApiError('Disabled', 'http', 503, 'rooms_disabled'));
   await roomSession.control('next');
-  expect(roomSession.getSnapshot().uncertain).toBeNull();
+  expect(roomSession.getSnapshot()).toMatchObject({ uncertain: null, error: 'room.unavailable' });
   await roomSession.run({ action: 'end', roomId: 'room-a', memberId: 'member-a' });
   expect(mocks.sendRoomCommand).toHaveBeenCalledTimes(2);
 });

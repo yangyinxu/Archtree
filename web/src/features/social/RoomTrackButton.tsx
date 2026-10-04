@@ -2,6 +2,7 @@ import { lazy, Suspense, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import styles from '../../components/SaveButton.module.css';
+import { useSocialAvailability } from './socialAvailability';
 
 const RoomTrackDialog = lazy(() => import('./RoomTrackDialog'));
 export interface RoomTrackButtonProps { mediaTrackId: string; title: string; compact?: boolean }
@@ -11,6 +12,9 @@ export default function RoomTrackButton({ compact = true, ...track }: RoomTrackB
   const { t } = useLocalization();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const { roomsEnabled } = useSocialAvailability();
+  // A disabled rollout hides the action, but an open dialog stays to explain the rejected attempt.
+  if (!roomsEnabled && !open) return null;
   return <span className={`${styles.wrapper} ${compact ? styles.compact : ''}`}>
     <button type="button" className={styles.button} aria-label={t('room_track.title', { title: track.title })}
       title={t('room_track.action')} ref={trigger} onClick={() => setOpen(true)}><span aria-hidden="true">♫</span>{!compact && t('room_track.action')}</button>

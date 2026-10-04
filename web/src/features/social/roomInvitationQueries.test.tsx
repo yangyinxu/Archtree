@@ -10,12 +10,12 @@ import { useRoomCommunity } from './useRoomCommunity';
 
 type RefreshKind = 'social' | 'rooms' | 'community';
 const mocks = vi.hoisted(() => ({ community: vi.fn(), invitations: vi.fn(), outgoing: vi.fn(), capabilities: vi.fn(),
-  refresh: undefined as ((kind: RefreshKind) => void) | undefined,
+  refresh: undefined as ((kind: RefreshKind) => void) | undefined, ensures: [] as unknown[],
   state: { viewerId: 'viewer-1', room: null as RoomSnapshot | null } }));
 vi.mock('../../api/roomCommunity', () => ({ getRoomCommunity: mocks.community }));
 vi.mock('../../api/rooms', () => ({ getRoomCapabilities: mocks.capabilities, getRoomInvitations: mocks.invitations }));
 vi.mock('./roomSession', () => ({ roomSession: { getSnapshot: () => mocks.state,
-  ensure: (_viewer: string, refresh: (kind: RefreshKind) => void) => { mocks.refresh = refresh; } } }));
+  ensure: (_viewer: string, refresh: (kind: RefreshKind) => void, options: unknown) => { mocks.refresh = refresh; mocks.ensures.push(options); } } }));
 
 const communityFor = (room: RoomSnapshot): RoomCommunity => ({ roomId: room.roomId, epoch: room.epoch, revision: room.revision,
   requests: [], queueCredits: [], events: [] });
@@ -42,7 +42,7 @@ const show = () => {
 };
 
 beforeEach(() => {
-  advanceAccountEpoch(); vi.useFakeTimers(); vi.setSystemTime(1_000_000); vi.clearAllMocks(); mocks.refresh = undefined;
+  advanceAccountEpoch(); vi.useFakeTimers(); vi.setSystemTime(1_000_000); vi.clearAllMocks(); mocks.refresh = undefined; mocks.ensures = [];
   mocks.state = { viewerId: 'viewer-1', room: roomFixture() }; serverCommunity = communityFor(mocks.state.room!);
   mocks.capabilities.mockResolvedValue({ socialEnabled: true, roomsEnabled: true });
   mocks.invitations.mockResolvedValue({ invitations: [] }); mocks.outgoing.mockResolvedValue({ invitations: [] });
@@ -139,4 +139,16 @@ test.each(['leave', 'ended', 'account'])('%s retires the former room before acti
   if (cause === 'account') { advanceAccountEpoch(); mocks.state.viewerId = 'viewer-2'; }
   await notify('rooms'); await notify('community'); await notify('social');
   expect(mocks.community).toHaveBeenCalledTimes(1); expect(mocks.outgoing).toHaveBeenCalledTimes(1);
+});
+
+test('every successful capability read re-applies the rollout so a gate-stopped transport can resume', async () => {
+  show(); await tick();
+  expect(mocks.ensures).toEqual([{ realtimeEnabled: true }]);
+  // An unchanged response still re-applies the switch; the session ignores it unless its own state differs.
+  await tick(30_000);
+  expect(mocks.capabilities).toHaveBeenCalledTimes(2);
+  expect(mocks.ensures).toEqual([{ realtimeEnabled: true }, { realtimeEnabled: true }]);
+  mocks.capabilities.mockResolvedValue({ socialEnabled: true, roomsEnabled: false });
+  await tick(30_000);
+  expect(mocks.ensures.at(-1)).toEqual({ realtimeEnabled: false });
 });

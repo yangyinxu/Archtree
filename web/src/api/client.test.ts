@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { apiRequest } from './client';
+import { apiRequest, socialRolloutGateEvent } from './client';
 import { captureAccountOperation, isAccountOperationCurrent } from './accountEpoch';
 import { browserSessionSchema } from './schemas';
 import {
@@ -297,4 +297,22 @@ test('recovers an expired access A plus refresh B without retrying into A caches
   expect(isAccountOperationCurrent(priorGuard)).toBe(false);
   expect(changes).toEqual(['logout']);
   unsubscribe();
+});
+
+test.each([
+  [503, 'social_disabled', 1], [503, 'rooms_disabled', 1],
+  [503, 'social_unavailable', 0], [503, undefined, 0], [500, 'social_disabled', 0], [409, 'rooms_disabled', 0]
+] as const)('a %s %s response announces a rollout gate %s time(s)', async (status, code, expected) => {
+  const gates = vi.fn();
+  window.addEventListener(socialRolloutGateEvent, gates);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(code ? { code } : {}, status)));
+  try {
+    await expect(apiRequest('/api/social/v1/music-shares', z.object({ ready: z.boolean() }).strict(), {
+      method: 'POST', accountViewer: 'listener-1'
+    })).rejects.toMatchObject({ status, code });
+    // Only the explicit feature gate proves the rollout changed; outages and other failures keep the current UI.
+    expect(gates).toHaveBeenCalledTimes(expected);
+  } finally {
+    window.removeEventListener(socialRolloutGateEvent, gates);
+  }
 });

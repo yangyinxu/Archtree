@@ -130,6 +130,18 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   short request-rate limits still apply.
   Social participation adds no public Feed, collaborative Playlist, chat,
   push/email delivery or S3-backed social avatar.
+- Finitude Web offers Together navigation, Share and friend listening status
+  only while social participation is enabled. Listen together, room invitation
+  reminders and the active-room entry additionally require rooms to be enabled.
+  An unknown rollout state offers none of them, so a default deployment neither
+  shows nor requests anything social. While social is disabled, the Together
+  screen stays reachable by its address for the preserved reads and safety
+  actions and states that Together is temporarily unavailable.
+- A request refused because social or rooms were switched off is explained as
+  temporary unavailability, never as a generic or uncertain failure, and needs
+  no outcome recovery. It refreshes the rollout state so the affected entry
+  points disappear without a reload; a dialog that is already open stays until
+  closed so it can explain the refusal.
 
 ## Direct Music Shares
 
@@ -290,6 +302,11 @@ Playlist access retain their existing rules.
   resulting player callback does not create a new shared playback action.
   Automatic advancement and explicit Next cannot both advance the same playback
   occurrence. These rules apply in both permission modes.
+
+- While rooms are disabled, the Web room panel says listening rooms are
+  temporarily unavailable instead of appearing to connect. It offers no room
+  creation or reconnection and stops background reconnects until rooms are
+  enabled again; leaving, ending and declining remain available.
 
 - A room has at most eight members and 100 queue entries. An account joins at
   most one active room and has one playing controller. Other tabs/devices are

@@ -476,6 +476,12 @@ README and Web release matrix. This starts local capacity verification; the
 actual deployment, degraded network, production-equivalent S3, staged rollout,
 and rollback exit gates below remain pending.
 
+Finitude Web honors the staged-rollout switches: the public listener capabilities
+carry `social: { enabled, rooms }`, flags-off pages offer no social entry point and
+send no social request, and a `social_disabled`/`rooms_disabled` refusal refreshes
+them while open. The listener Chromium gate covers flags off, social without rooms
+and a refusal while open; production rollout and rollback rehearsal remain pending.
+
 All local browser contexts share one source IP. Playback GET admission now waits
 within a bounded two-second queue without raising active-request limits. Explicit
 local resync retries the exact pinned source, withdraws failed readiness, and

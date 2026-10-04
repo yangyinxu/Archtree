@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { MusicShareAction } from '../../../../src/contracts/socialMusicV1';
 import { captureAccountOperation, isAccountOperationCurrent, subscribeToAccountEpoch } from '../../api/accountEpoch';
 import type { SocialCommand, SocialOutcome } from '../../api/social';
-import { isUncertainSocialFailure } from '../../api/socialFailure';
+import { isSocialRolloutFailure, isUncertainSocialFailure } from '../../api/socialFailure';
 import type { MessageKey } from '../../localization/contract';
 
 interface ShareState {
@@ -47,7 +47,8 @@ export const createMusicShareSession = () => {
     } catch (error) {
       if (!current(observed)) return;
       const unknown = dispatched && command && isUncertainSocialFailure(error);
-      emit({ uncertain: unknown ? command! : null, message: unknown ? 'social.unknown' : 'social.error' });
+      emit({ uncertain: unknown ? command! : null,
+        message: unknown ? 'social.unknown' : isSocialRolloutFailure(error) ? 'social.unavailable' : 'social.error' });
     } finally { if (current(observed)) emit({ busy: false }); }
   };
   return {

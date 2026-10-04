@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { SharedMusicType } from '../../api/musicShares';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import styles from '../../components/SaveButton.module.css';
+import { useSocialAvailability } from './socialAvailability';
 
 const ShareMusicDialog = lazy(() => import('./ShareMusicDialog'));
 export interface ShareMusicButtonProps { contentType: SharedMusicType; contentId: string; title: string; compact?: boolean }
@@ -12,6 +13,9 @@ export default function ShareMusicButton({ compact = true, ...music }: ShareMusi
   const { t } = useLocalization();
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const { socialEnabled } = useSocialAvailability();
+  // A disabled rollout hides the action, but an open dialog stays to explain the rejected attempt.
+  if (!socialEnabled && !open) return null;
   return <span className={`${styles.wrapper} ${compact ? styles.compact : ''}`}>
     <button type="button" className={styles.button} aria-label={t('music_shares.share_title', { title: music.title })}
       title={t('music_shares.share')} ref={trigger} onClick={() => setOpen(true)}><span aria-hidden="true">↗</span>{!compact && t('music_shares.share')}</button>

@@ -5,6 +5,7 @@ import { browserSessionQueryKey } from '../../api/session';
 import { advanceAccountEpoch } from '../../api/accountEpoch';
 import type { SocialProfile } from '../../api/social';
 import { SocialPage } from './SocialPage';
+import { seedListenerCapabilities, type SocialRollout } from '../../test/listenerCapabilities';
 
 vi.mock('./RoomsPanel', () => ({ RoomsPanel: () => <section aria-label="Listening room">Room surface</section> }));
 const own: SocialProfile = { socialId: `s_${'a'.repeat(32)}`, handle: 'alice', alias: 'Alice', iconSeed: 'alice', active: true, discoverable: true, revision: 1 };
@@ -13,12 +14,13 @@ let current: SocialProfile | null;
 let mutations: Array<{ path: string; body: Record<string, unknown> }>;
 let unknown = false;
 let profileUnavailable = false;
+let admissionDisabled = false;
 let lastCommandId = '';
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: {
   'Content-Type': 'application/json', 'X-Finitude-Account-Viewer': 'viewer-1'
 } });
 beforeEach(() => {
-  advanceAccountEpoch(); current = null; mutations = []; unknown = false; profileUnavailable = false; lastCommandId = '';
+  advanceAccountEpoch(); current = null; mutations = []; unknown = false; profileUnavailable = false; admissionDisabled = false; lastCommandId = '';
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const body = options?.body ? JSON.parse(String(options.body)) : {};
     if (path === '/api/social/v1/me/profile' && options?.method === 'PATCH') {
@@ -33,12 +35,16 @@ beforeEach(() => {
     if (path.startsWith('/api/social/v1/relationships?')) return response({ items: path.includes('kind=incoming') ? [{ socialId: peer.socialId, profile: peer, revision: 4 }] : [], nextCursor: null });
     if (path.startsWith('/api/social/v1/profiles?')) return response({ profile: peer });
     if (path === `/api/social/v1/relationships/${peer.socialId}`) return response({ relationship: { socialId: peer.socialId, state: 'none', revision: 3 } });
+    if (admissionDisabled && path === '/api/social/v1/friend-requests') {
+      mutations.push({ path, body });
+      return new Response(JSON.stringify({ code: 'social_disabled', message: 'Social participation is disabled.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    }
     if (options?.method === 'POST') { mutations.push({ path, body }); return response({ commandId: body.commandId, outcome: 'applied', replayed: false }); }
     throw new Error(`Unhandled synthetic request ${path}`);
   }));
 });
-const show = (signedIn = true) => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const show = (signedIn = true, social?: SocialRollout) => {
+  const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }), social);
   client.setQueryData(browserSessionQueryKey, signedIn ? { user: { id: 'viewer-1', email: 'private@example.invalid' } } : null);
   return render(<QueryClientProvider client={client}><MemoryRouter><SocialPage /></MemoryRouter></QueryClientProvider>);
 };
@@ -47,7 +53,26 @@ test('signed-out route offers login without requesting social state', async () =
   show(false);
   expect(screen.getByRole('heading', { name: 'Listen together' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Log in' })).toHaveAttribute('href', '/login');
+  expect(screen.queryByText(/temporarily unavailable/)).not.toBeInTheDocument();
   expect(fetch).not.toHaveBeenCalled();
+});
+
+test('a disabled rollout explains Together while its existing relationships and safety actions stay reachable', async () => {
+  current = own; admissionDisabled = true; show(true, { enabled: false, rooms: false });
+  const unavailable = 'Together is temporarily unavailable. Removing friends, blocking and deactivating your profile still work.';
+  expect(screen.getByText(unavailable)).toHaveAttribute('role', 'status');
+  fireEvent.click(await screen.findByRole('tab', { name: 'Incoming requests' }));
+  expect(await screen.findByRole('button', { name: 'Block' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Deactivate social profile' })).toBeEnabled();
+  const form = screen.getByRole('form', { name: 'Find a friend' });
+  fireEvent.change(within(form).getByLabelText('Handle'), { target: { value: 'bobby' } });
+  fireEvent.submit(form);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add friend' }));
+  // The definite feature-gate rejection is explained, not reported as a generic retryable failure.
+  await waitFor(() => expect(screen.getAllByText(unavailable)).toHaveLength(2));
+  expect(screen.queryByText('We could not complete that action. Try again.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Check outcome' })).not.toBeInTheDocument();
+  expect(mutations).toHaveLength(1);
 });
 
 test('identity setup saves the explicit alias without sharing private account identity', async () => {

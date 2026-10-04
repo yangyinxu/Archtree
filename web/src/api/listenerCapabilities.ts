@@ -9,7 +9,9 @@ const listenerCapabilitiesSchema = z.object({
     reads: z.boolean(),
     sections: z.boolean(),
     organizations: z.boolean()
-  }).strict().optional()
+  }).strict().optional(),
+  // Optional for an older server; a missing value hides social entry points.
+  social: z.object({ enabled: z.boolean(), rooms: z.boolean() }).strict().optional()
 }).strict();
 
 export const listenerCapabilitiesQueryKey = ['listener', 'capabilities'] as const;

@@ -149,7 +149,10 @@ handle lookup, friend requests, invitations, queue selection, shared transport,
 Host/Everyone permissions, local pause/resync and accepted host transfer. It uses
 the existing player. Enable both `FINITUDE_SOCIAL_ENABLED=true` and
 `FINITUDE_ROOMS_ENABLED=true`; both default to false. Leave/end/decline and account
-cleanup remain available when new room admission is disabled. Native room UI and
+cleanup remain available when new room admission is disabled. With the flags off,
+Finitude Web shows no social entry point and sends no social request; `/finitude/social`
+stays reachable by address and says Together is temporarily unavailable, and the room
+panel says rooms are temporarily unavailable instead of connecting. Native room UI and
 shared Video are not enabled by this slice.
 
 For a disposable local demonstration, run `npm run build` then
@@ -1174,7 +1177,12 @@ Public Listener capability discovery:
 
 - `GET /api/listener/v1/capabilities` returns only deploy-safe feature
   availability. The Web client uses its `playlists` boolean to hide Playlist
-  routes and controls when the server-side rollout switch is off.
+  routes and controls when the server-side rollout switch is off, and its
+  `social: { enabled, rooms }` object (from `FINITUDE_SOCIAL_ENABLED` and
+  `FINITUDE_ROOMS_ENABLED`; rooms is never true without social) to hide the
+  Together navigation, Share, Listen together and room reminders. A missing
+  object hides them too. Any `503 social_disabled`/`rooms_disabled` response
+  makes the open page re-read these switches.
 
 Email registration happens only on the Web, by emailed link:
 

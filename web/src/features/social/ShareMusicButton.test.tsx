@@ -3,11 +3,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { browserSessionQueryKey, browserSessionResolvingQueryKey } from '../../api/session';
 import { advanceAccountEpoch } from '../../api/accountEpoch';
+import { ApiError } from '../../api/client';
 import type { AudioTrackSummary } from '../../api/contentSchemas';
 import { ContentCard } from '../../components/ContentCard';
 import { ContentListRow } from '../../components/ContentListRow';
 import ShareMusicButton from './ShareMusicButton';
 import { musicShareSession } from './musicShareSession';
+import { seedListenerCapabilities } from '../../test/listenerCapabilities';
 
 const mocks = vi.hoisted(() => ({ profile: vi.fn(), friends: vi.fn(), prepare: vi.fn(), send: vi.fn(), outcome: vi.fn() }));
 vi.mock('../../api/social', async original => ({ ...await original<typeof import('../../api/social')>(), getSocialProfile: mocks.profile,
@@ -17,7 +19,7 @@ const profile = { socialId: `s_${'a'.repeat(32)}`, handle: 'alice', alias: 'Alic
 const track: AudioTrackSummary = { contentType: 'audioTrack', id: 'a'.repeat(24), title: 'Quiet track', artworkUrl: '', artistNames: [], albumId: null,
   albumTitle: null, duration: null, mediaType: 'audio', streamUrl: '/content/mediaTrack/stream/track-a' };
 const show = (viewer: string | null = 'viewer-1', content = <ShareMusicButton contentType="audioTrack" contentId={track.id} title={track.title} />) => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   client.setQueryData(browserSessionQueryKey, viewer ? { user: { id: viewer, email: 'private@example.test' } } : null);
   client.setQueryData(browserSessionResolvingQueryKey, false);
   return { client, ...render(<QueryClientProvider client={client}><MemoryRouter><Routes>
@@ -105,4 +107,30 @@ test.each(['card', 'row'])('the common %s share action is separate from primary 
 test('unavailable library rows do not offer new sharing', () => {
   show('viewer-1', <ul><ContentListRow item={track} shareable={false} /></ul>);
   expect(screen.queryByRole('button', { name: 'Share Quiet track' })).not.toBeInTheDocument(); expect(mocks.profile).not.toHaveBeenCalled();
+});
+
+test('Share is not offered while social is disabled', async () => {
+  const { client } = show();
+  expect(screen.getByRole('button', { name: 'Share Quiet track' })).toBeVisible();
+  act(() => { seedListenerCapabilities(client, { enabled: false, rooms: false }); });
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Share Quiet track' })).not.toBeInTheDocument());
+  expect(mocks.profile).not.toHaveBeenCalled();
+});
+
+test('a send rejected by a disabled rollout is explained in the open dialog, which outlives the hidden action', async () => {
+  mocks.send.mockRejectedValueOnce(new ApiError('Social participation is disabled.', 'http', 503, 'social_disabled'));
+  const { client } = show(); await open(); await selectFriend();
+  fireEvent.click(screen.getByRole('button', { name: 'Send share' }));
+  const dialog = screen.getByRole('dialog', { name: 'Share Quiet track' });
+  expect(await within(dialog).findByText('Together is temporarily unavailable. Removing friends, blocking and deactivating your profile still work.')).toBeVisible();
+  expect(within(dialog).queryByText('We could not complete that action. Try again.')).not.toBeInTheDocument();
+  // A definite gate is not an uncertain outcome, so there is no recovery to offer.
+  expect(within(dialog).queryByRole('button', { name: 'Check outcome' })).not.toBeInTheDocument();
+  act(() => { seedListenerCapabilities(client, { enabled: false, rooms: false }); });
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.getByRole('dialog', { name: 'Share Quiet track' })).toBeVisible();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.queryByRole('button', { name: 'Share Quiet track' })).not.toBeInTheDocument();
+  expect(mocks.send).toHaveBeenCalledTimes(1);
 });

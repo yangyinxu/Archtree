@@ -394,7 +394,7 @@ process memory, which is complete for the single production process; see the
 
 | Endpoint under `/api/social/v1` | Contract |
 | --- | --- |
-| `GET /capabilities` | `socialEnabled`, `roomsEnabled`; room admission requires both flags |
+| `GET /capabilities` | `socialEnabled`, `roomsEnabled`; room admission requires both flags. The public `GET /api/listener/v1/capabilities` reports the same switches as `social: { enabled, rooms }` (both read `src/config/socialRollout.ts`) so signed-out Web pages can hide social entry points |
 | `GET /rooms/current`, `GET /rooms/:roomId` | `{ room: snapshot or null }`, always freshly authorized |
 | `GET /room-media` | `{ items }`, at most 100 eligible pinned Audio descriptors |
 | `GET /room-media/search?q=&cursor=&limit=` | `{ items, nextCursor }`, title substring search; default 20/max 50 eligible pinned Audio descriptors per page |

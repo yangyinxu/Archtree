@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-SzTmmuiOKmwZ2wXC9o81-WwFfav02R9CoiVz18Wa7PU",
+  "revision": "sha256-uBQIXjI0ipxRbrZWIa0lDLyaR091m63tgyBVRlaKzuM",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.back_login": "返回登录",
@@ -728,6 +728,7 @@
     "room.title": "一起听房间",
     "room.transfer": "转让房主并离开",
     "room.transfer_pending": "等待接受。转让成功后，原房主将离开房间。",
+    "room.unavailable": "一起听房间暂时不可用。",
     "room.waiting_for_host": "等待房主开始播放。",
     "route.announcement.page": "{title}页面",
     "route.error.copy": "返回首页并继续探索。",
@@ -853,6 +854,7 @@
     "social.suspended": "你的社交资料已被暂停。你无法添加好友、分享音乐、分享正在收听的内容或加入房间。屏蔽仍然有效，你也仍然可以举报用户。",
     "social.suspended_action": "你的社交资料已被暂停，暂时无法进行此操作。",
     "social.title": "一起听音乐",
+    "social.unavailable": "“一起听”暂时不可用。移除好友、屏蔽和停用社交身份仍可使用。",
     "social.unblock": "取消屏蔽",
     "social.unknown": "操作结果尚未确认，请先查询结果，再重试同一操作。",
     "social.updated": "已更新。",

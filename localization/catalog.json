@@ -5252,6 +5252,13 @@
       ],
       "variables": {}
     },
+    "room.unavailable": {
+      "description": "Shared listening interface: rooms are switched off by the server rollout; replaces the connection status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.waiting_for_host": {
       "description": "Shared listening interface: waiting for host.",
       "delivery": [
@@ -6132,6 +6139,13 @@
     },
     "social.title": {
       "description": "Social listener interface: title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.unavailable": {
+      "description": "Social interface: new social participation is switched off by the server rollout; safety actions still work.",
       "delivery": [
         "runtime"
       ],

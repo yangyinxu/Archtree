@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { ApiError } from '../../api/client';
-import { isUncertainSocialFailure } from '../../api/socialFailure';
+import { isSocialRolloutFailure, isUncertainSocialFailure } from '../../api/socialFailure';
 import { captureAccountOperation, isAccountOperationCurrent, subscribeToAccountEpoch } from '../../api/accountEpoch';
 import { getCurrentRoom, getRealtimeTicket, prepareRoomCommand, sendRoomCommand, roomControlPreconditions,
   roomSnapshotSchema, type RoomAction, type RoomCommand, type RoomSnapshot } from '../../api/rooms';
@@ -228,11 +228,13 @@ export const createRoomSession = () => {
       connection.onerror = () => { connection.close(); };
     } catch (error) {
       if (version !== generation || transport !== transportGeneration || !current()) return;
-      const busy = error instanceof ApiError && error.code === 'realtime_capacity';
+      // A disabled rollout is definite: stop background reconnects until capabilities enable realtime again.
+      if (isSocialRolloutFailure(error)) realtimeEnabled = false;
+      const busy = realtimeEnabled && error instanceof ApiError && error.code === 'realtime_capacity';
       // ApiError keeps Retry-After only from 429s (quota cooling), so this 503 deliberately falls back to the
       // server's fixed 30 seconds (REALTIME_CAPACITY_RETRY_SECONDS).
       if (busy) busyUntil = performance.now() + Math.min(300, Math.max(5, error.retryAfterSeconds ?? 30)) * 1000;
-      emit({ connected: false, realtimeBusy: busy, error: busy ? 'room.realtime_busy' : 'room.disconnected' });
+      emit({ connected: false, realtimeBusy: busy, error: !realtimeEnabled ? null : busy ? 'room.realtime_busy' : 'room.disconnected' });
     }
     finally { if (version === generation && transport === transportGeneration) opening = false; }
   };
@@ -295,7 +297,7 @@ export const createRoomSession = () => {
     } catch (error) {
       if (version !== generation || !current()) return;
       const unknown = command && isUncertainSocialFailure(error);
-      emit({ uncertain: unknown ? command! : null, error: unknown ? 'social.unknown' : 'social.error' });
+      emit({ uncertain: unknown ? command! : null, error: unknown ? 'social.unknown' : isSocialRolloutFailure(error) ? 'room.unavailable' : 'social.error' });
     } finally {
       if (version === generation) {
         // An aborted personal resume must not leave the UI/heartbeat unpaused while
@@ -343,7 +345,8 @@ export const createRoomSession = () => {
       if (state.viewerId === viewerId && current()) {
         if (realtimeEnabled !== enabled) {
           realtimeEnabled = enabled;
-          if (enabled) { void refresh(); void connect(); } else disconnect();
+          // Disabled rooms are explained as unavailable, not as a connection loss the user could repair.
+          if (enabled) { void refresh(); void connect(); } else { disconnect(); emit({ error: null }); }
         }
         return;
       }
