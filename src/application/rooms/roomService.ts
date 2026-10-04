@@ -19,6 +19,7 @@ import { readSocialToken, signSocialToken } from '../social/socialTokens';
 import { SOCIAL_TRANSACTION_ATTEMPTS, waitForSocialTransactionRetry } from '../social/socialTransactionRetry';
 import { suppressRoomListening } from '../social/listeningLifecycle';
 import { appendRoomEvent, closeRoom, deleteRoomInvitations, incrementRoomVersion, invalidateInvitationAccounts, pauseRoom, persistRoom, removeRoomMember, roomPositionAt } from './roomLifecycle';
+import { roomHostPlaybackSuspended, roomMemberConnected } from './roomHostAbsence';
 
 export interface RoomServiceOptions {
     now?: () => number;
@@ -69,10 +70,11 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
     const profiles = () => db().collection<SocialProfileDocument>('socialProfiles');
     const receipts = () => db().collection<SocialReceiptDocument>('socialMutations');
     const budgets = () => db().collection<SocialBudgetDocument>('socialBudgets');
-    const connected = (member: RoomMemberDocument) => member.connectionPresent && now() - member.lastSeenAt.getTime() < ROOM_LIMITS.hostGraceMs;
+    const connected = (member: RoomMemberDocument) => roomMemberConnected(member, now());
     const controls = (member: RoomMemberDocument, actor: RoomActor) => member.controllerSessionId === actor.sessionId && member.controllerClientId === actor.clientId;
     const host = (room: RoomDocument) => room.members.find(member => member.membershipId === room.hostMembershipId);
     const hostPresent = (room: RoomDocument) => Boolean(host(room) && connected(host(room)!));
+    const playbackSuspended = (room: RoomDocument) => roomHostPlaybackSuspended(room, now());
     const safeRoom = (room: RoomDocument | null): room is RoomDocument => Boolean(room && room.state === 'open' && room.expiresAt.getTime() > now());
     /** Discovery projects only the ready resolver's public descriptor, never its database evidence. */
     const mediaDescriptor = (value: RoomMediaDescriptor): RoomMediaDescriptor => ({ mediaTrackId: value.mediaTrackId,
@@ -187,7 +189,8 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
     };
     const finishPreparation = (room: RoomDocument): boolean => {
         const preparation = room.preparation;
-        if (!preparation || !hostPresent(room) || !enabled()) return false;
+        // The host-absence grace keeps an accepted preparation running; the cohort filter below drops the host's device.
+        if (!preparation || playbackSuspended(room) || !enabled()) return false;
         preparation.cohort = preparation.cohort.filter(candidate => room.members.some(value => value.membershipId === candidate.membershipId
             && value.controllerGeneration === candidate.controllerGeneration && connected(value) && !value.locallyPaused));
         const ready = preparation.cohort.filter(value => value.ready);
@@ -218,9 +221,10 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         if (!hosting) return 'close';
         if (!connected(hosting)) {
             if (!room.hostAbsentSince) { room.hostAbsentSince = hosting.lastSeenAt; changed = true; }
-            if (room.preparation) { pauseRoom(room, now()); changed = true; }
             const absent = now() - room.hostAbsentSince.getTime();
             if (absent >= ROOM_LIMITS.hostCloseMs) return 'close';
+            // Playback is untouched inside the grace. Suspension pauses it in both modes and cancels a pending
+            // preparation, which cannot finish once the deadline has passed.
             if (absent >= ROOM_LIMITS.hostGraceMs && !room.hostSuspended) { room.hostSuspended = true; pauseRoom(room, now()); changed = true; }
         }
         if (room.transfer && room.transfer.expiresAt.getTime() <= now()) { room.transfer = null; changed = true; }
@@ -235,7 +239,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         if (enabled() && room.epoch === candidate.epoch && room.playbackGeneration === candidate.playbackGeneration
             && room.queueRevision === candidate.queueRevision && room.timeline.entryId === candidate.timeline.entryId
             && candidate.timeline.state === 'playing' && room.timeline.state === 'playing'
-            && current && roomPositionAt(room, now()) >= current.durationMs && hostPresent(room)) return 'advance';
+            && current && roomPositionAt(room, now()) >= current.durationMs && !playbackSuspended(room)) return 'advance';
         return changed ? 'persist' : 'unchanged';
     };
 
@@ -564,7 +568,10 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         if (!isHost && room.controlMode !== 'everyone') return fail('room_forbidden', 403);
         if (command.expectedPlaybackGeneration !== room.playbackGeneration || command.expectedEntryId !== room.timeline.entryId) return fail('stale_playback');
         if (['next', 'previous', 'select'].includes(command.action) && command.expectedQueueRevision !== room.queueRevision) return fail('stale_queue');
-        if (command.action !== 'pause' && !hostPresent(room)) return fail('host_absent');
+        // An absent host's own disconnected device must reconnect, which ends the absence, before changing shared
+        // playback. Other participants keep the current mode's permissions through the grace and lose them only
+        // when suspension is due; a returning host, not a guest, starts a suspended room again.
+        if (command.action !== 'pause' && (isHost ? !hostPresent(room) : playbackSuspended(room))) return fail('host_absent');
         if (command.action === 'pause') {
             if (room.timeline.state === 'paused') return noop();
             pauseRoom(room, now()); return changed();
@@ -853,10 +860,9 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 me.connectionPresent = false;
                 me.readyPlaybackGeneration = undefined;
                 await suppressRoomListening(room._id, me, session);
-                if (me.membershipId === room.hostMembershipId) {
-                    room.hostAbsentSince = me.lastSeenAt;
-                    if (room.preparation) pauseRoom(room, now());
-                }
+                // Absence starts at the last confirmed heartbeat. An accepted preparation continues for the connected
+                // cohort during the grace; suspension, not the disconnect itself, pauses shared playback.
+                if (me.membershipId === room.hostMembershipId) room.hostAbsentSince = me.lastSeenAt;
                 await persistRoom(room, session, now()); visible = true;
             });
             if (visible) notifyRoomChanges();

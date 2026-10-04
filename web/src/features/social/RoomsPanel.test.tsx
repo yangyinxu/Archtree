@@ -90,6 +90,19 @@ test('the seek bar speaks the shown time, following a drag before it is committe
   expect(slider).toHaveAttribute('aria-valuetext', '0:12 of 0:30');
 });
 
+test('everyone-control guests keep shared controls during the host-absence grace, before suspension', () => {
+  const fixture = roomFixture();
+  mocks.room = { ...fixture, status: 'open', controlMode: 'everyone', hostMemberId: 'other-member',
+    hostAbsenceDeadlineMs: fixture.serverTimeMs + 20_000, timeline: { ...fixture.timeline!, state: 'paused' }, preparation: null,
+    members: [...fixture.members, { ...fixture.members[0], memberId: 'other-member', role: 'host', connected: false }] };
+  show();
+  expect(screen.queryByText('The host is disconnected. Shared playback is suspended.')).not.toBeInTheDocument();
+  for (const name of ['Previous', 'Next']) expect(screen.getByRole('button', { name })).toBeEnabled();
+  expect(screen.getByRole('slider', { name: 'Room playback position' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Play for everyone' }));
+  expect(mocks.control).toHaveBeenCalledExactlyOnceWith('play');
+});
+
 test('a suspended room allows its returning host to resume and keeps guest controls disabled', () => {
   mocks.room = { ...mocks.room!, status: 'suspended', controlMode: 'everyone', hostMemberId: 'other-member' };
   const rerender = show();

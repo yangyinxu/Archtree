@@ -1228,7 +1228,7 @@ test('same-session tabs have one controller and takeover fences old controls, re
     await api.disconnected(host.actor); assert.equal((await snapshot(tab)).members[0].connected, true);
 });
 
-test('host disconnect stops new playback intents, pauses after grace, and returning never auto-resumes', async () => {
+test('an absent host cannot control from its disconnected device, suspension follows the grace, and returning never auto-resumes', async () => {
     const { host, guest } = await pair(); await playPair(host, guest);
     await api.disconnected(host.actor);
     assert.equal((await api.mutate(host.actor, control(host, await snapshot(host), 'next'))).code, 'host_absent');
@@ -1238,6 +1238,79 @@ test('host disconnect stops new playback intents, pauses after grace, and return
     assert.equal(returned.timeline?.state, 'paused'); assert.equal(returned.status, 'suspended');
     assert.equal(returned.hostAbsenceDeadlineMs, null);
     await api.mutate(host.actor, control(host, returned, 'play')); assert.equal((await snapshot(host)).status, 'open');
+});
+
+test('everyone-control guests keep playback controls through the host-absence grace and lose them once suspension is due', async () => {
+    const { host, guest } = await pair(); const hostSeenAt = now;
+    assert.equal((await api.mutate(host.actor, control(host, await snapshot(host), 'setControlMode', { mode: 'everyone' }))).outcome, 'applied');
+    await playPair(host, guest); await api.disconnected(host.actor);
+    const absent = await snapshot(guest);
+    assert.equal(absent.status, 'open'); assert.equal(absent.timeline?.state, 'playing');
+    assert.equal(absent.hostAbsenceDeadlineMs, hostSeenAt + ROOM_LIMITS.hostGraceMs);
+    assert.equal((await api.mutate(host.actor, control(host, await snapshot(host), 'seek', { positionMs: 1_000 }))).code, 'host_absent');
+    assert.equal((await api.mutate(guest.actor, control(guest, absent, 'seek', { positionMs: 5_000 }))).outcome, 'applied');
+    const seeking = await snapshot(guest);
+    assert.deepEqual(seeking.preparation?.cohortMembershipIds, [seeking.self.memberId]);
+    await ready(guest, seeking); const sought = await snapshot(guest);
+    assert.equal(sought.timeline?.state, 'playing'); assert.equal(sought.timeline?.positionMs, 5_000);
+    now = hostSeenAt + ROOM_LIMITS.hostGraceMs - 1; await connect(guest, sought);
+    assert.equal((await api.mutate(guest.actor, control(guest, await snapshot(guest), 'next'))).outcome, 'applied');
+    const advancing = await snapshot(guest);
+    assert.equal(advancing.timeline?.entryId, absent.queue[1].entryId); assert.equal(advancing.status, 'open');
+    // The deadline belongs to the last heartbeat: it applies before any sweep records the suspension.
+    now += 1;
+    assert.equal((await api.mutate(guest.actor, control(guest, await snapshot(guest), 'previous'))).code, 'host_absent');
+    await ready(guest, advancing); assert.equal((await snapshot(guest)).timeline?.state, 'preparing');
+    await api.sweep(); const suspended = await snapshot(guest);
+    assert.equal(suspended.status, 'suspended'); assert.equal(suspended.timeline?.state, 'paused'); assert.equal(suspended.preparation, null);
+    assert.equal((await api.mutate(guest.actor, control(guest, suspended, 'pause'))).outcome, 'noop');
+    // Everyone control never bypasses suspension, including after the host has reconnected.
+    await connect(host, await snapshot(host)); await connect(guest, await snapshot(guest));
+    assert.equal((await snapshot(guest)).status, 'suspended');
+    assert.equal((await api.mutate(guest.actor, control(guest, await snapshot(guest), 'play'))).code, 'host_absent');
+    assert.equal((await snapshot(guest)).timeline?.state, 'paused');
+    assert.equal((await api.mutate(host.actor, control(host, await snapshot(host), 'play'))).outcome, 'applied');
+    assert.equal((await snapshot(guest)).status, 'open');
+    assert.equal((await api.mutate(guest.actor, control(guest, await snapshot(guest), 'seek', { positionMs: 0 }))).outcome, 'applied');
+});
+
+test('host-only rooms keep the running timeline and natural advancement through the host-absence grace', async () => {
+    const { host, guest } = await pair(); const hostSeenAt = now; const playing = await playPair(host, guest);
+    await api.disconnected(host.actor);
+    assert.equal((await api.mutate(guest.actor, control(guest, await snapshot(guest), 'next'))).code, 'room_forbidden');
+    now += media[0].durationMs + ROOM_LIMITS.startLeadMs; await connect(guest, await snapshot(guest)); await api.sweep();
+    const advanced = await snapshot(guest);
+    assert.equal(advanced.status, 'open'); assert.equal(advanced.timeline?.entryId, playing.queue[1].entryId);
+    assert.equal(advanced.timeline?.state, 'preparing'); assert.deepEqual(advanced.preparation?.cohortMembershipIds, [advanced.self.memberId]);
+    await ready(guest, advanced); assert.equal((await snapshot(guest)).timeline?.state, 'playing');
+    now = hostSeenAt + ROOM_LIMITS.hostGraceMs; await connect(guest, await snapshot(guest)); await api.sweep();
+    const suspended = await snapshot(guest); assert.equal(suspended.status, 'suspended'); assert.equal(suspended.timeline?.state, 'paused');
+});
+
+test('a preparation accepted before the host disconnects still starts for the connected cohort during the grace', async () => {
+    const { host, guest } = await pair();
+    assert.equal((await api.mutate(host.actor, control(host, await snapshot(host), 'play'))).outcome, 'applied');
+    const preparing = await snapshot(guest); await api.disconnected(host.actor);
+    const absent = await snapshot(guest);
+    assert.equal(absent.timeline?.state, 'preparing'); assert.equal(absent.preparation?.preparationId, preparing.preparation?.preparationId);
+    await ready(guest, preparing); const started = await snapshot(guest);
+    assert.equal(started.timeline?.state, 'playing'); assert.equal(started.timeline?.playbackGeneration, preparing.timeline?.playbackGeneration);
+    assert.equal(started.members.find(value => value.memberId === started.hostMemberId)?.ready, false);
+});
+
+test('a silently dropped host is past its grace once its heartbeat is stale, even before a sweep records the absence', async () => {
+    const { host, guest } = await pair(); const hostSeenAt = now;
+    assert.equal((await api.mutate(host.actor, control(host, await snapshot(host), 'setControlMode', { mode: 'everyone' }))).outcome, 'applied');
+    now = hostSeenAt + ROOM_LIMITS.hostGraceMs - 1; await connect(guest, await snapshot(guest));
+    assert.equal((await api.mutate(guest.actor, control(guest, await snapshot(guest), 'play'))).outcome, 'applied');
+    const preparing = await snapshot(guest); assert.equal(preparing.preparation?.cohortMembershipIds.length, 2);
+    now += 1; const stale = await snapshot(guest);
+    assert.equal(stale.status, 'open'); assert.equal(stale.hostAbsenceDeadlineMs, null);
+    assert.equal((await api.mutate(guest.actor, control(guest, stale, 'seek', { positionMs: 0 }))).code, 'host_absent');
+    await ready(guest, preparing); assert.equal((await snapshot(guest)).timeline?.state, 'preparing');
+    await api.sweep(); const suspended = await snapshot(guest);
+    assert.equal(suspended.status, 'suspended'); assert.equal(suspended.timeline?.state, 'paused'); assert.equal(suspended.preparation, null);
+    assert.equal(suspended.hostAbsenceDeadlineMs, hostSeenAt + ROOM_LIMITS.hostGraceMs);
 });
 
 test('five minute host absence closes the room and releases all exact participation slots', async () => {
@@ -1325,13 +1398,17 @@ test('block/deactivation lifecycle work enlists one transaction and rolls back w
 
 test('session revocation is fenced against read/control and freezes host readiness immediately', async () => {
     const { host, guest } = await pair(); await api.mutate(host.actor, control(host, await snapshot(host), 'play'));
+    const preparing = await snapshot(host);
     await transaction(async session => {
         await database().collection('authSessions').updateOne({ _id: new ObjectId(host.actor.sessionId) }, { $set: { revokedAt: new Date(now) } }, { session });
         await applyRoomSafety({ kind: 'session', accountId: host.actor.userId, sessionId: host.actor.sessionId }, session, now);
     });
     await assert.rejects(api.currentRoom(host.actor), isError('social_session_required'));
-    const state = await snapshot(guest); assert.equal(state.timeline?.state, 'paused'); assert.equal(state.preparation, null);
+    await assert.rejects(ready(host, preparing), isError('social_session_required'));
+    const state = await snapshot(guest); assert.equal(state.status, 'open'); assert.equal(state.timeline?.state, 'preparing');
     assert.equal(state.members.find(value => value.memberId === state.hostMemberId)?.connected, false);
+    // Revocation uses ordinary absence handling: the accepted preparation completes without the revoked device.
+    await ready(guest, await snapshot(guest)); assert.equal((await snapshot(guest)).timeline?.state, 'playing');
 });
 
 test('unknown committed outcomes retain same-key evidence without automatically executing another command', async () => {

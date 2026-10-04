@@ -141,10 +141,9 @@ export const applyRoomSafety = async (change: RoomSafetyChange, session: ClientS
             if (member.controllerSessionId !== change.sessionId) continue;
             member.connectionPresent = false;
             member.readyPlaybackGeneration = undefined;
-            if (room.hostMembershipId === member.membershipId) {
-                room.hostAbsentSince = member.lastSeenAt;
-                if (room.preparation) pauseRoom(room, now);
-            }
+            // A revoked host controller follows ordinary absence handling: the grace keeps an accepted
+            // preparation running for the connected cohort, and suspension pauses playback when it is due.
+            if (room.hostMembershipId === member.membershipId) room.hostAbsentSince = member.lastSeenAt;
             await persistRoom(room, session, now);
         } else {
             await removeRoomMember(room, member.membershipId, session, now);

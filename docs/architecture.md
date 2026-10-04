@@ -1213,17 +1213,21 @@ and never replays old transport commands as new intent.
 
 If the host's active controller disconnects, retain its role during a 30-second
 grace measured from last verified controller liveness (do not start a second
-grace after presence expiry). Cancel pending preparation; the current committed
-timeline may continue through that grace, but new Play/seek/select/Next and natural
-advancement cannot start a preparation while the host is absent. Shared Pause
-remains available to currently authorized controllers. An observer's socket does
-not establish host-controller liveness.
+grace after presence expiry). The grace changes no shared playback: the committed
+timeline, an accepted preparation (whose cohort drops the disconnected host
+device) and natural advancement continue, and Everyone-control participants keep
+Play/seek/select/Previous/Next. The absent host's own disconnected device receives
+`host_absent` for those commands until it reconnects, which ends the absence.
+Shared Pause remains available to currently authorized controllers. An observer's
+socket does not establish host-controller liveness.
 
-At the deadline, the server pauses and persists a host-absent suspension, fences
-timers, and rejects attempts to resume in either control mode. Everyone control
-does not bypass that suspension. A host that returns must authenticate, reclaim
-its controller through the normal generation fence, and synchronize; the paused
-room resumes only through a subsequent permitted explicit Play. If host absence
+At the deadline, the server pauses and persists a host-absent suspension, cancels
+any preparation, fences timers, and rejects non-Pause playback commands with
+`host_absent` in either control mode, also before a delayed sweep records the
+suspension. Everyone control does not bypass that suspension, even after the host
+reconnects. A host that returns must authenticate, reclaim its controller through
+the normal generation fence, and synchronize; the paused room resumes only through
+the host's subsequent explicit Play. If host absence
 reaches five minutes, close the room even if guests are still connected. No
 automatic promotion is performed. A successful explicit transfer before departure
 lets the room continue under its new host.

@@ -403,10 +403,16 @@ Playlist access retain their existing rules.
   members, transferring and changing the mode need the host's active playback
   device.
 - Host absence is measured from the last confirmed controller heartbeat,
-  with a 30-second grace period. Both control modes suspend
-  after that grace, and five minutes of host absence ends the room. Reconnection
-  never automatically resumes a suspended timeline: the host explicitly starts it; personal audio resumes only through
-  explicit resync and readiness. Every room expires after 24 hours.
+  with a 30-second grace period. The grace changes no shared playback: the
+  current timeline, an already accepted preparation and automatic advancement
+  continue, and Everyone control participants keep their playback controls. The
+  absent host's disconnected device cannot change shared playback until it
+  reconnects. Both control modes suspend after that grace: shared playback
+  pauses and guests cannot start it again, even after the host returns. Five
+  minutes of host absence ends the room. Reconnection never automatically
+  resumes a suspended timeline: the host explicitly starts it; personal audio
+  resumes only through explicit resync and readiness. Every room expires after
+  24 hours.
 - Revoking the playing controller's session disconnects that controller and
   triggers absence handling. Revoking an observer session cannot remove another
   device's membership. Changing a password preserves a room controller on the
