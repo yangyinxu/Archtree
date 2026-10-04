@@ -469,6 +469,42 @@ test('unauthenticated social requests fall back to an IP window that cannot spen
     assert.deepEqual(actors, [actor]);
 });
 
+test('social mutation slots follow the account, so a neighbor on the same IP keeps its own', { timeout: 10_000 }, async t => {
+    const { api, actors } = fixtureApi();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const waiters: Array<{ count: number; resolve: () => void }> = [];
+    let entered = 0;
+    const enteredAt = (count: number) => new Promise<void>(resolve => {
+        if (entered >= count) resolve(); else waiters.push({ count, resolve });
+    });
+    const issueScope = api.issueScope;
+    api.issueScope = async who => {
+        entered += 1;
+        for (const waiter of waiters) if (entered >= waiter.count) waiter.resolve();
+        await gate;
+        return issueScope(who);
+    };
+    const { request } = await listen(t, api);
+    const neighbor = { headers: { 'x-test-account': 'synthetic-other-account' } };
+    try {
+        const held = Array.from({ length: 4 }, () => request('/mutation-scopes', {}));
+        await enteredAt(4);
+        const refused = await request('/mutation-scopes', {});
+        assert.equal(refused.status, 429);
+        assert.equal(refused.headers.get('retry-after'), '2');
+        assert.deepEqual(await refused.json(), { message: 'Too many concurrent requests.' });
+        // Both accounts share the loopback address; the neighbor's mutation is admitted beside the four held ones.
+        const admitted = request('/mutation-scopes', {}, neighbor);
+        // A refusal settles the request without entering the service, so it must not wait for a fifth entry.
+        await Promise.race([enteredAt(5), admitted]);
+        release();
+        for (const response of [...await Promise.all(held), await admitted]) assert.equal(response.status, 200);
+        assert.equal(actors.filter(value => value.userId === 'synthetic-other-account').length, 1);
+        assert.equal(actors.length, 5);
+    } finally { release(); }
+});
+
 test('real application mounts social authentication before its general body parser', async t => {
     resetRateLimitWindowsForTests();
     const { base } = await start(t, createApp({ environment: 'test' }));

@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
 type SocialSuite = { name: string; port: number; spec?: string; grep?: RegExp };
 type SocialBrowserSuite = SocialSuite & { browser: 'chromium' | 'firefox' | 'webkit' };
 
-// Each test owns one fixture process, so one test's requests cannot spend another's per-IP room or social windows.
+// Each test owns one fixture process, so one test's requests cannot spend another's per-IP or per-account rate windows.
 // Ports 4187/4188 belong to the separate room soak configuration.
 const roomsRecovery = { name: 'rooms-recovery', port: 4189, spec: 'rooms',
   grep: /real room command races, controller recovery and running host transfer/ } satisfies SocialSuite;

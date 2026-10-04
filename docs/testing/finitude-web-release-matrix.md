@@ -108,7 +108,10 @@ eight request-window), with no media-admission denials. Shared controls retained
 their strict HTTP 200/applied and one-POST assertions. Earlier setup and
 shared-selection 429 failures are failed attempts, separate from this pass;
 read reservations and bounded known-concurrency GET recovery are in the tested
-candidate.
+candidate. That run predates per-account room HTTP limits: all eight members then
+shared one loopback request window and per-client concurrency pool. Later runs give
+each member's account its own, so this run's 429 counts are not a baseline for
+them.
 
 The longer run was stopped at the user's request. Its last complete progress
 sample was at 8,528 seconds (2 h 22 min 8 s), with 171 control cycles, 16 recovery

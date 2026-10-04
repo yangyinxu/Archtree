@@ -372,7 +372,7 @@ Run `npm test`, `npm run build`, `npm run test:integration`, and
 MongoDB/S3/WebSocket browser flows. Each social test owns a disposable
 server, database and object store, including separate rate-limit windows; the
 two rooms tests run as the `chromium-rooms` and `chromium-rooms-recovery`
-projects so neither can exhaust the other's per-IP room quota. Keep the
+projects so neither can exhaust the other's rate windows. Keep the
 ordinary listener E2E gate for playback continuity, navigation and
 accessibility changes. The social E2E uses a disposable
 headed Chromium profile to verify real background tab visibility; run it in a
@@ -929,8 +929,8 @@ continues local pause/resume checks. No production quota is reset or relaxed.
 Every run first proves reload without autoplay or automatic takeover, followed by
 explicit **Use this device** recovery. Timed cycles repeat local pause during
 shared selection, shared pause/play, and device recovery. Each shared gesture
-honors previously observed `Retry-After` and published shared-IP request-window
-headroom before dispatch, sends one command, and must receive an
+honors previously observed `Retry-After` and published request-window headroom
+from every participant before dispatch, sends one command, and must receive an
 applied outcome and the exact selected entry or transport state; continued
 playback of an old entry cannot count as a successful selection. The gate checks actual
 media-clock advancement and capture-time-adjusted pairwise drift against the
@@ -947,12 +947,13 @@ gate separately from builds and other load generators. Memory extrema describe
 that application process, exclude browser/MongoDB/whole-machine memory, and do
 not establish absence of leaks. A local pass does not
 certify AWS/S3 capacity, physical audio, branded browsers, or a longer duration.
-Multiple contexts share one loopback source IP and the real per-IP admission
+Multiple contexts share one loopback source IP and the real per-IP media admission
 limits; a playback pass does not imply that every background HTTP read succeeded.
-Room GET/HEAD work is capped at four/IP and 40/process within the unchanged total
-six/IP and 48/process HTTP pool, reserving capacity from read bursts for explicit
-controls and tickets. All room requests still share the 180/minute/IP window;
-other writes can still consume the shared concurrency capacity.
+Room HTTP limits follow each member's account instead: GET/HEAD work is capped at
+four/account and 40/process within the unchanged total six/account and 48/process
+HTTP pool, reserving capacity from read bursts for explicit controls and tickets,
+and each account's room requests share its own 180/minute window. Other writes can
+still consume the shared process-wide concurrency capacity.
 Increasing members to eight is an admission/capacity stress case, not a guaranteed
 passing profile: concurrent replacement media requests can overlap old requests
 at the per-IP media ceiling, while snapshot-triggered reads also compete for room

@@ -505,3 +505,36 @@ test('social request windows follow the database-verified account and count reje
     assert.equal(renewedProfile.headers.get('ratelimit-remaining'), '119');
     assert.equal((await send(neighbor.token, '/me/profile')).status, 200);
 });
+
+test('room request windows follow the database-verified account apart from the social window and count rejected credentials by IP', async () => {
+    const send = async (token: string | undefined, path = '/capabilities') => {
+        const response = await fetch(`${base}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        await response.arrayBuffer();
+        return response;
+    };
+    const owner = await account(); const neighbor = await account(); const revoked = await account();
+    for (let count = 0; count < 180; count += 1) assert.equal((await send(owner.token)).status, 200);
+    const exhausted = await send(owner.token);
+    assert.equal(exhausted.status, 429);
+    assert.equal(exhausted.headers.get('ratelimit-limit'), '180');
+    // Room traffic leaves the same account's separate social window untouched.
+    const social = await send(owner.token, '/me/profile');
+    assert.equal(social.status, 200);
+    assert.equal(social.headers.get('ratelimit-limit'), '120');
+    assert.equal(social.headers.get('ratelimit-remaining'), '119');
+    // Every caller here shares the loopback address; a second account keeps its own full room window.
+    const neighborRoom = await send(neighbor.token);
+    assert.equal(neighborRoom.status, 200);
+    assert.equal(neighborRoom.headers.get('ratelimit-remaining'), '179');
+
+    // A revoked token is unauthenticated, so it spends the address window rather than its former account's.
+    await AuthSession.revokeById(revoked.userId, revoked.sessionId);
+    for (let count = 0; count < 180; count += 1) assert.equal((await send(revoked.token)).status, 401);
+    assert.equal((await send(revoked.token)).status, 429);
+    assert.equal((await send(undefined)).status, 429);
+    const renewed = await createSession({ _id: revoked.id, email: revoked.email, role: 'user' });
+    const renewedRoom = await send(renewed.accessToken);
+    assert.equal(renewedRoom.status, 200);
+    assert.equal(renewedRoom.headers.get('ratelimit-remaining'), '179');
+    assert.equal((await send(neighbor.token)).status, 200);
+});

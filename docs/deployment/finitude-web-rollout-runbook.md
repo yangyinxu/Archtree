@@ -23,6 +23,12 @@ canonical in [`../business-rules.md`](../business-rules.md).
   configuration-deployment HTTPS entry points, and bootstrap/renewal timer
   hooks. A candidate missing any one of those hooks is not deployable to the
   single-instance environment.
+- Request rate windows and concurrency slots, including the per-account social
+  and room budgets, live in the one application process and reset on restart.
+  Keep the environment at one instance and one process; adding another would
+  give every account and IP an extra budget. Design shared limits first, as the
+  [single-process capacity contract](../architecture.md#single-process-capacity-contract)
+  requires.
 - The Playlist release adds private `playlists` and account-mutation receipt
   collections plus their owner, replay, and expiry indexes. These changes are
   additive and own no S3 objects; verify every required production index before

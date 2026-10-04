@@ -17,13 +17,18 @@ const deferred = () => {
     return { promise, resolve };
 };
 type Result = { status: number; headers: IncomingHttpHeaders; body: string };
-type Options = { method?: string; ip?: string; hold?: boolean; body?: unknown;
+type Options = { method?: string; ip?: string; account?: string; hold?: boolean; body?: unknown;
     headers?: Record<string, string>; authenticate?: boolean };
 type Operation = { entered: ReturnType<typeof deferred>; gate: ReturnType<typeof deferred>;
     closed: ReturnType<typeof deferred>; completed: ReturnType<typeof deferred>;
-    observed: boolean; authenticate: boolean };
+    observed: boolean; authenticate: boolean; account: string };
+const defaultAccount = 'synthetic-room-account';
 
-/** Drives the real router and production lifecycle through sockets, holding only injected service work. */
+/**
+ * Drives the real router and production lifecycle through sockets, holding only injected service work.
+ * The synthetic identity is installed before the router; the router's own optional resolution cannot
+ * verify the synthetic Bearer value and leaves it in place, as it leaves a database-verified context.
+ */
 const listen = async (t: TestContext) => {
     const operations = new Map<string, Operation>();
     const clients: ReturnType<typeof request>[] = [];
@@ -60,7 +65,7 @@ const listen = async (t: TestContext) => {
         res.once('close', operation.closed.resolve);
         onRequestWorkComplete(req, res, operation.completed.resolve);
         if (operation.authenticate) (req as AuthenticatedRequest).auth = {
-            userId: 'synthetic-room-account', sessionId: 'synthetic-room-session',
+            userId: operation.account, sessionId: `${operation.account}-session`,
             email: 'fixture@example.test', role: 'user'
         };
         context.run({ operation, req, res }, next);
@@ -81,7 +86,8 @@ const listen = async (t: TestContext) => {
         const id = String(++sequence);
         const method = options.method ?? 'GET';
         const operation: Operation = { entered: deferred(), gate: deferred(), closed: deferred(),
-            completed: deferred(), observed: false, authenticate: options.authenticate !== false };
+            completed: deferred(), observed: false, authenticate: options.authenticate !== false,
+            account: options.account ?? defaultAccount };
         operations.set(id, operation);
         if (!options.hold) operation.gate.resolve();
         const body = options.body ?? (method === 'POST' ? {
@@ -200,19 +206,19 @@ test('six simultaneous per-client mutations remain bounded and total refusals ca
     assert.equal(fixture.maximumActive, 6);
 });
 
-test('distinct trusted-proxy clients leave eight global command slots beneath the unchanged total ceiling', { timeout: 10_000 }, async t => {
+test('distinct accounts leave eight global command slots beneath the unchanged total ceiling', { timeout: 10_000 }, async t => {
     resetRateLimitWindowsForTests();
     const fixture = await listen(t);
     const reads: Held[] = [];
     for (let client = 1; client <= 10; client++) for (let index = 0; index < 4; index++) {
-        reads.push(await hold(fixture, { ip: `198.51.100.${client}` }));
+        reads.push(await hold(fixture, { account: `synthetic-reader-${client}`, ip: `198.51.100.${client}` }));
     }
-    await refusal(fixture.send('/rooms/current', { ip: '198.51.100.20' }));
+    await refusal(fixture.send('/rooms/current', { account: 'synthetic-reader-20', ip: '198.51.100.20' }));
     const commands: Held[] = [];
     for (let client = 21; client <= 22; client++) for (let index = 0; index < 4; index++) {
-        commands.push(await hold(fixture, { method: 'POST', ip: `198.51.100.${client}` }));
+        commands.push(await hold(fixture, { method: 'POST', account: `synthetic-controller-${client}`, ip: `198.51.100.${client}` }));
     }
-    await refusal(fixture.send('/room-commands', { method: 'POST', ip: '198.51.100.23' }));
+    await refusal(fixture.send('/room-commands', { method: 'POST', account: 'synthetic-controller-23', ip: '198.51.100.23' }));
     assert.equal(fixture.active, 48);
     assert.equal(fixture.calls.filter(value => value === 'command').length, 8);
     await finish([...reads, ...commands]);
@@ -224,17 +230,17 @@ test('48 simultaneous mutations stay bounded globally and rejected mixed reads l
     const fixture = await listen(t);
     const commands: Held[] = [];
     for (let client = 1; client <= 8; client++) for (let index = 0; index < 6; index++) {
-        commands.push(await hold(fixture, { method: 'POST', ip: `192.0.2.${client}` }));
+        commands.push(await hold(fixture, { method: 'POST', account: `synthetic-member-${client}`, ip: `192.0.2.${client}` }));
     }
-    await refusal(fixture.send('/room-commands', { method: 'POST', ip: '192.0.2.20' }));
-    for (let index = 0; index < 5; index++) await refusal(fixture.send('/rooms/current', { ip: '192.0.2.20' }));
+    await refusal(fixture.send('/room-commands', { method: 'POST', account: 'synthetic-member-20', ip: '192.0.2.20' }));
+    for (let index = 0; index < 5; index++) await refusal(fixture.send('/rooms/current', { account: 'synthetic-member-20', ip: '192.0.2.20' }));
     assert.deepEqual(fixture.calls, Array(48).fill('command'));
     await finish(commands);
     const reads: Held[] = [];
     for (let client = 21; client <= 30; client++) for (let index = 0; index < 4; index++) {
-        reads.push(await hold(fixture, { ip: `192.0.2.${client}` }));
+        reads.push(await hold(fixture, { account: `synthetic-member-${client}`, ip: `192.0.2.${client}` }));
     }
-    await refusal(fixture.send('/rooms/current', { ip: '192.0.2.31' }));
+    await refusal(fixture.send('/rooms/current', { account: 'synthetic-member-31', ip: '192.0.2.31' }));
     await finish(reads);
     assert.equal(fixture.maximumActive, 48);
 });
@@ -275,21 +281,87 @@ test('auth, viewer, query, content-type and JSON bounds still reject before serv
     await finish(reads);
 });
 
-test('the existing 180-request room window still covers reads and explicit commands together', { timeout: 10_000 }, async t => {
+test('the 180-request room window follows one account across addresses and covers reads and commands together', { timeout: 10_000 }, async t => {
     resetRateLimitWindowsForTests();
     const fixture = await listen(t);
     for (let index = 0; index < 180; index++) {
-        const operation = fixture.send('/capabilities');
+        // Alternating addresses cannot refill the account's window.
+        const operation = fixture.send('/capabilities', { ip: index % 2 ? '198.51.100.40' : '203.0.113.1' });
         const response = await operation.result;
         assert.equal(response.status, 200);
         assert.equal(response.headers['ratelimit-limit'], '180');
         assert.equal(response.headers['ratelimit-remaining'], String(179 - index));
         await operation.completed;
     }
-    const response = await fixture.send('/room-commands', { method: 'POST' }).result;
+    const response = await fixture.send('/room-commands', { method: 'POST', ip: '192.0.2.40' }).result;
     assert.equal(response.status, 429);
     assert.equal(response.headers['ratelimit-remaining'], '0');
     assert.ok(Number(response.headers['retry-after']) > 0);
     assert.deepEqual(JSON.parse(response.body), { message: 'Too many requests. Please try again later.' });
     assert.deepEqual(fixture.calls, []);
+    // A neighbor behind the same address keeps a complete window of its own.
+    const neighbor = await fixture.send('/rooms/current', { account: 'synthetic-room-neighbor' }).result;
+    assert.equal(neighbor.status, 200);
+    assert.equal(neighbor.headers['ratelimit-remaining'], '179');
+    assert.deepEqual(fixture.calls, ['read']);
+    assert.equal((await fixture.send('/capabilities').result).status, 429);
+});
+
+test('unauthenticated room requests spend an address window that never spends an account budget', { timeout: 10_000 }, async t => {
+    resetRateLimitWindowsForTests();
+    const fixture = await listen(t);
+    for (let index = 0; index < 180; index++) {
+        const operation = fixture.send('/capabilities', { authenticate: false });
+        const response = await operation.result;
+        assert.equal(response.status, 401);
+        assert.equal(response.headers['ratelimit-remaining'], String(179 - index));
+        await operation.completed;
+    }
+    const denied = await fixture.send('/rooms/current', { authenticate: false }).result;
+    assert.equal(denied.status, 429);
+    assert.ok(Number(denied.headers['retry-after']) > 0);
+    assert.deepEqual(JSON.parse(denied.body), { message: 'Too many requests. Please try again later.' });
+    // Another address keeps its own unauthenticated window and still receives the authentication failure.
+    const elsewhere = await fixture.send('/capabilities', { authenticate: false, ip: '198.51.100.41' }).result;
+    assert.equal(elsewhere.status, 401);
+    assert.equal(elsewhere.headers['ratelimit-remaining'], '179');
+    // An account on the exhausted address keeps its full window.
+    const authenticated = await fixture.send('/rooms/current').result;
+    assert.equal(authenticated.status, 200);
+    assert.equal(authenticated.headers['ratelimit-remaining'], '179');
+    assert.deepEqual(fixture.calls, ['read']);
+});
+
+test('accounts sharing one trusted-proxy address keep separate room concurrency slots', { timeout: 10_000 }, async t => {
+    resetRateLimitWindowsForTests();
+    const fixture = await listen(t);
+    const neighbor = { account: 'synthetic-room-neighbor' };
+    const held: Held[] = [];
+    for (let index = 0; index < 4; index++) held.push(await hold(fixture));
+    await refusal(fixture.send());
+    for (let index = 0; index < 4; index++) held.push(await hold(fixture, neighbor));
+    await refusal(fixture.send('/rooms/current', neighbor));
+    for (const options of [{}, {}, neighbor, neighbor]) held.push(await hold(fixture, { ...options, method: 'POST' }));
+    await refusal(fixture.send('/room-commands', { method: 'POST' }));
+    await refusal(fixture.send('/room-commands', { ...neighbor, method: 'POST' }));
+    assert.equal(fixture.active, 12);
+    assert.equal(fixture.calls.filter(value => value === 'command').length, 4);
+    await finish(held);
+    assert.equal(fixture.maximumActive, 12);
+});
+
+test('one account gains no room concurrency slots by changing address', { timeout: 10_000 }, async t => {
+    resetRateLimitWindowsForTests();
+    const fixture = await listen(t);
+    const held: Held[] = [];
+    for (let index = 0; index < 4; index++) held.push(await hold(fixture, { ip: `198.51.100.${50 + index}` }));
+    await refusal(fixture.send('/rooms/current', { ip: '198.51.100.60' }));
+    for (let index = 0; index < 2; index++) held.push(await hold(fixture, { method: 'POST', ip: `198.51.100.${61 + index}` }));
+    await refusal(fixture.send('/room-commands', { method: 'POST', ip: '198.51.100.70' }));
+    assert.equal(fixture.active, 6);
+    // A completed read returns its slot to the account, whichever address uses it next.
+    await finish([held[0]]);
+    held.push(await hold(fixture, { ip: '198.51.100.71' }));
+    await finish(held.slice(1));
+    assert.equal(fixture.maximumActive, 6);
 });

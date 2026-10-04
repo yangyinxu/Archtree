@@ -46,7 +46,7 @@ export const roomSoakElapsedSeconds = (startedAtMs: number | null, nowMs: number
     return (nowMs - startedAtMs) / 1000;
 };
 
-/** Uses published shared-IP window headroom before another explicit gesture; never replays a denied command. */
+/** Uses a participant's published request-window headroom before another explicit gesture; never replays a denied command. */
 export const roomSoakWindowAdmissionAt = (headers: Record<string, string>, now: number, participants: number): number => {
     if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(participants) || participants < 2 || participants > 8) return 0;
     const limit = headers['ratelimit-limit'], remaining = headers['ratelimit-remaining'], reset = headers['ratelimit-reset'];

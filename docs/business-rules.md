@@ -407,6 +407,12 @@ Playlist access retain their existing rules.
   Switching rooms back on resumes no paused or suspended room by itself. With
   only rooms off, social identity, friendships, music shares and ordinary
   listening status keep working; listening status from room playback stops.
+- Room and social request allowances belong to the signed-in account, including
+  how many requests may run at once. Listeners who share a network address, such
+  as a household, office or campus, do not spend each other's allowance, and
+  changing networks does not add to an account's allowance. Signed-out requests
+  and requests with expired or revoked credentials are limited by network
+  address and never spend an account's allowance.
 
 The wire protocol and operational bounds are documented in
 [the room API contract](architecture.md#implemented-audio-room-api).

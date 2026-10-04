@@ -314,8 +314,9 @@ new-scope replay.
 Durable budgets are 24 scopes/day, 30 new mutation attempts/minute and 120 reads/minute
 per account, plus 100 newly received requests/day. Profile deactivation cannot reset
 these counters. A 120 requests/minute HTTP window per authenticated account (per IP
-for unauthenticated requests, including revoked or expired tokens) and per-IP
-mutation concurrency limits provide additional request protection. Retained
+for unauthenticated requests, including revoked or expired tokens) and per-account
+mutation concurrency limits (four per account, 32 per process) provide additional
+request protection. Retained
 receipts permit 1,000 admission attempts plus 128 safety receipts and a final
 reserved deactivation receipt; admission exhaustion therefore cannot consume the
 privacy-exit reserve. Retries consume no new receipt.
@@ -376,12 +377,20 @@ account viewer, reject extra query/body fields, and return allowlisted DTOs.
 Cookie writes retain the existing same-origin JSON protections. Room HTTP bodies
 are capped at 16 KiB; social identity bodies remain capped at 4 KiB.
 `X-Finitude-Room-Client` identifies a fresh tab lifetime, not authorization.
-Room HTTP keeps its shared 180-request/minute/IP window and total concurrency
-ceiling of six/IP and 48/process. GET/HEAD work has a smaller four/IP,
-40/process ceiling inside that pool, so read bursts alone cannot occupy every
-control slot. Commands and tickets still share the original total ceiling.
-Rejected admission returns HTTP 429 with `Retry-After`; occupied slots remain
-held until both the response and tracked work complete, including disconnects.
+Room HTTP has a 180-request/minute window per authenticated account and a total
+concurrency ceiling of six/account and 48/process. GET/HEAD work has a smaller
+four/account, 40/process ceiling inside that pool, so read bursts alone cannot
+occupy every control slot. Commands and tickets still share the original total
+ceiling. Identity resolves before the window, as on the social router, so members
+behind one NAT keep separate budgets and a new address adds no budget to an
+account. Unauthenticated requests, including revoked or expired tokens, spend a
+180/minute window per IP before their 401, never an account's window; an
+authenticated request over quota still pays the session and user lookups but no
+room work. Room and social windows are separate scopes. Rejected admission returns
+HTTP 429 with `Retry-After`; occupied slots remain held until both the response
+and tracked work complete, including disconnects. These windows and slots are
+process memory, which is complete for the single production process; see the
+[single-process capacity contract](#single-process-capacity-contract).
 
 | Endpoint under `/api/social/v1` | Contract |
 | --- | --- |
@@ -1708,7 +1717,11 @@ loads the environment. Its existing fair queue and cancellation rules remain.
 
 These counters, rate windows, upload/transform limits, and media admission limits
 protect one process. They are not a deployment-wide quota. The current architecture
-remains a single application process per instance. Before multiple replicas are
+remains a single application process per instance. The per-account room and social
+request windows and concurrency slots are kept in that process's memory on purpose:
+on the single Elastic Beanstalk instance they are complete per-account budgets, and a
+restart only resets the current window. A second process or instance would give
+every account and IP another full budget. Before multiple replicas are
 introduced, explicitly design shared abuse limits and measure the aggregate media
 and provider budget. A shared cache, queue, CDN, or worker service is not introduced
 without a measured requirement and a compatible ready/deletion/revocation contract.

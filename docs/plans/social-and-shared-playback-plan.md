@@ -498,7 +498,9 @@ Room HTTP read reservations and bounded known-concurrency GET recovery address
 the earlier shared-command and invitation-read admission failures without raising
 the total request or rate limits. The passing smoke still observed 124 read 429s
 (116 concurrency and eight request-window denials); retain these separately from
-command acceptance. Final local checks passed 710 backend tests, 989 Web tests,
+command acceptance. Those members shared one per-IP room window and concurrency
+pool; room HTTP limits are now keyed per authenticated account (per IP only for
+unauthenticated requests). Final local checks passed 710 backend tests, 989 Web tests,
 580 integration tests, the production build and E2E TypeScript, and two selected
 Windows native recovery/command and compressed-media cases. Cross-engine
 compressed-media and concurrent-command failures remain independent gates; do

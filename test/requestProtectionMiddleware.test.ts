@@ -6,6 +6,7 @@ import {
     accountOrClientKey,
     authEmailAccountRateLimit,
     authRateLimit,
+    limitConcurrency,
     rateLimit,
     refreshClientRateLimit,
     refreshCredentialRateLimit,
@@ -174,6 +175,44 @@ test('account-keyed windows separate accounts on one IP and fall back to the IP 
     assert.equal(invoke(sharedAddress, 'dolor-account').admitted, true);
     assert.equal(accountOrClientKey({ ip: sharedAddress, socket: {} } as any), `ip:${sharedAddress}`);
     assert.equal(accountOrClientKey({ ip: sharedAddress, socket: {}, auth: { userId: 'lorem-account' } } as any), 'account:lorem-account');
+});
+
+test('account-keyed concurrency separates accounts on one IP, follows an account across IPs and keeps one process ceiling', () => {
+    const limiter = limitConcurrency('account-concurrency-test', 2, 5, accountOrClientKey);
+    const open: EventEmitter[] = [];
+    const invoke = (ip: string, userId?: string) => {
+        const { capture, response } = responseCapture();
+        const events = Object.assign(new EventEmitter(), response);
+        let admitted = false;
+        limiter({ ip, socket: {}, ...(userId ? { auth: { userId } } : {}) } as any, events as any, () => { admitted = true; });
+        if (admitted) open.push(events);
+        return { admitted, capture, events };
+    };
+    const sharedAddress = '203.0.113.31';
+    try {
+        const first = invoke(sharedAddress, 'lorem-account');
+        assert.equal(first.admitted, true);
+        assert.equal(invoke('198.51.100.31', 'lorem-account').admitted, true);
+        // A new address adds no slots to an account that already holds its limit.
+        const refused = invoke('192.0.2.31', 'lorem-account');
+        assert.equal(refused.capture.status, 429);
+        assert.equal(refused.capture.headers['Retry-After'], '2');
+        assert.deepEqual(refused.capture.body, { message: 'Too many concurrent requests.' });
+        // A neighbor on the same address keeps its own slots.
+        assert.equal(invoke(sharedAddress, 'ipsum-account').admitted, true);
+        // Without an account the request falls back to its address, never to an account's slots.
+        const anonymous = invoke(sharedAddress);
+        assert.equal(anonymous.admitted, true);
+        assert.equal(invoke(sharedAddress, 'ipsum-account').admitted, true);
+        // Five occupied slots fill the process-wide ceiling for every key.
+        assert.equal(invoke('192.0.2.32', 'dolor-account').capture.status, 429);
+        assert.equal(invoke('192.0.2.33').capture.status, 429);
+        for (const released of [first, anonymous]) { released.events.emit('finish'); released.events.emit('close'); }
+        // The released slot returns to the account at any address, and its limit still applies with process room left.
+        assert.equal(invoke('192.0.2.34', 'lorem-account').admitted, true);
+        assert.equal(invoke('192.0.2.35', 'lorem-account').capture.status, 429);
+        assert.equal(invoke('192.0.2.32', 'dolor-account').admitted, true);
+    } finally { for (const response of open) response.emit('close'); }
 });
 
 test('analysis capacity bounds different administrators independently from upload capacity', () => {

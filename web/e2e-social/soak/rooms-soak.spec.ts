@@ -129,7 +129,8 @@ test('room playback repeatedly recovers and releases owned transports after sust
     pages = await Promise.all(contexts.map(context => context.newPage()));
     observations = pages.map(observe);
     const awaitAdmission = async () => {
-      // Successful responses can exhaust shared-IP headroom before any rejection; recheck hints received while waiting.
+      // Successful responses can exhaust window headroom before any rejection. Room windows are per account,
+      // so waiting for every participant's hint is conservative; recheck hints received while waiting.
       for (;;) {
         const delay = Math.max(0, ...observations.map(value => value.admissionAtMs())) - Date.now();
         if (delay <= 0) return;

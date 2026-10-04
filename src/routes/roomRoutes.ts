@@ -3,8 +3,8 @@ import { createRoomService } from '../application/rooms/roomService';
 import { isRoomClientId, isRoomIdentifier, normalizeRoomMediaQuery, parseRoomCommand, ROOM_LIMITS, ROOM_MEDIA_DISCOVERY_LIMITS, type RoomActor, type RoomApi } from '../contracts/roomV1';
 import { exactSocialKeys, SocialError } from '../contracts/socialV1';
 import { socialCapacity, type SocialCapacity } from '../config/socialCapacity';
-import { requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
-import { asyncHandler, limitConcurrency, rateLimit, requireSecureAuthTransport } from '../middleware/requestProtectionMiddleware';
+import { attachOptionalAccessAuth, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
+import { accountOrClientKey, asyncHandler, limitConcurrency, rateLimit, requireSecureAuthTransport } from '../middleware/requestProtectionMiddleware';
 import { realtimeSeats, type RealtimeSeatCheck } from '../realtime/realtimeSeats';
 import { issueRoomTicket } from '../realtime/roomTickets';
 import { socialOperations, type SocialOperations, type TicketFailureKind } from '../realtime/socialOperations';
@@ -40,7 +40,15 @@ export const createRoomRouter = (api: RoomApi = createRoomService(), options: Ro
     router.use((req, _res, next) => /^\/(rooms(?:\/|$)|room-commands$|room-invitations(?:\/|$)|room-media(?:\/|$)|realtime-tickets$|capabilities$)/.test(req.path) ? next() : next('router'));
     router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); res.vary('Cookie'); res.vary('Authorization');
         res.vary('X-Finitude-Account-Viewer'); res.vary('X-Finitude-Room-Client'); next(); });
-    router.use(requireSecureAuthTransport, rateLimit('room-http', 180, 60_000), requireAuth, requireCurrentAccountViewer);
+    // Like the social router, identity resolves before the 180/minute window so
+    // the window belongs to the verified account: room members behind one NAT
+    // (a household, office or campus) no longer share it. Unauthenticated
+    // requests, including revoked or expired tokens, are counted by IP and then
+    // rejected, so a stale token cannot spend its former account's budget.
+    // Authenticated requests over quota still pay the session and user lookups
+    // but never reach room service work. requireAuth reuses the resolved context.
+    const requestWindow = rateLimit('room-http', 180, 60_000, undefined, accountOrClientKey);
+    router.use(requireSecureAuthTransport, attachOptionalAccessAuth, requestWindow, requireAuth, requireCurrentAccountViewer);
     router.use((req, _res, next) => {
         if (!(req.method === 'GET' || req.method === 'HEAD') || !/^\/room-media\/search\/?$/.test(req.path)) {
             if (!exactSocialKeys(req.query, [])) return next(invalid());
@@ -50,10 +58,13 @@ export const createRoomRouter = (api: RoomApi = createRoomService(), options: Ro
         next();
     });
     // Reads cannot occupy the entire shared pool; commands and tickets still obey its original ceiling.
-    const readConcurrency = limitConcurrency('room-http-read', 4, 40);
+    // Both per-client ceilings are per account (every request here is authenticated), so one
+    // account's tabs and devices share them, a new address adds no slots, and neighbors on one
+    // address keep their own. The process-wide ceilings are unchanged.
+    const readConcurrency = limitConcurrency('room-http-read', 4, 40, accountOrClientKey);
     router.use((req, res, next) => req.method === 'GET' || req.method === 'HEAD'
         ? readConcurrency(req, res, next) : next());
-    router.use(limitConcurrency('room-http', 6, 48), express.json({ limit: ROOM_LIMITS.commandBytes, strict: true }));
+    router.use(limitConcurrency('room-http', 6, 48, accountOrClientKey), express.json({ limit: ROOM_LIMITS.commandBytes, strict: true }));
     router.get('/capabilities', (_req, res) => res.json({ socialEnabled: process.env.FINITUDE_SOCIAL_ENABLED === 'true',
         roomsEnabled: process.env.FINITUDE_SOCIAL_ENABLED === 'true' && process.env.FINITUDE_ROOMS_ENABLED === 'true' }));
     router.get('/rooms/current', asyncHandler(async (req, res) => { res.json({ room: await api.currentRoom(actor(req)) }); }));

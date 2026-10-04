@@ -67,7 +67,7 @@ test('room soak duration is absent before playback and preserves actual monotoni
     }
 });
 
-test('room soak respects successful shared-IP window headroom before the first denied command', () => {
+test('room soak respects successful published window headroom before the first denied command', () => {
     const now = 1_000_125;
     for (const limit of ['120', '180']) {
         const headers = { 'ratelimit-limit': limit, 'ratelimit-remaining': '8', 'ratelimit-reset': '1061' };

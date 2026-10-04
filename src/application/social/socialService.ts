@@ -119,7 +119,7 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
         return { id: value.id, expiresAt: Number(value.expiresAt) };
     };
 
-    /** Authenticated reads have a durable actor budget in addition to the router's IP budget. */
+    /** Authenticated reads have a durable actor budget in addition to the router's per-account request window. */
     const readTransaction = <T>(actor: SocialActor, work: (session: ClientSession) => Promise<T>): Promise<T> => transaction(actor, async session => {
         const previous = await budgets().findOne({ _id: actor.userId }, { session });
         const minute = Math.floor(now() / 60_000);

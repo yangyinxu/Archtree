@@ -8,6 +8,15 @@ type WindowEntry = {
     resetsAt: number;
 };
 
+/**
+ * Every rate window and concurrency slot below lives in this process's memory
+ * on purpose: production runs one Node process on one Elastic Beanstalk
+ * instance, so these are complete budgets there without a shared store. A
+ * second process or instance would grant every IP and account its own extra
+ * budget; shared limits must be designed before scaling out (see the
+ * single-process capacity contract in docs/architecture.md). A restart clears
+ * them, which only ever loosens a limit for the current window.
+ */
 const windows = new Map<string, WindowEntry>();
 let lastSweep = 0;
 const rejectionsByScope = new Map<string, number>();
@@ -211,16 +220,26 @@ export const requireSecureAuthTransport: RequestHandler = (req, res, next) => {
     return next();
 };
 
+// Process-local like the rate windows above; see the note on `windows`.
 const activeByScopeAndClient = new Map<string, number>();
 const activeByScope = new Map<string, number>();
 
+/**
+ * Bounds simultaneous requests per scope for each client and for the whole
+ * process. The per-client slots are keyed by client IP unless `keyFor` says
+ * otherwise; account-keyed callers must mount this after authentication, or
+ * every request falls back to its address. The process-wide ceiling is shared
+ * by every key. A slot is released only after the response and its tracked
+ * work both complete, including disconnects.
+ */
 export const limitConcurrency = (
     scope: string,
     perClientLimit: number,
-    globalLimit: number
+    globalLimit: number,
+    keyFor: (req: Request) => string = clientKey
 ): RequestHandler => {
     return (req, res, next) => {
-        const scopedClient = `${scope}:${clientKey(req)}`;
+        const scopedClient = `${scope}:${keyFor(req)}`;
         const clientActive = activeByScopeAndClient.get(scopedClient) ?? 0;
         const globalActive = activeByScope.get(scope) ?? 0;
         if (clientActive >= perClientLimit || globalActive >= globalLimit) {

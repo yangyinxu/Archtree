@@ -71,7 +71,9 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
         res.setHeader('Cache-Control', 'private, no-store');
         next();
     });
-    const mutationCapacity = limitConcurrency('social-mutation', 4, 32);
+    // Mutation slots follow the authenticated account, like the request window, so
+    // neighbors on one address do not take each other's four slots.
+    const mutationCapacity = limitConcurrency('social-mutation', 4, 32, accountOrClientKey);
     router.use((req, res, next) => {
         if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
         if (!req.is('application/json')) return next(new SocialError(415, 'json_required'));
