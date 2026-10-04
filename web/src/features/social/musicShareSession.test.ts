@@ -96,12 +96,30 @@ test('a failed refresh cannot reclassify an acknowledged write as uncertain', as
 });
 
 test.each([['music_unavailable', 'music_shares.unavailable'], ['music_share_capacity', 'music_shares.limit'],
-  ['music_share_limit', 'music_shares.limit'], ['relationship_changed', 'social.stale']])('a recorded %s rejection gives an actionable message without retaining the command', async (code, message) => {
+  ['music_share_limit', 'music_shares.limit'], ['profile_unavailable', 'social.profile_unavailable'], ['relationship_changed', 'social.stale']])('a recorded %s rejection gives an actionable message without retaining the command', async (code, message) => {
   mocks.send.mockResolvedValueOnce({ ...applied, outcome: 'rejected', code });
   const session = createMusicShareSession(); session.ensure('alice', vi.fn()); await session.run(action);
   expect(session.getSnapshot()).toMatchObject({ uncertain: null, busy: false, message });
 });
 
+test.each([
+  [new ApiError('Too many social actions.', 'http', 429, 'social_limit', 30), 'social.rate_limited'],
+  [new ApiError('Social participation is disabled.', 'http', 503, 'social_disabled'), 'social.unavailable']
+])('a definite failed share (%s) is explained without retaining the command', async (error, message) => {
+  mocks.send.mockRejectedValueOnce(error);
+  const session = createMusicShareSession(); session.ensure('alice', vi.fn()); await session.run(action);
+  expect(session.getSnapshot()).toMatchObject({ uncertain: null, busy: false, message });
+});
+
+test('a recovered rejected share outcome keeps its specific explanation', async () => {
+  mocks.send.mockRejectedValueOnce(new TypeError('disconnected'));
+  const session = createMusicShareSession(); session.ensure('alice', vi.fn()); await session.run(action);
+  mocks.outcome.mockResolvedValueOnce({ outcome: { ...applied, outcome: 'rejected', code: 'music_share_capacity', replayed: true } });
+  await session.check();
+  expect(mocks.outcome).toHaveBeenCalledExactlyOnceWith('alice', command);
+  expect(session.getSnapshot()).toMatchObject({ uncertain: null, busy: false, message: 'music_shares.limit' });
+  expect(mocks.send).toHaveBeenCalledTimes(1);
+});
 
 test('an account change while loading command code prevents preparation and dispatch', async () => {
   const session = createMusicShareSession(); session.ensure('alice', vi.fn());

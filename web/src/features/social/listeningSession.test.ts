@@ -1,6 +1,7 @@
 import { advanceAccountEpoch } from '../../api/accountEpoch';
 import { ApiError } from '../../api/client';
 import type { ListeningReport, OwnListeningState } from '../../api/listening';
+import type { SocialOutcome } from '../../api/social';
 import { createListeningSession, type ListeningSample } from './listeningSession';
 const deferred = <T,>() => { let resolve!: (value: T) => void, reject!: (error: unknown) => void;
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
@@ -11,7 +12,7 @@ const setup = (enabled = true) => {
   let count = 0;
   const read = vi.fn(async () => ({ listening: { ...owner, serverTimeMs: 100_000 + mono }, receivedAtMs: mono }));
   const prepare = vi.fn(async (_viewer, action) => ({ ...action, commandId: `command-number-${++count}`, scopeToken: 'signed-scope-token' }));
-  const send = vi.fn(async (_viewer, command) => {
+  const send = vi.fn(async (_viewer, command): Promise<SocialOutcome> => {
     if (command.action === 'claimListening') owner.publisherRevision++;
     else if (command.action === 'setListeningSharing') { owner.enabled = command.enabled; owner.revision++; if (!command.enabled) owner.publisherRevision++; }
     return { commandId: command.commandId, outcome: 'applied' as const, replayed: false };
@@ -138,6 +139,21 @@ test('opting in while social is disabled is explained as unavailable and leaves 
   await f.session.setEnabled(true); await flush();
   expect(f.session.getSnapshot()).toMatchObject({ error: 'social.unavailable', uncertain: null });
   expect(f.send).toHaveBeenCalledTimes(1); expect(f.report).not.toHaveBeenCalled(); f.session.reset();
+});
+test.each([['profile_unavailable', 'social.inactive'], ['listening_preference_changed', 'social.stale']])(
+  'opting in refused with %s explains it, claims nothing and leaves nothing to recover', async (code, error) => {
+    const f = setup(false); await flush();
+    f.send.mockImplementationOnce(async (_viewer, command) => ({ commandId: command.commandId, outcome: 'rejected', code, replayed: false }));
+    await f.session.setEnabled(true); await flush();
+    expect(f.session.getSnapshot()).toMatchObject({ error, uncertain: null, busy: false });
+    expect(f.send).toHaveBeenCalledTimes(1); expect(f.report).not.toHaveBeenCalled(); f.session.reset();
+  });
+test('a rate-limited sharing change asks the listener to wait and leaves nothing to recover', async () => {
+  const f = setup(); await flush();
+  f.send.mockRejectedValueOnce(new ApiError('Too many social actions.', 'http', 429, 'social_limit', 30));
+  await f.session.setEnabled(false); await flush();
+  expect(f.session.getSnapshot()).toMatchObject({ error: 'social.rate_limited', uncertain: null });
+  expect(f.send).toHaveBeenCalledTimes(1); f.session.reset();
 });
 test('account switch fences delayed scope, report response and private preference', async () => {
   const f = setup(); await flush(); const held = deferred<any>(); f.prepare.mockReturnValueOnce(held.promise); f.session.useDevice(); await flush();

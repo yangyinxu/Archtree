@@ -15,6 +15,14 @@ vi.mock('../../api/rooms', async importOriginal => ({ ...await importOriginal<ty
   prepareRoomCommand: mocks.prepareRoomCommand, sendRoomCommand: mocks.sendRoomCommand }));
 vi.mock('../../api/social', async importOriginal => ({ ...await importOriginal<typeof import('../../api/social')>(), getSocialOutcome: mocks.getSocialOutcome }));
 vi.mock('../../player', () => ({ playerStore: { attachRoomPlayback: mocks.attach, notePlaybackIntent: mocks.playbackIntent } }));
+/** Lets a test switch accounts while the on-demand refusal copy is being applied. */
+const refusalHook = vi.hoisted(() => ({ beforeExplain: undefined as undefined | (() => void) }));
+vi.mock('./socialRefusal', async importOriginal => {
+  const actual = await importOriginal<typeof import('./socialRefusal')>();
+  return { ...actual, roomRefusalMessage: (...args: Parameters<typeof actual.roomRefusalMessage>) => {
+    refusalHook.beforeExplain?.(); return actual.roomRefusalMessage(...args);
+  } };
+});
 import { roomSession } from './roomSession';
 
 class Socket {
@@ -59,7 +67,7 @@ class RoomMedia implements PlayerAudio {
 
 let options: RoomPlaybackOptions;
 beforeEach(() => {
-  roomSession.stop(); vi.useFakeTimers(); vi.clearAllMocks(); Socket.instances = [];
+  roomSession.stop(); vi.useFakeTimers(); vi.clearAllMocks(); Socket.instances = []; refusalHook.beforeExplain = undefined;
   vi.stubGlobal('WebSocket', Socket);
   mocks.getCurrentRoom.mockResolvedValue({ room: null });
   mocks.getRealtimeTicket.mockResolvedValue({ ticket: 'single-use-ticket', expiresAt: new Date(Date.now() + 30_000).toISOString() });
@@ -338,6 +346,66 @@ test('other ticket failures keep the ordinary disconnected message and five-seco
   expect(roomSession.getSnapshot().error).toBe('room.disconnected');
   await vi.advanceTimersByTimeAsync(5_000);
   expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+});
+
+const member = { roomId: 'room-a', memberId: 'member-a' };
+const queueControl = { ...member, controllerGeneration: 1, expectedEpoch: 1, expectedEntryId: 'entry-a',
+  expectedPlaybackGeneration: 1, expectedControlGeneration: 1, expectedQueueRevision: 1 };
+test.each<{ action: RoomAction['action']; command: RoomAction; code: string; message: string }>([
+  { action: 'create', command: { action: 'create', mediaTrackIds: ['1'.repeat(24)] }, code: 'room_capacity', message: 'room.capacity' },
+  { action: 'acceptInvitation', command: { action: 'acceptInvitation', invitationId: 'invitation-a', generation: 1 }, code: 'room_full', message: 'room.full' },
+  { action: 'create', command: { action: 'create', mediaTrackIds: ['1'.repeat(24)] }, code: 'already_in_room', message: 'room.existing_room' },
+  { action: 'acceptInvitation', command: { action: 'acceptInvitation', invitationId: 'invitation-a', generation: 1 }, code: 'invitation_unavailable', message: 'room.invitation_unavailable' },
+  { action: 'invite', command: { ...member, action: 'invite', targetSocialId: `s_${'b'.repeat(32)}` }, code: 'room_invitation_capacity', message: 'room.invitation_limit' },
+  { action: 'invite', command: { ...member, action: 'invite', targetSocialId: `s_${'b'.repeat(32)}` }, code: 'profile_unavailable', message: 'social.profile_unavailable' },
+  { action: 'leave', command: { ...member, action: 'leave' }, code: 'host_exit_required', message: 'room.host_exit_required' },
+  { action: 'react', command: { ...member, action: 'react', expectedEpoch: 1, reaction: 'heart' }, code: 'host_absent', message: 'room.suspended' },
+  { action: 'requestSong', command: { ...member, action: 'requestSong', expectedEpoch: 1, mediaTrackId: '1'.repeat(24) }, code: 'room_request_capacity', message: 'room.request_capacity' },
+  { action: 'acceptSongRequest', command: { ...queueControl, action: 'acceptSongRequest', requestId: 'request-a' }, code: 'room_queue_capacity', message: 'room.queue_full' },
+  { action: 'removeQueueEntry', command: { ...queueControl, action: 'removeQueueEntry', targetEntryId: 'entry-b' }, code: 'room_forbidden', message: 'room.forbidden' }
+])('$action refused with $code explains $message and retains no resend intent', async ({ command, code, message }) => {
+  await connected(pausedRoom());
+  mocks.sendRoomCommand.mockResolvedValueOnce({ commandId: 'immutable-command-123', outcome: 'rejected', code, replayed: false });
+  await roomSession.run(command);
+  expect(roomSession.getSnapshot()).toMatchObject({ error: message, uncertain: null, busy: false });
+  expect(mocks.sendRoomCommand).toHaveBeenCalledTimes(1);
+});
+
+test('a rate-limited room command asks the listener to wait instead of offering outcome recovery', async () => {
+  await connected(pausedRoom());
+  mocks.sendRoomCommand.mockRejectedValueOnce(new ApiError('Too many social actions.', 'http', 429, 'social_limit', 30));
+  await roomSession.control('next');
+  expect(roomSession.getSnapshot()).toMatchObject({ error: 'social.rate_limited', uncertain: null, busy: false });
+  await roomSession.control('next');
+  // A fresh explicit gesture is still allowed; nothing was retained for an automatic resend.
+  expect(mocks.prepareRoomCommand).toHaveBeenCalledTimes(2);
+});
+
+test('a recovered rejected outcome is explained for the original gesture and still refreshes every room surface', async () => {
+  await connected(null);
+  const refresh = vi.fn(); roomSession.ensure('viewer-1', refresh);
+  mocks.sendRoomCommand.mockRejectedValueOnce(new ApiError('Unknown', 'network'));
+  await roomSession.run({ action: 'create', mediaTrackIds: ['1'.repeat(24)] });
+  const original = roomSession.getSnapshot().uncertain!;
+  expect(original.action).toBe('create');
+  mocks.getSocialOutcome.mockResolvedValue({ outcome: { commandId: original.commandId, outcome: 'rejected', code: 'room_capacity', replayed: true } });
+  await roomSession.checkOutcome();
+  // The open-room limit, not "this room is full": the captured gesture was a creation.
+  expect(roomSession.getSnapshot()).toMatchObject({ error: 'room.capacity', uncertain: null, busy: false });
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('rooms');
+  expect(mocks.sendRoomCommand).toHaveBeenCalledTimes(1);
+});
+
+test.each(['rejected outcome', 'rate limit'])('an account switch while the %s copy loads leaves the replacement account clean', async kind => {
+  await connected(pausedRoom());
+  if (kind === 'rate limit') mocks.sendRoomCommand.mockRejectedValueOnce(new ApiError('Too many social actions.', 'http', 429, 'social_limit'));
+  else mocks.sendRoomCommand.mockResolvedValueOnce({ commandId: 'immutable-command-123', outcome: 'rejected', code: 'room_reaction_limit', replayed: false });
+  refusalHook.beforeExplain = () => { advanceAccountEpoch(); roomSession.ensure('viewer-2', vi.fn()); };
+  const before = mocks.getCurrentRoom.mock.calls.length;
+  await roomSession.run({ ...member, action: 'react', expectedEpoch: 1, reaction: 'heart' });
+  expect(roomSession.getSnapshot()).toMatchObject({ viewerId: 'viewer-2', error: null, uncertain: null, busy: false });
+  // Only the replacement account's own initial read ran; the old command never reconciled under it.
+  expect(mocks.getCurrentRoom).toHaveBeenCalledTimes(before + 1);
 });
 
 test('ending a room retires membership before invalidating its active query observers', async () => {

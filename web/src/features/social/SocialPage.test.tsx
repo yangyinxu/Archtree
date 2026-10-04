@@ -16,13 +16,20 @@ let unknown = false;
 let profileUnavailable = false;
 let admissionDisabled = false;
 let lastCommandId = '';
+/** Mutation paths the synthetic server refuses with a recorded outcome code. */
+let refusals: Record<string, string> = {};
 const response = (body: unknown) => new Response(JSON.stringify(body), { headers: {
   'Content-Type': 'application/json', 'X-Finitude-Account-Viewer': 'viewer-1'
 } });
 beforeEach(() => {
   advanceAccountEpoch(); current = null; mutations = []; unknown = false; profileUnavailable = false; admissionDisabled = false; lastCommandId = '';
+  refusals = {};
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const body = options?.body ? JSON.parse(String(options.body)) : {};
+    if (refusals[path] && options?.method !== 'GET' && body.commandId) {
+      mutations.push({ path, body });
+      return response({ commandId: body.commandId, outcome: 'rejected', code: refusals[path], replayed: false });
+    }
     if (path === '/api/social/v1/me/profile' && options?.method === 'PATCH') {
       mutations.push({ path, body }); lastCommandId = body.commandId;
       current = { ...own, alias: body.alias, handle: body.handle, discoverable: body.discoverable };
@@ -188,4 +195,26 @@ test('looking up your own handle never offers a self-report', async () => {
   await within(lookup).findByText('@alice');
   await waitFor(() => expect(reads).toHaveLength(1));
   expect(within(lookup).queryByRole('button', { name: 'Report' })).not.toBeInTheDocument();
+});
+
+test('a taken handle is explained during setup and the handle stays editable for another choice', async () => {
+  refusals['/api/social/v1/me/profile'] = 'handle_unavailable'; show();
+  const form = await screen.findByRole('form', { name: 'Your social profile' });
+  fireEvent.change(within(form).getByLabelText('Handle'), { target: { value: 'alice' } });
+  fireEvent.change(within(form).getByLabelText('Display name'), { target: { value: 'Alice' } });
+  fireEvent.submit(form);
+  expect(await screen.findByText('That handle is taken or reserved. Choose a different handle.')).toHaveAttribute('role', 'status');
+  expect(screen.queryByText('This changed while you were acting. The latest state is now shown.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Check outcome' })).not.toBeInTheDocument();
+  expect(within(screen.getByRole('form', { name: 'Your social profile' })).getByLabelText('Handle')).toBeEnabled();
+  expect(mutations).toHaveLength(1);
+});
+
+test('accepting at the friend limit names the limit instead of a concurrent change', async () => {
+  current = own; refusals[`/api/social/v1/relationships/${peer.socialId}/accept`] = 'social_limit'; show();
+  fireEvent.click(await screen.findByRole('tab', { name: 'Incoming requests' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+  expect(await screen.findByText('One of you has reached the limit of 500 friends.')).toHaveAttribute('role', 'status');
+  expect(screen.queryByText('This changed while you were acting. The latest state is now shown.')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
 });

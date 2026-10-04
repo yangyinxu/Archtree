@@ -4662,6 +4662,20 @@
       ],
       "variables": {}
     },
+    "room.existing_room": {
+      "description": "Shared listening interface: refused creation or join because the account is already in a room, possibly on another device.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.forbidden": {
+      "description": "Shared listening interface: refused action that the listener’s current room role or control mode does not allow.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.full": {
       "description": "Room capacity: This room is full.",
       "delivery": [
@@ -4678,6 +4692,13 @@
     },
     "room.host": {
       "description": "Shared listening interface: host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.host_exit_required": {
+      "description": "Shared listening interface: refused leave or self-removal by the host.",
       "delivery": [
         "runtime"
       ],
@@ -4742,6 +4763,13 @@
       "variables": {
         "time": "string"
       }
+    },
+    "room.invitation_limit": {
+      "description": "Shared listening interface: refused invitation because the host already has 20 pending invitations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "room.invitation_link": {
       "description": "Room invitation interface: invitation link.",
@@ -4926,8 +4954,22 @@
       ],
       "variables": {}
     },
+    "room.media_unavailable": {
+      "description": "Shared listening interface: refused action because a chosen song is no longer eligible for rooms.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.members": {
       "description": "Shared listening interface: members.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.no_longer_available": {
+      "description": "Shared listening interface: refused action because the room ended or the listener is no longer in it.",
       "delivery": [
         "runtime"
       ],
@@ -4994,6 +5036,13 @@
     },
     "room.queue_full": {
       "description": "The room queue is full.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_last_entry": {
+      "description": "Shared listening interface: refused removal of the last song in the room queue.",
       "delivery": [
         "runtime"
       ],
@@ -5096,6 +5145,13 @@
       ],
       "variables": {}
     },
+    "room.request_capacity": {
+      "description": "Shared listening interface: refused song request because the per-person or room-wide pending request limit was reached.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.request_dismiss": {
       "description": "Dismiss",
       "delivery": [
@@ -5126,6 +5182,13 @@
     },
     "room.request_track": {
       "description": "Choose a song",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_unavailable": {
+      "description": "Shared listening interface: refused acceptance of a song request that was withdrawn or whose requester left.",
       "delivery": [
         "runtime"
       ],
@@ -5247,6 +5310,13 @@
     },
     "room.transfer_pending": {
       "description": "Shared listening interface: transfer pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.transfer_unavailable": {
+      "description": "Shared listening interface: refused host transfer that expired or whose participant disconnected.",
       "delivery": [
         "runtime"
       ],
@@ -5785,6 +5855,13 @@
       ],
       "variables": {}
     },
+    "social.block_limit": {
+      "description": "Social interface: refused block because the block or relationship limit was reached.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "social.blocked_profile": {
       "description": "Social listener interface: blocked profile.",
       "delivery": [
@@ -5883,6 +5960,13 @@
       ],
       "variables": {}
     },
+    "social.friend_limit": {
+      "description": "Social interface: refused acceptance because one of the two accounts has 500 friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "social.friends": {
       "description": "Social listener interface: friends.",
       "delivery": [
@@ -5897,8 +5981,22 @@
       ],
       "variables": {}
     },
+    "social.handle_locked": {
+      "description": "Social interface: refused profile save that would change the handle chosen earlier, which never changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "social.handle_reserved": {
       "description": "Social listener interface: the chosen handle is reserved for Finitude, staff or system use.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle_unavailable": {
+      "description": "Social interface: refused profile setup because the handle is taken or reserved by another account.",
       "delivery": [
         "runtime"
       ],
@@ -5962,6 +6060,20 @@
     },
     "social.outgoing": {
       "description": "Social listener interface: outgoing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.profile_unavailable": {
+      "description": "Social and room interface: the other profile is missing, hidden or deactivated; never reveals a block.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.rate_limited": {
+      "description": "Social and room interface: the account sent too many social or room actions in a short time.",
       "delivery": [
         "runtime"
       ],
@@ -6081,6 +6193,20 @@
     },
     "social.request": {
       "description": "Social listener interface: request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.request_incoming": {
+      "description": "Social interface: refused friend request because that person already sent the listener a request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.request_limit": {
+      "description": "Social interface: refused friend request because a pending-request or daily incoming-request limit was reached.",
       "delivery": [
         "runtime"
       ],

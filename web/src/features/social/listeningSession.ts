@@ -3,8 +3,9 @@ import type { ListeningAction, ListeningPlayback, ListeningRoomOccurrence } from
 import { captureAccountOperation, isAccountOperationCurrent, subscribeToAccountEpoch } from '../../api/accountEpoch';
 import { getOwnListening, sendListeningReport, type ListeningOwnerRead, type ListeningReport, type OwnListeningState } from '../../api/listening';
 import { prepareSocialCommand, sendSocialCommand, getSocialOutcome, type SocialCommand, type SocialOutcome } from '../../api/social';
-import { isSocialRolloutFailure, isUncertainSocialFailure } from '../../api/socialFailure';
+import { isUncertainSocialFailure } from '../../api/socialFailure';
 import type { MessageKey } from '../../localization/contract';
+import { socialFailureMessage, socialRejectionMessage } from './socialRefusal';
 
 export interface ListeningSample {
   intentId: number; sourceId: string; occurrenceId: string; mediaTrackId: string; positionMs: number; observedAtMs: number;
@@ -108,7 +109,7 @@ export const createListeningSession = (options: {
       observedAtMs: Math.max(0, Math.round(clock.server + sample.observedAtMs - clock.mono)) });
   };
   const settle = async (command: SocialCommand, result: SocialOutcome, observedIntent: number, captured: number) => {
-    emit({ uncertain: null, error: result.outcome === 'rejected' ? 'social.stale' : null });
+    emit({ uncertain: null, error: result.outcome === 'rejected' ? socialRejectionMessage(result.code, command.action) : null });
     // An owner read started before this write may contain the old revision even if its response arrives later.
     if (readPending) await readPending;
     if (!current(captured)) return false;
@@ -140,7 +141,7 @@ export const createListeningSession = (options: {
       if (!current(captured)) return;
       const unknown = dispatched && command && isUncertainSocialFailure(error);
       uncertainIntent = observedIntent; emit({ uncertain: unknown ? command! : null,
-        error: unknown ? 'social.unknown' : isSocialRolloutFailure(error) ? 'social.unavailable' : 'social.error' });
+        error: unknown ? 'social.unknown' : socialFailureMessage(error, 'social.unavailable') });
     } finally { if (current(captured)) { emit({ busy: false }); if (optedIn) noteIntent();
       // A distinct explicit gesture received while a scope was pending remains that user's pending intent.
       else if (observedIntent !== intentId && !blockedOff) void claim(intentId);

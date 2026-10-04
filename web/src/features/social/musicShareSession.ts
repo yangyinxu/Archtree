@@ -2,8 +2,9 @@ import { useSyncExternalStore } from 'react';
 import type { MusicShareAction } from '../../../../src/contracts/socialMusicV1';
 import { captureAccountOperation, isAccountOperationCurrent, subscribeToAccountEpoch } from '../../api/accountEpoch';
 import type { SocialCommand, SocialOutcome } from '../../api/social';
-import { isSocialRolloutFailure, isUncertainSocialFailure } from '../../api/socialFailure';
+import { isUncertainSocialFailure } from '../../api/socialFailure';
 import type { MessageKey } from '../../localization/contract';
+import { socialFailureMessage, socialRejectionMessage } from './socialRefusal';
 
 interface ShareState {
   viewerId: string; busy: boolean; message: MessageKey | null; uncertain: SocialCommand | null;
@@ -20,10 +21,8 @@ export const createMusicShareSession = () => {
   const emit = (next: Partial<ShareState>) => { state = { ...state, ...next }; for (const listener of listeners) listener(); };
   const current = (observed: number) => observed === version && Boolean(state.viewerId) && isAccountOperationCurrent(guard, state.viewerId);
   const stop = () => { version++; state = empty; for (const listener of listeners) listener(); };
-  const settle = async (outcome: SocialOutcome) => {
-    const message: MessageKey = outcome.outcome !== 'rejected' ? 'social.updated'
-      : outcome.code === 'music_unavailable' ? 'music_shares.unavailable'
-        : ['music_share_capacity', 'music_share_limit'].includes(outcome.code ?? '') ? 'music_shares.limit' : 'social.stale';
+  const settle = async (outcome: SocialOutcome, action: SocialCommand['action']) => {
+    const message = outcome.outcome !== 'rejected' ? 'social.updated' : socialRejectionMessage(outcome.code, action);
     emit({ uncertain: null, message });
     // A failed read refresh cannot make an already acknowledged mutation uncertain.
     try { await invalidate(); } catch { /* The query surface owns its read error. */ }
@@ -43,12 +42,12 @@ export const createMusicShareSession = () => {
       if (!current(observed)) return;
       dispatched = true;
       const outcome = await sendSocialCommand(viewerId, command);
-      if (current(observed)) await settle(outcome);
+      if (current(observed)) await settle(outcome, command.action);
     } catch (error) {
       if (!current(observed)) return;
       const unknown = dispatched && command && isUncertainSocialFailure(error);
       emit({ uncertain: unknown ? command! : null,
-        message: unknown ? 'social.unknown' : isSocialRolloutFailure(error) ? 'social.unavailable' : 'social.error' });
+        message: unknown ? 'social.unknown' : socialFailureMessage(error, 'social.unavailable') });
     } finally { if (current(observed)) emit({ busy: false }); }
   };
   return {
@@ -64,14 +63,15 @@ export const createMusicShareSession = () => {
     run: (action: MusicShareAction) => perform(action),
     retry: () => state.uncertain ? perform(undefined, state.uncertain) : Promise.resolve(),
     async check() {
-      if (!state.uncertain || state.busy || !current(version)) return;
+      const command = state.uncertain;
+      if (!command || state.busy || !current(version)) return;
       const observed = version;
       emit({ busy: true });
       try {
         const { getSocialOutcome } = await import('../../api/social');
         if (!current(observed)) return;
-        const result = await getSocialOutcome(state.viewerId, state.uncertain);
-        if (current(observed) && result.outcome) await settle(result.outcome);
+        const result = await getSocialOutcome(state.viewerId, command);
+        if (current(observed) && result.outcome) await settle(result.outcome, command.action);
       } catch { if (current(observed)) emit({ message: 'social.unknown' }); }
       finally { if (current(observed)) emit({ busy: false }); }
     }

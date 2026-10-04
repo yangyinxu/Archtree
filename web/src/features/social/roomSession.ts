@@ -21,9 +21,9 @@ const incomingMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('socialChanged') }).strict(),
   z.object({ type: z.literal('pong'), clientTimeMs: z.number().finite(), serverTimeMs: z.number().finite() }).strict()
 ]);
-/** Server capacity refusals get specific copy; every other rejected command means the room changed first. */
-const rejectionMessages = new Map<string, MessageKey>([
-  ['room_reaction_limit', 'room.reaction_limit'], ['room_capacity', 'room.capacity'], ['room_full', 'room.full']]);
+/** Refusal copy loads only after a refusal; the room panel's initial JavaScript is at its budget. */
+const explain = (refusal: unknown, action?: RoomAction['action']) =>
+  import('./socialRefusal').then(copy => copy.roomRefusalMessage(refusal, action), (): MessageKey => 'social.error');
 
 /** One authenticated transport controls the app's existing player across route navigation. */
 export const createRoomSession = () => {
@@ -238,9 +238,12 @@ export const createRoomSession = () => {
     }
     finally { if (version === generation && transport === transportGeneration) opening = false; }
   };
-  const settle = async (outcome: { outcome: string; code?: string }, action?: RoomAction['action']) => {
+  // `refused` names the gesture for its refusal copy; outcome recovery omits `action` to refresh every surface.
+  const settle = async (outcome: { outcome: string; code?: string }, action?: RoomAction['action'], refused = action) => {
     const version = generation;
-    emit({ uncertain: null, error: outcome.outcome === 'rejected' ? rejectionMessages.get(outcome.code ?? '') ?? 'social.stale' : null });
+    const error = outcome.outcome === 'rejected' ? await explain(outcome, refused) : null;
+    if (version !== generation || !current()) return;
+    emit({ uncertain: null, error });
     // Retire ended memberships before active query observers can refetch their former room.
     const reconciled = await refresh();
     if (!reconciled || version !== generation || !current()) return;
@@ -295,9 +298,10 @@ export const createRoomSession = () => {
         busyUntil = 0; opening = false; void connect();
       }
     } catch (error) {
-      if (version !== generation || !current()) return;
       const unknown = command && isUncertainSocialFailure(error);
-      emit({ uncertain: unknown ? command! : null, error: unknown ? 'social.unknown' : isSocialRolloutFailure(error) ? 'room.unavailable' : 'social.error' });
+      const message = unknown ? 'social.unknown' : await explain(error);
+      if (version !== generation || !current()) return;
+      emit({ uncertain: unknown ? command! : null, error: message });
     } finally {
       if (version === generation) {
         // An aborted personal resume must not leave the UI/heartbeat unpaused while
@@ -383,13 +387,14 @@ export const createRoomSession = () => {
     resync,
     retry: () => state.uncertain ? run(undefined, state.uncertain) : Promise.resolve(),
     async checkOutcome() {
-      if (!state.uncertain || state.busy) return;
+      const command = state.uncertain;
+      if (!command || state.busy) return;
       const version = generation; emit({ busy: true });
       try {
         const { getSocialOutcome } = await import('../../api/social');
-        const result = await getSocialOutcome(state.viewerId, state.uncertain);
+        const result = await getSocialOutcome(state.viewerId, command);
         // Outcome recovery conservatively refreshes every room surface, including invitation safety state.
-        if (version === generation && current() && result.outcome) await settle(result.outcome);
+        if (version === generation && current() && result.outcome) await settle(result.outcome, undefined, command.action);
       } catch { if (version === generation && current()) emit({ error: 'social.unknown' }); }
       finally { if (version === generation) emit({ busy: false }); }
     }

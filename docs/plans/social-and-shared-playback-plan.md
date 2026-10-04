@@ -399,6 +399,14 @@ pause, permission switch during a seek gesture, concurrent member commands,
 host transfer/loss in both modes, buffering, same-NAT limits, fallback polling
 and local recovery. A guest cannot bypass host-absence suspension with Play.
 
+Rejected social, music-share, listening and room outcomes now show localized
+reason-specific copy keyed by the backend code and the refused action (for
+example `room_capacity` is the deployment open-room limit on creation and
+`room_full` the member limit on joining). Only lost revision races keep the generic changed-state message,
+and a 429 asks the listener to wait. The room session loads this copy on demand
+to stay within the initial JavaScript budget. Native clients adopt the same keys
+when the native localization artifacts are next synchronized.
+
 ## Stage 5 — Native social and Audio room adoption
 
 **Status: Not started**

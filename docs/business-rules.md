@@ -142,6 +142,15 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   no outcome recovery. It refreshes the rollout state so the affected entry
   points disappear without a reload; a dialog that is already open stays until
   closed so it can explain the refusal.
+- Any other definite refusal names its reason so the listener knows what to do
+  next: a taken or reserved handle, a handle that is already set, a request the
+  other person has already sent (to be accepted from Incoming requests), an
+  unavailable profile, the friend, pending-request and block limits, the
+  music-share limits and too many recent actions each have their own message.
+  An unavailable profile is never distinguished from a block. Only an action
+  that lost a race against a newer relationship, profile or listening revision
+  says the state changed and shows the latest state. None of these refusals
+  offers outcome recovery or keeps the action for a resend.
 
 ## Direct Music Shares
 
@@ -307,6 +316,14 @@ Playlist access retain their existing rules.
   temporarily unavailable instead of appearing to connect. It offers no room
   creation or reconnection and stops background reconnects until rooms are
   enabled again; leaving, ending and declining remain available.
+- A refused room action names its reason: a full room (eight people), too many
+  open rooms service-wide, the host's 20 pending invitations, a current room on
+  this or another device, a host-only action or one the current control mode
+  does not allow, a disconnected host, a host leaving without ending the room or
+  transferring the role, an ended room, an expired invitation or transfer, a song
+  no longer eligible for rooms, the queue, song-request and reaction limits, and
+  too many recent actions. Losing to a newer playback, queue, control or room
+  version still shows the latest room state as a change made meanwhile.
 
 - A room has at most eight members and 100 queue entries. An account joins at
   most one active room and has one playing controller. Other tabs/devices are
