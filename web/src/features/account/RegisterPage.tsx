@@ -1,67 +1,48 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router';
 
 import {
   browserAuthenticationCapabilitiesQuery,
-  registerBrowserAccount
+  requestBrowserRegistration
 } from '../../api/account';
 import styles from './AccountSurfaces.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import {
+  AuthEmailField,
   AuthFormFeedback,
   AuthPageFrame,
-  privateAccountActionError
+  EmailRequestSent,
+  privateAccountActionError,
+  useEmailRequestForm
 } from './AuthFormSupport';
 
-/** Creates an email account without revealing whether the address already exists. */
+/**
+ * Starts Web registration with only an email address. Every accepted address
+ * gets the same "check your email" status with the address it used: the email
+ * holds a registration link, or a notice that the address already has an
+ * account. An address whose domain cannot receive mail is rejected on the
+ * field. The form stays available so the listener can ask again.
+ */
 export const RegisterPage = () => {
   const { t } = useLocalization();
-  const navigate = useNavigate();
   const capabilities = useQuery(browserAuthenticationCapabilitiesQuery());
-  const [localError, setLocalError] = useState('');
-  const register = useMutation({
-    mutationFn: registerBrowserAccount,
-    onSuccess: (_data, variables) => {
-      navigate('/verify-email', {
-        state: { email: variables.email, notice: t('auth.register.accepted') }
-      });
-    }
-  });
+  const form = useEmailRequestForm({ request: requestBrowserRegistration });
   const registrationUnavailable = capabilities.isError
     || (capabilities.isSuccess && !capabilities.data.emailRegistration);
-  const error = localError || (register.isError
-    ? privateAccountActionError(register.error, t('account.common.request_error'))
-    : '');
+  const error = form.failure
+    ? privateAccountActionError(form.failure, t('account.common.request_error'))
+    : '';
 
   return (
     <AuthPageFrame
       eyebrow={t('auth.register.eyebrow')}
       title={t('auth.register.title')}
-      description={t('auth.register.description')}
+      description={t('auth.register.link_description')}
     >
-      <form
-        aria-busy={register.isPending}
-        className={styles.formCard}
-        onSubmit={(event) => {
-          event.preventDefault();
-          setLocalError('');
-          register.reset();
-          const form = new FormData(event.currentTarget);
-          const password = String(form.get('password') ?? '');
-          if (password !== String(form.get('confirmPassword') ?? '')) {
-            setLocalError(t('account.common.password_mismatch'));
-            return;
-          }
-          register.mutate({
-            email: String(form.get('email') ?? ''),
-            password,
-            displayName: String(form.get('displayName') ?? '') || undefined
-          });
-        }}
-      >
+      <form aria-busy={form.isPending} className={styles.formCard} onSubmit={form.submit}>
         <h2 className={styles.formTitle}>{t('auth.register.form_title')}</h2>
-        <AuthFormFeedback error={error} focusKey={register.submittedAt} />
+        <AuthFormFeedback error={error} focusKey={form.failureKey} />
+        <EmailRequestSent form={form} message={t('auth.register.link_sent')} />
         {registrationUnavailable ? (
           <div className={styles.compactState}>
             <p>{capabilities.isError
@@ -74,34 +55,11 @@ export const RegisterPage = () => {
           </div>
         ) : (
           <>
-            <div className={styles.field}>
-              <label htmlFor="register-name">{t('account.field.name')} <span className={styles.optional}>{t('account.field.optional')}</span></label>
-              <input autoComplete="name" id="register-name" maxLength={80} name="displayName" type="text" />
-            </div>
-            <div className={styles.field}>
-              <label htmlFor="register-email">{t('account.field.email')}</label>
-              <input autoComplete="email" id="register-email" maxLength={254} name="email" required type="email" />
-            </div>
-            <div className={styles.field}>
-              <label htmlFor="register-password">{t('account.field.password')}</label>
-              <input
-                aria-describedby="register-password-hint"
-                autoComplete="new-password"
-                id="register-password"
-                maxLength={256}
-                minLength={12}
-                name="password"
-                required
-                type="password"
-              />
-              <p className={styles.fieldHint} id="register-password-hint">{t('account.common.password_hint')}</p>
-            </div>
-            <div className={styles.field}>
-              <label htmlFor="register-confirm-password">{t('account.field.confirm_password')}</label>
-              <input autoComplete="new-password" id="register-confirm-password" maxLength={256} minLength={12} name="confirmPassword" required type="password" />
-            </div>
-            <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={register.isPending || capabilities.isPending} type="submit">
-              {register.isPending ? t('auth.register.creating') : capabilities.isPending ? t('auth.register.checking') : t('auth.login.create_account')}
+            <AuthEmailField form={form} id="register-email" />
+            <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={form.isPending || capabilities.isPending} type="submit">
+              {form.isPending
+                ? t('auth.register.sending_link')
+                : capabilities.isPending ? t('auth.register.checking') : t('auth.register.send_link')}
             </button>
           </>
         )}

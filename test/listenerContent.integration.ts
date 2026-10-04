@@ -11,6 +11,7 @@ import { getDb } from '../src/infrastructure/database';
 import { getS3 } from '../src/infrastructure/s3';
 import { Carousel } from '../src/models/carousel';
 import { UserLibrary } from '../src/models/userLibrary';
+import { resetRateLimitWindowsForTests } from '../src/middleware/requestProtectionMiddleware';
 import {
     MongoReplicaSetHarness,
     startMongoReplicaSet
@@ -370,9 +371,9 @@ test('listener read layer preserves composition and exposes only ready safe DTOs
     const expiredHomeResponse = await fetch(`${baseUrl}/api/listener/v1/home`, {
         headers: { Authorization: `Bearer ${expiredToken}` }
     });
-    assert.equal(expiredHomeResponse.status, 200);
-    const expiredHome: any = await expiredHomeResponse.json();
-    assert.deepEqual(expiredHome.sections[1].items, []);
+    // A presented expired token must trigger a native refresh, not anonymous Home.
+    assert.equal(expiredHomeResponse.status, 401);
+    assert.deepEqual(await expiredHomeResponse.json(), { message: 'Missing or invalid credentials.' });
 
     const authenticatedHomeResponse = await fetch(`${baseUrl}/api/listener/v1/home`, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -727,6 +728,61 @@ test('shared-content authorization runs before the application body parser', asy
     assert.equal((await malformedJson('/content/manage/artist/delete', undefined, 'manual')).status, 302);
     assert.equal((await malformedJson('/content/manage/artist/delete', accessToken)).status, 403);
     assert.equal((await malformedJson('/content/manage/artist/delete', adminAccessToken)).status, 400);
+});
+
+test('optional-auth Home reads return 401 for a presented Bearer token that fails verification', async () => {
+    resetRateLimitWindowsForTests();
+    const claims = {
+        userId: ids.user.toString(),
+        email: 'listener@example.com',
+        role: 'user',
+        tokenType: 'access'
+    };
+    // Minted here so the earlier tests' runtime cannot expire the valid token.
+    const validToken = jwt.sign(
+        { ...claims, sessionId: ids.session.toString() },
+        process.env.JWT_SECRET!,
+        { expiresIn: 60 }
+    );
+    const rejectedTokens = {
+        expired: jwt.sign(
+            { ...claims, sessionId: ids.session.toString() },
+            process.env.JWT_SECRET!,
+            { expiresIn: -1 }
+        ),
+        revoked: jwt.sign(
+            { ...claims, sessionId: new ObjectId().toString() },
+            process.env.JWT_SECRET!,
+            { expiresIn: 60 }
+        ),
+        malformed: 'not-a-jwt'
+    };
+    const homeRead = (pathname: string, token?: string, viewerId?: string) => fetch(`${baseUrl}${pathname}`, {
+        headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(viewerId ? { 'X-Finitude-Account-Viewer': viewerId } : {})
+        }
+    });
+
+    for (const pathname of ['/api/listener/v1/home', '/content/pages/home/expanded']) {
+        assert.equal((await homeRead(pathname)).status, 200, `anonymous ${pathname}`);
+
+        for (const [kind, token] of Object.entries(rejectedTokens)) {
+            for (const viewerId of [ids.user.toString(), undefined]) {
+                const response = await homeRead(pathname, token, viewerId);
+                const label = `${kind} Bearer ${viewerId ? 'with' : 'without'} viewer on ${pathname}`;
+                assert.equal(response.status, 401, label);
+                assert.deepEqual(await response.json(), { message: 'Missing or invalid credentials.' }, label);
+                assert.equal(response.headers.get('cache-control'), 'no-store', label);
+            }
+        }
+
+        // Native Bearer requests stay bound to the token identity, not the viewer header.
+        for (const viewerId of [ids.user.toString(), ids.admin.toString(), undefined]) {
+            const response = await homeRead(pathname, validToken, viewerId);
+            assert.equal(response.status, 200, `valid Bearer with viewer ${String(viewerId)} on ${pathname}`);
+        }
+    }
 });
 
 test('legacy expanded Home hydrates referenced posts outside the default Feed page safely', async () => {

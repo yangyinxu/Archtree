@@ -11,6 +11,16 @@ import {
 } from '../services/federatedIdentityService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import { normalizeUserRole } from '../services/authRoleService';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
+import {
+    credentialTransactionOptions,
+    replacePendingRecord,
+    requireActiveAuthSession,
+    requireVerifiedAccount
+} from '../services/authCredentialService';
+import { EmailVerificationRequiredError } from '../services/emailVerificationService';
+import { notifyRoomChanges } from '../realtime/roomEvents';
+import { respondEmailVerificationRequired } from './emailAuthController';
 
 const conflict = () => {
     const error = new Error(
@@ -47,18 +57,29 @@ const resolveFederatedUser = async (
             error.statusCode = 401;
             throw error;
         }
-        await AuthIdentity.create(
-            req.auth.userId,
-            identity.provider,
-            identity.subject,
-            identity.email
-        );
+        const auth = req.auth;
+        await withActiveAccount(auth.userId, async session => {
+            if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+            await requireVerifiedAccount(auth.userId, session);
+            await AuthIdentity.create(
+                auth.userId,
+                identity.provider,
+                identity.subject,
+                identity.email,
+                session
+            );
+        });
         recordSecurityEvent('federated_identity_linked', { userId: req.auth.userId });
         return authenticatedUser;
     }
 
-    if (await User.findByEmail(identity.email)) {
-        throw conflict();
+    const existing = await User.findByEmail(identity.email);
+    if (existing) {
+        // An unverified record from the earlier code-based sign-up must not
+        // block the inbox owner, who can no longer sign up by email in the
+        // apps: the provider-verified email replaces it completely.
+        if (existing.emailVerified !== false) throw conflict();
+        return replacePendingRecordWithProvider(existing._id.toString(), identity);
     }
 
     const result = await new User(
@@ -82,6 +103,27 @@ const resolveFederatedUser = async (
     return User.findById(userId);
 };
 
+/**
+ * Replaces an unverified record whose address the provider verified with a
+ * provider-only account (no password, no name) and links the identity, in one
+ * account-fenced transaction. A record that stopped being unverified
+ * meanwhile keeps the existing-email conflict.
+ */
+const replacePendingRecordWithProvider = async (userId: string, identity: VerifiedFederatedIdentity) => {
+    await withActiveAccount(userId, async session => {
+        const replaced = await replacePendingRecord(
+            userId,
+            { password: '', displayName: '', username: generatedUsername(identity) },
+            session
+        );
+        if (!replaced) throw conflict();
+        await AuthIdentity.create(userId, identity.provider, identity.subject, identity.email, session);
+    }, undefined, credentialTransactionOptions);
+    notifyRoomChanges();
+    recordSecurityEvent('federated_account_replaced_pending', { userId });
+    return User.findById(userId);
+};
+
 /** Creates an app session only after authoritative provider verification succeeds. */
 const completeFederatedAuthentication = async (
     req: Request,
@@ -92,7 +134,17 @@ const completeFederatedAuthentication = async (
     if (!user) {
         return res.status(401).json({ message: 'Authentication failed.' });
     }
-    const tokens = await createSession(user as any, req);
+    let tokens: Awaited<ReturnType<typeof createSession>>;
+    try {
+        tokens = await createSession(user as any, req);
+    } catch (error) {
+        // A linked identity is a valid credential; an unverified account gets
+        // the distinct 403 and its verification or registration link.
+        if (error instanceof EmailVerificationRequiredError && error.account) {
+            return respondEmailVerificationRequired(res, error.account, identity.provider);
+        }
+        throw error;
+    }
     recordSecurityEvent('federated_login_succeeded', {
         userId: user._id.toString(),
         sessionId: tokens.sessionId

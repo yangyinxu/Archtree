@@ -1,0 +1,332 @@
+import { createRoomPlaybackController, type RoomPlaybackState } from './roomPlayback';
+import type { PlayerAudio, PlayerQueueItem } from './types';
+
+/** A stalled paused decoder exposes current data but never enough future data until a source reload. */
+const setup = () => {
+  let source = 0;
+  const target = { src: '/pinned.mp3', currentSrc: '/pinned.mp3', currentTime: 0, duration: 120,
+    readyState: 0, seeking: false, paused: true as boolean, ended: false, error: null as { code: number } | null,
+    buffered: { length: 1, start: () => 0, end: () => 120 }, volume: 1, muted: false, playbackRate: 1,
+    play: vi.fn(async () => { target.paused = false; }), pause: vi.fn(() => { target.paused = true; }),
+    load: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() } satisfies PlayerAudio;
+  const install = vi.fn(async (queue: readonly PlayerQueueItem[], index: number) => {
+    source += 1; target.src = queue[index].streamUrl; target.currentSrc = target.src;
+    target.currentTime = 0; target.readyState = 0;
+  });
+  const onIntent = vi.fn(), onObservation = vi.fn();
+  const seek = vi.fn((position: number) => { target.currentTime = position; return true; });
+  const controller = createRoomPlaybackController({ media: () => target, sourceGeneration: () => source, install,
+    updateQueue: vi.fn(), play: target.play, pause: target.pause,
+    seek, detach: vi.fn() },
+  { now: () => 10000 + performance.now(), onIntent, onObservation });
+  const state: RoomPlaybackState = { roomId: 'room', epoch: 1, mediaRevision: 'mr_a', revision: 1,
+    playbackEpoch: 1, controlEpoch: 1, queueRevision: 1, canControl: true, playbackAllowed: false,
+    entryIds: ['entry-a'], queue: [{ id: 'a', title: 'Audio', artistNames: [], artworkUrl: '', mediaType: 'audio', streamUrl: '/pinned.mp3' }],
+    currentEntryId: 'entry-a', positionSeconds: 66, status: 'preparing', anchorMonotonicMs: 10000 };
+  const decoded = (readyState: number) => {
+    target.readyState = readyState;
+    controller.observe('loadedmetadata', target);
+    controller.observe('seeked', target);
+  };
+  return { target, install, seek, onIntent, onObservation, controller, room: controller.attachment, state, decoded };
+};
+
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
+test('a stalled fully buffered decoder reloads once, stays paused and still requires real readiness', async () => {
+  const { room, state, target, install, decoded, onObservation, onIntent } = setup();
+  await room.apply(state); decoded(2);
+  await vi.advanceTimersByTimeAsync(999); expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1); expect(install).toHaveBeenCalledTimes(2);
+  expect(target.play).not.toHaveBeenCalled();
+  decoded(2);
+  await room.apply({ ...state, revision: 2, playbackAllowed: true });
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(2);
+  expect(onObservation.mock.calls.some(([event]) => event.type === 'ready')).toBe(false);
+  decoded(4);
+  expect(target.currentTime).toBe(66);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready', playbackEpoch: 1 }));
+  expect(target.play).not.toHaveBeenCalled();
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['local-pause', 'detach', 'replacement', 'ready'] as const)('%s cancels pending decoder recovery', async action => {
+  const { room, state, target, install, decoded } = setup();
+  await room.apply(state); decoded(2);
+  if (action === 'local-pause') room.pauseLocally();
+  if (action === 'detach') room.detach();
+  if (action === 'replacement') await room.apply({ ...state, revision: 2, playbackEpoch: 2, mediaRevision: 'mr_b',
+    queue: [{ ...state.queue[0], streamUrl: '/replacement.mp3' }] });
+  if (action === 'ready') decoded(4);
+  const count = install.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(count);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['partial-buffer', 'near-end', 'metadata-only', 'error', 'video'] as const)('%s cannot trigger paused decoder recovery', async condition => {
+  const { room, state, target, install, decoded } = setup();
+  const incoming = condition === 'video' ? { ...state, queue: [{ ...state.queue[0], mediaType: 'video' as const }] }
+    : condition === 'near-end' ? { ...state, positionSeconds: 119.8 } : state;
+  await room.apply(incoming);
+  if (condition === 'partial-buffer') target.buffered.end = () => 80;
+  if (condition === 'error') target.error = { code: 3 };
+  decoded(condition === 'metadata-only' ? 1 : 2);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(1);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a new occurrence has its own single recovery opportunity', async () => {
+  const { room, state, install, decoded } = setup();
+  await room.apply(state); decoded(2);
+  await vi.advanceTimersByTimeAsync(1000); decoded(2);
+  await room.apply({ ...state, revision: 2, playbackEpoch: 2, positionSeconds: 88 });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(install).toHaveBeenCalledTimes(3);
+  room.detach();
+});
+
+test('failed decoder reload remains unready without an automatic retry loop', async () => {
+  const { room, state, install, decoded, onObservation, target } = setup();
+  await room.apply(state); decoded(2);
+  install.mockRejectedValueOnce(new Error('Source unavailable'));
+  await vi.advanceTimersByTimeAsync(5000); decoded(4);
+  expect(install).toHaveBeenCalledTimes(2);
+  expect(onObservation.mock.calls.some(([event]) => event.type === 'ready')).toBe(false);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('pause during reload cannot resume playback, while explicit resync uses the installed source', async () => {
+  const { room, state, install, decoded, target } = setup();
+  await room.apply(state); decoded(2);
+  let finish!: () => void;
+  install.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  await vi.advanceTimersByTimeAsync(1000);
+  room.pauseLocally(); finish(); await Promise.resolve(); await Promise.resolve();
+  decoded(4);
+  expect(target.play).not.toHaveBeenCalled();
+  await room.resync();
+  expect(target.currentTime).toBe(66);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('reload fences old callbacks and seeks to the latest same-occurrence server anchor', async () => {
+  const { room, state, install, decoded, target, onObservation } = setup();
+  await room.apply(state); decoded(2);
+  let finish!: () => void;
+  const loading = new Promise<void>(resolve => { finish = resolve; });
+  const installSource = install.getMockImplementation()!;
+  install.mockImplementationOnce(async (...args) => { await installSource(...args); await loading; });
+  await vi.advanceTimersByTimeAsync(1000);
+  decoded(4);
+  expect(onObservation.mock.calls.some(([event]) => event.type === 'ready')).toBe(false);
+  await room.apply({ ...state, revision: 2, status: 'playing' });
+  await vi.advanceTimersByTimeAsync(500);
+  finish(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  decoded(4);
+  expect(target.currentTime).toBe(67.5);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready', playbackEpoch: 1 }));
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('an older pending reload cannot ready or reposition a replacement occurrence', async () => {
+  const { room, state, install, decoded, target, onObservation } = setup();
+  await room.apply(state); decoded(2);
+  let finish!: () => void;
+  const loading = new Promise<void>(resolve => { finish = resolve; });
+  const installSource = install.getMockImplementation()!;
+  install.mockImplementationOnce(async (...args) => { await installSource(...args); await loading; });
+  await vi.advanceTimersByTimeAsync(1000);
+  await room.apply({ ...state, revision: 2, playbackEpoch: 2, mediaRevision: 'mr_b', positionSeconds: 88,
+    queue: [{ ...state.queue[0], streamUrl: '/replacement.mp3' }] });
+  decoded(4);
+  finish(); await Promise.resolve(); await Promise.resolve();
+  expect(target.currentTime).toBe(88);
+  expect(target.src).toBe('/replacement.mp3');
+  expect(onObservation.mock.calls.filter(([event]) => event.type === 'ready').map(([event]) => event.playbackEpoch)).toEqual([2]);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('successful decoder recovery uses controlled seek instead of soft rate only for that occurrence', async () => {
+  const { room, state, target, seek, decoded, onIntent } = setup();
+  await room.apply(state); decoded(2);
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  const playing = { ...state, revision: 2, status: 'playing' as const, playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() };
+  await room.apply(playing);
+  expect(room.correct(66.3)).toBe('seek');
+  expect(seek).toHaveBeenLastCalledWith(66.3);
+  expect(target.playbackRate).toBe(1);
+  await room.apply({ ...playing, revision: 3, playbackEpoch: 2 });
+  expect(room.correct(66.3)).toBe('rate');
+  expect(target.playbackRate).toBe(1.05);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['local pause', 'permission loss', 'detach'] as const)('%s blocks the recovered decoder fallback', async cancellation => {
+  const { room, state, target, seek, decoded, onIntent } = setup();
+  await room.apply(state); decoded(2);
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  const playing = { ...state, revision: 2, status: 'playing' as const, playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() };
+  await room.apply(playing);
+  if (cancellation === 'local pause') room.pauseLocally();
+  if (cancellation === 'permission loss') await room.apply({ ...playing, revision: 3, playbackAllowed: false });
+  if (cancellation === 'detach') room.detach();
+  const calls = seek.mock.calls.length;
+  target.paused = false;
+  expect(room.correct(66.3)).toBe('none');
+  expect(seek).toHaveBeenCalledTimes(calls);
+  expect(target.playbackRate).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a failed reload does not mark a decoder as requiring the recovered-rate fallback', async () => {
+  const { room, state, target, install, decoded } = setup();
+  await room.apply(state); decoded(2);
+  install.mockRejectedValueOnce(new Error('Source unavailable'));
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  await room.apply({ ...state, revision: 2, status: 'playing', playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() });
+  await room.resync();
+  expect(target.paused).toBe(false);
+  expect(room.correct(66.3)).toBe('rate');
+  expect(target.playbackRate).toBe(1.05);
+  room.detach();
+});
+
+/** WebKitGTK/GStreamer can fire loadedmetadata and canplay at HAVE_ENOUGH_DATA with a zero duration and empty ranges. */
+const missingDuration = (target: ReturnType<typeof setup>['target'], controller: ReturnType<typeof setup>['controller'],
+  duration = 0, readyState = 4) => {
+  target.duration = duration; target.readyState = readyState;
+  target.buffered = { length: 0, start: () => 0, end: () => 0 };
+  controller.observe('loadedmetadata', target);
+  controller.observe('canplay', target);
+};
+const healthy = (target: ReturnType<typeof setup>['target']) => {
+  target.duration = 120;
+  target.buffered = { length: 1, start: () => 0, end: () => 120 };
+};
+const readyEpochs = (onObservation: ReturnType<typeof setup>['onObservation']) =>
+  onObservation.mock.calls.filter(([event]) => event.type === 'ready').map(([event]) => event.playbackEpoch);
+
+test('metadata without a duration reloads the source once, then still requires real readiness before starting', async () => {
+  const { room, state, target, install, controller, decoded, onObservation, onIntent } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  expect(readyEpochs(onObservation)).toEqual([]);
+  await vi.advanceTimersByTimeAsync(999); expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1); expect(install).toHaveBeenCalledTimes(2);
+  expect(target.readyState).toBe(0);
+  expect(target.play).not.toHaveBeenCalled();
+  healthy(target); decoded(4);
+  expect(target.currentTime).toBe(66);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  expect(target.play).not.toHaveBeenCalled();
+  await room.apply({ ...state, revision: 2, status: 'playing', playbackAllowed: true, anchorMonotonicMs: 10000 + performance.now() });
+  expect(target.play).toHaveBeenCalledTimes(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a second duration-less load in the same occurrence waits for an explicit resync instead of looping', async () => {
+  const { room, state, target, install, controller, decoded, onObservation } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(1000); expect(install).toHaveBeenCalledTimes(2);
+  missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(2);
+  expect(readyEpochs(onObservation)).toEqual([]);
+  await room.resync();
+  expect(install).toHaveBeenCalledTimes(3);
+  healthy(target); decoded(4);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a duration that arrives late through durationchange reports readiness without a reload', async () => {
+  const { room, state, target, install, controller, onObservation } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(500);
+  healthy(target);
+  controller.observe('durationchange', target);
+  expect(target.currentTime).toBe(66);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(1);
+  expect(target.play).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['local-pause', 'detach', 'replacement', 'duration-corrected', 'error'] as const)(
+  '%s cancels a pending duration reload', async action => {
+    const { room, state, target, install, controller } = setup();
+    await room.apply(state); missingDuration(target, controller);
+    if (action === 'local-pause') room.pauseLocally();
+    if (action === 'detach') room.detach();
+    if (action === 'replacement') await room.apply({ ...state, revision: 2, playbackEpoch: 2, mediaRevision: 'mr_b',
+      queue: [{ ...state.queue[0], streamUrl: '/replacement.mp3' }] });
+    if (action === 'duration-corrected') healthy(target); // No event: the timer itself must re-check the condition.
+    if (action === 'error') target.error = { code: 4 };
+    const count = install.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(install).toHaveBeenCalledTimes(count);
+    expect(target.play).not.toHaveBeenCalled();
+    room.detach();
+  });
+
+test.each(['loading', 'infinite', 'video', 'ended', 'paused-locally', 'explicit-retry'] as const)(
+  '%s cannot trigger a duration reload', async condition => {
+    const { room, state, target, install, controller } = setup();
+    const incoming = condition === 'video' ? { ...state, queue: [{ ...state.queue[0], mediaType: 'video' as const }] }
+      : condition === 'ended' ? { ...state, status: 'ended' as const } : state;
+    await room.apply(incoming);
+    if (condition === 'paused-locally') room.pauseLocally();
+    if (condition === 'explicit-retry') await room.resync(); // Its own 10s deadline decides failure.
+    const count = install.mock.calls.length;
+    missingDuration(target, controller, condition === 'loading' ? NaN : condition === 'infinite' ? Infinity : 0,
+      condition === 'loading' ? 0 : 4);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(install).toHaveBeenCalledTimes(count);
+    expect(target.play).not.toHaveBeenCalled();
+    room.detach();
+  });
+
+test('a reload pending for a missing duration yields to a decoder stall once the duration arrives', async () => {
+  const { room, state, target, install, controller, decoded } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(600);
+  healthy(target); decoded(2);
+  await vi.advanceTimersByTimeAsync(999); expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1); expect(install).toHaveBeenCalledTimes(2);
+  room.detach();
+});
+
+test('a duration reload that misses the preparation deadline still joins the started room', async () => {
+  const { room, state, target, install, controller, decoded, onObservation } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  // The server starts without this device and keeps it unauthorized; the reload is re-armed for the same occurrence.
+  await vi.advanceTimersByTimeAsync(500);
+  const started = { ...state, revision: 2, status: 'playing' as const, anchorMonotonicMs: 10000 + performance.now() };
+  await room.apply(started);
+  await vi.advanceTimersByTimeAsync(1000); expect(install).toHaveBeenCalledTimes(2);
+  healthy(target); decoded(4);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  expect(target.play).not.toHaveBeenCalled();
+  // The late ready report authorizes this member on the unchanged timeline.
+  await room.apply({ ...started, revision: 3, playbackAllowed: true });
+  expect(target.play).toHaveBeenCalledTimes(1);
+  room.detach();
+});

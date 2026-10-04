@@ -13,6 +13,7 @@ import {
 import { Page, PageSlug } from '../models/page';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
 import { deleteContentCollectionAndPageReferences } from '../services/pageReferenceLifecycleService';
+import { ManualCompositionConflictError } from '../services/manualCompositionService';
 
 export type ContentCollectionDefinition = {
     presentation: CollectionPresentation;
@@ -193,6 +194,7 @@ export const addContentCollectionItem = async (req: Request, res: Response, next
             authReq.auth.userId,
             position(req.body.position)
         );
+        if (!items) throw new ManualCompositionConflictError();
         return res.status(200).json({ message: 'Item added to Grid/List.', items });
     } catch (error) {
         return next(error);

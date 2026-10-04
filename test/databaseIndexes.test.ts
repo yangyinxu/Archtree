@@ -80,6 +80,70 @@ test('mandatory index failure prevents migration success without disclosing data
   assert.deepEqual(fake.receipts, []);
 });
 
+test('essential social cleanup indexes must exist before startup can complete', async () => {
+  for (const collection of ['socialRelationships', 'socialHandles', 'socialMusicShares', 'socialListeningPublications', 'socialReports']) {
+    const fake = databaseDouble();
+    fake.fail(collection);
+    await assert.rejects(initializeDatabaseIndexes(fake.db), DatabaseIndexInitializationError);
+    assert.deepEqual(fake.receipts, []);
+  }
+});
+
+test('the email-link cleanup index must exist before startup can complete', async () => {
+  const fake = databaseDouble();
+  fake.fail('emailLinkTokens');
+  await assert.rejects(initializeDatabaseIndexes(fake.db), (error: unknown) => {
+    assert.ok(error instanceof DatabaseIndexInitializationError);
+    assert.equal(error.indexId, 'emailLinkTokens:email,purpose');
+    return true;
+  });
+  assert.deepEqual(fake.receipts, []);
+
+  const initialized = databaseDouble();
+  await initializeDatabaseIndexes(initialized.db);
+  initialized.metadata.set('emailLinkTokens', []);
+  await assert.rejects(verifyRequiredDatabaseIndexes(initialized.db), /emailLinkTokens:email,purpose/);
+});
+
+test('social cleanup indexes reject unique, sparse, partial, hidden and expiring substitutes', async () => {
+  for (const altered of [
+    { unique: true }, { sparse: true }, { partialFilterExpression: { active: true } },
+    { hidden: true }, { expireAfterSeconds: 0 }, { collation: { locale: 'en' } }
+  ]) {
+    const fake = databaseDouble();
+    await initializeDatabaseIndexes(fake.db);
+    Object.assign(fake.metadata.get('socialRelationships')![0], altered);
+    await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /socialRelationships:accountIds/);
+  }
+  const fake = databaseDouble();
+  await initializeDatabaseIndexes(fake.db);
+  fake.metadata.set('socialHandles', []);
+  await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /socialHandles:accountId/);
+});
+
+test('report deduplication and deletion cleanup indexes are mandatory, while the triage sort index is optional', async () => {
+  const initialized = databaseDouble();
+  await initializeDatabaseIndexes(initialized.db);
+  const keys = initialized.metadata.get('socialReports')!.map(index => JSON.stringify(index.key));
+  for (const expected of [{ dedupeKey: 1 }, { reporterAccountId: 1 }, { targetAccountId: 1, state: 1 }]) {
+    assert.ok(keys.includes(JSON.stringify(expected)), JSON.stringify(expected));
+  }
+  for (const [kept, pattern] of [
+    [(index: Document) => JSON.stringify(index.key) !== JSON.stringify({ dedupeKey: 1 }), /socialReports:dedupeKey/],
+    [(index: Document) => JSON.stringify(index.key) !== JSON.stringify({ targetAccountId: 1, state: 1 }), /socialReports:targetAccountId,state/]
+  ] as const) {
+    const fake = databaseDouble();
+    await initializeDatabaseIndexes(fake.db);
+    fake.metadata.set('socialReports', fake.metadata.get('socialReports')!.filter(kept));
+    await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), pattern);
+  }
+  const optional = databaseDouble();
+  await initializeDatabaseIndexes(optional.db);
+  optional.metadata.set('socialReports', optional.metadata.get('socialReports')!
+    .filter(index => JSON.stringify(index.key) !== JSON.stringify({ state: 1, createdAt: 1, _id: 1 })));
+  await verifyRequiredDatabaseIndexes(optional.db);
+});
+
 test('nonunique, sparse, partial, and incompatible collation constraints fail verification', async () => {
   for (const altered of [
     { unique: false }, { sparse: true }, { partialFilterExpression: { active: true } },

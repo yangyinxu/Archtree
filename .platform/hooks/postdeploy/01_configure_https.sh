@@ -136,6 +136,9 @@ activate_config() {
   return 1
 }
 
+# The temporary HTTP server used before a certificate exists deliberately does
+# not forward WebSocket upgrades: production room sockets require HTTPS (the
+# gateway answers 426 otherwise), and Secure session cookies never reach it.
 write_challenge_config() {
   local candidate_config
   if ! candidate_config=$(build_config_candidate <<EOF
@@ -165,10 +168,28 @@ EOF
   activate_config "${candidate_config}"
 }
 
+# The HTTPS server tunnels WebSocket handshakes (today the room realtime path)
+# to Node's 'upgrade' listener. Upgrade and Connection are hop-by-hop, so Nginx
+# drops them unless set here. Only "Upgrade: websocket" (map strings match
+# ignoring case) gets "Connection: upgrade"; other requests keep the empty
+# Connection header they always had, so ordinary proxying is unchanged and
+# other Upgrade tokens never switch protocols. The map variable name is
+# Archtree-specific because a second map for the same variable silently
+# replaces the first, and a platform $connection_upgrade map could then win by
+# include order. Sec-WebSocket-Protocol (subprotocol plus one-time ticket) and
+# Origin are ordinary headers Nginx forwards as-is; never hide or override them.
+# The 120 s idle timeouts exceed the 5 s room ping cadence and the gateway's
+# 16 s silence eviction, so they never end a live socket. Browsers open the
+# socket on its own HTTP/1.1 connection because Nginx does not offer RFC 8441.
 write_tls_config() {
   local candidate_config
   if ! candidate_config=$(build_config_candidate <<EOF
 # Managed by Archtree's Elastic Beanstalk postdeploy hook.
+map \$http_upgrade \$archtree_connection_upgrade {
+    default "";
+    websocket upgrade;
+}
+
 server {
     listen 80;
     server_name ${DOMAIN};
@@ -199,7 +220,8 @@ server {
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
-        proxy_set_header Connection "";
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$archtree_connection_upgrade;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;

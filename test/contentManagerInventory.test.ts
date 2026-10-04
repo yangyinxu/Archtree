@@ -280,6 +280,7 @@ test('Content Manager loads global inventory into focused Catalog sections', asy
     assert.match(capture.html, /ph ph-gear-six/);
     assert.match(capture.html, /Page Layout/);
     assert.match(capture.html, /Operations/);
+    assert.match(capture.html, /href="\/content\/manage\/room-audio-analysis"/);
     assert.match(capture.html, /Legacy Global Artist/);
     assert.match(capture.html, /id="inventory-artists"/);
     assert.doesNotMatch(capture.html, /id="inventory-albums"/);

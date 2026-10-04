@@ -1,5 +1,6 @@
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
 
 export type AuthProvider = 'apple' | 'google';
 
@@ -22,41 +23,54 @@ class AuthIdentity {
         });
     }
 
-    static listForUser(userId: string) {
+    static listForUser(userId: string, session?: ClientSession) {
         return getDb()!
             .collection<AuthIdentityDocument>('authIdentities')
-            .find({ userId })
+            .find({ userId }, { session })
             .project<{ provider: AuthProvider }>({ provider: 1 })
             .toArray();
+    }
+
+    /**
+     * Reports whether one of the account's linked identities carries `email`
+     * (lowercase). Provider identities store only provider-verified emails.
+     */
+    static async hasEmailForUser(userId: string, email: string, session?: ClientSession) {
+        const identity = await getDb()!
+            .collection<AuthIdentityDocument>('authIdentities')
+            .findOne({ userId, email }, { session, projection: { _id: 1 } });
+        return Boolean(identity);
     }
 
     static async create(
         userId: string,
         provider: AuthProvider,
         providerSubject: string,
-        email?: string
+        email?: string,
+        session?: ClientSession
     ) {
         const now = new Date();
-        await getDb()!.collection<AuthIdentityDocument>('authIdentities').insertOne({
+        await withActiveAccount(userId, transaction => getDb()!.collection<AuthIdentityDocument>('authIdentities').insertOne({
             userId,
             provider,
             providerSubject,
             email,
             createdAt: now,
             updatedAt: now
-        });
+        }, { session: transaction }), session);
     }
 
-    static deleteForUser(userId: string) {
-        return getDb()!.collection<AuthIdentityDocument>('authIdentities').deleteMany({ userId });
+    /** Removes every provider identity, e.g. ones linked before the account proved email ownership. */
+    static deleteForUser(userId: string, session?: ClientSession) {
+        return getDb()!.collection<AuthIdentityDocument>('authIdentities').deleteMany({ userId }, { session });
     }
 
     /** Removes one linked provider only after account recovery safeguards are checked. */
-    static deleteForUserAndProvider(userId: string, provider: AuthProvider) {
+    static deleteForUserAndProvider(userId: string, provider: AuthProvider, session: ClientSession) {
         return getDb()!.collection<AuthIdentityDocument>('authIdentities').deleteOne({
             userId,
             provider
-        });
+        }, { session });
     }
 }
 

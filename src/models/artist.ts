@@ -11,7 +11,7 @@ import {
     withReadyArtistReferences
 } from '../services/artistReferenceFenceService';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { catalogSearchFilter, withCatalogSearchUpdate } from '../utils/catalogSearch';
 export {
     ArtistCreationOutcomeUnknownError,
     confirmArtistCreationAfterWriteError
@@ -112,7 +112,7 @@ export class Artist {
 
         return db!
             .collection('artists')
-            .find({ name: { $regex: escapeRegex(query), $options: 'i' } })
+            .find(catalogSearchFilter('name', query))
             .maxTimeMS(3_000)
             .limit(limit)
             .toArray()
@@ -133,7 +133,7 @@ export class Artist {
     static async updateById(artistId: string, update: Record<string, unknown>) {
         const db = getDb();
         const artistObjectId = ObjectId.createFromHexString(artistId);
-        const normalizedUpdate = { ...update };
+        const normalizedUpdate = withCatalogSearchUpdate(update, 'name');
         const mutate = async (session?: ClientSession) => {
             const result = await db!
                 .collection('artists')
@@ -171,7 +171,7 @@ export class Artist {
                 _id: ObjectId.createFromHexString(artistId),
                 $and: [readyArtistLifecycleFilter, expectedReference]
             },
-            { $set: update }
+            { $set: withCatalogSearchUpdate(update, 'name') }
         );
     }
 

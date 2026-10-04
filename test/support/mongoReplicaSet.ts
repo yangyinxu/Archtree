@@ -25,6 +25,8 @@ export interface MongoReplicaSetHarness {
 interface MongoTestDatabaseOptions {
     topology?: 'replicaSet' | 'standalone';
     connectApplication?: boolean;
+    /** A containing server can own signals so it drains request work before database shutdown. */
+    registerSignalHandlers?: boolean;
 }
 
 const testDirectoryPrefix = 'archtree-auth-test-';
@@ -225,7 +227,7 @@ export const startMongoTestDatabase = async (
         }
         signalHandlers.clear();
     };
-    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as NodeJS.Signals[]) {
+    for (const signal of options.registerSignalHandlers === false ? [] : ['SIGINT', 'SIGTERM', 'SIGHUP'] as NodeJS.Signals[]) {
         const handler = () => {
             unregisterSignalHandlers();
             void cleanup()
@@ -272,4 +274,5 @@ export const startMongoTestDatabase = async (
 };
 
 /** Preserves the transactional default for existing integration suites. */
-export const startMongoReplicaSet = (databaseName: string) => startMongoTestDatabase(databaseName);
+export const startMongoReplicaSet = (databaseName: string, options: Pick<MongoTestDatabaseOptions, 'registerSignalHandlers'> = {}) =>
+    startMongoTestDatabase(databaseName, options);

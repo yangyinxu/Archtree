@@ -9,56 +9,7 @@ import { stageElasticBeanstalkArtifact } from '../scripts/stage-eb-artifact.mjs'
 
 const commitSha = 'a'.repeat(40);
 
-const writeFixtureFile = async (root: string, relativePath: string, contents: string) => {
-  const filePath = path.join(root, relativePath);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, contents, 'utf8');
-};
-
-/** Creates the minimum source tree accepted by the deployment allowlist. */
-const createSourceFixture = async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'archtree-eb-source-'));
-  await writeFixtureFile(root, 'package.json', '{"name":"fixture","workspaces":["web"]}\n');
-  await writeFixtureFile(root, 'package-lock.json', '{"name":"fixture","lockfileVersion":3}\n');
-  await writeFixtureFile(root, 'tsconfig.json', '{}\n');
-  await writeFixtureFile(root, 'src/app.ts', 'export const app = true;\n');
-  await writeFixtureFile(root, 'localization/generated/manifest.json', '{"schemaVersion":1}\n');
-  await writeFixtureFile(root, 'web/package.json', '{"name":"fixture-web"}\n');
-  await writeFixtureFile(
-    root,
-    'web/dist/index.html',
-    '<script type="module" src="/finitude/assets/index-AbCd1234.js"></script>'
-      + '<link rel="stylesheet" href="/finitude/assets/index-XyZ_5678.css">\n'
-  );
-  await writeFixtureFile(
-    root,
-    'web/dist/.vite/manifest.json',
-    `${JSON.stringify({
-      'index.html': {
-        file: 'assets/index-AbCd1234.js',
-        css: ['assets/index-XyZ_5678.css'],
-        assets: ['assets/logo-Qwer1234.webp'],
-        isEntry: true
-      }
-    })}\n`
-  );
-  await writeFixtureFile(root, 'web/dist/assets/index-AbCd1234.js', 'console.log("fixture");\n');
-  await writeFixtureFile(root, 'web/dist/assets/index-XyZ_5678.css', 'body { color: black; }\n');
-  await writeFixtureFile(root, 'web/dist/assets/logo-Qwer1234.webp', 'fixture image\n');
-  for (const hook of [
-    '.platform/confighooks/postdeploy/01_configure_https.sh',
-    '.platform/hooks/prebuild/01_install_certbot.sh',
-    '.platform/hooks/postdeploy/01_configure_https.sh',
-    '.platform/hooks/postdeploy/02_install_certbot_timer.sh'
-  ]) {
-    await writeFixtureFile(root, hook, '#!/usr/bin/env bash\n');
-    await chmod(path.join(root, hook), 0o755);
-  }
-  await writeFixtureFile(root, '.platform/nginx/conf.d/fixture.conf', 'send_timeout 120s;\n');
-  await writeFixtureFile(root, '.ebextensions/https-instance.config', 'Resources: {}\n');
-  await writeFixtureFile(root, 'README.md', 'must not be staged\n');
-  return root;
-};
+import { createSourceFixture, writeEngineeringFixture, writeFixtureFile } from './helpers/ebArtifactFixture';
 
 const stageFixture = async (sourceRoot: string) => {
   const outputDirectory = path.join(sourceRoot, 'elastic-beanstalk-artifact');
@@ -83,6 +34,7 @@ test('stages only the Elastic Beanstalk allowlist with bounded release metadata'
     '.ebextensions',
     '.platform',
     'RELEASE.json',
+    'engineering',
     'localization',
     'package-lock.json',
     'package.json',
@@ -170,6 +122,9 @@ test('stages a clean local Git worktree before creating its temporary output', a
     execFileSync('git', args, { cwd: sourceRoot, stdio: 'ignore' });
   }
 
+  const localCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceRoot, encoding: 'utf8' }).trim();
+  await writeEngineeringFixture(sourceRoot, localCommit);
+
   const { release } = await stageElasticBeanstalkArtifact({
     sourceRoot,
     outputDirectory: path.join(sourceRoot, 'elastic-beanstalk-artifact'),
@@ -224,6 +179,27 @@ test('rejects an artifact without the port 443 security-group contract', async (
   await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
 });
 
+test('rejects an artifact without the conservative social capacity defaults', async (t) => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await rm(path.join(sourceRoot, '.ebextensions/social-capacity.config'));
+
+  await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
+});
+
+test('rejects an artifact without the room audio decoder hook or its path setting', async (t) => {
+  for (const required of [
+    '.platform/hooks/prebuild/02_install_ffmpeg.sh',
+    '.ebextensions/room-audio-decoder.config'
+  ]) {
+    const sourceRoot = await createSourceFixture();
+    t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+    await rm(path.join(sourceRoot, required));
+
+    await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i, required);
+  }
+});
+
 test('rejects a manifest reference whose asset is not content-hashed', async (t) => {
   const sourceRoot = await createSourceFixture();
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));
@@ -259,4 +235,38 @@ test('rejects a manifest reference to a missing emitted asset', async (t) => {
   );
 
   await assert.rejects(stageFixture(sourceRoot), /Vite manifest asset is missing/i);
+});
+
+for (const [label, mutate] of [
+  ['dirty guide', (manifest: any) => { manifest.revision.dirty = true; }],
+  ['stale guide commit', (manifest: any) => { manifest.revision.commit = 'b'.repeat(40); }],
+  ['unsafe guide page path', (manifest: any) => { manifest.pages[1].file = '../outside.html'; }],
+  ['unknown guide manifest fields', (manifest: any) => { manifest.privateData = 'rejected'; }],
+  ['missing guide root', (manifest: any) => { manifest.pages.shift(); }],
+  ['invalid source digest', (manifest: any) => { manifest.sourceDigest = 'invalid'; }],
+  ['duplicate guide page', (manifest: any) => { manifest.pages.push(manifest.pages[0]); }]
+] as const) {
+  test(`rejects ${label} before staging a deployable artifact`, async t => {
+    const sourceRoot = await createSourceFixture();
+    t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+    const filename = path.join(sourceRoot, 'engineering/dist/manifest.json');
+    const manifest = JSON.parse(await readFile(filename, 'utf8')); mutate(manifest);
+    await writeFile(filename, JSON.stringify(manifest));
+    await assert.rejects(stageFixture(sourceRoot), /Engineering/);
+    await assert.rejects(readFile(path.join(sourceRoot, 'elastic-beanstalk-artifact/RELEASE.json')), { code: 'ENOENT' });
+  });
+}
+
+test('rejects unmanifested guide files and does not stage source documents', async t => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await writeFixtureFile(sourceRoot, 'engineering/dist/internal-notes.md', 'must not ship');
+  await assert.rejects(stageFixture(sourceRoot), /Engineering distribution contains an unexpected file/);
+});
+
+test('rejects a missing nested guide page', async t => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await rm(path.join(sourceRoot, 'engineering/dist/system/map/index.html'));
+  await assert.rejects(stageFixture(sourceRoot), /Engineering distribution file is missing/);
 });

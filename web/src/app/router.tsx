@@ -12,6 +12,7 @@ const ChangePasswordPage = lazy(() => import('../features/account/ChangePassword
 const ForgotPasswordPage = lazy(() => import('../features/account/ForgotPasswordPage').then(({ ForgotPasswordPage }) => ({ default: ForgotPasswordPage })));
 const LoginPage = lazy(() => import('../features/account/LoginPage').then(({ LoginPage }) => ({ default: LoginPage })));
 const RegisterPage = lazy(() => import('../features/account/RegisterPage').then(({ RegisterPage }) => ({ default: RegisterPage })));
+const RegisterCompletePage = lazy(() => import('../features/account/RegisterCompletePage').then(({ RegisterCompletePage }) => ({ default: RegisterCompletePage })));
 const ResetPasswordPage = lazy(() => import('../features/account/ResetPasswordPage').then(({ ResetPasswordPage }) => ({ default: ResetPasswordPage })));
 const VerifyEmailPage = lazy(() => import('../features/account/VerifyEmailPage').then(({ VerifyEmailPage }) => ({ default: VerifyEmailPage })));
 const AlbumPage = lazy(() => import('../features/catalog/AlbumPage').then(({ AlbumPage }) => ({ default: AlbumPage })));
@@ -23,6 +24,9 @@ const PlaylistDetailPage = lazy(() => import('../features/playlists/PlaylistDeta
 const PlaylistFeatureGate = lazy(() => import('../features/playlists/PlaylistFeatureGate').then(({ PlaylistFeatureGate }) => ({ default: PlaylistFeatureGate })));
 const PlaylistIndexPage = lazy(() => import('../features/playlists/PlaylistIndexPage').then(({ PlaylistIndexPage }) => ({ default: PlaylistIndexPage })));
 const SearchPage = lazy(() => import('../features/search/SearchPage').then(({ SearchPage }) => ({ default: SearchPage })));
+const SocialPage = lazy(() => import('../features/social/SocialPage').then(({ SocialPage }) => ({ default: SocialPage })));
+const RoomInvitationsPage = lazy(() => import('../features/social/RoomInvitationsPage').then(({ RoomInvitationsPage }) => ({ default: RoomInvitationsPage })));
+const MusicSharesPage = lazy(() => import('../features/social/MusicSharesPage').then(({ MusicSharesPage }) => ({ default: MusicSharesPage })));
 
 /** Provides an announced route placeholder while a page-specific bundle loads. */
 const RouteLoadingPage = () => {
@@ -53,6 +57,10 @@ export const appRoutes: RouteObject[] = [
       { index: true, element: loadRoute(<HomePage />), errorElement: <RouteErrorPage /> },
       { path: 'search', element: loadRoute(<SearchPage />), errorElement: <RouteErrorPage /> },
       { path: 'library', element: loadRoute(<LibraryPage />), errorElement: <RouteErrorPage /> },
+      { path: 'social', element: loadRoute(<SocialPage />), errorElement: <RouteErrorPage /> },
+      { path: 'social/shares', element: loadRoute(<MusicSharesPage />), errorElement: <RouteErrorPage /> },
+      { path: 'social/invitations', element: loadRoute(<RoomInvitationsPage />), errorElement: <RouteErrorPage /> },
+      { path: 'social/invitations/:invitationId', element: loadRoute(<RoomInvitationsPage />), errorElement: <RouteErrorPage /> },
       { path: 'playlists', element: loadRoute(<PlaylistFeatureGate><PlaylistIndexPage /></PlaylistFeatureGate>), errorElement: <RouteErrorPage /> },
       { path: 'playlists/:playlistId', element: loadRoute(<PlaylistFeatureGate><PlaylistDetailPage /></PlaylistFeatureGate>), errorElement: <RouteErrorPage /> },
       { path: 'albums/:albumId', element: loadRoute(<AlbumPage />), errorElement: <RouteErrorPage /> },
@@ -60,6 +68,7 @@ export const appRoutes: RouteObject[] = [
       { path: 'organizations/:organizationId', element: loadRoute(<OrganizationPage />), errorElement: <RouteErrorPage /> },
       { path: 'login', element: loadRoute(<LoginPage />), errorElement: <RouteErrorPage /> },
       { path: 'register', element: loadRoute(<RegisterPage />), errorElement: <RouteErrorPage /> },
+      { path: 'register/complete', element: loadRoute(<RegisterCompletePage />), errorElement: <RouteErrorPage /> },
       { path: 'verify-email', element: loadRoute(<VerifyEmailPage />), errorElement: <RouteErrorPage /> },
       { path: 'forgot-password', element: loadRoute(<ForgotPasswordPage />), errorElement: <RouteErrorPage /> },
       { path: 'reset-password', element: loadRoute(<ResetPasswordPage />), errorElement: <RouteErrorPage /> },

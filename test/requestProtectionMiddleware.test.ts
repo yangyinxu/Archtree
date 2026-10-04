@@ -3,9 +3,19 @@ import test from 'node:test';
 import { EventEmitter } from 'node:events';
 
 import {
+    accountOrClientKey,
+    authEmailAccountRateLimit,
+    authRateLimit,
+    limitConcurrency,
+    rateLimit,
+    refreshClientRateLimit,
+    refreshCredentialRateLimit,
     resetRateLimitWindowsForTests,
     uploadRateLimit,
-    searchConcurrencyLimit
+    searchConcurrencyLimit,
+    roomAudioAnalysisConcurrencyLimit,
+    takeLimiterRejections,
+    uploadConcurrencyLimit
 } from '../src/middleware/requestProtectionMiddleware';
 
 const responseCapture = () => {
@@ -56,6 +66,175 @@ test('account-owned upload mutations retain their hourly abuse-protection quota'
     assert.equal(typeof rejected.capture.headers['RateLimit-Reset'], 'number');
 });
 
+test('email account limits key only on the validated email and skip requests without one', () => {
+    resetRateLimitWindowsForTests();
+    const invoke = (body: Record<string, unknown>) => {
+        const { capture, response } = responseCapture();
+        let admitted = false;
+        authEmailAccountRateLimit({ ip: '203.0.113.20', socket: {}, body } as any, response as any, () => {
+            admitted = true;
+        });
+        return { admitted, capture };
+    };
+
+    // A missing email cannot resolve an account, so it neither counts nor is rejected here.
+    for (let index = 0; index < 12; index += 1) {
+        assert.equal(invoke({ identifier: 'lorem.ipsum@example.test', username: 'lorem' }).admitted, true);
+    }
+    for (let index = 0; index < 10; index += 1) {
+        assert.equal(invoke({
+            email: ' Lorem.Ipsum@Example.Test ',
+            identifier: `probe-${index}@example.test`,
+            username: `probe-${index}`
+        }).admitted, true);
+    }
+    const rejected = invoke({ email: 'lorem.ipsum@example.test', identifier: 'fresh@example.test' });
+    assert.equal(rejected.admitted, false);
+    assert.equal(rejected.capture.status, 429);
+    assert.deepEqual(rejected.capture.body, { message: 'Too many requests. Please try again later.' });
+    assert.equal(Number(rejected.capture.headers['Retry-After']) > 0, true);
+    assert.equal(invoke({ email: 'dolor.sit@example.test' }).admitted, true);
+});
+
+test('refresh credential limits key on the presented token digest and fall back to the client address', () => {
+    resetRateLimitWindowsForTests();
+    const invoke = (ip: string, body: Record<string, unknown>) => {
+        const { capture, response } = responseCapture();
+        let admitted = false;
+        refreshCredentialRateLimit({ ip, socket: {}, body } as any, response as any, () => {
+            admitted = true;
+        });
+        return { admitted, capture };
+    };
+
+    // Ten presentations of one token from different addresses share its budget.
+    for (let index = 0; index < 10; index += 1) {
+        assert.equal(invoke(`198.51.100.${index}`, { refreshToken: 'lorem-ipsum-token' }).admitted, true);
+    }
+    const rejected = invoke('198.51.100.99', { refreshToken: 'lorem-ipsum-token' });
+    assert.equal(rejected.admitted, false);
+    assert.equal(rejected.capture.status, 429);
+    assert.deepEqual(rejected.capture.body, { message: 'Too many requests. Please try again later.' });
+    assert.equal(Number(rejected.capture.headers['Retry-After']) > 0, true);
+    assert.equal(invoke('198.51.100.0', { refreshToken: 'dolor-sit-token' }).admitted, true,
+        'listeners behind one address keep separate token budgets');
+
+    // Missing, non-string, and oversized tokens fall back to one per-address bucket.
+    for (const body of [{}, { refreshToken: ['lorem'] }, { refreshToken: 'x'.repeat(513) }]) {
+        for (let index = 0; index < 3; index += 1) {
+            assert.equal(invoke('203.0.113.30', body).admitted, true);
+        }
+    }
+    assert.equal(invoke('203.0.113.30', {}).admitted, true);
+    assert.equal(invoke('203.0.113.30', {}).capture.status, 429);
+    assert.equal(invoke('203.0.113.31', {}).admitted, true);
+});
+
+test('refresh and login draw from separate per-address buckets without loosening login', () => {
+    resetRateLimitWindowsForTests();
+    const request = { ip: '203.0.113.40', socket: {} };
+    const admit = (limiter: typeof authRateLimit) => {
+        const { capture, response } = responseCapture();
+        let admitted = false;
+        limiter(request as any, response as any, () => { admitted = true; });
+        return { admitted, capture };
+    };
+
+    for (let index = 0; index < 20; index += 1) assert.equal(admit(authRateLimit).admitted, true);
+    const login = admit(authRateLimit);
+    assert.equal(login.capture.status, 429, 'login keeps 20 attempts per 15 minutes');
+    assert.equal(login.capture.headers['RateLimit-Limit'], 20);
+
+    for (let index = 0; index < 600; index += 1) assert.equal(admit(refreshClientRateLimit).admitted, true);
+    const refresh = admit(refreshClientRateLimit);
+    assert.equal(refresh.capture.status, 429, 'refresh still has a per-address ceiling');
+    assert.equal(refresh.capture.headers['RateLimit-Limit'], 600);
+});
+
+test('account-keyed windows separate accounts on one IP and fall back to the IP without an account', () => {
+    resetRateLimitWindowsForTests();
+    const limiter = rateLimit('account-key-test', 2, 60_000, undefined, accountOrClientKey);
+    const invoke = (ip: string, userId?: string) => {
+        const { capture, response } = responseCapture();
+        let admitted = false;
+        limiter({ ip, socket: {}, ...(userId ? { auth: { userId } } : {}) } as any, response as any, () => { admitted = true; });
+        return { admitted, capture };
+    };
+    const sharedAddress = '203.0.113.30';
+    assert.equal(invoke(sharedAddress, 'lorem-account').admitted, true);
+    assert.equal(invoke('198.51.100.30', 'lorem-account').admitted, true);
+    // A new address cannot refill an account budget.
+    assert.equal(invoke('192.0.2.30', 'lorem-account').capture.status, 429);
+    assert.equal(invoke(sharedAddress, 'ipsum-account').admitted, true);
+    assert.equal(invoke(sharedAddress).admitted, true);
+    assert.equal(invoke(sharedAddress).admitted, true);
+    assert.equal(invoke(sharedAddress).capture.status, 429);
+    assert.equal(invoke(sharedAddress, 'ipsum-account').admitted, true);
+    // An address that spells an account ID still draws from its own IP window.
+    assert.equal(invoke('dolor-account').admitted, true);
+    assert.equal(invoke(sharedAddress, 'dolor-account').admitted, true);
+    assert.equal(accountOrClientKey({ ip: sharedAddress, socket: {} } as any), `ip:${sharedAddress}`);
+    assert.equal(accountOrClientKey({ ip: sharedAddress, socket: {}, auth: { userId: 'lorem-account' } } as any), 'account:lorem-account');
+});
+
+test('account-keyed concurrency separates accounts on one IP, follows an account across IPs and keeps one process ceiling', () => {
+    const limiter = limitConcurrency('account-concurrency-test', 2, 5, accountOrClientKey);
+    const open: EventEmitter[] = [];
+    const invoke = (ip: string, userId?: string) => {
+        const { capture, response } = responseCapture();
+        const events = Object.assign(new EventEmitter(), response);
+        let admitted = false;
+        limiter({ ip, socket: {}, ...(userId ? { auth: { userId } } : {}) } as any, events as any, () => { admitted = true; });
+        if (admitted) open.push(events);
+        return { admitted, capture, events };
+    };
+    const sharedAddress = '203.0.113.31';
+    try {
+        const first = invoke(sharedAddress, 'lorem-account');
+        assert.equal(first.admitted, true);
+        assert.equal(invoke('198.51.100.31', 'lorem-account').admitted, true);
+        // A new address adds no slots to an account that already holds its limit.
+        const refused = invoke('192.0.2.31', 'lorem-account');
+        assert.equal(refused.capture.status, 429);
+        assert.equal(refused.capture.headers['Retry-After'], '2');
+        assert.deepEqual(refused.capture.body, { message: 'Too many concurrent requests.' });
+        // A neighbor on the same address keeps its own slots.
+        assert.equal(invoke(sharedAddress, 'ipsum-account').admitted, true);
+        // Without an account the request falls back to its address, never to an account's slots.
+        const anonymous = invoke(sharedAddress);
+        assert.equal(anonymous.admitted, true);
+        assert.equal(invoke(sharedAddress, 'ipsum-account').admitted, true);
+        // Five occupied slots fill the process-wide ceiling for every key.
+        assert.equal(invoke('192.0.2.32', 'dolor-account').capture.status, 429);
+        assert.equal(invoke('192.0.2.33').capture.status, 429);
+        for (const released of [first, anonymous]) { released.events.emit('finish'); released.events.emit('close'); }
+        // The released slot returns to the account at any address, and its limit still applies with process room left.
+        assert.equal(invoke('192.0.2.34', 'lorem-account').admitted, true);
+        assert.equal(invoke('192.0.2.35', 'lorem-account').capture.status, 429);
+        assert.equal(invoke('192.0.2.32', 'dolor-account').admitted, true);
+    } finally { for (const response of open) response.emit('close'); }
+});
+
+test('analysis capacity bounds different administrators independently from upload capacity', () => {
+    const responses: EventEmitter[] = [];
+    const invoke = (ip: string, limiter = roomAudioAnalysisConcurrencyLimit) => {
+        const { capture, response } = responseCapture();
+        const events = Object.assign(new EventEmitter(), response);
+        responses.push(events);
+        let admitted = false;
+        limiter({ ip, socket: {} } as any, events as any, () => { admitted = true; });
+        return { admitted, capture, events };
+    };
+    try {
+        const analysis = invoke('analysis-admin-a');
+        assert.equal(analysis.admitted, true);
+        assert.equal(invoke('analysis-admin-b').capture.status, 429);
+        assert.equal(invoke('analysis-admin-a', uploadConcurrencyLimit).admitted, true);
+        analysis.events.emit('finish');
+        assert.equal(invoke('analysis-admin-b').admitted, true);
+    } finally { for (const response of responses) response.emit('close'); }
+});
+
 test('search has shared process and per-client bounds and releases finished capacity', () => {
     const open: EventEmitter[] = [];
     const invoke = (ip: string) => {
@@ -77,4 +256,32 @@ test('search has shared process and per-client bounds and releases finished capa
         assert.equal(invoke('client-b').admitted, true);
         assert.equal(invoke('client-c').capture.status, 429);
     } finally { for (const response of open) response.emit('close'); }
+});
+
+test('every limiter 429 is counted per fixed scope for the operations summary and reset when taken', () => {
+    resetRateLimitWindowsForTests();
+    const request = { ip: '203.0.113.40', socket: {}, body: { email: 'counted@example.test' } };
+    const window = rateLimit('synthetic-window', 1, 60_000);
+    for (let index = 0; index < 3; index += 1) window(request as any, responseCapture().response as any, () => undefined);
+    for (let index = 0; index < 11; index += 1) authEmailAccountRateLimit(request as any, responseCapture().response as any, () => undefined);
+    const open: EventEmitter[] = [];
+    try {
+        for (let index = 0; index < 3; index += 1) {
+            const events = Object.assign(new EventEmitter(), responseCapture().response);
+            searchConcurrencyLimit({ ip: '203.0.113.41', socket: {} } as any, events as any, () => { open.push(events); });
+        }
+    } finally { for (const response of open) response.emit('close'); }
+    const taken = takeLimiterRejections();
+    assert.deepEqual(taken, { 'auth-account': 1, 'catalog-search': 1, 'synthetic-window': 2 });
+    assert.doesNotMatch(JSON.stringify(taken), /203\.0\.113|counted@/);
+    assert.deepEqual(takeLimiterRejections(), {});
+});
+
+test('limiter rejection counts keep a bounded number of scopes', () => {
+    resetRateLimitWindowsForTests();
+    for (let index = 0; index < 100; index += 1) {
+        const limiter = rateLimit(`synthetic-scope-${index}`, 0, 60_000);
+        limiter({ ip: '203.0.113.42', socket: {} } as any, responseCapture().response as any, () => undefined);
+    }
+    assert.equal(Object.keys(takeLimiterRejections()).length, 64);
 });

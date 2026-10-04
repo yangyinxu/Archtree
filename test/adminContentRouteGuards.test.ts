@@ -66,6 +66,7 @@ test('Content Manager skips hourly quotas while retaining upload concurrency bou
         '/artist/albums/add',
         '/artist/albums/remove',
         '/workflows/artist-release/retry',
+        '/room-audio-analysis',
         '/organization/create',
         '/organization/update',
         '/organization/delete',
@@ -101,6 +102,12 @@ test('Content Manager skips hourly quotas while retaining upload concurrency bou
         assert.equal(names.includes('contentManagerUploadRateLimit'), false);
         assert.equal(names.includes('uploadRateLimit'), false);
     }
+});
+
+test('room audio analysis separates bounded reads from cancellable analysis work', () => {
+    assert.deepEqual(handlerNames(contentManagerRoutes, 'get', '/room-audio-analysis').slice(0, -1), []);
+    assert.deepEqual(handlerNames(contentManagerRoutes, 'post', '/room-audio-analysis').slice(0, 2),
+        ['roomAudioAnalysisConcurrencyLimit', 'attachRequestAbortSignal']);
 });
 
 test('catalog and audio uploads authorize admins, skip hourly quotas, and retain concurrency guards', () => {

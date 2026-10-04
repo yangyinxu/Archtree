@@ -4,11 +4,19 @@ export interface AccountOperationGuard {
 }
 
 let accountEpoch = 0;
+const epochListeners = new Set<() => void>();
 
 /** Invalidates every account-owned callback captured before an identity transition. */
 export const advanceAccountEpoch = () => {
   accountEpoch += 1;
+  for (const listener of epochListeners) listener();
   return accountEpoch;
+};
+
+/** Privacy-sensitive live transports detach synchronously when credentials transition. */
+export const subscribeToAccountEpoch = (listener: () => void) => {
+  epochListeners.add(listener);
+  return () => { epochListeners.delete(listener); };
 };
 
 /** Captures the account identity and transition generation owned by one operation. */

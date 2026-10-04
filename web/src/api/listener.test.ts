@@ -193,3 +193,44 @@ test('types save status, save, unsave, and recent activity mutations', async () 
     expect(new Headers(init?.headers).get('X-Finitude-Account-Viewer')).toBe('viewer-1');
   }
 });
+
+test('Save status batches deduplicate targets and require exactly one result per identity', async () => {
+  const targets = Array.from({ length: 101 }, (_, index) => ({ contentType: 'audioTrack' as const, contentId: `track-${index}` }));
+  const batches: number[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+    const { items } = JSON.parse(String(init?.body));
+    batches.push(items.length);
+    return jsonResponse({ items: items.map((item: object) => ({ ...item, saved: true })) }, 200, 'viewer-1');
+  }));
+  const result = await getSaveStatuses('viewer-1', [...targets, targets[0]]);
+  expect(batches).toEqual([100, 1]);
+  expect(result.items).toEqual(targets.map((target) => ({ ...target, saved: true })));
+});
+
+test.each(['missing', 'duplicate', 'unrequested'])('rejects %s Save statuses instead of committing partial data', async (kind) => {
+  const first = { contentType: 'album' as const, contentId: 'album-1', saved: true };
+  const second = { contentType: 'audioTrack' as const, contentId: 'track-1', saved: true };
+  const items = kind === 'missing' ? [first] : kind === 'duplicate' ? [first, first]
+    : [first, { ...second, contentId: 'another-track' }];
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ items }, 200, 'viewer-1')));
+  await expect(getSaveStatuses('viewer-1', [
+    { contentType: first.contentType, contentId: first.contentId },
+    { contentType: second.contentType, contentId: second.contentId }
+  ])).rejects.toMatchObject({ kind: 'invalid-response' });
+});
+
+test.each(['abort', 'account'] as const)('a late first Save batch after %s cannot dispatch the next batch', async (reason) => {
+  const { advanceAccountEpoch } = await import('./accountEpoch');
+  const controller = new AbortController();
+  let finish!: (result: Response) => void;
+  const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; }));
+  vi.stubGlobal('fetch', fetchMock);
+  const targets = Array.from({ length: 101 }, (_, index) => ({ contentType: 'audioTrack' as const, contentId: `track-${index}` }));
+  const request = getSaveStatuses('viewer-1', targets, controller.signal);
+  const rejection = expect(request).rejects.toMatchObject(reason === 'abort' ? { name: 'AbortError' } : { code: 'account_viewer_mismatch' });
+  if (reason === 'abort') controller.abort();
+  else advanceAccountEpoch();
+  finish(jsonResponse({ items: targets.slice(0, 100).map((target) => ({ ...target, saved: false })) }, 200, 'viewer-1'));
+  await rejection;
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

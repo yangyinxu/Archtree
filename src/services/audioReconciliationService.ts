@@ -246,10 +246,28 @@ export const findDuplicateAudioStorageKeys = (tracks: any[]) => {
         }));
 };
 
-/** Projects every recoverable storage or publication lifecycle into the audit DTO. */
+/**
+ * Checks one lifecycle key against the S3 listing of its media kind; callers
+ * resolve the kind like topLevelMediaLifecycleKeys does for that phase.
+ */
+const lifecycleObjectListed = (
+    key: unknown,
+    mediaType: unknown,
+    audioS3Keys: ReadonlySet<string>,
+    videoS3Keys: ReadonlySet<string>
+) => Boolean(key)
+    && (persistedMediaType(mediaType) === 'video' ? videoS3Keys : audioS3Keys).has(String(key));
+
+/**
+ * Projects every recoverable storage or publication lifecycle into the audit
+ * DTO. Object existence uses the listing for each phase's media kind, so a
+ * present Video object is not reported missing; callers without a video
+ * listing report every Video phase as absent.
+ */
 export const findIncompleteAudioTracks = (
     tracks: any[],
-    s3Keys: ReadonlySet<string>
+    s3Keys: ReadonlySet<string>,
+    videoS3Keys: ReadonlySet<string> = new Set()
 ) => tracks
     .filter((track) => (track.uploadStatus && track.uploadStatus !== 'ready')
         || (Object.prototype.hasOwnProperty.call(track, 'publicationStatus')
@@ -259,32 +277,43 @@ export const findIncompleteAudioTracks = (
     .map((track) => ({
         audioTrackId: String(track._id),
         s3Key: String(track.s3Key ?? ''),
+        s3VersionId: track.mediaRepresentation?.objectKey === track.s3Key
+            ? track.mediaRepresentation.versionId ?? null : null,
         title: String(track.title ?? ''),
         originalFileName: String(track.originalFileName ?? ''),
         ownerId: String(track.createdBy ?? ''),
         uploadStatus: String(track.uploadStatus),
         uploadUpdatedAt: track.uploadUpdatedAt ?? null,
         uploadError: String(track.uploadError ?? '').slice(0, 500),
-        objectExists: s3Keys.has(String(track.s3Key ?? '')),
+        objectExists: lifecycleObjectListed(track.s3Key, track.mediaType, s3Keys, videoS3Keys),
         publicationStatus: Object.prototype.hasOwnProperty.call(track, 'publicationStatus')
             ? String(track.publicationStatus)
             : 'legacy',
         publicationUpdatedAt: track.publicationUpdatedAt ?? null,
         publicationError: String(track.publicationError ?? '').slice(0, 500),
         pendingS3Key: String(track.pendingS3Key ?? ''),
+        pendingS3VersionId: track.pendingS3VersionId ?? null,
+        pendingUploadOutcomeUnknown: track.pendingUploadOutcomeUnknown === true,
         pendingUploadStatus: String(track.pendingUploadStatus ?? ''),
         pendingUploadUpdatedAt: track.pendingUploadUpdatedAt ?? null,
         pendingUploadError: String(track.pendingUploadError ?? '').slice(0, 500),
-        pendingObjectExists: track.pendingS3Key
-            ? s3Keys.has(String(track.pendingS3Key))
-            : false,
+        pendingObjectExists: lifecycleObjectListed(
+            track.pendingS3Key,
+            track.pendingMediaType ?? track.mediaType,
+            s3Keys,
+            videoS3Keys
+        ),
         storageCleanupS3Key: String(track.storageCleanupS3Key ?? ''),
+        storageCleanupS3VersionId: track.storageCleanupS3VersionId ?? null,
         storageCleanupStatus: String(track.storageCleanupStatus ?? ''),
         storageCleanupUpdatedAt: track.storageCleanupUpdatedAt ?? null,
         storageCleanupError: String(track.storageCleanupError ?? '').slice(0, 500),
-        cleanupObjectExists: track.storageCleanupS3Key
-            ? s3Keys.has(String(track.storageCleanupS3Key))
-            : false
+        cleanupObjectExists: lifecycleObjectListed(
+            track.storageCleanupS3Key,
+            track.storageCleanupMediaType ?? 'audio',
+            s3Keys,
+            videoS3Keys
+        )
     }));
 
 export const reconcileAudioStorage = async () => {
@@ -305,6 +334,7 @@ export const reconcileAudioStorage = async () => {
                 originalFileName: 1,
                 createdBy: 1,
                 s3Key: 1,
+                mediaRepresentation: 1,
                 mediaType: 1,
                 uploadStatus: 1,
                 uploadUpdatedAt: 1,
@@ -313,11 +343,14 @@ export const reconcileAudioStorage = async () => {
                 publicationUpdatedAt: 1,
                 publicationError: 1,
                 pendingS3Key: 1,
+                pendingS3VersionId: 1,
+                pendingUploadOutcomeUnknown: 1,
                 pendingMediaType: 1,
                 pendingUploadStatus: 1,
                 pendingUploadUpdatedAt: 1,
                 pendingUploadError: 1,
                 storageCleanupS3Key: 1,
+                storageCleanupS3VersionId: 1,
                 storageCleanupMediaType: 1,
                 storageCleanupStatus: 1,
                 storageCleanupUpdatedAt: 1,
@@ -365,7 +398,8 @@ export const reconcileAudioStorage = async () => {
             publicationUpdatedAt: track.publicationUpdatedAt ?? null,
             publicationError: String(track.publicationError ?? '').slice(0, 500)
         }));
-    const incompleteTracks = findIncompleteAudioTracks(tracks, s3Keys);
+    const videoS3Keys = new Set(videoS3Objects.map((object) => object.key));
+    const incompleteTracks = findIncompleteAudioTracks(tracks, s3Keys, videoS3Keys);
     const invalidStorageKeys = tracks.flatMap((track) => {
         const audioTrackId = String(track._id);
         return rawTopLevelReferences(track).flatMap((reference) => {
@@ -387,7 +421,6 @@ export const reconcileAudioStorage = async () => {
         return !isAudioStorageObjectKey(object.key);
     });
 
-    const videoS3Keys = new Set(videoS3Objects.map((object) => object.key));
     const validVideoReferences = tracks.flatMap(rawVideoReferences).filter((reference) => (
         isVideoObjectKeyForTrack(reference.s3Key, reference.audioTrackId)
     ));

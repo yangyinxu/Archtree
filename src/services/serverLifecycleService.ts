@@ -1,5 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import type { Server, ServerResponse } from 'node:http';
+import { onResponseComplete } from '../infrastructure/responseCompletion';
 
 const requestLifecycles = new WeakMap<Request, ServerLifecycle>();
 
@@ -11,6 +12,18 @@ interface RequestWorkState {
 }
 
 const requestWork = new WeakMap<Request, RequestWorkState>();
+
+/** Identifies dispatch refused solely because its original response has already ended. */
+class RequestWorkCancelledError extends Error {
+  readonly name = 'AbortError';
+  readonly statusCode = 503;
+
+  constructor() { super('The request has already ended.'); }
+}
+
+/** Only a recorded transport completion can consume this internal cancellation at the error boundary. */
+export const isCompletedRequestWorkCancellation = (req: Request, error: unknown) =>
+  error instanceof RequestWorkCancelledError && requestWork.get(req)?.responseFinished === true;
 
 /** Keeps request work observable even in isolated Routers without an application lifecycle. */
 const workState = (req: Request) => {
@@ -34,17 +47,10 @@ const observeResponse = (req: Request, res: ServerResponse) => {
   const state = workState(req);
   if (!state.responseObserved) {
     state.responseObserved = true;
-    const finished = () => {
+    onResponseComplete(res, () => {
       state.responseFinished = true;
-      res.off('finish', finished);
-      res.off('close', finished);
       notifyRequestCompletion(state);
-    };
-    if (res.writableFinished || res.destroyed) finished();
-    else {
-      res.once('finish', finished);
-      res.once('close', finished);
-    }
+    });
   }
   return state;
 };
@@ -60,13 +66,13 @@ export const onRequestWorkComplete = (req: Request, res: ServerResponse, complet
 export const runRequestWork = <T>(req: Request, operation: () => T | Promise<T>): Promise<T> => {
   const state = workState(req);
   if (state.responseFinished) {
-    return Promise.reject(Object.assign(new Error('The request has already ended.'), { statusCode: 503 }));
+    return Promise.reject(new RequestWorkCancelledError());
   }
   state.pending += 1;
   const execute = () => {
     // A callback parser can finish after disconnect, even before this microtask begins.
     if (state.responseFinished) {
-      throw Object.assign(new Error('The request has already ended.'), { statusCode: 503 });
+      throw new RequestWorkCancelledError();
     }
     return operation();
   };
@@ -82,9 +88,18 @@ export class ServerLifecycle {
   draining = false;
   private shutdown?: Promise<'graceful' | 'forced'>;
   private responses = new Set<ServerResponse>();
+  private responseWaiters = new Set<() => void>();
   private work = new Set<Promise<unknown>>();
   private idleWaiters = new Set<() => void>();
   private workAdmissionClosed = false;
+  private drainListeners = new Set<() => void>();
+
+  /** Realtime gateways stop upgrade/timer admission and close owned sockets before HTTP drain. */
+  onDrain(listener: () => void) {
+    if (this.draining) listener();
+    else this.drainListeners.add(listener);
+    return () => { this.drainListeners.delete(listener); };
+  }
 
   /** Tracks business completion independently of HTTP connection lifetime. */
   track<T>(operation: () => T | Promise<T>): Promise<T> {
@@ -109,18 +124,28 @@ export class ServerLifecycle {
     return new Promise<void>(resolve => this.idleWaiters.add(resolve));
   }
 
+  /**
+   * Resolves once every admitted response has recorded transport completion. Node can close the
+   * server before a disconnected request's response emits 'close'; until then a late dispatch would
+   * look like a shutdown admission failure instead of a cancellation of an already-ended request.
+   */
+  private whenResponsesClosed() {
+    if (!this.responses.size) return Promise.resolve();
+    return new Promise<void>(resolve => this.responseWaiters.add(resolve));
+  }
+
   readonly admit: RequestHandler = (_req, res, next) => {
     if (!this.draining) {
       requestLifecycles.set(_req, this);
       observeResponse(_req, res);
       this.responses.add(res);
-      const release = () => {
+      onResponseComplete(res, () => {
         this.responses.delete(res);
-        res.off('close', release);
-        res.off('finish', release);
-      };
-      res.once('finish', release);
-      res.once('close', release);
+        if (this.responses.size === 0) {
+          for (const resolve of this.responseWaiters) resolve();
+          this.responseWaiters.clear();
+        }
+      });
       return next();
     }
     res.setHeader('Connection', 'close');
@@ -133,6 +158,8 @@ export class ServerLifecycle {
   stop(server: Server, closeDatabase: () => Promise<void>, graceMs: number, cleanupMs: number) {
     if (this.shutdown) return this.shutdown;
     this.draining = true;
+    for (const listener of this.drainListeners) listener();
+    this.drainListeners.clear();
     for (const response of this.responses) {
       response.shouldKeepAlive = false;
       if (!response.headersSent) response.setHeader('Connection', 'close');
@@ -159,7 +186,8 @@ export class ServerLifecycle {
       };
       // close() stops new connections and closes idle keep-alive connections on Node 24.
       const socketsClosed = new Promise<void>(closed => server.close(() => closed()));
-      void Promise.all([socketsClosed, this.whenIdle()]).then(complete);
+      // Draining admits no new responses, so this set only shrinks; the grace timer still bounds it.
+      void Promise.all([socketsClosed, this.whenResponsesClosed(), this.whenIdle()]).then(complete);
       timer = setTimeout(() => {
         forced = true;
         server.closeAllConnections();
@@ -168,6 +196,7 @@ export class ServerLifecycle {
       }, graceMs);
     });
     this.idleWaiters.clear();
+    this.responseWaiters.clear();
     await new Promise<void>(resolve => {
       let timer: NodeJS.Timeout | undefined;
       const complete = () => { clearTimeout(timer); resolve(); };

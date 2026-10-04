@@ -34,14 +34,6 @@
   width: 100%;
 }
 
-button.action {
-  cursor: pointer;
-}
-
-.action:hover {
-  background: transparent;
-}
-
 .action:focus-visible {
   outline-offset: -3px;
 }
@@ -58,6 +50,7 @@ button.action {
 .title,
 .metadata {
   display: block;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -66,21 +59,15 @@ button.action {
 .title {
   font-size: 0.9rem;
   font-weight: 700;
-  line-height: 1.35;
 }
 
 .metadata {
   color: var(--color-text-muted);
   font-size: 0.76rem;
-  line-height: 1.35;
   margin-top: 0.18rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .action {
-    transition: none;
-  }
-
   .row {
     transition: none;
   }

@@ -19,7 +19,7 @@ const MusicRows = ({ rows, viewerId, label, savedOnly = false }: MusicRowsProps)
     const actualSaved = confirmed[key] ?? saved;
     if (savedOnly && !actualSaved) return null;
     if (content.contentType !== 'album' && content.contentType !== 'audioTrack') return null;
-    return <ContentListRow key={`${content.contentType}:${content.id}`} item={content}
+    return <ContentListRow key={`${content.contentType}:${content.id}`} item={content} shareable={available}
       onPlay={content.contentType === 'audioTrack' && available
         ? (track) => { void launchStandalonePlayback(track, viewerId); } : undefined}
       trailing={<span className={styles.rowActions}>

@@ -7,7 +7,7 @@ import {
   unsaveContent
 } from '../api/listener';
 import type { LibraryTarget } from '../api/contentSchemas';
-import { captureAccountOperation, isAccountOperationCurrent } from '../api/accountEpoch';
+import { captureAccountOperation, isAccountOperationCurrent, type AccountOperationGuard } from '../api/accountEpoch';
 import styles from './SaveButton.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 
@@ -32,24 +32,30 @@ export const SaveButton = ({
   const [message, setMessage] = useState('');
   const ownerKey = `${viewerId ?? 'signed-out'}:${target.contentType}:${target.contentId}`;
   const ownerRef = useRef(ownerKey);
+  const activeOwnerRef = useRef(ownerKey);
+  activeOwnerRef.current = ownerKey;
   const visibleMessage = ownerRef.current === ownerKey ? message : '';
   const mutation = useMutation({
-    mutationFn: () => saved
-      ? unsaveContent(viewerId ?? '', target)
-      : saveContent(viewerId ?? '', target),
-    onMutate: () => captureAccountOperation(viewerId ?? ''),
-    onSuccess: (result, _variables, guard) => {
-      if (!isAccountOperationCurrent(guard, viewerId ?? '')) return;
-      setMessage(result.saved ? t('save.status.saved') : t('save.status.removed'));
-      onSavedChange?.(result.saved);
-      void Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['listener', 'home'] }),
-        queryClient.invalidateQueries({ queryKey: ['listener', 'library'] }),
-        queryClient.invalidateQueries({ queryKey: ['listener', 'save-statuses'] })
-      ]);
+    mutationFn: async (variables: { viewerId: string; target: LibraryTarget; saved: boolean; ownerKey: string; guard: AccountOperationGuard }) => {
+      // Load reconciliation before dispatch so a missing chunk cannot turn acknowledged success into an error.
+      const { commitSaveStatus } = await import('../api/saveCache');
+      if (!isAccountOperationCurrent(variables.guard, variables.viewerId)) throw new Error('Account changed');
+      const result = await (variables.saved
+        ? unsaveContent(variables.viewerId, variables.target)
+        : saveContent(variables.viewerId, variables.target));
+      return { result, commitSaveStatus };
     },
-    onError: (_error, _variables, guard) => {
-      if (isAccountOperationCurrent(guard, viewerId ?? '')) {
+    onMutate: (variables) => variables.guard,
+    onSuccess: async ({ result, commitSaveStatus }, variables, guard) => {
+      if (!isAccountOperationCurrent(guard, variables.viewerId)) return;
+      if (!await commitSaveStatus(queryClient, result, guard)) return;
+      if (activeOwnerRef.current === variables.ownerKey) {
+        setMessage(result.saved ? t('save.status.saved') : t('save.status.removed'));
+        onSavedChange?.(result.saved);
+      }
+    },
+    onError: (_error, variables, guard) => {
+      if (isAccountOperationCurrent(guard, variables.viewerId) && activeOwnerRef.current === variables.ownerKey) {
         setMessage(t('save.error.update'));
       }
     }
@@ -79,7 +85,7 @@ export const SaveButton = ({
           }
           if (saved === null || mutation.isPending) return;
           setMessage('');
-          mutation.mutate();
+          mutation.mutate({ viewerId: viewerId!, target, saved, ownerKey, guard: captureAccountOperation(viewerId!) });
         }}
         type="button"
       >

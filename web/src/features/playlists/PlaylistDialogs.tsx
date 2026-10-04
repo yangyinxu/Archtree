@@ -10,7 +10,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/client';
 import { captureAccountOperation, isAccountOperationCurrent } from '../../api/accountEpoch';
 import {
-  createPlaylist,
   createPlaylistIdempotencyKey,
   deletePlaylist,
   playlistNameSchema,
@@ -19,45 +18,17 @@ import {
   type PlaylistSummary
 } from '../../api/playlists';
 import { ModalDialog } from '../../components/ModalDialog';
+import { PlaylistCreateDialog } from './PlaylistCreateDialog';
+import { playlistMutationMessage } from './playlistMutationMessage';
 import {
   commitPlaylistDetail,
   removePlaylistFromCaches,
   revalidatePlaylistLists
 } from './playlistCache';
 import styles from './Playlists.module.css';
-import {
-  useLocalization,
-  type LocalizationContextValue
-} from '../../localization/LocalizationProvider';
+import { useLocalization } from '../../localization/LocalizationProvider';
 
-const playlistMutationMessage = (
-  error: unknown,
-  operation: 'create' | 'rename' | 'delete',
-  t: LocalizationContextValue['t']
-) => {
-  if (!(error instanceof ApiError)) return t('playlist.error.change_unconfirmed');
-  if (error.code === 'playlist_limit_reached') {
-    return t('playlist.error.playlist_limit');
-  }
-  if (error.code === 'idempotency_in_progress') {
-    return t('playlist.error.request_pending');
-  }
-  if (error.code === 'idempotency_key_reused') {
-    return t('playlist.error.request_key_mismatch');
-  }
-  if (error.code === 'account_viewer_mismatch' || error.status === 401) {
-    return t('playlist.error.account_changed');
-  }
-  if (error.code === 'playlist_revision_conflict' || error.status === 409) {
-    return operation === 'create'
-      ? t('playlist.error.replay_unsafe')
-      : t('playlist.error.revision_loading');
-  }
-  if (error.status === 429) return t('playlist.error.rate_limit');
-  return t('playlist.error.change_unconfirmed');
-};
-
-interface PlaylistNameDialogProps {
+export interface PlaylistNameDialogProps {
   mode: 'create' | 'rename';
   viewerId: string;
   playlist?: PlaylistSummary;
@@ -66,9 +37,11 @@ interface PlaylistNameDialogProps {
   returnFocusRef: RefObject<HTMLElement | null>;
 }
 
-/** Reuses one validated name flow for creation and revision-checked renaming. */
-export const PlaylistNameDialog = ({
-  mode,
+/** Creation recovery survives route changes; renaming remains a revision-checked dialog action. */
+export const PlaylistNameDialog = (props: PlaylistNameDialogProps) => props.mode === 'create'
+  ? <PlaylistCreateDialog {...props} /> : <PlaylistRenameDialog {...props} />;
+
+const PlaylistRenameDialog = ({
   viewerId,
   playlist,
   onClose,
@@ -82,15 +55,13 @@ export const PlaylistNameDialog = ({
   const [name, setName] = useState(playlist?.name ?? '');
   const [validationError, setValidationError] = useState('');
   const mutation = useMutation({
-    mutationFn: ({ normalizedName, key }: { normalizedName: string; key: string }) => mode === 'create'
-      ? createPlaylist({ viewerId, name: normalizedName, idempotencyKey: key })
-      : renamePlaylist({
-          viewerId,
-          playlistId: playlist!.id,
-          revision: playlist!.revision,
-          name: normalizedName,
-          idempotencyKey: key
-        }),
+    mutationFn: ({ normalizedName, key }: { normalizedName: string; key: string }) => renamePlaylist({
+      viewerId,
+      playlistId: playlist!.id,
+      revision: playlist!.revision,
+      name: normalizedName,
+      idempotencyKey: key
+    }),
     onMutate: () => captureAccountOperation(viewerId),
     onSuccess: (detail, _variables, guard) => {
       if (!guard || !isAccountOperationCurrent(guard, viewerId)) return;
@@ -138,14 +109,12 @@ export const PlaylistNameDialog = ({
   return (
     <ModalDialog
       closeDisabled={mutation.isPending}
-      description={mode === 'create'
-        ? t('playlist.name.create_description')
-        : t('playlist.name.rename_description')}
+      description={t('playlist.name.rename_description')}
       initialFocusRef={inputRef}
       kicker={t('library.title')}
       onClose={onClose}
       returnFocusRef={returnFocusRef}
-      title={mode === 'create' ? t('playlist.name.create_title') : t('playlist.name.rename_title')}
+      title={t('playlist.name.rename_title')}
     >
       <form className={styles.dialogForm} onSubmit={submit}>
         <label className={styles.field}>
@@ -167,7 +136,7 @@ export const PlaylistNameDialog = ({
         <p className={styles.fieldHint} id="playlist-name-hint">{t('playlist.name.hint')}</p>
         {(validationError || mutation.isError) && (
           <p className={styles.feedbackError} role="alert">
-            {validationError || playlistMutationMessage(mutation.error, mode, t)}
+            {validationError || playlistMutationMessage(mutation.error, 'rename', t)}
           </p>
         )}
         <div className={styles.dialogActions}>
@@ -175,9 +144,7 @@ export const PlaylistNameDialog = ({
           <button className={styles.primaryButton} disabled={mutation.isPending} type="submit">
             {mutation.isPending
               ? t('playlist.name.saving')
-              : mode === 'create'
-                ? t('playlist.action.create')
-                : t('playlist.action.save_name')}
+              : t('playlist.action.save_name')}
           </button>
         </div>
       </form>

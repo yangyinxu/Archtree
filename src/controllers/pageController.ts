@@ -23,6 +23,7 @@ import { toPublicExpandedPage, toPublicPage } from '../services/publicPageServic
 import { boundedLimit, boundedOffset } from '../utils/pagination';
 import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
 import { deleteCarouselAndPageReferences } from '../services/pageReferenceLifecycleService';
+import { ManualCompositionConflictError } from '../services/manualCompositionService';
 
 // v1 only allows composition pages for Home and Library.
 const allowedSlugs: PageSlug[] = ['home', 'library'];
@@ -659,6 +660,8 @@ export const addCarouselItem = async (req: Request, res: Response, next: NextFun
             position
         );
 
+        if (!items) throw new ManualCompositionConflictError();
+
         return res.status(200).json({
             message: 'Item added to carousel.',
             items
@@ -1073,10 +1076,11 @@ export const addCarouselItemWeb = async (req: Request, res: Response, next: Next
         }
 
         const position = parseOptionalPosition(req.body.position);
-        await Carousel.addItem(carouselId, {
+        const items = await Carousel.addItem(carouselId, {
             contentType,
             contentId
         }, authReq.auth.userId, position);
+        if (!items) throw new ManualCompositionConflictError();
 
         return redirectWithMessage(res, 'Carousel item added successfully.');
     } catch (error) {

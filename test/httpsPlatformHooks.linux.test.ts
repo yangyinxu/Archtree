@@ -27,6 +27,56 @@ const writeExecutable = async (filePath: string, lines: string[]) => {
   await chmod(filePath, 0o755);
 };
 
+type NginxBlock = { header: string; body: string };
+
+/**
+ * Splits one nesting level of a generated Nginx config into its blocks. The
+ * generated configs contain no quoted braces, so brace depth is sufficient.
+ */
+const nginxBlocks = (config: string): NginxBlock[] => {
+  const source = config.replace(/#.*$/gm, '');
+  const blocks: NginxBlock[] = [];
+  let depth = 0;
+  let headerStart = 0;
+  let bodyStart = 0;
+  let header = '';
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '{') {
+      if (depth === 0) {
+        header = source.slice(headerStart, index).trim().replace(/\s+/g, ' ');
+        bodyStart = index + 1;
+      }
+      depth += 1;
+    } else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        blocks.push({ header, body: source.slice(bodyStart, index) });
+        headerStart = index + 1;
+      }
+    } else if (character === ';' && depth === 0) {
+      headerStart = index + 1;
+    }
+  }
+  assert.equal(depth, 0, 'generated Nginx braces must balance');
+  return blocks;
+};
+
+/** Lists the simple directives of a block body, ignoring nested blocks. */
+const nginxDirectives = (body: string): string[] => {
+  let flat = body.replace(/#.*$/gm, '');
+  while (/\{[^{}]*\}/.test(flat)) flat = flat.replace(/[^;{}]*\{[^{}]*\}/g, '');
+  return flat.split(';').map(value => value.trim().replace(/\s+/g, ' ')).filter(Boolean);
+};
+
+/** Seeds the live certificate that the hook treats as ready. */
+const seedCertificate = async (certRoot: string) => {
+  const liveCertificate = path.join(certRoot, 'kashewt.com');
+  await mkdir(liveCertificate, { recursive: true });
+  await writeFile(path.join(liveCertificate, 'fullchain.pem'), 'certificate\n');
+  await writeFile(path.join(liveCertificate, 'privkey.pem'), 'private-key\n');
+};
+
 /** Builds isolated command and filesystem dependencies for the platform hooks. */
 const createHookFixture = async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'archtree-https-hook-'));
@@ -125,6 +175,7 @@ const createHookFixture = async () => {
     nginxConfig,
     certbotLog,
     getConfigLog,
+    nginxLog,
     systemctlLog,
     flockLog,
     readyMarker,
@@ -145,6 +196,8 @@ test('retries a failed first issuance and activates TLS after recovery', async (
   assert.match(challengeConfig, /\.well-known\/acme-challenge/);
   assert.match(challengeConfig, /proxy_pass http:\/\/127\.0\.0\.1:8080/);
   assert.doesNotMatch(challengeConfig, /listen 443/);
+  // Room sockets require HTTPS, so the temporary HTTP server never tunnels upgrades.
+  assert.doesNotMatch(challengeConfig, /Upgrade|connection_upgrade/i);
 
   await execFileAsync('/bin/bash', [configureHook], {
     env: { ...fixture.environment, ARCHTREE_HTTPS_MODE: 'bootstrap' }
@@ -158,13 +211,92 @@ test('retries a failed first issuance and activates TLS after recovery', async (
   assert.equal(await readFile(fixture.readyMarker, 'utf8'), '');
 });
 
+test('forwards WebSocket upgrades from the HTTPS server without changing ordinary proxying', async (t) => {
+  const fixture = await createHookFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  await seedCertificate(fixture.certRoot);
+
+  await execFileAsync('/bin/bash', [configureHook], { env: fixture.environment });
+  const tlsConfig = await readFile(fixture.nginxConfig, 'utf8');
+  const [upgradeMap, httpServer, httpsServer, ...unexpected] = nginxBlocks(tlsConfig);
+  assert.deepEqual(unexpected, []);
+
+  // The map must sit at http level, beside the server blocks, under a name no platform map shares.
+  assert.equal(upgradeMap?.header, 'map $http_upgrade $archtree_connection_upgrade');
+  assert.deepEqual(nginxDirectives(upgradeMap.body), ['default ""', 'websocket upgrade']);
+  assert.doesNotMatch(tlsConfig, /\$connection_upgrade\b/);
+
+  // Port 80 only serves ACME challenges and redirects; it never proxies a socket in TLS mode.
+  assert.equal(httpServer?.header, 'server');
+  assert.deepEqual(
+    nginxBlocks(httpServer.body).map(block => block.header),
+    ['location ^~ /.well-known/acme-challenge/', 'location /']
+  );
+  assert.deepEqual(nginxDirectives(nginxBlocks(httpServer.body)[1].body), ['return 308 https://$host$request_uri']);
+
+  assert.equal(httpsServer?.header, 'server');
+  const httpsDirectives = nginxDirectives(httpsServer.body);
+  assert.ok(httpsDirectives.includes('listen 443 ssl'));
+  assert.ok(httpsDirectives.includes('http2 on'));
+  const httpsLocations = nginxBlocks(httpsServer.body);
+  assert.deepEqual(httpsLocations.map(block => block.header), ['location /']);
+  const proxy = nginxDirectives(httpsLocations[0].body);
+
+  // HTTP/1.1 plus explicit hop-by-hop headers let Node's 'upgrade' listener answer 101.
+  assert.ok(proxy.includes('proxy_pass http://127.0.0.1:8080'));
+  assert.ok(proxy.includes('proxy_http_version 1.1'));
+  assert.deepEqual(
+    proxy.filter(directive => /^proxy_set_header (upgrade|connection) /i.test(directive)),
+    ['proxy_set_header Upgrade $http_upgrade', 'proxy_set_header Connection $archtree_connection_upgrade']
+  );
+  // The same-origin Host/protocol contract the gateway checks is unchanged.
+  assert.ok(proxy.includes('proxy_set_header Host $host'));
+  assert.ok(proxy.includes('proxy_set_header X-Forwarded-Proto https'));
+  // Subprotocol (room-v1 name plus ticket) and Origin must pass through untouched in both directions.
+  assert.deepEqual(
+    proxy.filter(directive => /sec-websocket|origin|proxy_hide_header|proxy_pass_request_headers/i.test(directive)),
+    []
+  );
+  // Idle limits must stay far above the 5 s room ping and the gateway's 16 s silence eviction.
+  for (const name of ['proxy_read_timeout', 'proxy_send_timeout']) {
+    const values = proxy.filter(directive => directive.startsWith(`${name} `));
+    assert.equal(values.length, 1, `${name} must be set once`);
+    const seconds = Number(/^\S+ (\d+)s$/.exec(values[0])?.[1]);
+    assert.ok(seconds >= 60, `${name} must leave room sockets open between pings`);
+  }
+});
+
+test('the next deploy replaces an active pre-WebSocket TLS config in place', async (t) => {
+  const fixture = await createHookFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  await seedCertificate(fixture.certRoot);
+  await mkdir(path.dirname(fixture.nginxConfig), { recursive: true });
+  await writeFile(fixture.nginxConfig, [
+    'server {',
+    '    listen 443 ssl;',
+    '    location / {',
+    '        proxy_http_version 1.1;',
+    '        proxy_set_header Connection "";',
+    '    }',
+    '}',
+    ''
+  ].join('\n'));
+
+  await execFileAsync('/bin/bash', [configureHook], { env: fixture.environment });
+  const tlsConfig = await readFile(fixture.nginxConfig, 'utf8');
+  assert.match(tlsConfig, /proxy_set_header Connection \$archtree_connection_upgrade;/);
+  assert.doesNotMatch(tlsConfig, /proxy_set_header Connection "";/);
+  // Existing instances keep their certificate: no issuance, only validate and reload.
+  await assert.rejects(readFile(fixture.certbotLog), { code: 'ENOENT' });
+  assert.equal(await readFile(fixture.nginxLog, 'utf8'), '-t\n');
+  assert.equal(await readFile(fixture.systemctlLog, 'utf8'), 'reload nginx\n');
+  assert.equal(await readFile(fixture.readyMarker, 'utf8'), '');
+});
+
 test('preserves active TLS when a maintenance renewal fails', async (t) => {
   const fixture = await createHookFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
-  const liveCertificate = path.join(fixture.certRoot, 'kashewt.com');
-  await mkdir(liveCertificate, { recursive: true });
-  await writeFile(path.join(liveCertificate, 'fullchain.pem'), 'certificate\n');
-  await writeFile(path.join(liveCertificate, 'privkey.pem'), 'private-key\n');
+  await seedCertificate(fixture.certRoot);
 
   const result = await execFileAsync('/bin/bash', [configureHook], {
     env: {
@@ -182,10 +314,7 @@ test('preserves active TLS when a maintenance renewal fails', async (t) => {
 test('marks active TLS so systemd gates later bootstrap work', async (t) => {
   const fixture = await createHookFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
-  const liveCertificate = path.join(fixture.certRoot, 'kashewt.com');
-  await mkdir(liveCertificate, { recursive: true });
-  await writeFile(path.join(liveCertificate, 'fullchain.pem'), 'certificate\n');
-  await writeFile(path.join(liveCertificate, 'privkey.pem'), 'private-key\n');
+  await seedCertificate(fixture.certRoot);
 
   await execFileAsync('/bin/bash', [configureHook], {
     env: { ...fixture.environment, ARCHTREE_HTTPS_MODE: 'bootstrap' }
@@ -248,11 +377,8 @@ test('maintenance obtains a missing first certificate instead of calling renew',
 test('restores the exact live Nginx config when a TLS candidate is invalid', async (t) => {
   const fixture = await createHookFixture();
   t.after(() => rm(fixture.root, { recursive: true, force: true }));
-  const liveCertificate = path.join(fixture.certRoot, 'kashewt.com');
-  await mkdir(liveCertificate, { recursive: true });
+  await seedCertificate(fixture.certRoot);
   await mkdir(path.dirname(fixture.nginxConfig), { recursive: true });
-  await writeFile(path.join(liveCertificate, 'fullchain.pem'), 'certificate\n');
-  await writeFile(path.join(liveCertificate, 'privkey.pem'), 'private-key\n');
   const previousConfig = 'previous validated config\n';
   await writeFile(fixture.nginxConfig, previousConfig);
 

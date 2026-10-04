@@ -3,6 +3,509 @@
 This document is the shared product-behavior reference for the Archtree backend
 and Finitude clients. Update it whenever an agreed business rule changes.
 
+## Social Identity and Friendships
+
+- Social participation is opt-in and separate from the private account profile.
+  The versioned backend is disabled for new participation by default until
+  explicitly enabled. Existing listener APIs and private avatar access do not
+  change. Finitude Web provides an explicitly enabled social screen; native
+  adoption remains a separate stage.
+- A social profile has a separately generated opaque ID, an explicit nickname
+  of 1–50 Unicode characters, and a case-insensitive handle of 3–24 ASCII letters,
+  digits or underscores beginning with a letter. The handle cannot change during
+  the account's lifetime; the nickname and discoverability can change.
+- Names that could pass for Finitude, its staff or a system account are
+  reserved, and the rejection says whether the handle or the nickname must
+  change. This is a closed-beta safeguard; listeners can also block and report,
+  and administrators can suspend a social profile (see below).
+  - A new handle cannot be a staff role (such as admin, administrator,
+    moderator, mod, staff, official, support, helpdesk, security or system) or a
+    system or mailbox name (such as root, help, api, www, mail, no-reply, null or
+    undefined), and cannot contain Finitude, Archtree or Kashewt. A staff role
+    is also reserved as an underscore-separated part of a handle, such as
+    support_team.
+  - The handle comparison ignores case, underscores and a trailing number, and
+    treats common look-alikes as the same letter (0 and o, 1 and i or l, 3 and e,
+    4 and a, 5 and s, 7 and t, 8 and b, rn and m, vv and w), so adm1n and
+    admin_2024 are reserved too.
+  - A nickname cannot use a staff role as a whole word, including camel-case
+    and spaced-out spellings such as SupportBot and A D M I N, and cannot contain
+    Finitude, Archtree or Kashewt. The same look-alike and trailing-number
+    rules apply, plus capital I and lowercase l, accents, full-width and other
+    Unicode compatibility forms, and common Cyrillic or Greek look-alike
+    letters. The Chinese staff terms 管理员, 官方, 客服, 版主 and 工作人员 (and
+    their traditional forms) are rejected anywhere in a nickname. System and
+    mailbox names stay allowed in nicknames.
+  - Existing profiles are not modified. A handle or nickname that predates
+    these rules stays usable, including for discovery changes, deactivation and
+    reactivation. The nickname rules apply once its owner changes the nickname.
+- Authenticated exact-handle lookup returns only the opted-in handle, nickname,
+  opaque social ID and generated-icon seed. Missing, undiscoverable and blocked
+  results are indistinguishable. Email, account IDs, private avatars, saves and
+  activity are never projected into social cards.
+- Finitude Web shows a social identity by nickname and @handle beside a
+  generated icon: the nickname's first character on a color derived from the
+  generated-icon seed, never a private account avatar. Profile setup states the
+  handle format before submission and counts the nickname in Unicode characters
+  with the backend's trimming and character rules, so a nickname of 50 emoji is
+  accepted and one the backend would refuse is explained before sending.
+- Friendship requires an explicit request and recipient acceptance. Crossing
+  requests do not automatically become friends. Only the sender may cancel a
+  pending request and only the recipient may accept or decline it. Either friend
+  may remove the relationship. Changes apply to the observed relationship
+  revision; a stale action never applies to a later request incarnation.
+- A listener may block another social identity in either direction. Blocking
+  removes friendship and pending requests atomically. Both directions remain
+  independent, and unblocking restores no relationship. A private block list
+  exposes only the owner's blocked opaque IDs and mutation revisions; it does
+  not unlock the blocked person's current profile.
+- A listener with a social profile, including a deactivated or suspended one,
+  can report another existing social identity, including one it has blocked or
+  that is no longer active. A report has an optional reason (pretending to be
+  someone else, harassment or bullying, spam or unwanted requests, offensive
+  name or content, or something else, the default) and an optional note of up
+  to 500 characters. Finitude Web asks for the reason and note in a
+  confirmation dialog before sending.
+  - Reporting never blocks, removes or notifies anyone. The reported listener
+    is never told that they were reported or by whom, and nothing they can see
+    changes. A report keeps the handle and nickname as they were when reported.
+  - Each reporter files at most one report about the same listener per UTC day;
+    repeating it that day succeeds without creating another report or using
+    allowance. Each reporter can file at most 10 reports per UTC day. Reporting
+    follows the mutation-scope and command-ID rules and remains available while
+    new social participation is disabled.
+  - Administrators review open reports, oldest first, with the reporter's
+    current handle. They can dismiss a report, mark it handled, or suspend the
+    reported listener, which resolves every open report about that listener.
+    Resolved reports are deleted 90 days after resolution; open reports remain
+    until an administrator resolves them.
+- An administrator can suspend a social profile from social features and lift
+  the suspension later. Suspending or lifting again has no further effect.
+  - While suspended, the profile cannot be looked up and appears on no friend
+    list, request, music share, listening status, room or invitation. The
+    listener cannot edit or reactivate the profile, send or accept requests,
+    share music, share listening, or create, join or be invited to rooms.
+  - Suspension cancels pending requests in both directions, removes music
+    shares, turns listening sharing off, removes room participation (ending a
+    room the listener hosts) and revokes invitations, as deactivation does.
+    Accepted friendships and blocks are kept but hidden from both sides.
+  - The suspended listener sees that the profile is suspended and can still
+    block, unblock, report, look up command outcomes and delete the account.
+  - Lifting a suspension restores the listener's own active or deactivated
+    state, discoverability and retained friendships. Cancelled requests,
+    removed shares, listening sharing and room participation are not restored.
+- Finitude Web offers Block both in the relationship lists and for anyone found
+  by handle lookup, with or without an existing relationship. Removing a friend
+  and blocking first ask for confirmation that says what changes for both
+  people; declining or cancelling a request and unblocking stay single explicit
+  actions because they are easily redone. A Remove confirmation acts on the
+  relationship revision observed when it was opened; Block carries no revision
+  and applies to whatever relationship exists when it is confirmed. Deactivating
+  the social profile likewise asks first and says what is removed and what is
+  kept.
+- Turning discovery off preserves existing friends and pending requests.
+  Deactivation hides the profile, turns discovery off, cancels requests and
+  removes friendships, while retaining the listener's identity, handle and private
+  blocks. Reactivation restores none of those removed relationships, and the
+  profile stays undiscoverable until the listener turns discovery back on. A new
+  request after removal uses a fresh, authorized relationship-state read.
+- The first backend release permits at most 500 friends, 50 combined incoming and
+  outgoing pending requests, 1,000 owned blocks and 2,048 retained relationship
+  pairs per account. Existing-pair safety operations remain possible at the pair
+  limit. New requests also have sender and recipient abuse limits per UTC day:
+  - A listener can send at most 50 friend requests per day, and at most 3 of
+    them to the same listener.
+  - A listener can receive requests from at most 100 different listeners per
+    day. More requests that day from a listener already counted use no more of
+    this allowance, so one sender cannot use it up for everyone else.
+  - Every request sent counts, even if it is later cancelled, declined or
+    accepted, so cancelling and re-sending cannot get around these limits.
+    Repeating a request that is still pending, or a request that is rejected,
+    does not count.
+  - A request over any limit is rejected without being created, and the
+    rejection does not say which limit applied.
+- Every durable social action uses its original server-issued mutation scope and
+  command ID. Identical retries return a status-only outcome and never restore
+  revoked access. Reusing the identity with a different action fails. Expired
+  scopes cannot execute, even after receipt cleanup; an uncertain result must not
+  be silently resubmitted with a fresh scope.
+- Account deletion atomically removes social identity and both-sided
+  relationships with its existing private-account cleanup. A deleted handle is
+  reserved for 30 days without retaining its former account/social ID, then may
+  be reused with a new opaque identity. Existing avatar and shared-provenance
+  deletion blockers remain unchanged and preserve social state on failure.
+  Deletion removes every report about the account. Reports the account wrote
+  remain as anonymous evidence about the reported listener: the reporter's
+  identity and note are removed, and the reason and reported name stay until
+  the report is resolved and expires.
+- Disabling new social participation preserves reads, discovery opt-out without
+  changing the handle/nickname, explicit cancellation, removal, block/unblock,
+  reporting, deactivation, outcome lookup, administrator suspension and account
+  cleanup. Admission attempts cannot
+  consume the reserved receipt capacity for safety actions and final deactivation;
+  short request-rate limits still apply.
+  Social participation adds no public Feed, collaborative Playlist, chat,
+  push/email delivery or S3-backed social avatar.
+- Finitude Web offers Together navigation, Share and friend listening status
+  only while social participation is enabled. Listen together, room invitation
+  reminders and the active-room entry additionally require rooms to be enabled.
+  An unknown rollout state offers none of them, so a default deployment neither
+  shows nor requests anything social. While social is disabled, the Together
+  screen stays reachable by its address for the preserved reads and safety
+  actions and states that Together is temporarily unavailable.
+- A request refused because social or rooms were switched off is explained as
+  temporary unavailability, never as a generic or uncertain failure, and needs
+  no outcome recovery. It refreshes the rollout state so the affected entry
+  points disappear without a reload; a dialog that is already open stays until
+  closed so it can explain the refusal.
+- Any other definite refusal names its reason so the listener knows what to do
+  next: a taken or reserved handle, a handle that is already set, a request the
+  other person has already sent (to be accepted from Incoming requests), an
+  unavailable profile, the friend, pending-request and block limits, the
+  music-share limits and too many recent actions each have their own message.
+  An unavailable profile is never distinguished from a block. Only an action
+  that lost a race against a newer relationship, profile or listening revision
+  says the state changed and shows the latest state. None of these refusals
+  offers outcome recovery or keeps the action for a resend.
+- Social does not depend on Shared Playback Rooms. While its page is visible,
+  Finitude Web refreshes new friend requests and received shares, with or
+  without rooms. It uses the live room connection when one exists. Otherwise it
+  checks for changes about every 15 seconds and slows to once a minute while
+  nothing changes. These refreshes are silent: no unread count, sound, system
+  notification, push or email. A hidden page does not check.
+
+## Direct Music Shares
+
+- An active social profile can explicitly share a ready MediaTrack or Album with
+  a current friend. Sharing uses the observed friendship revision. Private
+  Playlists, account activity and arbitrary messages or external URLs are not
+  shared. Recipients can return later; simultaneous presence is unnecessary.
+- Received and Sent lists are private to their respective account and show the
+  other person's current social card. They are not a public feed, unread-history
+  count, or read/play receipt. Sharing, opening a card and viewing its list never
+  automatically play, save, join or create a room.
+- Play and Save remain explicit personal actions under the ordinary catalog and
+  player rules. An Album play resolves its complete current playable order.
+  Another room is never left implicitly. Inviting the sender back uses current
+  host/controller permissions and existing friendship and room admission checks.
+- Each account may retain up to 100 incoming and 100 outgoing shares for 30 days,
+  with at most 50 new incoming shares per day. Repeating a still-active share of
+  the same content to the same friend creates no duplicate or new notification.
+  The recipient can dismiss a card; its sender can withdraw it. Both remove that
+  share, and an old action cannot affect a later share incarnation.
+- Current friendship, active profiles and no block are required on every read.
+  Removing friendship, blocking, deactivation, administrator suspension or account
+  deletion clears affected shares. Reconnecting friendship never restores them. Turning discoverability
+  off preserves current shares. Disabling social admission preserves authorized
+  reads, dismiss/withdraw and outcome recovery while preventing new sends.
+- Shares retain catalog identity rather than copied media bytes or versioned
+  playback URLs. Replacement resolves the current ready content. Deleting or
+  non-ready content exposes no former title/artwork; an unavailable card can be
+  dismissed while idempotent content-reference cleanup removes the share.
+
+## Friend Listening Status
+
+- Sharing current listening is off by default and requires an explicit preference
+  change by an active social profile. It supports ordinary and shared-room Audio;
+  Video, readiness, play intent and historical activity never establish status.
+  Turning discoverability off preserves this independent preference. Deactivation
+  and administrator suspension reset it to off; reactivation or lifting the
+  suspension does not restore it.
+- Only current friends with active social profiles and no block can see a fresh
+  status. It exposes the current ready Audio and chosen social identity, without
+  playback position, room/device/session identity, last-seen data or history.
+  Friend status refreshes while its panel is visible and disappears when stale or
+  unreadable. The panel lists every friend listening now, not only those on one
+  page of the friend list, 20 at a time with an explicit Load more, and shows the
+  Audio's public artwork, title and artists. Removing friendship or blocking
+  removes visibility immediately at the server, independently of continued room
+  membership.
+- A new explicit playback or sharing gesture may claim the account's publishing
+  device against its observed publisher revision. That claim publishes nothing
+  until the device reports actual playback. Automatic advancement, reconnecting,
+  polling and old callbacks cannot take over from a newer device. Delayed reports
+  and stops affect only their captured publisher and playback occurrence.
+- Actual advancing playback renews the short status at most once per ten seconds.
+  Observations must be fresh, and status expires within 25 seconds of the latest
+  accepted observation. Pause, buffering, seeking, end, errors, source changes,
+  freeze and account transitions stop local publication. Fresh actual progress
+  may restore a still-owned lease; an expired or replaced lease needs a new
+  explicit gesture. Merely hiding an Audio tab does not stop fresh playback.
+- Room reports additionally require the exact admitted playing controller and
+  current ready timeline occurrence. Ordinary Audio does not require room-format
+  analysis. Reads and renewals recheck the current ready source; replacing or
+  removing that source invalidates its earlier publication. A loaded source keeps
+  its identity across buffering and resumes so old bytes cannot silently rebind
+  within the same publishing lease.
+- Opt-out clears publication atomically while preserving its version fence.
+  Revocation clears only the matching publishing session; retaining the current
+  session during a password change preserves its eligible publication. Account
+  deletion removes the preference and publication with existing account cleanup.
+  Ephemeral publication records expire; their durable owner clock prevents a
+  delayed report from recreating expired state. Safety stops and opt-out retain
+  access when new participation or playing-report capacity is unavailable.
+  Disabling social participation suppresses listening status while preserving
+  private setting reads, opt-out and captured safety stops.
+- Inviting a listening friend is explicit and follows existing room permissions.
+  A current host can invite into its room. With no room, an explicit confirmation
+  may create a paused room using eligible Audio and then invite the friend.
+  Creation and invitation have separate recoverable outcomes; invitation failure
+  leaves that room available. No status view creates, leaves or joins a room,
+  starts playback, or sends an invitation automatically.
+
+## Shared Playback Rooms
+
+The initial implementation supports explicitly enabled Audio rooms in Finitude
+Web. Production rollout, native room screens and shared Video playback remain
+separate verification and delivery stages. Ordinary local playback and private
+Playlist access retain their existing rules.
+
+- A room supports Host control and Everyone control. Only its current host can
+  change that mode while the room is open. New rooms start with Host control.
+- Host control allows only the host to change shared playback. Everyone control
+  allows each admitted participant, through that account's active playback
+  device, to play, pause, seek, move Previous/Next, or select an existing room
+  queue entry. Other devices observing the room do not gain control.
+- Shared playback permission does not grant room-management permission. Changing
+  the mode, inviting/removing members, choosing the initial queue, transferring
+  the host role, and ending the room remain host-only operations. The initial
+  selection and subsequent accepted recommendations belong to an independent
+  room queue; no change mutates a member's private Playlist.
+- Every admitted member can recommend eligible Audio, independently of Host or
+  Everyone playback control and without taking over a playing device. Each member
+  may have five pending recommendations, within a room-wide limit of 20. Repeating
+  the same pending recommendation by that member does not create another copy.
+- Web listeners can recommend a single Audio track from Search, Album, Library
+  or the current player to their current room. Eligibility is checked before the
+  action and again by the server. Pending feedback reflects the confirmed room
+  recommendation; opening an action never plays, submits or changes rooms.
+- Room music selection supports title search and pagination across eligible
+  tracks. Initial queue selections persist across searches and pages, up to the
+  existing 100-entry limit. Unsupported ordinary-playback formats remain usable
+  privately and are explained before a room action.
+- With no current room, an explicit song-and-friend confirmation creates a
+  paused room and then invites that friend. These are separate recoverable
+  commands. A changed room requires another explicit action; a failed invitation
+  preserves the created room. The current queue is never left implicitly.
+- An authorized active-room entry remains available across Web browsing routes
+  and returns to room controls or command recovery. Its status distinguishes
+  connection recovery, observing, local pause and shared playback state; merely
+  opening it never resumes playback or takes over a device. Account transitions
+  immediately hide the previous account's room information.
+- The active host controller can accept or dismiss a recommendation, remove a
+  queued entry, or reorder the queue. Members may withdraw their own pending
+  recommendations. Acceptance appends one occurrence with requester attribution;
+  it never starts playback. Queue edits require the observed queue and playback
+  versions; concurrent stale edits do not silently overwrite the winner.
+- Appending, reordering, or removing another queued entry preserves the current
+  timeline, readiness preparation and each device's local pause. The current
+  entry cannot be removed directly; select another entry first. A room retains
+  at least one entry. Pending recommendations disappear when their member leaves
+  or their media is replaced/deleted. Attribution resolves current admitted social
+  profiles only and is cleared on departure; it is not historical identity data.
+- Mode changes are server-confirmed and visible to every participant. They apply
+  to subsequent commands; they do not undo an already accepted playback operation
+  or restart the current media. Commands that rely on superseded permission state
+  cannot take effect after a mode change.
+- Every admitted member, including an observing device, may explicitly send a
+  heart, clap, fire, smile or music reaction. Reactions are independent of playback
+  permission and accept no arbitrary text. Accepted reactions are limited to 12
+  per account and 60 per room per minute; reconnecting or rejoining does not reset
+  the account allowance. Replaying the same command adds no reaction or quota use.
+- Brief room activity shows confirmed joins, song changes, host changes, control
+  mode changes and reactions. It retains at most 20 events for 30 seconds, subject
+  to bounded projection size. Automatic advancement is identified as a system
+  action; readiness, reconnects, rejected/noop commands and heartbeat traffic do
+  not become human activity. Events never issue playback commands or change
+  playback/control/queue generations by themselves.
+- Activity resolves only current admitted social cards. A departing member's
+  events disappear and room closure clears every event. Initial load and reconnect
+  may show still-current events but never replay their announcements as new.
+- Volume, mute, and an explicitly device-local pause remain personal controls in
+  either mode. Shared Pause affects the room; a deliberate local pause is not
+  silently undone by another participant's shared playback command.
+- Concurrent Next actions based on the same current queue entry and playback
+  state advance the room at most once. A losing stale action synchronizes to
+  the confirmed state without automatically becoming another Next. A new
+  explicit action after observing the next entry may advance again.
+- Conflicting selections based on the same playback state accept at most one
+  transition. The first server-accepted selection becomes the shared choice;
+  the losing action refreshes without automatically overwriting it. Selecting
+  again after observing the new state is a new explicit action.
+- Applying shared state, retrying an already accepted action, or receiving a
+  resulting player callback does not create a new shared playback action.
+  Automatic advancement and explicit Next cannot both advance the same playback
+  occurrence. These rules apply in both permission modes.
+
+- While rooms are disabled, the Web room panel says listening rooms are
+  temporarily unavailable instead of appearing to connect. It offers no room
+  creation or reconnection and stops background reconnects until rooms are
+  enabled again; leaving, ending and declining remain available.
+- A refused room action names its reason: a full room, rooms at capacity
+  service-wide, the host's 20 pending invitations, a current room on
+  this or another device, a host-only action or one the current control mode
+  does not allow, a disconnected host, a host leaving without ending the room or
+  transferring the role, an ended room, an expired invitation or transfer, a song
+  no longer eligible for rooms, the queue, song-request and reaction limits, and
+  too many recent actions. Losing to a newer playback, queue, control or room
+  version still shows the latest room state as a change made meanwhile.
+
+- A room has at most eight members and 100 queue entries. An account joins at
+  most one active room and has one playing controller. Other tabs/devices are
+  observers until the user explicitly chooses Use this device. Refreshing or
+  duplicating a tab cannot silently take over the existing controller.
+- A deployment may set lower capacity than these maximums for open rooms, members
+  per room and live room connections. Creating a room beyond the open-room limit
+  says rooms are at capacity; accepting an invitation to a full room says the room
+  is full and leaves the invitation pending. A tab refused a live connection says
+  live updates are busy and retries automatically after a short wait. It can still
+  create a room, accept an invitation and invite friends, and connects as soon as
+  it has joined; playback and other room controls wait for the live connection.
+  Each admitted member's first live connection is reserved, so tabs outside rooms
+  and a member's extra tabs cannot lock members out of shared playback, and one
+  account's tabs may hold only a share of the other connections. A tab whose room
+  ended gives up its reserved connection only when no other connection is free.
+  Lowering a limit never removes members or closes rooms already open.
+- The host invites existing friends to a specific room. Invitations expire after
+  24 hours, expose only the inviter's social card before acceptance, and require
+  current friendship, capacity and block checks at admission. Removing friendship
+  cancels unused invitations but preserves an already admitted membership.
+  A host can have at most 20 pending invitations at a time; sending a fresh
+  invitation to a friend who already has a pending one replaces it without
+  using another.
+- Finitude Web shows a global, silent reminder for current pending room
+  invitations, including while browsing outside Together or participating in a
+  different room. The indicator means an invitation still needs a response; it
+  is not an unread-history count and viewing it does not dismiss the invitation.
+  Accepted, declined, replaced, expired or revoked invitations cease to appear.
+  Reminders add no notification sound, system notification, email or push delivery.
+- The host can copy a link to an existing pending invitation for its selected
+  friend. Each link identifies that invitation only and grants no access by
+  possession. A recipient who is signed out can sign in and continue to the
+  invitation; before acceptance only its inviter's social card and expiry are
+  visible. Other accounts and unavailable invitations receive the same unavailable
+  result. Sending a replacement invitation invalidates its earlier link. Finitude
+  Web lets the host explicitly send a new invitation for a pending one, after a
+  confirmation that the earlier link stops working. Replacing a live invitation
+  adds no pending invitation, so it remains possible at the 20-invitation limit.
+- Opening a reminder or invitation link never accepts it, starts playback,
+  takes over another device, or leaves an existing room. Joining still requires
+  an explicit action and the current admission checks. A listener already in a
+  room can inspect or decline another invitation and must explicitly leave or
+  end the current room before joining the other one.
+- The host removes a member only after confirming; the member leaves at once and
+  can be invited again later while still a friend.
+- A blocked pair cannot share a room. If the blocker hosts, remove the blocked
+  member; otherwise remove the blocker. Deactivation, administrator suspension
+  and account deletion remove participation, ending a hosted room. These changes
+  take effect atomically.
+- The Web member list shows each member's role and whether they are connected,
+  with readiness for connected members, and the room queue names its current
+  song in text rather than by color alone.
+- The host can End room for everyone or offer Transfer and leave to a connected
+  participant. The selected controller must accept within 30 seconds; Finitude
+  Web shows the host and that participant the time remaining to accept. Acceptance
+  transfers the role and removes the old host atomically, preserving the mode,
+  queue and running timeline; an in-progress preparation is cancelled and paused.
+  There is no automatic host promotion.
+  End room, like a guest's Leave, works from any of that account's signed-in
+  tabs or devices, including one that is only observing. Inviting, removing
+  members, transferring and changing the mode need the host's active playback
+  device.
+- Host absence is measured from the last confirmed controller heartbeat,
+  with a 30-second grace period. The grace changes no shared playback: the
+  current timeline, an already accepted preparation and automatic advancement
+  continue, and Everyone control participants keep their playback controls. The
+  absent host's disconnected device cannot change shared playback until it
+  reconnects. Both control modes suspend after that grace: shared playback
+  pauses and guests cannot start it again, even after the host returns. Five
+  minutes of host absence ends the room. Reconnection never automatically
+  resumes a suspended timeline: the host explicitly starts it; personal audio
+  resumes only through explicit resync and readiness. Every room expires after
+  24 hours.
+- Finitude Web shows the remaining host-absence grace and, once suspended, the
+  time until the room ends; the host sees the same for its own disconnected
+  playing device. After the host returns, participants see that playback stays
+  suspended until the host starts it. Countdowns follow the server's deadlines
+  regardless of the device clock, keep counting while the participant visits
+  other pages, and reaching zero changes no room state by itself: the server
+  suspends, ends the room or expires the offer.
+- Revoking the playing controller's session disconnects that controller and
+  triggers absence handling. Revoking an observer session cannot remove another
+  device's membership. Changing a password preserves a room controller on the
+  retained current session; sign out everywhere and password reset remove
+  participation and end a hosted room.
+- Shared playback uses the existing single player with an online representation
+  pinned to the selected media version. Only finite Audio whose duration and
+  seekability have been verified is eligible. Supported sources are complete
+  PCM16 WAV, MP3, and single-track unencrypted AAC-LC in M4A; compressed sources
+  require complete structure and decode validation. Unverified, unsupported or
+  failed analysis never prevents ordinary playback and never grants room
+  eligibility. Native download preference is unchanged until native room adoption
+  explicitly supports the pinned-source contract.
+- Administrators can explicitly analyze existing ready Audio without re-uploading
+  or changing its stored bytes. Viewing the analysis list never starts work.
+  Results belong to the exact source and cannot replace evidence for a changed,
+  replacing or deleting source. Already eligible sources keep their identity.
+  Failed, cancelled or interrupted attempts are explicitly retryable; a lost
+  result is recovered using the same attempt identity rather than automatically
+  submitting new work. Cancellation stops pending download and decode work;
+  a database write already dispatched is reconciled and may have committed.
+  Completed analysis remains durable. Unsupported input
+  has a terminal result; replacing that file creates a new analysis opportunity.
+- An administrator-started catalog backfill applies that same explicit analysis,
+  one source at a time, to every ready published Audio source without a current
+  verified result. It skips eligible, terminally unsupported and in-progress
+  sources, so a repeated run only revisits sources that still lack a result, and
+  it follows the same source, retry and recovery rules as analyzing one source.
+- Preparing a play, seek or selection waits up to three seconds for the connected
+  playing cohort. Ready participants start on the shared schedule; unready or late
+  participants remain silent until their own player reports readiness for the
+  exact current occurrence. If nobody is ready, playback stays paused. A slow
+  participant does not repeatedly pause the whole room.
+- Local pause survives subsequent room events. Resync is an explicit action.
+  The Web primary playback action resumes only this device when the room is
+  already playing. When the room is paused and the caller can control playback,
+  that action resumes the caller's participation and starts shared playback;
+  other participants' deliberate local pauses remain unchanged. Host-control
+  guests can become ready locally but must wait for the host to start the room.
+  Merely switching Web Audio tabs does not pause participation while the browser
+  continues media execution and the authorized realtime connection stays fresh.
+  Actual browser freeze/page departure or stale authority pauses the device;
+  waking or reconnecting does not silently resume it or replay a shared action.
+  Lost realtime authority detaches local room playback until a fresh authorized
+  connection and explicit resync; periodic reads during recovery do not allow
+  offline room control. A server authority change pauses the recovered timeline.
+  Leaving, removal or room closure clears the room player and queue without
+  restoring or resuming an earlier local queue.
+- A media replacement or deletion invalidates its old room representation and
+  pauses it if current. Queue positions retain their identity; unavailable items
+  cannot be selected or automatically started. No room action mutates a source
+  Playlist or another member's Recently Played. This initial Web room mode does
+  not record room playback in Recently Played.
+- Switching rooms off, directly or by switching social off, is a temporary stop.
+  It removes no social identity, friendship, share or setting, and rooms already
+  open do not silently continue. Shared playback in every open room pauses, no
+  device can connect to a room, start shared playback, or create or join a room,
+  and open rooms end through the ordinary rules while rooms stay off: suspension
+  after the 30-second host-absence grace, the end after five minutes of host
+  absence, or the 24-hour expiry. Leaving, ending, removal, declining, shared
+  Pause and account cleanup remain available. Each device stops room playback;
+  a fresh page load shows the room's current paused, suspended or ended state.
+  Switching rooms back on resumes no paused or suspended room by itself. With
+  only rooms off, social identity, friendships, music shares and ordinary
+  listening status keep working; listening status from room playback stops.
+- Room and social request allowances belong to the signed-in account, including
+  how many requests may run at once. Listeners who share a network address, such
+  as a household, office or campus, do not spend each other's allowance, and
+  changing networks does not add to an account's allowance. Signed-out requests
+  and requests with expired or revoked credentials are limited by network
+  address and never spend an account's allowance. Media stream admission is not
+  a room or social allowance and stays per network address.
+
+The wire protocol and operational bounds are documented in
+[the room API contract](architecture.md#implemented-audio-room-api).
+
 ## Saved Content and Library
 
 - Users can save and unsave Albums and MediaTracks.
@@ -42,6 +545,12 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   sorting. Recent Activity uses the newest saved, played, or downloaded event.
   Items without the selected sort event follow items that have one, using a
   deterministic fallback order.
+- Library play times stay consistent with Recently Played. Saving content that
+  is still in Recently Played carries that play into Library sorting, including
+  after an Unsave and re-save. Clearing Recently Played also removes the
+  Library's play times in the same atomic change: Recently Played sorting then
+  treats saved items as unplayed and Recent Activity falls back to their Save
+  time. Saves, Save times, and Recently Saved are unchanged.
 - Completed downloaded content displays a download checkmark in its Library
   row. In-progress, paused, failed, and corrupted content displays its actual
   state rather than the completed checkmark.
@@ -145,6 +654,15 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - Only admins can see or access Content Manager. Hiding its navigation is not
   an authorization boundary; direct page, form, API, and upload requests must
   enforce the same administrator role before processing a mutation.
+- The hosted Engineering Guide is a read-only internal resource available only
+  to administrators. Its pages and supporting assets enforce that permission
+  directly, and its Archtree landing-page entry is visible only to admins.
+  Reading the guide grants no additional permissions and changes no account or
+  catalog data. A repository-local documentation preview uses no account data.
+- The Engineering Guide is available in English and Simplified Chinese. Its
+  language switch preserves the current topic, and the selected language is
+  retained in shareable page links. Changing the guide language does not change
+  the listener's Finitude language preference.
 - Admins manage the global shared catalog regardless of `createdBy`, while
   retaining that field for provenance and lifecycle auditing.
 - Album primary Artist Credits are the canonical Artist-to-Album membership.
@@ -354,6 +872,12 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   object remains public, atomically promotes the new key and kind, and only then
   deletes the old object. Failed upload, promotion, cleanup, deletion, or retry
   retains exact database/S3 lifecycle evidence for reconciliation.
+- A successful Audio or Video replacement automatically runs the idempotent
+  publication retry for that MediaTrack, so an earlier publication failure needs
+  no separate audit retry. Publication still requires a ready assigned Album,
+  when there is one, and a publishable lifecycle state; the upload and
+  publication outcomes are reported separately, and a failed publication never
+  requires uploading the file again.
 - Public metadata exposes one `mediaType` and one stream URL. Stream `HEAD` and
   `GET` require a ready/published database row and resolve the exact stored key
   allowed for that kind and MediaTrack ID. Pending, failed, deleting,
@@ -460,10 +984,10 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   Unmodified single-character shortcuts are not used; the accessible player
   help lists the available non-character keys and every action remains
   available through visible controls.
-- Public Web registration, verification, resend, and password-recovery writes
+- Public Web registration, verification-link, and password-recovery writes
   use same-origin JSON contracts and never return session credentials. Generic
-  registration, resend, and recovery responses do not reveal account
-  existence.
+  registration, verification-link, and recovery responses do not reveal
+  account existence.
 - A native Apple, Google, or passkey configuration does not make that method
   visible on Web. Web advertises an optional sign-in method only after its
   complete browser-to-HttpOnly-session flow is configured.
@@ -757,8 +1281,102 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 
 ## Authentication and Resolution
 
-- New email registrations require a single-use verification code; existing
-  accounts without an `emailVerified` migration field remain treated as verified.
+- Email registration is available only on the Web. The Finitude apps do not
+  offer an email sign-up form. They open the Web sign-up page in the browser,
+  and they keep Apple and Google sign-in.
+- Web sign-up asks only for an email address and always answers with the same
+  "check your email" response.
+  - When the address has no account, or only an unverified record left by the
+    earlier code-based sign-up, the email contains a single-use registration
+    link that expires after 30 minutes.
+  - When the address already has an account, the email says so and links to
+    Log in and password reset, and nothing is created or changed.
+- Opening a registration link shows the address and asks for a display name
+  and password. Submitting creates the account with its email already
+  verified, and the listener then logs in with the new password on the Web or
+  in an app.
+  - A registration link works once, and completing registration voids every
+    other registration link for that address.
+  - An invalid, expired or used link changes nothing.
+- Credentials are chosen only after the inbox owner opens the link.
+  Registering an address first therefore never gives anyone control of the
+  account the inbox owner creates.
+- Unverified records left by the earlier code-based sign-up are not deleted or
+  expired automatically. They cannot sign in, open sessions, or link Apple,
+  Google or passkey methods.
+  - When the inbox owner completes registration for that address, the old
+    record is replaced completely. Its password, name, sessions, provider
+    identities, passkeys and pending passkey enrollments are removed, and the
+    account becomes verified with the new credentials.
+  - Apple or Google sign-in whose provider-verified email matches such a
+    record replaces it the same way and creates the provider account.
+- Every account must have a verified email. An account counts as verified when
+  its email was proven through a registration link, a verification link or a
+  completed password reset, or when one of its linked Apple or Google
+  identities carries that same email as provider-verified. Accounts created
+  before email verification existed are otherwise unverified.
+- Unverified accounts cannot open new sessions with any sign-in method, and
+  cannot link Apple, Google or passkey methods. Sessions, refresh tokens and
+  browser cookies that existed before this rule remain valid until they end or
+  are revoked.
+- Signing in with a valid credential for an unverified account fails with a
+  distinct verification-required result and sends an email. The result is the
+  same whether or not an email was sent.
+  - For an account created before verification existed, the email contains a
+    verification link that expires after 30 minutes. Opening it and selecting
+    Verify email verifies the address without changing the password or ending
+    other sessions, and the listener then signs in again.
+  - For an unverified record from the earlier code-based sign-up, the email
+    contains a registration link instead, so whoever set that record's
+    password never gains the verified account.
+- On the Web, a listener can request a new verification link by email address.
+  The response does not reveal whether the address needs verification.
+- Completing a password reset revokes every active session for that account
+  and proves ownership of the inbox.
+  - On an account that was not yet verified, the reset also verifies the email
+    and removes every provider identity, passkey and pending passkey enrollment
+    that existed before the reset.
+  - Password recovery for an unverified record from the earlier code-based
+    sign-up sends a registration link instead of a reset code.
+- A password-reset code is voided by its fifth wrong submission, and the user
+  must request a new code.
+- The earlier app and Web endpoints for code-based registration, verification
+  and verification resend no longer change anything. They tell the user to
+  create the account on the Web.
+- Registration, verification-link and password-recovery requests do not reveal
+  whether an email address belongs to an account, neither through their
+  content and latency nor through rate or concurrency limiting.
+  - Each address receives at most three registration links, already-registered
+    notices or verification links per 15 minutes.
+  - Further requests receive the same response without another email.
+- Registration, verification-link and password-recovery requests for an
+  address whose domain cannot receive email, for example a mistyped or
+  nonexistent domain, are rejected with a message asking the listener to check
+  the address.
+  - Whether a domain can receive email is public information that does not
+    depend on any account, so the rejection is the same whether or not the
+    address belongs to an account, and responses still never reveal account
+    existence.
+  - A rejected request sends no email and issues no link or code, so a
+    password-reset code the listener already holds stays valid. It does not
+    count toward the address's email limits, but limits per network address
+    still apply.
+  - When the domain cannot be checked, the request proceeds normally.
+- On the Web, sign-up, verification-link and password-recovery forms show
+  such a rejection on the email field. After an accepted request they show the
+  exact address it used and offer to start over with a different address.
+  Asking again repeats the check, so a resend to such an address is rejected
+  again and sends nothing.
+  - While the listener types, a domain that looks like a misspelling of a
+    popular email provider gets a suggested correction. The suggestion changes
+    the address only when the listener selects it.
+- Authentication emails (registration links, already-registered notices,
+  verification links and password-reset codes) are never sent to an address
+  whose domain cannot receive email. This also covers the email sent after a
+  sign-in for an unverified account, whose response stays the same, and a
+  domain that could not be checked when the request arrived. Such a skipped
+  email issues no link or code and still counts toward the address's email
+  limits.
 - Apple and Google identities are keyed by each provider's stable subject ID,
   not by an email address that can change.
 - A verified provider email matching an existing account does not silently link
@@ -775,9 +1393,20 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - Authentication entry points display only methods the connected deployment
   reports as fully configured. Password sign-in remains available as the
   compatibility fallback when optional capabilities cannot be resolved.
-- Password-recovery and verification request responses do not reveal whether an
-  email address belongs to an account.
-- Completing a password reset revokes every active session for that account.
+- Each refresh rotates the session's refresh token, and a session has exactly
+  one current refresh token at any time, including when the previous and
+  current tokens are used concurrently. A listener whose refresh response was
+  lost is not signed out: for about 60 seconds after a rotation, presenting the
+  immediately previous token rotates the same session again and returns a
+  fresh pair, and the pair from the lost response stops working. Replays do not
+  extend that window. Older tokens, or the previous token after the window,
+  are rejected with `401` and leave the session unchanged. Revoked or expired
+  sessions cannot be recovered this way.
+- Token refresh is rate limited separately from sign-in, so failed sign-ins
+  do not block a valid refresh and refreshing does not consume sign-in
+  attempts. Native refresh is limited per presented refresh token, so other
+  listeners sharing a network address do not spend its budget. Sign-in limits
+  are unchanged.
 - Listeners can view and revoke active sessions, sign out everywhere, and
   delete their account in-app.
 - Active-session UI uses familiar device and browser descriptions and never
@@ -787,7 +1416,7 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - Apple or Google can be unlinked only when another password, provider, or
   passkey method remains available for account recovery.
 - Listeners can clear Recently Played activity without removing saved albums
-  or MediaTracks.
+  or MediaTracks. Clearing also removes those plays from Library sorting.
 - Listener deletion removes saved content, recent activity, Playlists,
   authentication actions, provider identities, and sessions before removing
   the user.
@@ -801,6 +1430,11 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - The expanded Library page requires valid authentication and returns `401`
   for missing or expired credentials so clients can refresh their sessions.
 - Expanded public pages such as Home may use optional authentication.
+- A request to an optional-authentication page that presents a Bearer
+  credential which fails verification, such as an expired, revoked, or
+  malformed access token, receives `401` so native clients refresh their
+  session instead of silently receiving anonymous content. Requests without
+  credentials remain anonymous.
 - Cookie-authenticated Web requests for account-owned or personalized data are
   bound to the account identity currently displayed by that tab. A missing or
   stale tab identity fails closed before private data is read or changed;

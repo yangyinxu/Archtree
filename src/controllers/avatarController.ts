@@ -3,30 +3,11 @@ import { Readable } from 'node:stream';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { getUploadedFile } from '../middleware/imageUpload';
 import User from '../models/user';
-import {
-    beginAvatarMutation,
-    completeAvatarMutation,
-    releaseAvatarMutation
-} from '../services/avatarMutationService';
-import {
-    AvatarMutationOutcomeUnknownError,
-    cleanupDetachedAvatarAssets,
-    deleteAvatarOwnerAndAllAssets,
-    getAvatarObject,
-    replaceAvatarOwnerAndCleanup,
-    uploadAvatar
-} from '../services/avatarStorageService';
+import { executeAvatarMutation } from '../services/avatarOperationService';
+import { getAvatarObject } from '../services/avatarStorageService';
 import { createMediaAbortContext, pipeMediaStream } from '../services/mediaDeliveryService';
 
 const revisionOf = (user: Record<string, any> | null) => Number(user?.avatarRevision ?? 0);
-const avatarProfile = (user: Record<string, any> | null) => {
-    const avatarRevision = revisionOf(user);
-    const assetId = String(user?.avatarAssetId ?? '');
-    return {
-        avatarRevision,
-        avatar: assetId ? { assetId, revision: avatarRevision } : null
-    };
-};
 
 const mutationHeaders = (req: Request) => {
     const idempotencyKey = String(req.get('Idempotency-Key') ?? '').trim();
@@ -125,176 +106,26 @@ export const getAvatar = async (req: Request, res: Response, next: NextFunction)
     }
 };
 
-/** Replaces an avatar with idempotent, revision-checked lifecycle semantics. */
+/** Runs the durable avatar operation after the bounded upload and viewer checks. */
 export const putAvatar = async (req: Request, res: Response, next: NextFunction) => {
     const auth = (req as AuthenticatedRequest).auth!;
-    let mutationId = '';
     try {
         assertAvatarMutationViewer(req, auth.userId);
         const { idempotencyKey, expectedRevision } = mutationHeaders(req);
-        const mutation = await beginAvatarMutation(auth.userId, idempotencyKey, 'replace', expectedRevision);
-        mutationId = mutation.mutationId;
-        if (!mutation.isOwner && mutation.result) return sendMutationResult(res, mutation.result);
-
-        const uploadFile = getUploadedFile(req, 'avatar');
-        if (!uploadFile) {
-            const result = { statusCode: 400, body: { message: 'Select an avatar image to upload.' } };
-            await completeAvatarMutation(mutationId, result);
-            return sendMutationResult(res, result);
-        }
-        const user = await User.findById(auth.userId) as Record<string, any> | null;
-        if (!user) {
-            const result = { statusCode: 404, body: { message: 'Account not found.' } };
-            await completeAvatarMutation(mutationId, result);
-            return sendMutationResult(res, result);
-        }
-        if (revisionOf(user) !== expectedRevision) {
-            const result = { statusCode: 409, body: { message: 'Avatar changed on another device.', ...avatarProfile(user) } };
-            await completeAvatarMutation(mutationId, result);
-            return sendMutationResult(res, result);
-        }
-
-        const replacementId = await uploadAvatar(auth.userId, uploadFile);
-        const previousId = String(user.avatarAssetId ?? '');
-        const replacement = await replaceAvatarOwnerAndCleanup(
-            replacementId,
-            auth.userId,
-            previousId,
-            expectedRevision,
-            () => User.replaceAvatar(auth.userId, expectedRevision, replacementId),
-            () => User.findById(auth.userId) as Promise<Record<string, any> | null>
-        );
-        if (!replacement.ownerReplaced) {
-            const current = replacement.currentOwner
-                ?? await User.findById(auth.userId) as Record<string, any> | null;
-            const result = {
-                statusCode: 409,
-                body: {
-                    message: 'Avatar changed on another device.',
-                    ...avatarProfile(current),
-                    cleanupPending: replacement.cleanupPending
-                }
-            };
-            await completeAvatarMutation(mutationId, result);
-            return sendMutationResult(res, result);
-        }
-
-        const detachedCleanup = await cleanupDetachedAvatarAssets(auth.userId);
-
-        const revision = expectedRevision + 1;
-        const result = {
-            statusCode: 200,
-            body: {
-                avatarRevision: revision,
-                avatar: { assetId: replacementId, revision },
-                cleanupPending: replacement.cleanupPending || detachedCleanup.cleanupPending
-            }
-        };
-        await completeAvatarMutation(mutationId, result);
-        return sendMutationResult(res, result);
-    } catch (error) {
-        if (error instanceof AvatarMutationOutcomeUnknownError && mutationId) {
-            const result = {
-                statusCode: 503,
-                body: {
-                    message: 'Avatar update outcome could not be confirmed. Reconciliation is required.',
-                    cleanupPending: true
-                }
-            };
-            await completeAvatarMutation(mutationId, result).catch(() => undefined);
-            return sendMutationResult(res, result);
-        }
-        if (mutationId) await releaseAvatarMutation(mutationId).catch(() => undefined);
-        return next(error);
-    }
+        return sendMutationResult(res, await executeAvatarMutation(
+            auth.userId, idempotencyKey, 'replace', expectedRevision, getUploadedFile(req, 'avatar')
+        ));
+    } catch (error) { return next(error); }
 };
 
-/** Removes the current avatar only after its private S3 object is confirmed deleted. */
+/** Resumes interrupted deletion without forgetting its private storage evidence. */
 export const deleteAvatar = async (req: Request, res: Response, next: NextFunction) => {
     const auth = (req as AuthenticatedRequest).auth!;
-    let mutationId = '';
     try {
         assertAvatarMutationViewer(req, auth.userId);
         const { idempotencyKey, expectedRevision } = mutationHeaders(req);
-        const mutation = await beginAvatarMutation(auth.userId, idempotencyKey, 'delete', expectedRevision);
-        mutationId = mutation.mutationId;
-        if (!mutation.isOwner && mutation.result) return sendMutationResult(res, mutation.result);
-
-        const user = await User.findById(auth.userId) as Record<string, any> | null;
-        if (!user) {
-            const result = { statusCode: 404, body: { message: 'Account not found.' } };
-            await completeAvatarMutation(mutationId, result);
-            return sendMutationResult(res, result);
-        }
-        if (revisionOf(user) !== expectedRevision) {
-            const result = { statusCode: 409, body: { message: 'Avatar changed on another device.', ...avatarProfile(user) } };
-            await completeAvatarMutation(mutationId, result);
-            return sendMutationResult(res, result);
-        }
-        const imageId = String(user.avatarAssetId ?? '');
-        if (!imageId) {
-            const cleanup = await cleanupDetachedAvatarAssets(auth.userId);
-            const result = {
-                statusCode: 200,
-                body: {
-                    avatarRevision: expectedRevision,
-                    avatar: null,
-                    cleanupPending: cleanup.cleanupPending
-                }
-            };
-            await completeAvatarMutation(mutationId, result);
-            return sendMutationResult(res, result);
-        }
-
-        const deletion = await deleteAvatarOwnerAndAllAssets(
-            imageId,
-            auth.userId,
-            () => User.clearAvatar(auth.userId, expectedRevision, imageId),
-            {
-                confirmOwnerCleared: async () => {
-                    const current = await User.findById(auth.userId) as Record<string, any> | null;
-                    return Boolean(current)
-                        && revisionOf(current) === expectedRevision + 1
-                        && !String(current?.avatarAssetId ?? '');
-                }
-            }
-        );
-        if (!deletion.ownerCleared) {
-            const current = await User.findById(auth.userId) as Record<string, any> | null;
-            const result = {
-                statusCode: 409,
-                body: {
-                    message: 'Avatar changed on another device.',
-                    ...avatarProfile(current),
-                    cleanupPending: true
-                }
-            };
-            await completeAvatarMutation(mutationId, result);
-            return sendMutationResult(res, result);
-        }
-        const result = {
-            statusCode: 200,
-            body: {
-                avatarRevision: expectedRevision + 1,
-                avatar: null,
-                cleanupPending: deletion.cleanupPending
-            }
-        };
-        await completeAvatarMutation(mutationId, result);
-        return sendMutationResult(res, result);
-    } catch (error) {
-        if (error instanceof AvatarMutationOutcomeUnknownError && mutationId) {
-            const result = {
-                statusCode: 503,
-                body: {
-                    message: 'Avatar deletion outcome could not be confirmed. Reconciliation is required.',
-                    cleanupPending: true
-                }
-            };
-            await completeAvatarMutation(mutationId, result).catch(() => undefined);
-            return sendMutationResult(res, result);
-        }
-        if (mutationId) await releaseAvatarMutation(mutationId).catch(() => undefined);
-        return next(error);
-    }
+        return sendMutationResult(res, await executeAvatarMutation(
+            auth.userId, idempotencyKey, 'delete', expectedRevision
+        ));
+    } catch (error) { return next(error); }
 };

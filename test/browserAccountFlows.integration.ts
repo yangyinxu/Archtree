@@ -16,6 +16,11 @@ import {
 const acceptedMessage = {
     message: 'If the account can use this action, an email has been sent.'
 };
+const registrationAccepted = { message: 'Check your email for the next step.' };
+const retiredBody = {
+    code: 'email_registration_moved',
+    message: 'Email sign-up has moved to the Finitude website. Create your account there, then sign in.'
+};
 
 let baseUrl = '';
 let harness: MongoReplicaSetHarness | undefined;
@@ -23,6 +28,8 @@ let server: Server | undefined;
 let originalSesSend: typeof SESv2Client.prototype.send;
 const originalEnvironment = new Map<string, string | undefined>();
 const deliveredCodes = new Map<string, string[]>();
+const deliveredLinks = new Map<string, string[]>();
+const deliveryAttempts = new Map<string, number>();
 const failedRecipients = new Set<string>();
 
 const closeServer = (value?: Server) => new Promise<void>((resolve, reject) => {
@@ -30,18 +37,21 @@ const closeServer = (value?: Server) => new Promise<void>((resolve, reject) => {
     value.close((error) => error ? reject(error) : resolve());
 });
 
-/** Captures test codes at the mail boundary without logging or persisting plaintext codes. */
+/** Captures test codes and link tokens at the mail boundary without logging or persisting them. */
 const installEmailCapture = () => {
     originalSesSend = SESv2Client.prototype.send;
     SESv2Client.prototype.send = (async (command: any) => {
         const recipient = String(command.input?.Destination?.ToAddresses?.[0] ?? '');
         const text = String(command.input?.Content?.Simple?.Body?.Text?.Data ?? '');
         const code = text.match(/\b(\d{6})\b/)?.[1];
-        assert.ok(recipient && code, 'the auth email contains a recipient and six-digit code');
+        const token = text.match(/#token=([A-Za-z0-9_-]{43})/)?.[1];
+        assert.ok(recipient, 'the auth email has a recipient');
+        deliveryAttempts.set(recipient, (deliveryAttempts.get(recipient) ?? 0) + 1);
         if (failedRecipients.has(recipient)) {
             throw new Error('simulated email delivery failure');
         }
-        deliveredCodes.set(recipient, [...(deliveredCodes.get(recipient) ?? []), code]);
+        if (code) deliveredCodes.set(recipient, [...(deliveredCodes.get(recipient) ?? []), code]);
+        if (token) deliveredLinks.set(recipient, [...(deliveredLinks.get(recipient) ?? []), token]);
         return {} as any;
     }) as typeof SESv2Client.prototype.send;
 };
@@ -65,6 +75,21 @@ const browserPost = (
     body: JSON.stringify(body)
 });
 
+/**
+ * Generic email responses are sent before account work, so assertions about a
+ * code or account wait for the mail boundary instead of the HTTP response.
+ */
+const expectDeliveryAttempt = async (email: string, request: () => Promise<Response>) => {
+    const expected = (deliveryAttempts.get(email) ?? 0) + 1;
+    const response = await request();
+    const deadline = Date.now() + 10_000;
+    while ((deliveryAttempts.get(email) ?? 0) < expected) {
+        assert.ok(Date.now() < deadline, `an email delivery was attempted for ${email}`);
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    return response;
+};
+
 const latestCode = (email: string) => {
     const codes = deliveredCodes.get(email) ?? [];
     assert.ok(codes.length > 0, `a code was delivered to ${email}`);
@@ -76,6 +101,7 @@ before(async () => {
     setTestEnvironment('AUTH_CODE_PEPPER', 'integration-code-pepper');
     setTestEnvironment('AWS_REGION', 'us-east-1');
     setTestEnvironment('JWT_SECRET', 'integration-jwt-secret');
+    setTestEnvironment('AUTH_LINK_ORIGIN', 'https://listen.example.test');
     setTestEnvironment('APPLE_CLIENT_IDS', 'com.example.native');
     setTestEnvironment('GOOGLE_CLIENT_IDS', 'native-google-client');
     setTestEnvironment('WEBAUTHN_RP_ID', 'listener.example.com');
@@ -125,21 +151,12 @@ test('browser capability discovery excludes native-only providers', async () => 
     });
 });
 
-test('browser registration and verification require same-origin JSON and single-use codes', async () => {
+test('browser registration requests require same-origin JSON and answer generically', async () => {
     const email = 'new-listener@example.com';
-    const registration = {
-        email,
-        password: 'new-listener-password',
-        displayName: 'New Listener'
-    };
-    const crossSite = await browserPost(
-        '/auth/browser/register',
-        registration,
-        'https://attacker.example'
-    );
+    const crossSite = await browserPost('/auth/browser/registration/request', { email }, 'https://attacker.example');
     assert.equal(crossSite.status, 403);
 
-    const formEncoded = await fetch(`${baseUrl}/auth/browser/register`, {
+    const formEncoded = await fetch(`${baseUrl}/auth/browser/registration/request`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -150,116 +167,84 @@ test('browser registration and verification require same-origin JSON and single-
     });
     assert.equal(formEncoded.status, 415);
 
-    const created = await browserPost('/auth/browser/register', registration);
-    assert.equal(created.status, 202);
-    assert.equal(created.headers.get('cache-control'), 'no-store');
-    assert.equal(created.headers.get('set-cookie'), null);
-    assert.deepEqual(await created.json(), acceptedMessage);
+    const invalid = await browserPost('/auth/browser/registration/request', { email: 'not-an-email' });
+    assert.equal(invalid.status, 422);
+
+    const requested = await expectDeliveryAttempt(email, () => browserPost('/auth/browser/registration/request', { email }));
+    assert.equal(requested.status, 202);
+    assert.equal(requested.headers.get('cache-control'), 'no-store');
+    assert.equal(requested.headers.get('set-cookie'), null);
+    assert.deepEqual(await requested.json(), registrationAccepted);
+    assert.equal(await User.findByEmail(email), null, 'requesting a link creates no account');
+    const token = (deliveredLinks.get(email) ?? []).at(-1)!;
+    assert.ok(token);
+
+    for (const path of ['/auth/browser/registration/inspect', '/auth/browser/registration/complete',
+        '/auth/browser/email-verification/inspect', '/auth/browser/email-verification/confirm',
+        '/auth/browser/email-verification/request']) {
+        const rejected = await browserPost(path, { token, email }, 'https://attacker.example');
+        assert.equal(rejected.status, 403, `${path} rejects cross-site requests`);
+    }
+    const inspected = await browserPost('/auth/browser/registration/inspect', { token });
+    assert.equal(inspected.status, 200);
+    assert.equal(inspected.headers.get('set-cookie'), null);
+    assert.deepEqual(await inspected.json(), { email });
+
+    const completed = await browserPost('/auth/browser/registration/complete', {
+        token, password: 'new-listener-password', displayName: 'New Listener'
+    });
+    assert.equal(completed.status, 201);
+    assert.equal(completed.headers.get('set-cookie'), null, 'completion installs no session (log in next)');
+    assert.deepEqual(await completed.json(), { email });
     const user = await User.findByEmail(email);
-    assert.ok(user);
-    assert.equal(user.emailVerified, false);
-    const staleCode = latestCode(email);
-
-    const resent = await browserPost('/auth/browser/email/resend-verification', { email });
-    const missingResend = await browserPost('/auth/browser/email/resend-verification', {
-        email: 'missing-listener@example.com'
-    });
-    assert.equal(resent.status, 202);
-    assert.equal(missingResend.status, 202);
-    assert.deepEqual(await resent.json(), acceptedMessage);
-    assert.deepEqual(await missingResend.json(), acceptedMessage);
-
-    const invalidExisting = await browserPost('/auth/browser/email/verify', {
-        email,
-        code: staleCode
-    });
-    const invalidMissing = await browserPost('/auth/browser/email/verify', {
-        email: 'missing-listener@example.com',
-        code: staleCode
-    });
-    assert.equal(invalidExisting.status, 400);
-    assert.equal(invalidMissing.status, 400);
-    assert.deepEqual(await invalidExisting.json(), await invalidMissing.json());
-
-    const verificationCode = latestCode(email);
-    const verified = await browserPost('/auth/browser/email/verify', {
-        email,
-        code: verificationCode
-    });
-    assert.equal(verified.status, 204);
-    assert.equal(await verified.text(), '');
-    assert.equal((await User.findByEmail(email))?.emailVerified, true);
-
-    const reused = await browserPost('/auth/browser/email/verify', {
-        email,
-        code: verificationCode
-    });
-    assert.equal(reused.status, 400);
+    assert.equal(user?.emailVerified, true);
+    assert.equal(user?.displayName, 'New Listener');
 });
 
-test('retired PUT registration is identical across account states and has no side effects', async () => {
+test('retired code-based registration routes answer 410 without side effects', async () => {
     const email = 'retired-registration@example.com';
-    const submit = (candidateEmail: string) => fetch(`${baseUrl}/auth/signup`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            email: candidateEmail,
-            password: 'retired-registration-password',
-            username: 'Retired Listener'
-        })
-    });
-
-    const missingAccount = await submit(email);
-    const existingAccount = await submit('new-listener@example.com');
-    assert.equal(missingAccount.status, 405);
-    assert.equal(existingAccount.status, 405);
-    assert.equal(missingAccount.headers.get('allow'), 'POST');
-    assert.equal(existingAccount.headers.get('allow'), 'POST');
-    const missingBody = await missingAccount.json();
-    const existingBody = await existingAccount.json();
-    assert.deepEqual(missingBody, existingBody);
-    assert.deepEqual(missingBody, {
-        message: 'Use POST /auth/signup.'
-    });
+    const body = { email, password: 'retired-registration-password', displayName: 'Retired Listener', code: '123456' };
+    const attemptsBefore = deliveryAttempts.get(email) ?? 0;
+    const retired: Array<[string, string, string?]> = [
+        ['POST', '/auth/signup'], ['PUT', '/auth/signup'], ['POST', '/auth/email/verify'],
+        ['POST', '/auth/email/resend-verification'], ['POST', '/auth/browser/register', baseUrl],
+        ['POST', '/auth/browser/email/verify', baseUrl], ['POST', '/auth/browser/email/resend-verification', baseUrl],
+        // A cross-site browser request also gets the retirement notice and nothing else.
+        ['POST', '/auth/browser/register', 'https://attacker.example']
+    ];
+    for (const [method, path, origin] of retired) {
+        const response = await fetch(`${baseUrl}${path}`, {
+            method,
+            headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) },
+            body: JSON.stringify(body)
+        });
+        assert.equal(response.status, 410, `${method} ${path}`);
+        assert.deepEqual(await response.json(), retiredBody);
+    }
     assert.equal(await User.findByEmail(email), null);
-    assert.deepEqual(deliveredCodes.get(email), undefined);
+    assert.equal(await getDb()!.collection('emailLinkTokens').countDocuments({ email }), 0);
+    assert.equal(deliveryAttempts.get(email) ?? 0, attemptsBefore);
 });
 
-test('Web form registration stays generic across delivery and account states', async () => {
+test('the Archtree sign-up page and form redirect to Web registration without account work', async () => {
     const email = 'generic-web-registration@example.com';
-    const submit = () => fetch(`${baseUrl}/auth/signup-web`, {
+    const page = await fetch(`${baseUrl}/auth/signup-web`, { redirect: 'manual' });
+    assert.equal(page.status, 303);
+    assert.equal(page.headers.get('location'), '/finitude/register');
+    const form = await fetch(`${baseUrl}/auth/signup-web`, {
         method: 'POST',
+        redirect: 'manual',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             Origin: baseUrl,
             'Sec-Fetch-Site': 'same-origin'
         },
-        body: new URLSearchParams({
-            email,
-            password: 'generic-web-registration-password',
-            username: 'Generic Listener'
-        })
+        body: new URLSearchParams({ email, password: 'generic-web-registration-password', username: 'Generic Listener' })
     });
-
-    failedRecipients.add(email);
-    const newAccount = await submit();
-    assert.equal(newAccount.status, 202);
-    const genericBody = await newAccount.text();
-    assert.match(genericBody, /If the account can be created, a verification code has been sent/);
-    assert.doesNotMatch(genericBody, /Creating the account failed/);
-    assert.equal((await User.findByEmail(email))?.emailVerified, false);
-
-    const existingUnverified = await submit();
-    assert.equal(existingUnverified.status, 202);
-    assert.equal(await existingUnverified.text(), genericBody);
-
-    const user = await User.findByEmail(email);
-    assert.ok(user);
-    await User.markEmailVerified(user._id.toString());
-    const existingVerified = await submit();
-    assert.equal(existingVerified.status, 202);
-    assert.equal(await existingVerified.text(), genericBody);
-    failedRecipients.delete(email);
+    assert.equal(form.status, 303);
+    assert.equal(form.headers.get('location'), '/finitude/register');
+    assert.equal(await User.findByEmail(email), null);
+    assert.equal(deliveryAttempts.get(email), undefined);
 });
 
 test('password recovery is non-enumerating and reset revokes every session', async () => {
@@ -274,7 +259,10 @@ test('password recovery is non-enumerating and reset revokes every session', asy
     );
 
     failedRecipients.add(email);
-    const failedKnownRequest = await browserPost('/auth/browser/password/forgot', { email });
+    const failedKnownRequest = await expectDeliveryAttempt(
+        email,
+        () => browserPost('/auth/browser/password/forgot', { email })
+    );
     const missingRequest = await browserPost('/auth/browser/password/forgot', {
         email: 'unknown-recovery@example.com'
     });
@@ -284,7 +272,10 @@ test('password recovery is non-enumerating and reset revokes every session', asy
     assert.deepEqual(await missingRequest.json(), acceptedMessage);
 
     failedRecipients.delete(email);
-    const knownRequest = await browserPost('/auth/browser/password/forgot', { email });
+    const knownRequest = await expectDeliveryAttempt(
+        email,
+        () => browserPost('/auth/browser/password/forgot', { email })
+    );
     assert.equal(knownRequest.status, 202);
     assert.deepEqual(await knownRequest.json(), acceptedMessage);
 

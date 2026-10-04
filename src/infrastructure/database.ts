@@ -1,6 +1,6 @@
-import * as dotenv from 'dotenv';
 import * as mongoDb from 'mongodb';
 import { initializeDatabaseIndexes, verifyRequiredDatabaseIndexes } from './databaseIndexes';
+import { initializeAvatarMutationRecovery } from '../services/avatarMutationService';
 import { verifyDatabaseTransactionTopology } from './databaseTopology';
 import { MissingStartupConfigurationError, recordStartupFailureStage, type StartupStage } from './startupDiagnostics';
 
@@ -14,11 +14,14 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 };
 
-export const connectToDatabase = async (): Promise<mongoDb.Db> => {
+/**
+ * Operational reads can verify existing constraints without implicitly creating collections or indexes.
+ * Configuration comes only from `process.env`; process entry points own `.env` loading so test imports never read it.
+ */
+export const connectToDatabase = async (options: { initializeIndexes?: boolean; logReady?: boolean } = {}): Promise<mongoDb.Db> => {
   let stage: StartupStage = 'configuration';
   let client: mongoDb.MongoClient | undefined;
   try {
-    dotenv.config();
     const missingVariables = (['DB_CONN_STRING', 'DB_NAME'] as const)
       .filter(name => !String(process.env[name] ?? '').trim());
     if (missingVariables.length) throw new MissingStartupConfigurationError(missingVariables);
@@ -36,11 +39,15 @@ export const connectToDatabase = async (): Promise<mongoDb.Db> => {
     stage = 'database_topology';
     await verifyDatabaseTransactionTopology(connectedDatabase);
     stage = 'database_initialization';
-    await initializeDatabaseIndexes(connectedDatabase);
+    if (options.initializeIndexes === false) await verifyRequiredDatabaseIndexes(connectedDatabase);
+    else {
+      await initializeDatabaseIndexes(connectedDatabase);
+      await initializeAvatarMutationRecovery(connectedDatabase);
+    }
     databaseClient = client;
     database = connectedDatabase;
     readinessCheckedAt = Date.now();
-    console.log(JSON.stringify({ category: 'database_ready' }));
+    if (options.logReady !== false) console.log(JSON.stringify({ category: 'database_ready' }));
     return connectedDatabase;
   } catch (error) {
     await client?.close().catch(() => undefined);

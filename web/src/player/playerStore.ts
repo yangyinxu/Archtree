@@ -4,6 +4,7 @@ import type {
   PlayerErrorCode,
   PlayerErrorState,
   PlayerPlaybackErrorStage,
+  PlayerPlaybackEvent,
   PlayerQueueItem,
   PlayerRepeatMode,
   PlayerSnapshot,
@@ -13,6 +14,7 @@ import { enqueueListenerTelemetry } from '../telemetry/client';
 import { classifyListenerRoute } from '../telemetry/routeClassifier';
 import { createMediaSessionAdapter } from './mediaSessionAdapter';
 import { canonicalOrder, copyQueue, currentCycleHistory, queueLaunchOrder, shuffledOrder } from './queueOrder';
+import type { createRoomPlaybackController, RoomPlaybackState } from './roomPlayback';
 
 const DEFAULT_SKIP_SECONDS = 10;
 const PREVIOUS_RESTART_SECONDS = 3;
@@ -116,6 +118,7 @@ export const createPlayerStore = (
   const mediaSession = createMediaSessionAdapter(options);
   const random = options.random ?? Math.random;
   const listeners = new Set<() => void>();
+  const playbackListeners = new Set<(event: PlayerPlaybackEvent) => void>();
   const boundAudioListeners = new Map<string, () => void>();
   const startingVolume = clamp(
     Number.isFinite(options.initialVolume) ? options.initialVolume ?? 1 : 1,
@@ -136,11 +139,23 @@ export const createPlayerStore = (
   let lastReportedPlaybackError = '';
   let playOrder: number[] = [];
   let playOrderPosition = -1;
+  let upcomingOrder: readonly number[] | undefined;
+  let upcomingPosition = -1;
   let actualHistory: number[] = [];
   let actualHistoryPosition = -1;
   const mediaSurfaceHosts: HTMLElement[] = [];
   let mediaParkingHost: HTMLElement | null = null;
   let destroyed = false;
+  let room: ReturnType<typeof createRoomPlaybackController> | null = null;
+  let observedRoom: RoomPlaybackState | null = null;
+
+  const observePlayback = (type: string, media = audio) => {
+    if (destroyed) return;
+    const event = { type, media, item: snapshot.currentItem, sourceGeneration, room: observedRoom };
+    for (const listener of playbackListeners) {
+      try { listener(event); } catch { /* Optional observers cannot change playback behavior. */ }
+    }
+  };
 
   const recordNavigation = (index: number, direction: 'previous' | 'next') => {
     const adjacentHistoryPosition = direction === 'previous'
@@ -203,12 +218,16 @@ export const createPlayerStore = (
 
   const syncMediaSession = () => mediaSession.sync(snapshot, audio);
 
-  const updateSnapshot = (patch: Partial<PlayerSnapshot>) => {
-    if (destroyed) return;
+  /** Immutable queue/order references keep clock and transport updates independent of queue derivation. */
+  const upcomingItems = (candidate: PlayerSnapshot, validIndex: boolean) => {
+    if (candidate.queue === snapshot.queue
+      && candidate.currentIndex === snapshot.currentIndex
+      && candidate.repeatMode === snapshot.repeatMode
+      && upcomingOrder === playOrder
+      && upcomingPosition === playOrderPosition) return snapshot.upNextItems;
 
-    const candidate = { ...snapshot, ...patch };
-    const validIndex = candidate.currentIndex >= 0
-      && candidate.currentIndex < candidate.queue.length;
+    upcomingOrder = playOrder;
+    upcomingPosition = playOrderPosition;
     const upcomingIndices = !validIndex
       ? []
       : candidate.repeatMode === 'one'
@@ -221,9 +240,18 @@ export const createPlayerStore = (
                 : [])
             ]
           : [];
-    const upNextItems = Object.freeze(upcomingIndices
+    return Object.freeze(upcomingIndices
       .filter((index) => index >= 0 && index < candidate.queue.length)
       .map((index) => candidate.queue[index]));
+  };
+
+  const updateSnapshot = (patch: Partial<PlayerSnapshot>) => {
+    if (destroyed) return;
+
+    const candidate = { ...snapshot, ...patch };
+    const validIndex = candidate.currentIndex >= 0
+      && candidate.currentIndex < candidate.queue.length;
+    const upNextItems = upcomingItems(candidate, validIndex);
     const next: PlayerSnapshot = Object.freeze({
       ...candidate,
       currentIndex: validIndex ? candidate.currentIndex : -1,
@@ -320,12 +348,22 @@ export const createPlayerStore = (
           error: playerError(code)
         });
       },
-      ended: () => { void handleEnded(target); }
+      ended: () => { void handleEnded(target); },
+      seeking: () => undefined,
+      seeked: () => {
+        if (!snapshot.currentItem || destroyed) return;
+        updateSnapshot({ currentTime: readAudioTime(target) });
+      }
     };
 
     Object.entries(handlers).forEach(([event, handler]) => {
-      boundAudioListeners.set(event, handler);
-      target.addEventListener(event, handler);
+      const guarded = () => {
+        if (room && !room.observe(event, target)) return;
+        observePlayback(event, target);
+        handler();
+      };
+      boundAudioListeners.set(event, guarded);
+      target.addEventListener(event, guarded);
     });
   };
 
@@ -363,7 +401,8 @@ export const createPlayerStore = (
     }
   };
 
-  const attemptPlay = async (expectedSourceGeneration: number): Promise<void> => {
+  /** Resolves the failure of this still-current attempt; pauses, loads and source changes supersede it silently. */
+  const attemptPlay = async (expectedSourceGeneration: number): Promise<PlayerErrorCode | undefined> => {
     if (destroyed || expectedSourceGeneration !== sourceGeneration || !snapshot.currentItem) return;
     const target = ensureAudio();
     if (!target) return;
@@ -376,18 +415,20 @@ export const createPlayerStore = (
       if (destroyed
         || attempt !== playAttemptGeneration
         || expectedSourceGeneration !== sourceGeneration) return;
-      updateSnapshot({ status: 'playing', isBuffering: false, error: null });
+      if (!room) updateSnapshot({ status: 'playing', isBuffering: false, error: null });
     } catch (failure) {
       if (destroyed
         || attempt !== playAttemptGeneration
         || expectedSourceGeneration !== sourceGeneration) return;
       const code = classifyPlaybackFailure(failure);
+      observePlayback('error');
       reportPlaybackError('play_call', code);
       updateSnapshot({
         status: code === 'autoplayBlocked' ? 'paused' : 'error',
         isBuffering: false,
         error: playerError(code)
       });
+      return code;
     }
   };
 
@@ -398,6 +439,8 @@ export const createPlayerStore = (
     navigationDirection: 'previous' | 'next' | null = null
   ): Promise<void> => {
     if (destroyed || index < 0 || index >= snapshot.queue.length) return;
+
+    observePlayback('sourcechange');
 
     playOrderPosition = orderPosition;
     if (navigationDirection) recordNavigation(index, navigationDirection);
@@ -440,6 +483,8 @@ export const createPlayerStore = (
 
     try {
       target.pause();
+      // Room preparation must buffer while paused, before the server permits a scheduled start.
+      target.preload = room ? 'auto' : 'metadata';
       target.poster = item.artworkUrl;
       target.src = item.streamUrl;
       target.currentTime = 0;
@@ -511,6 +556,10 @@ export const createPlayerStore = (
 
   async function handleEnded(target: PlayerAudio): Promise<void> {
     if (!snapshot.currentItem || destroyed) return;
+    if (room) {
+      updateSnapshot({ status: 'ended', isBuffering: false, currentTime: readAudioTime(target) });
+      return;
+    }
     const endedGeneration = sourceGeneration;
     const endedItem = snapshot.currentItem;
     if (snapshot.repeatMode === 'one'
@@ -538,6 +587,7 @@ export const createPlayerStore = (
   }
 
   const clearQueue = () => {
+    observePlayback('sourcechange');
     sourceGeneration += 1;
     playAttemptGeneration += 1;
     playOrder = [];
@@ -571,10 +621,12 @@ export const createPlayerStore = (
     launchOptions = {}
   ) => {
     if (destroyed) return;
+    if (room) throw new Error('Leave room playback before launching a local queue.');
     if (queue.length === 0) {
       clearQueue();
       return;
     }
+    if (launchOptions.autoplay ?? true) store.notePlaybackIntent();
 
     const ownedQueue = copyQueue(queue);
     const boundedIndex = clamp(
@@ -602,6 +654,33 @@ export const createPlayerStore = (
     );
   };
 
+  /** These media effects are shared by local transport and confirmed room application. */
+  const pauseMedia = () => {
+    observePlayback('pause');
+    playAttemptGeneration += 1;
+    try { audio?.pause(); } catch { /* A browser shim cannot prevent local suspension. */ }
+    if (snapshot.currentItem) updateSnapshot({ status: 'paused', isBuffering: false });
+  };
+
+  const seekMedia = (position: number) => {
+    if (destroyed || !audio || !snapshot.currentItem || !Number.isFinite(position)) return false;
+    const upperBound = snapshot.duration > 0 ? snapshot.duration : Number.MAX_SAFE_INTEGER;
+    try {
+      observePlayback('seeking');
+      audio.currentTime = clamp(position, 0, upperBound);
+      updateSnapshot({ currentTime: audio.currentTime });
+      return true;
+    } catch { return false; }
+  };
+
+  const updateRoomQueue = (queue: readonly PlayerQueueItem[], index: number) => {
+    playOrder = canonicalOrder(queue.length);
+    playOrderPosition = index;
+    actualHistory = [index];
+    actualHistoryPosition = 0;
+    updateSnapshot({ queue, currentIndex: index, shuffleEnabled: false, repeatMode: 'off' });
+  };
+
   const store: PlayerStore = {
     getSnapshot: () => snapshot,
     getServerSnapshot: () => snapshot,
@@ -610,10 +689,18 @@ export const createPlayerStore = (
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    subscribePlaybackEvents: listener => {
+      if (destroyed) return () => undefined;
+      playbackListeners.add(listener);
+      return () => { playbackListeners.delete(listener); };
+    },
+    notePlaybackIntent: () => observePlayback('intent'),
     launchQueue,
     launchAlbumQueue: launchQueue,
     launchStandalone: async (item, launchOptions = {}) => {
       if (destroyed) return;
+      if (room) throw new Error('Leave room playback before launching a local queue.');
+      if (launchOptions.autoplay ?? true) store.notePlaybackIntent();
       const ownedQueue = copyQueue([item]);
       playOrder = [0];
       playOrderPosition = 0;
@@ -632,6 +719,8 @@ export const createPlayerStore = (
     },
     play: async () => {
       if (destroyed || !snapshot.currentItem) return;
+      if (room) { room.intent({ type: 'play' }); return; }
+      store.notePlaybackIntent();
       const target = ensureAudio();
       if (!target) return;
       if (snapshot.status === 'playing' && !target.paused) return;
@@ -663,27 +752,19 @@ export const createPlayerStore = (
     },
     pause: () => {
       if (destroyed || !snapshot.currentItem) return;
+      if (room) { room.intent({ type: 'pause' }); return; }
       if (snapshot.status === 'error' || snapshot.status === 'ended') return;
-      playAttemptGeneration += 1;
-      try {
-        audio?.pause();
-      } catch {
-        // The visible state can still pause even if a browser audio shim rejects the call.
-      }
-      updateSnapshot({ status: 'paused', isBuffering: false });
+      pauseMedia();
     },
-    previous: () => movePrevious(),
-    next: () => moveNext(),
+    previous: async () => { if (room) return room.intent({ type: 'previous' }); store.notePlaybackIntent(); return movePrevious(); },
+    next: async () => { if (room) return room.intent({ type: 'next' }); store.notePlaybackIntent(); return moveNext(); },
     seek: (time) => {
       if (destroyed || !audio || !snapshot.currentItem || !Number.isFinite(time)) return;
       const upperBound = snapshot.duration > 0 ? snapshot.duration : Number.MAX_SAFE_INTEGER;
       const position = clamp(time, 0, upperBound);
-      try {
-        audio.currentTime = position;
-        updateSnapshot({ currentTime: position });
-      } catch {
-        // Some streams reject seeking until metadata arrives; later attempts remain valid.
-      }
+      if (room) { room.intent({ type: 'seek', positionSeconds: position }); return; }
+      store.notePlaybackIntent();
+      seekMedia(position);
     },
     skipBackward: (seconds = DEFAULT_SKIP_SECONDS) => {
       if (!Number.isFinite(seconds)) return;
@@ -694,7 +775,7 @@ export const createPlayerStore = (
       store.seek(snapshot.currentTime + Math.max(0, seconds));
     },
     toggleShuffle: () => {
-      if (destroyed) return;
+      if (destroyed || room) return;
       const shuffleEnabled = !snapshot.shuffleEnabled;
 
       if (snapshot.currentItem) {
@@ -714,7 +795,7 @@ export const createPlayerStore = (
       updateSnapshot({ shuffleEnabled });
     },
     cycleRepeatMode: () => {
-      if (destroyed) return;
+      if (destroyed || room) return;
       const repeatMode: PlayerRepeatMode = snapshot.repeatMode === 'off'
         ? 'all'
         : snapshot.repeatMode === 'all' ? 'one' : 'off';
@@ -744,6 +825,41 @@ export const createPlayerStore = (
       updateSnapshot({ muted });
     },
     toggleMute: () => store.setMuted(!snapshot.muted),
+    attachRoomPlayback: (roomOptions, controllerFactory = options.roomPlaybackProbeFactory) => {
+      if (!controllerFactory || destroyed) {
+        throw new Error('Room playback requires an authorized room controller.');
+      }
+      room?.attachment.detach();
+      pauseMedia();
+      clearQueue();
+      room = controllerFactory({
+        media: () => audio,
+        sourceGeneration: () => sourceGeneration,
+        install: async (queue, index) => {
+          updateRoomQueue(queue, index);
+          await activateIndex(index, false, index);
+        },
+        updateQueue: updateRoomQueue,
+        play: async () => {
+          const failure = await attemptPlay(sourceGeneration);
+          return failure === undefined ? undefined : failure === 'autoplayBlocked' ? 'blocked' : 'failed';
+        },
+        pause: pauseMedia,
+        seek: seekMedia,
+        detach: () => { clearQueue(); room = null; observedRoom = null; }
+      }, roomOptions);
+      const attachment = room.attachment;
+      return { ...attachment, apply: async state => {
+        const previous = observedRoom;
+        if (previous && state.revision <= previous.revision) return attachment.apply(state);
+        if (observedRoom && (observedRoom.roomId !== state.roomId || observedRoom.epoch !== state.epoch
+          || observedRoom.playbackEpoch !== state.playbackEpoch || observedRoom.currentEntryId !== state.currentEntryId)) observePlayback('sourcechange');
+        observedRoom = state;
+        const accepted = await attachment.apply(state);
+        if (!accepted && observedRoom === state) observedRoom = previous;
+        return accepted;
+      } };
+    },
     attachMediaElement: (container) => {
       if (destroyed) return () => undefined;
       if (!mediaSurfaceHosts.includes(container)) mediaSurfaceHosts.push(container);
@@ -759,6 +875,8 @@ export const createPlayerStore = (
     },
     destroy: () => {
       if (destroyed) return;
+      observePlayback('sourcechange');
+      room?.attachment.detach();
       destroyed = true;
       sourceGeneration += 1;
       playAttemptGeneration += 1;
@@ -768,6 +886,7 @@ export const createPlayerStore = (
         snapshot.shuffleEnabled,
         snapshot.repeatMode
       );
+      upcomingOrder = undefined;
       notify();
 
       if (audio) {
@@ -791,6 +910,7 @@ export const createPlayerStore = (
       mediaSession.destroy();
 
       listeners.clear();
+      playbackListeners.clear();
       boundAudioListeners.clear();
       mediaSurfaceHosts.splice(0);
       audio = null;

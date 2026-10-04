@@ -1,11 +1,18 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render as renderView, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import type { AlbumSummary, ArtistSummary, AudioTrackSummary } from '../api/contentSchemas';
 import { Artwork } from './Artwork';
 import { ContentCard, defaultContentCardArtworkSizes } from './ContentCard';
+import { ContentListRow } from './ContentListRow';
 import { PageSection } from './PageSection';
+import { listenerCapabilitiesWrapper, seedListenerCapabilities } from '../test/listenerCapabilities';
+
+// Cards read the shell's rollout capabilities, so every render supplies a social-enabled query context.
+const render = (ui: ReactElement) => renderView(ui, { wrapper: listenerCapabilitiesWrapper() });
 
 const artist: ArtistSummary = {
   contentType: 'artist',
@@ -213,6 +220,45 @@ test.each(['carousel', 'grid', 'list'] as const)('preserves the %s presentation 
   }
 });
 
+test.each(['carousel', 'grid', 'list'] as const)('keeps every repeated %s item as its own keyed entry', (presentation) => {
+  const consoleError = vi.spyOn(console, 'error');
+  const secondAlbum: AlbumSummary = { ...album, id: 'album-2', title: 'Lorem Ipsum' };
+  const { container, rerender } = render(
+    <MemoryRouter>
+      <PageSection
+        id={`repeated-${presentation}`}
+        items={[album, audioTrack, album]}
+        presentation={presentation}
+        title="Repeated picks"
+      />
+    </MemoryRouter>
+  );
+  const entryTitles = () => Array.from(
+    container.querySelector(`[data-presentation="${presentation}"]`)!.children,
+    (entry) => entry.textContent
+  );
+
+  expect(entryTitles()).toHaveLength(3);
+  expect(entryTitles()[0]).toContain('Still Water');
+  expect(entryTitles()[2]).toContain('Still Water');
+
+  // Colliding keys would let React reuse or drop the wrong repeated entry on update.
+  rerender(
+    <MemoryRouter>
+      <PageSection
+        id={`repeated-${presentation}`}
+        items={[album, secondAlbum, album, album]}
+        presentation={presentation}
+        title="Repeated picks"
+      />
+    </MemoryRouter>
+  );
+
+  expect(entryTitles()).toHaveLength(4);
+  expect(entryTitles().map((title) => title?.includes('Lorem Ipsum'))).toEqual([false, true, false, false]);
+  expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/same key/);
+});
+
 test('shows only the available carousel directions as overflow moves between edges', async () => {
   const { container } = render(
     <MemoryRouter>
@@ -404,4 +450,60 @@ test('section presentations describe the rendered card and list artwork widths',
     </MemoryRouter>
   );
   expect(container.querySelector('img')).toHaveAttribute('sizes', '3.15rem');
+});
+
+test('room actions are separate from catalog playback and excluded for Video and unavailable Library rows', async () => {
+  const onPlay = vi.fn();
+  const view = render(<MemoryRouter><ContentCard item={audioTrack} onPlay={onPlay} /></MemoryRouter>);
+  const action = await screen.findByRole('button', { name: `Listen together: ${audioTrack.title}` });
+  expect(action.closest('article')?.querySelector('button button')).toBeNull();
+  expect(onPlay).not.toHaveBeenCalled();
+  view.rerender(<MemoryRouter><ContentCard item={{ ...audioTrack, mediaType: 'video' }} onPlay={onPlay} /></MemoryRouter>);
+  expect(screen.queryByRole('button', { name: /^Listen together:/ })).not.toBeInTheDocument();
+  view.rerender(<MemoryRouter><ul><ContentListRow item={audioTrack} shareable={false} /></ul></MemoryRouter>);
+  expect(screen.queryByRole('button', { name: /^Listen together:/ })).not.toBeInTheDocument();
+  view.rerender(<MemoryRouter><ul><ContentListRow item={audioTrack} /></ul></MemoryRouter>);
+  expect(await screen.findByRole('button', { name: `Listen together: ${audioTrack.title}` })).toBeVisible();
+});
+
+test('a disabled social rollout offers no Share or Listen together action on cards or rows', async () => {
+  renderView(<MemoryRouter><section aria-label="Disabled rollout"><ContentCard item={audioTrack} onPlay={vi.fn()} />
+    <ul><ContentListRow item={album} /><ContentListRow item={audioTrack} /></ul></section></MemoryRouter>,
+  { wrapper: listenerCapabilitiesWrapper({ enabled: false, rooms: false }) });
+  // An enabled tree proves the deferred actions had time to load before asserting their absence.
+  render(<MemoryRouter><section aria-label="Enabled rollout"><ContentCard item={audioTrack} onPlay={vi.fn()} /></section></MemoryRouter>);
+  const enabled = screen.getByRole('region', { name: 'Enabled rollout' });
+  await within(enabled).findByRole('button', { name: `Share ${audioTrack.title}` });
+  await within(enabled).findByRole('button', { name: `Listen together: ${audioTrack.title}` });
+  const disabled = screen.getByRole('region', { name: 'Disabled rollout' });
+  expect(within(disabled).queryByRole('button', { name: /^Share / })).not.toBeInTheDocument();
+  expect(within(disabled).queryByRole('button', { name: /^Listen together:/ })).not.toBeInTheDocument();
+});
+
+test('social without rooms keeps Share but hides Listen together', async () => {
+  renderView(<MemoryRouter><ContentCard item={audioTrack} onPlay={vi.fn()} /><ul><ContentListRow item={audioTrack} /></ul></MemoryRouter>,
+    { wrapper: listenerCapabilitiesWrapper({ enabled: true, rooms: false }) });
+  expect(await screen.findAllByRole('button', { name: `Share ${audioTrack.title}` })).toHaveLength(2);
+  expect(screen.queryByRole('button', { name: /^Listen together:/ })).not.toBeInTheDocument();
+});
+
+test('a rollout change while open removes card social actions without reloading the page', async () => {
+  const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  renderView(<QueryClientProvider client={client}><MemoryRouter><ContentCard item={audioTrack} onPlay={vi.fn()} /></MemoryRouter></QueryClientProvider>);
+  await screen.findByRole('button', { name: `Share ${audioTrack.title}` });
+  await screen.findByRole('button', { name: `Listen together: ${audioTrack.title}` });
+  act(() => { seedListenerCapabilities(client, { enabled: true, rooms: false }); });
+  await waitFor(() => expect(screen.queryByRole('button', { name: /^Listen together:/ })).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: `Share ${audioTrack.title}` })).toBeVisible();
+  act(() => { seedListenerCapabilities(client, { enabled: false, rooms: false }); });
+  await waitFor(() => expect(screen.queryByRole('button', { name: /^Share / })).not.toBeInTheDocument());
+});
+
+test('enabling the rollout while open loads the deferred social actions', async () => {
+  const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }), { enabled: false, rooms: false });
+  renderView(<QueryClientProvider client={client}><MemoryRouter><ul><ContentListRow item={audioTrack} /></ul></MemoryRouter></QueryClientProvider>);
+  expect(screen.queryByRole('button', { name: /^Share / })).not.toBeInTheDocument();
+  act(() => { seedListenerCapabilities(client); });
+  expect(await screen.findByRole('button', { name: `Share ${audioTrack.title}` })).toBeVisible();
+  expect(await screen.findByRole('button', { name: `Listen together: ${audioTrack.title}` })).toBeVisible();
 });

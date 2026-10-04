@@ -28,6 +28,7 @@ const artifactEntries = [
   'localization',
   'web/package.json',
   'web/dist',
+  'engineering/dist',
   '.platform',
   '.ebextensions'
 ];
@@ -61,6 +62,7 @@ const expectedRootEntries = new Set([
   '.platform',
   artifactMarkerName,
   'RELEASE.json',
+  'engineering',
   'package-lock.json',
   'package.json',
   'localization',
@@ -72,12 +74,15 @@ const expectedRootEntries = new Set([
 const requiredPlatformHooks = [
   '.platform/confighooks/postdeploy/01_configure_https.sh',
   '.platform/hooks/prebuild/01_install_certbot.sh',
+  '.platform/hooks/prebuild/02_install_ffmpeg.sh',
   '.platform/hooks/postdeploy/01_configure_https.sh',
   '.platform/hooks/postdeploy/02_install_certbot_timer.sh'
 ];
 
 const requiredDeploymentFiles = [
   '.ebextensions/https-instance.config',
+  '.ebextensions/room-audio-decoder.config',
+  '.ebextensions/social-capacity.config',
   ...requiredPlatformHooks
 ];
 
@@ -316,6 +321,65 @@ const validateListenerDistribution = async (artifactRoot) => {
   }
 };
 
+/** Keeps the independent guide bound to the exact clean release, without shipping its sources. */
+const validateEngineeringDistribution = async artifactRoot => {
+  const distRoot = path.join(artifactRoot, 'engineering', 'dist');
+  const readBounded = async (relative, maximum) => {
+    const filename = path.join(distRoot, relative);
+    await requireRegularFile(filename, 'Engineering distribution file');
+    if ((await lstat(filename)).size > maximum) throw new Error('Engineering distribution file exceeds its size limit.');
+    return readFile(filename, 'utf8');
+  };
+  let manifest;
+  try { manifest = JSON.parse(await readBounded('manifest.json', 64 * 1024)); }
+  catch (error) { throw new Error(`Engineering manifest is invalid: ${error.message}`); }
+  const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+  if (!exactKeys(manifest, ['schemaVersion', 'revision', 'sourceDigest', 'pages', 'assets'])
+    || manifest.schemaVersion !== 1
+    || !exactKeys(manifest.revision, ['commit', 'dirty'])
+    || typeof manifest.revision.commit !== 'string' || !/^[0-9a-f]{40}$/.test(manifest.revision.commit)
+    || manifest.revision.dirty !== false
+    || typeof manifest.sourceDigest !== 'string' || !/^[0-9a-f]{64}$/.test(manifest.sourceDigest)
+    || !Array.isArray(manifest.pages) || manifest.pages.length < 1 || manifest.pages.length > 32
+    || JSON.stringify(manifest.assets) !== JSON.stringify(['guide.css', 'guide.js'])) {
+    throw new Error('Engineering manifest must describe a bounded, clean release build.');
+  }
+  const release = JSON.parse(await readFile(path.join(artifactRoot, 'RELEASE.json'), 'utf8'));
+  if (manifest.revision.commit !== release.commitSha) throw new Error('Engineering revision does not match RELEASE.json. Rebuild the guide from the release commit.');
+  const files = new Set(['manifest.json', ...manifest.assets]);
+  const directories = new Set();
+  let hasRoot = false;
+  for (const page of manifest.pages) {
+    if (!exactKeys(page, ['slug', 'title', 'description', 'file'])
+      || typeof page.slug !== 'string' || page.slug.length > 160
+      || !/^(?:[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*){0,3})?$/.test(page.slug)
+      || typeof page.title !== 'string' || !page.title.trim() || page.title.length > 160
+      || typeof page.description !== 'string' || !page.description.trim() || page.description.length > 500
+      || page.file !== (page.slug ? `${page.slug}/index.html` : 'index.html') || files.has(page.file)) {
+      throw new Error('Engineering manifest contains an invalid or duplicate page.');
+    }
+    if (!page.slug) hasRoot = true;
+    files.add(page.file);
+    if (page.slug) {
+      const components = page.slug.split('/');
+      for (let index = 1; index <= components.length; index++) directories.add(components.slice(0, index).join('/'));
+    }
+    const html = await readBounded(page.file, 512 * 1024);
+    for (const asset of manifest.assets) {
+      if (!html.includes(`/engineering/${asset}`)) throw new Error(`Engineering page does not reference its asset: ${asset}`);
+    }
+  }
+  if (!hasRoot) throw new Error('Engineering manifest requires a root page.');
+  for (const asset of manifest.assets) await readBounded(asset, 1024 * 1024);
+  for (const entry of await listTreeEntries(distRoot)) {
+    const relative = path.relative(distRoot, entry.path).split(path.sep).join('/');
+    if (!(entry.type === 'directory' ? directories : files).has(relative)) {
+      throw new Error(`Engineering distribution contains an unexpected ${entry.type}: ${relative}`);
+    }
+  }
+};
+
 const validateForbiddenPaths = async (artifactRoot) => {
   for (const { path: entryPath } of await listTreeEntries(artifactRoot)) {
     const relative = path.relative(artifactRoot, entryPath);
@@ -343,6 +407,11 @@ const validateExactLayout = async (artifactRoot) => {
     throw new Error(`Deployment artifact root does not match the explicit allowlist: ${[...rootEntries].sort().join(', ')}`);
   }
 
+  const engineeringEntries = await readdir(path.join(artifactRoot, 'engineering'));
+  if (engineeringEntries.length !== 1 || engineeringEntries[0] !== 'dist') {
+    throw new Error('Deployment artifact engineering directory must contain only dist.');
+  }
+
   const webEntries = (await readdir(path.join(artifactRoot, 'web'))).sort();
   if (webEntries.length !== 2 || webEntries[0] !== 'dist' || webEntries[1] !== 'package.json') {
     throw new Error(`Deployment artifact web directory is not allowlisted: ${webEntries.join(', ')}`);
@@ -368,6 +437,15 @@ const validateHookPermissions = async (artifactRoot) => {
       throw new Error(`Elastic Beanstalk platform hook is not executable: ${hook}`);
     }
   }
+};
+
+/** Rechecks a promoted artifact without rebuilding or rewriting its source identity. */
+export const validateElasticBeanstalkArtifact = async artifactRoot => {
+  await validateExactLayout(artifactRoot);
+  await validateForbiddenPaths(artifactRoot);
+  await validateListenerDistribution(artifactRoot);
+  await validateEngineeringDistribution(artifactRoot);
+  await validateHookPermissions(artifactRoot);
 };
 
 /** Stages and validates the exact root layout consumed by Elastic Beanstalk. */
@@ -406,10 +484,7 @@ export const stageElasticBeanstalkArtifact = async ({
       { encoding: 'utf8', mode: 0o644 }
     );
 
-    await validateExactLayout(temporaryDirectory);
-    await validateForbiddenPaths(temporaryDirectory);
-    await validateListenerDistribution(temporaryDirectory);
-    await validateHookPermissions(temporaryDirectory);
+    await validateElasticBeanstalkArtifact(temporaryDirectory);
 
     await rm(resolvedOutputDirectory, { recursive: true, force: true });
     await rename(temporaryDirectory, resolvedOutputDirectory);

@@ -21,12 +21,12 @@ import { AppShell } from './AppShell';
 import { appRoutes } from './router';
 import { shellLayoutStorageKey } from './shellLayoutPreferences';
 
-const renderRoute = (path: string) => {
+const renderRoute = (path: string, social?: { enabled: boolean; rooms: boolean }) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   });
   queryClient.setQueryData(browserSessionQueryKey, null);
-  queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true });
+  queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true, ...(social ? { social } : {}) });
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
   const view = render(
     <QueryClientProvider client={queryClient}>
@@ -206,6 +206,40 @@ test('announces an unknown nested address as not found', async () => {
 
   expect(await screen.findByText('Page not found page')).toBeInTheDocument();
   expect(document.title).toBe('Page not found · Finitude');
+});
+
+test('advertises Together only while the social rollout is enabled', async () => {
+  const { queryClient } = renderRoute('/', { enabled: false, rooms: false });
+  expect(await screen.findByRole('heading', { name: 'Made for your moment' })).toBeInTheDocument();
+  expect(screen.getAllByRole('link', { name: 'Library' })).toHaveLength(1);
+  expect(screen.queryByRole('link', { name: 'Together' })).not.toBeInTheDocument();
+  expect(document.querySelectorAll('a[href="/social"]')).toHaveLength(0);
+
+  act(() => { queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true, social: { enabled: true, rooms: false } }); });
+  // Both the wide and compact navigation offer the destination once rollout enables social.
+  await waitFor(() => expect(document.querySelectorAll('nav[aria-label="Primary"] a[href="/social"]')).toHaveLength(2));
+
+  act(() => { queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true, social: { enabled: false, rooms: false } }); });
+  await waitFor(() => expect(document.querySelectorAll('a[href="/social"]')).toHaveLength(0));
+});
+
+test('an older server without rollout state keeps social entry points hidden', async () => {
+  renderRoute('/');
+  expect(await screen.findByRole('heading', { name: 'Made for your moment' })).toBeInTheDocument();
+  expect(document.querySelectorAll('a[href="/social"]')).toHaveLength(0);
+});
+
+test('announces the Social route with its product title', async () => {
+  renderRoute('/social');
+  expect(await screen.findByText('Listen together page')).toBeInTheDocument();
+  expect(document.title).toBe('Listen together · Finitude');
+});
+
+test('announces the registration completion route by its own title', async () => {
+  renderRoute('/register/complete');
+  expect(await screen.findByText('Finish creating account page')).toBeInTheDocument();
+  expect(document.title).toBe('Finish creating account · Finitude');
+  expect(await screen.findByRole('heading', { level: 1, name: 'This link can’t be used' })).toBeInTheDocument();
 });
 
 test('logs in through the browser session endpoint and returns Home', async () => {

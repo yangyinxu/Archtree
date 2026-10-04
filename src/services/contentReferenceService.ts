@@ -6,6 +6,8 @@ import { readyArtistLifecycleFilter } from './artistReferenceFenceService';
 import { readyAlbumLifecycleFilter } from './albumReferenceFenceService';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { readyOrganizationLifecycleFilter } from './organizationReferenceFenceService';
+import { cleanupMusicSharesForContent } from '../application/social/socialShareLifecycle';
+import { cleanupListeningForContent } from '../application/social/listeningLifecycle';
 
 export type ContentReferenceType = 'artist' | 'album' | 'audioTrack';
 type ValidatedContentReferenceType = ContentReferenceType | 'organization';
@@ -23,8 +25,18 @@ export type ContentReferenceValidation = {
     message?: string;
 };
 
+/**
+ * Matches definitions whose items are curated references. Carousels created before the mode
+ * field existed are manual, and the listener and reconciliation report treat a missing or empty
+ * mode that way; cleanup must agree, or their references to deleted content would be reported
+ * forever but never removed. Grid/List definitions have always stored a mode, so matching a
+ * missing one there can only remove references to deleted content.
+ */
+const curatedDefinitionMode = { $in: ['manual', null, ''] };
+
+/** Removes one item type's matching references and renumbers the retained items contiguously. */
 const orderedManualItemCleanup = (
-    contentType: 'album' | 'audioTrack',
+    contentType: 'post' | 'album' | 'audioTrack',
     referenceIds: Array<string | ObjectId>
 ) => ([
     {
@@ -131,6 +143,22 @@ export const validateContentReferences = async (
     return { valid: true, ids };
 };
 
+/** Lists the stored spellings (canonical hex, uppercase hex, ObjectId, raw input) of one content ID. */
+const storedReferenceIds = (contentId: string) => {
+    const referenceIds: Array<string | ObjectId> = [];
+    try {
+        const objectId = ObjectId.createFromHexString(contentId);
+        const canonicalContentId = objectId.toHexString();
+        referenceIds.push(canonicalContentId, canonicalContentId.toUpperCase(), objectId);
+        if (contentId !== canonicalContentId) referenceIds.push(contentId);
+        return { canonicalContentId, referenceIds };
+    } catch {
+        // Legacy string references can still be removed when the ID is not canonical.
+        referenceIds.push(contentId);
+        return { canonicalContentId: contentId, referenceIds };
+    }
+};
+
 /** Idempotently detaches shared references before the final content record is deleted. */
 export const cleanupDeletedContentReferences = async (
     type: ContentReferenceType,
@@ -138,17 +166,7 @@ export const cleanupDeletedContentReferences = async (
 ) => {
     const db = getDb()!;
     const operations: Promise<unknown>[] = [];
-    let canonicalContentId = contentId;
-    const referenceIds: Array<string | ObjectId> = [];
-    try {
-        const objectId = ObjectId.createFromHexString(contentId);
-        canonicalContentId = objectId.toHexString();
-        referenceIds.push(canonicalContentId, canonicalContentId.toUpperCase(), objectId);
-        if (contentId !== canonicalContentId) referenceIds.push(contentId);
-    } catch {
-        // Legacy string references can still be removed when the ID is not canonical.
-        referenceIds.push(contentId);
-    }
+    const { canonicalContentId, referenceIds } = storedReferenceIds(contentId);
 
     if (type === 'artist') {
         const removeArtistCreditPipeline = [
@@ -217,6 +235,8 @@ export const cleanupDeletedContentReferences = async (
         );
     } else {
         const contentType = type;
+        if (contentType === 'audioTrack') operations.push(cleanupListeningForContent(canonicalContentId));
+        operations.push(cleanupMusicSharesForContent(contentType, canonicalContentId));
         const matchingItem = {
             contentType,
             contentId: { $in: referenceIds }
@@ -224,11 +244,11 @@ export const cleanupDeletedContentReferences = async (
         operations.push(
             UserLibrary.cleanupContent(contentType, canonicalContentId),
             db.collection('carousels').updateMany(
-                { mode: 'manual', items: { $elemMatch: matchingItem } },
+                { mode: curatedDefinitionMode, items: { $elemMatch: matchingItem } },
                 orderedManualItemCleanup(contentType, referenceIds) as any
             ),
             db.collection('contentCollections').updateMany(
-                { mode: 'manual', items: { $elemMatch: matchingItem } },
+                { mode: curatedDefinitionMode, items: { $elemMatch: matchingItem } },
                 orderedManualItemCleanup(contentType, referenceIds) as any
             )
         );
@@ -254,4 +274,21 @@ export const cleanupDeletedContentReferences = async (
         );
     }
     await Promise.all(operations);
+};
+
+/**
+ * Idempotently removes a Feed Post from every manual (including legacy mode-less) Carousel before
+ * the Post record is deleted.
+ * Posts are kept out of ContentReferenceType because only manual Carousels can reference them;
+ * they have no Library, share, listening, Grid/List, or reverse catalog references to clean.
+ */
+export const cleanupDeletedPostReferences = async (postId: string) => {
+    const { referenceIds } = storedReferenceIds(postId);
+    await getDb()!.collection('carousels').updateMany(
+        {
+            mode: curatedDefinitionMode,
+            items: { $elemMatch: { contentType: 'post', contentId: { $in: referenceIds } } }
+        },
+        orderedManualItemCleanup('post', referenceIds) as any
+    );
 };

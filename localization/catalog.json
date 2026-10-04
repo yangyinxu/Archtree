@@ -95,6 +95,13 @@
       ],
       "variables": {}
     },
+    "account.field.display_name": {
+      "description": "Required display-name field on the registration completion page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "account.field.email": {
       "description": "Account email field label.",
       "delivery": [
@@ -692,6 +699,108 @@
       ],
       "variables": {}
     },
+    "auth.email_link.description": {
+      "description": "Explains the verification confirmation step; the password is unchanged.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.invalid_copy": {
+      "description": "Shown when a verification link cannot be used; offers a new link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.request_description": {
+      "description": "Explains the non-enumerating verification-link request form.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.request_title": {
+      "description": "Heading of the verification-link request form.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.send": {
+      "description": "Button that requests a verification link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.sending": {
+      "description": "Pending label while a verification link is requested.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.sent": {
+      "description": "Non-enumerating status after a verification-link request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email_link.title": {
+      "description": "Heading on the page opened from a verification link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email.domain_undeliverable": {
+      "description": "Inline email-field error on the Web sign-up, verification-link and password-recovery forms when the server rejects the address because its domain cannot receive email, for example a mistyped or nonexistent domain. Never implies whether an account exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.email.sent_to": {
+      "description": "Status line after a Web sign-up, verification-link or password-recovery request is accepted, showing the exact address the request used so the listener can spot a typo. {email} is the submitted email address, shown verbatim. Shown the same way for every address, so it never reveals whether an account exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "email": "string"
+      }
+    },
+    "auth.email.suggestion": {
+      "description": "Clickable suggestion below an email field when the typed domain looks like a misspelling of a popular email provider. {email} is the full corrected email address; selecting it replaces the typed address.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "email": "string"
+      }
+    },
+    "auth.email.use_different": {
+      "description": "Action shown after an accepted Web sign-up, verification-link or password-recovery request that clears the form so the listener can enter a different email address.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.link.checking": {
+      "description": "Status while an emailed link is checked.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.link.invalid_title": {
+      "description": "Heading when an emailed link cannot be used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "auth.login.already_listening": {
       "description": "Heading when a signed-in listener opens Log in.",
       "delivery": [
@@ -764,8 +873,57 @@
       ],
       "variables": {}
     },
+    "auth.login.verification_link_prompt": {
+      "description": "Web Log in link to request a new verification link after verification is required.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.login.verification_required": {
+      "description": "Web Log in error when the account must verify its email first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "auth.login.verify_prompt": {
       "description": "Link shown when login requires email verification.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.create_account_web": {
+      "description": "Native button that opens Finitude Web sign-up in the browser.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.create_account_web_hint": {
+      "description": "Native hint below the Web sign-up button.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.email_domain_undeliverable": {
+      "description": "Native password-recovery error when the server rejects the address because its domain cannot receive email, for example a mistyped or nonexistent domain. Never implies whether an account exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.verification_required": {
+      "description": "Native sign-in error when the account must verify its email first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.web_signup_unavailable": {
+      "description": "Native error when the Web sign-up page cannot be opened.",
       "delivery": [
         "runtime"
       ],
@@ -827,6 +985,90 @@
       ],
       "variables": {}
     },
+    "auth.register_complete.action": {
+      "description": "Button that creates the account from a registration link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.description": {
+      "description": "Registration completion page description.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.exists_copy": {
+      "description": "Shown when the link’s address already has an account.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.exists_title": {
+      "description": "Heading when the link’s address already has an account.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.eyebrow": {
+      "description": "Eyebrow on the page opened from a registration link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.form_title": {
+      "description": "Form heading on the registration completion page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.invalid_copy": {
+      "description": "Shown when a registration link cannot be used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.name_rejected": {
+      "description": "Error when the display name is rejected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.password_rejected": {
+      "description": "Error when the server rejects the chosen password.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.request_new": {
+      "description": "Link back to the registration request page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.success": {
+      "description": "Log in notice after registration completes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register_complete.title": {
+      "description": "Heading on the registration completion page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "auth.register.accepted": {
       "description": "Non-enumerating registration acceptance status.",
       "delivery": [
@@ -878,6 +1120,34 @@
     },
     "auth.register.form_title": {
       "description": "Registration form title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.link_description": {
+      "description": "Registration request page description for email-link sign-up.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.link_sent": {
+      "description": "Non-enumerating status after a registration link request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.send_link": {
+      "description": "Button that requests a registration link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.register.sending_link": {
+      "description": "Pending label while a registration link is requested.",
       "delivery": [
         "runtime"
       ],
@@ -2300,6 +2570,306 @@
       ],
       "variables": {}
     },
+    "listening.claim": {
+      "description": "Friend listening status: Share from this device",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.confirm": {
+      "description": "Friend listening status: Create paused room and invite",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.confirm_copy": {
+      "description": "Friend listening status: Create a paused room with {title}, then invite {alias}. Playback starts only when you choose.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string",
+        "title": "string"
+      }
+    },
+    "listening.confirm_title": {
+      "description": "Friend listening status: Listen together with {alias}?",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "listening.create_invite": {
+      "description": "Friend listening status: Create a room and invite",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.created": {
+      "description": "Friend listening status: The room is ready. Send the invitation to finish.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.disable": {
+      "description": "Friend listening status: Turn off listening sharing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.empty": {
+      "description": "Friend listening status: No friends are sharing fresh listening right now.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.enable": {
+      "description": "Friend listening status: Enable listening sharing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.existing_room": {
+      "description": "Friend listening status: Open Together to manage your current room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.hint": {
+      "description": "Friend listening status: Friends can see your current Audio while it is actually playing. Sharing is off by default.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.idle": {
+      "description": "Friend listening status: Nothing is being shared from this device.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.invite": {
+      "description": "Friend listening status: Invite to my room",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.lost": {
+      "description": "Friend listening status: Sharing stopped. Choose this device to share again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.now": {
+      "description": "Friend listening status: {alias} is listening",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "listening.other_device": {
+      "description": "Friend listening status: Choose this device to share what you listen to here.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.owned": {
+      "description": "Friend listening status: This device can share actual playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.refresh": {
+      "description": "Friend listening status: Refresh listening status",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.sharing": {
+      "description": "Friend listening status: Share what I’m listening to",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "listening.title": {
+      "description": "Friend listening status: Listening with friends",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.choose_friend": {
+      "description": "Friend music sharing: Choose a friend",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.description": {
+      "description": "Friend music sharing: Music from friends, ready whenever you are. Nothing plays or saves until you choose.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.dismiss": {
+      "description": "Friend music sharing: Dismiss share",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.empty_received": {
+      "description": "Friend music sharing: No received music shares.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.empty_sent": {
+      "description": "Friend music sharing: No sent music shares.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.from": {
+      "description": "Friend music sharing: From {alias}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "music_shares.invite_back": {
+      "description": "Friend music sharing: Invite to my room",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.limit": {
+      "description": "Music share capacity or daily admission limit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.no_friends": {
+      "description": "Friend music sharing: Add a friend in Together to share music.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.open_together": {
+      "description": "Friend music sharing: Open Together",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.received": {
+      "description": "Friend music sharing: Received",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.room_playback": {
+      "description": "Friend music sharing: Leave your current room in Together before playing this music on your own.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.send": {
+      "description": "Friend music sharing: Send share",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.sent": {
+      "description": "Friend music sharing: Sent",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.share": {
+      "description": "Friend music sharing: Share with a friend",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.share_title": {
+      "description": "Friend music sharing: Share {title}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "music_shares.sign_in": {
+      "description": "Friend music sharing: Log in to view and share music with friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.title": {
+      "description": "Friend music sharing: Music shares",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.to": {
+      "description": "Friend music sharing: To {alias}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "music_shares.unavailable": {
+      "description": "Friend music sharing: This music is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "music_shares.withdraw": {
+      "description": "Friend music sharing: Withdraw share",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "now_playing.current_label": {
       "description": "Accessible label for the current MediaTrack detail region.",
       "delivery": [
@@ -3067,6 +3637,40 @@
         "name": "string"
       }
     },
+    "playlist.create.abandon": {
+      "description": "Action explicitly discarding recovery of an unconfirmed Playlist creation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "playlist.create.abandon_confirm": {
+      "description": "Confirmation explaining that abandoning recovery does not undo a possibly committed Playlist creation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.create.expired": {
+      "description": "An uncertain Playlist creation can no longer be retried safely after its server receipt retention window.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "playlist.create.recovery": {
+      "description": "Preserved unknown Playlist creation guidance across dialog and route changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
     "playlist.delete.deleting": {
       "description": "Status while a Playlist deletion is confirmed.",
       "delivery": [
@@ -3742,6 +4346,1122 @@
         "name": "string"
       }
     },
+    "room_track.action": {
+      "description": "Listen together",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.create_hint": {
+      "description": "Choose a friend. This creates a paused room for this song, then sends an invitation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.invited": {
+      "description": "Invitation sent. Open Together when you are ready to start listening.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.no_friends": {
+      "description": "Add a friend in Together to invite them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.opt_in": {
+      "description": "Set up your social profile in Together to listen with friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.request_hint": {
+      "description": "Recommend this song to your room. The host decides whether to add it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.room_changed": {
+      "description": "Your room changed. Review the current room before trying again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.sign_in": {
+      "description": "Sign in to request this song or invite a friend to listen together.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.title": {
+      "description": "Listen together: {title}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room_track.unsupported": {
+      "description": "This song is not available for shared rooms yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room_track.waiting": {
+      "description": "Requested. Waiting for the host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.accept_transfer": {
+      "description": "Shared listening interface: accept transfer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_auto_next": {
+      "description": "Room interactions: The room advanced to the next song.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_empty": {
+      "description": "Room interactions: No recent room activity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_hint": {
+      "description": "Room interactions: Reactions and recent actions disappear after 30 seconds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_host_changed": {
+      "description": "Room interactions: {alias} became the host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.activity_joined": {
+      "description": "Room interactions: {alias} joined the room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.activity_mode_changed": {
+      "description": "Room interactions: {alias} changed playback control.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.activity_reaction": {
+      "description": "Room interactions: {alias} reacted {emoji}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string",
+        "emoji": "string"
+      }
+    },
+    "room.activity_title": {
+      "description": "Room interactions: Room activity",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.activity_track_changed": {
+      "description": "Room interactions: {alias} changed the song.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.cancel_transfer": {
+      "description": "Shared listening interface: cancel transfer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.capacity": {
+      "description": "Room capacity: Rooms are at capacity right now. Try again in a few minutes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.choose_music": {
+      "description": "Shared listening interface: choose music.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.close": {
+      "description": "Shared listening interface: close.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.connected": {
+      "description": "Shared listening interface: connected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.connecting": {
+      "description": "Shared listening interface: connecting.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.create": {
+      "description": "Shared listening interface: create.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.disconnected": {
+      "description": "Shared listening interface: disconnected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.empty": {
+      "description": "Shared listening interface: empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.end": {
+      "description": "Shared listening interface: end.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.end_confirm": {
+      "description": "Shared listening interface: end confirm.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.ended": {
+      "description": "Shared listening interface: ended.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_attention": {
+      "description": "Room action needs attention",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_local_pause": {
+      "description": "Room paused on this device",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_observing": {
+      "description": "Observing room",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_open": {
+      "description": "Open room: {status}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "status": "string"
+      }
+    },
+    "room.entry_paused": {
+      "description": "Room paused",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_playing": {
+      "description": "Room playing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_preparing": {
+      "description": "Room preparing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_reconnecting": {
+      "description": "Room reconnecting",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.entry_suspended": {
+      "description": "Room suspended",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.everyone": {
+      "description": "Shared listening interface: everyone.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.existing_room": {
+      "description": "Shared listening interface: refused creation or join because the account is already in a room, possibly on another device.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.forbidden": {
+      "description": "Shared listening interface: refused action that the listener’s current room role or control mode does not allow.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.full": {
+      "description": "Room capacity: This room is full.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.guest": {
+      "description": "Shared listening interface: guest.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.host": {
+      "description": "Shared listening interface: host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.host_absence": {
+      "description": "Shared listening interface: countdown until a disconnected host suspends shared playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.host_absence_self": {
+      "description": "Shared listening interface: countdown shown to the host while their playing device is disconnected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.host_closing": {
+      "description": "Shared listening interface: countdown until a suspended room ends because its host is still absent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.host_closing_self": {
+      "description": "Shared listening interface: countdown shown to the host until their suspended room ends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.host_exit_required": {
+      "description": "Shared listening interface: refused leave or self-removal by the host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.host_only": {
+      "description": "Shared listening interface: host only.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.incoming_invite": {
+      "description": "Shared listening interface: incoming invite.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.invitation_continue": {
+      "description": "Room invitation interface: invitation continue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_copied": {
+      "description": "Room invitation interface: invitation copied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_copy": {
+      "description": "Room invitation interface: invitation copy.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_copy_manual": {
+      "description": "Room invitation interface: invitation copy manual.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_existing_room": {
+      "description": "Room invitation interface: invitation existing room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_expires": {
+      "description": "Room invitation interface: invitation expires.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "time": "string"
+      }
+    },
+    "room.invitation_limit": {
+      "description": "Shared listening interface: refused invitation because the host already has 20 pending invitations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_link": {
+      "description": "Room invitation interface: invitation link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_pending": {
+      "description": "Room invitation interface: invitation pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_profile_needed": {
+      "description": "Room invitation interface: invitation profile needed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_recipient_only": {
+      "description": "Room invitation interface: invitation recipient only.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.invitation_replace": {
+      "description": "Shared listening interface: host action that sends a pending invitation again so its earlier link stops working.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_replace_confirm_copy": {
+      "description": "Shared listening interface: confirmation explaining that replacing an invitation invalidates its earlier link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.invitation_replace_confirm_title": {
+      "description": "Shared listening interface: confirmation title before replacing a pending room invitation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.invitation_sign_in": {
+      "description": "Room invitation interface: invitation sign in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_unavailable": {
+      "description": "Room invitation interface: invitation unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitations": {
+      "description": "Shared listening interface: invitations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitations_disabled": {
+      "description": "Room invitation interface: invitations disabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitations_empty": {
+      "description": "Room invitation interface: invitations empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitations_pending": {
+      "description": "Room invitation interface: invitations pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invite": {
+      "description": "Shared listening interface: invite.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invite_friends": {
+      "description": "Shared listening interface: invite friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.join": {
+      "description": "Shared listening interface: join.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.kick": {
+      "description": "Shared listening interface: kick.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.kick_confirm_copy": {
+      "description": "Shared listening interface: confirmation explaining what removing a room member does.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.kick_confirm_title": {
+      "description": "Shared listening interface: confirmation title before the host removes a member from the room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.leave": {
+      "description": "Shared listening interface: leave.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.local_pause": {
+      "description": "Shared listening interface: local pause.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.locally_paused": {
+      "description": "Shared listening interface: locally paused.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_eligibility": {
+      "description": "Rooms support verified WAV, MP3 and AAC-LC M4A audio. Other songs remain available for personal listening.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_no_results": {
+      "description": "No room-ready songs matched “{query}”.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
+    },
+    "room.media_pending": {
+      "description": "Already requested",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_remove": {
+      "description": "Remove {title} from selection",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room.media_results": {
+      "description": "Room-ready songs",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_search_label": {
+      "description": "Search room-ready songs",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_selected": {
+      "description": "Selected songs ({count})",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "room.media_selection_limit": {
+      "description": "You can choose up to 100 songs for a room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.media_unavailable": {
+      "description": "Shared listening interface: refused action because a chosen song is no longer eligible for rooms.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.member_disconnected": {
+      "description": "Shared listening interface: member list status for a member who is not currently connected to the room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.members": {
+      "description": "Shared listening interface: members.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.no_longer_available": {
+      "description": "Shared listening interface: refused action because the room ended or the listener is no longer in it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.no_media": {
+      "description": "Shared listening interface: no media.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.not_ready": {
+      "description": "Shared listening interface: not ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.observing": {
+      "description": "Shared listening interface: observing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.permissions": {
+      "description": "Shared listening interface: permissions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.position": {
+      "description": "Shared listening interface: position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "duration": "string",
+        "elapsed": "string"
+      }
+    },
+    "room.preparing": {
+      "description": "Shared listening interface: preparing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue": {
+      "description": "Shared listening interface: queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_current": {
+      "description": "Shared listening interface: label marking the room queue entry that is currently playing or prepared.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_current_hint": {
+      "description": "To remove the current song, select another song first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_full": {
+      "description": "The room queue is full.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_last_entry": {
+      "description": "Shared listening interface: refused removal of the last song in the room queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.queue_move_down": {
+      "description": "Move {title} later",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room.queue_move_up": {
+      "description": "Move {title} earlier",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room.queue_remove": {
+      "description": "Remove {title} from queue",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "room.react_clap": {
+      "description": "Room interactions: Send applause",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.react_fire": {
+      "description": "Room interactions: Send fire",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.react_heart": {
+      "description": "Room interactions: Send heart",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.react_music": {
+      "description": "Room interactions: Send music",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.react_smile": {
+      "description": "Room interactions: Send smile",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.reaction_limit": {
+      "description": "Room interactions: Please wait before sending another reaction.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.ready": {
+      "description": "Shared listening interface: ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.realtime_busy": {
+      "description": "Room capacity: Live room updates are busy; the connection retries automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.reconnect": {
+      "description": "Shared listening interface: reconnect.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_accept": {
+      "description": "Add to queue",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_capacity": {
+      "description": "Shared listening interface: refused song request because the per-person or room-wide pending request limit was reached.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_dismiss": {
+      "description": "Dismiss",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_limit": {
+      "description": "You can have up to five pending song requests.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_room_limit": {
+      "description": "Explains the shared room song request limit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_song": {
+      "description": "Request song",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_track": {
+      "description": "Choose a song",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_unavailable": {
+      "description": "Shared listening interface: refused acceptance of a song request that was withdrawn or whose requester left.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.request_withdraw": {
+      "description": "Withdraw request",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.requested_by": {
+      "description": "Requested by {alias}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.requests_empty": {
+      "description": "No pending song requests.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.requests_hint": {
+      "description": "Anyone in the room can request a song. The host adds requests to the queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.requests_title": {
+      "description": "Song requests",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.resume_and_play": {
+      "description": "Shared listening interface: resume and play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.resync": {
+      "description": "Shared listening interface: resync.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.seek": {
+      "description": "Shared listening interface: seek.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.seek_value": {
+      "description": "Shared listening interface: spoken value of the room playback position slider, as elapsed and total time.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "duration": "string",
+        "elapsed": "string"
+      }
+    },
+    "room.selected": {
+      "description": "Shared listening interface: selected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.shared_pause": {
+      "description": "Shared listening interface: shared pause.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.shared_play": {
+      "description": "Shared listening interface: shared play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.start_failed": {
+      "description": "Shared listening interface: start failed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.suspended": {
+      "description": "Shared listening interface: suspended.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.suspended_self": {
+      "description": "Shared listening interface: suspended room shown to its returned host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.take_control": {
+      "description": "Shared listening interface: take control.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.title": {
+      "description": "Shared listening interface: title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.transfer": {
+      "description": "Shared listening interface: transfer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.transfer_expires": {
+      "description": "Shared listening interface: remaining time of a host transfer offer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.transfer_offered": {
+      "description": "Shared listening interface: host transfer offer shown to its recipient.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.transfer_pending": {
+      "description": "Shared listening interface: transfer pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.transfer_unavailable": {
+      "description": "Shared listening interface: refused host transfer that expired or whose participant disconnected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.unavailable": {
+      "description": "Shared listening interface: rooms are switched off by the server rollout; replaces the connection status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.waiting_for_host": {
+      "description": "Shared listening interface: waiting for host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "route.announcement.page": {
       "description": "Live-region announcement after a client-side route change.",
       "delivery": [
@@ -3816,6 +5536,13 @@
     },
     "route.title.create_account": {
       "description": "Document title for account registration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "route.title.finish_account": {
+      "description": "Route title announced for the registration completion page.",
       "delivery": [
         "runtime"
       ],
@@ -4221,6 +5948,555 @@
     },
     "shell.skip_to_main": {
       "description": "Keyboard skip-link label for moving to routed content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.accept": {
+      "description": "Social listener interface: accept.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.alias": {
+      "description": "Social listener interface: alias.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.alias_characters": {
+      "description": "Social listener interface: validation message when the display name contains invisible control or formatting characters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.alias_hint": {
+      "description": "Social listener interface: display name field hint stating its length limit and who sees it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.alias_length": {
+      "description": "Social listener interface: validation message when the display name is empty after trimming or longer than 50 characters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.alias_reserved": {
+      "description": "Social listener interface: the chosen display name impersonates Finitude or its staff.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.block": {
+      "description": "Social listener interface: block.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.block_confirm_copy": {
+      "description": "Social listener interface: confirmation explaining what blocking changes for both people.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "social.block_confirm_title": {
+      "description": "Social listener interface: confirmation title before blocking a social identity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "social.block_limit": {
+      "description": "Social interface: refused block because the block or relationship limit was reached.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.blocked_profile": {
+      "description": "Social listener interface: blocked profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.blocks": {
+      "description": "Social listener interface: blocks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.cancel_request": {
+      "description": "Social listener interface: cancel request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.check_outcome": {
+      "description": "Social listener interface: check outcome.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.create_profile": {
+      "description": "Social listener interface: create profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.deactivate": {
+      "description": "Social listener interface: deactivate.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.deactivate_confirm": {
+      "description": "Social listener interface: deactivation confirmation body stating what deactivating removes and keeps.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.deactivate_confirm_title": {
+      "description": "Social listener interface: title of the confirmation shown before deactivating the social profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.decline": {
+      "description": "Social listener interface: decline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.description": {
+      "description": "Social listener interface: description.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.discoverable": {
+      "description": "Social listener interface: discoverable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.empty": {
+      "description": "Social listener interface: empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.error": {
+      "description": "Social listener interface: error.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.find": {
+      "description": "Social listener interface: find.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.find_hint": {
+      "description": "Social listener interface: find hint.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.friend_limit": {
+      "description": "Social interface: refused acceptance because one of the two accounts has 500 friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.friends": {
+      "description": "Social listener interface: friends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle": {
+      "description": "Social listener interface: handle.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle_format": {
+      "description": "Social listener interface: handle format hint (length, allowed characters, first character) shown while choosing or looking up a handle.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle_locked": {
+      "description": "Social interface: refused profile save that would change the handle chosen earlier, which never changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle_reserved": {
+      "description": "Social listener interface: the chosen handle is reserved for Finitude, staff or system use.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.handle_unavailable": {
+      "description": "Social interface: refused profile setup because the handle is taken or reserved by another account.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.identity": {
+      "description": "Social listener interface: identity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.identity_hint": {
+      "description": "Social listener interface: identity hint.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.inactive": {
+      "description": "Social listener interface: inactive.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.incoming": {
+      "description": "Social listener interface: incoming.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.loading": {
+      "description": "Social listener interface: loading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.lookup": {
+      "description": "Social listener interface: lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.nav": {
+      "description": "Social listener interface: nav.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.not_found": {
+      "description": "Social listener interface: not found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.outgoing": {
+      "description": "Social listener interface: outgoing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.profile_unavailable": {
+      "description": "Social and room interface: the other profile is missing, hidden or deactivated; never reveals a block.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.rate_limited": {
+      "description": "Social and room interface: the account sent too many social or room actions in a short time.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.reactivate": {
+      "description": "Social listener interface: reactivate.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.refresh": {
+      "description": "Social listener interface: refresh.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.relationship_error": {
+      "description": "Social listener interface: alert when the relationship with a profile found by handle could not be read, so no action can be offered.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.remove": {
+      "description": "Social listener interface: remove.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.remove_confirm_copy": {
+      "description": "Social listener interface: confirmation explaining what removing a friend changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "social.remove_confirm_title": {
+      "description": "Social listener interface: confirmation title before removing a friend.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "social.report": {
+      "description": "Social listener interface: open the dialog to report another listener.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_hint": {
+      "description": "Social listener interface: explains who sees a report and that the reported listener is not told.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_limit": {
+      "description": "Social listener interface: the listener has sent the most reports allowed today.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_note": {
+      "description": "Social listener interface: label for optional extra details in a report.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason": {
+      "description": "Social listener interface: label for the list of report reasons.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_harassment": {
+      "description": "Social listener interface: report reason, harassment or bullying.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_impersonation": {
+      "description": "Social listener interface: report reason, the listener pretends to be someone else.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_inappropriate": {
+      "description": "Social listener interface: report reason, an offensive name or content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_other": {
+      "description": "Social listener interface: report reason, something not listed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_reason_spam": {
+      "description": "Social listener interface: report reason, spam or unwanted friend requests.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_send": {
+      "description": "Social listener interface: button that sends a report.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_sent": {
+      "description": "Social listener interface: confirmation after a report is sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.report_title": {
+      "description": "Social listener interface: title of the dialog for reporting another listener.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.request": {
+      "description": "Social listener interface: request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.request_incoming": {
+      "description": "Social interface: refused friend request because that person already sent the listener a request.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.request_limit": {
+      "description": "Social interface: refused friend request because a pending-request or daily incoming-request limit was reached.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.retry_same": {
+      "description": "Social listener interface: retry same.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.save_profile": {
+      "description": "Social listener interface: save profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.sign_in": {
+      "description": "Social listener interface: sign in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.signed_in": {
+      "description": "Social listener interface: signed in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "social.stale": {
+      "description": "Social listener interface: stale.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.suspended": {
+      "description": "Social listener interface: the listener's social profile has been suspended by an administrator.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.suspended_action": {
+      "description": "Social listener interface: an action was refused because the listener's social profile is suspended.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.title": {
+      "description": "Social listener interface: title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.unavailable": {
+      "description": "Social interface: new social participation is switched off by the server rollout; safety actions still work.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.unblock": {
+      "description": "Social listener interface: unblock.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.unknown": {
+      "description": "Social listener interface: unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "social.updated": {
+      "description": "Social listener interface: updated.",
       "delivery": [
         "runtime"
       ],

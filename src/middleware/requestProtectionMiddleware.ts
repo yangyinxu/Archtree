@@ -1,28 +1,70 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express';
 import crypto from 'crypto';
 import { onRequestWorkComplete, runRequestWork } from '../services/serverLifecycleService';
+import type { AuthenticatedRequest } from './authMiddleware';
 
 type WindowEntry = {
     count: number;
     resetsAt: number;
 };
 
+/**
+ * Every rate window and concurrency slot below lives in this process's memory
+ * on purpose: production runs one Node process on one Elastic Beanstalk
+ * instance, so these are complete budgets there without a shared store. A
+ * second process or instance would grant every IP and account its own extra
+ * budget; shared limits must be designed before scaling out (see the
+ * single-process capacity contract in docs/architecture.md). A restart clears
+ * them, which only ever loosens a limit for the current window.
+ */
 const windows = new Map<string, WindowEntry>();
 let lastSweep = 0;
+const rejectionsByScope = new Map<string, number>();
+const maximumRejectionScopes = 64;
+
+/**
+ * Counts one HTTP 429 per limiter scope for the periodic operations summary. Scopes are code constants;
+ * the key bound only guards against a future caller passing a variable value.
+ */
+const recordLimiterRejection = (scope: string) => {
+    if (!rejectionsByScope.has(scope) && rejectionsByScope.size >= maximumRejectionScopes) return;
+    rejectionsByScope.set(scope, Math.min(Number.MAX_SAFE_INTEGER, (rejectionsByScope.get(scope) ?? 0) + 1));
+};
+
+/** Returns the 429 counts per limiter scope since the previous call and starts a new interval. */
+export const takeLimiterRejections = (): Record<string, number> => {
+    const taken = Object.fromEntries([...rejectionsByScope].sort(([left], [right]) => left.localeCompare(right)));
+    rejectionsByScope.clear();
+    return taken;
+};
 
 /** Resets process-local rate windows so sequential integration cases remain isolated. */
 export const resetRateLimitWindowsForTests = () => {
     windows.clear();
     lastSweep = 0;
+    rejectionsByScope.clear();
 };
 
 const clientKey = (req: Request) => req.ip || req.socket.remoteAddress || 'unknown';
 
+/**
+ * Keys a window by the account that database-backed authentication already
+ * resolved, so listeners sharing one NAT or proxy address keep separate
+ * budgets. Requests without a verified account fall back to the client IP.
+ * The prefixes keep an address bucket from ever matching an account bucket.
+ */
+export const accountOrClientKey = (req: Request) => {
+    const userId = (req as AuthenticatedRequest).auth?.userId;
+    return userId ? `account:${userId}` : `ip:${clientKey(req)}`;
+};
+
+/** Counts requests per scope in a fixed window keyed by client IP unless `keyFor` says otherwise. */
 export const rateLimit = (
     scope: string,
     maximumRequests: number,
     windowMs: number,
-    onRejected?: (req: Request, res: Response, retryAfterSeconds: number) => unknown
+    onRejected?: (req: Request, res: Response, retryAfterSeconds: number) => unknown,
+    keyFor: (req: Request) => string = clientKey
 ): RequestHandler => {
     return (req, res, next) => {
         const now = Date.now();
@@ -33,7 +75,7 @@ export const rateLimit = (
             }
         }
 
-        const key = `${scope}:${clientKey(req)}`;
+        const key = `${scope}:${keyFor(req)}`;
         const current = windows.get(key);
         const entry = !current || current.resetsAt <= now
             ? { count: 0, resetsAt: now + windowMs }
@@ -46,12 +88,40 @@ export const rateLimit = (
         res.setHeader('RateLimit-Reset', Math.ceil(entry.resetsAt / 1000));
         if (entry.count > maximumRequests) {
             const retryAfterSeconds = Math.max(1, Math.ceil((entry.resetsAt - now) / 1000));
+            recordLimiterRejection(scope);
             res.setHeader('Retry-After', retryAfterSeconds);
             if (onRejected) return onRejected(req, res, retryAfterSeconds);
             return res.status(429).json({ message: 'Too many requests. Please try again later.' });
         }
         return next();
     };
+};
+
+/** Counts one attempt in a window keyed by a digest, never the raw identifier or credential. */
+const consumeDigestKeyedAttempt = (
+    scope: string,
+    identifier: string,
+    maximumRequests: number,
+    windowMs: number,
+    res: Response,
+    next: NextFunction
+) => {
+    const digest = crypto.createHash('sha256').update(identifier, 'utf8').digest('hex');
+    const now = Date.now();
+    const key = `${scope}:${digest}`;
+    const current = windows.get(key);
+    const entry = !current || current.resetsAt <= now
+        ? { count: 0, resetsAt: now + windowMs }
+        : current;
+    entry.count += 1;
+    windows.set(key, entry);
+
+    if (entry.count > maximumRequests) {
+        recordLimiterRejection(scope);
+        res.setHeader('Retry-After', Math.max(1, Math.ceil((entry.resetsAt - now) / 1000)));
+        return res.status(429).json({ message: 'Too many requests. Please try again later.' });
+    }
+    return next();
 };
 
 /** Limits credential attempts across IPs without retaining the raw identifier. */
@@ -67,23 +137,79 @@ const accountRateLimit = (
         if (!identifier) {
             return next();
         }
-
-        const digest = crypto.createHash('sha256').update(identifier, 'utf8').digest('hex');
-        const now = Date.now();
-        const key = `${scope}:${digest}`;
-        const current = windows.get(key);
-        const entry = !current || current.resetsAt <= now
-            ? { count: 0, resetsAt: now + windowMs }
-            : current;
-        entry.count += 1;
-        windows.set(key, entry);
-
-        if (entry.count > maximumRequests) {
-            res.setHeader('Retry-After', Math.max(1, Math.ceil((entry.resetsAt - now) / 1000)));
-            return res.status(429).json({ message: 'Too many requests. Please try again later.' });
-        }
-        return next();
+        return consumeDigestKeyedAttempt(scope, identifier, maximumRequests, windowMs, res, next);
     };
+};
+
+/**
+ * Limits email-code attempts per account across IPs. It keys only on the
+ * `email` field, normalized exactly as the email-auth controllers normalize it
+ * before the account lookup, and ignores `identifier` and `username`.
+ *
+ * Mount it after the route's express-validator chain. That chain rewrites
+ * `req.body.email` with normalizeEmail(), which folds dots, +tags and
+ * googlemail.com into one address. Counting the raw body instead would give
+ * each extra field or address variant a fresh bucket for the same account.
+ */
+const emailAccountRateLimit = (
+    scope: string,
+    maximumRequests: number,
+    windowMs: number
+): RequestHandler => {
+    return (req, res, next) => {
+        const email = String(req.body?.email ?? '').trim().toLowerCase();
+        if (!email) {
+            // No account can be resolved; the controller rejects the request as invalid.
+            return next();
+        }
+        return consumeDigestKeyedAttempt(scope, email, maximumRequests, windowMs, res, next);
+    };
+};
+
+/**
+ * Limits refresh attempts per presented refresh token, so listeners behind one
+ * shared address (carrier NAT, offices) do not spend each other's budget and a
+ * replayed token cannot be retried without bound. The token is keyed only by
+ * digest. A request without a usable token falls back to its client address.
+ */
+const refreshCredentialLimit = (
+    scope: string,
+    maximumRequests: number,
+    windowMs: number
+): RequestHandler => {
+    return (req, res, next) => {
+        const token = req.body?.refreshToken;
+        const credential = typeof token === 'string' && token.length > 0 && token.length <= 512
+            ? `token:${token}`
+            : `client:${clientKey(req)}`;
+        return consumeDigestKeyedAttempt(scope, credential, maximumRequests, windowMs, res, next);
+    };
+};
+
+/** Registration links, already-registered notices and verification links per address and window. */
+export const linkEmailBudgetPerWindow = 3;
+const linkEmailBudgetWindowMs = 15 * 60_000;
+
+/**
+ * Spends one unit of the per-address budget shared by every link email
+ * (registration links, already-registered notices and verification links).
+ * Resolves false when the address has no budget left; callers then send
+ * nothing, while their response stays the same. Keyed by a digest of the
+ * normalized address, process-local like the other limiters (production is a
+ * single instance), and cleared by `resetRateLimitWindowsForTests`.
+ */
+export const consumeLinkEmailBudget = (email: string) => {
+    const digest = crypto.createHash('sha256').update(String(email ?? '').trim().toLowerCase(), 'utf8').digest('hex');
+    const now = Date.now();
+    const key = `auth-link-email:${digest}`;
+    const current = windows.get(key);
+    const entry = !current || current.resetsAt <= now
+        ? { count: 0, resetsAt: now + linkEmailBudgetWindowMs }
+        : current;
+    if (entry.count >= linkEmailBudgetPerWindow) return false;
+    entry.count += 1;
+    windows.set(key, entry);
+    return true;
 };
 
 /** Rejects production credentials sent without TLS after trusted-proxy resolution. */
@@ -94,19 +220,30 @@ export const requireSecureAuthTransport: RequestHandler = (req, res, next) => {
     return next();
 };
 
+// Process-local like the rate windows above; see the note on `windows`.
 const activeByScopeAndClient = new Map<string, number>();
 const activeByScope = new Map<string, number>();
 
+/**
+ * Bounds simultaneous requests per scope for each client and for the whole
+ * process. The per-client slots are keyed by client IP unless `keyFor` says
+ * otherwise; account-keyed callers must mount this after authentication, or
+ * every request falls back to its address. The process-wide ceiling is shared
+ * by every key. A slot is released only after the response and its tracked
+ * work both complete, including disconnects.
+ */
 export const limitConcurrency = (
     scope: string,
     perClientLimit: number,
-    globalLimit: number
+    globalLimit: number,
+    keyFor: (req: Request) => string = clientKey
 ): RequestHandler => {
     return (req, res, next) => {
-        const scopedClient = `${scope}:${clientKey(req)}`;
+        const scopedClient = `${scope}:${keyFor(req)}`;
         const clientActive = activeByScopeAndClient.get(scopedClient) ?? 0;
         const globalActive = activeByScope.get(scope) ?? 0;
         if (clientActive >= perClientLimit || globalActive >= globalLimit) {
+            recordLimiterRejection(scope);
             res.setHeader('Retry-After', '2');
             return res.status(429).json({ message: 'Too many concurrent requests.' });
         }
@@ -139,7 +276,25 @@ export const asyncHandler = (
 
 export const authRateLimit = rateLimit('auth', 20, 15 * 60_000);
 export const browserRefreshRateLimit = rateLimit('browser-refresh', 120, 15 * 60_000);
+/**
+ * Bounds native token refresh per client address with a ceiling far above one
+ * address's normal refresh traffic, so random-token floods stay bounded. It is
+ * separate from the login 'auth' bucket: failed sign-ins cannot block refresh
+ * and refresh traffic cannot consume sign-in attempts.
+ */
+export const refreshClientRateLimit = rateLimit('refresh-client', 600, 15 * 60_000);
+/** Keys native token refresh on the presented refresh token; see refreshCredentialLimit. */
+export const refreshCredentialRateLimit = refreshCredentialLimit('refresh-credential', 10, 15 * 60_000);
+/** Keys login attempts on the submitted `identifier`, falling back to `email` or `username`. */
 export const authAccountRateLimit = accountRateLimit('auth-account', 10, 15 * 60_000);
+/**
+ * Keys registration-link, verification-link and recovery attempts on the validated account email.
+ * It uses the same 'auth-account' scope, so these routes and an identifier
+ * login that submits the same normalized address draw from one budget. Those
+ * routes mount it after `rejectUndeliverableEmailDomain`, so a request rejected
+ * because its domain cannot receive mail never counts here.
+ */
+export const authEmailAccountRateLimit = emailAccountRateLimit('auth-account', 10, 15 * 60_000);
 export const authConcurrencyLimit = limitConcurrency('auth-password', 2, 20);
 export const publicReadRateLimit = rateLimit('public-read', 120, 60_000);
 /** Bounds substring search work independently of lightweight catalog metadata reads. */
@@ -159,6 +314,10 @@ export const uploadConcurrencyLimit: RequestHandler = (req, res, next) =>
 /** Prevents telemetry uploads from occupying meaningful API capacity. */
 export const listenerTelemetryConcurrencyLimit = limitConcurrency('listener-telemetry', 2, 10);
 export const reconciliationConcurrencyLimit = limitConcurrency('reconciliation', 1, 1);
+/** Bounds existing-file download and analysis without consuming multipart upload capacity. */
+const roomAudioAnalysisLimiter = limitConcurrency('room-audio-analysis', 1, 1);
+export const roomAudioAnalysisConcurrencyLimit: RequestHandler = (req, res, next) =>
+    roomAudioAnalysisLimiter(req, res, next);
 
 const requestAbortControllers = new WeakMap<Request, AbortController>();
 

@@ -20,6 +20,7 @@ import {
 } from '../player';
 import styles from './PlayerBar.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
+import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
 
 const MOBILE_PLAYER_QUERY = '(max-width: 767px)';
 const VERTICAL_GESTURE_THRESHOLD = 48;
@@ -78,6 +79,8 @@ const useMobileViewport = () => {
 };
 
 const trapDialogFocus = (event: ReactKeyboardEvent<HTMLElement>) => {
+  // A portaled song dialog owns its focus even when React bubbles through this player.
+  if (!event.currentTarget.contains(event.target as Node)) return;
   if (event.key !== 'Tab') return;
   const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
     'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])'
@@ -271,6 +274,8 @@ export const PlayerBar = ({
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      const dialog = event.target instanceof Element ? event.target.closest('[aria-modal="true"]') : null;
+      if (dialog && !['expanded-player-heading', 'player-shortcuts-heading'].includes(dialog.getAttribute('aria-labelledby') ?? '')) return;
 
       if (event.key === 'Escape') {
         if (helpOpen) {
@@ -313,6 +318,7 @@ export const PlayerBar = ({
   }, [current, expanded, helpOpen, playbackActive, store]);
 
   const startCompactGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!event.currentTarget.contains(event.target as Node)) return;
     if (!mobile || !current || event.currentTarget !== event.target
       && (event.target as HTMLElement).closest('[data-player-control]')) return;
     // Compact-player swipes are a direct-touch interaction. Capturing a mouse
@@ -480,6 +486,7 @@ export const PlayerBar = ({
         </div>
 
         <div className={styles.volume}>
+          {current?.mediaType === 'audio' && <LazyRoomTrackButton key={current.id} mediaTrackId={current.id} title={current.title} />}
           <button
             aria-label={t('player.help.label')}
             className={styles.helpButton}
@@ -597,6 +604,7 @@ export const PlayerBar = ({
               <p className={styles.expandedArtist}>
                 {current.displayByline || current.artistNames.join(', ') || t('now_playing.fallback_byline')}
               </p>
+              {current.mediaType === 'audio' && <LazyRoomTrackButton key={current.id} mediaTrackId={current.id} title={current.title} compact={false} />}
             </div>
 
             <div className={styles.expandedTimeline}>

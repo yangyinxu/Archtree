@@ -1,17 +1,36 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
-import { installShutdownHandlers, ServerLifecycle } from '../src/services/serverLifecycleService';
+import {
+  installShutdownHandlers,
+  isCompletedRequestWorkCancellation,
+  ServerLifecycle
+} from '../src/services/serverLifecycleService';
 import { asyncHandler } from '../src/middleware/requestProtectionMiddleware';
 import { requireAuth } from '../src/middleware/authMiddleware';
+import { safeServerErrorCategory } from '../src/middleware/requestDiagnosticsMiddleware';
 
 /** Starts an isolated loopback server; it never uses application database configuration. */
 const listen = async (app: ReturnType<typeof express>) => {
   const server = createServer(app);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+};
+
+interface BoundaryError { error: unknown; req: express.Request }
+
+/**
+ * Captures the first error that reaches the Express boundary. Assertions run in the test body:
+ * Express swallows a throw from error middleware, which would leave the test waiting forever.
+ */
+const captureBoundaryError = () => {
+  let capture!: (seen: BoundaryError) => void;
+  const seen = new Promise<BoundaryError>(resolve => { capture = resolve; });
+  const handler: express.ErrorRequestHandler = (error, req, _res, _next) => { capture({ error, req }); };
+  return { handler, seen };
 };
 
 test('drain stops admission while an existing upload and transaction finish before database close', async () => {
@@ -186,20 +205,42 @@ test('a late parser callback cannot start new business work after database teard
   assert.equal(controllerStarted, false);
 });
 
-test('late authentication work reaches the Express error boundary after teardown', async () => {
+test('graceful drain waits for admitted responses to close, bounded by the grace deadline', async () => {
+  for (const closeWithinGrace of [true, false]) {
+    const { server } = await listen(express());
+    const lifecycle = new ServerLifecycle();
+    // A synthetic response isolates this wait from Node's socket and server close ordering.
+    const response = Object.assign(new EventEmitter(), {
+      writableFinished: false, destroyed: false, headersSent: false, setHeader: () => undefined
+    });
+    let admitted = false;
+    lifecycle.admit({} as express.Request, response as unknown as express.Response, () => { admitted = true; });
+    assert.equal(admitted, true);
+    let closed = false;
+    const stopping = lifecycle.stop(server, async () => { closed = true; }, 50, 50);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(closed, false);
+    if (closeWithinGrace) response.emit('close');
+    assert.equal(await stopping, closeWithinGrace ? 'graceful' : 'forced');
+    assert.equal(closed, true);
+  }
+});
+
+test('late authentication dispatch after teardown is distinguishable from a service failure', async () => {
   const lifecycle = new ServerLifecycle();
   const app = express();
   app.use(lifecycle.admit);
   let entered!: () => void;
   let lateNext!: () => void;
-  let failed!: () => void;
+  let responseClosed = false;
   const parsed = new Promise<void>(resolve => { entered = resolve; });
-  const errorSeen = new Promise<void>(resolve => { failed = resolve; });
-  app.get('/protected', (_req, _res, next) => { lateNext = next; entered(); }, requireAuth);
-  app.use((error: { statusCode: number }, _req: express.Request, _res: express.Response, _next: express.NextFunction) => {
-    assert.equal(error.statusCode, 503);
-    failed();
-  });
+  const boundary = captureBoundaryError();
+  app.get('/protected', (_req, res, next) => {
+    res.once('close', () => { responseClosed = true; });
+    lateNext = next;
+    entered();
+  }, requireAuth);
+  app.use(boundary.handler);
   const { server, url } = await listen(app);
   const req = request(`${url}/protected`);
   req.on('error', () => undefined);
@@ -208,7 +249,54 @@ test('late authentication work reaches the Express error boundary after teardown
   const disconnected = new Promise<void>(resolve => req.once('close', resolve));
   req.destroy();
   await disconnected;
-  await lifecycle.stop(server, async () => undefined, 100, 100);
+  assert.equal(await lifecycle.stop(server, async () => undefined, 100, 100), 'graceful');
+  // Node can report the server closed before this disconnected response emits close.
+  assert.equal(responseClosed, true);
   lateNext();
-  await errorSeen;
+  const { error, req: lateRequest } = await boundary.seen;
+  assert.equal((error as { statusCode: number }).statusCode, 503);
+  assert.equal(isCompletedRequestWorkCancellation(lateRequest, error), true);
+  assert.equal(safeServerErrorCategory(error), 'aborted');
+  assert.equal(isCompletedRequestWorkCancellation(lateRequest, { name: 'AbortError', statusCode: 503 }), false);
+  await assert.rejects(lifecycle.track(() => assert.fail('work cannot start after teardown')), error => {
+    assert.equal(isCompletedRequestWorkCancellation({} as express.Request, error), false);
+    assert.equal((error as { statusCode: number }).statusCode, 503);
+    assert.equal(safeServerErrorCategory(error), 'internal');
+    return true;
+  });
+});
+
+test('an admitted handler failure remains visible after its client disconnects', async () => {
+  const lifecycle = new ServerLifecycle();
+  const app = express();
+  app.use(lifecycle.admit);
+  let entered!: () => void;
+  let release!: () => void;
+  let responseClosed!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const closed = new Promise<void>(resolve => { responseClosed = resolve; });
+  const boundary = captureBoundaryError();
+  app.get('/work', asyncHandler(async (_req, res) => {
+    res.once('close', responseClosed);
+    entered();
+    await gate;
+    throw Object.assign(new Error('service failure'), { statusCode: 503 });
+  }));
+  app.use(boundary.handler);
+  const { server, url } = await listen(app);
+  const req = request(`${url}/work`);
+  req.on('error', () => undefined);
+  req.end();
+  try {
+    await started;
+    req.destroy();
+    await closed;
+    release();
+    const { error, req: failedRequest } = await boundary.seen;
+    assert.equal(isCompletedRequestWorkCancellation(failedRequest, error), false);
+    assert.equal(safeServerErrorCategory(error), 'internal');
+    assert.equal((error as { statusCode: number }).statusCode, 503);
+    assert.equal(await lifecycle.stop(server, async () => undefined, 100, 100), 'graceful');
+  } finally { release(); req.destroy(); server.closeAllConnections(); server.close(); }
 });

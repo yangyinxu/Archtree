@@ -8,8 +8,7 @@ import {
     logout,
     logoutAll,
     me,
-    renderSignupPage,
-    signupFromWeb,
+    redirectToWebRegistration,
     renderLoginPage,
     loginFromWeb,
     logoutFromWeb,
@@ -22,8 +21,11 @@ import {
     asyncHandler,
     authAccountRateLimit,
     authConcurrencyLimit,
+    authEmailAccountRateLimit,
     authRateLimit,
     browserRefreshRateLimit,
+    refreshClientRateLimit,
+    refreshCredentialRateLimit,
     requireSecureAuthTransport
 } from '../middleware/requestProtectionMiddleware';
 import {
@@ -34,11 +36,16 @@ import {
     requireBrowserAuth
 } from '../middleware/authMiddleware';
 import {
+    completeRegistration,
+    confirmEmailVerification,
     forgotPassword,
-    register,
-    resendVerification,
+    inspectEmailVerification,
+    inspectRegistration,
+    rejectUndeliverableEmailDomain,
+    requestEmailVerification,
+    requestRegistration,
     resetPassword,
-    verifyEmail
+    retiredRegistrationEndpoint
 } from '../controllers/emailAuthController';
 import {
     authenticateWithApple,
@@ -64,7 +71,8 @@ import {
 } from '../services/authCapabilitiesService';
 import { requireAcceptablePassword } from '../services/passwordPolicyService';
 import { deleteAvatar, getAvatar, putAvatar } from '../controllers/avatarController';
-import { avatarUpload } from '../middleware/imageUpload';
+import { avatarUpload, maxAvatarRequestMb } from '../middleware/imageUpload';
+import { requireUploadSize } from '../middleware/audioUpload';
 import {
     uploadConcurrencyLimit,
     uploadRateLimit
@@ -79,25 +87,6 @@ import {
 } from '../services/authCookieService';
 
 const router: Router = express.Router();
-
-const signupWebValidation: RequestHandler[] = [
-    body('email')
-        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
-        .isEmail()
-        .withMessage('Please enter a valid email.')
-        .normalizeEmail(),
-    body('password').custom(requireAcceptablePassword),
-    body('username').trim().isLength({ min: 1, max: 64 })
-];
-
-const emailRegistrationValidation: RequestHandler[] = [
-    body('email')
-        .customSanitizer((value) => String(value ?? '').trim().toLowerCase())
-        .isEmail()
-        .normalizeEmail(),
-    body('password').custom(requireAcceptablePassword),
-    body('displayName').optional().trim().isLength({ max: 80 })
-];
 
 const emailOnlyValidation: RequestHandler[] = [
     body('email')
@@ -121,28 +110,36 @@ router.get('/capabilities', (_req, res) => {
     res.status(200).json(getAuthenticationCapabilities());
 });
 
-router.put('/signup', (_req, res) => {
-    res.setHeader('Allow', 'POST');
-    res.status(405).json({ message: 'Use POST /auth/signup.' });
-});
+// Code-based registration moved to Web email links. These routes answer 410
+// before validation, rate limiting or any database access, so no hijack path
+// stays open and older clients show a clear message.
+router.put('/signup', retiredRegistrationEndpoint);
+router.post('/signup', retiredRegistrationEndpoint);
+router.post('/email/verify', retiredRegistrationEndpoint);
+router.post('/email/resend-verification', retiredRegistrationEndpoint);
+router.post('/browser/register', retiredRegistrationEndpoint);
+router.post('/browser/email/verify', retiredRegistrationEndpoint);
+router.post('/browser/email/resend-verification', retiredRegistrationEndpoint);
+
+// Email routes resolve the account from the normalized `email`, so their
+// per-account limit runs after validation; see authEmailAccountRateLimit.
+// Routes that email a submitted address reject a domain that cannot receive
+// mail between the two limits: the rejection counts per IP but not per address.
 router.post(
-    '/signup',
+    '/password/forgot',
     authRateLimit,
-    authAccountRateLimit,
-    authConcurrencyLimit,
-    ...emailRegistrationValidation,
-    asyncHandler(register)
+    ...emailOnlyValidation,
+    rejectUndeliverableEmailDomain,
+    authEmailAccountRateLimit,
+    asyncHandler(forgotPassword)
 );
-router.post('/email/verify', authRateLimit, authAccountRateLimit, ...emailCodeValidation, asyncHandler(verifyEmail));
-router.post('/email/resend-verification', authRateLimit, authAccountRateLimit, ...emailOnlyValidation, asyncHandler(resendVerification));
-router.post('/password/forgot', authRateLimit, authAccountRateLimit, ...emailOnlyValidation, asyncHandler(forgotPassword));
-router.post('/password/reset', authRateLimit, authAccountRateLimit, authConcurrencyLimit, ...passwordResetValidation, asyncHandler(resetPassword));
+router.post('/password/reset', authRateLimit, authConcurrencyLimit, ...passwordResetValidation, authEmailAccountRateLimit, asyncHandler(resetPassword));
 router.post('/apple', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithApple));
 router.post('/google', authRateLimit, authAccountRateLimit, requireAuthWhenPresented, asyncHandler(authenticateWithGoogle));
 
-router.get('/signup-web', renderSignupPage);
-
-router.post('/signup-web', requireSameOriginBrowserFormMutation, authRateLimit, authAccountRateLimit, authConcurrencyLimit, signupWebValidation, asyncHandler(signupFromWeb));
+// The Archtree sign-up page is retired; its POST body is ignored.
+router.get('/signup-web', redirectToWebRegistration);
+router.post('/signup-web', redirectToWebRegistration);
 
 router.get('/login-web', attachOptionalAuth, renderLoginPage);
 
@@ -155,46 +152,67 @@ router.get('/browser/capabilities', (_req, res) => {
     res.status(200).json(getBrowserAuthenticationCapabilities());
 });
 
+// Registration requests hash no password, so they take no concurrency slot:
+// every 429 they can return is independent of the address's account state.
 router.post(
-    '/browser/register',
+    '/browser/registration/request',
     requireSameOriginBrowserMutation,
     authRateLimit,
-    authAccountRateLimit,
-    authConcurrencyLimit,
-    ...emailRegistrationValidation,
-    asyncHandler(register)
-);
-router.post(
-    '/browser/email/verify',
-    requireSameOriginBrowserMutation,
-    authRateLimit,
-    authAccountRateLimit,
-    ...emailCodeValidation,
-    asyncHandler(verifyEmail)
-);
-router.post(
-    '/browser/email/resend-verification',
-    requireSameOriginBrowserMutation,
-    authRateLimit,
-    authAccountRateLimit,
     ...emailOnlyValidation,
-    asyncHandler(resendVerification)
+    rejectUndeliverableEmailDomain,
+    authEmailAccountRateLimit,
+    asyncHandler(requestRegistration)
+);
+router.post(
+    '/browser/registration/inspect',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    asyncHandler(inspectRegistration)
+);
+router.post(
+    '/browser/registration/complete',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    authConcurrencyLimit,
+    asyncHandler(completeRegistration)
+);
+router.post(
+    '/browser/email-verification/request',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    ...emailOnlyValidation,
+    rejectUndeliverableEmailDomain,
+    authEmailAccountRateLimit,
+    asyncHandler(requestEmailVerification)
+);
+router.post(
+    '/browser/email-verification/inspect',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    asyncHandler(inspectEmailVerification)
+);
+router.post(
+    '/browser/email-verification/confirm',
+    requireSameOriginBrowserMutation,
+    authRateLimit,
+    asyncHandler(confirmEmailVerification)
 );
 router.post(
     '/browser/password/forgot',
     requireSameOriginBrowserMutation,
     authRateLimit,
-    authAccountRateLimit,
     ...emailOnlyValidation,
+    rejectUndeliverableEmailDomain,
+    authEmailAccountRateLimit,
     asyncHandler(forgotPassword)
 );
 router.post(
     '/browser/password/reset',
     requireSameOriginBrowserMutation,
     authRateLimit,
-    authAccountRateLimit,
     authConcurrencyLimit,
     ...passwordResetValidation,
+    authEmailAccountRateLimit,
     asyncHandler(resetPassword)
 );
 
@@ -224,7 +242,9 @@ router.post(
 
 router.post('/login', authRateLimit, authAccountRateLimit, authConcurrencyLimit, asyncHandler(login));
 
-router.post('/refresh', authRateLimit, asyncHandler(refresh));
+// Refresh has its own buckets: sharing the login bucket let failed sign-ins
+// from one address turn valid refreshes into 429s.
+router.post('/refresh', refreshClientRateLimit, refreshCredentialRateLimit, asyncHandler(refresh));
 
 router.post('/logout', authRateLimit, asyncHandler(logout));
 
@@ -244,6 +264,7 @@ router.put(
     requireCurrentAccountViewer,
     uploadRateLimit,
     uploadConcurrencyLimit,
+    requireUploadSize(maxAvatarRequestMb),
     avatarUpload.single('avatar'),
     asyncHandler(putAvatar)
 );

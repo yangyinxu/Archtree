@@ -4,16 +4,13 @@ phases:
   install:
     runtime-versions:
       nodejs: 24
-    commands:
-      - npm ci
+      python: 3.12
   build:
     commands:
-      - npm test
-      - npm run build --if-present
-  post_build:
-    commands:
-      - npm run stage:eb-artifact
-      - echo "Validated Elastic Beanstalk artifact staged. Runtime startup is handled by the deployment target."
+      # Actions read access may be supplied as GITHUB_ARTIFACT_TOKEN through Secrets Manager.
+      # Missing, pending or failed exact-main gates fail closed; this path never rebuilds.
+      - node scripts/check-runtime.mjs --linux
+      - node scripts/promote-eb-artifact.mjs
 
 artifacts:
   base-directory: elastic-beanstalk-artifact

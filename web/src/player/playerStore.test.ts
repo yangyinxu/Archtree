@@ -153,6 +153,100 @@ const videoTracks: PlayerQueueItem[] = [
   { ...tracks[2], mediaType: 'video', streamUrl: '/video/night-window.mp4' }
 ];
 
+test('a 500-entry queue reuses its upcoming items across 500 clock updates without hiding progress', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  const largeQueue = Array.from({ length: 500 }, (_, index) => ({ ...tracks[0], id: `track-${index}` }));
+  await store.launchQueue(largeQueue, 0, { autoplay: false });
+  const initialUpcoming = store.getSnapshot().upNextItems;
+  const publishedUpcoming = new Set<readonly PlayerQueueItem[]>();
+  let clockUpdates = 0;
+  const stop = store.subscribe(() => {
+    clockUpdates += 1;
+    publishedUpcoming.add(store.getSnapshot().upNextItems);
+  });
+
+  for (let tick = 1; tick <= 500; tick += 1) {
+    audio.currentTime = tick;
+    audio.emit('timeupdate');
+  }
+
+  expect(clockUpdates).toBe(500);
+  expect(store.getSnapshot().currentTime).toBe(500);
+  expect(store.getSnapshot().canPrevious).toBe(true);
+  expect(initialUpcoming).toHaveLength(499);
+  expect(publishedUpcoming.size).toBe(1);
+  expect([...publishedUpcoming][0]).toBe(initialUpcoming);
+  stop(); store.destroy();
+});
+
+test('metadata, transport, volume and duplicate clock events retain queue identity and no-op snapshots', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  await store.launchQueue(tracks, 0, { autoplay: false });
+  const upcoming = store.getSnapshot().upNextItems;
+  audio.duration = 180;
+  audio.emit('durationchange');
+  audio.emit('waiting');
+  audio.emit('canplay');
+  await store.play();
+  store.pause();
+  store.setVolume(0.5);
+  store.setMuted(true);
+  audio.currentTime = 2.9; audio.emit('timeupdate');
+  expect(store.getSnapshot().canPrevious).toBe(false);
+  audio.currentTime = 3; audio.emit('timeupdate');
+  expect(store.getSnapshot().canPrevious).toBe(true);
+  expect(store.getSnapshot().upNextItems).toBe(upcoming);
+
+  const unchanged = store.getSnapshot();
+  const listener = vi.fn();
+  const stop = store.subscribe(listener);
+  audio.emit('timeupdate');
+  audio.emit('durationchange');
+  store.setVolume(0.5);
+  store.setMuted(true);
+  expect(store.getSnapshot()).toBe(unchanged);
+  expect(listener).not.toHaveBeenCalled();
+  stop(); store.destroy();
+});
+
+test('upcoming items refresh for selection, Shuffle, Repeat and a replacement queue', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null, random: () => 0 });
+  await store.launchQueue(tracks, 0, { autoplay: false });
+  const canonical = store.getSnapshot().upNextItems;
+  expect(canonical.map(item => item.id)).toEqual(['track-2', 'track-3']);
+
+  store.toggleShuffle();
+  const shuffled = store.getSnapshot().upNextItems;
+  expect(shuffled).not.toBe(canonical);
+  expect(shuffled.map(item => item.id)).toEqual(['track-3', 'track-2']);
+  await store.next();
+  const afterNext = store.getSnapshot().upNextItems;
+  expect(afterNext).not.toBe(shuffled);
+  expect(afterNext.map(item => item.id)).toEqual(['track-2']);
+
+  store.cycleRepeatMode();
+  const repeatAll = store.getSnapshot().upNextItems;
+  expect(repeatAll).not.toBe(afterNext);
+  expect(repeatAll.map(item => item.id)).toEqual(['track-2', 'track-1', 'track-3']);
+  store.cycleRepeatMode();
+  const repeatOne = store.getSnapshot().upNextItems;
+  expect(repeatOne).not.toBe(repeatAll);
+  expect(repeatOne.map(item => item.id)).toEqual(['track-3']);
+  store.cycleRepeatMode();
+  store.toggleShuffle();
+  expect(store.getSnapshot().upNextItems).toEqual([]);
+
+  await store.launchQueue(tracks.map(item => ({ ...item, title: `New ${item.title}` })), 0, { autoplay: false });
+  const replaced = store.getSnapshot().upNextItems;
+  expect(replaced).not.toBe(canonical);
+  expect(replaced.map(item => item.title)).toEqual(['New Open Field', 'New Night Window']);
+  expect(Object.isFrozen(replaced)).toBe(true);
+  store.destroy();
+});
+
 test('owns one lazy audio instance and copies an album queue before launch', async () => {
   const audio = new FakeAudio();
   const audioFactory = vi.fn(() => audio);

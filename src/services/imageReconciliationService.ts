@@ -89,6 +89,8 @@ const assetReportItem = (asset: any, s3Keys: Set<string>) => ({
     uploadStatus: String(asset.uploadStatus ?? ''),
     uploadUpdatedAt: asset.uploadUpdatedAt ?? null,
     uploadError: String(asset.uploadError ?? ''),
+    uploadOutcomeUnknown: asset.uploadOutcomeUnknown === true,
+    storageIdentityMissing: !asset.storageIdentity && !asset.storageCleanupVersions && !asset.storageDeleted,
     objectExists: s3Keys.has(String(asset.s3Key ?? ''))
 });
 
@@ -182,6 +184,10 @@ export const reconcileImageStorage = async (
     const incompleteAssets = assets
         .filter((asset) => asset.uploadStatus !== 'ready')
         .map((asset) => assetReportItem(asset, s3Keys));
+    const storageIdentityIssues = assets
+        .filter(asset => asset.uploadOutcomeUnknown
+            || (!asset.storageIdentity && !asset.storageCleanupVersions && !asset.storageDeleted))
+        .map(asset => assetReportItem(asset, s3Keys));
     const invalidStorageKeys = assets
         .filter((asset) => !hasValidStorageKey(asset))
         .map((asset) => assetReportItem(asset, s3Keys));
@@ -244,6 +250,7 @@ export const reconcileImageStorage = async (
             orphanedObjectCount: orphanedObjects.length,
             missingObjectCount: missingObjects.length,
             incompleteImageCount: incompleteAssets.length,
+            storageIdentityIssueCount: storageIdentityIssues.length,
             detachedImageCount: detachedAssets.length,
             danglingOwnerReferenceCount: danglingOwnerReferences.length,
             invalidStorageKeyCount: invalidStorageKeys.length,
@@ -252,6 +259,7 @@ export const reconcileImageStorage = async (
         orphanedObjects,
         missingObjects,
         incompleteAssets,
+        storageIdentityIssues,
         detachedAssets,
         danglingOwnerReferences,
         invalidStorageKeys,

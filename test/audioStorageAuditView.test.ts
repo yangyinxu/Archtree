@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { findIncompleteAudioTracks } from '../src/services/audioReconciliationService';
 import { renderAudioStorageAuditPage } from '../src/views/admin/audioStorageAuditView';
 
 const report = {
@@ -65,6 +66,31 @@ test('missing and non-ready Soundtracks never receive an S3 delete or publicatio
     assert.doesNotMatch(html, /orphan-delete/);
     assert.doesNotMatch(html, /Retry publication/);
     assert.match(html, /upload a replacement or remove the record safely/);
+});
+
+test('a storage-ready Video publication failure offers retry instead of re-upload', () => {
+    const videoTrackId = '507f1f77bcf86cd799439021';
+    const videoKey = `video/${videoTrackId}/507f1f77bcf86cd799439031`;
+    const incompleteTracks = findIncompleteAudioTracks([{
+        _id: videoTrackId,
+        title: 'Lorem ipsum video',
+        mediaType: 'video',
+        s3Key: videoKey,
+        uploadStatus: 'ready',
+        publicationStatus: 'pending'
+    }], new Set(), new Set([videoKey]));
+    const html = renderAudioStorageAuditPage({
+        ...report,
+        orphanedObjects: [],
+        missingObjects: [],
+        incompleteTracks
+    }, 'admin@example.com');
+
+    assert.match(html, /S3 object: Present/);
+    assert.match(html, /action="\/admin\/audio-storage\/publication-retry"/);
+    assert.match(html, new RegExp(`name="audioTrackIds" value="${videoTrackId}"`));
+    assert.match(html, /Retry publication without uploading it again/);
+    assert.doesNotMatch(html, /upload a replacement or remove the record safely/);
 });
 
 test('MongoDB-only rows with invalid storage identity do not receive direct deletion', () => {

@@ -228,6 +228,9 @@ export const reconcileContentReferences = async () => {
     const trackArtistLookupIds = new Set<string>();
     const albumReferenceLookupIds = new Set<string>();
     const trackReferenceLookupIds = new Set<string>();
+    // Posts are not a source scan, so every Carousel Post reference needs an exact lookup.
+    const noScannedPosts = new Set<string>();
+    const postReferenceLookupIds = new Set<string>();
     const pageCarouselLookupIds = new Set<string>();
     const pageCollectionLookupIds = new Set<string>();
     const queueCatalogReferenceLookup = (
@@ -283,7 +286,11 @@ export const reconcileContentReferences = async () => {
     }
     for (const carousel of scannedCarousels.filter(item => item.mode === 'manual' || !item.mode)) {
         for (const item of referencesFor(carouselItemReferences, carousel._id)) {
-            queueTypedContentReference(item?.contentType, item?.contentId);
+            if (item?.contentType === 'post') {
+                queueCatalogReferenceLookup(item.contentId, noScannedPosts, postReferenceLookupIds);
+            } else {
+                queueTypedContentReference(item?.contentType, item?.contentId);
+            }
         }
     }
     for (const collection of scannedContentCollections.filter(item => item.mode === 'manual')) {
@@ -365,6 +372,7 @@ export const reconcileContentReferences = async () => {
     const artistLookupObjectIds = [...trackArtistLookupIds].map(id => new ObjectId(id));
     const albumReferenceLookupObjectIds = [...albumReferenceLookupIds].map(id => new ObjectId(id));
     const trackReferenceLookupObjectIds = [...trackReferenceLookupIds].map(id => new ObjectId(id));
+    const postReferenceLookupObjectIds = [...postReferenceLookupIds].map(id => new ObjectId(id));
     const playlistTargetLookupObjectIds = [...playlistTargetLookupIds].map(id => new ObjectId(id));
     const pageCarouselLookupObjectIds = [...pageCarouselLookupIds].map(id => new ObjectId(id));
     const pageCollectionLookupObjectIds = [...pageCollectionLookupIds].map(id => new ObjectId(id));
@@ -374,6 +382,7 @@ export const reconcileContentReferences = async () => {
         additionalArtists,
         additionalAlbums,
         additionalCatalogTracks,
+        additionalPosts,
         additionalTargetPlaylists,
         additionalPageCarousels,
         additionalPageCollections
@@ -423,6 +432,14 @@ export const reconcileContentReferences = async () => {
                 .limit(trackReferenceLookupObjectIds.length)
                 .maxTimeMS(10_000)
                 .toArray(),
+        postReferenceLookupObjectIds.length === 0
+            ? []
+            : db.collection('posts')
+                .find({ _id: { $in: postReferenceLookupObjectIds } })
+                .project({ _id: 1 })
+                .limit(postReferenceLookupObjectIds.length)
+                .maxTimeMS(10_000)
+                .toArray(),
         playlistTargetLookupObjectIds.length === 0
             ? []
             : db.collection('playlists')
@@ -457,6 +474,7 @@ export const reconcileContentReferences = async () => {
     const additionalCatalogTrackSet = new Set(
         additionalCatalogTracks.map(item => String(item._id))
     );
+    const additionalPostSet = new Set(additionalPosts.map(item => String(item._id)));
     const additionalPageCarouselSet = new Set(
         additionalPageCarousels.map(item => String(item._id))
     );
@@ -503,6 +521,14 @@ export const reconcileContentReferences = async () => {
             return trackReferenceLookupIds.has(id) ? false : undefined;
         }
         return false;
+    };
+    /** Manual Carousels may also hold Feed Posts; saves, activity, and Grid/List items never do. */
+    const carouselItemContentExists = (type: string, value: unknown): boolean | undefined => {
+        if (type !== 'post') return catalogContentExists(type, value);
+        const id = canonicalObjectId(value);
+        if (!id) return false;
+        if (additionalPostSet.has(id)) return true;
+        return postReferenceLookupIds.has(id) ? false : undefined;
     };
     const pageCarouselExists = (value: unknown): boolean | undefined => {
         const id = canonicalObjectId(value);
@@ -569,7 +595,7 @@ export const reconcileContentReferences = async () => {
     const danglingCarouselItems: any[] = [];
     for (const carousel of scannedCarousels.filter((item) => item.mode === 'manual' || !item.mode)) {
         for (const item of referencesFor(carouselItemReferences, carousel._id)) {
-            const contentExists = catalogContentExists(String(item?.contentType), item?.contentId);
+            const contentExists = carouselItemContentExists(String(item?.contentType), item?.contentId);
             if (contentExists) continue;
             if (contentExists === undefined) {
                 markUnknownCatalogReference();

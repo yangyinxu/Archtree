@@ -5,15 +5,18 @@ import { contentByline, type AudioTrackSummary, type ContentSummary } from '../a
 import { Artwork } from './Artwork';
 import styles from './ContentListRow.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
+import { LazyShareMusicButton } from '../features/social/LazyShareMusicButton';
+import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
 
 export interface ContentListRowProps {
   item: ContentSummary;
   onPlay?: (audioTrack: AudioTrackSummary) => void;
   trailing?: ReactNode;
+  shareable?: boolean;
 }
 
 /** Renders a canonical single-column row whose whole surface is the primary action. */
-export const ContentListRow = ({ item, onPlay, trailing }: ContentListRowProps) => {
+export const ContentListRow = ({ item, onPlay, trailing, shareable = true }: ContentListRowProps) => {
   const { locale, t } = useLocalization();
   const title = item.contentType === 'artist'
     ? item.name.trim() || t('content.title.unknown_artist')
@@ -68,7 +71,10 @@ export const ContentListRow = ({ item, onPlay, trailing }: ContentListRowProps) 
           {body}
         </Link>
       )}
-      {trailing && <span className={styles.trailing}>{trailing}</span>}
+      {(trailing || shareable && item.contentType !== 'artist') && <span className={styles.trailing}>{trailing}
+        {shareable && item.contentType === 'audioTrack' && item.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={item.id} title={title} />}
+        {shareable && item.contentType !== 'artist' && <LazyShareMusicButton contentType={item.contentType} contentId={item.id} title={title} />}
+      </span>}
     </li>
   );
 };

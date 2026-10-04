@@ -14,6 +14,7 @@ import AuthIdentity from '../src/models/authIdentity';
 import AuthSession from '../src/models/authSession';
 import { Album } from '../src/models/album';
 import { Artist } from '../src/models/artist';
+import { Organization } from '../src/models/organization';
 import { AudioFormat, AudioTrack } from '../src/models/audioTrack';
 import { Carousel } from '../src/models/carousel';
 import { ContentCollection } from '../src/models/contentCollection';
@@ -97,6 +98,7 @@ const deferred = () => {
 
 const sharedProvenanceCollections = [
     'artists',
+    'organizations',
     'albums',
     'audioTracks',
     'carousels',
@@ -225,14 +227,35 @@ test('provider unlink refuses the final recovery method and succeeds after passw
     assert.equal(await AuthIdentity.find('apple', 'apple-subject'), null);
 });
 
-test('clearing listening history preserves recently saved activity', async () => {
-    const userId = new ObjectId().toString();
-    const saved = [{ contentType: 'album', contentId: new ObjectId().toString() }];
-    await getDb()!.collection('userActivity').insertOne({
-        userId,
-        recentlySaved: saved,
-        recentlyPlayed: [{ contentType: 'audioTrack', contentId: new ObjectId().toString() }]
-    });
+test('clearing listening history clears Library play times but preserves saves', async () => {
+    const userObjectId = new ObjectId();
+    const userId = userObjectId.toString();
+    const albumId = new ObjectId().toString();
+    const savedAt = new Date('2026-08-01T10:00:00Z');
+    const saved = [{ contentType: 'album', contentId: albumId }];
+    await Promise.all([
+        getDb()!.collection('users').insertOne({
+            _id: userObjectId,
+            email: 'clear-history@example.com',
+            password: 'hash',
+            username: '',
+            posts: [],
+            role: 'user'
+        }),
+        getDb()!.collection('userSaves').insertOne({
+            userId,
+            contentType: 'album',
+            contentId: albumId,
+            savedAt,
+            lastPlayedAt: new Date('2026-08-02T10:00:00Z'),
+            lastActivityAt: new Date('2026-08-02T10:00:00Z')
+        }),
+        getDb()!.collection('userActivity').insertOne({
+            userId,
+            recentlySaved: saved,
+            recentlyPlayed: [{ contentType: 'album', contentId: albumId }]
+        })
+    ]);
     const capture = captureResponse();
 
     await clearListeningHistory(
@@ -244,6 +267,11 @@ test('clearing listening history preserves recently saved activity', async () =>
     const activity = await getDb()!.collection('userActivity').findOne({ userId });
     assert.deepEqual(activity!.recentlyPlayed, []);
     assert.deepEqual(activity!.recentlySaved, saved);
+    const save = await getDb()!.collection('userSaves').findOne({ userId, contentId: albumId });
+    assert.ok(save, 'clearing history must not unsave content');
+    assert.equal(save.lastPlayedAt, undefined);
+    assert.deepEqual(save.savedAt, savedAt);
+    assert.deepEqual(save.lastActivityAt, savedAt);
 });
 
 test('listener deletion removes every account-owned record transactionally', async () => {
@@ -502,7 +530,7 @@ test('an Avatar mutation reservation wins the account fence before deletion chec
         status: 'pending'
     }));
 
-    await releaseAvatarMutation((await reservation).mutationId);
+    await releaseAvatarMutation((await reservation).lease!);
     assert.deepEqual(await deleteListenerAccountData(userIdString), { status: 'deleted' });
     assert.equal(await getDb()!.collection('users').findOne({ _id: userId }), null);
     assert.equal(await AuthSession.findActiveById(sessionId), null);
@@ -555,7 +583,7 @@ test('one pending Avatar lease excludes a different concurrent mutation for the 
         userId: userIdString,
         status: 'pending'
     }), 1);
-    await releaseAvatarMutation(firstResult.mutationId);
+    await releaseAvatarMutation(firstResult.lease!);
     assert.deepEqual(await deleteListenerAccountData(userIdString), { status: 'deleted' });
 });
 
@@ -904,6 +932,13 @@ test('every production provenance writer rejects a missing creator account', asy
                 [] as unknown as [string],
                 creatorUserId,
                 new ObjectId()
+            ).save()
+        },
+        {
+            label: 'Organization.save',
+            collectionName: 'organizations',
+            write: () => new Organization(
+                'Missing creator Organization', 'label', '', creatorUserId
             ).save()
         },
         {

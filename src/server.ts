@@ -5,6 +5,12 @@ import { connectToDatabase, disconnectFromDatabase } from './infrastructure/data
 import { accessTokenDurationSeconds } from './services/authSessionService';
 import { installShutdownHandlers, ServerLifecycle } from './services/serverLifecycleService';
 import { recordStartupFailureStage, type StartupStage } from './infrastructure/startupDiagnostics';
+import { installRoomGateway } from './realtime/roomGateway';
+import { installRoomWindDown } from './realtime/roomWindDown';
+import { resolveSocialCapacity } from './config/socialCapacity';
+import { socialRollout } from './config/socialRollout';
+import { createOperationalSummary } from './services/operationalSummaryService';
+import { writeOperationalLog } from './infrastructure/operationalLog';
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -18,11 +24,22 @@ export interface ServerDependencies {
   createApplication?: typeof createApp;
   port?: number;
   stopped?: (outcome: 'graceful' | 'forced') => void;
+  installRoomGateway?: typeof installRoomGateway;
+  installRoomWindDown?: typeof installRoomWindDown;
+  /** Starts the periodic `ops_summary` line and returns its stop function. */
+  startOperationalSummary?: () => () => void;
 }
 
 /** Resolves only after listening, and releases infrastructure on every startup failure. */
 export const startServer = async (dependencies: ServerDependencies = {}): Promise<Server> => {
-  const closeDatabase = dependencies.closeDatabase ?? disconnectFromDatabase;
+  const disconnectDatabase = dependencies.closeDatabase ?? disconnectFromDatabase;
+  let rooms: { stop: () => void; release: () => Promise<void> } | undefined;
+  let stopSummary: (() => void) | undefined;
+  const closeDatabase = async () => {
+    stopSummary?.();
+    rooms?.stop();
+    try { await rooms?.release(); } finally { await disconnectDatabase(); }
+  };
   const lifecycle = new ServerLifecycle();
   const server = new Server();
   const cleanupMs = () => Math.min(30_000, positiveInteger(process.env.SERVER_SHUTDOWN_CLEANUP_MS, 5_000));
@@ -32,6 +49,17 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
     stage = 'application';
     const app = (dependencies.createApplication ?? createApp)({ lifecycle });
     server.on('request', app);
+    // Rooms admit traffic only with both rollout flags. Otherwise a switched-off process still winds down the
+    // rooms an earlier process left open instead of leaving them silently playing.
+    const { roomsEnabled } = socialRollout();
+    if (roomsEnabled) {
+      // Names, never values, of unusable capacity settings, so an operator sees a typo that fell back to a ceiling.
+      const { capacity, invalid } = resolveSocialCapacity();
+      writeOperationalLog({ category: 'social_capacity_config', ...capacity, invalidSettings: invalid });
+    }
+    rooms = roomsEnabled
+      ? (dependencies.installRoomGateway ?? installRoomGateway)(server, lifecycle)
+      : (dependencies.installRoomWindDown ?? installRoomWindDown)(server, lifecycle);
     stage = 'listener_configuration';
     const port = dependencies.port ?? Number(process.env.PORT || process.env.port || 8080);
     if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('PORT must be a valid TCP port.');
@@ -55,6 +83,7 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
       server.listen(port);
     });
     console.log(JSON.stringify({ category: 'server_listening', accessTokenSeconds: accessTokenDurationSeconds() }));
+    stopSummary = (dependencies.startOperationalSummary ?? (() => createOperationalSummary().start()))();
     const stopped = dependencies.stopped ?? (outcome => {
       console.log(JSON.stringify({ category: 'server_stopped', outcome }));
       process.exit(outcome === 'graceful' ? 0 : 1);

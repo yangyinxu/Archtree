@@ -1,4 +1,5 @@
 import type { MediaSessionArtworkSource } from '../artwork/artworkUrls';
+import type { createRoomPlaybackController, RoomPlaybackAttachment, RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
 
 /** Canonical metadata retained for every item in the one shared playback queue. */
 export interface PlayerQueueItem {
@@ -78,7 +79,10 @@ export interface PlayerAudio {
   readonly paused: boolean;
   readonly ended: boolean;
   readonly error: { code: number } | null;
-  readonly playbackRate: number;
+  playbackRate: number;
+  readonly readyState?: number;
+  readonly seeking?: boolean;
+  readonly buffered?: Pick<TimeRanges, 'length' | 'start' | 'end'>;
   preload?: string;
   poster?: string;
   playsInline?: boolean;
@@ -133,6 +137,17 @@ export interface CreatePlayerStoreOptions {
   initialRepeatMode?: PlayerRepeatMode;
   random?: () => number;
   onPlaybackError?: (event: PlayerPlaybackErrorEvent) => void;
+  /** Synthetic harness injection keeps room implementation outside the production bundle. */
+  roomPlaybackProbeFactory?: typeof createRoomPlaybackController;
+}
+
+/** Optional raw observations stay outside rendering state; consumers must validate actual native playback. */
+export interface PlayerPlaybackEvent {
+  type: string;
+  media: PlayerAudio | null;
+  item: PlayerQueueItem | null;
+  sourceGeneration: number;
+  room: RoomPlaybackState | null;
 }
 
 /** Public commands intentionally contain no routing or activity-reporting dependency. */
@@ -140,6 +155,9 @@ export interface PlayerStore {
   getSnapshot(): PlayerSnapshot;
   getServerSnapshot(): PlayerSnapshot;
   subscribe(listener: () => void): () => void;
+  subscribePlaybackEvents(listener: (event: PlayerPlaybackEvent) => void): () => void;
+  /** Explicit gesture marker; remote effects and natural advancement never call this method. */
+  notePlaybackIntent(): void;
   launchQueue(
     queue: readonly PlayerQueueItem[],
     initialIndex: number,
@@ -164,6 +182,8 @@ export interface PlayerStore {
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
   toggleMute(): void;
+  /** The authorized room runtime supplies its lazy controller; the store creates no room or transport. */
+  attachRoomPlayback(options: RoomPlaybackOptions, controllerFactory?: typeof createRoomPlaybackController): RoomPlaybackAttachment;
   /** Attaches the one shared video element to a presentation-owned surface. */
   attachMediaElement(container: HTMLElement): () => void;
   destroy(): void;

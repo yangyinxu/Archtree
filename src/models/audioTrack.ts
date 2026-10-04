@@ -11,7 +11,7 @@ import {
 } from './catalogCredit';
 import { touchReadyOrganizationReferences } from '../services/organizationReferenceFenceService';
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { catalogSearchFilter, catalogSearchProjection, withCatalogSearchUpdate } from '../utils/catalogSearch';
 import { withReadyArtistReferences } from '../services/artistReferenceFenceService';
 import { touchReadyAlbumReferences } from '../services/albumReferenceFenceService';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
@@ -19,6 +19,7 @@ import { touchActiveAccount } from '../services/accountReferenceFenceService';
 import { updateReadyAudioTrackAndAlbum } from '../services/albumTrackLinkService';
 import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
 import type { SoundtrackVideoAsset } from './soundtrackVideoAsset';
+import type { MediaRepresentation } from './mediaRepresentation';
 import {
     activeMediaObjectKeyForTrack,
     type MediaType
@@ -65,7 +66,7 @@ const normalizedAudioTrackUpdate = (update: Record<string, unknown>) => {
     if (typeof normalizedUpdate.originalFileName === 'string') {
         normalizedUpdate.originalFileName = normalizeUtf8Text(normalizedUpdate.originalFileName);
     }
-    return normalizedUpdate;
+    return withCatalogSearchUpdate(normalizedUpdate, 'title');
 };
 
 export class AudioTrack {
@@ -87,6 +88,8 @@ export class AudioTrack {
     /** Active media kind; missing on legacy rows means Audio unless migration evidence says otherwise. */
     mediaType?: MediaType;
     s3Key?: string;
+    /** Exact object metadata; duration display text is never a synchronized playback clock. */
+    mediaRepresentation?: MediaRepresentation | null;
     uploadStatus: AudioUploadStatus;
     uploadUpdatedAt: Date;
     uploadError?: string | null;
@@ -94,11 +97,15 @@ export class AudioTrack {
     publicationUpdatedAt: Date;
     publicationError?: string | null;
     pendingS3Key?: string | null;
+    pendingS3VersionId?: string | null;
+    /** Unknown PUT outcomes require explicit version reconciliation, never key-only cleanup. */
+    pendingUploadOutcomeUnknown?: boolean | null;
     pendingMediaType?: MediaType | null;
     pendingUploadStatus?: 'pending' | 'failed' | null;
     pendingUploadUpdatedAt?: Date;
     pendingUploadError?: string | null;
     storageCleanupS3Key?: string | null;
+    storageCleanupS3VersionId?: string | null;
     storageCleanupMediaType?: MediaType | null;
     storageCleanupStatus?: 'pending' | 'deleteFailed' | null;
     storageCleanupUpdatedAt?: Date;
@@ -176,6 +183,7 @@ export class AudioTrack {
             );
             this.albumId = albumIds[0] ?? '';
             await touchActiveAccount(this.createdBy, session);
+            Object.assign(this, catalogSearchProjection(this.title));
             return db!
                 .collection(collectionId)
                 .insertOne(this, { session });
@@ -359,7 +367,7 @@ export class AudioTrack {
 
         return db!
             .collection(collectionId)
-            .find({ title: { $regex: escapeRegex(query), $options: 'i' } })
+            .find(catalogSearchFilter('title', query))
             .maxTimeMS(3_000)
             .limit(limit)
             .toArray()

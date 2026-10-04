@@ -1,27 +1,28 @@
-import { useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 import { requestBrowserPasswordReset } from '../../api/account';
 import styles from './AccountSurfaces.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import {
+  AuthEmailField,
   AuthFormFeedback,
   AuthPageFrame,
-  privateAccountActionError
+  EmailRequestSent,
+  privateAccountActionError,
+  useEmailRequestForm
 } from './AuthFormSupport';
 
-/** Starts password recovery without disclosing whether an email has an account. */
+/**
+ * Starts password recovery without disclosing whether an email has an
+ * account. Only an address whose domain cannot receive mail is rejected, on
+ * the field; every accepted request shows the address it used.
+ */
 export const ForgotPasswordPage = () => {
   const { t } = useLocalization();
   const navigate = useNavigate();
-  const [submittedEmail, setSubmittedEmail] = useState('');
-  const forgot = useMutation({
-    mutationFn: requestBrowserPasswordReset,
-    onSuccess: (_data, variables) => setSubmittedEmail(variables.email)
-  });
-  const error = forgot.isError
-    ? privateAccountActionError(forgot.error, t('account.common.request_error'))
+  const form = useEmailRequestForm({ request: requestBrowserPasswordReset });
+  const error = form.failure
+    ? privateAccountActionError(form.failure, t('account.common.request_error'))
     : '';
 
   return (
@@ -30,29 +31,18 @@ export const ForgotPasswordPage = () => {
       title={t('auth.recovery.title')}
       description={t('auth.recovery.description')}
     >
-      <form
-        aria-busy={forgot.isPending}
-        className={styles.formCard}
-        onSubmit={(event) => {
-          event.preventDefault();
-          forgot.reset();
-          const form = new FormData(event.currentTarget);
-          forgot.mutate({ email: String(form.get('email') ?? '') });
-        }}
-      >
+      <form aria-busy={form.isPending} className={styles.formCard} onSubmit={form.submit}>
         <h2 className={styles.formTitle}>{t('auth.recovery.form_title')}</h2>
-        <AuthFormFeedback error={error} status={forgot.isSuccess ? t('auth.recovery.accepted') : ''} focusKey={forgot.submittedAt} />
-        <div className={styles.field}>
-          <label htmlFor="forgot-email">{t('account.field.email')}</label>
-          <input autoComplete="email" id="forgot-email" maxLength={254} name="email" required type="email" />
-        </div>
-        <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={forgot.isPending} type="submit">
-          {forgot.isPending ? t('auth.recovery.sending') : t('auth.recovery.send')}
+        <AuthFormFeedback error={error} focusKey={form.failureKey} />
+        <EmailRequestSent form={form} message={t('auth.recovery.accepted')} />
+        <AuthEmailField form={form} id="forgot-email" />
+        <button className={`${styles.button} ${styles.buttonPrimary}`} disabled={form.isPending} type="submit">
+          {form.isPending ? t('auth.recovery.sending') : t('auth.recovery.send')}
         </button>
-        {forgot.isSuccess && (
+        {form.sentTo && (
           <button
             className={`${styles.button} ${styles.buttonSecondary}`}
-            onClick={() => navigate('/reset-password', { state: { email: submittedEmail } })}
+            onClick={() => navigate('/reset-password', { state: { email: form.sentTo } })}
             type="button"
           >
             {t('auth.recovery.enter')}

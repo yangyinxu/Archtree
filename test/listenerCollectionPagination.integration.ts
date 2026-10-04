@@ -8,6 +8,7 @@ import { ObjectId } from 'mongodb';
 
 import { createApp } from '../src/app';
 import { getDb } from '../src/infrastructure/database';
+import { resetRateLimitWindowsForTests } from '../src/middleware/requestProtectionMiddleware';
 import { deleteAlbumAndReferences } from '../src/services/albumLifecycleService';
 import {
     MongoReplicaSetHarness,
@@ -656,4 +657,46 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
         `/api/listener/v1/pages/home/items/${ids.listItem}?cursor=${encodeURIComponent(firstList.nextCursor)}`
     );
     assert.equal(deletedPageItem.status, 404);
+});
+
+test('Home collection pages return 401 for a presented Bearer token that fails verification', async () => {
+    resetRateLimitWindowsForTests();
+    const pathname = `/api/listener/v1/pages/home/items/${ids.gridItem}?limit=1`;
+    const expiredToken = jwt.sign({
+        userId: ids.userOne.toHexString(),
+        email: 'listener-one@example.test',
+        role: 'user',
+        sessionId: ids.sessionOne.toHexString(),
+        tokenType: 'access'
+    }, process.env.JWT_SECRET!, { expiresIn: -1 });
+    const bearerRequest = (token: string, viewerUserId?: ObjectId) => fetch(`${baseUrl}${pathname}`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+            ...(viewerUserId ? { 'X-Finitude-Account-Viewer': viewerUserId.toHexString() } : {})
+        }
+    });
+
+    for (const viewerUserId of [ids.userOne, ids.userTwo, undefined]) {
+        const response = await bearerRequest(expiredToken, viewerUserId);
+        const label = `expired Bearer with viewer ${viewerUserId?.toHexString() ?? 'none'}`;
+        assert.equal(response.status, 401, label);
+        assert.deepEqual(await response.json(), { message: 'Missing or invalid credentials.' }, label);
+        assert.equal(response.headers.get('cache-control'), 'no-store', label);
+    }
+
+    const anonymous = await request(pathname);
+    assert.equal(anonymous.status, 200);
+    assert.equal(anonymous.headers.get('cache-control'), 'public, max-age=60');
+
+    const validToken = accessToken(ids.userOne, ids.sessionOne, 'listener-one@example.test');
+    for (const viewerUserId of [ids.userOne, ids.userTwo, undefined]) {
+        const response = await bearerRequest(validToken, viewerUserId);
+        const label = `valid Bearer with viewer ${viewerUserId?.toHexString() ?? 'none'}`;
+        assert.equal(response.status, 200, label);
+        assert.equal(response.headers.get('cache-control'), 'private, no-store', label);
+    }
+
+    const staleCookieViewer = await cookieRequest(pathname, validToken, ids.userTwo);
+    assert.equal(staleCookieViewer.status, 409);
+    assert.equal((await staleCookieViewer.json() as any).code, 'account_viewer_mismatch');
 });

@@ -11,12 +11,11 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
-import { browserSessionQuery } from '../api/session';
 import { listenerCapabilitiesQuery } from '../api/listenerCapabilities';
-import { Avatar } from '../components/Avatar';
 import { Icon, type IconName } from '../components/Icon';
 import { SearchQueryProvider, useSearchQuery } from '../features/search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
+import { useSocialAvailability } from '../features/social/socialAvailability';
 import { RouteAnnouncer } from './RouteAnnouncer';
 import { useLocalization } from '../localization/LocalizationProvider';
 import type { MessageKey } from '../localization/contract';
@@ -26,7 +25,8 @@ import styles from './AppShell.module.css';
 const destinations: Array<{ labelKey: MessageKey; path: string; icon: IconName }> = [
   { labelKey: 'shell.nav.home', path: '/', icon: 'home' },
   { labelKey: 'shell.nav.search', path: '/search', icon: 'search' },
-  { labelKey: 'shell.nav.library', path: '/library', icon: 'library' }
+  { labelKey: 'shell.nav.library', path: '/library', icon: 'library' },
+  { labelKey: 'social.nav', path: '/social', icon: 'account' }
 ];
 
 const PlaylistSidebar = lazy(() => import('../features/playlists/PlaylistSidebar'));
@@ -43,6 +43,10 @@ const PlayerBar = lazy(() => import('../components/PlayerBar').then((module) => 
   default: module.PlayerBar
 })));
 const VideoTheater = lazy(() => import('../components/VideoTheater'));
+const GlobalRoomInvitations = lazy(() => import('../features/social/GlobalRoomInvitations').then(module => ({
+  default: module.GlobalRoomInvitations
+})));
+const AccountEntry = lazy(() => import('./AccountEntry').then(module => ({ default: module.AccountEntry })));
 
 /** Activates the shell skip link without changing the routed URL. */
 const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -53,12 +57,14 @@ const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
 const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => {
   const location = useLocation();
   const { t } = useLocalization();
+  // Together stays reachable by address for preserved safety actions, but is not advertised while disabled.
+  const { socialEnabled } = useSocialAvailability();
   return (
     <nav
       className={mobile ? styles.mobileNavigation : styles.navigation}
       aria-label={t('shell.nav.primary_label')}
     >
-      {destinations.map((destination) => {
+      {destinations.filter((destination) => socialEnabled || destination.path !== '/social').map((destination) => {
         const label = t(destination.labelKey);
         const libraryOwnsRoute = destination.path === '/library'
           && (location.pathname === '/playlists' || location.pathname.startsWith('/playlists/'));
@@ -141,27 +147,6 @@ const TopSearch = () => {
   );
 };
 
-const AccountEntry = () => {
-  const session = useQuery(browserSessionQuery());
-  const user = session.data?.user;
-  const { t } = useLocalization();
-  const label = user?.displayName.trim()
-    || user?.email
-    || (session.isPending ? t('shell.account.checking') : t('shell.account.log_in'));
-
-  return (
-    <Link className={styles.account} to={user ? '/account' : '/login'} aria-label={label}>
-      <Avatar
-        avatar={user?.avatar}
-        displayName={user?.displayName}
-        email={user?.email}
-        viewerId={user?.id}
-      />
-      <span>{label}</span>
-    </Link>
-  );
-};
-
 /** Keeps navigation, route content, and the single player mounted together. */
 const AppShellContent = () => {
   const navigate = useNavigate();
@@ -220,7 +205,10 @@ const AppShellContent = () => {
         <Suspense fallback={null}>
           <LanguageSelector placement="mobile" />
         </Suspense>
-        <AccountEntry />
+        <div className={styles.accountActions}>
+          {capabilities.data?.social?.enabled && <Suspense fallback={null}><GlobalRoomInvitations /></Suspense>}
+          <Suspense fallback={<span className={styles.accountLoading} aria-hidden="true" />}><AccountEntry /></Suspense>
+        </div>
       </header>
 
       <aside className={styles.sidebar} aria-label={t('shell.sidebar.label')} id="library-sidebar">

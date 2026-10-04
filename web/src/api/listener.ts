@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { apiRequest } from './client';
+import { ApiError, apiRequest } from './client';
+import { captureAccountOperation, isAccountOperationCurrent } from './accountEpoch';
 import {
   libraryPageSchema,
   libraryTargetSchema,
@@ -15,7 +16,8 @@ import {
   saveStatusesSchema,
   type LibraryContentType,
   type LibrarySort,
-  type LibraryTarget
+  type LibraryTarget,
+  type SaveStatus
 } from './contentSchemas';
 
 const listenerBasePath = '/api/listener/v1';
@@ -152,18 +154,41 @@ export const libraryPageQuery = (
   enabled: viewerKey.trim().length > 0
 });
 
-export const getSaveStatuses = (
+/** Resolves the whole collection in bounded batches without publishing partial or stale account data. */
+export const getSaveStatuses = async (
   viewerKey: string,
   items: LibraryTarget[],
   signal?: AbortSignal
 ) => {
-  const targets = libraryTargetSchema.array().max(100).parse(items);
-  return apiRequest('/content/me/saves/status', saveStatusesSchema, {
-    method: 'POST',
-    body: JSON.stringify({ items: targets }),
-    accountViewer: viewerKey,
-    signal
-  });
+  const identity = (target: LibraryTarget) => `${target.contentType}:${target.contentId}`;
+  const targets = [...new Map(libraryTargetSchema.array().parse(items)
+    .map((target) => [identity(target), target])).values()];
+  const guard = captureAccountOperation(viewerKey);
+  const resolved: SaveStatus[] = [];
+  const assertCurrent = () => {
+    signal?.throwIfAborted();
+    if (!isAccountOperationCurrent(guard)) {
+      throw new ApiError('The active account changed.', 'invalid-response', 409, 'account_viewer_mismatch');
+    }
+  };
+  for (let offset = 0; offset < targets.length; offset += 100) {
+    assertCurrent();
+    const batch = targets.slice(offset, offset + 100);
+    const result = await apiRequest('/content/me/saves/status', saveStatusesSchema, {
+      method: 'POST',
+      body: JSON.stringify({ items: batch }),
+      accountViewer: viewerKey,
+      signal
+    });
+    assertCurrent();
+    const expected = new Set(batch.map(identity));
+    if (result.items.length !== batch.length || result.items.some((item) => !expected.delete(identity(item)))) {
+      throw new ApiError('The server returned incomplete Save states.', 'invalid-response');
+    }
+    resolved.push(...result.items);
+  }
+  assertCurrent();
+  return { items: resolved };
 };
 
 export const saveStatusesQuery = (viewerKey: string, items: LibraryTarget[]) => queryOptions({

@@ -7,6 +7,8 @@ export const maxImageUploadMb = Number.isFinite(configuredMaxImageUploadMb) && c
     ? Math.min(configuredMaxImageUploadMb, absoluteMaxImageUploadMb)
     : 10;
 export const maxAvatarUploadMb = 5;
+/** Allows the image ceiling plus bounded multipart headers, before memory parsing. */
+export const maxAvatarRequestMb = 6;
 
 const storage = multer.memoryStorage();
 
@@ -33,8 +35,15 @@ export const artistReleaseImageUpload = multer({
 export const avatarUpload = multer({
     storage,
     limits: {
-        fileSize: maxAvatarUploadMb * 1024 * 1024,
-        files: 1
+        // Busboy emits the limit event when the size reaches the ceiling.
+        fileSize: maxAvatarUploadMb * 1024 * 1024 + 1,
+        files: 1,
+        fields: 0,
+        // Busboy's parts ceiling is exclusive of the one accepted file part.
+        parts: 2,
+        fieldNameSize: 100,
+        fieldSize: 1024,
+        headerPairs: 100
     }
 });
 

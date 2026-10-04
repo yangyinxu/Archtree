@@ -16,6 +16,469 @@ Implementation boundaries, API compatibility, runtime reliability, browser sessi
 recovery, and catalog reconciliation are documented in
 [`docs/architecture.md`](docs/architecture.md).
 
+## Engineering guide
+
+The independent **Engineering Guide** at `/engineering` introduces the system,
+local setup, module responsibilities, a complete Album request walkthrough, and
+the checks needed for a change. Its sidebar, source links, and page outlines work
+independently of the Finitude listener. Administrators see an entry on the Archtree
+landing page. Pages and assets require the existing administrator session; a
+signed-out visitor returns to the requested guide page after Archtree login, and
+an ordinary account receives `403`. The guide does not grant or change any role.
+
+English pages use `/engineering` and `/engineering/<topic>`; Simplified Chinese
+pages use `/engineering/zh-hans` and `/engineering/zh-hans/<topic>`. The header's
+English / 简体中文 switch preserves the current topic. Language selection is
+encoded in the URL and does not change the Finitude language preference.
+
+To read or review the guide locally without application credentials or a database:
+
+```sh
+npm ci
+npm run preview:engineering
+```
+
+Open `http://127.0.0.1:4174/engineering`. This command builds the guide and starts
+a documentation-only, read-only preview bound to loopback. Stop it with Ctrl+C;
+rebuild and restart after changing content. The application route uses the same
+generated pages with server-side authorization.
+
+English explanations live in `docs/engineering/guide.json`, and English interface
+copy lives in `engineering/locales/en-US.json`. The complete Chinese translation
+is maintained in `docs/engineering/locales/zh-Hans.json`; see the
+[Engineering Guide localization workflow](docs/localization.md#engineering-guide-localization)
+when editing either language. The existing business rules, architecture,
+development-environment documentation, and code remain the authoritative sources.
+`npm run build:engineering` validates the page schema,
+internal page/section links, referenced repository files and text anchors, and
+documented npm commands, plus translation keys, interface placeholders, and the
+English source digest. It emits 26 static topic pages across both languages,
+with escaped HTML and local CSS/JavaScript, to the ignored `engineering/dist`
+directory. No runtime route reads arbitrary
+repository documents, and no third-party service is needed to render the guide.
+The build is included in `npm run build`; restart the server after rebuilding.
+
+Each page identifies its source commit. A dirty checkout is visibly marked as a
+working copy, whose source links open the base commit and may differ from local
+changes. Release staging includes only `engineering/dist`, rejects missing or
+invalid guide bundles, and requires a clean guide built from the release commit.
+The guide marks future work separately from implemented behavior; dated test
+evidence in source documents must never be presented as current verification.
+
+## Social backend
+
+The transactional identity/friendship API is mounted at `/api/social/v1`.
+`FINITUDE_SOCIAL_ENABLED=true` explicitly enables profile creation/reactivation,
+profile edits, new requests, acceptance, music sharing and listening publication;
+it defaults to false in all environments. Disabling admission hides listening
+status. Other reads, deny-only discovery opt-out, removal, cancellation,
+block/unblock, deactivation, share dismissal/withdrawal, listening opt-out/stops
+and outcome lookup remain available. Account deletion always performs social cleanup.
+
+The API requires a revocable authenticated session, current Web viewer and the
+existing same-origin cookie mutation checks. JSON bodies are limited to 4 KiB.
+The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
+scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
+must never be logged or placed in URLs. Key rotation invalidates old scopes and
+cursors; clients must not automatically resubmit an uncertain command under a
+new scope after rotation. Startup verifies the `required-indexes-v6-social-reports` constraints before
+admission; these are additive schema changes even when the feature is disabled.
+
+See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
+for exact routes, envelopes, limits, retention and recovery behavior. Narrow
+checks are `node --import tsx --test test/socialContract.test.ts test/socialRoutes.test.ts test/socialModerationRoutes.test.ts test/socialModerationView.test.ts`
+and `node --import tsx --test --test-concurrency=1 test/socialLifecycle.integration.ts test/socialAccountLifecycle.integration.ts test/socialAuth.integration.ts test/socialModeration.integration.ts`.
+The integration harness starts an isolated local MongoDB replica set; it does
+not connect to the configured application database. Full gates remain `npm test`,
+`npm run build` and `npm run test:integration`.
+
+Use **Share with a friend** on a track or Album to select an existing friend.
+**Together → Music shares** (`/finitude/social/shares`) shows private Received and
+Sent lists. A share lasts up to 30 days; repeating the same active share does not
+create another card. Play, Save and room invitations are explicit actions.
+Received cards can be dismissed and Sent cards withdrawn. Removing friendship or
+blocking clears the pair's shares. The same page remains available after login.
+
+In **Together**, **Share what I’m listening to** is off by default. Enable it to
+share fresh actual Audio playback with current friends, from both ordinary and
+room playback. **Share from this device** explicitly chooses the publishing
+device. **Listening with friends** lists every friend listening now, 20 at a time
+with **Load more**; it is read when Together opens and refreshes the loaded pages
+while visible. Status expires within 25 seconds without fresh progress and stops
+on pause, buffering or opt-out.
+Viewing a status does not play anything. Invite a friend into a room you host,
+or explicitly confirm creation of a paused room with eligible Audio before
+sending the invitation. If invitation fails, the created room remains available.
+
+**Report** appears on friends, requests, blocked rows and lookup results in
+**Together**. It opens a dialog for an optional reason and note and sends only
+after **Send report**. The reported listener is never told. A listener can report
+each person once per UTC day and file up to 10 reports a day. A suspended
+listener sees a notice in place of the profile controls.
+
+Administrators review reports at `/admin/social/reports`, linked as **Social
+reports** under Content Manager operations. Each open report can be dismissed,
+marked handled, or resolved by suspending the reported listener, which resolves
+all of that listener's open reports. The page also lists suspended listeners
+for unsuspension and looks up any handle. Resolved reports are deleted 90 days
+after resolution. The same routes return JSON for scripted use with an
+administrator access token from `POST /auth/login` (Bearer requests skip the
+browser same-origin check; keep the token out of shell history and logs):
+
+```sh
+curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H 'Accept: application/json' \
+  'https://<host>/admin/social/reports?state=open&limit=50'
+curl -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" 'https://<host>/admin/social/profiles?handle=<handle>'
+curl -X POST -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"resolution":"dismissed"}' 'https://<host>/admin/social/reports/<reportId>/resolve'
+curl -X POST -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{}' 'https://<host>/admin/social/profiles/<socialId>/suspend'
+curl -X POST -H "Authorization: Bearer $ADMIN_ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  -d '{}' 'https://<host>/admin/social/profiles/<socialId>/unsuspend'
+```
+
+Each change is idempotent: repeating it returns `noop`, so a
+`mutation_outcome_unknown` response can be retried after reading the current
+state. Suspension and moderation work whether or not `FINITUDE_SOCIAL_ENABLED`
+is set. See
+[reports and suspension](docs/architecture.md#reports-and-administrator-suspension)
+for the stored evidence, transactions and account-deletion handling.
+
+## Listening rooms and local demonstration
+
+Finitude Web exposes **Together** at `/finitude/social`: opt-in identity, exact
+handle lookup (anyone found can also be blocked), friend requests, invitations, queue selection, shared transport,
+Host/Everyone permissions, local pause/resync and accepted host transfer. It uses
+the existing player. **Remove friend**, **Block**, **Deactivate social profile** and
+**Remove from room** ask for confirmation first and say what changes. Enable both `FINITUDE_SOCIAL_ENABLED=true` and
+`FINITUDE_ROOMS_ENABLED=true`; both default to false. Leave/end/decline and account
+cleanup remain available when new room admission is disabled. With the flags off,
+Finitude Web shows no social entry point and sends no social request; `/finitude/social`
+stays reachable by address and says Together is temporarily unavailable, and the room
+panel says rooms are temporarily unavailable instead of connecting. Native room UI and
+shared Video are not enabled by this slice.
+
+For a disposable local demonstration, run `npm run build` then
+`npm run demo:social`. Node 24 and the same trusted local `mongod` used by the
+integration suite are required. The command starts its own MongoDB replica set
+and loopback S3-compatible HTTP fixture, seeds three original synthesized WAV
+tracks, and prints two `/finitude/social` URLs. Open both in Chrome. The separate
+`127.0.0.1` and `localhost` origins keep the two normal cookie logins independent.
+Use the synthetic accounts `alice@example.test` and `bob@example.test`, each with
+password `Social-demo-only-2026!`. This password belongs only to this disposable
+fixture; the command refuses production mode and does not use the application
+MongoDB database or S3 bucket. Stop the command with Ctrl-C to clean up its owned
+resources; restart creates fresh accounts and rooms.
+
+Create an identity in each tab, use exact handle lookup to send/accept a friend
+request, select tracks and create a room, then invite and join from the other tab.
+Host control is the default. Choose Everyone to let both active controllers seek
+or choose a track. Pause only for me stays local. The main button becomes Listen
+along when the room is playing, or Resume and play for everyone when the room is
+paused and you can control it. A guest in Host control can resume locally and
+wait for the host. Switching tabs keeps Audio playing while the browser and
+realtime connection remain active. Actual page freezing, sleep with stale
+connectivity, or connection loss pauses local playback; after reconnection use
+the main button to listen again. Transfer and leave requires the recipient to accept; End room
+closes it for every member. A refreshed tab observes until Use this device is
+selected. Browser autoplay refusal is surfaced with explicit resync rather than
+reported as successful playback.
+
+In **Song requests**, any admitted member can recommend an eligible Audio track,
+including an observer device and guests in Host control. The host's active
+controller adds requests to the queue or dismisses them; members can withdraw
+their own pending requests. The host can move queued songs earlier/later and
+remove a song after selecting another current entry. Appending and reordering
+preserve playback and local pause. Requester attribution reflects current room
+members only. There are at most five pending requests per member and 20 per room.
+
+Use **Listen together** beside an Audio track in Search, an Album, Library, or
+the player to request it for your current room. Confirmed requests show
+**Requested. Waiting for the host.** With no room, choose a friend and explicitly
+confirm a paused room plus invitation. If sending fails, use the existing room
+and receipt recovery instead of creating another room. Songs are checked for
+room eligibility before submission; ordinary playback still supports other
+formats. Together's song pickers support title search and **Load more**, retaining
+the initial queue selection across searches. The global room entry returns to
+controls and shows shared playback, local pause, observation or connection
+recovery without starting playback.
+
+**Room activity** offers five fixed emoji reactions to every admitted member,
+including observing devices. It shows brief confirmed join, song, host and
+control-mode changes. Events expire after 30 seconds and are cleared when their
+member departs or the room ends. Reactions do not change playback; repeated
+commands are deduplicated. The per-account limit is 12 reactions per minute,
+within a room-wide limit of 60.
+
+Active social profiles have a **Room invitations** bell throughout the Web
+listener. Its dot means there are pending invitations, not an unread-history
+count; opening the list does not clear it. The list is also available at
+`/finitude/social/invitations`, including while the listener is in another room.
+After inviting a friend, the host's active controller can choose **Copy invitation
+link** beside that friend. A read-only URL field provides a manual fallback if
+clipboard access is unavailable. The URL points to
+`/finitude/social/invitations/:invitationId` and works only for that invitation's
+recipient. Login preserves this destination across reloads. Opening the link
+never joins, changes rooms or starts playback; the recipient explicitly joins or
+declines. If a link reached the wrong person, **Send new invitation** (after a
+confirmation) replaces the invitation and the earlier link stops working; a
+replacement does not use another of the host's 20 pending invitations.
+Replaced, expired and revoked invitations, and links opened by a
+different account, show the same unavailable state. These are Web links; native
+invitation handling remains a later delivery stage.
+
+The global entry reuses the existing account-scoped realtime connection and
+refreshes invitation reads after subscription/reconnection. Invitations also
+refresh every 15 seconds while the page is active and on focus; local expiry
+removes stale reminders even when MongoDB TTL cleanup sends no invalidation.
+Disabled room capabilities suppress background ticket retries while keeping
+explicit safety actions available. No notification sound or push permission is
+requested.
+
+Social works with `FINITUDE_ROOMS_ENABLED=false`. Whenever no room socket is
+connected, the Web client polls the payload-free `GET /api/social/v1/me/changes`
+cursor in a visible tab. It polls 15 seconds after its previous poll and doubles
+that wait up to 60 seconds while nothing changes. A changed cursor refreshes
+incoming requests, shares and other social reads. Each poll reads two small
+documents and writes nothing. A connected socket stops the polling.
+
+The implemented [room API](docs/architecture.md#implemented-audio-room-api) uses
+HTTP for version-fenced commands and complete authorized WebSocket snapshots for
+delivery. The server uses pinned `ws` with compression disabled; no Redis or
+external messaging service is required for this bounded single-authority slice.
+The proxy must forward Upgrade/Connection and WebSocket subprotocol headers,
+preserve the same-origin Host/protocol contract, and allow more than the five
+second heartbeat interval. The managed Elastic Beanstalk HTTPS server
+(`.platform/hooks/postdeploy/01_configure_https.sh`) does this for every path:
+only an `Upgrade: websocket` request gets `Connection: upgrade`, other requests
+proxy exactly as before, `Sec-WebSocket-Protocol` and `Origin` pass through
+unchanged, and its 120-second idle timeouts exceed the five-second ping and the
+gateway's 16-second silence eviction. The next application deploy rewrites an
+existing instance's config without reissuing its certificate. The temporary
+HTTP server used before a certificate exists never forwards upgrades. Configure
+`TRUST_PROXY_HOPS` for the actual proxy chain. Production requires HTTPS/WSS.
+Only the live MongoDB lease holder admits realtime connections and scheduling;
+verify routing, lease recovery and capacity in the deployment before enabling
+it.
+
+New uploads receive a private representation record tied to the exact object.
+The room analyzer verifies complete PCM16 WAV (mono/stereo, 8–48 kHz), MP3
+(MPEG Layer III, including verified Xing-indexed VBR), and self-contained, single-track AAC-LC
+M4A (mono/stereo, 8–48 kHz). Duration must be finite and at most 24 hours.
+Compressed inputs are capped at 512 MiB and require strict framing/sample tables
+plus full FFmpeg decoding to the null muxer. HE-AAC, encrypted/fragmented MP4,
+external references, Video and unverified audio remain outside room selection.
+Ordinary playback remains available if inspection fails or the decoder is absent.
+
+Install FFmpeg and run `npm run doctor` before compressed-media development or
+rollout. `ROOM_AUDIO_FFMPEG_PATH` may select an absolute executable path; otherwise
+`ffmpeg` is resolved on PATH. Each process permits at most two simultaneous
+single-threaded decodes, with a 60-second decode deadline. Operational decoder
+errors preserve retryable evidence; successful source metadata is never inferred
+from a filename, MIME type, display duration or a missing runtime. On Elastic
+Beanstalk a prebuild hook installs a pinned, SHA-256-verified FFmpeg and
+`.ebextensions/room-audio-decoder.config` points `ROOM_AUDIO_FFMPEG_PATH` at it;
+see [Room audio decoder on Elastic Beanstalk](#room-audio-decoder-on-elastic-beanstalk).
+See [runtime setup](docs/development-environment.md#room-audio-analysis-runtime).
+
+Administrators can open **Content Manager → Operations → Room audio analysis**
+at `/content/manage/room-audio-analysis`. GET lists 25 rows per page and never
+reads storage or starts analysis. POST explicitly analyzes/retries one source,
+rechecking the admin role and matching its opaque source revision and original
+attempt ID. A source-bound two-minute lease preserves interrupted/uncertain work;
+recovery is explicit. Storage/decode work has a 90-second deadline and a 512-MiB
+temporary-file limit; database calls retain the bounded driver timeouts and
+five-second server-operation limit. Late results cannot publish after lease
+expiry. A separate concurrency limit admits one analysis request at a time. It pins S3
+HEAD/GET by ETag/version, rechecks the source, and writes only analysis metadata.
+It never PUTs or DELETEs objects, replaces bytes, or changes an eligible revision.
+A concurrent upload/deletion wins its source fence; stale results cannot publish.
+
+From a full repository checkout on an administrator workstation, a bounded CLI
+lists a single page by default, without index or media writes:
+
+```sh
+npm run analyze:room-audio -- --admin-id=<admin-account-id> --limit=25
+npm run analyze:room-audio -- --admin-id=<admin-account-id> --limit=25 --apply --confirm=ANALYZE_ROOM_AUDIO
+```
+
+Use the returned `resumeAfter` with `--after=<track-id>` for explicit continuation.
+When `stopped=false` and the cursor is null, the scan is finished. When
+`stopped=true` and the cursor is null, restart without `--after` to recover the
+first unresolved item. A failed, busy, cancelled, stale or
+unknown item stops the batch before advancing past it. Completed items remain
+stored and are skipped on continuation. SIGINT/SIGTERM cancels the current item;
+retryable attempts retain their original ID. Inspect the current status before
+retrying an unknown outcome. This command needs the normal private database/S3
+configuration and an existing admin account. The Elastic Beanstalk bundle excludes
+repository scripts; use the deployed administrator page for in-app operations.
+Use it for targeted recovery; the catalog backfill below covers the whole catalog.
+Run either command against production only as the approved launch backfill or
+another explicitly authorized catalog operation.
+
+#### Room audio catalog backfill
+
+MP3/M4A uploads made while Elastic Beanstalk had no decoder recorded
+`decoder_unavailable`, and older tracks have no verified analysis, so none of
+them can be chosen in a room. `npm run backfill:room-audio-analysis` walks the
+whole catalog from an operator checkout and analyzes, one source at a time,
+every ready/published Audio track whose analysis is missing, retryable or from
+an older analyzer version. Eligible, terminally unsupported and leased tracks are
+skipped without storage reads, and unpublished or unfinished uploads are never
+listed, so rerunning a finished backfill analyzes nothing. It calls the same
+source-fenced service as the administrator page: pinned S3 HEAD/GET, no object
+writes, analysis metadata only, and a recorded attempt keeps its identity.
+
+```sh
+# 1. Preview (the default): catalog reads only, no storage reads or database writes.
+npm run backfill:room-audio-analysis -- --admin-id=<admin-account-id> --log=room-audio-backfill.jsonl
+# 2. Apply in bounded, paced runs (defaults: 100 analyses per run, 2 s apart, 25 rows per page).
+npm run backfill:room-audio-analysis -- --admin-id=<admin-account-id> --log=room-audio-backfill.jsonl \
+  --apply --confirm=BACKFILL_ROOM_AUDIO
+# 3. Continue after the previous summary's resumeAfter until a summary reports finished=true.
+npm run backfill:room-audio-analysis -- --admin-id=<admin-account-id> --log=room-audio-backfill.jsonl \
+  --after=<resumeAfter> --apply --confirm=BACKFILL_ROOM_AUDIO
+```
+
+`--max-analyses=1..1000` bounds one run, `--delay-ms=0..60000` paces analyses,
+and `--page-size=1..100` sizes catalog reads. Each listed track produces one JSON
+line (`mediaTrackId`, `listed` status, `result`, bounded `reason`, `resumeAfter`)
+and the run ends with a `summary` line. `--log` appends the same lines to a
+private (0600) file, so resumed runs extend one audit trail. Titles, storage keys,
+validators and attempt IDs are never printed. Exit codes: 0 finished, 2 stopped
+and resumable, 1 could not run, 130/143 interrupted.
+
+Busy, stale, timed-out and other per-source failures are logged and passed over
+(`retryLater` counts them); a later run started without `--after` retries them.
+A missing local decoder, unavailable storage, an uncertain outcome, or SIGINT/SIGTERM
+stops the run before its cursor passes that track. `--apply` refuses to start
+unless the local FFmpeg passes `node scripts/check-runtime.mjs --room-audio`, so
+a broken decoder cannot turn every source into a failed attempt.
+
+Run it safely:
+
+- Use a trusted operator machine with FFmpeg installed and the target's private
+  `.env` (`DB_CONN_STRING`, `DB_NAME`, `S3_BUCKET_NAME`, `AWS_REGION` and AWS
+  credentials). Analysis needs only `s3:GetObject`/`s3:GetObjectVersion` on the
+  media bucket; prefer credentials limited to those reads.
+- Check the target before every command; the dry run is the default and writes nothing.
+  Compare its `wouldAnalyze` count with expectations before applying. The dry
+  run counts each `wouldAnalyze` row toward `--max-analyses` (default 100), so a
+  default preview stops at 100 with `stopReason: "limit"`. To see the full count,
+  pass `--max-analyses=1000` and follow `resumeAfter` until `finished=true`.
+- Each analysis downloads the full source (up to 512 MiB) into the local
+  temporary directory and counts as S3 data transfer out. Keep the default
+  pacing on the free-tier MongoDB Atlas cluster and run one backfill at a time.
+  The deployed administrator page can keep working: a two-minute source lease
+  makes either side skip a track the other is analyzing.
+- The rooms launch decision approves one production backfill after the
+  FFmpeg-enabled deployment has been verified; keep the log's final summary with
+  the release evidence.
+
+Verified room response MIME types come from the inspected format rather than an
+upload declaration. Room URLs pin an opaque media revision and HEAD/GET validate the same stored S3
+ETag/version. S3 permissions must cover `GetObjectVersion` and
+`DeleteObjectVersion` when version IDs are present. Fresh PUTs use a unique
+identity-bound key and `If-None-Match: *`, preventing an SDK retry from silently
+creating another version. A lost PUT response retains its pending key and
+unknown-outcome flag for explicit version reconciliation; retry/delete cannot
+erase that evidence. Known pending, active and detached versions are deleted by
+exact VersionId. The latest-key inventory is not a full version-history
+reconciliation tool.
+
+Run `npm test`, `npm run build`, `npm run test:integration`, and
+`npm run test:e2e:social --workspace @archtree/finitude-web` for the real
+MongoDB/S3/WebSocket browser flows. Each social test owns a disposable
+server, database and object store, including separate rate-limit windows; the
+two rooms tests run as the `chromium-rooms` and `chromium-rooms-recovery`
+projects so neither can exhaust the other's rate windows. The
+`chromium-room-lifecycle` project waits through one real 30-second host-absence
+grace and verifies the visible countdowns, suspension in both control modes,
+host return without automatic resume, five-minute closure in both modes, and
+observer logout versus sign out everywhere. Only that disposable fixture exposes
+`POST /__fixture/room-host-absence`, which moves a recorded absence start into
+the past; the application's own sweep still suspends or closes the room. The
+`chromium-social-safety` project runs request cancel and decline, friend removal,
+block, unblock, deactivation and reactivation through the Together page against the
+real social service; `chromium-room-membership` covers removing a member, leaving,
+Reconnect after a lost transport, and the room exit that a block causes. Keep the
+ordinary listener E2E gate for playback continuity, navigation and
+accessibility changes. The social E2E uses a disposable
+headed Chromium profile to verify real background tab visibility; run it in a
+desktop session, or use `xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web`
+on Linux with Xvfb installed. All automated Chromium launches, including this
+headed profile, use `--disable-audio-output` to route playback through Chromium's
+fake audio output stream. This avoids opening the developer's audio output device
+and triggering automatic Bluetooth headphone switching; muting alone can still
+open that device. Media decoding, playback clocks, element volume/mute state and
+background-tab behavior remain under test. These checks do not verify audible
+output or physical headphone routing.
+
+The compressed-media social scenario uploads original CBR MP3, Xing VBR MP3 and
+AAC-LC M4A fixtures through the production storage lifecycle. It checks pinned
+HEAD/Range responses, real decoding, readiness, seeking, cross-format advancement
+and absence of command echoes. In Linux CI (`CI=true` or `CI=1`), the same
+scenario also runs with Firefox and WebKit hosts, each paired with an isolated
+Chromium guest and its own server/database. Dedicated Firefox/WebKit room projects
+also verify explicit controller recovery after reload and host transfer during
+playback, with both participants using the selected engine. These extra projects
+are collected only on Linux CI; browser-specific results remain separate from
+Chromium proof. Chromium retains the separate strict native-background scenario.
+Room playback preloads media while paused so readiness can precede the shared
+start; confirming a completed seek does not seek again to the same position.
+It corrects startup drift after credible media-clock advancement. A corrective
+seek measures the clock time lost during that seek, separately from initial
+play startup. At most two additional seeks per playback occurrence may compensate
+the measured delay, within six seconds of the first compensation. The second
+allows one refinement when the first measured decoder delay changes; concurrent
+heartbeat corrections update the clock reference
+without interrupting that observation. Measurements expire after three seconds.
+Valid finite, non-negative delays within that window are retained, while
+predictive lead is capped at two seconds. Later ordinary heartbeat
+corrections can reuse the measured delay until the playback effect changes.
+All pending work is cancelled by local pause, authority loss, or source changes.
+A fully buffered Audio decoder that stays paused with only current-frame data after a
+completed seek gets at most one paused source reload per playback occurrence;
+readiness still requires future data, and local pause or leaving cancels recovery.
+For that recovered occurrence, drift corrections use explicit measured seeks
+instead of playback-rate changes, which can trigger additional decoder seeks.
+This may produce a brief jump for smaller drift, but avoids repeated rate
+transitions on a decoder that already needed recovery. A new occurrence resumes
+normal rate correction. Rate restoration never authorizes a seek from stale
+readiness or permission state.
+CI runs these scenarios in their own job and uploads `finitude-social-browser-evidence`
+from it whether they pass or fail; the MongoDB integration and ordinary browser
+gates run in parallel jobs.
+The isolated PulseAudio sink uses a requested 100 ms device-buffer budget
+(`PULSE_LATENCY_MSEC=100`); its unrestricted default can introduce seconds of
+output buffering (see [PulseAudio latency control](https://www.freedesktop.org/software/pulseaudio/doxygen/structpa__buffer__attr.html)).
+This changes only the simulated output device, with no browser media-clock
+substitution or readiness/drift threshold changes. Compressed-audio evidence
+records the observed stream/sink latencies when available, continuous playback
+advancement, and capture-time-adjusted drift. These results do not establish a
+latency guarantee for arbitrary physical or Bluetooth output devices.
+
+In isolated Linux CI (`CI=true` or `CI=1`), the native-tab fixture matches
+Playwright's default `--no-sandbox` launch option; other local launches keep the
+browser sandbox. This changes no host sandbox or AppArmor settings. Native
+startup failures report exit/signal status and at most 4 KiB of startup stderr;
+collection stops when the debugging connection is established, before login.
+
+On macOS, the ordinary listener E2E configuration defaults to Chromium only and
+prints a notice that Firefox/WebKit were excluded: their headless modes do not
+provide verified isolation from hardware audio output. Run the full three-browser
+matrix in an isolated Linux CI environment without host audio passthrough. To
+deliberately allow hardware audio on a Mac, use
+`FINITUDE_E2E_ALLOW_HARDWARE_AUDIO=1 npm run test:e2e`; this can take over connected
+headphones. Report excluded browser projects as not run, not as passed. Other
+platforms retain their existing three-browser matrix.
+
+The legacy
+`contracts/social/prototype-v1/playback-trace.json` remains a feasibility fixture
+for native DEBUG adapters, not the room wire contract. Native devices and native
+background participation, shared Video and deployment performance remain tracked in
+[the social implementation plan](docs/plans/social-and-shared-playback-plan.md).
+
 ## Code Documentation
 
 Classes, types, and functions should have concise comments describing their
@@ -36,10 +499,13 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm run doctor`: check Node 24 and the isolated MongoDB test executable
 - `npm run doctor:release`: also require the Linux/Bash release environment
 - `npm run dev`: start development server
+- `npm run demo:social`: start the isolated two-account Audio room demonstration
 - `npm run dev:web`: start the listener Vite server at `/finitude/`; run the
   Express development server separately so API requests can be proxied
 - `npm start`: start production-mode server
-- `npm run build`: type-check the server and build the listener bundle
+- `npm run build`: type-check the server and build the listener and engineering guide
+- `npm run build:engineering`: validate and build the static engineering guide
+- `npm run preview:engineering`: build and serve the guide on loopback port 4174
 - `npm test`: run server and listener unit/component tests
 - `npm run test:server:linux`: explicitly run the Linux platform-hook and artifact
   tests; these also run automatically as part of `npm test` on Linux
@@ -111,9 +577,22 @@ Required variables:
 - `SERVER_SHUTDOWN_CLEANUP_MS`: database shutdown deadline after draining
   (defaults to 5000; capped at 30000)
 - `JWT_SECRET`: JWT signing secret
-- `AUTH_CODE_PEPPER`: optional separate HMAC secret for verification and reset
-  codes (defaults to `JWT_SECRET`)
-- `AUTH_EMAIL_FROM`: AWS SES verified sender used for verification and reset mail
+- `AUTH_CODE_PEPPER`: optional separate HMAC secret for password-reset codes
+  and emailed link tokens (defaults to `JWT_SECRET`)
+- `AUTH_EMAIL_FROM`: AWS SES verified sender used for registration links,
+  already-registered notices, verification links and reset codes. Requests for
+  an address whose domain publishes no usable MX record are rejected with
+  `422 email_domain_undeliverable`, and no email is ever sent to one; see the
+  recipient-domain check in
+  [Browser Auth and Content Management](#browser-auth-and-content-management)
+- `AUTH_LINK_ORIGIN`: exact origin of the Web listener used in emailed links,
+  for example `https://kashewt.com` (scheme, host and optional port only; no
+  path, query or fragment). `https:` is required; `http:` is accepted only
+  outside production for `localhost`, `127.0.0.1` or `[::1]`. An invalid value
+  counts as missing. Links are never built from `Host`, `Origin` or
+  `X-Forwarded-*`. Without it, `emailRegistration` is reported as unavailable
+  and the registration and verification-link requests return `503`; password
+  recovery still sends reset codes
 - `ACCESS_TOKEN_MINUTES`: short-lived access-token lifetime from 1 to 60 minutes (defaults to 15)
 - `ACCESS_TOKEN_SECONDS`: development-only access-token lifetime from 1 to 300 seconds
   for fast refresh-rotation testing (ignored in production)
@@ -124,10 +603,44 @@ Required variables:
 - `BROWSER_ALLOWED_ORIGINS`: optional comma-separated additional exact origins
   for cookie-authenticated browser mutations; same-origin requests are always
   accepted
+- `FINITUDE_SOCIAL_ENABLED`: set to `true` to enable social profile/friend admission,
+  music sharing and opt-in listening publication; defaults to `false`
+- `FINITUDE_ROOMS_ENABLED`: set to `true` alongside social enablement to admit
+  Audio rooms and realtime connections; defaults to `false`. A process started
+  with either flag off runs no realtime gateway: upgrades get an empty `503`,
+  and rooms left open by an earlier process are wound down. Shared playback
+  pauses, rooms end through the ordinary host-absence rules (suspended after 30
+  seconds, ended after five minutes) or the 24-hour expiry, and the room
+  authority is released once no room is open. HTTP room reads and safety exits
+  keep working, and social features stay available when only rooms are off.
+  Flag changes take effect on restart; enabling, the kill switch, verification
+  and rollback are in the
+  [social rollout runbook](docs/deployment/social-rollout-runbook.md).
+- `FINITUDE_ROOMS_MAX_OPEN`, `FINITUDE_ROOM_MAX_MEMBERS`,
+  `FINITUDE_REALTIME_MAX_SOCKETS`: deployment capacity for open rooms (1–100),
+  members per room (2–8) and realtime sockets per process (1–256). Unset values
+  use those maximums; out-of-range whole numbers are clamped, anything else falls
+  back to the maximum, and the startup `social_capacity_config` line names the
+  variable either way. `.ebextensions/social-capacity.config` ships 1, 2 and 10 for
+  the t4g.micro with free-tier Atlas; values set on the environment take
+  precedence. Lowering a limit refuses new rooms, joins and connections without
+  removing anything already admitted. Each connected room member's first socket
+  has a reserved seat; the runbook describes the seat rule. At most half of the
+  sockets are reserved: with unset values (256 sockets, 100 rooms of 8 seats)
+  128 sockets are reserved for room members, so sockets outside rooms stop at
+  128. See the
+  [capacity budget](docs/testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04)
+  before raising them.
 - `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in
   production and enabled in non-production environments.
+- `CATALOG_SEARCH_INDEX_ENABLED`: defaults to `false`. Enable indexed substring
+  candidates only after all catalog writers are updated and the bounded
+  `backfill:catalog-search` command has completed for all four collections.
+  Disable before reverting to older writers; see
+  [the search rollout procedure](docs/architecture.md#substring-candidate-index-rollout)
+  for dry runs, checkpoints, compatibility limits, and rollback requirements.
 - Catalog Credit rollout switches are documented in
   [`docs/deployment/catalog-credit-rollout-runbook.md`](docs/deployment/catalog-credit-rollout-runbook.md):
   `CATALOG_CREDIT_WRITES_ENABLED`, `CATALOG_CREDIT_READS_ENABLED`,
@@ -172,6 +685,13 @@ Required variables:
   and expiry notices
 - `S3_STORAGE_COST_PER_GB_MONTH`: optional S3 Standard storage rate used for the Content Manager estimate (defaults to `$0.023` per GiB-month)
 - `PORT`: optional explicit HTTP port (preferred in cloud environments)
+
+Audio/Video playback GETs may wait up to two seconds when an older stream still
+occupies a media slot. This fixed pending pool allows 32 requests per process and
+eight per IP without raising active limits. HEAD and non-playback requests do not
+wait; a full or expired queue returns 429 with `Retry-After: 2`. Admission retains
+its slot until the response and tracked storage work both finish. Disconnecting a
+queued request cancels it before source validation or storage access.
 
 ### Naruto Mobile private analysis proxy
 
@@ -247,6 +767,9 @@ route exceeds the reviewed 150 KiB gzip budget. It also caps the complete
 emitted stylesheet payload at 32 KiB gzip, emitted fonts at 128 KiB, bundled
 images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
 continues to load through listener DTOs rather than being bundled into the app.
+Production CSS Modules use compact scoped identifiers; development and test
+builds retain readable defaults. Exported module keys and style declarations are
+unchanged, and `test/finitudeWebBuildPolicy.test.ts` exercises the real transform.
 
 To test MediaTrack replacement locally, sign in as an administrator at
 `http://localhost:8080/content/manage`, create or select a MediaTrack, and use
@@ -278,7 +801,10 @@ retain behavior and accessibility coverage. Review intentional visual changes
 before creating or updating any named Chromium screenshot rather than bulk-
 refreshing snapshots to make a failure pass. Snapshot paths are platform-
 scoped so one operating system never silently approves another system font's
-rendering.
+rendering. Before each Chromium capture, the visual helper pins scroll-container
+gutters to a transparent 10 px (the Linux baseline width), so macOS goldens do
+not depend on the System Settings scroll-bar choice and both platforms share
+one layout.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, authenticated Library,
@@ -357,6 +883,15 @@ admission and stream outcomes split across playback, download, artwork,
 avatar, and video. The shared 40/8 process/client ceiling reserves 16/2 slots
 from non-playback traffic so artwork-heavy pages cannot consume all audio or
 video playback capacity.
+The response also includes identity-free `rooms` diagnostics: current admission
+enablement, authority state and its change count, time since the last successful
+sweep, open realtime sockets and rooms, and five bounded failure counters. Room
+diagnostics do not change HTTP readiness; see
+[the health contract](docs/architecture.md#database-constraints-and-additive-migrations).
+Each process also logs a minutely `ops_summary` line plus room lifecycle, room
+authority and capacity lines for CloudWatch metric filters; the
+[social rollout runbook](docs/deployment/social-rollout-runbook.md#signals)
+describes the fields and suggested alarms.
 
 ### Verify media Range behavior under bounded load
 
@@ -365,6 +900,11 @@ For a synthetic local memory screen without MongoDB or AWS access, run
 Node 24. This measures application-process RSS, not a total-machine memory
 limit or AWS throughput. See [the t4g.micro screening report](docs/testing/t4g-micro-capacity-screen.md)
 for workloads, reproduction details, observed limits, and remaining release checks.
+That screen predates social features and exercises no sockets or MongoDB. The
+database operations each room sweep, socket refresh and controller heartbeat cost
+are counted against an isolated `mongod` by `test/roomCapacityBudget.integration.ts`
+(part of `npm run test:integration`); the report's room budget derives the shipped
+capacity limits from those counts.
 
 The media load command targets `http://127.0.0.1:8081` by default and requires
 one or more database-confirmed ready Audio MediaTrack ObjectIds. Optional
@@ -397,36 +937,128 @@ Run this only in an environment approved for load testing. The harness models
 concurrent clients from one runner; release evidence still needs approved
 multi-source staging traffic against the real media store.
 
+### Verify sustained Audio rooms locally
+
+After `npm ci`, `npm run doctor`, and `npm run build`, run
+`npm run test:soak:rooms`. This separate gate defaults to two members and 30
+minutes, using real browser media clocks, authenticated HTTP, WebSockets, an owned
+MongoDB replica set, and a loopback S3 protocol fixture. It never uses configured
+application databases or external storage, and Chromium hardware audio stays disabled.
+Ports 4187 and 4188 must be free.
+
+```powershell
+$env:FINITUDE_ROOM_SOAK_SECONDS = '1800'
+$env:FINITUDE_ROOM_SOAK_CYCLE_SECONDS = '45'
+$env:FINITUDE_ROOM_SOAK_MEMBERS = '2'
+npm run test:soak:rooms
+```
+
+Duration accepts 60–28,800 seconds; cycle spacing accepts 15–300 seconds and cannot
+exceed duration; members accept 2–8. Invalid settings fail before startup. The
+duration/spacing combination must also fit the real retained mutation budget;
+use the default 45-second spacing for eight hours. Reload/device recovery is
+capped at 16 per run to respect daily scope issuance, after which that cycle
+continues local pause/resume checks. No production quota is reset or relaxed.
+Every run first proves reload without autoplay or automatic takeover, followed by
+explicit **Use this device** recovery. Timed cycles repeat local pause during
+shared selection, shared pause/play, and device recovery. Each shared gesture
+honors previously observed `Retry-After` and published request-window headroom
+from every participant before dispatch, sends one command, and must receive an
+applied outcome and the exact selected entry or transport state; continued
+playback of an old entry cannot count as a successful selection. The gate checks actual
+media-clock advancement and capture-time-adjusted pairwise drift against the
+existing 750 ms browser-test tolerance. Closing participants must release all
+upgrade transports, active media requests, and pending playback reads. A capability-protected loopback
+control plane confirms fixture resource cleanup before Windows runner termination.
+
+Evidence under ignored `web/test-results/room-soak` contains bounded aggregate
+counts, fixed-route HTTP failure/admission counts, application-fixture Node
+process RSS/heap extrema, drift, and
+cleanup status; it excludes account/media IDs,
+URLs, private payloads, raw exceptions, and a growing frame/trace history. Run this
+gate separately from builds and other load generators. Memory extrema describe
+that application process, exclude browser/MongoDB/whole-machine memory, and do
+not establish absence of leaks. A local pass does not
+certify AWS/S3 capacity, physical audio, branded browsers, or a longer duration.
+Multiple contexts share one loopback source IP and the real per-IP media admission
+limits; a playback pass does not imply that every background HTTP read succeeded.
+Room HTTP limits follow each member's account instead: GET/HEAD work is capped at
+four/account and 40/process within the unchanged total six/account and 48/process
+HTTP pool, reserving capacity from read bursts for explicit controls and tickets,
+and each account's room requests share its own 180/minute window. Other writes can
+still consume the shared process-wide concurrency capacity.
+Increasing members to eight is an admission/capacity stress case, not a guaranteed
+passing profile: concurrent replacement media requests can overlap old requests
+at the per-IP media ceiling, while snapshot-triggered reads also compete for room
+HTTP capacity. Preserve any resulting 429 and playback failure as evidence; do not
+raise quotas or drop participant assertions to obtain a pass.
+
 ## AWS CodeBuild
 
-This repo includes `buildspec.yml` with CI-oriented behavior:
+`buildspec.yml` is a promotion-only bridge from GitHub Actions to Elastic
+Beanstalk. It runs on Node 24 and Python 3; it does not run `npm ci`, rebuild the
+application, or substitute a bundle produced by a smaller test suite.
 
-- `install`: `npm ci`
-- `build`: `npm test`, then `npm run build --if-present`
-- `post_build`: stages and validates the explicit Elastic Beanstalk runtime
-  allowlist before packaging
+The `.github/workflows/finitude-web-release.yml` workflow runs unit/component
+tests, Mongo lifecycle integration, production builds, E2E type checking, real
+social scenarios, and all three browser/axe projects before staging its bundle.
+These gates are parallel jobs, each with its own timeout of 30 minutes or less:
+`build` (production build and E2E type check), `unit-integration`,
+`social-e2e` and `browser-e2e`. The two browser jobs test the one production
+build that `build` shares as the short-lived `finitude-web-release-build`
+artifact. `release-artifact` needs all four jobs, so it is skipped unless every
+gate succeeds. It stages those same build bytes without rebuilding and binds each
+gate step's outcome into the provenance. A run normally finishes in about 20–25
+minutes, inside the promoter's wait. If branch protection is added, require every
+gate job's check, not only `release-artifact`: GitHub reports a skipped job as
+passing. Both Playwright configurations reject focused tests in CI. The workflow uploads
+`archtree-eb-<commit>-<run-id>-<attempt>` for 30 days, containing the runtime ZIP
+and `release-provenance.json` with the bundle SHA-256, exact source/run/attempt,
+and all successful gate names. PR artifacts are review evidence only.
 
-Artifact packaging includes only the root package/lock/TypeScript files,
-server source, Web runtime package plus built distribution, `.platform`, and
-`.ebextensions`. It rejects nested dependencies, environment files, test
-reports, symbolic links, missing or unhashed Vite assets, and non-executable
-platform hooks. `RELEASE.json` records the source commit and build identity;
-Elastic Beanstalk performs a clean dependency install on each instance.
+CodeBuild runs `node scripts/promote-eb-artifact.mjs`. The promoter requires
+`CODEBUILD_RESOLVED_SOURCE_VERSION` to be the full main commit SHA, queries the
+fixed `yangyinxu/Archtree` release workflow, and accepts only the latest successful
+`push` run on `main` from that repository. It waits for an absent or running gate
+for up to 35 minutes, so an existing source-triggered pipeline can run concurrently
+with GitHub CI. A completed failed gate stops immediately; no older successful
+run is substituted. `ARCHTREE_RELEASE_WAIT_SECONDS` can set a bounded 0–3600 second
+wait, with `0` for fail-fast operational checks. Allow the CodeBuild project at
+least 45 minutes for the default wait and download/validation.
 
-The separate `.github/workflows/finitude-web-release.yml` gate follows the
-Playwright CI installation flow and runs unit/component tests, the Mongo-backed
-lifecycle integration suite, both production builds, and all three browser/axe
-projects on pull requests and pushes to `main`. Browser traces,
-screenshots, videos, JUnit output, and the HTML report are retained as workflow
-artifacts. A missing or failed integration environment blocks artifact staging.
+Supply `GITHUB_ARTIFACT_TOKEN` through CodeBuild Secrets Manager or Parameter
+Store when needed. It needs only the repository's **Actions: read** permission;
+never put its value in Git, plaintext buildspec variables, or shell commands.
+The CodeBuild service role must be allowed to retrieve that one secret. Artifact
+downloads use GitHub's [Actions artifact API](https://docs.github.com/en/rest/actions/artifacts),
+and the token is never forwarded to signed blob-storage URLs. Private-repository
+access, expired credentials, missing/expired artifacts and API failures fail closed.
+No AWS or GitHub account configuration is changed by this repository update.
 
-After the browser gate, CI retains a commit-named Elastic Beanstalk ZIP for 30
-days so staging and production can promote the same tested bytes and the
-previous successful version remains directly deployable. Follow
+Promotion verifies GitHub's archive digest, the internal bundle checksum, every
+required gate, the source/run/attempt in `RELEASE.json`, and the runtime allowlist.
+It rejects unsafe ZIP paths, links, duplicate entries, oversized archives,
+credentials, unexpected distribution files and missing executable platform hooks.
+It rechecks the workflow's success and attempt before installing the verified tree
+into the previously absent `elastic-beanstalk-artifact` directory for the existing
+CodePipeline/EB artifact handoff. The GitHub build identity remains unchanged;
+CodeBuild logs its digest and artifact ID. The pipeline's GitHub source connection
+alone does not grant Actions download permission.
+
+The artifact includes only root package/lock/TypeScript files, server source,
+localization, the Web runtime package and built distribution, `.platform` and
+`.ebextensions`. Elastic Beanstalk still installs locked runtime dependencies on
+each instance. Keep the source buildspec override set to `buildspec.yml`, preserve
+executable modes in the output archive, and disable any older AWS rebuild override.
+
+Retain the candidate and previous tested ZIP, sidecar, GitHub run identity and
+checksum in deployment storage through the observation/rollback window; the
+30-day GitHub retention is not a permanent rollback store. An older archive without
+the provenance sidecar cannot enter this promotion path. Follow
 [`docs/deployment/finitude-web-rollout-runbook.md`](docs/deployment/finitude-web-rollout-runbook.md)
-for the smoke, observation, evidence, and rollback contract. A retained bundle
-and runbook do not replace the required production-equivalent rollout and
-rollback rehearsal.
+for exact-artifact rollout and rollback. Local synthetic promotion tests do not
+replace a successful merged-main workflow, configured AWS handoff, production-
+equivalent rollout, or rollback rehearsal.
 
 ### Single-instance Elastic Beanstalk HTTPS
 
@@ -477,6 +1109,45 @@ process environment directly. Configuration-only deployments also rerun the
 same idempotent configurator, so correcting the domain or ACME properties does
 not require an unrelated application release.
 
+### Room audio decoder on Elastic Beanstalk
+
+Amazon Linux 2023 has no FFmpeg package, so
+`.platform/hooks/prebuild/02_install_ffmpeg.sh` installs one on every deployment
+before the new version starts. It downloads a single pinned LGPL static build of
+FFmpeg 9.0 from the [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)
+GitHub releases (linux arm64 for t4g Graviton instances, plus an x86_64 pin so an
+instance-type change does not break deployments), checks its exact byte size and
+hard-coded SHA-256, extracts only `ffmpeg` and `ffprobe` into
+`/opt/archtree-ffmpeg/<build>/`, verifies the decoding capabilities the analyzer
+needs, and then atomically links `/usr/local/bin/ffmpeg` and
+`/usr/local/bin/ffprobe`. `.ebextensions/room-audio-decoder.config` sets
+`ROOM_AUDIO_FFMPEG_PATH=/usr/local/bin/ffmpeg`, so the decoder never depends on
+the service PATH; a value set directly on the environment still takes precedence.
+Later deployments reuse the verified installation without downloading, and a new
+pin replaces the previous directory only after the new build passes.
+
+A failed download, size or digest mismatch, unexpected archive layout or missing
+capability fails the deployment loudly (see `/var/log/eb-hooks.log`) before the
+new version is activated, rather than leaving compressed uploads without a
+decoder. A replacement instance downloads the build again (about 117 MB for
+arm64), so GitHub must be reachable, just as the Certbot hook needs PyPI. Upstream
+keeps the pinned month-end build until about September 2028; refresh the pin
+earlier for FFmpeg security fixes by updating the tag, archive names, sizes and
+digests together, checking each digest against the release's `checksums.sha256`
+and GitHub's asset digest.
+
+Decoding stays within the 1 GiB instance budget: room analysis remains one job
+per process (the administrator page admits one request at a time), each decode is
+single-threaded with at most two per process (upload inspection plus analysis),
+each FFmpeg allocation is capped at 32 MiB, decodes have a 60-second deadline, and
+analysis keeps its 90-second deadline and 512-MiB temporary-file limit. Keep
+`TMPDIR=/var/tmp` so temporary analysis files use the EBS disk.
+
+After deploying, run `/usr/local/bin/ffmpeg -hide_banner -version` on the instance,
+upload a short MP3 through Content Manager, and confirm the Room audio analysis
+page lists it as eligible. Then run the
+[room audio catalog backfill](#room-audio-catalog-backfill) for existing tracks.
+
 Important:
 - Build phase should not run `npm start`.
 - Runtime process startup should happen in the deployment service configuration.
@@ -506,8 +1177,8 @@ their conventional sibling directories.
 
 Web auth endpoints:
 
-- `GET /auth/signup-web`
-- `POST /auth/signup-web`
+- `GET /auth/signup-web` and `POST /auth/signup-web`: `303` to
+  `/finitude/register` without any account work (the POST body is ignored)
 - `GET /auth/login-web`
 - `POST /auth/login-web`
 - `POST /auth/logout-web`
@@ -528,9 +1199,12 @@ Listener browser-session endpoints (HttpOnly cookies; credentials are never
 returned to JavaScript):
 
 - `GET /auth/browser/capabilities`
-- `POST /auth/browser/register`
-- `POST /auth/browser/email/verify`
-- `POST /auth/browser/email/resend-verification`
+- `POST /auth/browser/registration/request`
+- `POST /auth/browser/registration/inspect`
+- `POST /auth/browser/registration/complete`
+- `POST /auth/browser/email-verification/request`
+- `POST /auth/browser/email-verification/inspect`
+- `POST /auth/browser/email-verification/confirm`
 - `POST /auth/browser/password/forgot`
 - `POST /auth/browser/password/reset`
 - `POST /auth/browser/login`
@@ -542,21 +1216,117 @@ Public Listener capability discovery:
 
 - `GET /api/listener/v1/capabilities` returns only deploy-safe feature
   availability. The Web client uses its `playlists` boolean to hide Playlist
-  routes and controls when the server-side rollout switch is off.
+  routes and controls when the server-side rollout switch is off, and its
+  `social: { enabled, rooms }` object (from `FINITUDE_SOCIAL_ENABLED` and
+  `FINITUDE_ROOMS_ENABLED`; rooms is never true without social) to hide the
+  Together navigation, Share, Listen together and room reminders. A missing
+  object hides them too. Any `503 social_disabled`/`rooms_disabled` response
+  makes the open page re-read these switches.
+
+Email registration happens only on the Web, by emailed link:
+
+- `POST /auth/browser/registration/request` takes `{ "email" }` and answers
+  `202 {"message":"Check your email for the next step."}` for every account
+  state. An address without an account, or with an unverified record from the
+  earlier code-based sign-up, receives a single-use registration link
+  (`AUTH_LINK_ORIGIN/finitude/register/complete#token=...`, 30 minutes). An
+  address with an account receives an "already registered" notice with Log in
+  and password-reset links, and nothing changes. An address whose domain
+  cannot receive mail gets `422 {"code":"email_domain_undeliverable"}` instead
+  (see the recipient-domain check below).
+- `POST /auth/browser/registration/inspect` takes `{ "token" }` and does not
+  consume it: `200 {"email"}`, `409 {"code":"email_already_registered"}` when
+  the address now has an account, or `400 {"code":"link_invalid"}`.
+- `POST /auth/browser/registration/complete` takes
+  `{ "token", "password", "displayName" }` (display name 1 to 80 characters
+  after trimming, no control characters). It returns `201 {"email"}` after it
+  creates a verified account or completely replaces the address's unverified
+  record (password, name, sessions, provider identities, passkeys, pending
+  enrollments, codes and links). Errors are `400 link_invalid`,
+  `409 email_already_registered`, and `422` with `code` `invalid_password` or
+  `invalid_display_name`. It installs no session; the listener logs in next.
+- `POST /auth/browser/email-verification/request` takes `{ "email" }` and
+  answers `202` for every account state, or
+  `422 {"code":"email_domain_undeliverable"}` when the domain cannot receive
+  mail. Only an account created before verification existed (no
+  `emailVerified` field and no linked identity with the same email) receives a
+  verification link (`AUTH_LINK_ORIGIN/finitude/verify-email#token=...`).
+- `POST /auth/browser/email-verification/inspect` takes `{ "token" }` and
+  returns `200 {"email"}` or `400 link_invalid` without consuming it.
+  `POST /auth/browser/email-verification/confirm` returns `204` after it
+  verifies the email. It does not change the password or end other sessions.
+
+Link tokens travel only in the URL fragment, so they never reach server logs,
+proxies or `Referer`; pages read them with the non-consuming `inspect` calls,
+and verification requires an explicit confirm request. All three link emails
+(registration link, already-registered notice, verification link) share a
+budget of three per normalized address per 15 minutes; requests over it get
+the same response and send nothing (`auth_link_email_suppressed`).
+
+Finitude Web pages for these links:
+
+- `/finitude/register` asks only for an email and shows the same "check your
+  email" status for every address; the form stays available to ask again.
+- `/finitude/register`, the `/finitude/verify-email` link request and
+  `/finitude/forgot-password` share one email form
+  (`web/src/features/account/AuthFormSupport.tsx`). A
+  `422 email_domain_undeliverable` is shown as an error on the email field,
+  which receives focus, for as long as the field holds the rejected address;
+  every other failure keeps the generic request error. An accepted request
+  shows the trimmed, lowercased address it was sent to with a **Use a
+  different email** action that clears the form. Sending again posts the
+  field's current address, so a resend to an undeliverable domain is rejected
+  again. While the listener types, a domain within a small Damerau-Levenshtein
+  distance of a popular provider (`web/src/features/account/emailDomainSuggestion.ts`)
+  gets a "Did you mean ...?" button in a polite live region, which replaces the
+  address only when selected; known providers and a few real look-alike
+  domains are never corrected.
+- `/finitude/register/complete#token=...` captures the token, removes the
+  fragment from the address bar and history entry at once (the token stays
+  only in page memory), and inspects the link. It then shows the address and
+  asks for a display name and password. Success sends the listener to Log in
+  with the address prefilled; it never signs in or changes a signed-in browser
+  session. Invalid, expired or used links offer a new link, and an address that
+  now has an account links to Log in and password recovery.
+- `/finitude/verify-email#token=...` shows the address and verifies it only
+  after **Verify email** is selected, then returns to Log in. Without a token,
+  or after an unusable link, the page offers a non-enumerating request for a
+  new verification link. Log in maps `403 email_verification_required` to a
+  verification message with a link to that request form.
+
+A sign-in that presents a valid credential (password through `/auth/login` or
+`/auth/browser/login`, a passkey assertion, or a linked Apple or Google
+identity) for an unverified account returns
+`403 {"code":"email_verification_required","message":"Verify your email to sign in. ..."}`
+and creates no session; the browser login leaves existing cookies untouched.
+After responding, the server mails a verification link to an account created
+before verification existed, or a registration link to an unverified record
+from the earlier code-based sign-up, within the shared budget. A wrong
+password still returns `401`. Sessions, refresh tokens and cookies that
+existed before verification became mandatory keep working; `GET /auth/me` and
+the browser session payload report `emailVerified: false` for them. Linking a
+provider or enrolling a passkey from such a session returns `403` with the
+same `code` and sends no email.
 
 Browser authentication mutations require same-origin JSON. Registration,
-verification resend, and recovery-request responses are deliberately generic
-so account existence is not disclosed. Browser capability discovery reports
-only end-to-end browser methods; native Apple, Google, or passkey configuration
-does not expose a nonfunctional listener button.
+verification-link, and recovery-request responses are deliberately generic
+so account existence is not disclosed. They send the generic response before
+the account lookup, token write and email delivery, so response latency does
+not reveal account state either. The `422 email_domain_undeliverable`
+rejection is decided from the domain's public DNS before any account lookup,
+so it does not depend on account state either. The account work still runs
+inside the tracked request: graceful shutdown waits for it, and a late failure
+is recorded only as an opaque security event. Registration and
+verification-link requests hash no password and take no concurrency slot, so
+none of their `429` responses depend on account state.
+Browser capability discovery reports only end-to-end browser methods;
+native Apple, Google, or passkey configuration does not expose a nonfunctional
+listener button.
 
 App session endpoints:
 
 - `GET /auth/capabilities`
 - `POST /auth/login`
-- `POST /auth/signup`
-- `POST /auth/email/verify`
-- `POST /auth/email/resend-verification`
 - `POST /auth/password/forgot`
 - `POST /auth/password/reset`
 - `POST /auth/password/change`
@@ -572,6 +1342,114 @@ App session endpoints:
 - `DELETE /auth/identities/:provider`
 - `DELETE /auth/activity/listening-history`
 - `DELETE /auth/account`
+
+Retired code-based registration endpoints answer immediately, before
+validation, rate limiting or any database access, with
+`410 {"code":"email_registration_moved","message":"Email sign-up has moved to the Finitude website. Create your account there, then sign in."}`:
+`POST /auth/signup`, `PUT /auth/signup`, `POST /auth/email/verify`,
+`POST /auth/email/resend-verification`, `POST /auth/browser/register`,
+`POST /auth/browser/email/verify`, and
+`POST /auth/browser/email/resend-verification`.
+
+Password recovery (`POST /auth/password/forgot` and
+`POST /auth/browser/password/forgot`) takes `{ "email" }` and answers
+`202 {"message":"If the account can use this action, an email has been sent."}`
+for every account state, or `422 {"code":"email_domain_undeliverable"}` when
+the domain cannot receive mail. A verified or legacy account receives a
+six-digit reset code (15 minutes, voided by its fifth wrong submission). An
+unverified record from the earlier code-based sign-up receives a registration
+link instead, and `password/reset` never applies to it. A completed reset
+revokes every session and sets `emailVerified: true`; on an account that was
+not verified before, it also removes every provider identity, passkey and
+passkey challenge.
+
+Recipient-domain check for authentication email:
+
+`src/services/emailDomainDeliverability.ts` decides from the recipient
+domain's MX records whether an address can receive mail:
+
+- `deliverable`: at least one MX record that is not an RFC 7505 null MX (`.`).
+- `undeliverable`: `ENOTFOUND` (NXDOMAIN), `ENODATA` (no MX records), only a
+  null MX, or a domain that is not a valid hostname. There is deliberately no
+  fallback to A/AAAA records (the RFC 5321 implicit MX): mistyped domains are
+  often parked with only an A record.
+- `unknown`: any other DNS failure (timeout, `SERVFAIL`, refused, network).
+
+The verdict is applied at two points:
+
+1. Before the response, on every route that emails a submitted address:
+   `POST /auth/browser/registration/request`,
+   `POST /auth/browser/email-verification/request`,
+   `POST /auth/password/forgot` and `POST /auth/browser/password/forgot`.
+   `rejectUndeliverableEmailDomain` runs after the per-IP limit and email
+   validation, and before the per-account limit and any account lookup. An
+   `undeliverable` verdict answers at once with
+   `422 {"code":"email_domain_undeliverable","message":"This email domain cannot receive email. Check the address and try again."}`:
+   nothing is looked up, prepared or sent, the per-account attempt limit and
+   the link-email budget are not spent (the per-IP limit is), and the security
+   event `auth_email_domain_rejected` records only `domain` and `reason`
+   (`nxdomain`, `no_mx`, `null_mx` or `invalid_domain`). The verdict depends
+   only on the domain, never on account state, so the `422` is identical for
+   every account state. `deliverable` and `unknown` continue exactly as
+   before, with the generic `202` and the account work after it. The response
+   now waits for the domain lookup, whose latency also depends only on the
+   domain. Invalid input keeps the generic validation `422` without a lookup.
+2. Before sending, in `sendAuthEmail`, for every authentication email, as
+   defense in depth: it covers the sign-in verification email, which goes to
+   the account's stored address after a `403`, and a domain that was `unknown`
+   when the request arrived. It runs before a link token or reset code is
+   written, so a skipped email never voids a code that was already delivered.
+   An `undeliverable` verdict skips the email, still spends the address's
+   link-email budget like a failed delivery, and records
+   `auth_email_undeliverable_domain` with `domain`, `emailKind`
+   (`registration_link`, `already_registered_notice`, `verification_link` or
+   `password_reset_code`) and `reason`. An `unknown` verdict fails open: the
+   email is sent and `auth_email_domain_check_failed` records `domain`,
+   `emailKind` and the DNS error code as `reason`. This check runs after the
+   response, so it changes no status, body or latency.
+
+No event records the address. Domains are trimmed, lowercased, stripped of one
+trailing root dot and converted to punycode when internationalized. Only the
+request check caches verdicts, in process for up to 1,000 domains, deliverable
+ones for 1 hour and undeliverable ones for 10 minutes; `unknown` verdicts are
+not cached. The send check reuses a cached verdict but never caches its own: it
+runs only for the account states that receive an email, so a verdict it cached
+(for example after the request check failed under flaky DNS) would make a later
+request for any address at that domain answer sooner and reveal an account.
+Each lookup is bounded at 3 seconds. Concurrent request checks for one domain
+share one query, and a send check may join a request check's query but never
+the reverse, so the request check and the later send check normally cost a
+single lookup.
+
+There is no configuration. Lookups use the host's system name servers through
+`node:dns`, so the instance needs outbound DNS; without it each email request
+waits up to the 3-second bound, then proceeds with the generic `202`, and every
+email is still sent and logged as `auth_email_domain_check_failed`.
+In local development, addresses at reserved domains such as `example.test` are
+rejected with `422 email_domain_undeliverable`, so use a real mailbox domain to
+receive email. Server tests preload a synthetic resolver
+(`test/support/syntheticMxResolver.ts`) and never query real DNS. The listener
+E2E server (`web/e2e/support/serveBuiltApp.ts`) installs
+`web/e2e/support/syntheticMx.ts`, which treats only reserved `.invalid` domains
+as undeliverable; the fake account routes in
+`web/e2e/support/emailLinkAuth.ts` apply the same rule.
+
+Auth attempts are limited per IP (20 per 15 minutes) and per account (10 per
+15 minutes). Registration and verification-link requests and password
+recovery and reset, in both their app and `/auth/browser/*` forms, key the
+account limit on the submitted `email` after validation normalizes it, so
+Gmail dots, `+tag` suffixes and `googlemail.com` count as one address and
+extra `identifier` or `username` fields are ignored.
+Password sign-in keys it on the submitted login identifier, and both kinds of
+route draw from the same budget for the same address. A request rejected with
+`422 email_domain_undeliverable` counts toward the per-IP limit only.
+
+`POST /auth/refresh` does not use the sign-in buckets. It is limited per
+presented refresh token (10 per 15 minutes, keyed by a SHA-256 digest; a
+request without a usable token falls back to a per-IP bucket of the same size)
+under a separate per-IP ceiling of 600 per 15 minutes, so failed sign-ins
+cannot turn a valid refresh into `429` and refresh traffic cannot consume
+sign-in attempts.
 
 Account roles:
 
@@ -654,7 +1532,18 @@ Web content management:
 - The Content Manager Credit editor supports named subject search, role
   changes, ordering, removal, Organization-only attribution, and an explicit
   `Attribution not documented` state. Dynamic Artist Carousels can target
-  Discography, Collaborations, Appears On, or all related Credits.
+  Discography, Collaborations, Appears On, or all related Credits. Album
+  carousels share the Artist detail classification and rollout switches, apply
+  ready lifecycle and role precedence before the result limit, and use legacy
+  relationships only for records without canonical Credits.
+- Manual Carousel and Grid/List additions, reorder operations, and moves read
+  their current contents inside the same MongoDB transaction as the reference
+  fences and writes. Concurrent appends preserve both edits and the 500-item
+  limit; positional edits return `409 manual_composition_changed` if transaction
+  retry observes changed contents. Refresh the editor before resubmitting a
+  positional edit. Adds rejected by the current size limit or a concurrently
+  deleted definition also return that conflict rather than reporting success.
+  Cross-Carousel moves commit both sides or neither.
 - Single and bulk Content Manager Audio MediaTrack creation records original filenames
   and a pending upload state before sending files to S3. They accept Artist Credits,
   Organization Credits, inherited Album primary Artists, or an explicitly
@@ -691,6 +1580,14 @@ Artist carousels:
 
 - Manual carousels keep an explicitly managed item list.
 - Manual carousels can be renamed without changing their items.
+- Carousels stored before the `mode` field existed (no or empty `mode`) are
+  read as manual by the listener API and the content-reference report, and the
+  cleanup of deleted Album, MediaTrack, and Feed Post references removes their
+  items the same way. That cleanup also covers Grid/List definitions without a
+  `mode`; it never changes dynamic definitions.
+- Deleting a Feed Post first removes its items from every manual carousel and
+  renumbers the remaining items, then deletes the Post. A failed cleanup keeps
+  the Post so the delete can be retried; repeating the delete is idempotent.
 - Artist carousels dynamically resolve either Albums or MediaTracks for one existing Artist.
 - Album carousels use the Artist's `albumIds`; MediaTrack carousels query the
   compatibility `AudioTrack.artistIds` field.
@@ -733,6 +1630,13 @@ Personalized Library:
   or Recently Played and resolve for the viewer requesting an expanded page.
 - Each recent history is capped at 20 mixed-content entries; the full saved
   relationship is retained separately.
+- Library items expose `lastPlayedAt` and `lastActivityAt`. A new save seeds
+  `lastPlayedAt` from the item's Recently Played entry when one is still in
+  the 20-entry history. `DELETE /auth/activity/listening-history` empties
+  Recently Played and, in the same account-fenced transaction, removes
+  `lastPlayedAt` and resets `lastActivityAt` to `savedAt` on that listener's
+  saves. Like Save and Unsave, it fails with 409 instead of writing once the
+  account has been deleted.
 - Expanded page responses include allowlisted resolved Album, MediaTrack, and
   Feed Post documents in an additive `included` payload. Referenced Posts are
   hydrated independently of the default Feed page, so older configured items
@@ -789,6 +1693,14 @@ User Playlists:
   `X-Finitude-Account-Viewer` so a stale browser tab cannot read or mutate the
   newly switched account's private data. Bearer-authenticated native requests
   remain bound to their access-token identity.
+- Web retains one uncertain Playlist creation intent (original name and key)
+  in account-scoped tab memory across dialog closure and route changes. Reopen
+  Create to retry that intent explicitly, or choose Stop retrying before
+  starting another. This does not delete a Playlist that may already exist.
+  Confirmed responses refresh the current account's cache; late responses from
+  a previous account are ignored. Recovery ends on account transition or full
+  page reload, and a retained intent cannot be replayed after its 24-hour
+  receipt window. Same-name Playlists remain supported.
 - Names contain 1–100 trimmed Unicode characters. Each account may own at most
   100 Playlists, each containing at most 500 unique MediaTracks. Playlist order
   is explicit; unavailable members remain represented but only ready members
@@ -800,12 +1712,67 @@ User Playlists:
 Session behavior:
 - API login returns a short-lived access token and a rotating opaque refresh
   token. `authSessions` stores only SHA-256 hashes; the immediately previous
-  hash is retained as revocation-only evidence so logout wins a refresh race.
+  hash is also retained so logout wins a refresh race and a lost rotation
+  response can be recovered.
 - Access tokens default to 15 minutes. Refresh sessions have an absolute
   lifetime of 30 days by default.
-- Refresh rotation is atomic, so a refresh token can succeed only once.
+- Refresh rotation is atomic: the current token rotates at most once, which
+  moves its hash to `previousRefreshTokenHash` and stamps `rotatedAt`. For 60
+  seconds after `rotatedAt`, presenting that previous token replaces only the
+  current hash with a fresh one (both `/auth/refresh` and
+  `/auth/browser/refresh`), so the pair from a lost response stops working and
+  the session keeps exactly one current token. Such a replay leaves
+  `previousRefreshTokenHash` and `rotatedAt` unchanged, so it cannot extend
+  its own window, and emits a `refresh_previous_token_replayed` security
+  event. Older tokens, the previous token after the window, and sessions last
+  rotated before `rotatedAt` existed get `401` without any session change.
+- Reset-code consumption, password/email effects, and session/listening/room
+  revocation commit together. Failed transactions leave the original code,
+  credential, and sessions available for a safe retry. Password login rechecks
+  its verified password hash when committing the session, so a concurrent
+  reset cannot be bypassed by a delayed login.
+- `authActionTokens` keeps one hashed password-reset code slot per account. A
+  wrong code increments the slot's `failedAttempts` inside the account
+  transaction; the fifth wrong submission voids the code (`voidedAt`). Codes
+  stored before per-account slots existed are no longer accepted. Verification
+  slots left by the earlier code-based sign-up are ignored and expire through
+  the TTL index.
+- `emailLinkTokens` stores registration and verification links only as
+  `HMAC-SHA256(AUTH_CODE_PEPPER ?? JWT_SECRET, "email-link:v1:<purpose>:<token>")`
+  in `_id`, with `purpose`, the normalized `email`, `userId` (verification
+  links only), `createdAt`, `expiresAt` (30 minutes) and `consumedAt`. Raw
+  tokens (32 random bytes, base64url) exist only in the outgoing email.
+  Consuming a link deletes the address's other links of the same purpose in
+  the same transaction; expired links leave through the TTL index. Account
+  deletion removes an account's links by `userId`.
+- `users.emailVerified` keeps three stored forms and is never backfilled:
+  `true` (verified), `false` (an unverified record from the earlier code-based
+  sign-up, kept until it is replaced), and absent (created before
+  verification existed; verified only while a linked Apple or Google identity
+  stores the same lowercase email). Completing registration for a `false`
+  record replaces the document in place (same `_id`) with only the new
+  credentials, `emailVerified: true` and `emailVerifiedAt`, and removes its
+  sessions, identities, passkeys, challenges, codes and links in one
+  account-fenced transaction. The `pendingRegistration` field that the earlier
+  sign-up stored disappears with that replacement.
+- Session creation for any sign-in method returns `403` with
+  `code: "email_verification_required"` unless the account is verified, and
+  provider linking and passkey enrollment also return that `403` for such an
+  account. Access-token checks and refresh do not check verification.
+- Provider unlink checks the remaining recovery methods inside the account
+  transaction. Account-owned sessions, identities, passkeys, codes, and
+  challenges share the account deletion fence; discoverable passkey challenges
+  can still be issued without an account. Authenticated credential changes
+  recheck their session before writing.
 - Protected requests verify that the access token's backing session is still
   active, allowing logout and logout-all to revoke access immediately.
+- Optional-auth reads (`GET /api/listener/v1/home`,
+  `GET /api/listener/v1/pages/home/items/:itemId`, and the legacy
+  `GET /content/pages/:slug/expanded` for public pages such as Home) still
+  serve requests without credentials anonymously. A presented
+  `Authorization: Bearer` token that is expired, revoked, or malformed returns
+  `401` before the account-viewer check so native clients refresh instead of
+  silently receiving anonymous content or `account_viewer_mismatch`.
 - Web login stores the access and refresh credentials in separate HttpOnly
   cookies and rotates them transparently when the access cookie expires.
 - Cookie-authenticated Web requests for account-owned or personalized reads
@@ -825,15 +1792,41 @@ Session behavior:
   boundaries, so public catalog data may refetch afterward.
   Storage or BroadcastChannel unavailability does not block the originating
   authentication action.
+- Social reads are serialized within an account epoch. An active read has a
+  30-second deadline covering response-body decoding and existing transient
+  transaction retries; queue waiting time is excluded. Caller cancellation
+  settles immediately, and an account transition cancels and discards the old
+  queue so it cannot block the next epoch. Cancellation or a deadline does not
+  establish that the server stopped processing the request.
+- Playback activity captures the viewer and account epoch before awaiting
+  playback start. A delayed start cannot report the previous account's activity
+  or invalidate the replacement account's cache.
 - Listener avatar reads bind private bytes to the requesting account and
   authoritative revision; a stale account projection receives no image bytes.
 - Listener avatar writes and destructive account actions also bind to the
   account projected in the page. A stale tab receives a conflict instead of
   mutating whichever account most recently replaced the browser cookies.
+- Avatar uploads require `Content-Length`, one `avatar` file no larger than
+  5 MiB, no text fields, and a total multipart envelope no larger than 6 MiB.
+  Total-size admission runs before in-memory multipart parsing; the parser
+  separately enforces file size and file/field/part counts.
 - Avatar mutations reserve a pending account-scoped lease in the same
-  transaction that touches the active account. Account deletion takes that
-  fence and refuses to commit while an avatar reference, pending lease, or any
-  current/detached private avatar lifecycle record remains.
+  transaction that touches the active account. Leases last 30 seconds and
+  renew every 10 seconds. A retry first resumes expired work using its recorded
+  phase; every owner publication and asset cleanup claim checks that lease
+  transactionally, so a late worker cannot overwrite or delete its successor.
+  Pending receipts do not expire. Startup removes the old `expiresAt` field
+  from pending avatar receipts; completed responses retain a 24-hour TTL.
+  Account deletion takes the account fence and refuses to commit while an
+  avatar reference, pending lease, or any current/detached private avatar
+  lifecycle record remains. Once no avatar or private image asset remains,
+  account deletion can retire expired `reserved` and `cleared` receipts in
+  that same transaction; other pending states, including legacy, active, or
+  uncertain operations, continue to block removal.
+- A recovered legacy receipt without phase information, or an upload without
+  a confirmed S3 response, preserves its image lifecycle evidence and returns
+  an explicit recovery outcome. A new key can start a new operation; uncertain
+  storage cleanup remains pending until an operator reconciles exact versions.
 - Protected web pages redirect to login if unauthenticated. Content Manager
   additionally requires the current database role to be `admin`.
 
@@ -873,6 +1866,14 @@ Upload:
   `audioTrackIds` list as authoritative.
 - S3 objects include track ID, owner ID, and encoded original filename metadata.
 - Failed or interrupted uploads remain identifiable in MongoDB and can be retried against the same track.
+- After a successful Replace with Audio or Replace with Video upload (API or
+  Content Manager), the server reruns the idempotent publication retry for that
+  MediaTrack, so a row whose earlier publication failed is published without a
+  separate audit retry. If publication still cannot commit (for example, its
+  Album is not ready or its explicit publication state is invalid), the new
+  object stays active with `uploadStatus: ready`; the API answers 409 (503 when
+  the outcome is unknown) with `publicationStatus`, `publicationOutcome`, and
+  `publicationRetryRequired`, and the retry needs no new upload.
 - Content Manager bulk-upload JSON responses include one `outcomes` row per
   selected file with its recoverable `audioTrackId` when a record was created,
   plus separate `uploadStatus`, `publicationStatus`, `cleanupPending`, and
@@ -923,9 +1924,10 @@ Reconciliation:
   cleaned and partial failures retain retryable database evidence.
 - Admin-only publication retry: `POST /admin/audio-storage/publication-retry`
   with `{"audioTrackIds":["..."]}` (1–100 items). It reuses existing
-  database-confirmed ready objects, isolates every item, and returns stable
-  outcomes for ready, non-ready, missing, malformed, and duplicate IDs without
-  stopping the rest of the batch.
+  database-confirmed ready Audio or Video objects whose key matches the
+  MediaTrack's recorded `mediaType` namespace, isolates every item, and returns
+  stable outcomes for ready, non-ready, missing, malformed, and duplicate IDs
+  without stopping the rest of the batch.
 - Browser requests receive a readable audit page with lifecycle-specific
   recommendations and individually confirmed actions; append `?format=json`
   for the structured report.
@@ -933,15 +1935,41 @@ Reconciliation:
 - Reports orphaned S3 objects, database tracks with missing objects, and
   pending/failed storage or publication lifecycle records. Incomplete rows
   include `publicationStatus`, `publicationUpdatedAt`, and bounded
-  `publicationError` evidence.
+  `publicationError` evidence. Their active, pending, and cleanup object
+  existence is checked against the S3 listing for that phase's recorded media
+  kind (Audio: legacy root and `audio/` keys; Video: `video/` keys).
 - Generating the report is read-only; it never deletes S3 objects
   automatically. Remediation requires a separate explicit administrator POST.
 - Admin-only image report: `GET /admin/image-storage/reconciliation`
 - The image report audits the `images/` namespace against `imageAssets`, including orphaned, detached, missing, pending, and failed image records.
+- New cover art and avatars record the PUT ETag and VersionId (including the
+  explicit null version). Reads and cleanup address those exact versions;
+  cleanup never treats a key-only delete marker as proof that bytes were
+  erased. Unknown uploads or legacy records without a confirmed version keep
+  their database evidence and report pending reconciliation.
+- Image version recovery uses an administrator checkout with the normal
+  private database/S3 configuration. Inspect one image without changing it:
+  `npx --no-install tsx scripts/reconcile-image-versions.ts --image-id=<24-hex-id>`.
+  The command inventories the exact key with `ListObjectVersions`, checks each
+  version's ownership metadata with HEAD, and accepts at most 100 versions and
+  delete markers. Missing/mismatched ownership, incomplete inventory, or
+  concurrent lifecycle changes fail closed.
+- To record that inventory, first stop all upload workers, then run
+  `npx --no-install tsx scripts/reconcile-image-versions.ts --image-id=<24-hex-id> --apply --confirm=UPLOAD_WORKERS_STOPPED`.
+  Apply conditionally updates only that image lifecycle row; it does not delete
+  S3 data. Then retry the existing avatar deletion or cover-art cleanup path.
+  This requires explicit authorization for the target environment. Deployment
+  bundles exclude repository scripts, so run it from the administrator checkout.
+- Before deploying version-aware image handling, grant `s3:GetObjectVersion`
+  and `s3:DeleteObjectVersion` for image/avatar objects, including explicit null
+  versions, alongside existing object permissions. The recovery operator also
+  needs bucket-level `s3:ListBucketVersions`. Keep old upload workers stopped
+  throughout an applied version reconciliation.
 - Admin-only content-reference report: `GET /admin/content-references/reconciliation`
 - The content-reference report detects dangling saved/activity references,
   Page-to-Carousel and Page-to-Grid/List references (including presentation
-  mismatches), manual carousel and Grid/List items, artist-album links,
+  mismatches), manual carousel (Album, MediaTrack, and Feed Post) and Grid/List
+  items, artist-album links,
   album-track links, and track-album links, plus both directions of
   Album/MediaTrack mismatch (a stale canonical membership or a published
   reverse Track link missing from a lifecycle Album's canonical order);
@@ -959,6 +1987,13 @@ Reconciliation:
 ## Troubleshooting
 
 - `EADDRINUSE`: another process is already using the chosen port.
+- Authentication email not arriving: look for the security events
+  `auth_email_domain_rejected` (the request was answered with
+  `422 email_domain_undeliverable`), `auth_email_undeliverable_domain` (the
+  recipient domain has no usable MX record, so nothing was sent) and
+  `auth_email_domain_check_failed` (the DNS lookup failed and the email was
+  sent anyway); see the recipient-domain check in
+  [Browser Auth and Content Management](#browser-auth-and-content-management).
 - Buildspec path errors (`buildspect.yml` not found): check AWS buildspec override settings in CodeBuild/CodePipeline and set path to `buildspec.yml`.
 - S3 upload/delete errors: verify IAM permissions and required S3 environment variables.
 - `413 Request Entity Too Large`: increase upload limits in both places:

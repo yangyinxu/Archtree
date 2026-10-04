@@ -9,6 +9,7 @@ const collectionId = 'imageAssets';
 
 export type ImageOwnerType = 'artist' | 'album' | 'audioTrack' | 'user';
 export type ImageUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
+export type ImageStorageIdentity = { versionId: string | null; etag: string };
 
 export interface ImageAssetRecord {
     _id: ObjectId;
@@ -21,6 +22,13 @@ export interface ImageAssetRecord {
     uploadStatus: ImageUploadStatus;
     uploadUpdatedAt: Date;
     uploadError: string | null;
+    storageIdentity?: ImageStorageIdentity;
+    /** All inventoried versions must be removed before lifecycle metadata disappears. */
+    storageCleanupVersions?: ImageStorageIdentity[];
+    storageDeleteMarkers?: string[];
+    storageDeleted?: boolean;
+    uploadOutcomeUnknown?: boolean;
+    avatarMutationId?: string;
 }
 
 export class ImageAsset {

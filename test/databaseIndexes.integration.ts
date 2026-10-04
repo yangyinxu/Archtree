@@ -30,6 +30,11 @@ test('real Mongo indexes are verified, missing uniqueness fails closed, and dupl
   const receipt = await db.collection<{ _id: string }>('schemaMigrations')
     .findOne({ _id: requiredIndexRevision });
   assert.ok(receipt);
+  const linkIndexes = await db.collection('emailLinkTokens').listIndexes().toArray();
+  const byKey = (key: Record<string, number>) => linkIndexes.find(index => JSON.stringify(index.key) === JSON.stringify(key));
+  assert.ok(byKey({ email: 1, purpose: 1 }), 'link cleanup within registration transactions is indexed');
+  assert.equal(byKey({ userId: 1 })?.sparse, true);
+  assert.equal(byKey({ expiresAt: 1 })?.expireAfterSeconds, 0, 'expired links leave through the TTL index');
   await verifyRequiredDatabaseIndexes(db);
   await db.collection('users').dropIndex('email_1');
   await assert.rejects(verifyRequiredDatabaseIndexes(db), DatabaseIndexInitializationError);

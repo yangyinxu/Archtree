@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { logCatalogFailure } from './catalogDiagnostics';
 import { Readable } from 'node:stream';
 import { AudioTrack, AudioFormat } from '../models/audioTrack';
 import { Artist } from '../models/artist';
@@ -179,7 +180,7 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
     try {
         audioMetadata = await readAudioMetadata(uploadFile);
     } catch (metadataError) {
-        console.log(`Unable to read audio metadata for ${originalFileName}:`, metadataError);
+        logCatalogFailure(res, 'audio_metadata_unavailable', metadataError);
     }
 
     const track = new AudioTrack(
@@ -239,10 +240,15 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
             cleanupPending: upload.cleanupPending
         });
     } catch (error) {
-        console.log(error);
-        return res.status(500).json({
-            message: 'Failed to create and upload the Audio MediaTrack. The upload attempt remains recorded for reconciliation.',
-            audioTrackId
+        logCatalogFailure(res, 'media_upload_failed', error);
+        const outcomeUnknown = (error as any)?.outcomeUnknown === true;
+        return res.status(outcomeUnknown ? 503 : 500).json({
+            message: outcomeUnknown
+                ? 'Audio MediaTrack recorded, but the upload outcome could not be confirmed. Storage reconciliation is required before retrying.'
+                : 'Failed to create and upload the Audio MediaTrack. The upload attempt remains recorded for reconciliation.',
+            audioTrackId,
+            outcomeUnknown,
+            cleanupPending: Boolean((error as any)?.cleanupPending)
         });
     }
 };
@@ -349,7 +355,7 @@ export const updateAudioTrack = async (req: Request, res: Response, next: NextFu
         )
         : { updateApplied: true, cleanupPending: false, cleanupError: undefined };
     if (cleanup.cleanupError) {
-        console.log(`Unable to delete detached audio-track cover art ${audioTrack.coverArtId}:`, cleanup.cleanupError);
+        logCatalogFailure(res, 'cover_art_cleanup_deferred', cleanup.cleanupError);
     }
     if (!cleanup.updateApplied) {
         return res.status((cleanup as any).outcomeUnknown ? 503 : 409).json({
@@ -405,7 +411,7 @@ export const headAudioTrackStream = async (req: Request, res: Response, next: Ne
         if (context.aborted || error?.name === 'AbortError') return;
         const statusCode = s3ErrorStatus(error);
         if (statusCode >= 500) {
-            console.error('Error checking Audio MediaTrack:', error);
+            logCatalogFailure(res, 'media_probe_failed', error);
         }
         return res.status(statusCode).end();
     } finally {
@@ -465,7 +471,7 @@ export const streamAudioTrack = async (req: Request, res: Response, next: NextFu
         await pipeMediaStream(req, res, stream, context);
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
-        console.error('Error streaming Audio MediaTrack:', error);
+        logCatalogFailure(res, 'media_stream_failed', error);
         if (!res.headersSent) {
             return res.status(s3ErrorStatus(error)).json({ message: 'Unable to stream Audio MediaTrack.' });
         } else {
@@ -496,7 +502,7 @@ export const headAudioTrackDownload = async (
         if (context.aborted || error?.name === 'AbortError') return;
         const statusCode = s3ErrorStatus(error);
         if (statusCode >= 500) {
-            console.error('Error checking downloadable Audio MediaTrack:', error);
+            logCatalogFailure(res, 'media_probe_failed', error);
         }
         return res.status(statusCode).end();
     } finally {
@@ -570,7 +576,7 @@ export const downloadAudioTrack = async (
         await pipeMediaStream(req, res, stream, context);
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
-        console.error('Error downloading Audio MediaTrack:', error);
+        logCatalogFailure(res, 'media_download_failed', error);
         if (!res.headersSent) {
             return res.status(s3ErrorStatus(error)).json({
                 message: 'Unable to download Audio MediaTrack.'
@@ -619,7 +625,7 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
                 cleanupPending: deletion.cleanupPending
             });
         } catch (s3Error) {
-            console.log('Audio track deletion failed for audioTrackId:', audioTrackId, s3Error);
+            logCatalogFailure(res, 'media_deletion_failed', s3Error);
             const conflict = Number((s3Error as any)?.statusCode) === 409;
             const outcomeUnknown = (s3Error as any)?.code === 'audio_deletion_outcome_unknown';
             return res.status(conflict ? 409 : 502).json({
@@ -633,7 +639,7 @@ export const deleteAudioTrack = async (req: Request, res: Response, next: NextFu
         }
 
     } catch (error: any) {
-        console.log(error);
+        logCatalogFailure(res, 'media_deletion_failed', error);
         return res.status(500).json({ message: 'Failed to delete MediaTrack.' });
     }
 };
@@ -733,7 +739,7 @@ export const uploadAudioTrackFile = async (
             cleanupPending: upload.cleanupPending
         });
     } catch (error) {
-        console.log(error);
+        logCatalogFailure(res, 'media_upload_failed', error);
         const statusCode = Number((error as any)?.statusCode);
         const conflict = statusCode === 409;
         const outcomeUnknown = (error as any)?.outcomeUnknown === true;

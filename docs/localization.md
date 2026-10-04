@@ -458,6 +458,50 @@ Every published locale is tested for:
 
 Pseudo-locales are test fixtures, not entries in the production manifest.
 
+## Engineering Guide localization
+
+The Engineering Guide uses separate, build-time translations. It serves English
+at `/engineering[/<topic>]` and Simplified Chinese at
+`/engineering/zh-hans[/<topic>]`. Header language links preserve the topic; the URL
+stores the choice without reading or changing Finitude's language preference.
+These pages do not use the listener's remote bundle API or native resource sync.
+
+English content comes from `docs/engineering/guide.json` and English interface
+messages from `engineering/locales/en-US.json`. The Chinese source is
+`docs/engineering/locales/zh-Hans.json`, an envelope with exactly `schemaVersion`
+(`1`), `locale` (`zh-Hans`), `sourceDigest`, and `messages`. Its `messages` value is
+a complete flat string map covering page copy, navigation, source-link labels,
+and accessibility text. Commands, file paths, routes, identifiers, and source
+anchors remain structural data rather than translation fields.
+
+`collectEngineeringMessages` in `scripts/lib/engineering-localization.mjs`
+collects the English key set. `engineeringTranslationDigest` computes SHA-256
+over the JSON serialization of English key/value entries sorted by key. The
+build rejects missing or extra keys, mismatched named interface placeholders,
+or a stale source digest before publishing either language.
+
+After changing English copy, review and update the complete Chinese message map,
+including entries affected by reordered content. Only after that review, obtain
+the new `sourceDigest` using the same helpers as the build:
+
+```sh
+node --input-type=module - <<'NODE'
+import { readFileSync } from 'node:fs';
+import { collectEngineeringMessages, engineeringTranslationDigest } from './scripts/lib/engineering-localization.mjs';
+const read = path => JSON.parse(readFileSync(path, 'utf8'));
+const messages = collectEngineeringMessages(
+  read('docs/engineering/guide.json'),
+  read('engineering/locales/en-US.json')
+);
+console.log(engineeringTranslationDigest(messages));
+NODE
+```
+
+Set the reviewed translation's `sourceDigest` to that value, then run
+`npm run build:engineering`. The current guide emits 26 static topic pages across
+the two languages. Use `npm run preview:engineering` to inspect both versions;
+do not edit generated files under `engineering/dist`.
+
 ## Standards references
 
 - [BCP 47 / RFC 5646: Tags for Identifying Languages](https://www.rfc-editor.org/rfc/rfc5646.html)

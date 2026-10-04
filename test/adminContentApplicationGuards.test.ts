@@ -17,6 +17,7 @@ test('pre-body authorization targets shared writes but preserves personal conten
         ['POST', '/content/me/recently-played'],
         ['PUT', '/content/me/saves/album/64b000000000000000000001'],
         ['POST', '/content/manage/artist/create'],
+        ['POST', '/content/manage/room-audio-analysis'],
         ['POST', '/auth/browser/login']
     ]) {
         assert.equal(requiresEarlySharedContentAdmin(method, path), false, `${method} ${path}`);

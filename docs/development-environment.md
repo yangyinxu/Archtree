@@ -12,6 +12,11 @@ or use a version manager with `.nvmrc` / `.node-version`. When downloading an
 archive, verify it against the official `SHASUMS256.txt` before extraction.
 Do not reuse `node_modules` installed for another Node major.
 
+Canonical localization JSON uses LF even in Windows checkouts with
+`core.autocrlf=true`, enforced by `.gitattributes`. Keep the byte-for-byte
+two-space JSON and duplicate-key checks enabled; do not regenerate locale content
+just to repair checkout line endings.
+
 ```sh
 node --version
 npm ci
@@ -21,10 +26,16 @@ npm run build
 npm run test:integration
 ```
 
-`npm run doctor` checks the Node major and the isolated MongoDB daemon without
+`npm run doctor` checks the Node major, FFmpeg capabilities and the isolated MongoDB daemon without
 reading `.env`, printing credentials, or contacting an application database.
 `npm test`, `npm run build`, and the server test runners reject unsupported
 Node majors before loading application checks.
+
+Node ESM loader arguments and dynamic imports use file URLs rather than native
+Windows drive paths. Disposable child tests scope `TMPDIR`, `TMP`, and `TEMP` to
+the same owned directory so cleanup assertions cover the actual allocation on
+every host. Synthetic decoder fixtures launch real Node child processes with
+bounded cleanup rather than relying on executable Unix shebang scripts.
 
 `npm start`, `npm run dev`, and `npm run dev:auth-rotation` use `cross-env` to set
 the existing environment values consistently on Windows, macOS, and Linux.
@@ -33,8 +44,18 @@ the test daemon does not provide development or production data.
 
 ## Configure application startup
 
-`npm run dev` loads `.env` from the repository working directory, in addition to
-settings already present in the terminal environment. `.env.example` is a
+`npm start`, `npm run dev`, and `npm run dev:auth-rotation` load `.env` from the
+working directory when `src/app.ts` starts as the process entry, before any
+application module reads configuration. Settings already present in the terminal
+environment take precedence. The operational database commands
+`npm run analyze:room-audio`, `npm run backfill:catalog-search`,
+`npm run migrate:catalog-credits`, and `scripts/reconcile-image-versions.ts` load
+it the same way. Application modules never read `.env` themselves, so tests, the
+disposable `npm run demo:social` and `npm run profile:search` commands, and the
+Listener E2E servers do not see private configuration. The listener E2E server
+also answers the authentication-email domain check from a synthetic resolver
+(`web/e2e/support/syntheticMx.ts`, where only `.invalid` domains are
+undeliverable), so browser tests never query DNS. `.env.example` is a
 template and is never loaded automatically. A passing `npm run doctor` verifies
 the development tools; it does not configure the application database or account
 secrets.
@@ -71,8 +92,81 @@ occupied ports. These diagnostics do not bypass the original startup checks.
 Regression coverage in `test/startupDiagnostics.test.ts` exercises the actual
 `src/app.ts` command entry with environment loading and database connections
 disabled. It checks the exit status, missing-variable list, and secret-safe log
-shape. `test/serverStartup.test.ts` covers successful listening, occupied ports,
+shape, and separately confirms that the entry still reads a `.env` in its working
+directory. `test/serverStartup.test.ts` covers successful listening, occupied ports,
 invalid ports, and application initialization failures.
+
+## Room audio analysis runtime
+
+Compressed room audio requires FFmpeg with AAC/MP3 decoders, MOV/MP3 demuxers and
+the null muxer, the PCM s16le encoder and file/pipe protocols. Use a maintained distribution package and verify its capabilities:
+
+```sh
+# macOS with Homebrew
+brew install ffmpeg
+# Ubuntu 24.04 (also installed by release CI)
+sudo apt-get update
+sudo apt-get install --yes ffmpeg
+npm run doctor
+```
+
+On Windows, install a trusted FFmpeg distribution linked by the
+[official FFmpeg download page](https://ffmpeg.org/download.html), add its bin
+directory to PATH or set `ROOM_AUDIO_FFMPEG_PATH` to the absolute `ffmpeg.exe` path.
+The override is an executable path, not a shell command. FFmpeg always reads a
+bounded local file and decodes to the null muxer; it never opens an audio device.
+Verify the distribution's published SHA-256 before extracting it. A portable
+installation outside the checkout avoids committing workstation executables.
+For a persistent user override, open a new shell after saving it, or load it into
+the current PowerShell process before `npm run doctor`:
+
+```powershell
+$env:ROOM_AUDIO_FFMPEG_PATH = [Environment]::GetEnvironmentVariable('ROOM_AUDIO_FFMPEG_PATH', 'User')
+npm run doctor
+```
+
+See the [FFmpeg protocol controls](https://ffmpeg.org/ffmpeg-protocols.html) and
+[command options](https://ffmpeg.org/ffmpeg.html) used by the restricted decoder.
+
+Elastic Beanstalk deployments install a pinned, SHA-256-verified build through
+`.platform/hooks/prebuild/02_install_ffmpeg.sh` (see the README's room audio
+decoder section); other deployment targets must provision and patch this
+executable separately. The application archive never bundles a workstation binary
+or the repository scripts. Use
+`npm run doctor` in a full Linux checkout with the test runtimes; a deployment
+host does not require a local MongoDB test daemon. To inspect only FFmpeg from a
+full checkout using the deployment's executable, run
+`node scripts/check-runtime.mjs --room-audio`. Then verify original MP3/M4A
+uploads and room preparation, play and seeking through the deployed app before
+rollout. Run the batch CLI or the paced catalog backfill
+(`npm run backfill:room-audio-analysis`) from a full administrator checkout with
+explicit configuration and a local FFmpeg; the deployed Content Manager page
+remains their in-app equivalent. Missing runtime makes compressed uploads
+ineligible with a retryable analysis reason while ordinary uploads/playback stay
+available. The analyzer tests intentionally require a real decoder; do not mark
+missing-decoder fixture checks as passed. Local checks preserve Chromium's
+`--disable-audio-output`; compressed-media and focused room-recovery scenarios add Firefox/WebKit hosts
+only on Linux with `CI=true` or `CI=1`, using isolated servers and the CI null
+audio sink. Local Firefox/WebKit execution remains excluded.
+
+When transferring a Windows working copy into isolated Linux verification, use
+Git's canonical line endings and executable modes rather than treating a raw
+directory copy as a Linux checkout. Preserve reviewed image baselines byte for
+byte. Record the selected source and built bundle separately from any temporary
+diagnostic instrumentation; restore and verify both before an acceptance rerun.
+
+A Linux guest without GPU passthrough can separately diagnose WebKit rendering
+with `LIBGL_ALWAYS_SOFTWARE=true` and `GALLIUM_DRIVER=llvmpipe`, as documented by
+[Mesa](https://docs.mesa3d.org/envvars.html). These settings select a software
+renderer; they do not supply audio hardware or establish media readiness. Label
+this profile separately from default CI, retain real click and media assertions,
+and preserve a media failure even when page rendering recovers. A working
+animation or click probe is not a passing playback gate.
+
+The separate sustained-room gate and bounded options are documented in
+[`README.md`](../README.md#verify-sustained-audio-rooms-locally). It does not run
+as part of the ordinary short test matrix. It owns its resource cleanup and uses
+no workstation application database or cloud credentials.
 
 ## Disposable MongoDB tests
 
@@ -105,8 +199,38 @@ Elastic Beanstalk artifact validation. Windows and macOS print their exclusion
 explicitly; these hosts cannot verify Bash/systemd behavior or POSIX executable
 bits. Those tests retain their complete assertions and remain part of Linux CI.
 
+The server test runner fails any single test that runs longer than 120 seconds,
+so a hung test fails the gate instead of stalling it. Pass a different bound
+explicitly when diagnosing a slow test, for example
+`npm run test:server -- --test-timeout=600000`. The runner also passes
+`--test-force-exit`, so a test file that finishes but leaves a socket, timer, or
+child process open still exits instead of keeping the gate alive. To find such a
+leaked handle, run with `npm run test:server -- --no-test-force-exit`; the run
+then stays open on the affected file.
+
+The server test runner starts unit, Linux, and integration test processes in an
+isolated environment so a private root `.env` never reaches them. It points
+`DOTENV_CONFIG_PATH` at the null device, so the app and operational script entries
+that tests spawn load nothing, and replaces `DB_CONN_STRING`, `DB_NAME`,
+`JWT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`,
+`S3_BUCKET_NAME`, `AWS_ENDPOINT_URL`, and `AWS_EC2_METADATA_DISABLED` with
+synthetic loopback values, including values exported in the terminal;
+`AWS_SESSION_TOKEN` is removed. An unmocked database or AWS call therefore fails
+against `127.0.0.1:9`. The runner also preloads
+`test/support/syntheticMxResolver.ts`, so the authentication-email domain check
+answers from a synthetic MX resolver and no test queries real DNS. Suites that
+need real services start their own disposable MongoDB and S3-compatible
+fixtures. Running one file directly with `node --import tsx --test` bypasses
+this environment and the resolver preload, so tests that spawn the app or
+script entries can then read a root `.env`, and authentication email requests
+and emails would look up real MX records; add `--import ./test/support/syntheticMxResolver.ts`
+from the repository root to keep DNS synthetic.
+`test/serverTestEnvironment.test.ts` fails if a test process can see a value
+from a sentinel `.env` in its working directory, or if any `src/` module other
+than `src/config/entryEnvironment.ts` imports `dotenv`.
+
 `npm run test:server:linux` runs the Linux suites explicitly and rejects other
-hosts. `npm run doctor:release` checks Linux, Bash, Node, and MongoDB. Deployment
+hosts. `npm run doctor:release` checks Linux, Bash, Node, MongoDB and FFmpeg. Deployment
 artifact staging also requires Linux so a Windows archive cannot be mistaken for
 a release bundle with verified executable permissions. Use Ubuntu 24.04 CI or a
 properly provisioned Ubuntu WSL environment for these gates; Git Bash alone does

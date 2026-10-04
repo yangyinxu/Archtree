@@ -3,6 +3,1428 @@
 This document describes implementation boundaries and recovery contracts. Product
 behavior remains defined in [business-rules.md](business-rules.md).
 
+## Social identity and relationship API
+
+The Stage 2 backend is implemented in `src/application/social/socialService.ts`,
+`src/contracts/socialV1.ts` and `src/routes/socialRoutes.ts`. This is additive to
+listener-v1 and private account APIs. `FINITUDE_SOCIAL_ENABLED` defaults to false;
+setting it to exactly `true` enables admission. Disabling it retains reads and
+safety actions, including changing an existing profile to undiscoverable without
+changing its handle/alias or losing friends. No room endpoint or delivery worker
+is enabled by this flag.
+
+### Routes and projections
+
+All routes below are relative to `/api/social/v1`. They require a current revocable
+session; native Bearer and current-viewer-bound browser cookie requests use the
+existing authentication and same-origin policies. The router authenticates before
+its strict 4 KiB JSON parser. It returns private/no-store responses and never raw
+database documents. Unknown JSON/query fields and repeated query values fail.
+
+| Method and path | Input | Response |
+| --- | --- | --- |
+| `POST /mutation-scopes` | Empty JSON object | `{scopeToken, expiresAt}` |
+| `POST /mutation-outcomes` | `{scopeToken, commandId}` | `{outcome: SocialOutcome or null}`; expired signed scopes may query retained outcomes |
+| `GET /me/profile` | No query | `{profile: SocialOwnProfile or null}` |
+| `GET /me/changes` | No query | `{revision}`; the account's opaque change counter, compared for inequality only |
+| `PATCH /me/profile` | Mutation identity plus `handle`, `alias`, `discoverable`, `expectedRevision` | `SocialOutcome`; creates with revision 0 or updates/reactivates the observed revision |
+| `POST /me/deactivate` | Mutation identity | `SocialOutcome` |
+| `GET /profiles?handle=...` | Exact normalized handle | `{profile: SocialCard or null}`; hidden/missing/bilaterally blocked are identical |
+| `GET /relationships?kind=...` | `kind`: friends/incoming/outgoing/blocks; optional limit 1–50 (default 20), signed cursor | `{items, nextCursor}`; no total count |
+| `GET /relationships/:socialId` | No query | `{relationship: {socialId,state,revision} or null}`; state is none/incoming/outgoing/friends/own blocked |
+| `POST /friend-requests` | Mutation identity plus `targetSocialId`, `expectedRevision` | `SocialOutcome` |
+| `POST /relationships/:socialId/:action` | Mutation identity and observed `expectedRevision`; block omits revision | `SocialOutcome`; action is accept/decline/cancel/remove/block/unblock |
+| `POST /reports` | Mutation identity plus `targetSocialId`; optional `reason` and `note` | `SocialOutcome`; see [reports and suspension](#reports-and-administrator-suspension) |
+
+A mutation identity is `{scopeToken, commandId}`. Command IDs contain 16–80 ASCII
+letters, digits, underscores or hyphens. The server normalizes a handle to lower
+case, trims/NFC-normalizes aliases, rejects control/format characters, and checks
+all fields before capturing immutable intent. Scope tokens are authenticated,
+account-bound, expire after 24 hours and are never accepted in a query string.
+They are domain-separated from both access tokens and list cursors. A signing-key
+rotation invalidates scopes/cursors rather than weakening verification.
+
+The closed-beta name policy in `src/application/social/socialNamePolicy.ts` holds
+the reserved-term lists and look-alike folding described in the business rules.
+The parser deliberately accepts reserved names; the profile plan checks a handle
+only when it is first claimed and a nickname only when it differs from the stored
+one, so profiles created earlier keep saving unchanged values. A violation is a
+durable `rejected` outcome with code `handle_reserved` or `alias_reserved`, and
+it writes no profile or handle row. There is no staff provisioning path for
+official accounts; one would need a separate, role-guarded change.
+
+`SocialCard` contains exactly `socialId`, `handle`, `alias`, and `iconSeed`.
+Finitude Web colors its generated icon from `iconSeed` (a stable hash to an
+OKLCH hue behind the alias initial); clients must treat the seed as opaque.
+`SocialOwnProfile` additionally contains `active`, `discoverable`, and `revision`,
+plus `suspended: true` only while an administrator suspension is in effect; the
+key is absent otherwise, so strict clients written before suspension keep parsing
+every unsuspended profile.
+List rows contain `socialId`, a permitted `profile` card or null, and the
+relationship `revision`. Block-list cards are always null: retaining a private
+block reference never grants current profile access. A peer's private block is
+not disclosed by pair-state or unblock precondition errors. Existing friends and
+pending-request participants may read their relationship despite discovery opt-out;
+an unrelated hidden or inactive target returns null.
+
+Completed mutation attempts return HTTP 200 with
+`{commandId, outcome: applied|noop|rejected, code?, replayed}`. A rejected domain
+outcome is durable and must be handled explicitly. The social router's errors use
+HTTP 400/401/404/409/410/413/415/429/503 for invalid schema, session, missing route,
+idempotency conflict, expired scope, body/type, admission budget or infrastructure
+failures, with generic `{code,message}` bodies. Shared authentication, viewer,
+Origin, TLS and concurrency guards retain their existing HTTP status and error
+envelopes, which may contain only `message` (including 403 and 426). Clients must
+handle the status even when a social error code is absent. A successful HTTP
+response alone does not mean that the requested relationship was applied.
+
+Web Social reads are serialized per viewer and account epoch. A GET 429 can cool
+subsequent GET dispatches using a positive integer `Retry-After`, capped at 60
+seconds; malformed, overflowing and HTTP-date hints are ignored. A known,
+message-only HTTP concurrency denial can recover when its safe delay fits the
+read's original active deadline. This recovery shares the existing three-attempt
+budget with transient-domain-503 GET recovery; waiting between those attempts
+counts toward the original 30 seconds. Quota, coded, unknown, and malformed
+admission failures, or delays that exceed the active deadline, remain terminal. Cooling uses a
+monotonic deadline, survives an idle read queue, retains at most 16 short-lived
+viewer entries, and clears on expiry or account transition. Cancellation settles
+a waiting caller immediately without dispatching with replacement credentials;
+the 30-second transport deadline starts after the initial admission waiting. POST listening
+status queries and durable mutations do not install or consult this GET cooling.
+Production quotas remain unchanged.
+
+After cancel/decline/remove/unblock, the pair may remain as a positive-revision
+`none` tombstone. Before an explicit new request, read the authorized pair-state
+endpoint and capture its revision; do not guess 0 or automatically rebase a failed
+command. Revision 0 denotes a currently absent pair. These numbers can skip: they
+are mutation preconditions, not item counts or continuous client event sequences.
+Cursor signatures bind the viewer and list kind for 15 minutes. Each page freshly
+projects visible rows in opaque social-ID order; it is not a retained list snapshot.
+
+A request that would create a pending row spends three UTC-day budgets in the
+same transaction. The pair row's `requestDay`/`requestCounts` (aligned with
+`accountIds`) allow 3 requests per direction; the sender's
+`socialBudgets.outgoingDay/outgoing` allows 50; the recipient's
+`incomingDay/incoming` allows 100 and is charged only by the sender's first
+request to that recipient that day. Cancel, decline and later transitions keep
+the pair counters, and a `none` tombstone expires 25 hours after its last change,
+so it outlives the day it counts. Account deletion removes both the pair rows and
+the budget row. An exhausted budget is a durable `rejected` `social_limit` that
+writes no pair or budget change; a noop repeat and a rejected request spend
+nothing.
+
+### Reports and administrator suspension
+
+`POST /reports` captures `{action: 'report', targetSocialId, reason, note}`.
+`reason` is one of `impersonation`, `harassment`, `spam`, `inappropriate` or
+`other` (the default when omitted). `note` is optional, trimmed, NFC-normalized,
+CRLF-folded and at most 500 characters; line feeds are the only control
+characters kept. Defaults are applied before the receipt digest, so a retry with
+or without the optional keys is the same intent. The command is a safety action:
+it is accepted while admission is disabled and may use the reserved safety
+receipt capacity.
+
+The plan in `socialService.ts` requires the reporter to own a social profile in
+any state and the target profile to exist and differ from the reporter. Missing
+and self targets are a durable `rejected` `profile_unavailable`. One
+`socialReports` row per reporter, target and UTC day is enforced by a unique
+SHA-256 `dedupeKey`; a repeat that day is a `noop` that spends no allowance. A
+new report spends the durable `socialBudgets.reportDay/reports` allowance of 10
+per day, or is rejected with `social_limit`. The row keeps the reporter and
+target account and social IDs, the target's handle and nickname at report time,
+the reason, the note and `createdAt`. The transaction fences both accounts (so a
+concurrent deletion cannot orphan a row) but writes no outbox signal, receipt,
+profile or relationship for the target, and wakes no realtime delivery.
+
+`src/application/social/socialModerationService.ts` and
+`src/routes/socialModerationRoutes.ts` implement administrator moderation under
+`/admin/social`. The router installs `requireAuth` and `requireAdmin` before any
+route; cookie POSTs also pass the application's same-origin mutation guard.
+Responses are `private, no-store`. GET responses are JSON unless the browser
+prefers HTML; forms post back and redirect with a fixed `notice` code, so no
+listener identity or caller text is placed in a redirect URL.
+
+| Method and path | Input | Response |
+| --- | --- | --- |
+| `GET /admin/social/reports` | `state=open\|resolved` (default open), `limit` 1–100 (default 50), `cursor` | `{items, nextCursor}`; open oldest first, resolved newest first. HTML adds the suspended list and a `handle` lookup |
+| `GET /admin/social/profiles` | `handle=...` or `suspended=true` | `{items: SocialModerationProfile[]}` |
+| `POST /admin/social/reports/:reportId/resolve` | `{resolution: 'dismissed' \| 'actioned'}` | `{outcome: applied\|noop, value: SocialModerationReport}` |
+| `POST /admin/social/profiles/:socialId/suspend` | Empty body | `{outcome, value: SocialModerationProfile}` |
+| `POST /admin/social/profiles/:socialId/unsuspend` | Empty body | `{outcome, value: SocialModerationProfile}` |
+
+A moderation profile contains `socialId`, `handle`, `alias`, `status`
+(`active`, `inactive` or `suspended`), the listener's own `discoverable` choice,
+`suspendedAt` and its open report count. A moderation report contains its ID,
+reason, note, state, timestamps, resolution, the reported snapshot with the
+current moderation profile (or null), and the reporter's social ID and current
+handle (or null once anonymized). Neither contains email, account IDs or avatars.
+
+Every moderation change is idempotent by state, so an administrator may retry a
+`mutation_outcome_unknown` result. Resolution is a single-document transition
+that stamps `resolvedAt`, `resolvedBy` (the administrator account ID) and a TTL
+`expiresAt` 90 days later. Suspension runs in a snapshot transaction that fences
+the target, every relationship peer, room co-members and live music-share peers
+in sorted order, then: moves pending edges to `none` under a fresh relationship
+revision; stores `suspension {suspendedAt, suspendedBy, restoreActive,
+restoreDiscoverable}` while holding `active` and `discoverable` false; applies
+the deactivation room safety change, music-share deletion and listening reset;
+resolves open reports about the target as `suspended`; and invalidates the
+target and peers. Because every read and admission path already requires an
+active profile, the inactive profile is hidden without new read predicates. The
+profile plan rejects any profile command from a suspended profile with
+`social_suspended` (403). Unsuspension restores the stored choices, removes the
+suspension and invalidates the target and retained peers. Accepted edges and
+blocks are untouched by both.
+
+Account deletion deletes reports whose `targetAccountId` is the account and
+anonymizes reports it wrote by removing `reporterAccountId`, `reporterSocialId`
+and `note`, stamping `anonymizedAt` and replacing `dedupeKey` with
+`anonymized:<reportId>`, in the same transaction. Startup requires the unique
+`dedupeKey` index and the `reporterAccountId` and `targetAccountId,state` cleanup
+indexes; the triage sort, TTL and sparse suspension indexes are optional.
+
+### Direct music share API
+
+`src/contracts/socialMusicV1.ts` defines a separate private projection. These
+routes reuse social-v1 authentication, viewer fencing, 4 KiB JSON limits,
+mutation scopes, status-only receipts and payload-free `socialChanged` delivery.
+
+| Endpoint under `/api/social/v1` | Contract |
+| --- | --- |
+| `GET /music-shares?direction=incoming\|outgoing&limit=20&cursor=...` | `{ items, nextCursor }`; default page 20, maximum 50; signed cursor binds account, direction and descending creation time/share identity for 15 minutes |
+| `POST /music-shares` | Original mutation identity, `targetSocialId`, observed friendship `expectedRevision`, `contentType: audioTrack\|album` and catalog `contentId` |
+| `POST /music-shares/:shareId/dismiss` | Original mutation identity; only the recipient removes this share incarnation |
+| `POST /music-shares/:shareId/withdraw` | Original mutation identity; only the sender removes this share incarnation |
+
+Items contain only opaque `shareId`, the peer's current social card, catalog
+type/identity, creation/expiry timestamps, and current allowlisted content
+(`id`, `contentType`, `title`, `artworkUrl`, `artistNames`) or null. No stream URL,
+account ID, saved state, read/play receipt or historical identity is retained.
+Reads recheck both active profiles, current friendship, blocking and ready
+catalog visibility. Replacements resolve current catalog identity. Deleted or
+non-ready content returns null until indexed idempotent cleanup removes its rows.
+
+The `socialMusicShares` collection bounds each account to 100 live incoming and
+100 live outgoing rows, with a durable 50-new-incoming/day budget and 30-day
+logical expiry. Current duplicate sender/recipient/content shares are noops.
+Account fences serialize quota, friendship and catalog-reference admission with
+the existing transaction executor. Removal/block/deactivation/account deletion
+clear the affected bounded rows and invalidate surviving peers. Catalog deletion
+reclaims indexed references in bounded retryable batches before final metadata
+removal. TTL only reclaims expired rows and never grants visibility.
+
+Web's lazy `/finitude/social/shares` route and share dialog use the existing player
+and private Save API. Their shared operation session retains an uncertain command
+across route/dialog changes, blocks a new share until explicit recovery, and
+fences late callbacks to the captured account epoch. Acknowledged writes remain
+acknowledged even if the subsequent list refresh fails.
+
+### Friend listening status API
+
+`src/contracts/listeningV1.ts` adds an independent opt-in Audio projection under
+the same live session, current viewer, exact JSON and cookie protections.
+
+| Endpoint under `/api/social/v1` | Contract |
+| --- | --- |
+| `GET /me/listening` | `{ listening: { enabled, revision, publisherRevision, serverTimeMs } }`; absent preference is off at revision 0 |
+| `PATCH /me/listening` | Original social mutation identity, `enabled`, observed `expectedRevision` |
+| `POST /listening-publications/claim` | Original social mutation identity, document `clientId`, `expectedPreferenceRevision`, `expectedPublisherRevision`; status-only receipt, no public playback |
+| `POST /listening-publications/report` | Exact publisher identity, expected preference/publisher versions and increasing `sequence`; `playing` carries `observedAtMs` and captured playback; `stopped` carries its captured `occurrenceId` and `playbackSequence` |
+| `POST /listening-status/query` | `{ socialIds }`, 1–50 unique already-observed opaque IDs; `{ items }` contains only current friend cards, ready Audio metadata and expiry |
+| `GET /listening-status/friends` | Optional `limit` (default 20, at most 50) and opaque `cursor`; `{ items, nextCursor }` lists every currently listening friend in opaque social-ID order with the same item projection. Only friends with a fresh visible publication are candidates, so a poll does not re-check every friend. The signed cursor is bound to the account and expires after 15 minutes |
+
+The durable `socialListeningStates` account row keeps the preference and publisher
+clock. One `socialListeningPublications` row per account holds the current session,
+document client, claim command ID, sequences, loaded-source fingerprint, playback
+occurrence and expiring display. A claim advances the clock and publishes nothing.
+Reports update an existing exact lease and never upsert. TTL can reclaim the
+publication without removing the durable clock or allowing an old receipt/report
+to recreate it. The claim's `commandId` is its private publication identity.
+
+Playing reports include `sourceId`, `occurrenceId`, `mediaTrackId`, `positionMs`
+and nullable room evidence (`roomId`, epoch, member/controller, playback generation,
+entry and pinned media revision). The per-document client matches the room client.
+Ordinary Audio uses the current ready source without requiring room WAV analysis.
+The source ID survives pause/buffering recovery; a new actual run changes the
+occurrence. Same-source resumes retain the source fingerprint, preventing an old
+loaded source from rebinding to replaced media inside its lease. The fingerprint
+hashes only the active object key, which every replacement mints anew, so
+room-audio analysis of unchanged bytes keeps the status and lease; room reports
+compare the pinned representation revision separately. Room reads and
+reports also verify current authority, admission, controller, readiness and the
+exact playing timeline. These private fields never enter friend projections.
+
+Native `playing` establishes source-matched proof; only fresh advancing native
+media time can renew it. An observer remounted during continuing Audio can also
+recover after a new explicit gesture and two fresh, advancing, source-matched
+native observations. A source change retires that recovery gesture. The lazy
+observer does not trust UI status, readiness or the `play()` promise.
+Client monotonic observations are mapped to server time from
+owner reads. Delayed responses cannot rewind the established clock estimate;
+preference and publisher revisions are still applied, and clock advances recheck
+the existing lease expiry. Reports more than five seconds old or two seconds ahead are rejected;
+expiry is bounded by observation time plus 25 seconds. Same-occurrence renewals
+extend at most every ten seconds; valid early/nonadvancing reports may acknowledge
+their sequence while retaining the previous expiry. The playing-report budget is
+60 per account per minute; captured safety stops remain available after that
+budget is exhausted. Existing IP/session protections still apply.
+
+The Web panel reads `GET /listening-status/friends` when Together opens, so its
+rows are laid out before the listener scrolls to it or to the profile controls
+below it, and then every five seconds while it is in view (immediately on
+returning to it after a longer gap), refetching each page it has loaded (20
+listening friends each, more on explicit Load more), so friends beyond the first
+page of the friend list stay visible. It
+reuses the account publisher's monotonic server clock, expires rows locally and
+hides failed reads. Claims and reports do not fan out generic social invalidations. Current
+friendship, active profiles, opt-in, unblocked relationships, publishing session
+and ready source are rechecked on each read. Source replacement is an immediate
+visibility/renewal barrier; indexed cleanup before final source deletion uses
+bounded batches rather than an unbounded publication update in the source
+transaction. Session revocation includes ordinary publishers that never joined
+a room. Opt-out/deactivation invalidate publication and retain clocks; final
+account deletion removes both private records. Disabled social admission hides
+status while preserving setting reads and safety cleanup.
+
+The Web account singleton retains uncertain preference/claim identities across
+route changes. A new explicit gesture freshly verifies the publisher; automatic
+progress, reconnect and polling cannot reclaim another device's ownership. Stops
+capture their original lease, sequence and occurrence. Account transitions
+synchronously detach observations, and late callbacks cannot publish for a new
+viewer. Creating a paused room and inviting a friend are separate explicit,
+recoverable mutations with no automatic playback.
+
+A stop records the sequence of the playing report it cancels, below its own
+sequence. This lets a stop arriving before that playing report suppress both the
+pending occurrence and older display, without allowing a delayed old-occurrence
+stop to clear newer playback. A room member's confirmed local pause/disconnection
+also clears its matching publication and blocks the retired actual occurrence;
+readiness recovery alone cannot restore that display.
+
+### Transactions, budgets and lifecycle
+
+Social reads/writes verify the actor's account-bound, unrevoked and unexpired
+`authSessions` row inside their transaction. A conditional session-row increment
+serializes with revocation. Involved account rows are fenced in sorted order before
+reading the final domain state. Each write commits the domain state, status-only
+receipt and payload-free invalidation together. Production transaction bodies
+perform no external dispatches. Known-aborted transient conflicts have at most three
+attempts with short backoff; a commit with an unknown result returns
+`mutation_outcome_unknown` and is never automatically rerun.
+
+Receipts are keyed by account, signed scope ID and command ID; a canonical digest
+detects changed intent. Identical retries are deduplicated before stale revision
+checks and return only the recorded status, never old profile/relationship data.
+Explicit same-identity retry resolves an uncertain commit. Receipt expiry is one
+hour after scope expiry. Expiry is checked logically, even if TTL has not run or
+the receipt was already removed. A failed outcome lookup does not authorize a
+new-scope replay.
+
+Durable budgets are 24 scopes/day, 30 new mutation attempts/minute and 120 reads/minute
+per account, plus 100 newly received requests/day. Profile deactivation cannot reset
+these counters. A 120 requests/minute HTTP window per authenticated account (per IP
+for unauthenticated requests, including revoked or expired tokens) and per-account
+mutation concurrency limits (four per account, 32 per process) provide additional
+request protection. Retained
+receipts permit 1,000 admission attempts plus 128 safety receipts and a final
+reserved deactivation receipt; admission exhaustion therefore cannot consume the
+privacy-exit reserve. Retries consume no new receipt.
+Short request-rate limits still apply to safety operations.
+
+Each canonical pair stores both account/social IDs, independent directional
+blocks, request direction, state and revision. Friends/pending/blocks/pair bounds
+are checked under both account fences. Unblocked `none` tombstones have a 25-hour
+expiry. Durable per-account relationship clocks survive their cleanup, ensuring
+a recreated pair never reuses a previous request revision. Those clocks also
+advance during deactivation. They are internal fields, not public profile data.
+
+The social outbox is one coalesced row per account: account ID, invalidation
+revision and update time. It retains no peer, alias or relationship payload and
+has no TTL that could erase pending recovery work. The room gateway reauthorizes
+delivery from these current-state markers. Scope receipts likewise contain no
+peer reference or private projection, so deleting a target cannot leave cached
+identity payload in another account's receipt.
+
+`GET /me/changes` exposes the same revision for clients without the room socket,
+for example when rooms are disabled. It is a missing-row-means-zero counter with
+no payload. Unlike other social reads it skips the transactional read fence: a
+read-only check of the current session replaces the session, account and read
+budget writes, so an idle poll never writes to MongoDB. The router's 120-per-minute
+account window still bounds it. Account deletion removes every session, so a valid
+session also implies a live account.
+
+Account deletion keeps the existing synchronous transaction and all avatar/shared
+provenance preconditions. `socialAccountLifecycleService.ts` removes the deleted
+account's profile, both-sided relationships, receipts, budget, outbox and the
+reports about it (anonymizing the reports it wrote), fences existing peers before
+their invalidation, and removes the owner identifier from the 30-day handle
+reservation. Concurrent peer deletion cannot recreate orphaned
+outbox data. A failure rolls back the entire cleanup; no S3 object is touched.
+Deactivation retains the profile/handle, blocks, receipts and clocks so later
+reactivation cannot restore an old intent or relationship.
+
+Startup migration `required-indexes-v4-social-participation` (now verified as part of
+`required-indexes-v6-social-reports`, which follows v5's `emailLinkTokens` cleanup
+index with the `socialReports` constraints) adds mandatory unique constraints
+and required nonunique cleanup indexes. A sparse, partial, hidden, wrong-key or
+wrong-uniqueness substitute is rejected. TTL is opportunistic reclamation and is
+never an authorization or admission decision. See the active plan for actual
+verification and the remaining client/room rollout stages.
+
+## Social and shared playback architecture (proposed)
+
+The architecture below includes later native, Video and deployment stages.
+The current implemented Web Audio slice is defined by the following contract and
+[canonical business rules](business-rules.md#shared-playback-rooms); remaining
+proposals must not be read as already delivered capabilities. The active
+[implementation plan](plans/social-and-shared-playback-plan.md) retains the
+unverified device and rollout gates.
+
+### Implemented Audio room API
+
+`src/contracts/roomV1.ts` freezes the runtime wire contract; the earlier
+`roomPlaybackPrototype.ts` remains a test feasibility model. Finitude Web's
+`/finitude/social` route uses `web/src/api/rooms.ts`, optional discovery reads in
+`web/src/api/roomMedia.ts`, `roomSession.ts`, and the
+existing player through its lazily loaded room adapter. Native adapters still
+use synthetic DEBUG fixtures and do not consume this API yet.
+
+All endpoints are private, require a live revocable session and current Web
+account viewer, reject extra query/body fields, and return allowlisted DTOs.
+Cookie writes retain the existing same-origin JSON protections. Room HTTP bodies
+are capped at 16 KiB; social identity bodies remain capped at 4 KiB.
+`X-Finitude-Room-Client` identifies a fresh tab lifetime, not authorization.
+Room HTTP has a 180-request/minute window per authenticated account and a total
+concurrency ceiling of six/account and 48/process. GET/HEAD work has a smaller
+four/account, 40/process ceiling inside that pool, so read bursts alone cannot
+occupy every control slot. Commands and tickets still share the original total
+ceiling. Identity resolves before the window, as on the social router, so members
+behind one NAT keep separate budgets and a new address adds no budget to an
+account. Unauthenticated requests, including revoked or expired tokens, spend a
+180/minute window per IP before their 401, never an account's window; an
+authenticated request over quota still pays the session and user lookups but no
+room work. Room and social windows are separate scopes. Rejected admission returns
+HTTP 429 with `Retry-After`; occupied slots remain held until both the response
+and tracked work complete, including disconnects. These windows and slots are
+process memory, which is complete for the single production process; see the
+[single-process capacity contract](#single-process-capacity-contract).
+
+| Endpoint under `/api/social/v1` | Contract |
+| --- | --- |
+| `GET /capabilities` | `socialEnabled`, `roomsEnabled`; room admission requires both flags. The public `GET /api/listener/v1/capabilities` reports the same switches as `social: { enabled, rooms }` (both read `src/config/socialRollout.ts`) so signed-out Web pages can hide social entry points |
+| `GET /rooms/current`, `GET /rooms/:roomId` | `{ room: snapshot or null }`, always freshly authorized |
+| `GET /room-media` | `{ items }`, at most 100 eligible pinned Audio descriptors |
+| `GET /room-media/search?q=&cursor=&limit=` | `{ items, nextCursor }`, title substring search; default 20/max 50 eligible pinned Audio descriptors per page |
+| `GET /room-media/:mediaTrackId` | `{ item: descriptor or null }`; current active social profile required; missing and ineligible tracks are indistinguishable |
+| `GET /room-invitations` | `{ invitations }`, up to 20 current authorized invitations with inviter card, incarnation and expiry; a bounded preview, not an exact total |
+| `GET /room-invitations/:invitationId` | `{ invitation: invitation or null }`, original recipient only; unavailable, expired, replaced, revoked and wrong-account links are indistinguishable |
+| `GET /rooms/:roomId/invitations` | Current host/controller only; `{ invitations }` containing only `invitationId`, `generation`, `recipientSocialId`, `expiresAtMs` for pending links |
+| `GET /rooms/:roomId/community` | Current members only; `{ community }` with room/epoch/revision, up to 20 pending song requests, current-member queue attribution and up to 20 unexpired activity events within 64 KiB |
+| `POST /room-commands` | Strict command with original `scopeToken` and `commandId`; status-only social outcome |
+| `POST /realtime-tickets` | `{ clientId }`; returns an opaque single-use 30-second ticket |
+| WebSocket `/realtime` | Same-origin upgrade, subprotocols `archtree-room-v1` and ticket; only the protocol name is negotiated |
+
+Room media search trims the query, limits it to 100 Unicode characters and
+rejects control characters. Title matching treats regex syntax literally.
+Descending-ID keyset cursors are signed, account/query bound and expire after
+15 minutes. Each page resolves at most 200 candidates; a partial or empty page
+may still provide `nextCursor` so older eligible tracks remain reachable. Reads
+never analyze or mutate media. The original bounded `/room-media` response stays
+available for older Web clients; current pickers use search and pagination.
+
+Tickets never appear in URLs and only their SHA-256 digest is persisted. Issue
+and redemption transactionally fence the live account/session. At most five
+pending tickets per account are retained. Expiry is checked logically before
+any TTL reclamation. The gateway reauthorizes complete state after every committed
+invalidation and periodically every five seconds to recover a lost final wakeup.
+Outboxes store only invalidation versions, never historical private room payloads.
+
+Invitation list, detail and outgoing projections share current room, host,
+profile, friendship and logical-expiry checks. Recipient previews filter before
+filling 20 results, with candidate scanning bounded by total room admission
+capacity. Detail lookup is independently recipient-scoped, so an older valid
+link does not depend on appearing in that preview. Copying a link performs no
+mutation: the host reads current outgoing metadata after the original status-only
+invite outcome. Reinviting mints a new invitation ID, and old receipts do not
+recover a historical URL. Acceptance still uses the original scope/command ID and
+the freshly read invitation generation.
+
+The lazy Web global invitation entry shares the room-session singleton with room
+pages. It refreshes on a fresh subscription, `socialChanged`, relevant explicit
+mutation settlement or outcome recovery, focus and a 15-second fallback.
+Ordinary Play, Pause, Seek, Select, Previous and Next settlement rereads the
+authoritative room without waking invitation/community queries again; snapshot
+revisions still drive the visible community refresh. Local expiry timers handle TTL deletes
+that produce no outbox bump. Queries and deferred UI callbacks remain scoped to
+the current account epoch, and the existing session privacy barrier hides them
+during identity transitions. This is a pending-action indicator, not a durable
+notification inbox or read-status model.
+
+The same singleton delivers social changes without the socket. When a five-second
+heartbeat finds no connected socket (rooms disabled, still connecting, or lost),
+it lazily loads `socialChangeFallback.ts` and ticks it on each later heartbeat
+while the socket stays down. In a visible tab the fallback polls `GET /me/changes`
+15 seconds after its previous poll. Each unchanged or failed poll doubles that wait
+up to 60 seconds, and returning to the tab restores the 15-second wait. A changed
+revision runs the same `social` refresh as `socialChanged`: friend requests,
+relationship lists, music shares, profile and invitation reads. The first poll
+always refreshes, like a fresh subscription. The last seen revision survives
+connected periods, so the first poll after a socket loss refreshes only if
+something changed. A connected socket stops the polling, and the music-share list
+has no fixed poll of its own, so a live socket adds no music-share polling.
+Invitations keep their 15-second fallback refetch and capabilities their 30-second
+poll while connected.
+
+Community reads preserve the strict room-v1 playback snapshot and WebSocket
+schemas. Song requests retain a bounded pending member incarnation and pinned
+media identity within the room aggregate. Acceptance revalidates that exact
+representation and appends one queue occurrence. Host queue edits carry the
+observed epoch, controller, permission, playback and queue versions; stale edits
+fail without becoming new commands. Editing another entry preserves the current
+timeline and readiness barrier. Community changes advance the existing room
+revision/outbox; the visible community query coalesces snapshot-driven refreshes
+without reloading unrelated social lists. Explicit community commands also
+invalidate only that account's community queries. Invitation-list invalidation
+does not also refetch community; snapshot revisions and membership identity
+changes still refresh it, and social invalidation still refreshes current cards.
+Member removal clears requests and attribution; media invalidation includes
+request-only references through the
+required `socialRooms.songRequests.mediaTrackId` index.
+
+The `react` member command carries `expectedEpoch` and one token from
+`heart`, `clap`, `fire`, `smile`, `music`. It uses ordinary admission and immutable
+receipts, independent of controller/playback permissions. Durable account and
+room counters enforce 12 and 60 accepted reactions per minute. Internal activity
+records retain only an event identity, fixed kind/reaction, membership incarnation
+and 30-second expiry. Read projection resolves current social cards, omits departed
+actors and trims the oldest events to preserve the existing response byte bound.
+Only automatic track advancement uses a null actor. Event append never changes
+playback, control or queue generations. Initial/reconnected clients seed existing
+event IDs without repeating live announcements; local timers enforce expiry even
+when no room revision changes.
+
+Client frames are `ping` with `clientTimeMs` and an optional exact membership /
+controller / local-pause heartbeat, or `ready` with an exact readiness report.
+Server frames are `subscribed` (protocol, server time, initial room), `snapshot`
+(complete current room or null), `pong` and `socialChanged`. Clients never submit
+transport commands through WebSocket, and snapshots never generate commands.
+Frames are capped at 2 KiB inbound and 64 KiB outbound, reports at 120/minute,
+per-connection pending work at eight and output buffering at 128 KiB. The gateway
+caps 32 connections per IP and four per account, with 32 pending upgrades. The
+process-wide connection cap is deployment capacity (`FINITUDE_REALTIME_MAX_SOCKETS`,
+at most 256). The reserved seats number the smaller of (open-room cap × member cap)
+and half the cap; each connected room member's first socket takes one, and every
+other socket takes one of the remaining general seats, so idle tabs and members'
+extra tabs cannot lock admitted members out. One account may hold a quarter of the
+general seats (one to four), plus its first socket while in a room. Membership comes
+from each socket's latest room read, or a participation lookup at admission only
+when it could change the outcome. A seated member socket whose account left every
+room is closed with 1013 only while the general seats are over-full. Replacing a
+client's own socket needs no seat. Ticket issuance applies the same rule first and
+answers `503 realtime_capacity` with `Retry-After: 30`; the upgrade rechecks it and
+answers `429`. Finitude Web lets a refused tab create, accept and invite over HTTP
+and then connect at once. These are admission bounds; the measured database cost behind the
+shipped Elastic Beanstalk values is in the
+[capacity screen](testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04).
+Transient snapshot-read contention receives at most three fresh authorized reads
+with bounded backoff. It does not retry playback commands or deliver a cached
+projection. Revoked access and lost authority close immediately; exhausted
+availability repair closes with retryable WebSocket code 1013.
+Known-aborted heartbeat/readiness reports use the same bounded retry while keeping
+their original occurrence and sequence; uncertain commits are never replayed.
+Stale controller reports refresh authorized state. A timer sweep may defer two
+consecutive availability failures only after freshly validating the lease; the
+third failure closes connections. Each later tick captures its own observation.
+
+Create takes an explicit ordered `mediaTrackIds` selection. Other actions are
+`acceptInvitation`, `declineInvitation`, `leave`, `end`, `takeControl`, `invite`,
+`kick`, `offerTransfer`, `acceptTransfer`, `cancelTransfer`, `setControlMode`,
+`requestSong`, `dismissSongRequest`, `acceptSongRequest`, `removeQueueEntry`,
+`reorderQueue`, `react`, `play`, `pause`, `seek`, `next`, `previous` and `select`. Shared transport captures
+room epoch, membership/controller generation, control generation, playback
+generation, queue revision and current entry. Its immutable identity and observed
+versions survive an explicit same-intent retry. A losing command never rebases
+itself onto a newer playback occurrence. Host queue edits use the same observed
+queue/playback preconditions and preserve the currently playing occurrence.
+
+A complete snapshot includes authority/room/control/queue/playback versions,
+version-pinned entries, authoritative timeline, preparation cohort, member cards
+and self controller permissions. `serverTimeMs` is an observation; timeline anchors
+are absolute server time. Web calibrates its monotonic clock with ping RTT,
+preserves the converted anchor on unrelated membership revisions, applies a
+350 ms scheduled lead after preparation and performs bounded drift correction.
+Actual speaker/output alignment remains a target-environment measurement.
+
+`hostAbsenceDeadlineMs` is non-null while a host absence is recorded and marks
+the end of its grace (absence start plus 30 seconds); it remains set after
+suspension until the host's controller heartbeats again. The room closes at the
+same absence start plus five minutes, so Web derives that deadline from the
+contract limits instead of adding a field to the strict room-v1 snapshot.
+`transferOffer.expiresAtMs` is visible only to the host and the selected member.
+The Web room session records the monotonic `performance.now()` at which it
+accepted each snapshot, and a countdown subtracts the time elapsed since that
+receipt from the deadline minus the snapshot's own `serverTimeMs`. Snapshots
+arrive only when the room changes, so the countdown never starts from the moment
+its component mounted: leaving Together and returning, or loading the countdown
+chunk late, still shows the time the server has left. Every newer snapshot
+re-bases the measurement, and device wall-clock skew cannot shorten or extend the
+display. The countdown module loads lazily with the active room; until it loads,
+or if it cannot load, the panel shows the countdown-free suspended or ended line.
+A countdown at zero issues no command: the sweep owns suspension, closure and
+offer expiry.
+
+Preparation lasts at most three seconds. Readiness fences exact room epoch,
+member/controller, preparation ID, playback generation, entry and media revision
+plus a monotonically increasing report sequence. Preparation completion preserves
+that playback generation. Reserved `preparationId: "current"` reports a late or
+resynchronizing player's readiness only when no preparation is active and the
+exact timeline is playing/paused; it does not restart or move the timeline. The
+local player remains silent until its own readiness acknowledgement is visible.
+Local pause, disconnect, takeover and revoked controller sessions clear readiness.
+
+`socialRooms` is a bounded aggregate (eight members, 100 entries, 100 active rooms
+per deployment). Deployment capacity may lower the open-room and member limits
+(`FINITUDE_ROOMS_MAX_OPEN`, `FINITUDE_ROOM_MAX_MEMBERS`); `create` beyond it is
+rejected as `room_capacity` and `acceptInvitation` into a full room as `room_full`,
+leaving the invitation pending. Sweeps, cleanup and invitation scans keep the
+contract maximum as their bound, so lowering a limit never strands an open room. An account-keyed participation row enforces one active room.
+MongoDB transactions arbitrate commands, receipts, graph/account fences, source
+reference touches, membership, readiness and timers. A deployment-wide 10-second
+MongoDB authority lease renews every three seconds; every authority mutation
+conditionally writes its live owner/epoch fence using MongoDB time. Takeover
+increments the epoch and pauses recovered playback. Safety removal never needs a
+leader. This initial deployment requires traffic to reach the lease holder;
+per-room routing, distributed fanout and sharding are future capacity work.
+
+Host-only is the default, invites last 24 hours, transfers last 30 seconds,
+host grace is 30 seconds and host absence closes after five minutes. A sweep
+runs every 250 ms, validates stored session/source state and logically expires
+24-hour rooms before releasing participation. Closed rooms have member/queue
+identities scrubbed transactionally and expire after 24 hours. Invitation TTL
+reclaims expired offers, and room-outbox hints expire after 24 hours. No TTL may
+delete an active aggregate before its participation cleanup.
+
+An unchanged sweep uses a complete read-only snapshot of the room, accounts,
+controller sessions, current media, and live authority. The same transition
+planner performs the subsequent fenced recheck when a change is needed.
+An unchanged preparation can use that same complete probe; readiness completion,
+deadline handling, cohort removal, and all other required transitions retain the
+write path. Missing or uncertain evidence also falls back to it. Before skipping
+writes, the sweep rechecks time boundaries and
+the authority in a fresh read-only transaction so the original snapshot cannot
+hide a committed lease takeover. Actual transitions retain sorted account
+fences and the authority write. Natural advancement still uses the original
+candidate's playback, queue, entry, and epoch identity across retries.
+An injected authority writer without a matching read-only probe retains the
+original transaction path.
+
+Media analysis accepts complete PCM16 WAV, mono/stereo 8–48 kHz, with a finite
+verified duration no greater than 24 hours. A private representation records
+opaque revision, duration, seek eligibility and S3 validators, atomically promoted
+with the active object. Public descriptors contain only ID/title/duration/revision
+and `/content/mediaTrack/stream/:id?revision=mr_...`. Revision-fenced HEAD/GET pin
+ETag/VersionId, recheck the ready representation after storage I/O and reject
+stale bytes. Replacing/deleting a source marks old room entries unavailable in
+the source transaction. Versionless ordinary streaming retains its contract.
+
+Web room playback does not write Recently Played in this slice. Joining replaces
+the executable queue through the existing player; leave/removal detaches the room
+and clears the queue without restoring or resuming an earlier queue. Browse playback cannot silently
+replace a joined room. Hidden Web Audio tabs continue using fresh authorized
+snapshots; visibility alone is not a local pause. Document freeze or pagehide
+invalidates the transport incarnation and detaches playback. Resume/pageshow
+obtains fresh authorization, while a visibility return also checks both monotonic
+and wall-clock pong age against the 15-second freshness bound. Personal resumption
+remains explicit. A local Play gesture captures its original command preconditions,
+clears the caller's local pause, and waits for the matching heartbeat pong before
+sending shared Play, so the HTTP command cannot overtake cohort admission. New
+local pause, account/controller/transport changes, or superseded preconditions
+cancel that pending gesture; temporary suspension retains uncertain command keys.
+Host-control guest Play only resumes personal readiness. Native background operation, downloaded-source preference,
+Video capability negotiation, broader audio decoders, queue editing, push
+notifications and deployment load evidence remain later stages.
+
+Social and room database transactions allow six total attempts for confirmed
+transient aborts or duplicate-key contention. Five waits use 50/100/200/400/600 ms
+plus 0–49 ms jitter each (at most 1,595 ms of intentional backoff, excluding
+transaction execution). The parsed command and its expected versions stay fixed.
+Unknown commit results and post-commit failures are never automatically replayed;
+the client retains the original command for explicit outcome checking or retry.
+
+### Existing foundation and compatibility
+
+The repository already supplies Express/Node, transaction-capable MongoDB,
+account/session fences, ready-only catalog projections, and identity-bound S3
+media delivery. `src/server.ts` attaches the optional authenticated WebSocket gateway using `ws`;
+Redis is not required for the initial single-authority implementation.
+
+`src/routes/feedRoutes.ts` restricts publishing to administrators. A Feed Post
+author ID is attribution, not a social profile. Playlists are private and
+owner-only; avatar bytes are private. The separate Artist Follow plan describes
+a private catalog subscription, not a person-to-person relationship. None of
+these surfaces becomes social by changing its existing authorization guard.
+
+Audio and Video already share one MediaTrack identity and stream endpoint.
+Web uses `web/src/player/playerStore.ts`; iOS uses `AudioManager.swift` with
+its shared transport and video projection; Android uses `PlaybackController.kt`
+with its app-owned Media3 player. Shared playback adds an orchestration adapter
+to those owners. It does not create another media player. Local playback remains
+the default mode for clients that do not adopt the new versioned protocol.
+The initial review found that Web's transport exposed playback rate as read-only,
+iOS lacked scheduled-start/rate control, and Android connected MediaSession
+directly to its ExoPlayer and installed an automatically advancing queue. Stage 1
+adds isolated feasibility adapters at those seams; this does not enable room
+admission or establish production synchronization guarantees. Complete the
+three-client evidence and capability fallbacks before freezing the protocol.
+
+### Implemented feasibility boundary
+
+`src/contracts/roomPlaybackPrototype.ts` validates the provisional synthetic
+snapshot/command shape. `src/application/rooms/roomPlaybackPrototype.ts` implements
+a pure version-fenced transition function and a bounded in-memory authority for
+tests. Competing commands consume the same playback generation once; receipts
+deduplicate identical intent without returning historical room snapshots. The
+prototype models both permission modes and control-generation fencing.
+
+There is no production route, authentication boundary, signed mutation scope,
+database transaction, outbox, authority lease or preparation coordinator in this
+prototype. In-memory admission demonstrates deterministic arbitration, not
+durability or distributed concurrency safety. The later repository must preserve
+the original command preconditions across transaction retries.
+
+`contracts/social/prototype-v1/playback-trace.json` is the exact shared synthetic
+corpus for backend and three-client tests. Its duplicate, stale, membership-only,
+playing and seek frames exercise the existing player through opt-in adapters.
+Client adapter types are local normalized inputs, not a released wire protocol.
+The active plan records platform checks and remaining physical-device, clock,
+media-lifecycle and background-execution gates.
+
+### Scope and module boundaries
+
+Recommended first experience: opt-in social identity, mutually accepted friends,
+block controls, account-targeted invitations, and private rooms for 2–8 people.
+Ship an Audio room first, then enable Video on the same room protocol after
+device evidence. Public discovery, follower counts, user posts, comments, direct
+messages, collaborative Playlists, live broadcasts, and voice/video calls are
+separate later product decisions. A room does not require a public social feed.
+
+```mermaid
+flowchart LR
+  C[Web / iOS / Android] --> H[Authenticated HTTP API]
+  C <--> G[Realtime gateway]
+  H --> S[Social identity / relationships / invitations]
+  H --> R[Room command application]
+  G --> R
+  S --> M[(MongoDB)]
+  R --> M
+  R --> F[After-commit fanout]
+  F --> G
+  M --> O[Outbox dispatcher]
+  O --> G
+  R --> V[Ready catalog resolver]
+  C --> P[Existing media stream endpoint]
+  P --> B[(Existing S3 lifecycle)]
+```
+
+All boxes except clients, MongoDB, and S3 are initially modules in Archtree.
+HTTP owns durable commands and snapshot reads; WebSocket pushes current room
+snapshots, clock samples, and bounded presence/readiness reports. Both invoke
+the same authorization and room application services. v1 has one command ingress,
+not competing HTTP and WebSocket mutation implementations. Reconsider WebSocket
+commands only if measured HTTP overhead matters; preserve the same command
+envelope and application handler. Audio/video bytes never traverse the gateway.
+
+| Module | Responsibility | Boundary |
+| --- | --- | --- |
+| Social identity | Explicit social alias and discoverability, allowlisted viewer-dependent projection | Never project the raw User model, email, private avatar, saves, or activity |
+| Relationships | Requests, accept/remove, bilateral block checks | Person relationships remain separate from private Artist Follow |
+| Invitations | Recipient-bound, expiring, revocable room admission | Knowing a room ID or invite ID grants no access |
+| Rooms | Membership, host role, queue, authoritative timeline, revision | Room roles grant no catalog/admin rights |
+| Realtime | Authorized delivery, reconnect, ephemeral connection state | Socket connection is neither durable membership nor proof of playback |
+| Notifications | Durable in-app invitation outcomes and read state | No email/push dependency in v1; recheck access when opening |
+| Safety | Block, host removal, invitation throttles, operational abuse handling | Applies to HTTP, subscriptions, replay, notifications, and admission |
+| Player adapter | Translate room state into existing transport operations | System controls and queue advancement go through the same mode boundary |
+
+Code seams are `src/contracts/socialV1.ts`, `src/application/social/`,
+`src/application/rooms/`, `src/repositories/social/`, and `src/realtime/`.
+Social and Audio room contracts, transactional application services, repositories
+and the authenticated realtime gateway are implemented. The isolated arbitration
+prototype remains a feasibility fixture alongside the production room service.
+Transport adapters must not contain independent business rules.
+
+### Identity, relationships, and access
+
+Use a separate opt-in social profile with a new opaque social ID mapped internally
+to the existing account. Start with a listener-chosen alias and generated icon.
+Do not derive social initials from email or expose the existing private avatar.
+Exact social-handle lookup is opt-in, authenticated, bounded, and rate-limited;
+it reveals only social ID, handle, alias, and generated icon, even to a non-friend. This
+minimal discovery card is distinct from profile access granted by friendship or
+active room membership. Pending requests have their own allowlisted alias-card
+projection; sending a request cannot unlock additional recipient fields. Do not search registration
+identifiers or implement email/contact discovery. Account IDs remain internal;
+client member/relationship references use social IDs and membership IDs.
+
+Turning discoverability off prevents new lookup but preserves existing friends.
+Deactivating the social profile cancels requests/invitations, removes friendships,
+leaves or ends rooms, and revokes social subscriptions before hiding the profile.
+Retain owner-private blocks until explicit unblock or account deletion; reactivation
+does not restore friends, invitations, or membership. The implemented identity
+contract above fixes handles for the account's lifetime and reserves a deleted
+handle without its former owner ID for 30 days. Cached handle text can never
+substitute for the immutable social ID when accepting an invitation. Room and invitation cleanup now shares the account/social transaction.
+
+Recommended relationship state machine: `none -> pending -> accepted -> none`.
+Decline/cancel removes pending access. Crossing requests do not auto-accept;
+acceptance must be explicit. One normalized unordered account pair is unique;
+each party's directional block state is independent. Unblock restores no prior
+request, friendship, invitation, or membership. Blocking atomically cancels
+pending requests/invitations, removes friendship, and denies future interaction.
+
+For the small-room v1, any blocked pair is forbidden from co-membership. Reject
+admission without revealing which member blocked whom. If members block while
+already together, remove the blocked member when the blocker hosts the room;
+otherwise remove the blocker, including when the blocked person is host. Apply
+the room change in the same serialized operation as the block, and close affected
+subscriptions. This is the implemented small-room policy.
+
+An invitation targets one account and one room, expires after a proposed 24 hours,
+and is consumed atomically with admission. Accept checks active account, current
+friendship with inviter, inviter's invitation permission, blocks against every
+member, room state, capacity, and expiry. Replayed acceptance returns the original
+result status; any private projection is freshly authorized. Removed membership
+is never resurrected by replay. The room host invites in v1. Friendship removal
+revokes unused invitations but does not silently end
+existing membership; explicit leave, kick, block, or room end does that.
+Invitation previews expose only the inviter's consented discovery card, expiry,
+and invitation status; membership lists, queue and current media require admission.
+
+The implemented social limits include 500 friends and 50 combined incoming and
+outgoing pending requests per account. The implemented room limits are 20
+outstanding invitations per host (replacing a friend's still-pending invitation
+does not use another), one joined active room per account, eight members per
+room, 100 queue entries and 100 open rooms per deployment. Enforce limits
+transactionally; revise them only with measured capacity and UX evidence. Apply
+both sender and recipient abuse controls so one account cannot flood another
+through repeated operations.
+
+### Room permissions and host management
+
+Rooms support `hostOnly` and `everyone`; the proposed creation default is
+`hostOnly`. Only the current host can change mode, and the server-confirmed mode
+is visible to every participant. The setting applies to shared transport, not
+room administration:
+
+| Action | Host control | Everyone control |
+| --- | --- | --- |
+| Shared Play/Pause/seek/Previous/Next/select existing queue entry | Host's active controller | Every admitted participant's active controller |
+| Change mode, invite/kick, add/remove/reorder/share queue items, transfer host, end room | Host only | Host only |
+| Volume, mute, explicit Pause on this device, local resync, leave | Each participant for themselves | Each participant for themselves |
+| Recommend Audio, withdraw one's own recommendation, send a fixed reaction | Every admitted member, including observers | Every admitted member, including observers |
+| Observe playback from a secondary device | Read-only playback | Read-only playback |
+
+Persist `playbackControlMode` and a monotonic `controlGeneration`. A real mode
+change or host transfer increments that generation and room revision. Commands
+check both the expected control generation and current role/mode in the same
+transaction as the playback mutation. Concurrent controls and a mode change
+commit in a definite order: a previously committed action remains valid, while
+a later stale command is rejected without automatic replay. Toggling back to
+Everyone never revives an old command. A same-mode no-op does not bump versions.
+All members' seek gestures submit only the final position on release; simultaneous
+commands based on one playback generation yield one winner and explicit stale
+results, not repeated automatic seeks. Retain per-member and per-room rate bounds.
+
+Changing mode alone preserves the active timeline and an already accepted
+preparation. Server completion of that recorded intent remains fenced to its
+preparation/playback identity; it is not permission to admit another stale member
+command. Pending controls are cleared when permissions change. Shared controls,
+system controls and fullscreen controls must show the same effective permission.
+Explicit local pause remains a separate action in both modes and requires local
+resume/resync before that device participates again.
+
+The proposed host exit UI has two distinct actions:
+
+- **Transfer and leave:** choose a current participant with a live controller;
+  that participant explicitly accepts a short-lived offer. Atomically install
+  the new host and remove the old host's membership/participation slot. A rejected,
+  expired or failed transfer does not silently remove the old host or close the
+  room. A remaining lone member may become host; no second guest is required.
+- **End room for everyone:** close the room and detach every member. When no
+  eligible recipient exists, this is the available host-exit action. A plain
+  host-leave API cannot disguise this consequence as a guest leave.
+
+An offer is bound to the current host/control generation, target membership and
+controller generations, proposed leave-after-transfer action and server expiry
+(initially 30 seconds). Cancel/replace offers explicitly; acceptance rechecks
+host authority, target presence/session, blocks, account state and room state.
+Removal, rejoin, mode change or controller takeover invalidates a stale offer.
+Uncertain acceptance uses its original mutation scope/command ID for outcome
+resolution. A competing End room is serialized with acceptance and cannot close
+a room after the sender has lost its host role.
+
+Successful transfer preserves playback mode, queue and an already running media
+timeline, cancels old-host invitations, and broadcasts the new host. If preparation
+is still pending, cancel it under a new playback generation and pause; the new
+host explicitly resumes with a fresh readiness round. The previous host never
+regains the role merely by reconnecting. There is no automatic host promotion in
+v1; absence handling below applies equally to both permission modes.
+
+### Persistence and atomic boundaries
+
+| Proposed collection | Main data and required constraints |
+| --- | --- |
+| `socialProfiles` | Unique account ID, unique normalized social handle, separate unique social ID, visibility revision |
+| `socialRelationships` | Unique canonical pair, request initiator/status, directional blocks, revision; indexes for either participant |
+| `socialInvitations` | One unique room-recipient row, invitation generation, inviter, logical expiry/state; reissue advances generation and invalidates prior acceptance |
+| `socialRooms` | Host, playback control mode/generation, optional transfer offer, bounded memberships/queue, timeline/preparation, authority epoch, room/queue/playback versions, controller generations, host-absence deadline/suspension, expiry |
+| `socialRoomParticipation` | Unique account ID pointing to active room; updated atomically with membership to enforce one-room limit |
+| `socialMutations` | Unique actor/mutation-scope/command ID, operation and canonical request digest, result status, retention deadline |
+| `socialOutbox` (implemented) | One coalesced account-keyed invalidation revision, with no peer or historical payload |
+| `socialRoomOutbox` (proposed) | Explicit room aggregate/epoch/revision/event kind and delivery attempt state; no retained room snapshot; separate from account-keyed social cleanup |
+| `socialNotifications` | Unique recipient/event ID, allowlisted invitation reference, read state, expiry |
+| `socialRealtimeTickets` | Unique hashed single-use ticket, account/session binding, consumed state, logical expiry |
+| `socialAuthority` | One deployment-wide v1 room-writer lease, monotonic fencing epoch, owner nonce and lease deadline |
+
+Keep small room membership and queue state in one bounded aggregate. Do not embed
+unbounded relationships, rooms, or notifications into `users`. Create and verify
+required unique indexes through the existing additive index catalog before flags
+can enable writes. TTL indexes reclaim expired data but never decide access;
+every request checks logical expiry itself. One room-recipient invitation row
+avoids a time-dependent partial unique index, which the current required-index
+verifier would reject. Old invitation generations survive only in bounded receipts.
+
+Commands fence the active account, relevant relationships/catalog references, and
+applicable room versions, then commit state + idempotency receipt + outbox record
+in one MongoDB transaction. Block/admission races must write the same relationship
+and room fences, including initially absent relationship pairs; snapshot reads
+alone cannot prevent write skew. Use deterministic fence ordering and bounded
+transaction retries. Only committed state is broadcast, outside transaction
+callbacks that the driver may retry.
+Unknown commit outcomes retain the same key for explicit same-intent retry. Key
+reuse with a different body is rejected. Deduplicate before checking a retry's
+now-stale expected revision, but recheck current visibility before returning a
+stored result. Never replay private payloads to a removed member.
+
+Every durable command also carries an immutable server-issued, authenticated mutation
+scope bound to its account and a server-set expiry, initially 24 hours. Its
+signature and expiry are checked on every attempt, even after receipts are gone.
+The scope plus client-generated command ID identifies intent. Expired scopes
+cannot execute; they permit only authorized outcome lookup while a receipt remains.
+Clients must not refresh a scope and silently replay an uncertain old intent as
+new. Retain receipts through scope expiry; bound issuance, command rates and
+outstanding uncertain outcomes. This avoids treating an ancient purged UUID as
+a brand-new mutation. Scope tokens are credentials and must not enter logs/URLs.
+
+Immediately after commit, wake in-process fanout for the affected room. Normal
+delivery does not wait for a polling interval. The durable outbox is the recovery
+path with bounded polling, backoff, claim expiry, and at-least-once processing;
+enqueueing a socket message is not proof that its recipient received it.
+Coalesce room invalidations to the latest committed snapshot. Recheck current
+account/session/membership visibility and project each recipient at send time;
+discard queued projections when their access generation changes. Notification
+workers also recheck access and deduplicate by recipient/event ID.
+
+An acknowledgement confirms durable commit, not playback by everyone. A crash
+between fanout and delivery marking may duplicate delivery; one after commit but
+before fanout is recovered from the outbox. Store no historical room/member
+payload for replay. MongoDB change streams may later wake the dispatcher but
+cannot replace persisted recovery or a current authorized snapshot.
+
+### Room protocol and ordering
+
+Proposed endpoints, all private under `/api/social/v1`:
+
+- `GET/PATCH /me/profile`; exact `GET /profiles?handle=...` lookup.
+- `POST /friend-requests`; explicit accept/decline/cancel; idempotent friend
+  removal and directional block/unblock resources.
+- `POST /rooms`; `GET /rooms/:id`; `POST /rooms/:id/commands` for shared transport
+  under the current mode; host-only mode/queue changes, invitations, kick,
+  transfer offers and end; target-only offer acceptance; and each member's own
+  leave action (with the explicit host-exit semantics above).
+- `POST /invitations/:id/accept`; notification list and read-state mutations.
+- `POST /mutation-scopes`; account-scoped outcome lookup for uncertain commands.
+- `GET /rooms/:id/playback` for a validated, revision-pinned media descriptor.
+- `POST /realtime-tickets`; authenticated bootstrap for `/api/social/v1/realtime`.
+
+Freeze exact methods, errors, bounds, and fixtures in Stage 1 before implementation.
+Durable domain mutations use the scope/command ID above; bounded authenticated
+scope/ticket issuance is bootstrap and does not recursively require a scope.
+Room transport commands carry authority epoch, membership/controller generation,
+expected control generation, expected playback generation and expected current
+queue-entry ID. Relative Previous/Next and queue edits also check the queue
+revision whose order the user observed. Server transactions
+still CAS the aggregate revision, but a heartbeat or unrelated member join does
+not invalidate an authorized participant's Pause intent. Each committed visible state change
+advances room revision. Safety actions such as leave/block/session revocation
+do not require a fresh displayed room revision. Leave/kick/transfer fence exact
+membership incarnation; a delayed kick cannot remove someone who later rejoined.
+Transfer requires consent bound to the proposed host's membership generation.
+Existing listener-v1 DTOs gain no social discriminators.
+
+### Concurrent commands and feedback prevention
+
+Capture the confirmed current entry and playback/control/queue versions at the
+user-action boundary (seek gesture start or button/system-action activation).
+Freeze that command envelope through asynchronous dispatch, retries and conflict
+handling. A MongoDB transaction retry may refresh internal database reads but
+must never substitute newer expected versions or reinterpret Next against a new
+entry. The server conditionally commits the transition with its receipt and
+outbox notice; the first commit wins for that playback generation.
+
+For a queue A, B, C with A current at playback generation 41:
+
+| Request | Server result |
+| --- | --- |
+| Participant 1: Next, expected entry A / generation 41 | Commit B in preparation at generation 42 |
+| Participant 2: Next, expected entry A / generation 41 | Stale conflict, no playback write; resolve current authorized snapshot |
+| Retry participant 1's original scope/command ID | Return its committed outcome status; no new transition |
+| Fresh user action after observing B / generation 42 | May advance to C if all current guards still pass |
+
+Both initial requests have distinct command IDs: idempotency alone cannot merge
+them. The expected-state condition provides the one-winner behavior. A stale
+request receives a controlled conflict such as `409 playback_state_changed`,
+clears its pending UI and adopts current state. It never automatically sends a
+new Next with updated versions. Queue reordering yields the corresponding stale
+queue outcome rather than silently choosing a different successor.
+
+Use two structurally separate client paths:
+
+- `submitUserIntent`: invoked only by an explicit permitted UI/system action;
+  creates one immutable command ID and envelope. One action delivered through
+  multiple app handlers must still create one intent, not two commands.
+- `applyRoomSnapshot`: sets the absolute authoritative entry, source, target
+  position and state on the existing player. It never calls the command-submitting
+  Next/Play/seek handlers. The originator applies its own server snapshot through
+  this same path; ignoring only self-originated messages would not stop peers
+  from echoing each other.
+
+Readiness, progress, seeking/seeked, play/pause, buffering, item-change and ended
+callbacks are observations. They may update local state or send bounded fenced
+readiness/status hints, but never create shared transport commands. Keep source/
+playback/application generations on asynchronous callbacks so late effects of an
+old snapshot cannot affect a newer one. A short synchronous `isApplyingRemote`
+boolean is insufficient because callbacks can arrive after it resets. Where a
+native control exposes only an ambiguous state change, report divergence and
+require explicit resync rather than infer a new user command from that callback.
+
+Repeated equal/older snapshots are no-ops for transport as well as the UI; a new
+membership-only room revision must not reload media or restart playback. Applying
+a newer absolute snapshot may perform necessary bounded local correction but
+cannot produce a network command. A server end timer and a manual Next compete
+on the same playback occurrence; old client ended hints cannot advance the new
+entry. At the end boundary the server resolves the current confirmed queue order,
+and any transaction retry still preserves the timer's original playback identity.
+An optional observed command ID helps resolve pending UI, not authorize replays.
+
+### Room snapshots and controller ownership
+
+Snapshots contain `protocolVersion`, `roomId`, `epoch`, `revision`, `serverTimeMs`,
+`playbackControlMode`, `controlGeneration`, current host membership, host-absence
+deadline/suspension, allowlisted members/roles and membership generations,
+queue revision, ordered
+`queueEntryId`/`mediaTrackId` pairs, and a timeline
+`{playbackGeneration, entryId, mediaRevision, durationMs, state, positionMs, anchorServerTimeMs, rate}`.
+The timeline is null before selection. An active preparation appears in full as
+`{preparationId, playbackGeneration, entryId, mediaRevision, targetPositionMs, deadlineServerTimeMs, cohortMembershipIds}`;
+it is null after cancellation/scheduling. The recipient-private `self` projection
+supplies its membership/controller/access generations and permission/capability
+state. A reconnecting client must be able to construct readiness solely from the
+current snapshot plus its freshly resolved media descriptor, without an earlier
+event. Clients cannot report readiness against a mismatched descriptor generation.
+Only the current host and selected target receive the transfer offer's private
+action projection; a full snapshot does not expose offer credentials to others.
+Queue-entry identity distinguishes repeated playback occurrences. A media
+revision is an opaque identity for the exact ready representation, never an S3
+key. A distinct social-v1 playback descriptor supplies that revision, validated
+numeric duration/seekability, media kind, and a version-pinned public stream URL;
+old public listener DTOs and legacy streaming requests keep their contract.
+
+v1 sends one complete room snapshot per state update, with a proposed 64 KiB
+encoded cap enforced alongside the eight-member/100-entry bounds. It does not
+send fragmented deltas or replay historical snapshots. Queue entries contain
+bounded IDs/state; public artwork/titles load separately. Coalesced snapshots
+may skip revisions because they are complete. Clients use one reducer for both
+HTTP and WebSocket responses, ignoring older/equal revisions within an epoch.
+After an acknowledged subscription, buffer bounded snapshots while fetching the
+initial HTTP snapshot, then apply only newer states. Server-issued monotonically
+increasing authority epochs and a local connection generation prevent old HTTP
+responses or sockets from restoring a retired timeline. On a newer epoch, pause
+and rebootstrap through the current authorized subscription before applying it.
+An unsupported protocol/required capability produces an explicit unavailable
+state and detaches room control; repeated snapshot fetches cannot fix it.
+
+Presence/readiness reports use their own sequence and membership/controller/
+preparation fences; heartbeats neither advance durable room revision nor write
+per-second progress to MongoDB. Profile/alias changes that affect a room snapshot
+advance its room revision through a room invalidation transaction. Heartbeat
+responses include current durable revision to expose a missed final update. A
+polling fallback can read authorized snapshots at a bounded, backoff-controlled
+rate while the UI reports reconnecting; it does not advertise synchronized
+playback, send readiness, or enable room transport commands. WebSocket recovery
+requires a fresh subscription and readiness handshake.
+
+One active controller device per account/room owns local readiness and the shared
+commands its account is currently allowed to issue; another device may observe.
+Explicit device takeover increments a
+generation so the prior device cannot continue controlling. Multiple tabs do
+not become additional members. Observers do not play the room stream or report
+ready. A server/worker authority lease is separate from the human host role.
+Even a one-instance deployment can overlap old/new processes during restart.
+v1 therefore has one Mongo-backed deployment-wide room authority lease with a
+monotonic epoch allocated only by that authority record; lease expiry uses
+MongoDB/server-authoritative time, never a caller-supplied clock. Only its holder
+admits realtime participation or commits
+transport/preparation/automatic-advance commands. Each such write atomically
+fences the live lease and relevant room generation. Loss of renewal stops that
+authority; takeover pauses recovered rooms before a new epoch can play.
+Non-holders report temporary room unavailability rather than using sticky
+sessions as ownership. Deny-only safety cleanup (block/revoke/delete) remains
+available, atomically invalidating affected membership/playback generations.
+Per-room leases/sharding are a later measured scaling step, not required in v1.
+
+### Synchronization and client behavior
+
+For a playing timeline, compute
+`targetMs = clamp(positionMs + max(0, estimatedServerNowMs - anchorServerTimeMs) * rate, 0, durationMs)`.
+Before a future anchor, the client waits at `positionMs`; paused state never
+advances. Obtain server-clock offset and uncertainty from repeated ping samples,
+favor low-RTT samples, and advance the estimate with the client's monotonic clock.
+Recalibrate after resume/output-route change, track RTT and offset uncertainty,
+and treat an uncertain estimate as unsynchronized. Never trust the host device
+clock as room authority. On process restart/clock discontinuity, pause affected
+rooms, allocate a new epoch through the singleton authority, and resynchronize instead
+of claiming that an uncertain timeline continued exactly.
+
+Permitted Play/select/seek and every entry change, including shared Next and natural
+advancement, enter the same persisted preparation round with a unique
+`preparationId`, playback generation, exact media revision and target position.
+Reports contain those identities plus membership/controller generation and
+an increasing report sequence; stale or wrong-source readiness is ignored.
+Ready means the source is validated, a seek completed, and the transport can
+attempt playback, not merely that a socket exists. Pause/Next/new seek, controller
+takeover, media invalidation, and epoch changes cancel prior preparation/timers.
+
+Freeze the readiness cohort to connected, participating controllers at preparation
+creation; deliberate local pause excludes any participant, including the host.
+Joining/rejoining guests catch up without enlarging that barrier. Removed members
+no longer delay it. The host's controller must be present for administration,
+but its personal player need not be ready for everyone else to play. Schedule
+when the remaining cohort is ready and contains at least one ready participant.
+Three seconds is a proposed preparation ceiling, not a fixed delay: at the
+deadline, start with ready participants or remain paused if none is ready.
+Joining/slow guests do not extend that deadline. A host who pauses only their
+device stays host; other permitted controls and natural advancement remain
+available, and shared commands never silently resume that device.
+Commit the future start anchor before publishing it. Choose its lead from recent
+high-percentile RTT, clock uncertainty, and a scheduling margin; 150–750 ms is
+an initial tuning range, not a guarantee. If required lead exceeds that bound,
+show degraded synchronization instead of claiming readiness. UI feedback can be
+immediate while confirmed playback waits for the anchor. A late recipient seeks
+to the current authoritative target rather than starting from the old position.
+Optional next-entry metadata/media prefetch must fit existing media admission
+budgets and reuse the existing player; v1 does not promise gapless transitions.
+
+Initial tuning candidates: ignore drift below 150 ms. Use a brief 0.98–1.02 rate
+adjustment only where the transport supports it and the estimated time to reach
+tolerance fits a five-second correction deadline; otherwise seek. A 600 ms error
+must not be assigned to a 2% correction and then claimed fixed five seconds later.
+Restore normal rate on correction completion, pause, entry change, or room exit.
+Bound seek retries and add hysteresis; persistent failure stays unsynchronized.
+Web measures dispatch-to-progress seek cost only within the existing three-second
+observation deadline. A valid measurement above two seconds still permits
+correction, while predictive lead remains capped at two seconds. Two measured
+follow-ups share one six-second occurrence budget; pause, source replacement,
+permission changes, and detachment invalidate pending work.
+Unsupported rate correction uses the same bounded seek fallback. Video,
+Bluetooth, AirPlay/Cast, background suspension, and device output latency require
+separate evidence; matching player positions
+does not promise sample-accurate sound from speakers in the same room.
+
+Clients use a `local | room` mode adapter. While in room mode, local natural-end,
+queue navigation, Repeat/Shuffle, media-session controls, fullscreen controls,
+and transport callbacks cannot independently advance or rewrite the room queue.
+The server advances once at the authoritative end boundary; timers and duplicate
+client ended reports are fenced to playback generation, exact media revision,
+and current authority epoch. Ended reports are hints, not permission to shorten
+a track. At the final entry, remain ended; v1 room Repeat/Shuffle are off.
+Authorized participants submit shared commands according to the current control
+mode. Every participant may mute/adjust volume, explicitly pause on their device
+and show unsynchronized state, resync, or leave. A deliberate local pause stays paused until that listener
+explicitly resumes/resynchronizes; later room events cannot override it.
+If a queued native play event interrupts an owned seek, pausing clears the
+pending start flag. Seek or metadata completion may resume only the current
+authorized occurrence; local/shared pause, permission loss, source replacement,
+and detachment still prevent resumption.
+A current start that the browser rejects for a reason other than autoplay policy,
+including an interrupted start, does not leave a paused element waiting for the
+next timeline. It retries at most twice per playback occurrence, 500 ms after
+each rejection, seeking to the live anchor first. The same fences cancel those
+retries, and autoplay refusal still waits for explicit resync.
+If the native media element reports a download/decoder error or has no usable
+metadata, explicit resync reinstalls the exact pinned source in the existing
+single player. Overlapping resync gestures share one installation; persistent
+failure does not trigger automatic reloads. Retry ownership survives the source
+write until current-source metadata/error or a ten-second deadline; that deadline
+marks a local failure, exposes resync, and blocks late readiness until a later
+explicit gesture. A new local pause remains effective
+while bytes load. Completion is fenced to the playback occurrence, attachment,
+and physical source generation, and a failed element cannot publish readiness.
+A native error also withdraws already-published readiness and pauses this device;
+duplicate errors cannot repeat the report. Only current-account, exact-entry and
+playback-generation observations may update the session. Explicit recovery waits
+for fresh media readiness and server confirmation before playback resumes.
+An installation rejection or an already-exposed media error at completion uses
+the same failure path without waiting for a native error event.
+Native media errors do not expose HTTP status or Retry-After to this adapter;
+media admission and a later explicit gesture govern recovery.
+Platforms whose native controls cannot be intercepted must detect divergence
+and report/resync it rather than imply room authority.
+
+Every playback launch from Home, Search, Album, Library, or Playlist also crosses
+this adapter. Ordinary Play while in a room offers explicit Leave and play locally;
+host Share selection to room is a separate action. No launch helper may silently
+replace the active room queue or accidentally publish a private selection.
+
+Joining explicitly confirms sharing the alias and replacing the active queue
+with the room projection. There remains one executable queue/player; any previous
+local queue is an inert recovery snapshot. Leaving or removal detaches all room
+events and offers an explicit return to local playback without auto-resuming an
+old queue. Increment the local player/account generation before detach so late
+snapshots cannot replace the new local queue. Observer-device logout disconnects
+only that session. Controller-session logout/revocation invalidates its controller
+generation and triggers absence handling; it does not let an observer end the
+room. Explicit Leave and logout-all/deletion remove account-wide participation
+(and end a hosted room unless transfer completed). Clear social caches on every
+local account exit. An already-playing public Web stream may continue locally
+under the existing logout rule, with no remote control or social disclosure.
+
+Room commands never write another member's Recently Played. Proposed activity
+policy: a member's explicit join-and-play or explicit item selection writes that
+MediaTrack once only after actual local playback starts; passive commands,
+resync, reconnect, and automatic advancement write nothing. Deduplicate against
+the local join/play intent and account generation. Promote this exception into
+business rules before enabling it.
+
+Room queues copy selected ready MediaTrack IDs into a distinct room aggregate;
+they expose no source Playlist ID/name/ownership. Sharing a selection requires
+an explicit action. Room queue edits cannot change a private Playlist. v1 uses
+online streams even when native Audio downloads exist, avoiding unverified
+representation mismatches. This is an explicit proposed exception to the current
+business rule that playback always prefers a valid completed local Audio asset;
+promote a room-mode exception with native implementation before enabling it.
+Ordinary local playback retains its existing download preference.
+
+Advertise supported media kinds per controller generation. A Video queue selection
+requires support from every admitted playing controller; an incompatible new
+controller remains an observer until an explicit compatible entry/room is chosen.
+Revalidate on takeover/reconnect and before automatic advancement. Turning off
+Video pauses/ends affected entries explicitly; it never invents an Audio fallback.
+
+### Media correctness before synchronized playback
+
+Current `AudioTrack.duration` and listener-v1 `duration` are display strings,
+not authoritative numeric clocks. Extract and validate finite positive
+`durationMs` and seekability from the exact stored representation, and bind them
+to an opaque server-issued media revision. Backfill legacy media through bounded,
+read-only media inspection plus fenced metadata writes; this must not alter bytes,
+replace assets, or change ordinary playback visibility. Unknown-duration or
+unseekable media remains usable under existing local rules but is ineligible for
+v1 rooms. Never trust a member's reported duration to drive automatic advancement.
+
+The social playback descriptor returns a same-origin stream URL carrying an
+opaque expected revision (not a credential or object key), suitable for Web,
+AVPlayer, and Media3 without custom request headers. On every HEAD/GET/Range,
+validate current readiness and exact active revision before opening the object;
+reject mismatches without returning replacement bytes. Existing If-Range behavior
+may return a full latest body and therefore is not a revision fence. Verify the
+new query/response behavior through proxies and every native media loader while
+keeping versionless stream semantics intact. Room membership conveys no media
+access beyond the existing ready/public catalog contract.
+
+Media replacement/deletion must persist an invalidation notice in its publication
+or deletion lifecycle, invalidate preparation, pause the current entry, and mark
+removed future entries unavailable. Include room reference cleanup/reconciliation
+and missed-notice recovery. Periodic current-source checks provide a bounded
+backstop if delivery fails. Clients discard their old room buffer and resolve a
+new descriptor before resuming. Requests already admitted may have buffered old
+bytes; this design cannot retract downloaded content or promise instantaneous
+output revocation. New requests must never silently mix revisions. A live stream
+has a different clock/DVR model and is outside on-demand v1 rooms.
+
+### Disconnection, revocation, and safety
+
+Proposed room states: `open -> closing -> closed`; timeline state is separate.
+Use an initial ten-second heartbeat interval and mark presence absent after
+30 seconds; server liveness deadlines do not depend on a client clock. Membership
+is durable until leave/removal/end/expiry. After control-channel loss, label the
+client reconnecting immediately and pause shared synchronization after that
+grace period, offering explicit local continuation. Rejoin fetches current state
+and never replays old transport commands as new intent.
+
+If the host's active controller disconnects, retain its role during a 30-second
+grace measured from last verified controller liveness (do not start a second
+grace after presence expiry). The grace changes no shared playback: the committed
+timeline, an accepted preparation (whose cohort drops the disconnected host
+device) and natural advancement continue, and Everyone-control participants keep
+Play/seek/select/Previous/Next. The absent host's own disconnected device receives
+`host_absent` for those commands until it reconnects, which ends the absence.
+Shared Pause remains available to currently authorized controllers. An observer's
+socket does not establish host-controller liveness.
+
+At the deadline, the server pauses and persists a host-absent suspension, cancels
+any preparation, fences timers, and rejects non-Pause playback commands with
+`host_absent` in either control mode, also before a delayed sweep records the
+suspension. Everyone control does not bypass that suspension, even after the host
+reconnects. A host that returns must authenticate, reclaim its controller through
+the normal generation fence, and synchronize; the paused room resumes only through
+a subsequent explicit host playback command (Play, Seek, Select, Previous or
+Next), because each one starts a new preparation. If host absence reaches five
+minutes, close the room even if guests are still connected. No
+automatic promotion is performed. A successful explicit transfer before departure
+lets the room continue under its new host.
+
+Host logout-all, social deactivation or account deletion closes the room unless
+transfer already committed. A single controller-session logout uses absence
+handling; an observer-session logout only detaches that session. The host's
+intentional room exit uses Transfer and leave or End room for everyone, including
+when ordinary browse Play requests local playback. Rooms with no live controller
+also close after five minutes and all rooms have a proposed 24-hour maximum life.
+Closure/expiry immediately denies access, cancels invitations/preparation, and
+releases participation slots through idempotent bounded cleanup. A stale slot
+cannot permanently prevent joining another room: admission rechecks its old room
+and repairs a terminal reference transactionally. Retained closed-room receipts
+never grant access. Recovered expired rooms cannot be reopened by stale clients.
+
+Authenticate Web tickets through existing cookie/current-viewer and origin/CSRF
+checks; native clients use current Bearer sessions. Social v1 requires a live,
+revocable `authSessions` record: reject sessionless legacy JWTs even if an older
+endpoint accepts them. Issue single-use tickets with a proposed 30-second
+lifetime, session/viewer/generation binding, and no
+tokens in URLs. Browser upgrade admission checks Origin and strict socket limits;
+the first frame redeems the ticket within five seconds before any subscription
+or data is allowed. Persist hashed ticket redemption state with logical expiry
+and atomic one-use consumption. Reauthorize commands, subscriptions, snapshots,
+and periodic liveness against account/session/membership
+state; close immediately on known revocation and bound missed-revocation exposure
+to ten seconds through server-driven revalidation. Auth/database failure expires
+the access lease and stops private delivery; it must not extend cached authority.
+Client-heartbeat silence cannot suppress the server check. Do not rely only on
+token expiry or socket admission.
+
+Use bounded frames, per-account/room command rates, outstanding command limits,
+and per-socket send queues. Coalesce presence/timeline hints; disconnect slow
+consumers with snapshot recovery when their budget is exceeded. Do not drop
+durable state silently. Logs/metrics use bounded outcome categories and latency
+buckets, not aliases, room IDs, member IDs, titles, invitation/ticket contents,
+or per-user listening history. Render aliases as text and reject unknown fields.
+
+### Lifecycle, retention, and operations
+
+Proposed defaults: notifications expire in 30 days; mutation scopes last 24 hours,
+and terminal receipts remain until at least one hour after their scope expiry.
+Closed-room payloads expire 24 hours after closure, once membership/reference
+cleanup completes; processed outbox invalidations expire after 24 hours. Room
+recovery always reads current state, so no historical event replay window exists.
+Expired scopes return expiry instead of re-executing even after receipt deletion.
+Pending outbox work and uncertain mutations are not blindly TTL-deleted: reconcile
+them under bounded retry/backlog budgets, surface unresolved operations, and refuse
+new work before backlog exhaustion. Cleanup remains available while admission is
+disabled. Notification expiry does not extend invitation or profile visibility.
+Presence is ephemeral and is not a listening-history table. Expired invitations
+retain only bounded receipt evidence until retry retention ends. Final handle
+reuse and abuse-evidence retention policy must be settled before launch.
+
+Account deletion must extend `accountDeletionService.ts` before any social write
+is enabled. Preserve existing avatar/provenance preconditions. Serialize social
+writers against the same active-account fence; revoke tickets, close hosted
+rooms, remove profiles/participation/memberships/relationships/invitations/
+notifications/tickets (including references embedded in retained closed rooms),
+and scrub identity-bearing receipts/outbox payloads before final user deletion.
+If bounded cleanup cannot fit one transaction, persist an explicit deletion
+operation and set an account deletion state only after existing preconditions
+pass. Current `touchActiveAccount` checks existence, so authentication, private
+writers, avatar lifecycle writers and shared-catalog provenance writers must adopt
+that deletion-state fence and keep preconditions true throughout asynchronous
+cleanup can safely run. Account-owned data is unavailable while deletion proceeds;
+return an explicit pending outcome, never success before completion. Reconcile
+and resume idempotently after crashes. The canonical behavior change needs promotion
+with that implementation. Do not delete shared catalog or private Playlists as
+a side effect of leaving/deleting a room. No social S3 assets exist in v1;
+future shared avatar/media uploads require their own ownership/visibility and
+create/replace/delete/reconciliation contract.
+
+Start with the current deployment and Mongo-backed recovery; introduce neither
+Redis nor a dedicated realtime service solely for this design. Media egress grows
+roughly as concurrent viewers times bitrate: eight 5 Mbit/s videos are about
+40 Mbit/s before overhead, a sizing example rather than measured capacity.
+Room presence limits do not prove media capacity. Same-NAT guests also share
+existing per-IP stream limits; test this explicitly before enabling eight seats.
+
+Add separate limits for sockets, active rooms, outbox backlog, and room work so
+it cannot starve catalog/auth/media. Extend startup/drain to reject upgrades,
+notify reconnect, drain committed work, explicitly close upgraded sockets, and
+recover rooms after restart. Verify load-balancer/proxy upgrade support and idle
+timeouts on the actual deployment. HTTP shutdown behavior alone is insufficient.
+
+Only measured contention justifies extracting realtime workers and introducing
+Redis for shared presence/fanout. MongoDB remains authoritative; shared rate
+limits, routed room ownership and per-room fencing replace the v1 singleton
+before active replicas are introduced. Redis Pub/Sub can lose disconnected-
+subscriber messages, so it cannot replace durable state and snapshot recovery.
+Separate media CDN/HLS work needs its own readiness, replacement, revocation,
+Range, and client contract. Add WebRTC/SFU only for an explicitly requested
+microphone/camera capability, with separate permissions and moderation.
+
+The first Web release keeps two rollout flags: `FINITUDE_SOCIAL_ENABLED` for
+social admission (profiles, friendships, music shares and listening status) and
+`FINITUDE_ROOMS_ENABLED`, which admits rooms only together with social. Shares and
+listening status already have per-user opt-in/out and safety exits, and rooms are
+Audio-only, so separate share, listening or Audio/Video flags would only multiply
+untested combinations that each cost a restart on the single instance. A Video
+sync flag arrives with shared Video. A flag change takes effect through a process
+restart; an Elastic Beanstalk environment-property update restarts the application.
+
+A process that starts with rooms disabled never installs the gateway. Instead
+`src/realtime/roomWindDown.ts` answers every upgrade with an empty `503`, and while
+any room is open it holds the room authority to run the ordinary sweep with rooms
+disabled every five seconds: shared playback pauses, absent hosts suspend after the
+30-second grace and rooms end after five minutes of host absence or at the 24-hour
+expiry. Once no room is open it releases the lease and stops polling; a disabled
+process cannot open another room. HTTP reads and the safety commands (`leave`,
+`end`, `kick`, `declineInvitation`, `cancelTransfer`, `pause`, `dismissSongRequest`)
+stay available. Web clients lose the realtime connection, detach room playback and
+stop requesting tickets once capabilities report rooms off, so no client applies
+invisible room state; HTTP reads return the current paused, suspended or ended
+room. Operations are in the [social rollout runbook](deployment/social-rollout-runbook.md).
+
+### External constraints consulted
+
+- [MDN autoplay guidance](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay):
+  script-triggered media may require user interaction; admission/readiness must
+  represent that state instead of promising automatic playback.
+- [MDN WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/index.html):
+  the classic WebSocket interface does not provide automatic backpressure;
+  application queues and slow-consumer recovery need explicit bounds.
+- [Redis Pub/Sub semantics](https://redis.io/docs/latest/develop/interact/pubsub/):
+  at-most-once delivery motivates retaining durable state and reconnect recovery.
+- [MongoDB change streams](https://www.mongodb.com/docs/manual/changeStreams/):
+  resumable delivery has prerequisites; a current snapshot remains the recovery
+  path when event history cannot be resumed.
+- [MongoDB TTL indexes](https://www.mongodb.com/docs/manual/core/index-ttl/):
+  deletion is asynchronous, so ticket/invitation/scope expiry is enforced by reads
+  and mutations independently of eventual storage reclamation.
+- [MongoDB atomic conditional writes](https://www.mongodb.com/docs/manual/core/write-operations-atomicity/):
+  expected current values belong in the update condition; the room's generation
+  fence prevents two concurrent commands from consuming the same playback state.
+- [Apple scheduled AVPlayer rate](https://developer.apple.com/documentation/avfoundation/avplayer/setrate(_:time:athosttime:)):
+  host-time synchronization has player prerequisites; the transport spike must
+  validate readiness and buffering configuration instead of assuming parity
+  with browser timers.
+
+These sources support transport constraints, not the proposed product defaults
+or synchronization targets. No infrastructure or feature was deployed by this
+design work.
+
 ## Catalog application and presentation boundaries
 
 The canonical product contract remains [business-rules.md](business-rules.md).
@@ -125,6 +1547,18 @@ registration, snapshot publication, and cleanup; every system action delegates t
 that same store. It does not create a player or queue, and browser integration
 errors cannot escape into transport.
 
+The store retains its derived upcoming queue array while queue identity, order,
+current entry, order position, and Repeat mode are unchanged. Media-clock updates
+still publish transport progress without allocating that array again.
+`usePlayerQueue.ts` subscribes the lazy Now Playing pane only to queue-related
+fields. The full player hook remains responsible for progress and transport UI.
+The active room-track composer is another lazy boundary: signed-out and inactive
+profile gates load their explanation before the larger composer.
+Music-share cards load their existing Save button on demand. The shared Icon
+keeps navigation and identity glyphs eager while deferring playback glyphs behind
+the same SVG dimensions and accessibility props. These boundaries retain the
+existing controls and the unchanged transitive JavaScript budget.
+
 Persistent browser-session schemas remain in `schemas.ts`. Account-route request
 and response validators live in `accountSchemas.ts`, so public browsing does not
 eagerly initialize password-recovery and account-management validation chains.
@@ -209,6 +1643,43 @@ process. No health request creates collections, builds indexes, starts a
 transaction, or changes data.
 A failed metadata read retains its diagnostic slot until all sibling reads settle.
 
+Both successful and unavailable health responses include a `rooms` snapshot
+with `scope: "process"`, `enabled`, `authorityState`, `authorityChanges`,
+`lastSuccessfulSweepAgeMs`, `openSockets`, `openRooms`, and `failures`.
+`openSockets` counts this process's realtime sockets; `openRooms` is the open-room
+count read by this process's latest sweep, null before one. `authorityChanges`
+counts state changes since start, and each change also writes one `room_authority`
+log line. `enabled` reflects both social and
+room rollout flags; authority state is independently `inactive` while nothing in
+the process holds authority, `starting` during acquisition, `ready` while an
+admitting gateway holds it, `windingDown` while a process started with rooms
+disabled holds it to pause and end rooms left open, `unavailable` after
+acquisition/lease failure, or `stopped` after shutdown. A disabled process returns
+to `inactive` once no room is open. A runtime flag change (tests only; deployments
+restart) can leave an installed gateway holding its lease. The sweep age is null
+until a sweep succeeds, then a nonnegative millisecond age. Failure
+counters use only `authorityAcquisition`, `sweep`, `refresh`, `report`, and
+`disconnect`, saturate at `Number.MAX_SAFE_INTEGER`, and reset on process restart.
+No account/room/session identifiers, raw exceptions, URLs, or caller-defined
+labels enter these diagnostics. A room failure remains observable without
+marking unrelated HTTP catalog and account routes unready. Monitor successive
+snapshots per process; they are not durable or cluster-wide totals.
+The `requests` snapshot groups routes into `auth`, `content`, `listener`, `media`,
+`social` (`/api/social/v1`) and `other`; per group, `failed` counts 5xx responses
+and `limited` counts 429 admission refusals.
+
+Every process also writes one `ops_summary` JSON line a minute to stdout for
+CloudWatch metric filters: configured room capacity, the room gauges above, the
+interval's socket opens/closes (by close class), upgrade refusals by reason, ticket
+failures, capacity refusals, fanout passes and maximum lag, room creations,
+suspensions and closures, per-interval room failure deltas, social/room 429/503
+codes, and 429 counts per request limiter (media admission refusals appear under
+`media-delivery`). Room lifecycle transitions (`room_lifecycle`, with the opaque room
+ID and a fixed close reason), the first refusal per minute at a capacity limit
+(`social_capacity`) and the effective capacity at startup (`social_capacity_config`)
+are immediate lines. The field reference and suggested alarms are in the
+[social rollout runbook](deployment/social-rollout-runbook.md#signals).
+
 One database health probe per application handler combines those checks and ping
 under a shared 1-second response deadline. Successful and failed results have a
 1-second cache, so repeated probes do not immediately retry an unavailable
@@ -236,11 +1707,14 @@ reject startup. Node 24 is the supported server runtime.
 SIGTERM and SIGINT start one shutdown operation. Repeated signals remain handled
 until that operation finishes. The server marks itself draining, reports 503 on
 health, refuses new requests with 503/Retry-After, and disables keep-alive on
-admitted responses. It then waits for both HTTP connections and tracked business
-Promises. A client disconnect does not mean its upload, transaction, or publication
-has finished. Every asynchronous Controller uses `asyncHandler`; async authentication
-middleware participates in the same tracker. The route-boundary test prevents new
-untracked asynchronous Controllers and duplicate wrappers.
+admitted responses. It then waits for HTTP connections, transport completion of
+every admitted response, and tracked business Promises. Node can report the server
+closed before a disconnected response emits `close`, so the response wait keeps a
+late dispatch for that request classified as cancellation. A client disconnect
+does not mean its upload, transaction, or publication has finished. Every
+asynchronous Controller uses `asyncHandler`; async authentication middleware
+participates in the same tracker. The route-boundary test prevents new untracked
+asynchronous Controllers and duplicate wrappers.
 
 Before database teardown, admission for business work is closed atomically. A late
 multipart/parser/auth callback cannot start a new Controller against the closing
@@ -249,6 +1723,12 @@ period expires, remaining HTTP connections are destroyed, aborting their attache
 media sources, and the outcome is `forced`; it is never described as successful
 completion of an unfinished upload. Existing pending/replacement/deletion records
 retain the database/S3 evidence needed by normal retry and reconciliation.
+
+Work dispatch refused only because its original response has ended is an internal
+cancellation. The application consumes that exact cancellation after recorded
+transport completion, without logging a false server failure or writing another
+response. Actual service failures and shutdown admission failures retain their
+normal error handling; already-admitted business work remains tracked until it settles.
 
 - `SERVER_SHUTDOWN_GRACE_MS`: default 30000, maximum 120000.
 - `SERVER_SHUTDOWN_CLEANUP_MS`: default 5000, maximum 30000.
@@ -270,6 +1750,23 @@ URL, content identity, account identity, cookie, credential, or request payload 
 added. This is a per-request debugging identifier, not a stored visitor identity.
 Catalog failures use the same bounded categorization.
 
+Unexpected errors after response headers or transport completion retain the same
+bounded diagnostic, then close the response without a second JSON/header write or
+forwarding a raw exception to Express's default logger. Error statuses must be
+integer HTTP errors from 400 through 599; invalid values fall back to a generic
+500. The internal completed-request cancellation described above remains silent.
+Room and Social route adapters also forward known errors to this boundary when
+the response has started, ended, or been destroyed; an already disconnected
+socket cannot silently bypass genuine server-failure diagnostics.
+
+Legacy Audio/Video upload, probe, stream, download, deletion, metadata, and artwork
+cleanup failures use `mediaDiagnosticsService.ts` with fixed failure categories.
+HTTP handlers retain only their generated request ID and controlled error category;
+storage lifecycle recovery uses fixed categories without an HTTP identity. Logs
+never include filenames, database IDs, S3 keys, decoded service errors, or stacks.
+Storage success, deferred cleanup, and retry semantics remain in the lifecycle
+records and response contracts rather than private diagnostic payloads.
+
 Health includes process-scoped request counters and fixed latency buckets, artwork
 scheduler occupancy and limits, available/total temporary-disk bytes, existing
 media admission/stream counters, and memory. Client keys and filesystem paths are
@@ -282,10 +1779,24 @@ loads the environment. Its existing fair queue and cancellation rules remain.
 
 These counters, rate windows, upload/transform limits, and media admission limits
 protect one process. They are not a deployment-wide quota. The current architecture
-remains a single application process per instance. Before multiple replicas are
+remains a single application process per instance. The per-account room and social
+request windows and concurrency slots are kept in that process's memory on purpose:
+on the single Elastic Beanstalk instance they are complete per-account budgets, and a
+restart only resets the current window. A second process or instance would give
+every account and IP another full budget. Before multiple replicas are
 introduced, explicitly design shared abuse limits and measure the aggregate media
 and provider budget. A shared cache, queue, CDN, or worker service is not introduced
 without a measured requirement and a compatible ready/deletion/revocation contract.
+
+Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
+seconds for an existing admission slot. The pending pool is bounded to 32 per
+process and eight per client; active limits and playback reserves do not increase.
+A blocked client cannot hold up another client's available slot. HEAD and
+non-playback requests retain immediate rejection. Queue cancellation removes all
+timer/response hooks; expiration or queue overflow retains 429 with Retry-After.
+Source and lifecycle validation happen after waiting, before storage access.
+An admitted slot releases only after transport completion and all tracked handler
+or storage work settle, so an aborted stream cannot free capacity prematurely.
 
 Catalog substring searches now share a dedicated per-process limit of eight active
 requests and two per client across both public search surfaces. Rejection returns
@@ -306,16 +1817,59 @@ Run this isolated, bounded query-plan probe:
 npm run profile:search
 ```
 
-It creates only 10000 synthetic records in a disposable loopback MongoDB replica
-set and removes that database afterward. It does not read application `.env` values
-for its target or query an existing catalog. It reports counts and execution time,
-never titles, content IDs, or a target URL. In the local Windows/MongoDB 8.0.12 run,
-a substring query returning the final 20 sorted items examined 10000 documents
-without the title/ID index. With the index it examined 20 documents but still
-10000 index keys (4 ms vs 6 ms in this small run). This proves lower document
-fetching, not a general latency improvement or sublinear substring search. Large
-catalog search remains a capacity measurement item, with bounded admission and
-query time; changing search semantics requires a separate product decision.
+It creates 10000 synthetic records in a disposable loopback MongoDB replica set,
+then compares the original regex, title/ID index, and substring candidate index.
+It never reads an application database or prints titles or target URLs. A local
+MongoDB 7.0.11 run returned the same 20 rows with 10000 keys examined by the
+ordering index versus 21 keys and 40 document examinations by the candidate
+index. `test/catalogSearch.integration.ts` enforces a candidate-work bound for
+that workload. This is a selective-query regression guard, not a latency SLO for
+all queries or all catalog sizes.
+
+### Substring candidate index rollout
+
+`CATALOG_SEARCH_INDEX_ENABLED` defaults to false and enables indexed candidate
+filtering only when exactly `true`. Every supported Artist, Organization, Album,
+and MediaTrack create/rename path writes derived `catalogSearchVersion` and
+`catalogSearchGrams` in the same document mutation as its name/title, regardless
+of the read flag. These internal fields never enter public DTOs. They contain
+unique lower-case ASCII one-, two-, and three-character grams for source strings
+up to 512 characters (at most 1533 entries). Non-ASCII or longer sources use
+version 0; missing/unsupported versions remain on the original regex path.
+Non-ASCII queries also use that path, preserving MongoDB Unicode case matching.
+The original escaped, case-insensitive substring regex always verifies candidates;
+ordering, limits and ready-content predicates do not change.
+
+The additive indexes are `{catalogSearchVersion: 1}` and
+`{catalogSearchGrams: 1, catalogSearchVersion: 1}` on each of the four collections.
+They increase write/storage work; measure representative text lengths, common
+short queries, Unicode share and catalog sizes before enabling broadly. Broad
+matches and unsupported/legacy sources can still require linear work. Existing
+search admission and query-time bounds remain mandatory.
+
+Deploy the new writers to every process with indexed reads disabled, then run
+bounded backfill pages on the intended configured database:
+
+```sh
+npm run backfill:catalog-search -- --collection=albums --limit=100
+npm run backfill:catalog-search -- --collection=albums --limit=100 --apply --confirm=APPLY_CATALOG_SEARCH
+```
+
+Repeat separately for `artists`, `organizations`, and `audioTracks`. Pass the
+returned `nextCursor` as `--after=<cursor>` until it is null. The default is a
+read-only report; apply requires the explicit confirmation value. The script
+verifies existing required schema without creating indexes or collections. It
+prints only counts and a checkpoint, never source text. Each update compares the
+exact observed source, so a concurrent rename or deletion cannot be overwritten.
+A failed/uncertain page is safely rerun with the same cursor; a changed source is
+reported separately and can be rechecked on a new pass. Retain checkpoints until
+completion and confirm the two candidate indexes exist before enabling the flag.
+
+Disable indexed reads before rolling back to a binary that does not maintain the
+projection. Keep them disabled across any mixed-version writer period. Before
+re-enabling after such a rollback, rerun the full backfill from the first page:
+old writers can leave an otherwise valid version-1 projection stale. Normal
+query reads never perform migrations or mutate catalog records.
 
 Use the existing `npm run test:media-load` only against an explicitly authorized
 target. Before a capacity change, compare rejected playback, API latency buckets,

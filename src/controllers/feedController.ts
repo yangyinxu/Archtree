@@ -4,6 +4,7 @@ import { ObjectId } from 'mongodb';
 import Post from '../models/post';
 import { getDb } from '../infrastructure/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
+import { cleanupDeletedPostReferences } from '../services/contentReferenceService';
 import { toPublicFeedPost } from '../services/publicCatalogService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
 
@@ -92,6 +93,8 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
         }
 
         const postId = ObjectId.createFromHexString(rawPostId);
+        // Detach Carousel items first so a failed cleanup leaves the Post in place for a retry.
+        await cleanupDeletedPostReferences(rawPostId);
         const result = await getDb()!.collection('posts').deleteOne({ _id: postId });
         if (result.deletedCount !== 1) {
             return res.status(404).json({ message: 'Post not found or cannot be deleted.' });

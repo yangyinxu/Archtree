@@ -194,6 +194,115 @@ test('audio reconciliation reports storage-ready pending and failed publication 
     ]);
 });
 
+test('audio reconciliation preserves known S3 versions and explicitly identifies unconfirmed upload outcomes', () => {
+    const id = '507f1f77bcf86cd799439011';
+    const [result] = findIncompleteAudioTracks([{
+        _id: id, s3Key: id, uploadStatus: 'ready', mediaRepresentation: { objectKey: id, versionId: 'active-version' },
+        pendingS3Key: `audio/${id}/507f1f77bcf86cd799439012`, pendingUploadStatus: 'failed',
+        pendingS3VersionId: null, pendingUploadOutcomeUnknown: true,
+        storageCleanupS3Key: `audio/${id}/507f1f77bcf86cd799439013`, storageCleanupStatus: 'deleteFailed',
+        storageCleanupS3VersionId: 'cleanup-version'
+    }], new Set([id]));
+    assert.equal(result.s3VersionId, 'active-version');
+    assert.equal(result.pendingS3VersionId, null);
+    assert.equal(result.pendingUploadOutcomeUnknown, true);
+    assert.equal(result.storageCleanupS3VersionId, 'cleanup-version');
+});
+
+test('audio reconciliation checks each lifecycle phase against the namespace of its media kind', () => {
+    const videoId = '507f1f77bcf86cd799439021';
+    const audioId = '507f1f77bcf86cd799439022';
+    const replacementId = '507f1f77bcf86cd799439023';
+    const cleanupId = '507f1f77bcf86cd799439024';
+    const videoKey = `video/${videoId}/507f1f77bcf86cd799439031`;
+    const audioKey = `audio/${audioId}/507f1f77bcf86cd799439031`;
+    const pendingVideoKey = `video/${replacementId}/507f1f77bcf86cd799439032`;
+    const cleanupVideoKey = `video/${replacementId}/507f1f77bcf86cd799439033`;
+    const activeVideoKey = `video/${cleanupId}/507f1f77bcf86cd799439034`;
+    const inheritedPendingVideoKey = `video/${cleanupId}/507f1f77bcf86cd799439035`;
+    const defaultCleanupAudioKey = `audio/${cleanupId}/507f1f77bcf86cd799439036`;
+    const tracks = [
+        {
+            _id: videoId,
+            mediaType: 'video',
+            s3Key: videoKey,
+            uploadStatus: 'ready',
+            publicationStatus: 'pending'
+        },
+        {
+            _id: audioId,
+            mediaType: 'audio',
+            s3Key: audioKey,
+            uploadStatus: 'ready',
+            publicationStatus: 'failed'
+        },
+        {
+            // Pre-migration Audio row replacing itself with Video.
+            _id: replacementId,
+            s3Key: replacementId,
+            uploadStatus: 'ready',
+            publicationStatus: 'ready',
+            pendingS3Key: pendingVideoKey,
+            pendingMediaType: 'video',
+            pendingUploadStatus: 'failed',
+            storageCleanupS3Key: cleanupVideoKey,
+            storageCleanupMediaType: 'video',
+            storageCleanupStatus: 'deleteFailed'
+        },
+        {
+            // Pending inherits the active kind; cleanup without a kind is Audio.
+            _id: cleanupId,
+            mediaType: 'video',
+            s3Key: activeVideoKey,
+            uploadStatus: 'ready',
+            publicationStatus: 'ready',
+            pendingS3Key: inheritedPendingVideoKey,
+            pendingUploadStatus: 'uploading',
+            storageCleanupS3Key: defaultCleanupAudioKey,
+            storageCleanupStatus: 'deleteFailed'
+        }
+    ];
+    const audioKeys = [audioKey, replacementId, defaultCleanupAudioKey];
+    const videoKeys = [
+        videoKey,
+        pendingVideoKey,
+        cleanupVideoKey,
+        activeVideoKey,
+        inheritedPendingVideoKey
+    ];
+    const existence = (listedAudioKeys: string[], listedVideoKeys: string[]) =>
+        findIncompleteAudioTracks(tracks, new Set(listedAudioKeys), new Set(listedVideoKeys))
+            .map((track) => [
+                track.audioTrackId,
+                track.objectExists,
+                track.pendingObjectExists,
+                track.cleanupObjectExists
+            ]);
+
+    assert.deepEqual(existence(audioKeys, videoKeys), [
+        [videoId, true, false, false],
+        [audioId, true, false, false],
+        [replacementId, true, true, true],
+        [cleanupId, true, true, true]
+    ]);
+    // A key listed only in the other kind's namespace is still missing for that phase.
+    assert.deepEqual(existence(videoKeys, audioKeys), [
+        [videoId, false, false, false],
+        [audioId, false, false, false],
+        [replacementId, false, false, false],
+        [cleanupId, false, false, false]
+    ]);
+    assert.deepEqual(
+        existence([], []).map(([, objectExists]) => objectExists),
+        [false, false, false, false]
+    );
+    assert.equal(
+        findIncompleteAudioTracks(tracks, new Set([videoKey]))[0].objectExists,
+        false,
+        'callers without a video listing never report a video object as present'
+    );
+});
+
 test('image reconciliation audits cover art and private avatars without mutating either', async () => {
     const coverAttached = '507f1f77bcf86cd799439011';
     const avatarMissing = '507f1f77bcf86cd799439012';
@@ -287,6 +396,8 @@ test('image reconciliation audits cover art and private avatars without mutating
     );
     assert.deepEqual(report.missingObjects.map(asset => asset.imageId), [avatarMissing]);
     assert.deepEqual(report.incompleteAssets.map(asset => asset.imageId), [avatarMissing]);
+    assert.equal(report.summary.storageIdentityIssueCount, assets.length);
+    assert.ok(report.storageIdentityIssues.every(asset => asset.storageIdentityMissing));
     assert.deepEqual(report.detachedAssets.map(asset => asset.imageId), [coverDetached]);
     assert.deepEqual(
         report.invalidStorageKeys.map(asset => asset.imageId),

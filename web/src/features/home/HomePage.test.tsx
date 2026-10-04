@@ -35,6 +35,38 @@ test('centers the retry action when Home cannot load', async () => {
   expect(getComputedStyle(retryButton.parentElement!).justifyContent).toBe('center');
 });
 
+test('renders the same Carousel attached twice as two independent sections', async () => {
+  const consoleError = vi.spyOn(console, 'error');
+  const album = {
+    contentType: 'album',
+    id: '0123456789abcdef01234567',
+    title: 'Lorem Ipsum',
+    artworkUrl: '',
+    artistNames: ['Dolor Ensemble'],
+    releaseDate: null
+  };
+  const attachment = { title: 'Sit Amet Picks', presentation: 'carousel', items: [album, album] };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    title: 'Evening selection',
+    // Each attachment of one Carousel carries its own persisted Page item ID.
+    sections: [
+      { id: '1123456789abcdef01234567', ...attachment },
+      { id: '2123456789abcdef01234567', ...attachment }
+    ]
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+  const { container } = renderHome();
+
+  const headings = await screen.findAllByRole('heading', { name: 'Sit Amet Picks' });
+
+  expect(headings.map((heading) => heading.id)).toEqual([
+    'listener-section-1123456789abcdef01234567',
+    'listener-section-2123456789abcdef01234567'
+  ]);
+  const carousels = container.querySelectorAll('[data-presentation="carousel"]');
+  expect(Array.from(carousels, (carousel) => carousel.children.length)).toEqual([2, 2]);
+  expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/same key/);
+});
+
 test('records a mood card as an explicit suggested search', async () => {
   const user = userEvent.setup();
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({

@@ -105,8 +105,47 @@
   box-shadow: 0 0 0 1px var(--color-text);
 }
 
-.field input:user-invalid {
+.field input:user-invalid,
+.field input[aria-invalid='true'] {
   border-color: var(--color-danger);
+}
+
+/* Margins replace the grid gap, so the usually empty suggestion region adds no space. */
+.emailField {
+  gap: 0;
+}
+
+.emailField > * + * {
+  margin-top: 0.4rem;
+}
+
+.emailField > :empty {
+  margin-top: 0;
+}
+
+.fieldError {
+  color: var(--color-danger);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* A typo suggestion reads as a link-like action under the field. */
+.suggestionButton {
+  background: none;
+  border: 0;
+  color: var(--color-accent-bright);
+  font-size: 0.8rem;
+  font-weight: 680;
+  min-height: 1.5rem;
+  overflow-wrap: anywhere;
+  padding: 0;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.suggestionButton:hover {
+  color: var(--color-text);
 }
 
 .fieldHint,
@@ -258,6 +297,21 @@
   background: var(--color-accent-soft);
   border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
   color: var(--color-accent-bright);
+}
+
+/* The accepted-request status, the exact address it used, and the "Use a different email" action. */
+.sentPanel {
+  display: grid;
+  gap: 0.7rem;
+  justify-items: start;
+}
+
+.sentTo {
+  color: var(--color-text);
+  display: block;
+  font-weight: 680;
+  margin-top: 0.3rem;
+  overflow-wrap: anywhere;
 }
 
 .panel {
@@ -477,7 +531,20 @@
 @media (pointer: coarse) {
   .button,
   .primaryLink,
+  .suggestionButton,
   .textButton {
     min-height: var(--control-min-size);
   }
+}
+
+/* A read-only field shows a fixed value, such as the address an emailed link belongs to. */
+.field input[readonly] {
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.panelNotice {
+  margin: 0.9rem auto 0;
+  max-width: 34rem;
 }

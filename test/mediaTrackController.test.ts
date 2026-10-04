@@ -113,3 +113,51 @@ test('canonical MediaTrack delivery distinguishes full, exact, open, suffix, and
     });
     assert.equal(resolveMediaTrackByteResponse('bytes=0-1,4-5', 100).status, 416);
 });
+
+test('revision-pinned resolution requires exact recorded HEAD validators and rechecks source after storage IO', async () => {
+    const revision = `mr_${'1'.repeat(32)}`;
+    const representation = {
+        revision, objectKey: trackId, byteLength: 4096, durationMs: 1000, seekable: true,
+        format: 'wav-pcm', etag: '"exact-bytes"', versionId: 'exact-version'
+    };
+    const track = readyTrack('audio', { mediaRepresentation: representation });
+    const metadata = { ContentLength: 4096, ETag: representation.etag, VersionId: representation.versionId };
+    let heads = 0;
+    const headObject = async (params: any) => {
+        heads += 1;
+        assert.equal(params.IfMatch, representation.etag);
+        assert.equal(params.VersionId, representation.versionId);
+        return metadata;
+    };
+    assert.equal((await resolveReadyMediaTrackAsset(trackId, signal, { findReadyTrack: async () => track, headObject }, undefined, `mr_${'2'.repeat(32)}`)).status, 'notFound');
+    assert.equal(heads, 0);
+    assert.equal((await resolveReadyMediaTrackAsset(trackId, signal, { findReadyTrack: async () => track, headObject }, undefined, revision)).status, 'ready');
+    for (const change of [{ ETag: '"wrong"' }, { VersionId: 'wrong' }, { ContentLength: 4095 }]) {
+        assert.equal((await resolveReadyMediaTrackAsset(trackId, signal, {
+            findReadyTrack: async () => track, headObject: async () => ({ ...metadata, ...change })
+        }, undefined, revision)).status, 'notFound');
+    }
+    for (const changedTrack of [null, readyTrack('audio', { mediaRepresentation: { ...representation, revision: `mr_${'2'.repeat(32)}` } })]) {
+        let reads = 0;
+        assert.equal((await resolveReadyMediaTrackAsset(trackId, signal, {
+            findReadyTrack: async () => ++reads === 1 ? track : changedTrack, headObject
+        }, undefined, revision)).status, 'notFound');
+        assert.equal(reads, 2);
+    }
+});
+
+
+test('pinned verified audio response type follows inspected bytes rather than spoofed upload MIME', async () => {
+    for (const [format, expected] of [['wav-pcm', 'audio/wav'], ['mp3', 'audio/mpeg'], ['m4a-aac', 'audio/mp4']]) {
+        const revision = `mr_${'a'.repeat(32)}`;
+        const representation = { revision, objectKey: trackId, byteLength: 4096, durationMs: 2000,
+            seekable: true, format, analysisVersion: 2, etag: '"verified"', versionId: 'exact-version' };
+        const track = readyTrack('audio', { contentType: 'audio/unknown', mediaRepresentation: representation });
+        const result = await resolveReadyMediaTrackAsset(trackId, signal, {
+            findReadyTrack: async () => track,
+            headObject: async () => ({ ContentLength: 4096, ETag: '"verified"', VersionId: 'exact-version' })
+        }, 'audio', revision);
+        assert.equal(result.status, 'ready');
+        if (result.status === 'ready') assert.equal(result.contentType, expected);
+    }
+});

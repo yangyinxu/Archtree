@@ -33,7 +33,14 @@ import {
 import { getUploadedFile } from '../../middleware/imageUpload';
 import { getRequestAbortSignal } from '../../middleware/requestProtectionMiddleware';
 import { publishUploadedAudioTracks } from '../../services/albumTrackLinkService';
-import { retryAudioTrackPublications } from '../../services/audioPublicationRecoveryService';
+import {
+    retryAudioTrackPublications,
+    retryPublicationAfterUpload
+} from '../../services/audioPublicationRecoveryService';
+import {
+    defaultSoundtrackVideoUploadDependencies,
+    type SoundtrackVideoUploadDependencies
+} from '../soundtrackVideoController';
 import {
     mergeLegacyArtistIdsIntoCredits,
     migratedCatalogCreditId,
@@ -286,6 +293,13 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
                 : `${mediaType === 'video' ? 'Video' : 'Audio'} MediaTrack created successfully.`
         );
     } catch (error) {
+        if (error instanceof AudioStorageLifecycleError) {
+            return redirectWithMessage(res, error.outcomeUnknown
+                ? 'MediaTrack recorded, but the upload outcome could not be confirmed. Storage reconciliation is required before retrying.'
+                : error.cleanupPending
+                    ? 'MediaTrack upload failed. Its storage evidence remains recorded for cleanup and reconciliation.'
+                    : 'MediaTrack upload failed. The recorded upload can be retried.');
+        }
         return next(error);
     }
 };
@@ -641,13 +655,21 @@ export const uploadAudioTrackWeb = async (
     }
 };
 
-/** Replaces the one active MediaTrack object with a validated MP4. */
+/**
+ * Replaces the one active MediaTrack object with a validated MP4, then replays
+ * publication so an earlier publication failure needs no separate audit retry.
+ */
 export const uploadSoundtrackVideoWeb = async (
     req: Request,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
+    dependencyOverrides: Partial<SoundtrackVideoUploadDependencies> = {}
 ) => {
     try {
+        const dependencies = {
+            ...defaultSoundtrackVideoUploadDependencies,
+            ...dependencyOverrides
+        };
         const authReq = req as AuthenticatedRequest;
         if (!authReq.auth) {
             return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
@@ -657,22 +679,38 @@ export const uploadSoundtrackVideoWeb = async (
         if (!/^[0-9a-f]{24}$/.test(audioTrackId)) {
             return redirectWithMessage(res, 'MediaTrack ID is not valid.');
         }
-        const track: any = await AudioTrack.findById(audioTrackId);
+        const track: any = await dependencies.findTrack(audioTrackId);
         if (!track) return redirectWithMessage(res, 'MediaTrack not found.');
         const uploadFile = (req as Request & { file?: Express.Multer.File }).file;
         if (!uploadFile) return redirectWithMessage(res, 'Missing MP4 video file.');
-        await validateSoundtrackVideoFile(uploadFile);
-        const result = await uploadVideoObject(
+        await dependencies.validateVideo(uploadFile);
+        const result = await dependencies.uploadObject(
             audioTrackId,
             uploadFile,
             getContentProvenanceId(track) || authReq.auth.userId,
             getRequestAbortSignal(req)
         );
+        const publication = await retryPublicationAfterUpload(
+            audioTrackId,
+            dependencies.retryPublications
+        );
+        const cleanupNote = result.cleanupPending
+            ? ' Previous media cleanup remains recorded for reconciliation.'
+            : '';
+        if (publication.outcome !== 'ready') {
+            return redirectWithMessage(
+                res,
+                publication.outcome === 'unknown'
+                    ? `MediaTrack is now Video, but publication outcome could not be confirmed. Reconciliation is required.${cleanupNote}`
+                    : `MediaTrack is now Video, but publication status is ${publicationStatusForMessage(publication.publicationStatus)}. Retry publication without uploading the file again.${cleanupNote}`
+            );
+        }
+        const publicationNote = `Publication status is ${publicationStatusForMessage(publication.publicationStatus)}.`;
         return redirectWithMessage(
             res,
             result.cleanupPending
-                ? 'MediaTrack is now Video. Previous media cleanup remains recorded for reconciliation.'
-                : 'MediaTrack was replaced with Video successfully.'
+                ? `MediaTrack is now Video. ${publicationNote}${cleanupNote}`
+                : `MediaTrack was replaced with Video successfully. ${publicationNote}`
         );
     } catch (error) {
         if (error instanceof InvalidSoundtrackVideoError) {

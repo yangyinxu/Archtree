@@ -9,7 +9,11 @@ canonical in [`../business-rules.md`](../business-rules.md).
 - Promote the exact tested Elastic Beanstalk bundle. Never rebuild between
   staging, production, or rollback.
 - Every candidate contains `RELEASE.json` with the source commit and CI build
-  identity. Record both values with the deployment evidence.
+  identity. Its retained ZIP has a `release-provenance.json` sidecar binding the
+  SHA-256, workflow run/attempt and successful gate set. Record all identities.
+- CodeBuild promotes only the retained artifact from the exact successful
+  merged-main push gate. Its repository buildspec cannot rebuild a substitute
+  from source or promote a PR, fork, failed run, or earlier rerun attempt.
 - Keep the immediately previous successful bundle available until the release
   has passed its agreed observation window.
 - The bundle must contain only the explicit runtime allowlist produced by
@@ -19,6 +23,12 @@ canonical in [`../business-rules.md`](../business-rules.md).
   configuration-deployment HTTPS entry points, and bootstrap/renewal timer
   hooks. A candidate missing any one of those hooks is not deployable to the
   single-instance environment.
+- Request rate windows and concurrency slots, including the per-account social
+  and room budgets, live in the one application process and reset on restart.
+  Keep the environment at one instance and one process; adding another would
+  give every account and IP an extra budget. Design shared limits first, as the
+  [single-process capacity contract](../architecture.md#single-process-capacity-contract)
+  requires.
 - The Playlist release adds private `playlists` and account-mutation receipt
   collections plus their owner, replay, and expiry indexes. These changes are
   additive and own no S3 objects; verify every required production index before
@@ -30,11 +40,12 @@ canonical in [`../business-rules.md`](../business-rules.md).
 ## 1. Prepare and identify the candidate
 
 The release workflow runs unit/component tests, Mongo-backed lifecycle
-integration tests, production builds, the three-engine browser/axe gate, and
-artifact staging before retaining a commit-named rollback bundle. Integration
-coverage is required for the account, Playlist, transaction, S3, and content-
-reference lifecycle; do not infer it from unit or browser results. For a local
-artifact verification run:
+integration tests, production builds, the real social browser scenarios, the
+three-engine browser/axe gate, and artifact staging before retaining a
+commit/run/attempt-named rollback bundle and checksum sidecar. Integration coverage
+is required for the account, Playlist, transaction, S3, and content-reference lifecycle; do not infer it from
+unit or browser results. For a local artifact verification run in a provisioned
+Linux environment:
 
 ```bash
 npm ci
@@ -42,15 +53,34 @@ npm test
 npm run test:integration
 npm run build
 npm run typecheck:e2e --workspace @archtree/finitude-web
+CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web
 CI=1 npm run test:e2e --workspace @archtree/finitude-web -- \
   --update-snapshots=none
 git diff --check
 npm run stage:eb-artifact
 ```
 
+CI installs Xvfb for the social suite's headed background-tab checks and a
+PulseAudio null sink for Firefox. All social Chromium launches disable hardware
+audio output. The nine isolated social scenarios cover room native lifecycle,
+room recovery, invitations, song requests, music shares, room interactions,
+listening status, catalog room entry, and compressed-audio formats. Once the
+browser environment is ready, the ordinary browser/visual gate runs even if a
+social assertion failed so both suites retain diagnostic evidence. Both gates must pass before artifact staging. Their traces and failure
+screenshots remain under the retained `web/test-results` evidence.
+
 Local staging requires a clean committed worktree so `RELEASE.json` cannot
 misidentify uncommitted bytes. CI supplies the immutable source identity
 directly.
+
+The same build emits the Engineering Guide under `engineering/dist`. Both the
+staged runtime and the versioned rollback ZIP must retain that directory alongside
+`web/dist`. Staging and promotion reject a guide whose manifest identifies a dirty
+checkout or a different commit from `RELEASE.json`; rebuild after committing the
+candidate. Guide source documents are not copied into the runtime. Once deployed,
+verify an administrator can open `/engineering` and a nested page, while an
+ordinary account cannot read either the pages or their assets. Local preview and
+fixture tests do not replace that deployment check.
 
 The release workflow never updates visual baselines. When the current
 candidate has no reviewed Linux baseline yet, its first Ubuntu run is expected
@@ -94,6 +124,52 @@ Before promotion, verify all of the following:
 Stop if the candidate or previous version cannot be identified exactly. Also
 stop the first base-path migration if rollback would leave `/finitude` deep
 links unavailable and no tested compatibility redirect exists.
+
+### CodePipeline promotion setup
+
+Use the repository `buildspec.yml` with a Node 24/Python 3 build image and a
+CodeBuild timeout of at least 45 minutes. Preserve the source revision as the full
+`CODEBUILD_RESOLVED_SOURCE_VERSION`; do not replace it with a branch name or an
+operator-selected newer SHA. The promoter waits up to 35 minutes for that exact
+main workflow to finish (`ARCHTREE_RELEASE_WAIT_SECONDS`, 0–3600); a failed gate
+stops immediately. A timeout is a failed promotion and requires an explicit retry
+after the same gate succeeds. The pipeline emits no deployable fallback artifact.
+
+Provide `GITHUB_ARTIFACT_TOKEN` from a managed secret with only **Actions: read**
+for `yangyinxu/Archtree`, and grant the CodeBuild service role access to that secret.
+Confirm the source pipeline connection is not being mistaken for this independent
+API permission. Permit HTTPS to GitHub's API and artifact blob storage. The
+promoter strips the GitHub credential before downloading the signed storage URL.
+The repository does not provision these account-side settings.
+
+The release workflow runs its gates as parallel jobs (`build`,
+`unit-integration`, `social-e2e`, `browser-e2e`), so a normal run takes about
+20–25 minutes, well inside the 35-minute wait. Only the final `release-artifact`
+job, which needs all four, stages and uploads the bundle. It stages the
+production build that both browser jobs tested, and never rebuilds it. A failed or
+timed-out gate skips that job and fails the run, so nothing is promoted. Use
+**Re-run all jobs** for a fresh attempt; the new attempt identity is bound into
+the provenance as before.
+
+The successful main workflow retains
+`archtree-eb-<commit>-<run-id>-<attempt>` containing
+`archtree-eb-<commit>.zip` and `release-provenance.json`. CodeBuild validates both
+archive digests, exact workflow event/repository/source/attempt, all gate results,
+`RELEASE.json`, ZIP safety, runtime layout and executable hooks before handing the
+unchanged extracted runtime tree to the existing EB deploy action. It fails if
+its output directory already exists. Keep the upload/deploy role restricted to
+this verified artifact path and remove saved buildspec overrides that rebuild.
+
+Check the CodeBuild `tested_release_promoted` event against the GitHub run,
+artifact ID and bundle digest before enabling automatic deployment. Test one
+pending/failed gate and one wrong-source candidate in a safe pipeline to prove
+there is no deploy action on failure. This account-side handoff check remains
+required even when all offline synthetic promotion tests pass.
+
+Store the exact candidate ZIP and sidecar, plus the prior successful pair, in
+retained deployment storage. GitHub's 30-day expiration must not remove the only
+rollback copy. Existing pre-provenance archives remain manual emergency recovery
+inputs under this runbook; they cannot silently pass the new promotion verifier.
 
 ## 2. Deploy and verify staging
 
@@ -146,6 +222,39 @@ after its base and randomized delay; do not promote until a trusted certificate
 is active, port 443 responds, and port 80 redirects application requests to
 HTTPS. Confirm the readiness condition gates further bootstrap service work and
 the twice-daily renewal timer remains active.
+
+When the target runs with `FINITUDE_ROOMS_ENABLED=true`, confirm that Nginx
+forwards WebSocket handshakes before any room smoke flow. This probe sends a
+well-formed handshake with a synthetic ticket and a foreign `Origin`, so the
+gateway refuses it before any ticket lookup or room work:
+
+```bash
+curl --http1.1 -sS -o /dev/null -w '%{http_code} %{size_download}\n' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -H 'Sec-WebSocket-Protocol: archtree-room-v1, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' \
+  -H 'Origin: https://probe.invalid' \
+  https://<target-host>/api/social/v1/realtime
+```
+
+`403 0` means the upgrade reached the room gateway. A `401` with a non-zero
+size is Express's JSON response, so the proxy dropped `Upgrade`/`Connection`;
+`503 0` means the realtime path is not admitting: no authority lease, draining,
+or rooms switched off (a process started with rooms off refuses every upgrade;
+see the [social rollout runbook](social-rollout-runbook.md)). `429 0` means the
+gateway's per-IP upgrade attempt, pending-upgrade or per-address limiter refused
+the request; wait and retry. `401 0` means the upgrade reached the gateway, but
+`Sec-WebSocket-Protocol` arrived malformed or stripped (or `Origin` was
+missing): the subprotocol is checked before the `Origin` comparison. Then
+confirm that a signed-in test account's room connects over `wss://` in the
+browser.
+
+Before enabling rooms on a target, confirm the room audio decoder: the deployment
+log shows the pinned FFmpeg install verified by size and SHA-256,
+`/usr/local/bin/ffmpeg -hide_banner -version` runs on the instance, and a short
+original MP3 uploaded through Content Manager is listed as eligible on the Room
+audio analysis page. Run the README's room audio catalog backfill (dry run first)
+for existing tracks after this check passes.
 
 Run the checked-in media workload only on a target explicitly approved for
 load testing. Remote targets require `ALLOW_REMOTE_MEDIA_LOAD=1` and an exact
@@ -216,7 +325,11 @@ infrastructure such as issued TLS certificates or systemd timer state. Inspect
 those separately if a release changed `.platform` or `.ebextensions`. The HTTPS
 timer installer keeps a stable copy of the configurator under
 `/usr/local/sbin`, so explicitly verify that persisted copy and both timer unit
-definitions when rolling back across this recovery change. The
+definitions when rolling back across this recovery change. The pinned FFmpeg under
+`/opt/archtree-ffmpeg` and its `/usr/local/bin` links also persist across an
+application rollback. An older release can still reach that decoder through
+`ROOM_AUDIO_FFMPEG_PATH` or PATH; remove them by hand only if the rollback must
+also remove the decoder. Analysis results written by the backfill remain valid. The
 additive Playlist collections and receipts must remain intact during rollback;
 the previous application may ignore them, but rollback must not delete listener
 data or remove their indexes. Playlist artwork has no persistent derivative or

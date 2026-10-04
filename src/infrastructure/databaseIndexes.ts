@@ -1,10 +1,18 @@
 import type { Db, CreateIndexesOptions, IndexSpecification, Document } from 'mongodb';
+import { catalogSearchCollections } from '../utils/catalogSearch';
+
+const catalogSearchIndexKeys: IndexSpecification[] = [
+  { catalogSearchVersion: 1 },
+  { catalogSearchGrams: 1, catalogSearchVersion: 1 }
+];
 
 /** Versioned index definitions; unique constraints are mandatory for correctness. */
 export const databaseIndexes: Array<{
     collection: string;
     keys: IndexSpecification;
     options?: CreateIndexesOptions;
+    /** Required nonunique indexes bound transactional cleanup and provision its collections. */
+    required?: boolean;
   }> = [
     { collection: 'pages', keys: { slug: 1 }, options: { unique: true } },
     { collection: 'users', keys: { email: 1 }, options: { unique: true } },
@@ -16,6 +24,10 @@ export const databaseIndexes: Array<{
     { collection: 'authActionTokens', keys: { codeHash: 1 } },
     { collection: 'authActionTokens', keys: { userId: 1, purpose: 1, consumedAt: 1 } },
     { collection: 'authActionTokens', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    // Required: registration and verification transactions use this collection.
+    { collection: 'emailLinkTokens', keys: { email: 1, purpose: 1 }, required: true },
+    { collection: 'emailLinkTokens', keys: { userId: 1 }, options: { sparse: true } },
+    { collection: 'emailLinkTokens', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'authIdentities', keys: { provider: 1, providerSubject: 1 }, options: { unique: true } },
     { collection: 'authIdentities', keys: { userId: 1, provider: 1 }, options: { unique: true } },
     { collection: 'passkeys', keys: { credentialId: 1 }, options: { unique: true } },
@@ -39,6 +51,53 @@ export const databaseIndexes: Array<{
       keys: { expiresAt: 1 },
       options: { expireAfterSeconds: 0 }
     },
+    { collection: 'socialProfiles', keys: { accountId: 1 }, options: { unique: true } },
+    { collection: 'socialProfiles', keys: { handle: 1 }, options: { unique: true } },
+    { collection: 'socialProfiles', keys: { 'suspension.suspendedAt': -1 }, options: { sparse: true } },
+    { collection: 'socialRelationships', keys: { accountIds: 1 }, required: true },
+    { collection: 'socialRelationships', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    {
+      collection: 'socialMutations', keys: { accountId: 1, scopeId: 1, commandId: 1 },
+      options: { unique: true }
+    },
+    { collection: 'socialMutations', keys: { accountId: 1, expiresAt: 1 } },
+    { collection: 'socialMutations', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'socialOutbox', keys: { accountId: 1 }, options: { unique: true } },
+    { collection: 'socialBudgets', keys: { accountId: 1 }, options: { unique: true } },
+    { collection: 'socialHandles', keys: { accountId: 1 }, required: true },
+    { collection: 'socialHandles', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'socialMusicShares', keys: { senderAccountId: 1, createdAt: -1, _id: -1 }, required: true },
+    { collection: 'socialMusicShares', keys: { recipientAccountId: 1, createdAt: -1, _id: -1 }, required: true },
+    { collection: 'socialMusicShares', keys: { accountIds: 1 }, required: true },
+    { collection: 'socialMusicShares', keys: { contentType: 1, contentId: 1, _id: 1 }, required: true },
+    { collection: 'socialMusicShares', keys: { senderAccountId: 1, recipientAccountId: 1, contentType: 1, contentId: 1 }, required: true },
+    { collection: 'socialMusicShares', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'socialListeningStates', keys: { accountId: 1 }, options: { unique: true } },
+    { collection: 'socialListeningPublications', keys: { 'playback.mediaTrackId': 1, _id: 1 }, required: true },
+    { collection: 'socialListeningPublications', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'socialRooms', keys: { state: 1, expiresAt: 1 }, required: true },
+    { collection: 'socialRooms', keys: { 'members.accountId': 1 }, required: true },
+    { collection: 'socialRooms', keys: { 'queue.mediaTrackId': 1 }, required: true },
+    { collection: 'socialRooms', keys: { 'songRequests.mediaTrackId': 1 }, required: true },
+    { collection: 'socialRooms', keys: { closedAt: 1 }, options: { expireAfterSeconds: 86_400 } },
+    { collection: 'socialRoomParticipation', keys: { roomId: 1 }, required: true },
+    { collection: 'socialInvitations', keys: { invitationId: 1 }, options: { unique: true } },
+    { collection: 'socialInvitations', keys: { recipientAccountId: 1, state: 1 }, required: true },
+    { collection: 'socialInvitations', keys: { senderAccountId: 1, state: 1 }, required: true },
+    { collection: 'socialInvitations', keys: { roomId: 1 }, required: true },
+    { collection: 'socialInvitations', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'socialRoomOutbox', keys: { roomId: 1 }, options: { unique: true } },
+    { collection: 'socialRoomOutbox', keys: { updatedAt: 1 }, options: { expireAfterSeconds: 86_400 } },
+    { collection: 'socialAuthority', keys: { owner: 1 }, required: true },
+    { collection: 'socialRealtimeTickets', keys: { accountId: 1, expiresAt: 1 }, required: true },
+    { collection: 'socialRealtimeTickets', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    // One report per reporter, target and UTC day; anonymized reports get a unique replacement key.
+    { collection: 'socialReports', keys: { dedupeKey: 1 }, options: { unique: true } },
+    // Required: account deletion and suspension clean these up inside their transactions.
+    { collection: 'socialReports', keys: { reporterAccountId: 1 }, required: true },
+    { collection: 'socialReports', keys: { targetAccountId: 1, state: 1 }, required: true },
+    { collection: 'socialReports', keys: { state: 1, createdAt: 1, _id: 1 } },
+    { collection: 'socialReports', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'pages', keys: { createdBy: 1, updatedAt: -1 } },
     { collection: 'contentWorkflowOperations', keys: { adminUserId: 1, updatedAt: -1 } },
     {
@@ -64,11 +123,13 @@ export const databaseIndexes: Array<{
     { collection: 'audioTracks', keys: { publicationStatus: 1, uploadStatus: 1 } },
     { collection: 'imageAssets', keys: { ownerType: 1, ownerId: 1, _id: 1 } },
     { collection: 'imageAssets', keys: { createdBy: 1, ownerType: 1 } },
-    { collection: 'posts', keys: { createdAt: -1 } }
+    { collection: 'posts', keys: { createdAt: -1 } },
+    ...Object.keys(catalogSearchCollections).flatMap(collection =>
+      catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v1';
-const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true);
+export const requiredIndexRevision = 'required-indexes-v6-social-reports';
+const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */
 export class DatabaseIndexInitializationError extends Error {
@@ -89,12 +150,14 @@ export class DatabaseCollectionInitializationError extends Error {
 const indexId = (index: typeof databaseIndexes[number]) =>
   `${index.collection}:${Object.keys(index.keys).join(',')}`;
 
-/** Accepts only the complete unique constraint, never a sparse or partial substitute. */
+/** Accepts complete constraints and cleanup indexes, never sparse or partial substitutes. */
 const matchesRequiredIndex = (actual: Document, expected: typeof databaseIndexes[number]) =>
   JSON.stringify(actual.key) === JSON.stringify(expected.keys)
-  && actual.unique === true
+  && (expected.options?.unique === true ? actual.unique === true : !actual.unique)
   && !actual.sparse
   && !actual.partialFilterExpression
+  && !actual.hidden
+  && actual.expireAfterSeconds === expected.options?.expireAfterSeconds
   && (!actual.collation || actual.collation.locale === 'simple');
 
 /** Reads bounded schema metadata without inspecting or repairing account records. */
@@ -139,7 +202,7 @@ export const initializeDatabaseIndexes = async (db: Db): Promise<void> => {
         definition.keys, { ...definition.options, maxTimeMS: 120_000 }
       );
     } catch {
-      if (definition.options?.unique) {
+      if (definition.options?.unique || definition.required) {
         throw new DatabaseIndexInitializationError(indexId(definition));
       }
       console.warn(JSON.stringify({ category: 'optional_index_unavailable', indexId: indexId(definition) }));

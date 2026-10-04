@@ -1,4 +1,5 @@
 import { ObjectId } from 'mongodb';
+import { catalogSearchProjection } from '../../utils/catalogSearch';
 import { getDb } from '../../infrastructure/database';
 import type { Artist } from '../../models/artist';
 import { withReadyAlbumReferences } from '../../services/albumReferenceFenceService';
@@ -23,6 +24,7 @@ export const insertPublishedArtist = async (artist: Artist) => {
             async (session, albumIds) => {
                 artist.albumIds = albumIds as [string];
                 await touchActiveAccount(artist.createdBy, session);
+                Object.assign(artist, catalogSearchProjection(artist.name));
                 return db!.collection('artists').insertOne(artist, { session });
             }
         );

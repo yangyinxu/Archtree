@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -8,18 +9,7 @@ import {
   Globe2,
   Library,
   LockKeyhole,
-  Maximize2,
-  PanelRight,
-  Pause,
-  Play,
-  Repeat1,
-  Repeat2,
   Search,
-  Shuffle,
-  SkipBack,
-  SkipForward,
-  Volume2,
-  VolumeX,
   type LucideIcon,
   type LucideProps
 } from 'lucide-react';
@@ -47,41 +37,34 @@ export type IconName =
   | 'volume'
   | 'volume-off';
 
-const icons: Record<IconName, LucideIcon> = {
+export type PlaybackIconName = 'expand' | 'panel-right' | 'pause' | 'play' | 'previous'
+  | 'repeat' | 'repeat-one' | 'shuffle' | 'next' | 'volume' | 'volume-off';
+const PlaybackIcon = lazy(() => import('./DeferredPlaybackIcon'));
+
+const icons: Partial<Record<IconName, LucideIcon>> = {
   account: CircleUserRound,
   'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
   brand: Disc3,
   check: Check,
-  expand: Maximize2,
   home: House,
   language: Globe2,
   library: Library,
   lock: LockKeyhole,
-  pause: Pause,
-  'panel-right': PanelRight,
-  play: Play,
-  previous: SkipBack,
-  repeat: Repeat2,
-  'repeat-one': Repeat1,
   search: Search,
-  shuffle: Shuffle,
-  next: SkipForward,
-  volume: Volume2,
-  'volume-off': VolumeX
 };
 
 /** Centralizes the mature Lucide icon set used by shell controls. */
 export const Icon = ({ name, ...props }: { name: IconName } & LucideProps) => {
   const Component = icons[name];
   const filledTransport = ['play', 'pause', 'previous', 'next'].includes(name);
-  return (
-    <Component
-      aria-hidden="true"
-      fill={filledTransport ? 'currentColor' : 'none'}
-      focusable="false"
-      strokeWidth={1.9}
-      {...props}
-    />
-  );
+  const properties: LucideProps = { 'aria-hidden': true, fill: filledTransport ? 'currentColor' : 'none',
+    focusable: 'false', strokeWidth: 1.9, ...props };
+  if (Component) return <Component {...properties} />;
+  const { size = 24, absoluteStrokeWidth: _absoluteStrokeWidth, ...placeholder } = properties;
+  // Playback controls already load on demand; their glyphs reserve the same box while their chunk arrives.
+  return <Suspense fallback={<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size}
+    viewBox="0 0 24 24" stroke="currentColor" {...placeholder} />}>
+    <PlaybackIcon {...properties} name={name as PlaybackIconName} />
+  </Suspense>;
 };

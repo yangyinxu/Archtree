@@ -80,7 +80,9 @@ test('landing actions expose Finitude while reserving Content Manager for admins
   assert.doesNotMatch(signedOut.headerActions, /href="\/finitude">Open Finitude/);
   assert.match(signedOut.heroActions, /href="\/finitude"><i class="ph ph-music-notes"[^>]*><\/i>Open Finitude/);
   assert.match(signedOut.headerActions, /href="\/auth\/login-web"><i class="ph ph-sign-in"[^>]*><\/i>Log in/);
-  assert.match(signedOut.heroActions, /href="\/auth\/signup-web"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
+  assert.match(signedOut.heroActions, /href="\/finitude\/register"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
+  assert.match(signedOut.headerActions, /href="\/finitude\/register"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
+  assert.doesNotMatch(signedOut.headerActions + signedOut.heroActions, /signup-web/);
 
   const signedInUser = renderLandingActions({
     userId: 'listener-id',
@@ -141,7 +143,8 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.equal(listenerCapabilities.headers.get('cache-control'), 'no-store');
     assert.deepEqual(await listenerCapabilities.json(), {
         playlists: true,
-        catalogCredits: { reads: true, sections: true, organizations: true }
+        catalogCredits: { reads: true, sections: true, organizations: true },
+        social: { enabled: false, rooms: false }
     });
 
     const loginPage = await fetch(`${baseUrl}/auth/login-web`, { redirect: 'manual' });
@@ -158,15 +161,15 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.match(loginHtml, /ph ph-sign-in/);
     assert.match(loginHtml, /data-browser-session-login/);
     assert.doesNotMatch(loginHtml, /\/finitude\/login/);
+    assert.match(loginHtml, /Need an account\? <a href="\/finitude\/register">Create one<\/a>/);
+    assert.doesNotMatch(loginHtml, /signup-web/);
 
-    const signupPage = await fetch(`${baseUrl}/auth/signup-web`);
-    assert.equal(signupPage.status, 200);
+    // Email registration moved to the Finitude Web pages.
+    const signupPage = await fetch(`${baseUrl}/auth/signup-web`, { redirect: 'manual' });
+    assert.equal(signupPage.status, 303);
+    assert.equal(signupPage.headers.get('location'), '/finitude/register');
     assertSecurityHeaders(signupPage);
-    const signupHtml = await signupPage.text();
-    assert.match(signupHtml, /<html lang="en" class="auth-document">/);
-    assert.match(signupHtml, /<body class="auth-page auth-page--signup">/);
-    assert.match(signupHtml, /<h1>Create your account<\/h1>/);
-    assert.match(signupHtml, /ph ph-user-plus/);
+    await signupPage.text();
 
     const contentManagerRedirect = await fetch(`${baseUrl}/content/manage`, {
       redirect: 'manual'
@@ -213,6 +216,38 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.match(landingHtml, /aria-labelledby="capabilities-title"/);
     assert.doesNotMatch(landingHtml, /class="grid" aria-label="Archtree capabilities"/);
   } finally {
+    await close(server);
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('public listener capabilities follow the social and room rollout switches without authentication', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-listener-social-rollout-'));
+  const previous = { social: process.env.FINITUDE_SOCIAL_ENABLED, rooms: process.env.FINITUDE_ROOMS_ENABLED };
+  const restore = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  };
+  const { server, baseUrl } = await listen(path.join(temporaryRoot, 'missing-dist'));
+  try {
+    // Rooms never report available without social, and only the exact lowercase opt-in enables either switch.
+    for (const [social, rooms, expected] of [
+      [undefined, undefined, { enabled: false, rooms: false }],
+      [undefined, 'true', { enabled: false, rooms: false }],
+      ['TRUE', 'true', { enabled: false, rooms: false }],
+      ['true', undefined, { enabled: true, rooms: false }],
+      ['true', 'false', { enabled: true, rooms: false }],
+      ['true', 'true', { enabled: true, rooms: true }]
+    ] as const) {
+      restore('FINITUDE_SOCIAL_ENABLED', social);
+      restore('FINITUDE_ROOMS_ENABLED', rooms);
+      const response = await fetch(`${baseUrl}/api/listener/v1/capabilities`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.deepEqual((await response.json()).social, expected);
+    }
+  } finally {
+    restore('FINITUDE_SOCIAL_ENABLED', previous.social);
+    restore('FINITUDE_ROOMS_ENABLED', previous.rooms);
     await close(server);
     await rm(temporaryRoot, { recursive: true, force: true });
   }

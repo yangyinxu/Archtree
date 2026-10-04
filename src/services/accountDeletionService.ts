@@ -5,6 +5,8 @@ import {
     AccountReferenceUnavailableError,
     touchActiveAccount
 } from './accountReferenceFenceService';
+import { deleteSocialAccountData } from './socialAccountLifecycleService';
+import { notifyRoomChanges } from '../realtime/roomEvents';
 
 export type AccountDeletionResult =
     | { status: 'deleted' }
@@ -18,6 +20,8 @@ export interface AccountDeletionDependencies {
     beforeAccountFence?: (session: ClientSession) => Promise<void>;
     /** Test-only coordination point after this transaction owns the account fence. */
     afterAccountFence?: (session: ClientSession) => Promise<void>;
+    /** Test-only failure point after social cleanup, before final personal/account removal. */
+    afterSocialCleanup?: (session: ClientSession) => Promise<void>;
 }
 
 class AccountDeletionBlockedError extends Error {
@@ -28,6 +32,7 @@ class AccountDeletionBlockedError extends Error {
 
 const sharedProvenanceCollections = [
     'artists',
+    'organizations',
     'albums',
     'audioTracks',
     'carousels',
@@ -40,6 +45,7 @@ const personalCollections = [
     ['userSaves', 'userId'],
     ['userActivity', 'userId'],
     ['authActionTokens', 'userId'],
+    ['emailLinkTokens', 'userId'],
     ['authIdentities', 'userId'],
     ['passkeys', 'userId'],
     ['passkeyChallenges', 'userId'],
@@ -92,6 +98,21 @@ export const deleteListenerAccountData = async (
                     throw new AccountDeletionBlockedError('avatarAttached');
                 }
 
+                const privateImageAsset = await db.collection('imageAssets').findOne(
+                    { ownerType: 'user', ownerId: ownedByUser },
+                    { session, projection: { _id: 1 } }
+                );
+                if (privateImageAsset) {
+                    throw new AccountDeletionBlockedError('avatarCleanupPending');
+                }
+
+                // No avatar or private asset exists. Only a never-dispatched or
+                // fully-cleared expired operation can now be retired. The same
+                // account transaction fences any late staging/finalization worker.
+                await db.collection('avatarMutations').deleteMany({
+                    userId: ownedByUser, status: 'pending',
+                    phase: { $in: ['reserved', 'cleared'] }, leaseUntil: { $lte: new Date() }
+                }, { session });
                 const pendingAvatarMutation = await db.collection('avatarMutations').findOne(
                     { userId: ownedByUser, status: 'pending' },
                     { session, projection: { _id: 1 } }
@@ -100,13 +121,8 @@ export const deleteListenerAccountData = async (
                     throw new AccountDeletionBlockedError('avatarCleanupPending');
                 }
 
-                const privateImageAsset = await db.collection('imageAssets').findOne(
-                    { ownerType: 'user', ownerId: ownedByUser },
-                    { session, projection: { _id: 1 } }
-                );
-                if (privateImageAsset) {
-                    throw new AccountDeletionBlockedError('avatarCleanupPending');
-                }
+                await deleteSocialAccountData(canonicalUserId, session);
+                await dependencies.afterSocialCleanup?.(session);
 
                 for (const [collectionName, ownerField] of personalCollections) {
                     await db.collection(collectionName).deleteMany(
@@ -129,6 +145,7 @@ export const deleteListenerAccountData = async (
                     throw new AccountDeletionBlockedError('avatarAttached');
                 }
             });
+            notifyRoomChanges();
             return { status: 'deleted' };
         } catch (error) {
             if (error instanceof AccountDeletionBlockedError) {

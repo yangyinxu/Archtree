@@ -1,0 +1,146 @@
+import { lazy, Suspense, useRef, useState } from 'react';
+import { roomControlPreconditions, type RoomMedia, type RoomSnapshot } from '../../api/rooms';
+import type { SocialProfile } from '../../api/social';
+import { useLocalization } from '../../localization/LocalizationProvider';
+import { usePlayer } from '../../player';
+import { Icon } from '../../components/Icon';
+import { roomSession, useRoomSession } from './roomSession';
+import { useRoomInvitationConnection, useRoomInvitations } from './roomInvitationQueries';
+import { SocialAvatar } from './SocialAvatar';
+import styles from './SocialPage.module.css';
+
+const seconds = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
+// Host-only management loads on demand: the panel's initial JavaScript is at its budget.
+const RoomInviteFriends = lazy(() => import('./RoomInviteFriends').then(module => ({ default: module.RoomInviteFriends })));
+const RoomMemberActions = lazy(() => import('./RoomMemberActions').then(module => ({ default: module.RoomMemberActions })));
+const RoomSongRequests = lazy(() => import('./RoomSongRequests').then(module => ({ default: module.RoomSongRequests })));
+const RoomMediaPicker = lazy(() => import('./RoomMediaPicker').then(module => ({ default: module.RoomMediaPicker })));
+/** The countdown-free status line while the deadline chunk loads, kept if that chunk cannot load (for example a stale hash after a deploy). */
+const RoomStatus = ({ kind }: { kind: 'host' | 'transfer' }) => {
+  const { t } = useLocalization();
+  const { room } = useRoomSession();
+  return kind === 'host' && room && room.status !== 'open' ? <p className={styles.status}>{t(room.status === 'ended' ? 'room.ended' : 'room.suspended')}</p> : null;
+};
+const RoomDeadline = lazy(() => import('./RoomDeadline').catch(() => ({ default: RoomStatus })));
+
+/** A creation draft is discarded on admission, and never becomes the user's personal player queue. */
+const RoomCreationPicker = ({ viewerId, disabled }: { viewerId: string; disabled: boolean }) => {
+  const { t } = useLocalization();
+  const [selected, setSelected] = useState<RoomMedia[]>([]);
+  return <>
+    <h3 style={{ marginTop: '1.4rem' }}>{t('room.choose_music')}</h3>
+    <Suspense fallback={<p role="status">{t('social.loading')}</p>}><RoomMediaPicker viewerId={viewerId} scopeKey="create"
+      selected={selected} onSelectionChange={setSelected} multiple disabled={disabled} /></Suspense>
+    <div className={styles.actions}><button className={styles.button} disabled={disabled || !selected.length} onClick={() => roomSession.run({
+      action: 'create', mediaTrackIds: selected.map(item => item.mediaTrackId)
+    })}><Icon name="play" />{t('room.create')}</button></div>
+  </>;
+};
+
+const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: string; status: string }) => {
+  const { t } = useLocalization();
+  const state = useRoomSession();
+  const player = usePlayer();
+  const [seek, setSeek] = useState<number | null>(null);
+  const seekExpected = useRef<ReturnType<typeof roomControlPreconditions> | null>(null);
+  const captureSeek = () => { if (!seekExpected.current && room.timeline) seekExpected.current = roomControlPreconditions(room); };
+  const commitSeek = () => {
+    const expected = seekExpected.current; seekExpected.current = null;
+    if (seek !== null && expected) void roomSession.run({ ...expected, action: 'seek', positionMs: Math.round(seek * 1000) });
+    setSeek(null);
+  };
+  const host = room.self.memberId === room.hostMemberId;
+  const member = { roomId: room.roomId, memberId: room.self.memberId };
+  const allowed = state.connected && room.self.isController && room.self.canControl
+    && (room.status === 'open' || host && room.status === 'suspended') && !state.busy && !state.uncertain;
+  const needsLocalResume = state.locallyPaused || Boolean(player.error);
+  const playing = room.timeline?.state === 'playing';
+  const resumeOnly = needsLocalResume && (playing || !room.self.canControl);
+  const localAllowed = state.connected && room.self.isController && room.status === 'open' && !state.busy && !state.uncertain;
+  const primaryLabel = resumeOnly ? 'room.resync' : playing ? 'room.shared_pause'
+    : needsLocalResume ? 'room.resume_and_play' : 'room.shared_play';
+  const current = room.queue.find(entry => entry.entryId === room.timeline?.entryId);
+  const elapsed = player.currentItem?.id === current?.mediaTrackId ? player.currentTime : (room.timeline?.positionMs ?? 0) / 1000;
+  const duration = (room.timeline?.durationMs ?? 0) / 1000;
+  const seekValue = seek ?? Math.min(elapsed, duration);
+  const offer = room.transferOffer;
+  const transferTarget = offer?.targetMemberId === room.self.memberId;
+  return <>
+    <div className={styles.roomHeading}><h2>{t('room.title')}</h2><span className={styles.muted}>{status}</span></div>
+    <Suspense fallback={<RoomStatus kind="host" />}><RoomDeadline kind="host" /></Suspense>
+    {!room.self.isController && <div className={styles.status}>{t('room.observing')}<div className={styles.actions}><button className={styles.button} disabled={!state.connected || state.busy} onClick={() => roomSession.run({ action: 'takeControl', ...member })}>{t('room.take_control')}</button></div></div>}
+    <div className={styles.nowPlaying}><div className={styles.artwork}><Icon name="brand" /></div><div><strong>{current?.title ?? t('room.title')}</strong><p className={styles.muted}>{room.timeline?.state === 'preparing' ? t('room.preparing') : state.locallyPaused ? t('room.locally_paused') : t('room.position', { elapsed: seconds(elapsed), duration: seconds(duration) })}</p></div></div>
+    {!room.self.canControl && !playing && room.status === 'open' && <p className={styles.status}>{t('room.waiting_for_host')}</p>}
+    {/* Spoken as a time ("1:05 of 3:20") rather than the raw seconds the range carries. */}
+    <input className={styles.seek} aria-label={t('room.seek')} type="range" min={0} max={Math.max(duration, 1)} step={.1}
+      value={seekValue} aria-valuetext={t('room.seek_value', { elapsed: seconds(seekValue), duration: seconds(duration) })} disabled={!allowed}
+      onPointerDown={captureSeek} onKeyDown={captureSeek}
+      onChange={event => { captureSeek(); setSeek(Number(event.target.value)); }}
+      onPointerUp={commitSeek} onPointerCancel={() => { seekExpected.current = null; setSeek(null); }}
+      onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) commitSeek(); }} />
+    <div className={styles.actions}>
+      <button className={styles.secondary} aria-label={t('player.action.previous')} disabled={!allowed} onClick={() => roomSession.control('previous')}><Icon name="previous" /></button>
+      <button className={styles.button} disabled={resumeOnly ? !localAllowed : !allowed} onClick={() => resumeOnly ? roomSession.resync() : roomSession.control(playing ? 'pause' : 'play')}><Icon name={playing && !resumeOnly ? 'pause' : 'play'} />{t(primaryLabel)}</button>
+      <button className={styles.secondary} aria-label={t('player.action.next')} disabled={!allowed} onClick={() => roomSession.control('next')}><Icon name="next" /></button>
+      {room.self.isController && (!needsLocalResume
+        ? <button className={styles.secondary} disabled={!state.connected} onClick={() => roomSession.pauseLocally()}>{t('room.local_pause')}</button>
+        : playing && room.self.canControl && <button className={styles.secondary} disabled={!allowed} onClick={() => roomSession.control('pause')}>{t('room.shared_pause')}</button>)}
+    </div>
+    {player.error && <p className={styles.error}>{t('room.start_failed')}</p>}
+    <div className={`${styles.actions} ${styles.roomSettings}`}>
+      <label className={styles.field}>{t('room.permissions')}<select value={room.controlMode} disabled={!host || !allowed || room.status !== 'open'} onChange={event => roomSession.control('setControlMode', event.target.value)}>
+        <option value="hostOnly">{t('room.host_only')}</option><option value="everyone">{t('room.everyone')}</option>
+      </select></label>
+      <button className={host ? styles.danger : styles.secondary} disabled={state.busy} onClick={() => {
+        if (host && !window.confirm(t('room.end_confirm'))) return;
+        void roomSession.run({ action: host ? 'end' : 'leave', ...member });
+      }}>{t(host ? 'room.end' : 'room.leave')}</button>
+    </div>
+    {offer && <div className={styles.status}><Suspense fallback={null}><RoomDeadline kind="transfer" /></Suspense><div className={styles.actions}>
+      {transferTarget && <button className={styles.button} disabled={!state.connected || state.busy || !room.self.isController} onClick={() => roomSession.run({ action: 'acceptTransfer', ...member, offerId: offer.offerId })}>{t('room.accept_transfer')}</button>}
+      {host && <button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.run({ action: 'cancelTransfer', ...member, offerId: offer.offerId })}>{t('room.cancel_transfer')}</button>}
+    </div></div>}
+    <div className={styles.grid} style={{ marginTop: '1.5rem' }}><section>
+      {/* Connection is shown because only a connected member can take over as host; readiness is meaningful only
+          while connected. */}
+      <h3>{t('room.members')}</h3><ul className={styles.list}>{room.members.map(participant => <li className={styles.row} key={participant.memberId}>
+        <SocialAvatar profile={participant} /><div className={styles.rowContent}><strong>{participant.alias}</strong><span>{t(participant.role === 'host' ? 'room.host' : 'room.guest')}
+          {' · '}{participant.connected ? <>{t('room.connected')} · {t(participant.ready ? 'room.ready' : 'room.not_ready')}</> : t('room.member_disconnected')}</span></div>
+        {host && participant.memberId !== room.self.memberId && <Suspense fallback={null}><RoomMemberActions room={room} participant={participant} /></Suspense>}
+      </li>)}</ul>
+      {host && <Suspense fallback={null}><RoomInviteFriends room={room} viewerId={viewerId} /></Suspense>}
+    </section><div className={styles.stack}><Suspense fallback={<p role="status">{t('social.loading')}</p>}><RoomSongRequests key={`${viewerId}:${room.roomId}:${room.epoch}:${room.self.memberId}`} viewerId={viewerId} room={room} /></Suspense></div></div>
+  </>;
+};
+
+/**
+ * The formal room surface creates and joins only server-authorized rooms. Disabled rooms say so instead of
+ * appearing to connect; leaving, ending and declining stay available as safety actions.
+ */
+export const RoomsPanel = ({ viewerId, profile }: { viewerId: string; profile: SocialProfile }) => {
+  const { t } = useLocalization();
+  const state = useRoomSession();
+  const connection = useRoomInvitationConnection(viewerId);
+  const unavailable = connection.ready && !connection.roomsEnabled;
+  const status = t(unavailable ? 'room.unavailable' : state.connected ? 'room.connected' : 'room.connecting');
+  const invitations = useRoomInvitations(viewerId);
+  const room = state.viewerId === viewerId ? state.room : null;
+  const busy = state.busy || Boolean(state.uncertain);
+  return <section className={`${styles.panel} ${styles.roomPanel}`} aria-label={t('room.title')}>
+    {(state.error || state.uncertain) && <div className={styles.error} role="status">{t(state.error ?? 'social.unknown')}
+      {!state.connected && !unavailable && <div className={styles.actions}><button className={styles.secondary} onClick={() => roomSession.reconnect()}>{t('room.reconnect')}</button></div>}
+      {state.uncertain && <div className={styles.actions}><button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.checkOutcome()}>{t('social.check_outcome')}</button><button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.retry()}>{t('social.retry_same')}</button></div>}
+    </div>}
+    {room ? <ActiveRoom room={room} viewerId={viewerId} status={status} /> : <>
+      <div className={styles.roomHeading}><h2>{t('room.title')}</h2><span className={styles.muted}>{status}</span></div>
+      {connection.roomsEnabled && <p className={styles.description}>{t('room.empty')}</p>}<p className={styles.muted}>{t('social.signed_in', { alias: profile.alias })}</p>
+      {invitations.data?.invitations.length ? <div style={{ marginTop: '1rem' }}><h3>{t('room.invitations')}</h3><ul className={styles.list}>{invitations.data.invitations.map(invitation => <li className={styles.row} key={invitation.invitationId}>
+        <div className={styles.rowContent}><strong>{t('room.incoming_invite', { alias: invitation.inviter.alias })}</strong></div>
+        <button className={styles.button} disabled={!(state.connected || state.realtimeBusy) || busy} onClick={() => roomSession.run({ action: 'acceptInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('room.join')}</button>
+        <button className={styles.secondary} disabled={busy} onClick={() => roomSession.run({ action: 'declineInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('social.decline')}</button>
+      </li>)}</ul></div> : null}
+      {/* Creation reads eligible media only once rooms are known to be enabled. */}
+      {connection.roomsEnabled && <RoomCreationPicker key={viewerId} viewerId={viewerId} disabled={!(state.connected || state.realtimeBusy) || busy} />}
+    </>}
+  </section>;
+};

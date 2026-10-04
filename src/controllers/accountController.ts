@@ -1,15 +1,15 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { getDb } from '../infrastructure/database';
 import { AuthenticatedRequest } from '../middleware/authMiddleware';
 import AuthSession from '../models/authSession';
-import AuthIdentity, { AuthProvider } from '../models/authIdentity';
-import { Passkey } from '../models/passkey';
+import { AuthProvider } from '../models/authIdentity';
 import User from '../models/user';
+import { UserLibrary } from '../models/userLibrary';
 import { recordSecurityEvent } from '../services/securityAuditService';
 import { evaluatePassword } from '../services/passwordPolicyService';
 import { describeSessionDevice } from '../services/deviceSessionService';
 import { deleteListenerAccountData } from '../services/accountDeletionService';
+import { changeAccountPassword, unlinkAccountProvider } from '../services/authCredentialService';
 
 /** Lists revocable devices while marking the access token's own session. */
 export const listSessions = async (req: Request, res: Response) => {
@@ -76,8 +76,7 @@ export const changePassword = async (req: Request, res: Response) => {
         }
     }
 
-    await User.updatePassword(auth.userId, await bcrypt.hash(newPassword, 12));
-    await AuthSession.revokeAllExcept(auth.userId, auth.sessionId);
+    await changeAccountPassword(auth.userId, auth.sessionId, user.password, await bcrypt.hash(newPassword, 12));
     recordSecurityEvent('password_changed', {
         userId: auth.userId,
         sessionId: auth.sessionId
@@ -85,13 +84,10 @@ export const changePassword = async (req: Request, res: Response) => {
     return res.status(204).send();
 };
 
-/** Clears listening activity while preserving the user's saved Library. */
+/** Clears listening activity and its Library play times while preserving saved content. */
 export const clearListeningHistory = async (req: Request, res: Response) => {
     const auth = (req as AuthenticatedRequest).auth!;
-    await getDb()!.collection('userActivity').updateOne(
-        { userId: auth.userId },
-        { $set: { recentlyPlayed: [], updatedAt: new Date() } }
-    );
+    await UserLibrary.clearRecentlyPlayed(auth.userId);
     recordSecurityEvent('listening_history_cleared', { userId: auth.userId });
     return res.status(204).send();
 };
@@ -104,19 +100,12 @@ export const unlinkProvider = async (req: Request, res: Response) => {
         return res.status(400).json({ message: 'The sign-in provider is not supported.' });
     }
 
-    const [user, identities, passkeys] = await Promise.all([
-        User.findById(auth.userId),
-        AuthIdentity.listForUser(auth.userId),
-        Passkey.listForUser(auth.userId)
-    ]);
-    const methodCount = (user?.password ? 1 : 0) + identities.length + (passkeys.length ? 1 : 0);
-    if (methodCount <= 1) {
+    if (!await unlinkAccountProvider(auth.userId, provider, auth.sessionId)) {
         return res.status(409).json({
             message: 'Add another sign-in method before removing your only recovery option.'
         });
     }
 
-    await AuthIdentity.deleteForUserAndProvider(auth.userId, provider);
     recordSecurityEvent('provider_unlinked', { userId: auth.userId });
     return res.status(204).send();
 };

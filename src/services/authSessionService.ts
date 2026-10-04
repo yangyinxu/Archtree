@@ -4,6 +4,9 @@ import jwt from 'jsonwebtoken';
 import AuthSession from '../models/authSession';
 import User from '../models/user';
 import { normalizeUserRole, UserRole } from './authRoleService';
+import { withActiveAccount } from './accountReferenceFenceService';
+import { recordSecurityEvent } from './securityAuditService';
+import { EmailVerificationRequiredError, emailVerificationState } from './emailVerificationService';
 
 export interface SessionUser {
     _id: { toString(): string };
@@ -121,16 +124,30 @@ const deviceFrom = (req?: Request) => {
 };
 
 /** Creates the initial access/refresh pair for a newly authenticated user. */
-export const createSession = async (user: SessionUser, req?: Request): Promise<SessionTokens> => {
+export const createSession = async (user: SessionUser, req?: Request, expectedPassword?: string): Promise<SessionTokens> => {
     const refreshToken = newRefreshToken();
     const refreshTokenExpiresAt = new Date(Date.now() + refreshSessionDurationMilliseconds());
-    const sessionId = await AuthSession.create(
-        user._id.toString(),
-        hashRefreshToken(refreshToken),
-        refreshTokenExpiresAt,
-        userAgentFrom(req),
-        deviceFrom(req)
-    );
+    // Password verification runs outside the transaction. A reset/change that
+    // wins the account fence invalidates that earlier verification result.
+    const sessionId = await withActiveAccount(user._id.toString(), async session => {
+        const current = await User.findById(user._id.toString(), session);
+        // No sign-in method may open a session for an unverified account. The
+        // error carries the account so the caller can mail its link.
+        if (current && await emailVerificationState(current, session) !== 'verified') {
+            throw new EmailVerificationRequiredError(current);
+        }
+        if (expectedPassword !== undefined && current?.password !== expectedPassword) {
+            throw Object.assign(new Error('Invalid credentials.'), { statusCode: 401 });
+        }
+        return AuthSession.create(
+            user._id.toString(),
+            hashRefreshToken(refreshToken),
+            refreshTokenExpiresAt,
+            userAgentFrom(req),
+            deviceFrom(req),
+            session
+        );
+    });
 
     return {
         accessToken: signAccessToken(user, sessionId),
@@ -141,17 +158,49 @@ export const createSession = async (user: SessionUser, req?: Request): Promise<S
     };
 };
 
-/** Rotates a refresh token atomically and returns a fresh short-lived access token. */
+/**
+ * How long after a rotation the immediately previous refresh token may rotate
+ * the session again. A client whose refresh response was lost in transit
+ * still holds only that token; without this window the next refresh would be
+ * rejected and sign the listener out.
+ */
+export const refreshTokenReplayGraceMilliseconds = 60_000;
+
+/**
+ * Rotates a refresh token atomically and returns a fresh short-lived access
+ * token. The current token rotates normally; the immediately previous token
+ * rotates the session again only inside the replay window. Any other token,
+ * or the previous token after the window, is rejected without changing the
+ * session.
+ */
 export const refreshSession = async (refreshToken: string): Promise<SessionTokens | null> => {
     if (!refreshToken || refreshToken.length > 512) {
         return null;
     }
 
+    const presentedHash = hashRefreshToken(refreshToken);
     const replacementToken = newRefreshToken();
-    const session = await AuthSession.rotate(
-        hashRefreshToken(refreshToken),
-        hashRefreshToken(replacementToken)
-    );
+    const replacementHash = hashRefreshToken(replacementToken);
+    const now = new Date();
+    // The common case rotates the current token in one update. A hash that is
+    // no longer current can never become current again (replacements are
+    // random), so when that update misses, the presented token is either the
+    // session's previous token or not usable at all.
+    let session = await AuthSession.rotate(presentedHash, replacementHash, now);
+    if (!session) {
+        session = await AuthSession.rotateFromPrevious(
+            presentedHash,
+            replacementHash,
+            new Date(now.getTime() - refreshTokenReplayGraceMilliseconds),
+            now
+        );
+        if (session) {
+            recordSecurityEvent('refresh_previous_token_replayed', {
+                userId: session.userId,
+                sessionId: session._id.toString()
+            });
+        }
+    }
     if (!session) {
         return null;
     }
@@ -171,7 +220,7 @@ export const refreshSession = async (refreshToken: string): Promise<SessionToken
     };
 };
 
-/** Identifies an active opaque refresh credential without consuming its one-time rotation. */
+/** Identifies the session behind a current or previous refresh credential without rotating it. */
 export const refreshSessionIdentity = async (refreshToken: string) => {
     if (!refreshToken || refreshToken.length > 512) {
         return null;

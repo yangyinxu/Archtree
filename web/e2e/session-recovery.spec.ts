@@ -2,7 +2,7 @@ import type { Route } from '@playwright/test';
 
 import { privateViewerSession } from './fixtures/privateListener';
 import { installPrivateListenerRoutes } from './support/privateRoutes';
-import { installSignedOutApi } from './support/apiRoutes';
+import { installNonSocialProfileRoute, installSignedOutApi } from './support/apiRoutes';
 import { expect, test } from './support/test';
 
 const viewer = privateViewerSession.user.id;
@@ -24,6 +24,7 @@ for (const [trigger, confirmation, endpoint] of [
     let expired = false;
     let signedOut = false;
     const requests: string[] = [];
+    await installNonSocialProfileRoute(page, () => expired || signedOut ? null : viewer);
     await page.route('**/auth/browser/session', (route) => json(
       route, expired || signedOut ? {} : privateViewerSession, expired || signedOut ? 401 : 200
     ));
@@ -44,7 +45,11 @@ for (const [trigger, confirmation, endpoint] of [
       return empty(route);
     });
 
+    const initialSocialProfile = page.waitForResponse(response => new URL(response.url()).pathname === '/api/social/v1/me/profile');
     await page.goto('/finitude/account');
+    const profileResponse = await initialSocialProfile;
+    expect(profileResponse.status()).toBe(200);
+    expect(profileResponse.headers()['x-finitude-account-viewer']).toBe(viewer);
     await expect(page.getByRole('button', { name: trigger })).toBeVisible();
     expired = true;
     await page.getByRole('button', { name: trigger }).click();
@@ -68,6 +73,7 @@ test('a delayed old-account 401 cannot sign out the account installed by another
   let releaseHistory!: () => void;
   const historyGate = new Promise<void>((resolve) => { releaseHistory = resolve; });
   let cookieWrites = 0;
+  await installNonSocialProfileRoute(page, () => replaced ? replacement.user.id : viewer);
   await page.route('**/api/listener/v1/capabilities', (route) => json(route, { playlists: false }));
   await page.route('**/auth/browser/session', (route) => json(route, replaced ? replacement : privateViewerSession));
   await page.route('**/auth/activity/listening-history', async (route) => {
@@ -84,6 +90,7 @@ test('a delayed old-account 401 cannot sign out the account installed by another
   const otherTab = await context.newPage();
   const otherApi = await installSignedOutApi(otherTab);
   await installPrivateListenerRoutes(otherTab, { session: replacement });
+  await installNonSocialProfileRoute(otherTab, () => replaced ? replacement.user.id : null);
   await otherTab.route('**/auth/browser/session', (route) => json(route, replaced ? replacement : {}, replaced ? 200 : 401));
   await otherTab.route('**/auth/browser/login', (route) => {
     replaced = true;

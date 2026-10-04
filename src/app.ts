@@ -1,4 +1,7 @@
-import express, { Application, NextFunction, Request, Response } from 'express';
+// Must stay first: loads `.env` for the `tsx src/app.ts` entry before any module reads configuration.
+import './config/entryEnvironment';
+import express, { Application, type ErrorRequestHandler, NextFunction, Request, Response } from 'express';
+import { configuredTrustProxyHops } from './config/trustProxy';
 import bodyParser from 'body-parser';
 import fs from 'fs';
 import path from 'path';
@@ -10,8 +13,11 @@ import contentRoutes from './routes/contentRoutes';
 import feedRoutes from './routes/feedRoutes';
 import listenerRoutes from './routes/listenerRoutes';
 import { createLocalizationRouter } from './routes/localizationRoutes';
+import { createEngineeringRouter } from './routes/engineeringRoutes';
 import videoRoutes from './routes/videoRoutes';
 import narutoMobileRoutes from './routes/narutoMobileRoutes';
+import { createSocialRouter } from './routes/socialRoutes';
+import { createRoomRouter } from './routes/roomRoutes';
 import {
   attachOptionalAuth,
   requireAdmin,
@@ -22,7 +28,7 @@ import {
   type AuthenticatedRequest
 } from './middleware/authMiddleware';
 import { createHealthController } from './controllers/healthController';
-import { ServerLifecycle } from './services/serverLifecycleService';
+import { isCompletedRequestWorkCancellation, ServerLifecycle } from './services/serverLifecycleService';
 import { createRequestDiagnostics, safeServerErrorCategory } from './middleware/requestDiagnosticsMiddleware';
 import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
@@ -43,6 +49,8 @@ export interface CreateAppOptions {
   lifecycle?: ServerLifecycle;
   /** Overrides the production listener bundle location for isolated route tests. */
   listenerDistPath?: string;
+  /** Overrides the generated internal engineering guide for isolated route tests. */
+  engineeringDistPath?: string;
   /** Overrides generated localization artifacts for isolated route tests. */
   localizationDistPath?: string;
   /** Retains explicit runtime context for existing isolated application callers. */
@@ -179,7 +187,8 @@ export const renderLandingActions = (
       : '';
     const adminHeroActions = auth.role === 'admin'
       ? `<a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Open Content Manager</a>
-        <a class="button button--secondary" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i>Browse MediaTracks</a>`
+        <a class="button button--secondary" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i>Browse MediaTracks</a>
+        <a class="button button--secondary" href="/engineering"><i class="ph ph-tree-structure" aria-hidden="true"></i>Engineering Guide</a>`
       : '';
     return {
       headerActions: `<div class="header-actions">
@@ -197,11 +206,11 @@ export const renderLandingActions = (
   return {
     headerActions: `<div class="header-actions">
       <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
-      <a class="button" href="/auth/signup-web"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
+      <a class="button" href="/finitude/register"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
     </div>`,
     heroActions: `<div class="action-row">
       ${listenerButton}
-      <a class="button" href="/auth/signup-web"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
+      <a class="button" href="/finitude/register"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
       <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
     </div>`
   };
@@ -213,11 +222,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   const lifecycle = options.lifecycle ?? new ServerLifecycle();
   const diagnostics = createRequestDiagnostics();
   app.disable('x-powered-by');
-  const defaultProxyHops = 1;
-  const configuredProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? defaultProxyHops);
-  app.set('trust proxy', Number.isFinite(configuredProxyHops) && configuredProxyHops >= 0
-    ? Math.floor(configuredProxyHops)
-    : defaultProxyHops);
+  app.set('trust proxy', configuredTrustProxyHops());
 
   app.use(applySecurityHeaders);
   app.use(diagnostics.observe);
@@ -229,7 +234,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, GET, POST, PUT, PATCH, DELETE');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match, X-Finitude-Account-Viewer'
+      'Content-Type, Authorization, Idempotency-Key, If-Match, If-None-Match, X-Finitude-Account-Viewer, X-Finitude-Room-Client'
     );
     res.setHeader(
       'Access-Control-Expose-Headers',
@@ -237,6 +242,9 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     );
     next();
   });
+
+  // The guide's pages, assets, redirects, and errors all share the admin boundary.
+  app.use('/engineering', createEngineeringRouter(options.engineeringDistPath));
 
   // Cookie mutation proof and shared-content authorization must run before a
   // rejected request can consume application body-parser or upload work.
@@ -246,6 +254,10 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
 
   // Authenticate paid Naruto requests before accepting their bounded JSON bodies.
   app.use('/naruto-mobile/api/v1', narutoMobileRoutes);
+
+  // Social authentication and its smaller JSON limit precede the general parser.
+  app.use('/api/social/v1', createRoomRouter());
+  app.use('/api/social/v1', createSocialRouter());
 
   // Protect and bound anonymous diagnostics before the general JSON parser can
   // consume a larger request. The listener router owns the final controller.
@@ -294,18 +306,24 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
     getRequestMetrics: diagnostics.snapshot
   }));
 
-  app.use((error: any, req: Request, res: Response, next: NextFunction) => {
-    if (res.headersSent) {
-      return next(error);
-    }
+  app.use(handleApplicationError);
+
+  return app;
+};
+
+/** Reports only bounded diagnostics and terminates late failures without Express's raw-error fallback. */
+export const handleApplicationError: ErrorRequestHandler = (error, req, res, _next) => {
+    if (isCompletedRequestWorkCancellation(req, error)) return;
 
     const isFileTooLarge = error?.code === 'LIMIT_FILE_SIZE';
     const isTooManyFiles = error?.code === 'LIMIT_FILE_COUNT';
     const isMulterInputError = typeof error?.code === 'string' && error.code.startsWith('LIMIT_');
     const isInvalidJson = error?.type === 'entity.parse.failed';
-    const status: number = isFileTooLarge || isTooManyFiles
+    const suppliedStatus = isFileTooLarge || isTooManyFiles
       ? 413
-      : isMulterInputError || isInvalidJson ? 400 : error.statusCode || 500;
+      : isMulterInputError || isInvalidJson ? 400 : error?.statusCode;
+    const status = Number.isInteger(suppliedStatus) && suppliedStatus >= 400 && suppliedStatus <= 599
+      ? suppliedStatus : 500;
     const message: string = isFileTooLarge
       ? error?.field === 'avatar'
         ? `Avatar is too large. The maximum size is ${maxAvatarUploadMb} MB.`
@@ -320,8 +338,8 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
           ? 'Invalid multipart upload.'
           : isInvalidJson
             ? 'Invalid JSON request.'
-            : error.message;
-    const data: any = error.data;
+            : error?.message;
+    const data: any = error?.data;
 
     if (status >= 500) {
       const method = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
@@ -351,20 +369,23 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
         requestId: res.locals.requestId,
         requestArea,
         method,
-        status: Number.isInteger(status) && status <= 599 ? status : 500,
+        status,
         occurredAt: new Date().toISOString()
       }));
     }
 
+    if (res.headersSent || res.destroyed || res.writableEnded) {
+      res.destroy();
+      return;
+    }
     if (status >= 500) {
       return res.status(status).json({
         message: 'The service could not complete the request.'
       });
     }
-    return res.status(status).json({ message, data });
-  });
-
-  return app;
+    // Only errors that opt in expose their machine-readable code to clients.
+    const exposedCode = error?.exposeCode === true && typeof error?.code === 'string' ? error.code : undefined;
+    return res.status(status).json({ message, data, ...(exposedCode ? { code: exposedCode } : {}) });
 };
 
 // Keep `tsx src/app.ts` as the runtime entry while imports remain side-effect free.

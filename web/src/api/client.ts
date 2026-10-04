@@ -18,13 +18,20 @@ import {
 
 export type ApiErrorKind = 'http' | 'network' | 'invalid-response';
 
+/** Only these explicit 503 feature gates prove a rollout switch is off; an ordinary outage keeps the current UI. */
+export const isSocialRolloutGate = (status?: number, code?: string) => status === 503
+  && (code === 'social_disabled' || code === 'rooms_disabled');
+/** Dispatched on window so a mounted social surface can refresh rollout state without this layer importing it. */
+export const socialRolloutGateEvent = 'finitude:social-rollout-gate';
+
 /** Describes a safe client-facing failure without retaining response bodies. */
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly kind: ApiErrorKind,
     readonly status?: number,
-    readonly code?: string
+    readonly code?: string,
+    readonly retryAfterSeconds?: number
   ) {
     super(message);
     this.name = 'ApiError';
@@ -75,6 +82,15 @@ const requestHeaders = (init?: RequestInit) => {
   return headers;
 };
 
+/** Retains only a bounded delay, never the untrusted header or an HTTP-date value. */
+const retryAfterSeconds = (response: Response) => {
+  if (response.status !== 429) return undefined;
+  const value = response.headers.get('Retry-After');
+  if (!value || !/^[1-9]\d{0,15}$/.test(value)) return undefined;
+  const seconds = Number(value);
+  return Number.isSafeInteger(seconds) ? Math.min(seconds, 60) : undefined;
+};
+
 const responseError = async (response: Response, assertCurrent?: () => void) => {
   assertCurrent?.();
   let message = response.status === 401
@@ -97,8 +113,9 @@ const responseError = async (response: Response, assertCurrent?: () => void) => 
   if (response.status === 409 && code === 'account_viewer_mismatch') {
     publishAccountSessionChange('viewer-mismatch');
   }
+  if (isSocialRolloutGate(response.status, code)) dispatchEvent(new Event(socialRolloutGateEvent));
 
-  return new ApiError(message, 'http', response.status, code);
+  return new ApiError(message, 'http', response.status, code, retryAfterSeconds(response));
 };
 
 const fetchResponse = async (path: string, init?: RequestInit, accountViewer?: string) => {

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../src/infrastructure/database';
 import AuthActionToken from '../src/models/authActionToken';
-import AuthSession from '../src/models/authSession';
+import AuthSession, { AuthSessionDocument } from '../src/models/authSession';
 import { PasskeyChallenge } from '../src/models/passkey';
 import {
     createSession,
@@ -25,7 +26,7 @@ after(async () => {
     await harness?.stop();
 });
 
-test('refresh rotation permits exactly one concurrent use and revocation is immediate', async () => {
+test('concurrent reuse of one refresh token leaves exactly one current pair and revocation is immediate', async () => {
     const userId = new ObjectId();
     const user = {
         _id: userId,
@@ -33,7 +34,8 @@ test('refresh rotation permits exactly one concurrent use and revocation is imme
         password: 'unused-hash',
         username: '',
         posts: [],
-        role: 'user'
+        role: 'user',
+        emailVerified: true
     };
     await getDb()!.collection('users').insertOne(user);
 
@@ -41,19 +43,32 @@ test('refresh rotation permits exactly one concurrent use and revocation is imme
     const attempts = await Promise.all(
         Array.from({ length: 8 }, () => refreshSession(initial.refreshToken))
     );
-    const successful = attempts.filter(
+    const issued = attempts.filter(
         (tokens): tokens is NonNullable<typeof tokens> => tokens !== null
     );
-    assert.equal(successful.length, 1);
-    assert.equal(await refreshSession(initial.refreshToken), null);
+    // One attempt rotates the current token; every later one presents the
+    // immediately previous token inside its replay window and supersedes the
+    // pair issued before it, so only one issued pair stays usable.
+    assert.equal(issued.length, 8);
+    const hash = (token: string) => crypto.createHash('sha256').update(token, 'utf8').digest('hex');
+    const stored = await getDb()!.collection<AuthSessionDocument>('authSessions')
+        .findOne({ _id: new ObjectId(initial.sessionId) });
+    assert.equal(stored?.previousRefreshTokenHash, hash(initial.refreshToken));
+    const current = issued.filter(tokens => hash(tokens.refreshToken) === stored?.refreshTokenHash);
+    assert.equal(current.length, 1);
+    for (const superseded of issued.filter(tokens => tokens !== current[0])) {
+        assert.equal(await refreshSession(superseded.refreshToken), null);
+    }
 
-    await revokeRefreshSession(successful[0].refreshToken);
-    assert.equal(await refreshSession(successful[0].refreshToken), null);
+    await revokeRefreshSession(current[0].refreshToken);
+    assert.equal(await refreshSession(current[0].refreshToken), null);
+    assert.equal(await refreshSession(initial.refreshToken), null, 'revocation also ends the replay window');
     assert.equal(await AuthSession.findActiveById(initial.sessionId), null);
 });
 
 test('revoke-all-except preserves only the credential-changing device', async () => {
     const userId = new ObjectId().toString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const expiry = new Date(Date.now() + 60_000);
     const current = await AuthSession.create(userId, 'hash-current', expiry);
     const otherA = await AuthSession.create(userId, 'hash-other-a', expiry);
@@ -68,6 +83,7 @@ test('revoke-all-except preserves only the credential-changing device', async ()
 
 test('email action codes and passkey challenges are single-use under concurrency', async () => {
     const userId = new ObjectId().toString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const code = await AuthActionToken.issue(userId, 'resetPassword', 5);
     const codeAttempts = await Promise.all(
         Array.from(
@@ -88,8 +104,10 @@ test('email action codes and passkey challenges are single-use under concurrency
 });
 
 test('expired and malformed session identifiers fail closed', async () => {
+    const userId = new ObjectId().toString();
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(userId), email: `${userId}@example.test`, username: userId });
     const expired = await AuthSession.create(
-        new ObjectId().toString(),
+        userId,
         'expired-hash',
         new Date(Date.now() - 1_000)
     );

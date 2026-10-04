@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AudioLines } from 'lucide-react';
 import { Link, useParams } from 'react-router';
@@ -13,9 +13,11 @@ import { SaveButton } from '../../components/SaveButton';
 import { launchAlbumPlayback } from '../playback/launchPlayback';
 import { LazyAddTrackToPlaylistButton as AddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
 import styles from './CatalogPages.module.css';
+import { LazyRoomTrackButton } from '../social/LazyRoomTrackButton';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { playerStore } from '../../player';
+import { LazyShareMusicButton } from '../social/LazyShareMusicButton';
 
 const creditRoleKeys: Record<string, MessageKey> = {
   primary: 'catalog.credit.primary',
@@ -56,13 +58,6 @@ export const AlbumPage = () => {
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id;
   const albumQuery = useQuery(listenerAlbumQuery(albumId));
-  const overrideOwner = `${viewerId ?? 'signed-out'}:${albumId}`;
-  const [savedOverrides, setSavedOverrides] = useState<{
-    owner: string;
-    values: Record<string, boolean>;
-  }>({ owner: overrideOwner, values: {} });
-  useEffect(() => setSavedOverrides({ owner: overrideOwner, values: {} }), [overrideOwner]);
-  const currentOverrides = savedOverrides.owner === overrideOwner ? savedOverrides.values : {};
   const targets = useMemo<LibraryTarget[]>(() => {
     if (!albumQuery.data) return [];
     return [
@@ -80,17 +75,7 @@ export const AlbumPage = () => {
   const savedFor = (target: LibraryTarget) => {
     if (!viewerId) return false;
     const key = `${target.contentType}:${target.contentId}`;
-    return currentOverrides[key] ?? savedByKey.get(key) ?? null;
-  };
-  const setSaved = (target: LibraryTarget, saved: boolean) => {
-    const key = `${target.contentType}:${target.contentId}`;
-    setSavedOverrides((current) => ({
-      owner: overrideOwner,
-      values: {
-        ...(current.owner === overrideOwner ? current.values : {}),
-        [key]: saved
-      }
-    }));
+    return statuses.isError ? null : savedByKey.get(key) ?? null;
   };
 
   if (albumQuery.isPending) {
@@ -137,6 +122,7 @@ export const AlbumPage = () => {
           </div>
         </div>
         <div className={`${styles.actions} ${styles.albumActions}`}>
+          <LazyShareMusicButton contentType="album" contentId={album.id} title={album.title} />
           <button
             aria-label={t('common.action.play')}
             className={styles.playButton}
@@ -149,13 +135,17 @@ export const AlbumPage = () => {
           </button>
           <SaveButton
             compact
-            onSavedChange={(saved) => setSaved(albumTarget, saved)}
             saved={savedFor(albumTarget)}
             target={albumTarget}
             viewerId={viewerId}
           />
         </div>
       </header>
+
+      {viewerId && statuses.isError && <div className={styles.state} role="alert">
+        <p>{t('library.error.load')}</p>
+        <button onClick={() => statuses.refetch()} type="button">{t('common.action.try_again')}</button>
+      </div>}
 
       {(album.credits?.length ?? 0) > 0 && (
         <section className={styles.creditSection} aria-labelledby="album-credits-title">
@@ -235,6 +225,8 @@ export const AlbumPage = () => {
                     <span className={styles.duration}>{track.duration || ''}</span>
                   </button>
                   <span className={styles.trackTrailing}>
+                    {track.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={track.id} title={title} />}
+                    <LazyShareMusicButton contentType="audioTrack" contentId={track.id} title={title} />
                     <AddTrackToPlaylistButton
                       accountPending={session.isPending}
                       accountUnavailable={session.isError}
@@ -243,7 +235,6 @@ export const AlbumPage = () => {
                     />
                     <SaveButton
                       compact
-                      onSavedChange={(saved) => setSaved(target, saved)}
                       saved={savedFor(target)}
                       target={target}
                       viewerId={viewerId}

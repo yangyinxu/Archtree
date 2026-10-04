@@ -1,20 +1,28 @@
 import crypto from 'crypto';
-import { ObjectId } from 'mongodb';
+import { ClientSession } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
 
-export type AuthActionPurpose = 'verifyEmail' | 'resetPassword';
+/** Six-digit codes now exist only for password reset; registration and verification use email links. */
+export type AuthActionPurpose = 'resetPassword';
+
+/** A code's fifth wrong submission voids it; the user must then request a new code. */
+export const maxFailedCodeAttempts = 5;
 
 interface AuthActionTokenDocument {
-    _id: ObjectId | string;
+    _id: string;
     userId: string;
     purpose: AuthActionPurpose;
     codeHash: string;
     createdAt: Date;
     expiresAt: Date;
     consumedAt?: Date;
+    /** Set when wrong attempts voided the code. */
+    voidedAt?: Date;
+    failedAttempts?: number;
 }
 
-/** Gives each account and purpose one current-code slot while legacy tokens age out. */
+/** Gives each account and purpose one current-code slot, so issuing a code voids every earlier one. */
 const tokenDocumentId = (userId: string, purpose: AuthActionPurpose) => crypto
     .createHash('sha256')
     .update(`${userId}\0${purpose}`, 'utf8')
@@ -31,92 +39,84 @@ const hashCode = (userId: string, purpose: AuthActionPurpose, code: string) => {
         .digest('hex');
 };
 
-/** Stores short-lived, single-use authentication codes only as hashes. */
+const tokens = () => getDb()!.collection<AuthActionTokenDocument>('authActionTokens');
+
+/** Stores short-lived, single-use password-reset codes only as hashes. */
 class AuthActionToken {
-    static async issue(userId: string, purpose: AuthActionPurpose, lifetimeMinutes: number) {
-        const db = getDb();
+    /** Issues a password-reset code, replacing the account's earlier code. */
+    static async issue(userId: string, purpose: AuthActionPurpose, lifetimeMinutes: number, session?: ClientSession) {
         const code = crypto.randomInt(100_000, 1_000_000).toString();
-        const now = new Date();
-        await db!.collection<AuthActionTokenDocument>('authActionTokens').findOneAndUpdate(
-            { _id: tokenDocumentId(userId, purpose) },
-            {
-                $set: {
-                    userId,
-                    purpose,
-                    codeHash: hashCode(userId, purpose, code),
-                    createdAt: now,
-                    expiresAt: new Date(now.getTime() + lifetimeMinutes * 60_000)
-                },
-                $unset: { consumedAt: '' }
-            },
-            { upsert: true, returnDocument: 'after' }
-        );
+        await withActiveAccount(userId, transaction => this.writeSlot(userId, purpose, code, lifetimeMinutes, transaction), session);
         return code;
     }
 
-    /** Atomically consumes a matching code so concurrent reuse can succeed only once. */
-    static async consume(userId: string, purpose: AuthActionPurpose, code: string) {
-        const db = getDb();
-        const collection = db!.collection<AuthActionTokenDocument>('authActionTokens');
-        const currentDocumentId = tokenDocumentId(userId, purpose);
+    /** Replaces the account's slot for a purpose, resetting its expiry and wrong-attempt count. */
+    private static writeSlot(
+        userId: string,
+        purpose: AuthActionPurpose,
+        code: string,
+        lifetimeMinutes: number,
+        session: ClientSession
+    ) {
         const now = new Date();
-        const submittedCodeHash = hashCode(userId, purpose, code);
-        const result = await collection.findOneAndUpdate(
+        return tokens().replaceOne(
+            { _id: tokenDocumentId(userId, purpose) },
             {
-                _id: currentDocumentId,
                 userId,
                 purpose,
-                codeHash: submittedCodeHash,
-                consumedAt: { $exists: false },
-                expiresAt: { $gt: now }
+                codeHash: hashCode(userId, purpose, code),
+                createdAt: now,
+                expiresAt: new Date(now.getTime() + lifetimeMinutes * 60_000),
+                failedAttempts: 0
             },
+            { upsert: true, session }
+        );
+    }
+
+    /**
+     * Atomically consumes a matching live code so concurrent reuse can succeed
+     * only once, and returns the consumed slot. A wrong code counts against the
+     * live slot; the attempt that reaches `maxFailedCodeAttempts` voids it in
+     * the same transaction.
+     */
+    static consume(userId: string, purpose: AuthActionPurpose, code: string, session?: ClientSession) {
+        return withActiveAccount(userId, transaction => this.consumeInTransaction(userId, purpose, code, transaction), session);
+    }
+
+    private static async consumeInTransaction(userId: string, purpose: AuthActionPurpose, code: string, session: ClientSession) {
+        const slotId = tokenDocumentId(userId, purpose);
+        const now = new Date();
+        const live = { _id: slotId, consumedAt: { $exists: false }, expiresAt: { $gt: now } };
+        const matched = await tokens().findOneAndUpdate(
+            { ...live, userId, purpose, codeHash: hashCode(userId, purpose, code) },
             { $set: { consumedAt: now } },
-            { returnDocument: 'after' }
+            { returnDocument: 'before', session }
         );
-        if (result.value) return result.value;
+        if (matched.value) return matched.value;
 
-        // A current slot invalidates every earlier code, including documents
-        // written before deterministic per-purpose slots were introduced.
-        const currentSlot = await collection.findOne(
-            { _id: currentDocumentId },
-            { projection: { _id: 1 } }
+        const counted = await tokens().findOneAndUpdate(
+            live,
+            { $inc: { failedAttempts: 1 } },
+            { returnDocument: 'after', session }
         );
-        if (currentSlot) return null;
+        if ((counted.value?.failedAttempts ?? 0) >= maxFailedCodeAttempts) await this.voidSlot(slotId, now, session);
+        return null;
+    }
 
-        // Preserve one already-delivered legacy code until this account and purpose
-        // first uses the current single-slot representation.
-        const legacyToken = await collection.findOne(
-            {
-                _id: { $type: 'objectId' },
-                userId,
-                purpose,
-                codeHash: submittedCodeHash,
-                consumedAt: { $exists: false },
-                expiresAt: { $gt: now }
-            },
-            { projection: { _id: 1, userId: 1, purpose: 1, codeHash: 1, createdAt: 1, expiresAt: 1 } }
+    private static voidSlot(slotId: string, now: Date, session: ClientSession) {
+        return tokens().updateOne(
+            { _id: slotId, consumedAt: { $exists: false } },
+            { $set: { consumedAt: now, voidedAt: now } },
+            { session }
         );
-        if (!legacyToken) return null;
+    }
 
-        // Claim the deterministic slot before accepting a legacy token. This also
-        // makes distinct legacy codes single-use when an earlier release created
-        // more than one active document concurrently. Existing legacy lifetimes
-        // are at most 30 minutes, so the one-hour fence outlives every such code.
-        const legacyClaim = await collection.findOneAndUpdate(
-            { _id: currentDocumentId },
-            {
-                $setOnInsert: {
-                    userId,
-                    purpose,
-                    codeHash: submittedCodeHash,
-                    createdAt: now,
-                    expiresAt: new Date(now.getTime() + 60 * 60_000),
-                    consumedAt: now
-                }
-            },
-            { upsert: true, returnDocument: 'before' }
-        );
-        return legacyClaim.value ? null : legacyToken;
+    /**
+     * Removes every code slot of an account, including verification slots left
+     * by the earlier code-based sign-up, when the record is replaced.
+     */
+    static deleteForUser(userId: string, session: ClientSession) {
+        return getDb()!.collection('authActionTokens').deleteMany({ userId }, { session });
     }
 }
 

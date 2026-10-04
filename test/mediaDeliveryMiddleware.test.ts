@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import test from 'node:test';
 import type { NextFunction, Request, Response } from 'express';
 
@@ -12,10 +12,12 @@ import {
     createMediaDeliveryMetricsRegistry,
     MediaResourceClass
 } from '../src/services/mediaDeliveryService';
+import { runRequestWork } from '../src/services/serverLifecycleService';
 
 class TestResponse extends EventEmitter {
     statusCode = 200;
     writableEnded = false;
+    destroyed = false;
     locals: Record<string, unknown> = {};
     headers = new Map<string, string>();
     body: unknown;
@@ -33,6 +35,7 @@ class TestResponse extends EventEmitter {
     json(body: unknown) {
         this.body = body;
         this.writableEnded = true;
+        this.emit('finish');
         return this;
     }
 
@@ -43,11 +46,13 @@ class TestResponse extends EventEmitter {
     }
 
     abort() {
+        this.destroyed = true;
         this.emit('close');
     }
 }
 
 const requestFor = (ip: string) => ({
+    method: 'GET',
     ip,
     socket: { remoteAddress: ip }
 }) as unknown as Request;
@@ -55,18 +60,21 @@ const requestFor = (ip: string) => ({
 const requestMedia = (
     controller: MediaAdmissionController,
     resourceClass: MediaResourceClass,
-    ip: string
+    ip: string,
+    method = 'GET'
 ) => {
     const response = new TestResponse();
+    const request = requestFor(ip);
+    request.method = method;
     let admitted = false;
     controller.middleware(resourceClass)(
-        requestFor(ip),
+        request,
         response as unknown as Response,
         (() => {
             admitted = true;
         }) as NextFunction
     );
-    return { response, admitted };
+    return { response, request, get admitted() { return admitted; } };
 };
 
 test('derives the reviewed playback reserve from the existing default pool size', () => {
@@ -232,4 +240,156 @@ test('independently scheduled artwork remains observable without consuming playb
     for (const response of responses) response.finish();
     assert.equal(metrics.snapshot().byResource.artwork.activeRequests, 0);
     assert.equal(metrics.snapshot().byResource.artwork.responseOutcomes.success, 10);
+});
+
+test('replacement playback waits for an existing slot without raising active ceilings', () => {
+    const controller = createMediaAdmissionController({ globalLimit: 2, perIpLimit: 2, playbackWaitMs: 100 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    const second = requestMedia(controller, 'video', '192.0.2.1');
+    const replacement = requestMedia(controller, 'playback', '192.0.2.1');
+    assert.equal(replacement.admitted, false);
+    assert.equal(controller.getQueuedPlaybackRequests(), 1);
+    assert.equal(controller.getMetrics().activeRequests, 2);
+    first.response.finish();
+    assert.equal(replacement.admitted, true);
+    assert.equal(controller.getQueuedPlaybackRequests(), 0);
+    assert.equal(controller.getMetrics().activeRequests, 2);
+    second.response.finish(); replacement.response.finish();
+    assert.equal(controller.getMetrics().activeRequests, 0);
+});
+
+test('disconnect retains an active slot until its admitted storage work settles', async () => {
+    const controller = createMediaAdmissionController({ globalLimit: 1, perIpLimit: 1, playbackWaitMs: 100 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    let settle!: () => void;
+    const work = runRequestWork(first.request, () => new Promise<void>(resolve => { settle = resolve; }));
+    await Promise.resolve();
+    const replacement = requestMedia(controller, 'playback', '192.0.2.1');
+    first.response.abort();
+    assert.equal(replacement.admitted, false);
+    assert.equal(controller.getMetrics().activeRequests, 1);
+    settle(); await work;
+    assert.equal(replacement.admitted, true);
+    assert.equal(controller.getMetrics().responseOutcomes.aborted, 1);
+    replacement.response.finish();
+    assert.equal(controller.getMetrics().activeRequests, 0);
+});
+
+test('queued disconnect detaches work and does not consume a later slot', () => {
+    const controller = createMediaAdmissionController({ globalLimit: 1, perIpLimit: 1, playbackWaitMs: 100 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    const cancelled = requestMedia(controller, 'playback', '192.0.2.1');
+    cancelled.response.abort();
+    assert.equal(controller.getQueuedPlaybackRequests(), 0);
+    assert.equal(cancelled.response.listenerCount('finish'), 0);
+    first.response.finish();
+    assert.equal(cancelled.admitted, false);
+    assert.equal(controller.getMetrics().activeRequests, 0);
+});
+
+test('playback queues are bounded and deadline rejection retains Retry-After', async () => {
+    const controller = createMediaAdmissionController({ globalLimit: 1, perIpLimit: 1,
+        playbackWaitMs: 20, playbackQueueGlobal: 1, playbackQueuePerIp: 1 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    const queued = requestMedia(controller, 'playback', '192.0.2.1');
+    const overflow = requestMedia(controller, 'playback', '192.0.2.1');
+    assert.equal(overflow.response.statusCode, 429);
+    assert.equal(controller.getQueuedPlaybackRequests(), 1);
+    await once(queued.response, 'finish');
+    assert.equal(queued.response.statusCode, 429);
+    assert.equal(queued.response.headers.get('retry-after'), '2');
+    assert.equal(controller.getQueuedPlaybackRequests(), 0);
+    first.response.finish();
+    assert.equal(queued.admitted, false);
+    assert.equal(controller.getMetrics().activeRequests, 0);
+});
+
+test('a blocked client does not starve a later queued client with capacity', () => {
+    const controller = createMediaAdmissionController({ globalLimit: 2, perIpLimit: 1, playbackWaitMs: 100 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    const second = requestMedia(controller, 'playback', '192.0.2.2');
+    const blocked = requestMedia(controller, 'playback', '192.0.2.1');
+    const available = requestMedia(controller, 'playback', '192.0.2.3');
+    second.response.finish();
+    assert.equal(blocked.admitted, false); assert.equal(available.admitted, true);
+    first.response.finish(); assert.equal(blocked.admitted, true);
+    blocked.response.finish(); available.response.finish();
+    assert.equal(controller.getQueuedPlaybackRequests(), 0);
+});
+
+test('HEAD and non-playback requests reject immediately instead of joining the playback queue', () => {
+    const controller = createMediaAdmissionController({ globalLimit: 1, perIpLimit: 1, playbackWaitMs: 100 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    for (const [resourceClass, method] of [
+        ['playback', 'HEAD'], ['video', 'HEAD'], ['download', 'GET'], ['artwork', 'GET'], ['avatar', 'GET']
+    ] as const) {
+        const rejected = requestMedia(controller, resourceClass, '192.0.2.1', method);
+        assert.equal(rejected.admitted, false);
+        assert.equal(rejected.response.statusCode, 429);
+        assert.equal(controller.getQueuedPlaybackRequests(), 0);
+    }
+    first.response.finish();
+});
+
+test('a per-client pending bound leaves the remaining queue available to another client', () => {
+    const controller = createMediaAdmissionController({ globalLimit: 1, perIpLimit: 1,
+        playbackWaitMs: 100, playbackQueueGlobal: 3, playbackQueuePerIp: 1 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    const queued = requestMedia(controller, 'playback', '192.0.2.1');
+    const overflow = requestMedia(controller, 'playback', '192.0.2.1');
+    const otherClient = requestMedia(controller, 'video', '192.0.2.2');
+    assert.equal(overflow.response.statusCode, 429);
+    assert.equal(controller.getQueuedPlaybackRequests(), 2);
+    first.response.finish();
+    assert.equal(queued.admitted, true);
+    assert.equal(otherClient.admitted, false);
+    queued.response.finish();
+    assert.equal(otherClient.admitted, true);
+    otherClient.response.finish();
+    assert.equal(controller.getQueuedPlaybackRequests(), 0);
+});
+
+test('closed transports cannot queue or dispatch work', () => {
+    const controller = createMediaAdmissionController({ globalLimit: 1, perIpLimit: 1, playbackWaitMs: 100 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    for (const closedState of ['aborted', 'destroyed', 'ended'] as const) {
+        const request = requestFor('192.0.2.1');
+        const response = new TestResponse();
+        if (closedState === 'aborted') request.aborted = true;
+        if (closedState === 'destroyed') response.destroyed = true;
+        if (closedState === 'ended') response.writableEnded = true;
+        let dispatched = false;
+        controller.middleware('playback')(request, response as unknown as Response,
+            () => { dispatched = true; });
+        assert.equal(dispatched, false);
+        assert.equal(controller.getQueuedPlaybackRequests(), 0);
+        assert.equal(response.listenerCount('close'), 0);
+    }
+    first.response.finish();
+});
+
+test('source validation occurs after admission and sees changes made while queued', () => {
+    const controller = createMediaAdmissionController({ globalLimit: 1, perIpLimit: 1, playbackWaitMs: 100 });
+    const first = requestMedia(controller, 'playback', '192.0.2.1');
+    const response = new TestResponse();
+    let currentRevision = 'original';
+    let validations = 0;
+    let storageReads = 0;
+    controller.middleware('playback')(requestFor('192.0.2.1'), response as unknown as Response, () => {
+        validations++;
+        if (currentRevision !== 'original') {
+            response.status(409).json({ message: 'The media source changed.' });
+            return;
+        }
+        storageReads++;
+    });
+    assert.equal(validations, 0);
+    assert.equal(storageReads, 0);
+    currentRevision = 'replacement';
+    first.response.finish();
+    assert.equal(validations, 1);
+    assert.equal(storageReads, 0);
+    assert.equal(response.statusCode, 409);
+    assert.equal(controller.getMetrics().activeRequests, 0);
+    assert.equal(controller.getQueuedPlaybackRequests(), 0);
 });

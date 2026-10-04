@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Request, RequestHandler } from 'express';
+import { onResponseComplete } from '../infrastructure/responseCompletion';
 
-type RequestArea = 'auth' | 'content' | 'listener' | 'media' | 'other';
-const areas: RequestArea[] = ['auth', 'content', 'listener', 'media', 'other'];
+type RequestArea = 'auth' | 'content' | 'listener' | 'media' | 'social' | 'other';
+const areas: RequestArea[] = ['auth', 'content', 'listener', 'media', 'social', 'other'];
 const durationBoundsMs = [50, 100, 250, 500, 1_000, 5_000];
 
 /** Classifies only fixed route families, never retaining URL text or identifiers. */
@@ -11,16 +12,20 @@ const areaFor = (req: Request): RequestArea => {
   if (req.path.startsWith('/content')) return 'content';
   if (req.path.startsWith('/api/listener')) return 'listener';
   if (req.path.startsWith('/video')) return 'media';
+  if (req.path.startsWith('/api/social')) return 'social';
   return 'other';
 };
 
-/** Uses fixed-cardinality counters so anonymous diagnostics have bounded memory. */
+/**
+ * Uses fixed-cardinality counters so anonymous diagnostics have bounded memory. `failed` counts server
+ * errors; `limited` counts 429 admission refusals, which are expected under load and alarm separately.
+ */
 export const createRequestDiagnostics = () => {
   const counters = Object.fromEntries(areas.map(area => [area, {
-    active: 0, completed: 0, failed: 0, aborted: 0,
+    active: 0, completed: 0, failed: 0, limited: 0, aborted: 0,
     durationBuckets: Array<number>(durationBoundsMs.length + 1).fill(0)
   }])) as Record<RequestArea, {
-    active: number; completed: number; failed: number; aborted: number; durationBuckets: number[];
+    active: number; completed: number; failed: number; limited: number; aborted: number; durationBuckets: number[];
   }>;
   const observe: RequestHandler = (req, res, next) => {
     // Always create our own identifier; accepting a caller's value would permit log injection.
@@ -29,22 +34,16 @@ export const createRequestDiagnostics = () => {
     const counter = counters[areaFor(req)];
     const startedAt = performance.now();
     counter.active += 1;
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      res.off('finish', finish);
-      res.off('close', finish);
+    onResponseComplete(res, () => {
       counter.active -= 1;
       counter.completed += 1;
       if (!res.writableFinished) counter.aborted += 1;
       if (res.statusCode >= 500) counter.failed += 1;
+      if (res.statusCode === 429) counter.limited += 1;
       const duration = performance.now() - startedAt;
       const bucket = durationBoundsMs.findIndex(bound => duration <= bound);
       counter.durationBuckets[bucket < 0 ? durationBoundsMs.length : bucket] += 1;
-    };
-    res.once('finish', finish);
-    res.once('close', finish);
+    });
     next();
   };
   return {

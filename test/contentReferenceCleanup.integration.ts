@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import { ObjectId } from 'mongodb';
 
+import { deletePost } from '../src/controllers/feedController';
 import { getDb } from '../src/infrastructure/database';
 import { Artist } from '../src/models/artist';
-import { cleanupDeletedContentReferences } from '../src/services/contentReferenceService';
+import {
+    cleanupDeletedContentReferences,
+    cleanupDeletedPostReferences
+} from '../src/services/contentReferenceService';
 import { reconcileContentReferences } from '../src/services/contentReferenceReconciliationService';
 import {
     MongoReplicaSetHarness,
@@ -26,6 +30,7 @@ beforeEach(async () => {
         'contentCollections',
         'pages',
         'playlists',
+        'posts',
         'accountMutations',
         'userActivity',
         'userSaves',
@@ -36,6 +41,35 @@ beforeEach(async () => {
 after(async () => {
     await harness?.stop();
 });
+
+/** Invokes the administrator Feed Post delete controller and records its outcome. */
+const deletePostAsAdmin = async (postId: string) => {
+    const outcome: { statusCode?: number; body?: any; error?: unknown } = {};
+    const response = {
+        status(statusCode: number) {
+            outcome.statusCode = statusCode;
+            return response;
+        },
+        json(body: unknown) {
+            outcome.body = body;
+            return response;
+        }
+    };
+    await deletePost(
+        {
+            auth: { userId: new ObjectId().toHexString(), role: 'admin' },
+            query: { postId }
+        } as any,
+        response as any,
+        (error?: unknown) => {
+            outcome.error = error;
+        }
+    );
+    return outcome;
+};
+
+/** Reads every carousel in a stable order so cleanup no-ops can be compared exactly. */
+const carouselSnapshot = () => getDb()!.collection('carousels').find().sort({ _id: 1 }).toArray();
 
 test('deleted Album and Soundtrack references leave only unrelated manual Grid/List items', async () => {
     const albumId = new ObjectId();
@@ -979,4 +1013,419 @@ test('reconciliation distinguishes pending and malformed completed Playlist crea
             { mutationId: 'unknown-status', reason: 'statusMismatch' }
         ]
     );
+});
+
+test('Feed Post deletion removes only that Post from manual Carousels and renumbers the rest', async () => {
+    const deletedPostId = new ObjectId();
+    const retainedPostId = new ObjectId();
+    const albumId = new ObjectId();
+    const mixedCarouselId = new ObjectId();
+    const secondCarouselId = new ObjectId();
+    const unrelatedCarouselId = new ObjectId();
+    const artistCarouselId = new ObjectId();
+    await Promise.all([
+        getDb()!.collection('posts').insertMany([
+            { _id: deletedPostId, title: 'Lorem ipsum', description: 'Dolor sit amet' },
+            { _id: retainedPostId, title: 'Consectetur', description: 'Adipiscing elit' }
+        ]),
+        getDb()!.collection('carousels').insertMany([
+            {
+                _id: mixedCarouselId,
+                name: 'Lorem Mixed',
+                mode: 'manual',
+                items: [
+                    { contentType: 'post', contentId: deletedPostId.toHexString(), order: 0 },
+                    { contentType: 'post', contentId: retainedPostId.toHexString(), order: 1 },
+                    {
+                        contentType: 'post',
+                        contentId: deletedPostId.toHexString().toUpperCase(),
+                        order: 2
+                    },
+                    { contentType: 'album', contentId: albumId.toHexString(), order: 3 },
+                    { contentType: 'post', contentId: deletedPostId, order: 4 }
+                ]
+            },
+            {
+                _id: secondCarouselId,
+                name: 'Ipsum Second',
+                mode: 'manual',
+                items: [
+                    // A non-Post item that happens to share the deleted Post ID must survive.
+                    { contentType: 'album', contentId: deletedPostId.toHexString(), order: 0 },
+                    { contentType: 'post', contentId: deletedPostId, order: 1 },
+                    { contentType: 'post', contentId: retainedPostId, order: 2 }
+                ]
+            },
+            {
+                _id: unrelatedCarouselId,
+                name: 'Dolor Unrelated',
+                mode: 'manual',
+                items: [
+                    { contentType: 'post', contentId: retainedPostId.toHexString(), order: 0 },
+                    { contentType: 'album', contentId: albumId.toHexString(), order: 1 }
+                ]
+            },
+            {
+                _id: artistCarouselId,
+                name: 'Sit Artist',
+                mode: 'artist',
+                artistConfig: {
+                    artistId: new ObjectId().toHexString(),
+                    contentType: 'album',
+                    sort: 'releaseDateDesc',
+                    limit: 20
+                },
+                items: [{ contentType: 'post', contentId: deletedPostId.toHexString(), order: 0 }]
+            }
+        ])
+    ]);
+    const before = await carouselSnapshot();
+    const unchangedBefore = before.filter(carousel =>
+        carousel._id.equals(unrelatedCarouselId) || carousel._id.equals(artistCarouselId)
+    );
+
+    const deleted = await deletePostAsAdmin(deletedPostId.toHexString());
+
+    assert.equal(deleted.error, undefined);
+    assert.equal(deleted.statusCode, 200);
+    assert.equal(await getDb()!.collection('posts').findOne({ _id: deletedPostId }), null);
+    assert.notEqual(await getDb()!.collection('posts').findOne({ _id: retainedPostId }), null);
+    const after = await carouselSnapshot();
+    const itemsOf = (carouselId: ObjectId) => after
+        .find(carousel => carousel._id.equals(carouselId))!
+        .items.map((item: any) => ({
+            contentType: item.contentType,
+            contentId: String(item.contentId),
+            order: item.order
+        }));
+    assert.deepEqual(itemsOf(mixedCarouselId), [
+        { contentType: 'post', contentId: retainedPostId.toHexString(), order: 0 },
+        { contentType: 'album', contentId: albumId.toHexString(), order: 1 }
+    ]);
+    assert.deepEqual(itemsOf(secondCarouselId), [
+        { contentType: 'album', contentId: deletedPostId.toHexString(), order: 0 },
+        { contentType: 'post', contentId: retainedPostId.toHexString(), order: 1 }
+    ]);
+    assert.deepEqual(
+        after.filter(carousel =>
+            carousel._id.equals(unrelatedCarouselId) || carousel._id.equals(artistCarouselId)
+        ),
+        unchangedBefore
+    );
+
+    const repeatedDelete = await deletePostAsAdmin(deletedPostId.toHexString());
+    await cleanupDeletedPostReferences(deletedPostId.toHexString().toUpperCase());
+
+    assert.equal(repeatedDelete.statusCode, 404);
+    assert.deepEqual(await carouselSnapshot(), after);
+});
+
+test('deleted content and Feed Posts leave mode-less legacy definitions like manual ones', async () => {
+    const deletedAlbumId = new ObjectId();
+    const deletedAudioTrackId = new ObjectId();
+    const deletedPostId = new ObjectId();
+    const retainedAlbumId = new ObjectId();
+    const retainedPostId = new ObjectId();
+    const missingModeCarouselId = new ObjectId();
+    const nullModeCarouselId = new ObjectId();
+    const emptyModeCarouselId = new ObjectId();
+    const missingModeCollectionId = new ObjectId();
+    const artistCarouselId = new ObjectId();
+    const personalizedCarouselId = new ObjectId();
+    await Promise.all([
+        getDb()!.collection('posts').insertMany([
+            { _id: deletedPostId, title: 'Lorem ipsum', description: 'Dolor sit amet' },
+            { _id: retainedPostId, title: 'Consectetur', description: 'Adipiscing elit' }
+        ]),
+        getDb()!.collection('albums').insertOne({ _id: retainedAlbumId, title: 'Sed do' }),
+        getDb()!.collection('carousels').insertMany([
+            {
+                // Carousels created before the mode field existed have no mode at all.
+                _id: missingModeCarouselId,
+                name: 'Lorem Legacy',
+                items: [
+                    { contentType: 'album', contentId: deletedAlbumId.toHexString(), order: 0 },
+                    { contentType: 'post', contentId: retainedPostId.toHexString(), order: 1 },
+                    { contentType: 'audioTrack', contentId: deletedAudioTrackId, order: 2 },
+                    { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 3 },
+                    { contentType: 'post', contentId: deletedPostId.toHexString(), order: 4 }
+                ]
+            },
+            {
+                _id: nullModeCarouselId,
+                name: 'Ipsum Null',
+                mode: null,
+                items: [
+                    { contentType: 'post', contentId: deletedPostId, order: 0 },
+                    { contentType: 'album', contentId: deletedAlbumId.toHexString().toUpperCase(), order: 1 },
+                    { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 2 }
+                ]
+            },
+            {
+                _id: emptyModeCarouselId,
+                name: 'Amet Empty',
+                mode: '',
+                items: [
+                    { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 0 },
+                    { contentType: 'audioTrack', contentId: deletedAudioTrackId.toHexString(), order: 1 }
+                ]
+            },
+            {
+                _id: artistCarouselId,
+                name: 'Dolor Artist',
+                mode: 'artist',
+                artistConfig: {
+                    artistId: new ObjectId().toHexString(),
+                    contentType: 'album',
+                    sort: 'releaseDateDesc',
+                    limit: 20
+                },
+                items: [
+                    { contentType: 'album', contentId: deletedAlbumId.toHexString(), order: 0 },
+                    { contentType: 'post', contentId: deletedPostId.toHexString(), order: 1 }
+                ]
+            },
+            {
+                _id: personalizedCarouselId,
+                name: 'Sit Personalized',
+                mode: 'personalized',
+                personalizedConfig: { source: 'recentlyPlayed', limit: 20 },
+                items: [{ contentType: 'audioTrack', contentId: deletedAudioTrackId, order: 0 }]
+            }
+        ]),
+        getDb()!.collection('contentCollections').insertOne({
+            _id: missingModeCollectionId,
+            contentType: 'album',
+            items: [
+                { contentType: 'album', contentId: deletedAlbumId, order: 0 },
+                { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 1 }
+            ]
+        })
+    ]);
+    const dynamicBefore = (await carouselSnapshot()).filter(carousel =>
+        carousel._id.equals(artistCarouselId) || carousel._id.equals(personalizedCarouselId)
+    );
+    const reportedBefore = (await reconcileContentReferences()).danglingCarouselItems
+        .filter(item => item.carouselId === missingModeCarouselId.toHexString())
+        .map(item => item.contentType)
+        .sort();
+    // The read-only report already treats a mode-less Carousel as manual; cleanup must agree.
+    assert.deepEqual(reportedBefore, ['album', 'audioTrack']);
+
+    await cleanupDeletedContentReferences('album', deletedAlbumId.toHexString());
+    await cleanupDeletedContentReferences('audioTrack', deletedAudioTrackId.toHexString());
+    const deleted = await deletePostAsAdmin(deletedPostId.toHexString());
+
+    assert.equal(deleted.error, undefined);
+    assert.equal(deleted.statusCode, 200);
+    const after = await carouselSnapshot();
+    const itemsOf = (carouselId: ObjectId) => after
+        .find(carousel => carousel._id.equals(carouselId))!
+        .items.map((item: any) => ({
+            contentType: item.contentType,
+            contentId: String(item.contentId),
+            order: item.order
+        }));
+    assert.deepEqual(itemsOf(missingModeCarouselId), [
+        { contentType: 'post', contentId: retainedPostId.toHexString(), order: 0 },
+        { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 1 }
+    ]);
+    assert.deepEqual(itemsOf(nullModeCarouselId), [
+        { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 0 }
+    ]);
+    assert.deepEqual(itemsOf(emptyModeCarouselId), [
+        { contentType: 'album', contentId: retainedAlbumId.toHexString(), order: 0 }
+    ]);
+    // Cleanup must not reinterpret a legacy definition by writing a mode.
+    const legacy = after.find(carousel => carousel._id.equals(missingModeCarouselId))!;
+    assert.equal('mode' in legacy, false);
+    assert.equal(after.find(carousel => carousel._id.equals(nullModeCarouselId))!.mode, null);
+    assert.deepEqual(
+        after.filter(carousel =>
+            carousel._id.equals(artistCarouselId) || carousel._id.equals(personalizedCarouselId)
+        ),
+        dynamicBefore
+    );
+    const collection = await getDb()!.collection('contentCollections')
+        .findOne({ _id: missingModeCollectionId });
+    assert.equal('mode' in collection!, false);
+    assert.deepEqual(
+        collection!.items.map((item: any) => ({ contentId: String(item.contentId), order: item.order })),
+        [{ contentId: retainedAlbumId.toHexString(), order: 0 }]
+    );
+    assert.deepEqual(
+        (await reconcileContentReferences()).danglingCarouselItems
+            .filter(item => [missingModeCarouselId, nullModeCarouselId, emptyModeCarouselId]
+                .some(carouselId => item.carouselId === carouselId.toHexString())),
+        []
+    );
+
+    const collectionsAfter = await getDb()!.collection('contentCollections').find().toArray();
+    await cleanupDeletedContentReferences('album', deletedAlbumId.toHexString().toUpperCase());
+    await cleanupDeletedContentReferences('audioTrack', deletedAudioTrackId.toHexString());
+    await cleanupDeletedPostReferences(deletedPostId.toHexString());
+
+    assert.deepEqual(await carouselSnapshot(), after);
+    assert.deepEqual(await getDb()!.collection('contentCollections').find().toArray(), collectionsAfter);
+});
+
+test('Feed Post deletion keeps the Post retryable when Carousel cleanup fails', async () => {
+    const postId = new ObjectId();
+    const retainedPostId = new ObjectId();
+    const carouselId = new ObjectId();
+    await Promise.all([
+        getDb()!.collection('posts').insertMany([
+            { _id: postId, title: 'Lorem ipsum', description: 'Dolor sit amet' },
+            { _id: retainedPostId, title: 'Consectetur', description: 'Adipiscing elit' }
+        ]),
+        getDb()!.collection('carousels').insertOne({
+            _id: carouselId,
+            name: 'Lorem Retry',
+            mode: 'manual',
+            items: [
+                { contentType: 'post', contentId: postId.toHexString(), order: 0 },
+                { contentType: 'post', contentId: retainedPostId.toHexString(), order: 1 }
+            ]
+        })
+    ]);
+    const before = await carouselSnapshot();
+
+    // Reject every Carousel write so reference cleanup fails before the Post delete.
+    await getDb()!.command({
+        collMod: 'carousels',
+        validator: { $expr: { $eq: [1, 0] } },
+        validationLevel: 'strict',
+        validationAction: 'error'
+    });
+    let failed: Awaited<ReturnType<typeof deletePostAsAdmin>>;
+    try {
+        failed = await deletePostAsAdmin(postId.toHexString());
+    } finally {
+        await getDb()!.command({ collMod: 'carousels', validator: {} });
+    }
+
+    assert.notEqual(failed.error, undefined);
+    assert.equal(failed.statusCode, undefined);
+    assert.notEqual(await getDb()!.collection('posts').findOne({ _id: postId }), null);
+    assert.deepEqual(await carouselSnapshot(), before);
+
+    const retried = await deletePostAsAdmin(postId.toHexString());
+
+    assert.equal(retried.error, undefined);
+    assert.equal(retried.statusCode, 200);
+    assert.equal(await getDb()!.collection('posts').findOne({ _id: postId }), null);
+    assert.deepEqual(
+        (await getDb()!.collection('carousels').findOne({ _id: carouselId }))!.items
+            .map((item: any) => ({ contentId: String(item.contentId), order: item.order })),
+        [{ contentId: retainedPostId.toHexString(), order: 0 }]
+    );
+});
+
+test('read-only reconciliation reports only missing or malformed manual Carousel Posts', async () => {
+    const existingPostId = new ObjectId();
+    const deletedPostId = new ObjectId();
+    const manualCarouselId = new ObjectId();
+    const legacyCarouselId = new ObjectId();
+    await Promise.all([
+        getDb()!.collection('posts').insertOne({
+            _id: existingPostId,
+            title: 'Lorem ipsum',
+            description: 'Dolor sit amet'
+        }),
+        getDb()!.collection('carousels').insertMany([
+            {
+                _id: manualCarouselId,
+                mode: 'manual',
+                items: [
+                    { contentType: 'post', contentId: existingPostId.toHexString(), order: 0 },
+                    {
+                        contentType: 'post',
+                        contentId: existingPostId.toHexString().toUpperCase(),
+                        order: 1
+                    },
+                    { contentType: 'post', contentId: deletedPostId.toHexString(), order: 2 },
+                    { contentType: 'post', contentId: 'malformed-post-id', order: 3 }
+                ]
+            },
+            {
+                _id: legacyCarouselId,
+                items: [
+                    { contentType: 'post', contentId: existingPostId, order: 0 },
+                    { contentType: 'post', contentId: deletedPostId, order: 1 }
+                ]
+            },
+            {
+                _id: new ObjectId(),
+                mode: 'artist',
+                items: [{ contentType: 'post', contentId: deletedPostId.toHexString(), order: 0 }]
+            }
+        ])
+    ]);
+    const before = await carouselSnapshot();
+
+    const report = await reconcileContentReferences();
+
+    assert.equal(report.truncated, false);
+    assert.deepEqual(
+        report.danglingCarouselItems.map(item => ({ ...item, contentId: String(item.contentId) })),
+        [
+            {
+                carouselId: manualCarouselId.toHexString(),
+                contentType: 'post',
+                contentId: deletedPostId.toHexString()
+            },
+            {
+                carouselId: manualCarouselId.toHexString(),
+                contentType: 'post',
+                contentId: 'malformed-post-id'
+            },
+            {
+                carouselId: legacyCarouselId.toHexString(),
+                contentType: 'post',
+                contentId: deletedPostId.toHexString()
+            }
+        ]
+    );
+    assert.deepEqual(await carouselSnapshot(), before);
+});
+
+test('bounded reconciliation exact-checks Carousel Posts within the catalog lookup budget', async () => {
+    const previousLimit = process.env.MAX_RECONCILIATION_OBJECTS;
+    process.env.MAX_RECONCILIATION_OBJECTS = '2';
+    const postIds = [
+        new ObjectId('000000000000000000000061'),
+        new ObjectId('000000000000000000000062'),
+        new ObjectId('000000000000000000000063'),
+        new ObjectId('000000000000000000000064')
+    ];
+    try {
+        await Promise.all([
+            getDb()!.collection('posts').insertMany(postIds.map((_id, index) => ({
+                _id,
+                title: `Lorem ipsum ${index}`,
+                description: 'Dolor sit amet'
+            }))),
+            getDb()!.collection('carousels').insertOne({
+                _id: new ObjectId(),
+                mode: 'manual',
+                items: postIds.map((contentId, order) => ({
+                    contentType: 'post',
+                    contentId: contentId.toHexString(),
+                    order
+                }))
+            })
+        ]);
+
+        const report = await reconcileContentReferences();
+
+        // Three lookups fit the limit + 1 budget; the fourth Post is unverified, not dangling.
+        assert.equal(report.truncated, true);
+        assert.deepEqual(report.danglingCarouselItems, []);
+    } finally {
+        if (previousLimit === undefined) {
+            delete process.env.MAX_RECONCILIATION_OBJECTS;
+        } else {
+            process.env.MAX_RECONCILIATION_OBJECTS = previousLimit;
+        }
+    }
 });

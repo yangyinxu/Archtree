@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { apiRequest } from './client';
+import { apiRequest, socialRolloutGateEvent } from './client';
 import { captureAccountOperation, isAccountOperationCurrent } from './accountEpoch';
 import { browserSessionSchema } from './schemas';
 import {
@@ -40,6 +40,34 @@ test('strict session schema rejects a credential leak', () => {
     ...sessionBody,
     accessToken: 'must-not-reach-the-browser'
   }).success).toBe(false);
+});
+
+test.each([
+  ['1', 1], ['60', 60], ['61', 60], ['900', 60],
+  ['0', undefined], ['-1', undefined], ['01', undefined], ['1.5', undefined],
+  ['+2', undefined], ['1e2', undefined], ['Infinity', undefined], ['1 0', undefined],
+  ['9007199254740992', undefined], ['99999999999999999999999', undefined],
+  ['Wed, 21 Oct 2026 07:28:00 GMT', undefined], ['', undefined]
+] as const)('a 429 Retry-After %j retains only the bounded integer %j', async (header, expected) => {
+  const response = jsonResponse({ code: 'rate_limited' }, 429);
+  response.headers.set('Retry-After', header!);
+  const fetchMock = vi.fn().mockResolvedValue(response);
+  vi.stubGlobal('fetch', fetchMock);
+  const error = await apiRequest('/api/social/v1/me/profile', z.object({ ready: z.boolean() }).strict(), {
+    accountViewer: 'listener-1'
+  }).catch(error => error);
+  expect(error).toMatchObject({ status: 429, retryAfterSeconds: expected });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(error).not.toHaveProperty('headers');
+});
+
+test('Retry-After on a real service failure does not turn it into quota cooling', async () => {
+  const response = jsonResponse({}, 503);
+  response.headers.set('Retry-After', '5');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  await expect(apiRequest('/api/social/v1/me/profile', z.object({ ready: z.boolean() }).strict(), {
+    accountViewer: 'listener-1'
+  })).rejects.toMatchObject({ status: 503, retryAfterSeconds: undefined });
 });
 
 test('coalesces concurrent 401 responses into one cookie refresh', async () => {
@@ -269,4 +297,22 @@ test('recovers an expired access A plus refresh B without retrying into A caches
   expect(isAccountOperationCurrent(priorGuard)).toBe(false);
   expect(changes).toEqual(['logout']);
   unsubscribe();
+});
+
+test.each([
+  [503, 'social_disabled', 1], [503, 'rooms_disabled', 1],
+  [503, 'social_unavailable', 0], [503, undefined, 0], [500, 'social_disabled', 0], [409, 'rooms_disabled', 0]
+] as const)('a %s %s response announces a rollout gate %s time(s)', async (status, code, expected) => {
+  const gates = vi.fn();
+  window.addEventListener(socialRolloutGateEvent, gates);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(code ? { code } : {}, status)));
+  try {
+    await expect(apiRequest('/api/social/v1/music-shares', z.object({ ready: z.boolean() }).strict(), {
+      method: 'POST', accountViewer: 'listener-1'
+    })).rejects.toMatchObject({ status, code });
+    // Only the explicit feature gate proves the rollout changed; outages and other failures keep the current UI.
+    expect(gates).toHaveBeenCalledTimes(expected);
+  } finally {
+    window.removeEventListener(socialRolloutGateEvent, gates);
+  }
 });

@@ -9,11 +9,17 @@ on:
 permissions:
   contents: read
 
+# The gates run as parallel jobs so the run finishes well inside the promoter's
+# 35-minute wait. One production build is shared by every browser gate and by the
+# staged bundle; release-artifact runs only after every gate job succeeds.
 jobs:
-  browser-release:
-    name: Unit, integration, build, browser, and accessibility gates
+  build:
+    name: Production build and E2E type check
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
+    outputs:
+      build: ${{ steps.build.outcome }}
+      e2e_typecheck: ${{ steps.e2e_typecheck.outcome }}
 
     steps:
       - name: Check out repository
@@ -28,12 +34,55 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install the MongoDB integration-test daemon
+      - name: Build production server and listener
+        id: build
+        run: npm run build
+
+      - name: Type-check browser fixtures and release specs
+        id: e2e_typecheck
+        run: npm run typecheck:e2e --workspace @archtree/finitude-web
+
+      # The exact bytes tested by both browser gates are the bytes staged for release.
+      # web/dist/.vite/manifest.json is hidden, so hidden files must be included.
+      - name: Share the tested production build with later jobs
+        uses: actions/upload-artifact@v5
+        with:
+          name: finitude-web-release-build
+          path: |
+            web/dist
+            engineering/dist
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 1
+
+  unit-integration:
+    name: Unit and Mongo-backed integration tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      unit: ${{ steps.unit.outcome }}
+      integration: ${{ steps.integration.outcome }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install the MongoDB test daemon and room audio decoder
         env:
           MONGODB_CI_VERSION: 8.0.12
         run: |
           sudo apt-get update
-          sudo apt-get install --yes curl gnupg
+          sudo apt-get install --yes curl gnupg ffmpeg
           curl -fsSL https://pgp.mongodb.com/server-8.0.asc \
             --output "${RUNNER_TEMP}/mongodb-server-8.0.asc"
           sudo gpg --batch --yes --dearmor \
@@ -49,49 +98,137 @@ jobs:
         run: npm run doctor:release
 
       - name: Run server and Web unit tests (including Linux platform suites)
+        id: unit
         run: npm test
 
       - name: Run Mongo-backed lifecycle integration tests
+        id: integration
+        if: ${{ !cancelled() }}
         run: npm run test:integration
 
-      - name: Build production server and listener
-        run: npm run build
+  social-e2e:
+    name: Real social MongoDB, media, and WebSocket browser tests
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      social: ${{ steps.social.outcome }}
 
-      - name: Type-check browser fixtures and release specs
-        run: npm run typecheck:e2e --workspace @archtree/finitude-web
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install the MongoDB test daemon and room audio decoder
+        env:
+          MONGODB_CI_VERSION: 8.0.12
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes curl gnupg ffmpeg
+          curl -fsSL https://pgp.mongodb.com/server-8.0.asc \
+            --output "${RUNNER_TEMP}/mongodb-server-8.0.asc"
+          sudo gpg --batch --yes --dearmor \
+            --output /usr/share/keyrings/mongodb-server-8.0.gpg \
+            "${RUNNER_TEMP}/mongodb-server-8.0.asc"
+          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" \
+            | sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install --yes "mongodb-org-server=${MONGODB_CI_VERSION}"
+          mongod --version
+
+      - name: Verify the complete release runtime
+        run: npm run doctor:release
+
+      - name: Use the shared production build
+        uses: actions/download-artifact@v5
+        with:
+          name: finitude-web-release-build
+          path: .
 
       - name: Install Playwright browsers and operating-system dependencies
         run: npx playwright install --with-deps chromium firefox webkit
 
-      - name: Provide an audio output for headless Firefox playback
+      - name: Provide isolated browser audio and display
+        id: browser_environment
         run: |
-          sudo apt-get install --yes pulseaudio
+          # Refresh package lists here so this step never depends on an earlier step's apt-get update.
+          sudo apt-get update
+          sudo apt-get install --yes pulseaudio xvfb
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=archtree_ci
+          pactl set-default-sink archtree_ci
+          pactl list short sinks
+
+      - name: Run real social MongoDB, media, and WebSocket browser tests
+        id: social
+        env:
+          # Bound the simulated device buffer; PulseAudio's default can add seconds before audio advances.
+          PULSE_LATENCY_MSEC: '100'
+        run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web
+
+      - name: Retain social browser evidence
+        if: ${{ !cancelled() && steps.browser_environment.outcome == 'success' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: finitude-social-browser-evidence
+          path: web/test-results/social-real
+          if-no-files-found: ignore
+          retention-days: 30
+
+  browser-e2e:
+    name: Production-bundle browser and accessibility tests
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      browser: ${{ steps.browser.outcome }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Use the shared production build
+        uses: actions/download-artifact@v5
+        with:
+          name: finitude-web-release-build
+          path: .
+
+      - name: Install Playwright browsers and operating-system dependencies
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Provide isolated browser audio and display
+        id: browser_environment
+        run: |
+          # Refresh package lists here so this step never depends on an earlier step's apt-get update.
+          sudo apt-get update
+          sudo apt-get install --yes pulseaudio xvfb
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=archtree_ci
           pactl set-default-sink archtree_ci
           pactl list short sinks
 
       - name: Run production-bundle browser and accessibility tests
-        run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
-
-      - name: Stage the Elastic Beanstalk deployment artifact
-        run: npm run stage:eb-artifact
-
-      - name: Create the versioned Elastic Beanstalk rollback bundle
+        id: browser
         env:
-          EB_BUNDLE_NAME: archtree-eb-${{ github.sha }}.zip
-        run: |
-          cd elastic-beanstalk-artifact
-          zip -q -r "../${EB_BUNDLE_NAME}" \
-            .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json localization src tsconfig.json web
-
-      - name: Retain the versioned Elastic Beanstalk rollback bundle
-        uses: actions/upload-artifact@v5
-        with:
-          name: archtree-eb-${{ github.sha }}
-          path: archtree-eb-${{ github.sha }}.zip
-          if-no-files-found: error
-          retention-days: 30
+          PULSE_LATENCY_MSEC: '100'
+        run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 
       - name: Retain browser evidence
         if: ${{ !cancelled() }}
@@ -103,4 +240,59 @@ jobs:
             web/test-results
             web/e2e/visual-regression.spec.ts-snapshots/linux
           if-no-files-found: ignore
+          retention-days: 30
+
+  release-artifact:
+    name: Stage and retain the tested Elastic Beanstalk bundle
+    # Implicit success(): skipped unless every gate job above succeeded in this run.
+    needs: [build, unit-integration, social-e2e, browser-e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Use the shared production build
+        uses: actions/download-artifact@v5
+        with:
+          name: finitude-web-release-build
+          path: .
+
+      - name: Stage the Elastic Beanstalk deployment artifact
+        id: staging
+        run: npm run stage:eb-artifact
+
+      - name: Create the versioned Elastic Beanstalk rollback bundle
+        env:
+          EB_BUNDLE_NAME: archtree-eb-${{ github.sha }}.zip
+        run: |
+          cd elastic-beanstalk-artifact
+          zip -q -r "../${EB_BUNDLE_NAME}" \
+            .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json localization src tsconfig.json web engineering
+
+      - name: Bind the tested bundle to this workflow attempt
+        env:
+          RELEASE_UNIT_RESULT: ${{ needs.unit-integration.outputs.unit }}
+          RELEASE_BUILD_RESULT: ${{ needs.build.outputs.build }}
+          RELEASE_E2E_TYPECHECK_RESULT: ${{ needs.build.outputs.e2e_typecheck }}
+          RELEASE_SOCIAL_RESULT: ${{ needs.social-e2e.outputs.social }}
+          RELEASE_INTEGRATION_RESULT: ${{ needs.unit-integration.outputs.integration }}
+          RELEASE_BROWSER_RESULT: ${{ needs.browser-e2e.outputs.browser }}
+          RELEASE_STAGING_RESULT: ${{ steps.staging.outcome }}
+        run: node scripts/write-release-provenance.mjs
+
+      - name: Retain the versioned Elastic Beanstalk rollback bundle
+        uses: actions/upload-artifact@v5
+        with:
+          name: archtree-eb-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            archtree-eb-${{ github.sha }}.zip
+            release-provenance.json
+          if-no-files-found: error
           retention-days: 30

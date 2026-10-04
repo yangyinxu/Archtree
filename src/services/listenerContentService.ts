@@ -8,7 +8,7 @@ import {
     UserLibrary
 } from '../models/userLibrary';
 import { resolvedCoverArtUrl } from '../utils/coverArt';
-import { escapeRegex } from '../utils/search';
+import { catalogSearchFilter } from '../utils/catalogSearch';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import {
@@ -23,13 +23,8 @@ import {
     isReadyAlbumLifecycle,
     readyAlbumLifecycleFilter
 } from './albumReferenceFenceService';
-import {
-    AttributionStatus,
-    CatalogCredit,
-    classifyArtistAlbumCredit,
-    normalizeCatalogCredits,
-    validateAttribution
-} from '../models/catalogCredit';
+import { AttributionStatus } from '../models/catalogCredit';
+import { artistAlbumSection, validStoredCredits } from './artistAlbumClassificationService';
 import { readyOrganizationLifecycleFilter } from './organizationReferenceFenceService';
 import { Carousel } from '../models/carousel';
 import { catalogCreditRollout } from '../config/catalogCreditRollout';
@@ -82,7 +77,6 @@ interface CatalogContext {
     artistsById: Map<string, any>;
     artists: any[];
     organizationsById: Map<string, any>;
-    albumTrackIds: Map<string, string[]>;
 }
 
 const maximumPageItems = 100;
@@ -356,22 +350,6 @@ const artistReferencesAlbum = (artist: any, albumId: string) =>
     (Array.isArray(artist?.albumIds) ? artist.albumIds : [])
         .some((id: unknown) => String(id).trim().toLowerCase() === albumId.toLowerCase());
 
-const compareTitleAndId = (left: any, right: any) =>
-    normalizeText(left?.title).localeCompare(normalizeText(right?.title))
-    || String(left?._id ?? '').localeCompare(String(right?._id ?? ''));
-
-const validStoredCredits = (owner: any): CatalogCredit[] | null => {
-    if (!catalogCreditRollout().readsEnabled) return null;
-    if (!Array.isArray(owner?.credits)) return null;
-    try {
-        const credits = normalizeCatalogCredits(owner.credits);
-        validateAttribution(owner.attributionStatus, credits);
-        return credits;
-    } catch {
-        return null;
-    }
-};
-
 /** Loads only the catalog fields needed to create public listener DTOs. */
 const createCatalogContext = async (
     seedAlbums: any[] = [],
@@ -396,52 +374,6 @@ const createCatalogContext = async (
             .maxTimeMS(queryTimeoutMs)
             .toArray();
         for (const album of linkedAlbums) albumsById.set(String(album._id).toLowerCase(), album);
-    }
-
-    // Album attribution follows ready component tracks, even on summary surfaces.
-    const declaredTrackIds = uniqueIds(
-        [...albumsById.values()].flatMap((album) =>
-            (Array.isArray(album?.audioTrackIds) ? album.audioTrackIds : [])
-                .slice(0, maximumAlbumTracks)
-        ),
-        maximumHydratedAlbumTracks
-    );
-    const missingDeclaredTrackIds = declaredTrackIds.filter((id) => !tracksById.has(id));
-    if (missingDeclaredTrackIds.length > 0) {
-        const declaredTracks = await db.collection('audioTracks')
-            .find({
-                ...readyAudioFilter,
-                _id: { $in: missingDeclaredTrackIds.map(toObjectId) }
-            })
-            .project(audioTrackProjection)
-            .maxTimeMS(queryTimeoutMs)
-            .toArray();
-        for (const track of declaredTracks) tracksById.set(String(track._id).toLowerCase(), track);
-    }
-
-    const legacyAlbumIds = [...albumsById.values()]
-        .filter((album) => album?.lifecycleStatus === undefined
-            && (!Array.isArray(album?.audioTrackIds) || album.audioTrackIds.length === 0))
-        .map((album) => String(album._id).toLowerCase());
-    if (legacyAlbumIds.length > 0) {
-        for (let index = 0; index < legacyAlbumIds.length; index += 10) {
-            const batch = legacyAlbumIds.slice(index, index + 10);
-            const legacyTrackBatches = await Promise.all(batch.map((albumId) =>
-                db.collection('audioTracks')
-                    .find({
-                        ...readyAudioFilter,
-                        albumId: { $in: storedObjectIdValues(albumId) }
-                    })
-                    .project(audioTrackProjection)
-                    .sort({ title: 1, _id: 1 })
-                    .limit(maximumAlbumTracks)
-                    .maxTimeMS(queryTimeoutMs)
-                    .toArray()
-            ));
-            for (const track of legacyTrackBatches.flat()) {
-                tracksById.set(String(track._id).toLowerCase(), track);
-            }
-        }
     }
 
     const explicitArtistIds = uniqueIds(
@@ -498,33 +430,7 @@ const createCatalogContext = async (
         : [];
     const organizationsById = documentsById(organizations);
 
-    const albumTrackIds = new Map<string, string[]>();
-    for (const album of albumsById.values()) {
-        const albumId = String(album._id).toLowerCase();
-        const declared = Array.isArray(album?.audioTrackIds) ? album.audioTrackIds : [];
-        if (declared.length > 0) {
-            albumTrackIds.set(
-                albumId,
-                uniqueIds(declared.slice(0, maximumAlbumTracks), maximumAlbumTracks)
-                    .filter((id) => tracksById.has(id))
-            );
-            continue;
-        }
-        if (album.lifecycleStatus !== undefined) {
-            albumTrackIds.set(albumId, []);
-            continue;
-        }
-        albumTrackIds.set(
-            albumId,
-            [...tracksById.values()]
-                .filter((track) => trackBelongsToAlbum(track, albumId))
-                .sort(compareTitleAndId)
-                .slice(0, maximumAlbumTracks)
-                .map((track) => String(track._id).toLowerCase())
-        );
-    }
-
-    return { albumsById, tracksById, artistsById, artists, organizationsById, albumTrackIds };
+    return { albumsById, tracksById, artistsById, artists, organizationsById };
 };
 
 const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
@@ -559,28 +465,21 @@ const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
     };
 };
 
+/** Album attribution never inherits the independent Credits of its component tracks. */
 const artistNamesForAlbum = (album: any, context: CatalogContext) => {
-    const names: string[] = [];
-    const seen = new Set<string>();
-    for (const trackId of context.albumTrackIds.get(String(album._id).toLowerCase()) ?? []) {
-        const track = context.tracksById.get(trackId);
-        for (const artistId of Array.isArray(track?.artistIds) ? track.artistIds : []) {
-            const name = normalizeText(context.artistsById.get(String(artistId).toLowerCase())?.name);
-            if (!name || seen.has(name)) continue;
-            seen.add(name);
-            names.push(name);
-        }
+    if (catalogCreditRollout().readsEnabled
+        && (Array.isArray(album?.credits) || album?.attributionStatus === 'unknown')) {
+        return [...new Set((validStoredCredits(album) ?? [])
+            .filter((credit) => credit.subjectType === 'artist'
+                && (credit.role === 'primary' || credit.role === 'featured'))
+            .map((credit) => normalizeText(context.artistsById.get(credit.subjectId)?.name))
+            .filter(Boolean))];
     }
-    if (names.length > 0) return names;
-
-    for (const artist of context.artists) {
-        if (!artistReferencesAlbum(artist, String(album._id).toLowerCase())) continue;
-        const name = normalizeText(artist?.name);
-        if (!name || seen.has(name)) continue;
-        seen.add(name);
-        names.push(name);
-    }
-    return names;
+    // Only unmigrated Albums or an explicit read rollback use the server-owned projection.
+    return [...new Set(context.artists
+        .filter((artist) => artistReferencesAlbum(artist, String(album._id).toLowerCase()))
+        .map((artist) => normalizeText(artist?.name))
+        .filter(Boolean))];
 };
 
 const toArtistSummary = (artist: any): ListenerArtistSummary => ({
@@ -596,14 +495,7 @@ const toAlbumSummary = (album: any, context: CatalogContext): ListenerAlbumSumma
     id: String(album._id),
     title: normalizeText(album?.title),
     artworkUrl: resolvedCoverArtUrl(album),
-    artistNames: (() => {
-        const creditNames = (validStoredCredits(album) ?? [])
-            .filter((credit) => credit.subjectType === 'artist'
-                && (credit.role === 'primary' || credit.role === 'featured'))
-            .map((credit) => normalizeText(context.artistsById.get(credit.subjectId)?.name))
-            .filter(Boolean);
-        return creditNames.length > 0 ? [...new Set(creditNames)] : artistNamesForAlbum(album, context);
-    })(),
+    artistNames: artistNamesForAlbum(album, context),
     releaseDate: safeDate(album?.releaseDate),
     ...creditProjectionForOwner(album, context)
 });
@@ -1051,26 +943,23 @@ export const getListenerCollectionPage = async (
 export const searchListenerContent = async (query: string, limit = 20): Promise<ListenerSearch> => {
     const db = getDb()!;
     const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 50));
-    const expression = { $regex: escapeRegex(query), $options: 'i' };
     const organizationSearch = catalogCreditRollout().organizationSurfacesEnabled
         ? db.collection('organizations').find({
-            name: expression,
-            ...readyOrganizationLifecycleFilter
+            $and: [catalogSearchFilter('name', query), readyOrganizationLifecycleFilter]
         }).project(organizationProjection).sort({ name: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray()
         : Promise.resolve([]);
     const [artists, organizations, albums, tracks] = await Promise.all([
-        db.collection('artists').find({ name: expression, ...readyArtistLifecycleFilter })
+        db.collection('artists').find({ $and: [catalogSearchFilter('name', query), readyArtistLifecycleFilter] })
             .project(artistProjection).sort({ name: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray(),
         organizationSearch,
         db.collection('albums').find({
-            title: expression,
-            ...readyAlbumLifecycleFilter
+            $and: [catalogSearchFilter('title', query), readyAlbumLifecycleFilter]
         })
             .project(albumProjection).sort({ title: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray(),
-        db.collection('audioTracks').find({ ...readyAudioFilter, title: expression })
+        db.collection('audioTracks').find({ $and: [readyAudioFilter, catalogSearchFilter('title', query)] })
             .project(audioTrackProjection).sort({ title: 1, _id: 1 })
             .limit(boundedLimit).maxTimeMS(queryTimeoutMs).toArray()
     ]);
@@ -1204,8 +1093,6 @@ export const getListenerArtist = async (artistId: string): Promise<Required<List
     ];
     const albums = orderedAlbumIds.flatMap((id) => albumsById.has(id) ? [albumsById.get(id)] : []);
     const context = await createCatalogContext(albums, tracks, [artist]);
-    const sectionsEnabled = catalogCreditRollout().readsEnabled
-        && catalogCreditRollout().sectionsEnabled;
     const sections = {
         discography: [] as ListenerAlbumSummary[],
         collaborations: [] as ListenerAlbumSummary[],
@@ -1213,22 +1100,7 @@ export const getListenerArtist = async (artistId: string): Promise<Required<List
         creditAlbums: [] as ListenerAlbumSummary[]
     };
     for (const album of albums) {
-        const albumId = String(album._id).toLowerCase();
-        const albumCredits = sectionsEnabled ? validStoredCredits(album) ?? [] : [];
-        const relatedTrackCredits = tracks
-            .filter((track) => trackBelongsToAlbum(track, albumId))
-            .flatMap((track) => validStoredCredits(track) ?? []);
-        let section = sectionsEnabled ? classifyArtistAlbumCredit(
-            normalizedArtistId,
-            albumCredits,
-            relatedTrackCredits
-        ) : null;
-        if (!section && legacyAlbumIds.includes(albumId)) section = 'discography';
-        if (!section && tracks.some((track) => trackBelongsToAlbum(track, albumId)
-            && (Array.isArray(track.artistIds) ? track.artistIds : [])
-                .some((id: unknown) => String(id).toLowerCase() === normalizedArtistId))) {
-            section = 'appearsOn';
-        }
+        const section = artistAlbumSection(artist, album, tracks);
         const summary = toAlbumSummary(album, context);
         if (section === 'discography') sections.discography.push(summary);
         else if (section === 'collaborations') sections.collaborations.push(summary);

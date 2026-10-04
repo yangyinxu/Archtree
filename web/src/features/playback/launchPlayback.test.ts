@@ -114,3 +114,29 @@ test('a superseded Playlist launch cannot borrow the newer queue state for activ
     })
   );
 });
+
+import { advanceAccountEpoch } from '../../api/accountEpoch';
+import { subscribeToAccountSessionChanges } from '../../api/accountSessionEvents';
+import { launchAlbumPlayback, launchStandalonePlayback } from './launchPlayback';
+
+test.each(['standalone', 'album', 'playlist'] as const)('a delayed %s start keeps public playback but cannot write for an exited account', async kind => {
+  let complete!: () => void;
+  const method = kind === 'standalone' ? 'launchStandalone' : kind === 'album' ? 'launchAlbumQueue' : 'launchQueue';
+  vi.spyOn(playerStore, method).mockImplementation(() => new Promise<void>(resolve => { complete = resolve; }));
+  const playing = { ...playerStore.getSnapshot(), status: 'playing' as const, currentItem: { ...tracks[0], id: tracks[0].id } };
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue(playing);
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ code: 'account_viewer_mismatch' }), { status: 409 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const changes = vi.fn();
+  const unsubscribe = subscribeToAccountSessionChanges(changes);
+  const launch = kind === 'standalone' ? launchStandalonePlayback(tracks[0], 'old-viewer')
+    : kind === 'album' ? launchAlbumPlayback('album', tracks, 'old-viewer') : launchPlaylistPlayback(tracks, 'old-viewer');
+  advanceAccountEpoch();
+  complete(); await launch;
+  // Flush the lazy history module too: no response may initiate another account transition.
+  await vi.dynamicImportSettled();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(changes).not.toHaveBeenCalled();
+  expect(playerStore.getSnapshot()).toBe(playing);
+  unsubscribe();
+});

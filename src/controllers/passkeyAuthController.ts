@@ -15,6 +15,10 @@ import User from '../models/user';
 import { createSession } from '../services/authSessionService';
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import { normalizeUserRole } from '../services/authRoleService';
+import { withActiveAccount } from '../services/accountReferenceFenceService';
+import { requireActiveAuthSession, requireVerifiedAccount } from '../services/authCredentialService';
+import { EmailVerificationRequiredError } from '../services/emailVerificationService';
+import { respondEmailVerificationRequired } from './emailAuthController';
 
 const configuration = () => {
     const rpID = String(process.env.WEBAUTHN_RP_ID ?? '').trim();
@@ -52,7 +56,11 @@ export const registrationOptions = async (req: Request, res: Response) => {
             userVerification: 'required'
         }
     });
-    const flowId = await PasskeyChallenge.issue('register', options.challenge, auth.userId);
+    const flowId = await withActiveAccount(auth.userId, async session => {
+        if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+        await requireVerifiedAccount(auth.userId, session);
+        return PasskeyChallenge.issue('register', options.challenge, auth.userId, session);
+    });
     return res.status(200).json({ flowId, options });
 };
 
@@ -63,6 +71,8 @@ export const verifyRegistration = async (req: Request, res: Response) => {
     if (!flow || flow.userId !== auth.userId) {
         return res.status(400).json({ message: 'The passkey request expired. Please try again.' });
     }
+    // Fail before attestation work; the transaction below rechecks atomically.
+    await requireVerifiedAccount(auth.userId);
     const config = configuration();
     const verification = await verifyRegistrationResponse({
         response: req.body.credential as RegistrationResponseJSON,
@@ -76,14 +86,18 @@ export const verifyRegistration = async (req: Request, res: Response) => {
     }
     const { credential, credentialDeviceType, credentialBackedUp } =
         verification.registrationInfo;
-    await Passkey.create({
-        credentialId: credential.id,
-        userId: auth.userId,
-        publicKey: Buffer.from(credential.publicKey).toString('base64url'),
-        counter: credential.counter,
-        transports: (credential.transports ?? []) as string[],
-        deviceType: credentialDeviceType,
-        backedUp: credentialBackedUp
+    await withActiveAccount(auth.userId, async session => {
+        if (auth.sessionId) await requireActiveAuthSession(auth.userId, auth.sessionId, session);
+        await requireVerifiedAccount(auth.userId, session);
+        await Passkey.create({
+            credentialId: credential.id,
+            userId: auth.userId,
+            publicKey: Buffer.from(credential.publicKey).toString('base64url'),
+            counter: credential.counter,
+            transports: (credential.transports ?? []) as string[],
+            deviceType: credentialDeviceType,
+            backedUp: credentialBackedUp
+        }, session);
     });
     recordSecurityEvent('passkey_registered', { userId: auth.userId });
     recordAuthFunnelEvent('link', 'passkey', 'succeeded');
@@ -134,7 +148,17 @@ export const verifyAuthentication = async (req: Request, res: Response) => {
         return res.status(401).json({ message: 'Passkey authentication failed.' });
     }
     await Passkey.updateCounter(passkey.credentialId, verification.authenticationInfo.newCounter);
-    const tokens = await createSession(user as any, req);
+    let tokens: Awaited<ReturnType<typeof createSession>>;
+    try {
+        tokens = await createSession(user as any, req);
+    } catch (error) {
+        // A verified assertion is a valid credential; an unverified account
+        // gets the distinct 403 and its verification or registration link.
+        if (error instanceof EmailVerificationRequiredError && error.account) {
+            return respondEmailVerificationRequired(res, error.account, 'passkey');
+        }
+        throw error;
+    }
     recordSecurityEvent('passkey_login_succeeded', {
         userId: user._id.toString(),
         sessionId: tokens.sessionId

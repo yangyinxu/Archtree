@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from 'express';
-import { validationResult } from 'express-validator';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/user';
@@ -23,8 +22,9 @@ import {
 import { recordAuthFunnelEvent, recordSecurityEvent } from '../services/securityAuditService';
 import AuthIdentity from '../models/authIdentity';
 import { Passkey } from '../models/passkey';
-import { registerEmailAccount } from './emailAuthController';
+import { respondEmailVerificationRequired } from './emailAuthController';
 import { normalizeUserRole } from '../services/authRoleService';
+import { EmailVerificationRequiredError, emailVerificationState } from '../services/emailVerificationService';
 
 /**
  * Interface for Error object with statusCode property
@@ -59,16 +59,14 @@ export const browserSessionPayload = (source: BrowserSessionUserSource) => {
       displayName: source.displayName ?? source.username ?? '',
       avatarRevision,
       avatar: source.avatarAssetId ? { revision: avatarRevision } : null,
-      emailVerified: source.emailVerified !== false,
+      // Only an explicitly verified state is reported as verified; a missing
+      // value no longer means verified.
+      emailVerified: source.emailVerified === true,
       ...(source.authenticationMethods
         ? { authenticationMethods: source.authenticationMethods }
         : {})
     }
   };
-};
-
-const normalizeEmail = (email: string) => {
-  return String(email ?? '').trim().toLowerCase();
 };
 
 const normalizeIdentifier = (value: string) => {
@@ -78,8 +76,11 @@ const normalizeIdentifier = (value: string) => {
 /** Restricts legacy form redirects to known same-origin browser destinations. */
 export const safeWebReturnTo = (value: unknown) => {
   const candidate = String(value ?? '').trim();
-  if (!candidate.startsWith('/') || candidate.startsWith('//')) return '/';
+  if (!candidate.startsWith('/') || candidate.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(candidate)) return '/';
   try {
+    // Inspect before URL normalization so traversal cannot become an allowed page.
+    const rawPath = decodeURIComponent(candidate.split(/[?#]/, 1)[0]);
+    if (rawPath.includes('\\') || rawPath.split('/').some((segment) => segment === '.' || segment === '..')) return '/';
     const base = 'https://archtree.invalid';
     const destination = new URL(candidate, base);
     if (destination.origin !== base) return '/';
@@ -92,9 +93,12 @@ export const safeWebReturnTo = (value: unknown) => {
       || destination.pathname.startsWith('/finitude/');
     const legacyListenerDestination = destination.pathname === '/listen'
       || destination.pathname.startsWith('/listen/');
+    const engineeringDestination = destination.pathname.length <= 174
+      && /^\/engineering(?:\/[a-z0-9]+(?:-[a-z0-9]+)*){0,4}\/?$/.test(destination.pathname);
     if (!contentManagerDestination
       && !listenerDestination
       && !legacyListenerDestination
+      && !engineeringDestination
       && destination.pathname !== '/') {
       return '/';
     }
@@ -114,63 +118,6 @@ const escapeHtml = (value: string) => {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-};
-
-const renderSignupHtml = (params: {
-  email?: string;
-  username?: string;
-  errorMessage?: string;
-  successMessage?: string;
-}) => {
-  const email = escapeHtml(params.email ?? '');
-  const username = escapeHtml(params.username ?? '');
-  const errorMessage = params.errorMessage ? `<div class="alert alert--error" role="alert">${escapeHtml(params.errorMessage)}</div>` : '';
-  const successMessage = params.successMessage ? `<div class="alert" role="status">${escapeHtml(params.successMessage)}</div>` : '';
-
-  return `<!DOCTYPE html>
-<html lang="en" class="auth-document">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Archtree Sign Up</title>
-  <link rel="stylesheet" href="/assets/archtree.css" />
-</head>
-<body class="auth-page auth-page--signup">
-  <main class="auth-layout">
-    <section class="auth-intro" aria-label="Archtree catalog workspace">
-      <img class="auth-intro__image" src="/assets/archtree-catalog-workspace.webp" width="1120" height="1400" alt="" />
-      <a class="brand" href="/">
-        <span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span>
-        <span>Archtree</span>
-      </a>
-      <div class="auth-intro__copy">
-        <h2>Build a catalog that stays connected.</h2>
-        <p>Organize every artist, release, file, credit, and placement in one publishing workspace.</p>
-      </div>
-    </section>
-    <section class="auth-form-panel">
-      <div class="auth-form-panel__inner">
-        <p class="eyebrow">New workspace</p>
-        <h1>Create your account</h1>
-        <p class="muted">Start organizing your music catalog and publishing structure.</p>
-        ${errorMessage}
-        ${successMessage}
-        <form method="POST" action="/auth/signup-web">
-          <label for="signup-email"><i class="ph ph-envelope-simple" aria-hidden="true"></i>Email</label>
-          <input id="signup-email" type="email" name="email" value="${email}" autocomplete="email" required />
-          <label for="signup-username"><i class="ph ph-user" aria-hidden="true"></i>Username</label>
-          <input id="signup-username" type="text" name="username" value="${username}" autocomplete="username" required />
-          <label for="signup-password"><i class="ph ph-lock-key" aria-hidden="true"></i>Password</label>
-          <input id="signup-password" type="password" name="password" minlength="12" autocomplete="new-password" required />
-          <span class="muted">Use at least 12 characters.</span>
-          <button type="submit"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</button>
-        </form>
-        <p class="auth-footer">Already have an account? <a href="/auth/login-web">Log in</a></p>
-      </div>
-    </section>
-  </main>
-</body>
-</html>`;
 };
 
 const renderLoginHtml = (params: {
@@ -227,7 +174,7 @@ const renderLoginHtml = (params: {
           <input id="login-password" type="password" name="password" autocomplete="current-password" required />
           <button type="submit"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</button>
         </form>
-        <p class="auth-footer">Need an account? <a href="/auth/signup-web">Create one</a></p>
+        <p class="auth-footer">Need an account? <a href="/finitude/register">Create one</a></p>
       </div>
     </section>
   </main>
@@ -260,10 +207,10 @@ const authenticateUser = async (identifier: string, password: string, req?: Requ
     error.statusCode = 401;
     throw error;
   }
-  if (user.emailVerified === false) {
-    const error: ErrorWithStatusCode = new Error('Verify your email before signing in.');
-    error.statusCode = 403;
-    throw error;
+  // A valid credential for an unverified account fails distinctly; the
+  // caller answers `403` and mails the account's link.
+  if (await emailVerificationState(user) !== 'verified') {
+    throw new EmailVerificationRequiredError(user);
   }
 
   return {
@@ -274,9 +221,9 @@ const authenticateUser = async (identifier: string, password: string, req?: Requ
     username: user.username ?? '',
     avatarAssetId: user.avatarAssetId,
     avatarRevision: Number(user.avatarRevision ?? 0),
-    emailVerified: user.emailVerified !== false,
+    emailVerified: true,
     legacyToken: createLegacyMigrationToken(user as unknown as SessionUser),
-    ...(await createSession(user as unknown as SessionUser, req))
+    ...(await createSession(user as unknown as SessionUser, req, user.password))
   };
 };
 
@@ -288,9 +235,10 @@ const loadBrowserSessionPayload = async (userId: string) => {
     error.statusCode = 401;
     throw error;
   }
-  const [identities, passkeys] = await Promise.all([
+  const [identities, passkeys, verificationState] = await Promise.all([
     AuthIdentity.listForUser(userId),
-    Passkey.listForUser(userId)
+    Passkey.listForUser(userId),
+    emailVerificationState(user)
   ]);
   const availableMethods = new Set<BrowserAuthenticationMethod>();
   if (user.password) availableMethods.add('password');
@@ -307,7 +255,7 @@ const loadBrowserSessionPayload = async (userId: string) => {
     username: user.username ?? '',
     avatarAssetId: user.avatarAssetId,
     avatarRevision: Number(user.avatarRevision ?? 0),
-    emailVerified: user.emailVerified !== false,
+    emailVerified: verificationState === 'verified',
     authenticationMethods
   });
 };
@@ -377,8 +325,9 @@ const revokePreviousBrowserSessionForLogin = async (
   }
 };
 
-export const renderSignupPage = (req: Request, res: Response) => {
-  res.status(200).send(renderSignupHtml({}));
+/** Sends the retired Archtree sign-up page and form to Web registration without any account work. */
+export const redirectToWebRegistration = (_req: Request, res: Response) => {
+  res.redirect(303, '/finitude/register');
 };
 
 export const renderLoginPage = (req: Request, res: Response) => {
@@ -387,36 +336,6 @@ export const renderLoginPage = (req: Request, res: Response) => {
   const auth = (req as Request & { auth?: { userId: string } }).auth;
   if (auth) return res.redirect(303, returnTo);
   return res.status(200).send(renderLoginHtml({ returnTo }));
-};
-
-export const signupFromWeb = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const errors = validationResult(req);
-    const email = normalizeEmail(req.body.email);
-    const username = req.body.username;
-    const password = req.body.password;
-
-    if (!errors.isEmpty()) {
-      const firstError = errors.array()[0]?.msg ?? 'Validation failed.';
-      res.status(422).send(renderSignupHtml({
-        email,
-        username,
-        errorMessage: String(firstError)
-      }));
-      return;
-    }
-
-    try {
-      await registerEmailAccount(email, password, username, username);
-    } catch {
-      recordSecurityEvent('email_registration_request_failed');
-    }
-    return res.status(202).send(renderSignupHtml({
-      successMessage: 'If the account can be created, a verification code has been sent. Verify the email before logging in.'
-    }));
-  } catch (error: any) {
-    next(error);
-  }
 };
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
@@ -430,7 +349,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     });
     recordAuthFunnelEvent('login', 'password', 'succeeded');
 
-    res.status(200).json({
+    return res.status(200).json({
       // Old clients read `token`; opt-in migration mode can preserve their session lifetime.
       token: authResult.legacyToken ?? authResult.accessToken,
       accessToken: authResult.accessToken,
@@ -442,11 +361,14 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       role: authResult.role
     });
   } catch (error: any) {
+    if (error instanceof EmailVerificationRequiredError && error.account) {
+      return respondEmailVerificationRequired(res, error.account, 'password');
+    }
     recordAuthFunnelEvent('login', 'password', 'rejected');
     if (!error.statusCode) {
       error.statusCode = 500;
     }
-    next(error);
+    return next(error);
   }
 };
 
@@ -498,6 +420,11 @@ export const browserLogin = async (req: Request, res: Response, next: NextFuncti
       if (previousSessionRevoked) clearBrowserSessionCookies(res);
     }
     recordSecurityEvent('browser_json_login_rejected');
+    // Verification is checked before the previous browser session is
+    // revoked, so this answer leaves every cookie untouched.
+    if (error instanceof EmailVerificationRequiredError && error.account && !authResult) {
+      return respondEmailVerificationRequired(res, error.account, 'password');
+    }
     recordAuthFunnelEvent('login', 'password', 'rejected');
     if (!error.statusCode) {
       error.statusCode = 500;
@@ -679,6 +606,8 @@ export const me = async (req: Request, res: Response) => {
   const user = await User.findById(auth.userId);
   const identities = await AuthIdentity.listForUser(auth.userId);
   const passkeys = await Passkey.listForUser(auth.userId);
+  // Existing sessions of unverified accounts stay valid; they report the state.
+  const verified = user ? await emailVerificationState(user) === 'verified' : false;
   const authenticationMethods = [
     ...(user?.password ? ['password'] : []),
     ...identities.map(identity => identity.provider),
@@ -694,7 +623,7 @@ export const me = async (req: Request, res: Response) => {
           revision: Number(user.avatarRevision ?? 0)
         }
       : null,
-    emailVerified: user?.emailVerified !== false,
+    emailVerified: verified,
     authenticationMethods
   });
 };

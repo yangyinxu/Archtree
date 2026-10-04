@@ -1,5 +1,14 @@
 # Repository Instructions
 
+## Git Workflow
+
+- Use `develop` as the working and delivery branch by default.
+- Do not create `codex/` or other feature branches unless the user explicitly
+  requests a separate branch. For parallel work, prefer read-only reviews or
+  detached worktrees when isolation is needed.
+- Commit only intended changes, preserve unrelated work, and push only when
+  the user authorizes it.
+
 ## Business Rules
 
 - Before planning, reviewing, or changing product behavior, read
@@ -28,14 +37,13 @@
 
 ## Planning
 
-- Record every new plan in a dedicated Markdown file under `docs/plans/`; a
-  plan must not exist only in chat or planning-tool state.
+- Plans may remain in chat or planning-tool state; saving a plan as a Markdown
+  file is optional.
 - Divide every plan into explicit implementation stages.
 - Mark every stage with one current status: `Not started`, `In progress`,
   `Blocked`, or `Complete`, and update that status as work progresses.
-- After the planned work and its required verification are complete, delete
-  that plan's dedicated Markdown file before handing off the change. Do not
-  retain completed plan files under `docs/plans/`.
+- If a temporary Markdown plan file is created, delete it after the planned
+  work and its required verification are complete, before handing off the change.
 - Treat plans as sequencing material, not as substitutes for canonical
   business rules, API contracts, or other stable documentation.
 
@@ -43,8 +51,8 @@
 
 - Prefer updating existing documentation over adding Markdown files. Keep only
   necessary, durable documents; do not retain one-off assessment or verification
-  reports. Write all new Markdown documentation in English. Temporary plans must
-  follow the planning lifecycle above and be removed when complete.
+  reports. Write all new Markdown documentation in English. Temporary plan files
+  must follow the planning lifecycle above and be removed when complete.
 
 - When a change affects setup, dependencies, commands, configuration,
   environment variables, endpoints, authentication, media behavior, or

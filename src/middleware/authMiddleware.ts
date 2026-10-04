@@ -124,7 +124,13 @@ export const requireCurrentAccountViewer = (
     return next();
 };
 
-/** Fences personalized optional reads while retaining a truly anonymous response. */
+/**
+ * Fences personalized optional reads while retaining a truly anonymous response.
+ * Optional auth discards an expired, revoked, or malformed credential, so a
+ * presented Bearer token without a verified context returns `401` before any
+ * viewer check; native clients then refresh instead of silently reading
+ * anonymous content or receiving an account-viewer mismatch.
+ */
 export const requireCurrentAccountViewerWhenAuthenticated = (
     req: Request,
     res: Response,
@@ -133,6 +139,10 @@ export const requireCurrentAccountViewerWhenAuthenticated = (
     const auth = (req as AuthenticatedRequest).auth;
     const requestedViewer = String(req.get('X-Finitude-Account-Viewer') ?? '').trim();
     if (!auth) {
+        if (req.get('Authorization')?.startsWith('Bearer ')) {
+            setBrowserSessionPrivacyHeaders(res);
+            return res.status(401).json({ message: 'Missing or invalid credentials.' });
+        }
         return requestedViewer ? sendAccountViewerMismatch(res) : next();
     }
     return requireCurrentAccountViewer(req, res, next);
@@ -200,7 +210,8 @@ export const attachOptionalAccessAuth = (req: Request, _res: Response, next: Nex
     try {
         await attachAuthContext(req);
     } catch {
-        // Expired or malformed credentials degrade to the public response.
+        // Expired or malformed credentials leave the viewer unset; the route's
+        // viewer guard rejects a presented Bearer token so native clients refresh.
     }
 
     return next();
