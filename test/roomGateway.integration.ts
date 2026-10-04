@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { Socket } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
@@ -108,6 +108,32 @@ test('either disabled rollout flag stops existing sockets and denies fresh upgra
             await waitFor(() => admitted.socket.readyState === WebSocket.CLOSED);
         } finally { process.env[flag] = 'true'; await gateway.stop(); }
     }
+});
+
+test('a well-formed handshake from a foreign Origin gets an empty 403 before any ticket redemption', async () => {
+    // The rollout runbook's proxy probe relies on this answer: it proves an upgrade reached the
+    // gateway without spending a ticket lookup, and differs from Express's JSON 401 for the same path.
+    const gateway = await fixture();
+    try {
+        gateway.hold();
+        const response = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+            const request = httpRequest(`${gateway.origin}/api/social/v1/realtime`, { headers: {
+                Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13',
+                'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==', 'Sec-WebSocket-Protocol': `archtree-room-v1, ${'A'.repeat(43)}`,
+                Origin: 'https://probe.invalid', 'X-Forwarded-For': '192.0.2.9' } });
+            request.once('upgrade', (_response, socket) => { socket.destroy(); reject(new Error('A foreign Origin must not upgrade.')); });
+            request.once('response', incoming => {
+                let body = '';
+                incoming.setEncoding('utf8');
+                incoming.on('data', chunk => { body += chunk; });
+                incoming.once('end', () => resolve({ status: incoming.statusCode!, body }));
+            });
+            request.once('error', reject);
+            request.end();
+        });
+        assert.deepEqual(response, { status: 403, body: '' });
+        assert.equal(gateway.redemptions.length, 0);
+    } finally { await gateway.stop(); }
 });
 
 test('errors during pending upgrade authentication destroy the socket without escaping as an unhandled event', async () => {

@@ -198,10 +198,18 @@ delivery. The server uses pinned `ws` with compression disabled; no Redis or
 external messaging service is required for this bounded single-authority slice.
 The proxy must forward Upgrade/Connection and WebSocket subprotocol headers,
 preserve the same-origin Host/protocol contract, and allow more than the five
-second heartbeat interval. Configure `TRUST_PROXY_HOPS` for the actual proxy
-chain. Production requires HTTPS/WSS. Only the live MongoDB lease holder admits
-realtime connections and scheduling; verify routing, lease recovery and capacity
-in the deployment before enabling it.
+second heartbeat interval. The managed Elastic Beanstalk HTTPS server
+(`.platform/hooks/postdeploy/01_configure_https.sh`) does this for every path:
+only an `Upgrade: websocket` request gets `Connection: upgrade`, other requests
+proxy exactly as before, `Sec-WebSocket-Protocol` and `Origin` pass through
+unchanged, and its 120-second idle timeouts exceed the five-second ping and the
+gateway's 16-second silence eviction. The next application deploy rewrites an
+existing instance's config without reissuing its certificate. The temporary
+HTTP server used before a certificate exists never forwards upgrades. Configure
+`TRUST_PROXY_HOPS` for the actual proxy chain. Production requires HTTPS/WSS.
+Only the live MongoDB lease holder admits realtime connections and scheduling;
+verify routing, lease recovery and capacity in the deployment before enabling
+it.
 
 New uploads receive a private representation record tied to the exact object.
 The room analyzer verifies complete PCM16 WAV (mono/stereo, 8–48 kHz), MP3

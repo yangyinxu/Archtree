@@ -208,6 +208,26 @@ is active, port 443 responds, and port 80 redirects application requests to
 HTTPS. Confirm the readiness condition gates further bootstrap service work and
 the twice-daily renewal timer remains active.
 
+When the target runs with `FINITUDE_ROOMS_ENABLED=true`, confirm that Nginx
+forwards WebSocket handshakes before any room smoke flow. This probe sends a
+well-formed handshake with a synthetic ticket and a foreign `Origin`, so the
+gateway refuses it before any ticket lookup or room work:
+
+```bash
+curl --http1.1 -sS -o /dev/null -w '%{http_code} %{size_download}\n' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -H 'Sec-WebSocket-Protocol: archtree-room-v1, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' \
+  -H 'Origin: https://probe.invalid' \
+  https://<target-host>/api/social/v1/realtime
+```
+
+`403 0` means the upgrade reached the room gateway. A `401` with a non-zero
+size is Express's JSON response, so the proxy dropped `Upgrade`/`Connection`;
+`503 0` means the gateway is not admitting (no authority lease, draining, or
+rooms disabled at runtime). Then confirm that a signed-in test account's room
+connects over `wss://` in the browser.
+
 Run the checked-in media workload only on a target explicitly approved for
 load testing. Remote targets require `ALLOW_REMOTE_MEDIA_LOAD=1` and an exact
 `MEDIA_LOAD_ALLOWED_HOSTS` entry. Retain only its aggregate result and server
