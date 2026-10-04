@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { roomFixture } from '../../test/roomFixture';
 import type { RoomCommand, RoomSnapshot } from '../../api/rooms';
 import { RoomsPanel } from './RoomsPanel';
@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({ room: null as RoomSnapshot | null, run: vi.fn(
   media: vi.fn(),
   resync: vi.fn(), pauseLocally: vi.fn(), retry: vi.fn(), checkOutcome: vi.fn(), uncertain: null as RoomCommand | null,
   connected: true, locallyPaused: false, playerError: false, roomsEnabled: true, error: null as string | null,
-  invitations: [] as unknown[], reconnect: vi.fn() }));
+  invitations: [] as unknown[], reconnect: vi.fn(), outgoing: [] as unknown[], friends: [] as unknown[] }));
 vi.mock('./roomSession', () => ({ roomSession: { run: mocks.run, control: mocks.control, ensure: mocks.ensure,
   resync: mocks.resync, pauseLocally: mocks.pauseLocally, retry: mocks.retry, checkOutcome: mocks.checkOutcome, reconnect: mocks.reconnect },
   useRoomSession: () => ({ viewerId: 'viewer-1', room: mocks.room, connected: mocks.connected, locallyPaused: mocks.locallyPaused, busy: false, error: mocks.error, uncertain: mocks.uncertain }) }));
@@ -17,9 +17,9 @@ vi.mock('../../player', () => ({ usePlayer: () => ({ currentItem: null, currentT
 vi.mock('../../api/rooms', async original => ({ ...await original<typeof import('../../api/rooms')>(),
   getRoomInvitations: async () => ({ invitations: mocks.invitations }),
   getRoomCapabilities: async () => ({ socialEnabled: mocks.roomsEnabled, roomsEnabled: mocks.roomsEnabled }),
-  getOutgoingRoomInvitations: async () => ({ invitations: [] }) }));
+  getOutgoingRoomInvitations: async () => ({ invitations: mocks.outgoing }) }));
 vi.mock('../../api/roomMedia', () => ({ searchRoomMedia: mocks.media }));
-vi.mock('../../api/social', () => ({ getSocialPage: async () => ({ items: [], nextCursor: null }) }));
+vi.mock('../../api/social', () => ({ getSocialPage: async () => ({ items: mocks.friends, nextCursor: null }) }));
 
 const show = () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -30,7 +30,7 @@ const show = () => {
   return () => rendered.rerender(content());
 };
 beforeEach(() => { mocks.room = roomFixture(); mocks.connected = true; mocks.locallyPaused = false; mocks.playerError = false; mocks.uncertain = null; vi.clearAllMocks();
-  mocks.roomsEnabled = true; mocks.error = null; mocks.invitations = [];
+  mocks.roomsEnabled = true; mocks.error = null; mocks.invitations = []; mocks.outgoing = []; mocks.friends = [];
   mocks.media.mockReset(); mocks.media.mockResolvedValue({ items: [], nextCursor: null }); });
 
 test('creation selects songs across search pages and sends only the explicit independent queue', async () => {
@@ -153,4 +153,71 @@ test('an enabled but disconnected room still offers reconnection', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
   expect(mocks.reconnect).toHaveBeenCalledOnce();
   expect(screen.getByText('Connecting…')).toBeVisible();
+});
+
+const bob = { socialId: `s_${'b'.repeat(32)}`, handle: 'bobby', alias: 'Bob', iconSeed: 'bob' };
+
+test('removing a member asks the host first and sends only the confirmed kick', async () => {
+  mocks.room = { ...roomFixture(), members: [...roomFixture().members, { ...bob, memberId: 'member-b', role: 'guest',
+    controllerGeneration: 1, connected: true, ready: true }] };
+  show();
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove from room' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Remove Bob from the room?' });
+  expect(dialog).toHaveAccessibleDescription('Bob leaves this room right away and stops listening with everyone. You can invite them again later.');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(mocks.run).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Remove from room' }));
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Remove Bob from the room?' })).getByRole('button', { name: 'Remove from room' }));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'kick', roomId: 'room-a', memberId: 'member-a', targetMemberId: 'member-b' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});
+
+test('a pending invitation can be copied or explicitly replaced so its earlier link stops working', async () => {
+  mocks.friends = [{ socialId: bob.socialId, profile: bob, revision: 2 }];
+  mocks.outgoing = [{ invitationId: 'invitation-b', generation: 1, recipientSocialId: bob.socialId, expiresAtMs: Date.now() + 60_000 }];
+  show();
+  expect(await screen.findByText('Invitation pending')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Copy invitation link' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: 'Invite' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Send new invitation' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Send Bob a new invitation?' });
+  expect(dialog).toHaveAccessibleDescription(/The current invitation link stops working/);
+  expect(mocks.run).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Send new invitation' }));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'invite', roomId: 'room-a', memberId: 'member-a', targetSocialId: bob.socialId });
+});
+
+test('a replacement dialog closes without sending when its invitation is no longer pending', async () => {
+  mocks.friends = [{ socialId: bob.socialId, profile: bob, revision: 2 }];
+  mocks.outgoing = [{ invitationId: 'invitation-b', generation: 1, recipientSocialId: bob.socialId, expiresAtMs: Date.now() + 60_000 }];
+  const rerender = show();
+  fireEvent.click(await screen.findByRole('button', { name: 'Send new invitation' }));
+  await screen.findByRole('dialog', { name: 'Send Bob a new invitation?' });
+  // Bob accepted meanwhile and is now a member.
+  mocks.room = { ...roomFixture(), members: [...roomFixture().members, { ...bob, memberId: 'member-b', role: 'guest',
+    controllerGeneration: 1, connected: true, ready: false }] };
+  rerender();
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+test('a friend without a pending invitation gets an ordinary Invite and no replacement', async () => {
+  mocks.friends = [{ socialId: bob.socialId, profile: bob, revision: 2 }];
+  show();
+  expect(await screen.findByRole('heading', { name: 'Invite a friend' })).toBeVisible();
+  fireEvent.click(await screen.findByRole('button', { name: 'Invite' }));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'invite', roomId: 'room-a', memberId: 'member-a', targetSocialId: bob.socialId });
+  expect(screen.queryByRole('button', { name: 'Send new invitation' })).not.toBeInTheDocument();
+});
+
+test('guests see neither member management nor host invitations', async () => {
+  mocks.friends = [{ socialId: bob.socialId, profile: bob, revision: 2 }];
+  mocks.room = { ...roomFixture(), hostMemberId: 'member-b', members: [...roomFixture().members, { ...bob, memberId: 'member-b', role: 'host',
+    controllerGeneration: 1, connected: true, ready: true }] };
+  show();
+  expect(await screen.findByRole('region', { name: 'Song requests' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Remove from room' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Invite a friend' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Invite' })).not.toBeInTheDocument();
 });

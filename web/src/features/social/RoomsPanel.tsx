@@ -1,16 +1,17 @@
 import { lazy, Suspense, useRef, useState } from 'react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { getOutgoingRoomInvitations, roomControlPreconditions, type RoomMedia, type RoomSnapshot } from '../../api/rooms';
+import { roomControlPreconditions, type RoomMedia, type RoomSnapshot } from '../../api/rooms';
 import type { SocialProfile } from '../../api/social';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { usePlayer } from '../../player';
 import { Icon } from '../../components/Icon';
 import { roomSession, useRoomSession } from './roomSession';
-import { useInvitationNow, useRoomInvitationConnection, useRoomInvitations } from './roomInvitationQueries';
+import { useRoomInvitationConnection, useRoomInvitations } from './roomInvitationQueries';
 import styles from './SocialPage.module.css';
 
 const seconds = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
-const CopyInvitationLink = lazy(() => import('./CopyInvitationLink').then(module => ({ default: module.CopyInvitationLink })));
+// Host-only management loads on demand: the panel's initial JavaScript is at its budget.
+const RoomInviteFriends = lazy(() => import('./RoomInviteFriends').then(module => ({ default: module.RoomInviteFriends })));
+const RoomMemberActions = lazy(() => import('./RoomMemberActions').then(module => ({ default: module.RoomMemberActions })));
 const RoomSongRequests = lazy(() => import('./RoomSongRequests').then(module => ({ default: module.RoomSongRequests })));
 const RoomMediaPicker = lazy(() => import('./RoomMediaPicker').then(module => ({ default: module.RoomMediaPicker })));
 
@@ -40,14 +41,7 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
     if (seek !== null && expected) void roomSession.run({ ...expected, action: 'seek', positionMs: Math.round(seek * 1000) });
     setSeek(null);
   };
-  const friends = useInfiniteQuery({ queryKey: ['social', viewerId, 'relationships', 'friends'],
-    queryFn: async ({ pageParam, signal }) => (await import('../../api/social')).getSocialPage(viewerId, 'friends', pageParam, signal),
-    initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined, retry: false });
   const host = room.self.memberId === room.hostMemberId;
-  const outgoing = useQuery({ queryKey: ['social', viewerId, 'room-outgoing-invitations', room.roomId],
-    queryFn: ({ signal }) => getOutgoingRoomInvitations(viewerId, room.roomId, signal),
-    enabled: host && room.self.isController && room.status === 'open', refetchInterval: 15_000, retry: false });
-  const now = useInvitationNow();
   const member = { roomId: room.roomId, memberId: room.self.memberId };
   const allowed = state.connected && room.self.isController && room.self.canControl
     && (room.status === 'open' || host && room.status === 'suspended') && !state.busy && !state.uncertain;
@@ -60,7 +54,6 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
   const current = room.queue.find(entry => entry.entryId === room.timeline?.entryId);
   const elapsed = player.currentItem?.id === current?.mediaTrackId ? player.currentTime : (room.timeline?.positionMs ?? 0) / 1000;
   const duration = (room.timeline?.durationMs ?? 0) / 1000;
-  const participants = new Set(room.members.map(value => value.socialId));
   const offer = room.transferOffer;
   const transferTarget = offer?.targetMemberId === room.self.memberId;
   return <>
@@ -100,23 +93,9 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
     <div className={styles.grid} style={{ marginTop: '1.5rem' }}><section>
       <h3>{t('room.members')}</h3><ul className={styles.list}>{room.members.map(participant => <li className={styles.row} key={participant.memberId}>
         <span className={styles.avatar} aria-hidden="true">{[...participant.alias][0]}</span><div className={styles.rowContent}><strong>{participant.alias}</strong><span>{t(participant.role === 'host' ? 'room.host' : 'room.guest')} · {t(participant.ready ? 'room.ready' : 'room.not_ready')}</span></div>
-        {host && participant.memberId !== room.self.memberId && <div className={styles.rowActions}>
-          <button className={styles.secondary} disabled={!state.connected || state.busy || !participant.connected || Boolean(offer)} onClick={() => roomSession.run({ action: 'offerTransfer', ...member,
-            expectedControlGeneration: room.controlGeneration, targetMemberId: participant.memberId, targetControllerGeneration: participant.controllerGeneration })}>{t('room.transfer')}</button>
-          <button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.run({ action: 'kick', ...member, targetMemberId: participant.memberId })}>{t('room.kick')}</button>
-        </div>}
+        {host && participant.memberId !== room.self.memberId && <Suspense fallback={null}><RoomMemberActions room={room} participant={participant} /></Suspense>}
       </li>)}</ul>
-      {host && <><h3 style={{ marginTop: '1rem' }}>{t('room.invite_friends')}</h3>
-        {outgoing.isError && <p className={styles.error} role="status">{t('social.error')} <button className={styles.secondary} onClick={() => outgoing.refetch()}>{t('social.refresh')}</button></p>}
-        <ul className={styles.list}>{friends.data?.pages.flatMap(page => page.items).filter(friend => !participants.has(friend.socialId)).map(friend => {
-          const invitation = room.self.isController && !outgoing.isError
-            ? outgoing.data?.invitations.find(value => value.recipientSocialId === friend.socialId && value.expiresAtMs > now) : undefined;
-          const disabled = !(state.connected || state.realtimeBusy) || !room.self.isController || state.busy || Boolean(state.uncertain) || room.status !== 'open';
-          return <li className={`${styles.row} ${styles.invitationRow}`} key={friend.socialId}><div className={styles.rowContent}><strong>{friend.profile?.alias}</strong>{invitation && <span>{t('room.invitation_pending')}</span>}</div>
-            {invitation ? <Suspense fallback={null}><CopyInvitationLink key={invitation.invitationId} viewerId={viewerId} invitationId={invitation.invitationId} alias={friend.profile?.alias ?? ''} disabled={disabled} /></Suspense>
-              : <button className={styles.secondary} disabled={disabled || outgoing.isPending || outgoing.isError} onClick={() => roomSession.run({ action: 'invite', ...member, targetSocialId: friend.socialId })}>{t('room.invite')}</button>}
-          </li>;
-        })}</ul>{friends.hasNextPage && <button className={styles.secondary} disabled={friends.isFetchingNextPage} onClick={() => friends.fetchNextPage()}>{t('common.action.load_more')}</button>}</>}
+      {host && <Suspense fallback={null}><RoomInviteFriends room={room} viewerId={viewerId} /></Suspense>}
     </section><div className={styles.stack}><Suspense fallback={<p role="status">{t('social.loading')}</p>}><RoomSongRequests key={`${viewerId}:${room.roomId}:${room.epoch}:${room.self.memberId}`} viewerId={viewerId} room={room} /></Suspense></div></div>
   </>;
 };

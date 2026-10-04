@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { browserSessionQueryKey } from '../../api/session';
 import { advanceAccountEpoch } from '../../api/accountEpoch';
@@ -15,6 +16,7 @@ let mutations: Array<{ path: string; body: Record<string, unknown> }>;
 let unknown = false;
 let profileUnavailable = false;
 let admissionDisabled = false;
+let friendsListed = false;
 let lastCommandId = '';
 /** Mutation paths the synthetic server refuses with a recorded outcome code. */
 let refusals: Record<string, string> = {};
@@ -23,6 +25,7 @@ const response = (body: unknown) => new Response(JSON.stringify(body), { headers
 } });
 beforeEach(() => {
   advanceAccountEpoch(); current = null; mutations = []; unknown = false; profileUnavailable = false; admissionDisabled = false; lastCommandId = '';
+  friendsListed = false;
   refusals = {};
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const body = options?.body ? JSON.parse(String(options.body)) : {};
@@ -39,9 +42,13 @@ beforeEach(() => {
     if (path === '/api/social/v1/me/profile') return profileUnavailable ? new Response(JSON.stringify({ code: 'social_unavailable' }), { status: 503 }) : response({ profile: current });
     if (path === '/api/social/v1/mutation-scopes') return response({ scopeToken: 'synthetic-scope-token-123', expiresAt: new Date(Date.now() + 60_000).toISOString() });
     if (path === '/api/social/v1/mutation-outcomes') return response({ outcome: { commandId: lastCommandId, outcome: 'applied', replayed: true } });
-    if (path.startsWith('/api/social/v1/relationships?')) return response({ items: path.includes('kind=incoming') ? [{ socialId: peer.socialId, profile: peer, revision: 4 }] : [], nextCursor: null });
-    if (path.startsWith('/api/social/v1/profiles?')) return response({ profile: peer });
+    if (path.startsWith('/api/social/v1/relationships?')) return response({ items: path.includes('kind=incoming') ? [{ socialId: peer.socialId, profile: peer, revision: 4 }]
+      : friendsListed && path.includes('kind=friends') ? [{ socialId: peer.socialId, profile: peer, revision: 5 }] : [], nextCursor: null });
+    if (path.startsWith('/api/social/v1/profiles?')) return response({ profile: path.includes('handle=alice')
+      ? { socialId: own.socialId, handle: own.handle, alias: own.alias, iconSeed: own.iconSeed } : peer });
     if (path === `/api/social/v1/relationships/${peer.socialId}`) return response({ relationship: { socialId: peer.socialId, state: 'none', revision: 3 } });
+    // The relationship read has no state for the viewer's own profile.
+    if (path === `/api/social/v1/relationships/${own.socialId}`) return response({ relationship: null });
     if (admissionDisabled && path === '/api/social/v1/friend-requests') {
       mutations.push({ path, body });
       return new Response(JSON.stringify({ code: 'social_disabled', message: 'Social participation is disabled.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
@@ -217,4 +224,62 @@ test('accepting at the friend limit names the limit instead of a concurrent chan
   expect(await screen.findByText('One of you has reached the limit of 500 friends.')).toHaveAttribute('role', 'status');
   expect(screen.queryByText('This changed while you were acting. The latest state is now shown.')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
+});
+
+test('removing a friend asks first: Cancel keeps the friendship and returns focus, confirming sends the observed revision', async () => {
+  current = own; friendsListed = true; const user = userEvent.setup(); show();
+  const remove = await screen.findByRole('button', { name: 'Remove friend' });
+  await user.click(remove);
+  const dialog = await screen.findByRole('dialog', { name: 'Remove Bob from your friends?' });
+  expect(dialog).toHaveAccessibleDescription(/You and Bob stop seeing each other’s listening status/);
+  const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
+  await waitFor(() => expect(cancel).toHaveFocus());
+  await user.click(cancel);
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(remove).toHaveFocus(); expect(mutations).toEqual([]);
+  await user.click(remove);
+  await user.click(within(await screen.findByRole('dialog', { name: 'Remove Bob from your friends?' })).getByRole('button', { name: 'Remove friend' }));
+  await waitFor(() => expect(mutations).toHaveLength(1));
+  expect(mutations[0]).toMatchObject({ path: `/api/social/v1/relationships/${peer.socialId}/remove`, body: { expectedRevision: 5 } });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('blocking from a request list asks first and Escape cancels, while Decline stays a single explicit action', async () => {
+  current = own; show();
+  fireEvent.click(await screen.findByRole('tab', { name: 'Incoming requests' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Block' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Block Bob?' });
+  expect(dialog).toHaveAccessibleDescription(/Unblocking later does not restore the friendship/);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(mutations).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: 'Block' }));
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Block Bob?' })).getByRole('button', { name: 'Block' }));
+  await waitFor(() => expect(mutations).toHaveLength(1));
+  expect(mutations[0].path).toBe(`/api/social/v1/relationships/${peer.socialId}/block`);
+  expect(mutations[0].body).not.toHaveProperty('expectedRevision');
+  fireEvent.click(await screen.findByRole('button', { name: 'Decline' }));
+  await waitFor(() => expect(mutations).toHaveLength(2));
+  expect(mutations[1]).toMatchObject({ path: `/api/social/v1/relationships/${peer.socialId}/decline`, body: { expectedRevision: 4 } });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('someone found by handle can be blocked with no relationship, and the own profile offers no Block', async () => {
+  current = own; show();
+  const form = await screen.findByRole('form', { name: 'Find a friend' });
+  fireEvent.change(within(form).getByLabelText('Handle'), { target: { value: 'bobby' } });
+  fireEvent.submit(form);
+  await screen.findByRole('button', { name: 'Add friend' });
+  const lookup = screen.getByRole('form', { name: 'Find a friend' }).closest('section')!;
+  fireEvent.click(within(lookup).getByRole('button', { name: 'Block' }));
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Block Bob?' })).getByRole('button', { name: 'Block' }));
+  await waitFor(() => expect(mutations).toHaveLength(1));
+  expect(mutations[0].path).toBe(`/api/social/v1/relationships/${peer.socialId}/block`);
+  expect(await screen.findByText('Updated.')).toHaveAttribute('role', 'status');
+  fireEvent.change(within(form).getByLabelText('Handle'), { target: { value: 'alice' } });
+  fireEvent.submit(form);
+  expect(await within(lookup).findByText('@alice')).toBeInTheDocument();
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/social/v1/relationships/${own.socialId}`, expect.anything()));
+  expect(within(lookup).queryByRole('button', { name: 'Block' })).not.toBeInTheDocument();
+  expect(within(lookup).queryByRole('button', { name: 'Add friend' })).not.toBeInTheDocument();
 });

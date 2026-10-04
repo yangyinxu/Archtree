@@ -148,6 +148,10 @@ test('real listening HTTP defaults off and exposes only opted-in current friend 
         assert.equal(encoded.includes(privateValue), false);
     assert.doesNotMatch(encoded, /positionMs|roomId|occurrenceId|sourceId|sessionId|lastSeen|s3Key|streamUrl/);
     assert.deepEqual(await listeningStatuses(outsider, [from.socialId]), []);
+    // The friends listing returns the same allowlisted projection without the caller naming any friend.
+    const listed = await json<{ items: FriendListeningStatus[]; nextCursor: string | null }>(await request(friend, '/listening-status/friends'));
+    assert.deepEqual(listed, { items: visible, nextCursor: null });
+    assert.deepEqual(await json(await request(outsider, '/listening-status/friends')), { items: [], nextCursor: null });
     if (report.state !== 'playing') throw new Error('Fixture must be playing.');
     const stopped = await json<ListeningReportResult>(await request(publisher, '/listening-publications/report', {
         ...claim, sequence: 2, state: 'stopped', playbackSequence: 1, occurrenceId: report.playback.occurrenceId }));
@@ -328,7 +332,8 @@ test('legacy JWTs cannot smuggle an arbitrary, revoked, expired or another accou
             const response = await request({ ...owner, token }, '/mutation-scopes', {});
             const result = await json<{ code: string }>(response, 401);
             assert.equal(result.code, sessionId ? 'social_session_required' : 'session_required');
-            for (const [path, body] of [['/me/listening', undefined], ['/listening-status/query', { socialIds: [`s_${'a'.repeat(32)}`] }]] as const) {
+            for (const [path, body] of [['/me/listening', undefined], ['/listening-status/friends', undefined],
+                ['/listening-status/query', { socialIds: [`s_${'a'.repeat(32)}`] }]] as const) {
                 const rejected = await json<{ code: string }>(await request({ ...owner, token }, path, body), 401);
                 assert.equal(rejected.code, sessionId ? 'social_session_required' : 'session_required');
             }

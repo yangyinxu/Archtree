@@ -1019,6 +1019,29 @@ test('invitation link replacement, logical expiry and disabled participation pre
     assert.equal(await database().collection('socialInvitations').countDocuments({}), 1, 'Logical expiry must not depend on TTL deletion.');
 });
 
+test('replacing a live invitation at the pending-invitation limit invalidates its link without needing a new slot', async () => {
+    const host = await person('host'); const guest = await person('guest'); const third = await person('third');
+    await friendship(host, guest); await friendship(host, third); const room = await create(host);
+    const original = await invite(host, guest);
+    // Synthetic live invitations from this host to other rooms fill the remaining capacity.
+    const filler = (count: number) => Array.from({ length: count }, (_, index) => ({ _id: `r_synthetic:${index}:${randomUUID()}`,
+        invitationId: `i_synthetic_${randomUUID().replaceAll('-', '')}`, roomId: 'r_synthetic', senderAccountId: host.actor.userId,
+        recipientAccountId: new ObjectId().toHexString(), generation: 1, state: 'pending', createdAt: new Date(now), expiresAt: new Date(now + 60_000) }));
+    await database().collection('socialInvitations').insertMany(filler(ROOM_LIMITS.invitations - 1));
+    assert.equal((await api.mutate(host.actor, command(host, { action: 'invite', ...memberBody(room), targetSocialId: third.profile.socialId }))).code,
+        'room_invitation_capacity');
+    const replacement = await invite(host, guest);
+    assert.notEqual(replacement.invitationId, original.invitationId); assert.equal(replacement.generation, original.generation + 1);
+    assert.equal(await api.invitation(guest.actor, original.invitationId), null);
+    assert.equal((await api.mutate(guest.actor, command(guest, { action: 'acceptInvitation', invitationId: original.invitationId,
+        generation: original.generation }))).code, 'invitation_unavailable');
+    // An expired invitation is no longer pending, so sending it again needs a free slot like any new invitation.
+    await database().collection('socialInvitations').insertMany(filler(1));
+    await database().collection('socialInvitations').updateOne({ invitationId: replacement.invitationId }, { $set: { expiresAt: new Date(now) } });
+    assert.equal((await api.mutate(host.actor, command(host, { action: 'invite', ...memberBody(room), targetSocialId: guest.profile.socialId }))).code,
+        'room_invitation_capacity');
+});
+
 test('invitation detail and preview share lifecycle filtering before the bounded preview fills', async () => {
     const host = await person('host'); const guest = await person('guest'); await friendship(host, guest); const room = await create(host);
     const value = await invite(host, guest);

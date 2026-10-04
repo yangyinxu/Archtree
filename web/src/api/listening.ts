@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { parseListeningReport, type OwnListeningState, type FriendListeningStatus, type ListeningReport, type ListeningReportResult } from '../../../src/contracts/listeningV1';
 import { apiRequest } from './client';
 import { socialReadRequest } from './socialReadRequest';
-import { socialCardSchema, socialIdSchema, socialRevisionSchema } from './socialSchemas';
+import { socialCardSchema, socialRevisionSchema } from './socialSchemas';
 
 const artwork = z.string().max(2048).refine(value => {
   if (/[\u0000-\u001f\u007f\\]/.test(value)) return false;
@@ -26,14 +26,19 @@ export const getOwnListening = async (viewerId: string, signal?: AbortSignal) =>
 };
 export type ListeningOwnerRead = Awaited<ReturnType<typeof getOwnListening>>;
 
-/** Requests only the exact bounded set of already-observed friends, never an account-wide public feed. */
-export const getListeningStatuses = (viewerId: string, socialIds: string[], signal?: AbortSignal) => {
-  const ids = z.array(socialIdSchema).min(1).max(50).refine(values => new Set(values).size === values.length).parse(socialIds);
-  const schema = z.object({ items: z.array(listeningStatusSchema).max(50) }).strict().refine(result =>
-    new Set(result.items.map(item => item.peer.socialId)).size === result.items.length && result.items.every(item => ids.includes(item.peer.socialId)));
-  return socialReadRequest('/api/social/v1/listening-status/query', schema, { accountViewer: viewerId, signal,
-    method: 'POST', body: JSON.stringify({ socialIds: ids }) });
+/**
+ * Pages every currently listening friend in opaque social-ID order. The server decides who is a current friend,
+ * so listening beyond the first page of the friend list is visible and the client never sends friend IDs.
+ */
+export const getListeningFriends = (viewerId: string, cursor?: string, signal?: AbortSignal) => {
+  const query = new URLSearchParams({ limit: '20' });
+  if (cursor) query.set('cursor', cursor);
+  const schema = z.object({ items: z.array(listeningStatusSchema).max(50),
+    nextCursor: z.string().min(1).max(1024).regex(/^[A-Za-z0-9_.-]+$/).nullable() }).strict()
+    .refine(result => new Set(result.items.map(item => item.peer.socialId)).size === result.items.length);
+  return socialReadRequest(`/api/social/v1/listening-status/friends?${query}`, schema, { accountViewer: viewerId, signal });
 };
+export type ListeningFriendsPage = Awaited<ReturnType<typeof getListeningFriends>>;
 
 /** Sends one immutable observation or captured stop; publication reports are never automatically retried here. */
 export const sendListeningReport = (viewerId: string, report: ListeningReport) => {

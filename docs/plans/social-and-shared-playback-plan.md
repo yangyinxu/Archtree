@@ -407,6 +407,15 @@ and a 429 asks the listener to wait. The room session loads this copy on demand
 to stay within the initial JavaScript budget. Native clients adopt the same keys
 when the native localization artifacts are next synchronized.
 
+Remove friend, Block and Remove from room now ask for an accessible confirmation
+(focus starts on Cancel; Escape cancels), anyone found by handle can be blocked,
+and the host can explicitly replace a pending invitation so a leaked link stops
+working; a live replacement no longer counts against the 20-invitation limit.
+Listening with friends reads the new `GET /listening-status/friends` page, so
+friends beyond the first 20 of the friend list are visible with Load more. The
+host's invitation list and member actions load on demand, which returned the
+room panel to about 1 KiB under the initial JavaScript budget.
+
 ## Stage 5 — Native social and Audio room adoption
 
 **Status: Not started**

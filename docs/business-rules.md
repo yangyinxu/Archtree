@@ -88,6 +88,12 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   - Lifting a suspension restores the listener's own active or deactivated
     state, discoverability and retained friendships. Cancelled requests,
     removed shares, listening sharing and room participation are not restored.
+- Finitude Web offers Block both in the relationship lists and for anyone found
+  by handle lookup, with or without an existing relationship. Removing a friend
+  and blocking first ask for confirmation that says what changes for both
+  people; declining or cancelling a request and unblocking stay single explicit
+  actions because they are easily redone. A confirmation acts on the
+  relationship revision observed when it was opened.
 - Turning discovery off preserves existing friends and pending requests.
   Deactivation hides the profile, cancels requests and removes friendships, while
   retaining the listener's identity, handle and private blocks. Reactivation
@@ -193,8 +199,11 @@ and Finitude clients. Update it whenever an agreed business rule changes.
   status. It exposes the current ready Audio and chosen social identity, without
   playback position, room/device/session identity, last-seen data or history.
   Friend status refreshes while its panel is visible and disappears when stale or
-  unreadable. Removing friendship or blocking removes visibility immediately at
-  the server, independently of continued room membership.
+  unreadable. The panel lists every friend listening now, not only those on one
+  page of the friend list, 20 at a time with an explicit Load more, and shows the
+  Audio's public artwork, title and artists. Removing friendship or blocking
+  removes visibility immediately at the server, independently of continued room
+  membership.
 - A new explicit playback or sharing gesture may claim the account's publishing
   device against its observed publisher revision. That claim publishes nothing
   until the device reports actual playback. Automatic advancement, reconnecting,
@@ -359,12 +368,17 @@ Playlist access retain their existing rules.
   possession. A recipient who is signed out can sign in and continue to the
   invitation; before acceptance only its inviter's social card and expiry are
   visible. Other accounts and unavailable invitations receive the same unavailable
-  result. Sending a replacement invitation invalidates its earlier link.
+  result. Sending a replacement invitation invalidates its earlier link. Finitude
+  Web lets the host explicitly send a new invitation for a pending one, after a
+  confirmation that the earlier link stops working. Replacing a live invitation
+  adds no pending invitation, so it remains possible at the 20-invitation limit.
 - Opening a reminder or invitation link never accepts it, starts playback,
   takes over another device, or leaves an existing room. Joining still requires
   an explicit action and the current admission checks. A listener already in a
   room can inspect or decline another invitation and must explicitly leave or
   end the current room before joining the other one.
+- The host removes a member only after confirming; the member leaves at once and
+  can be invited again later while still a friend.
 - A blocked pair cannot share a room. If the blocker hosts, remove the blocked
   member; otherwise remove the blocker. Deactivation, administrator suspension
   and account deletion remove participation, ending a hosted room. These changes

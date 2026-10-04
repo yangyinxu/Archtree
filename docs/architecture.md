@@ -228,6 +228,7 @@ the same live session, current viewer, exact JSON and cookie protections.
 | `POST /listening-publications/claim` | Original social mutation identity, document `clientId`, `expectedPreferenceRevision`, `expectedPublisherRevision`; status-only receipt, no public playback |
 | `POST /listening-publications/report` | Exact publisher identity, expected preference/publisher versions and increasing `sequence`; `playing` carries `observedAtMs` and captured playback; `stopped` carries its captured `occurrenceId` and `playbackSequence` |
 | `POST /listening-status/query` | `{ socialIds }`, 1–50 unique already-observed opaque IDs; `{ items }` contains only current friend cards, ready Audio metadata and expiry |
+| `GET /listening-status/friends` | Optional `limit` (default 20, at most 50) and opaque `cursor`; `{ items, nextCursor }` lists every currently listening friend in opaque social-ID order with the same item projection. Only friends with a fresh visible publication are candidates, so a poll does not re-check every friend. The signed cursor is bound to the account and expires after 15 minutes |
 
 The durable `socialListeningStates` account row keeps the preference and publisher
 clock. One `socialListeningPublications` row per account holds the current session,
@@ -265,9 +266,11 @@ their sequence while retaining the previous expiry. The playing-report budget is
 60 per account per minute; captured safety stops remain available after that
 budget is exhausted. Existing IP/session protections still apply.
 
-The visible 20-friend page polls every five seconds, reuses the account publisher's
-monotonic server clock, expires rows locally and hides failed reads. Changing pages
-replaces the queried set. Claims and reports do not fan out generic social invalidations. Current
+The visible Web panel reads `GET /listening-status/friends` every five seconds,
+refetching each page it has loaded (20 listening friends each, more on explicit
+Load more), so friends beyond the first page of the friend list stay visible. It
+reuses the account publisher's monotonic server clock, expires rows locally and
+hides failed reads. Claims and reports do not fan out generic social invalidations. Current
 friendship, active profiles, opt-in, unblocked relationships, publishing session
 and ready source are rechecked on each read. Source replacement is an immediate
 visibility/renewal barrier; indexed cleanup before final source deletion uses

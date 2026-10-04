@@ -1,9 +1,12 @@
 import type { SocialCard } from './socialV1';
 import type { SharedMusicContent } from './socialMusicV1';
 
-/** Ephemeral, opt-in Audio presence is independent of room playback permission and durable activity history. */
+/**
+ * Ephemeral, opt-in Audio presence is independent of room playback permission and durable activity history.
+ * `page`/`maximumPage` bound one page of the listening-friends read; `query` bounds an explicit ID query.
+ */
 export const LISTENING_LIMITS = Object.freeze({ renewMs: 10_000, freshnessMs: 25_000,
-    observationAgeMs: 5_000, futureSkewMs: 2_000, reportsPerMinute: 60, query: 50 });
+    observationAgeMs: 5_000, futureSkewMs: 2_000, reportsPerMinute: 60, query: 50, page: 20, maximumPage: 50 });
 
 /** Private owner state; publisherRevision remains durable when its visible payload expires. */
 export interface OwnListeningState {
@@ -54,6 +57,8 @@ export interface FriendListeningStatus {
     track: SharedMusicContent & { contentType: 'audioTrack' };
     expiresAtMs: number;
 }
+/** One page of currently listening friends in opaque social-ID order; the cursor is signed and account-bound. */
+export interface FriendListeningPage { items: FriendListeningStatus[]; nextCursor: string | null }
 
 const exact = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => value !== null
     && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length

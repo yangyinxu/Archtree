@@ -102,7 +102,8 @@ blocking clears the pair's shares. The same page remains available after login.
 In **Together**, **Share what I’m listening to** is off by default. Enable it to
 share fresh actual Audio playback with current friends, from both ordinary and
 room playback. **Share from this device** explicitly chooses the publishing
-device. **Listening with friends** refreshes while visible; status expires within
+device. **Listening with friends** lists every friend listening now, 20 at a time
+with **Load more**, and refreshes the loaded pages while visible; status expires within
 25 seconds without fresh progress and stops on pause, buffering or opt-out.
 Viewing a status does not play anything. Invite a friend into a room you host,
 or explicitly confirm creation of a paused room with eligible Audio before
@@ -145,9 +146,10 @@ for the stored evidence, transactions and account-deletion handling.
 ## Listening rooms and local demonstration
 
 Finitude Web exposes **Together** at `/finitude/social`: opt-in identity, exact
-handle lookup, friend requests, invitations, queue selection, shared transport,
+handle lookup (anyone found can also be blocked), friend requests, invitations, queue selection, shared transport,
 Host/Everyone permissions, local pause/resync and accepted host transfer. It uses
-the existing player. Enable both `FINITUDE_SOCIAL_ENABLED=true` and
+the existing player. **Remove friend**, **Block** and **Remove from room** ask for
+confirmation first and say what changes. Enable both `FINITUDE_SOCIAL_ENABLED=true` and
 `FINITUDE_ROOMS_ENABLED=true`; both default to false. Leave/end/decline and account
 cleanup remain available when new room admission is disabled. With the flags off,
 Finitude Web shows no social entry point and sends no social request; `/finitude/social`
@@ -217,7 +219,10 @@ clipboard access is unavailable. The URL points to
 `/finitude/social/invitations/:invitationId` and works only for that invitation's
 recipient. Login preserves this destination across reloads. Opening the link
 never joins, changes rooms or starts playback; the recipient explicitly joins or
-declines. Replaced, expired and revoked invitations, and links opened by a
+declines. If a link reached the wrong person, **Send new invitation** (after a
+confirmation) replaces the invitation and the earlier link stops working; a
+replacement does not use another of the host's 20 pending invitations.
+Replaced, expired and revoked invitations, and links opened by a
 different account, show the same unavailable state. These are Web links; native
 invitation handling remains a later delivery stage.
 

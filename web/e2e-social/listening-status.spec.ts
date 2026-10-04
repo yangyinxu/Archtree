@@ -151,9 +151,12 @@ test('friends see only fresh opted-in actual audio, with device fences and expli
           }
         }
         else if (response.status() >= 500) otherServerFailures.push({ method: response.request().method(), path, status: response.status() });
-        if (path === '/api/social/v1/listening-status/query' && response.ok()) inspections.push((async () => {
+        // Finitude Web reads the listening-friends page; the explicit ID query keeps the same item projection.
+        const listeningRead = path === '/api/social/v1/listening-status/friends' || path === '/api/social/v1/listening-status/query';
+        if (listeningRead && response.ok()) inspections.push((async () => {
           const body = await response.json();
-          if (Object.keys(body).join() !== 'items' || !Array.isArray(body.items)) { privacyErrors.push('Invalid public listening envelope'); return; }
+          const envelope = path.endsWith('/friends') ? 'items,nextCursor' : 'items';
+          if (Object.keys(body).sort().join() !== envelope || !Array.isArray(body.items)) { privacyErrors.push('Invalid public listening envelope'); return; }
           for (const item of body.items) {
             if (Object.keys(item).sort().join() !== 'expiresAtMs,peer,track') privacyErrors.push('Unexpected public listening fields');
             if (Object.keys(item.peer).sort().join() !== 'alias,handle,iconSeed,socialId') privacyErrors.push('Unexpected friend identity fields');

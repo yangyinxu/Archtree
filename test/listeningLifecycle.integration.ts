@@ -416,3 +416,46 @@ test('shared-room status requires the exact current ready playing controller and
     await rooms.mutate(replacement, { ...identity(a.scope), action: 'end', roomId: current.roomId, memberId: current.self.memberId });
     assert.equal((await status(b, a)).length, 1, 'Room cleanup cannot clear an ordinary publisher on another controller.');
 });
+
+test('the listening-friends read pages every fresh friend in social-ID order beyond one friend-list page', async () => {
+    const viewer = await person('viewer'); const outsider = await person('outsider'); const quiet = await person('quiet');
+    const listeners: Person[] = [];
+    for (const name of ['first', 'second', 'third', 'fourth']) {
+        const friend = await person(name); await friends(viewer, friend); await begin(friend); listeners.push(friend);
+    }
+    await friends(viewer, quiet); await begin(outsider);
+    // A visible publication whose preference was switched off is a candidate that the full checks still hide.
+    const hidden = listeners[3];
+    await states().updateOne({ _id: hidden.actor.userId }, { $set: { enabled: false } });
+    const expected = listeners.slice(0, 3).map(value => value.profile.socialId).sort();
+
+    const first = await api.listeningFriends(viewer.actor, 2);
+    assert.deepEqual(first.items.map(item => item.peer.socialId), expected.slice(0, 2));
+    assert.ok(first.nextCursor);
+    const second = await api.listeningFriends(viewer.actor, 2, first.nextCursor);
+    assert.deepEqual(second.items.map(item => item.peer.socialId), expected.slice(2));
+    assert.equal(second.nextCursor, null);
+    // Both reads project exactly what the explicit ID query projects for the same friend.
+    for (const item of [...first.items, ...second.items]) {
+        assert.deepEqual([item], await api.listeningStatuses(viewer.actor, [item.peer.socialId]));
+    }
+    assert.equal((await api.listeningFriends(viewer.actor, 20)).items.length, 3);
+
+    // The continuation belongs to its account and is signed; it never unlocks another listener's friends.
+    await assert.rejects(api.listeningFriends(outsider.actor, 2, first.nextCursor), isError('invalid_cursor'));
+    const tampered = first.nextCursor!.replace(/^./, value => value === 'e' ? 'f' : 'e');
+    await assert.rejects(api.listeningFriends(viewer.actor, 2, tampered), isError('invalid_cursor'));
+    for (const limit of [0, 51, 1.5]) await assert.rejects(api.listeningFriends(viewer.actor, limit), isError('invalid_request'));
+
+    // Removing friendship or blocking hides a listener immediately; disabling participation hides everyone.
+    const [removed, blocked] = listeners;
+    await api.mutate(viewer.actor, { ...identity(viewer.scope), action: 'remove', targetSocialId: removed.profile.socialId,
+        expectedRevision: (await api.relationship(viewer.actor, removed.profile.socialId))!.revision });
+    await api.mutate(blocked.actor, { ...identity(blocked.scope), action: 'block', targetSocialId: viewer.profile.socialId });
+    assert.deepEqual((await api.listeningFriends(viewer.actor, 20)).items.map(item => item.peer.socialId), [listeners[2].profile.socialId]);
+    enabled = false;
+    assert.deepEqual(await api.listeningFriends(viewer.actor, 20), { items: [], nextCursor: null });
+    enabled = true;
+    now += 900_001;
+    await assert.rejects(api.listeningFriends(viewer.actor, 2, first.nextCursor), isError('invalid_cursor'));
+});

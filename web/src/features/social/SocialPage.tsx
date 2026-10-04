@@ -15,10 +15,34 @@ const FriendsListening = lazy(() => import('./FriendsListening').then(module => 
 const RoomsPanel = lazy(() => import('./RoomsPanel').then(module => ({ default: module.RoomsPanel })));
 const ReportDialog = lazy(() => import('./ReportDialog'));
 type Report = (socialId: string, label: string, trigger: HTMLElement) => void;
+const ConfirmActionDialog = lazy(() => import('./ConfirmActionDialog').then(module => ({ default: module.ConfirmActionDialog })));
 /** Generated public identity uses only the explicitly chosen social alias. */
 export const SocialAvatar = ({ profile }: { profile: SocialCard | null }) => <span className={styles.avatar} aria-hidden="true">
   {profile ? [...profile.alias][0].toLocaleUpperCase() : '·'}
 </span>;
+
+/** A Remove or Block gesture captured when its dialog opened; Remove keeps the relationship revision observed then. */
+type SafetyIntent = { action: 'remove'; targetSocialId: string; expectedRevision: number; alias: string }
+  | { action: 'block'; targetSocialId: string; alias: string };
+
+/**
+ * Removing a friend and blocking cannot simply be undone (reconnecting needs a new request, unblocking restores
+ * nothing), so both ask first. Confirming closes the dialog and runs the captured gesture; its outcome appears in
+ * the page's shared action status.
+ */
+const SafetyConfirmation = ({ intent, actions, onClose }: { intent: SafetyIntent; actions: ReturnType<typeof useSocialActions>; onClose: () => void }) => {
+  const { t } = useLocalization();
+  const block = intent.action === 'block';
+  return <Suspense fallback={null}><ConfirmActionDialog
+    title={t(block ? 'social.block_confirm_title' : 'social.remove_confirm_title', { alias: intent.alias })}
+    description={t(block ? 'social.block_confirm_copy' : 'social.remove_confirm_copy', { alias: intent.alias })}
+    confirmLabel={t(block ? 'social.block' : 'social.remove')} confirmDisabled={actions.busy || Boolean(actions.uncertain)}
+    onCancel={onClose} onConfirm={() => {
+      onClose();
+      const { alias: _alias, ...action } = intent;
+      void actions.run(action);
+    }} /></Suspense>;
+};
 
 const IdentityForm = ({ profile, actions }: { profile: SocialProfile | null; actions: ReturnType<typeof useSocialActions> }) => {
   const { t } = useLocalization();
@@ -58,6 +82,7 @@ const FriendLookup = ({ viewerId, enabled, actions, report }: { viewerId: string
   const relationship = useQuery({ queryKey: ['social', viewerId, 'relationship', profile?.socialId],
     queryFn: () => getSocialRelationship(viewerId, profile!.socialId), enabled: Boolean(profile), retry: false });
   const relation = relationship.data?.relationship;
+  const [blocking, setBlocking] = useState<SafetyIntent | null>(null);
   return <section className={styles.panel}>
     <h2>{t('social.find')}</h2><p className={styles.muted}>{t('social.find_hint')}</p>
     <form aria-label={t('social.find')} className={styles.search} onSubmit={event => { event.preventDefault(); setSubmitted(handle.trim().toLowerCase()); }}>
@@ -72,9 +97,13 @@ const FriendLookup = ({ viewerId, enabled, actions, report }: { viewerId: string
       {relation?.state === 'outgoing' && <span className={styles.muted}>{t('social.outgoing')}</span>}
       {relation?.state === 'friends' && <span className={styles.muted}>{t('social.friends')}</span>}
       {relation?.state === 'incoming' && <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'accept', targetSocialId: profile.socialId, expectedRevision: relation.revision })}>{t('social.accept')}</button>}
+      {/* Any identity can be blocked, including someone found by handle with no relationship yet. A missing
+          relationship means the result is the viewer's own profile. */}
+      {relation && relation.state !== 'blocked' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => setBlocking({ action: 'block', targetSocialId: profile.socialId, alias: profile.alias })}>{t('social.block')}</button>}
       {/* The pair state is null for the viewer's own handle, so a listener is never offered a self-report. */}
       {relation && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(profile.socialId, `${profile.alias} (@${profile.handle})`, event.currentTarget)}>{t('social.report')}</button>}
     </div>}
+    {blocking && <SafetyConfirmation intent={blocking} actions={actions} onClose={() => setBlocking(null)} />}
   </section>;
 };
 
@@ -85,6 +114,7 @@ const Relationships = ({ viewerId, actions, report }: { viewerId: string; action
     queryFn: ({ pageParam, signal }) => getSocialPage(viewerId, kind, pageParam, signal),
     initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined, retry: false });
   const rows = [...new Map((result.data?.pages ?? []).flatMap(page => page.items).map(row => [row.socialId, row])).values()];
+  const [confirming, setConfirming] = useState<SafetyIntent | null>(null);
   return <section className={styles.panel}>
     <h2>{t('social.friends')}</h2>
     <div className={styles.tabs} role="tablist" aria-label={t('social.friends')}>{tabs.map(tab => <button type="button" className={styles.tab} role="tab" aria-selected={kind === tab} key={tab} onClick={() => setKind(tab)}>{t(`social.${tab}`)}</button>)}</div>
@@ -96,15 +126,19 @@ const Relationships = ({ viewerId, actions, report }: { viewerId: string; action
           <span>{row.profile ? `@${row.profile.handle}` : row.socialId.slice(-8)}</span></div>
         <div className={styles.rowActions}>
           {kind === 'incoming' && <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'accept', targetSocialId: row.socialId, expectedRevision: row.revision })}>{t('social.accept')}</button>}
-          <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: kind === 'friends' ? 'remove' : kind === 'incoming' ? 'decline' : kind === 'outgoing' ? 'cancel' : 'unblock', targetSocialId: row.socialId, expectedRevision: row.revision })}>
+          {/* Declining, cancelling and unblocking are easily redone, so only Remove and Block ask first. */}
+          <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => kind === 'friends'
+            ? setConfirming({ action: 'remove', targetSocialId: row.socialId, expectedRevision: row.revision, alias: row.profile?.alias ?? '' })
+            : actions.run({ action: kind === 'incoming' ? 'decline' : kind === 'outgoing' ? 'cancel' : 'unblock', targetSocialId: row.socialId, expectedRevision: row.revision })}>
             {t(kind === 'friends' ? 'social.remove' : kind === 'incoming' ? 'social.decline' : kind === 'outgoing' ? 'social.cancel_request' : 'social.unblock')}</button>
-          {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'block', targetSocialId: row.socialId })}>{t('social.block')}</button>}
+          {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => setConfirming({ action: 'block', targetSocialId: row.socialId, alias: row.profile?.alias ?? '' })}>{t('social.block')}</button>}
           {/* Blocked rows stay reportable: blocking and then reporting is a common safety sequence. */}
           <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(row.socialId,
             row.profile ? `${row.profile.alias} (@${row.profile.handle})` : `${t('social.blocked_profile')} ${row.socialId.slice(-8)}`, event.currentTarget)}>{t('social.report')}</button>
         </div>
       </li>)}</ul>}
     {result.hasNextPage && <button className={styles.secondary} disabled={result.isFetchingNextPage} onClick={() => result.fetchNextPage()}>{t('common.action.load_more')}</button>}
+    {confirming && <SafetyConfirmation intent={confirming} actions={actions} onClose={() => setConfirming(null)} />}
   </section>;
 };
 

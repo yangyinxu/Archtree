@@ -4801,6 +4801,31 @@
         "alias": "string"
       }
     },
+    "room.invitation_replace": {
+      "description": "Shared listening interface: host action that sends a pending invitation again so its earlier link stops working.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.invitation_replace_confirm_copy": {
+      "description": "Shared listening interface: confirmation explaining that replacing an invitation invalidates its earlier link.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.invitation_replace_confirm_title": {
+      "description": "Shared listening interface: confirmation title before replacing a pending room invitation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
     "room.invitation_sign_in": {
       "description": "Room invitation interface: invitation sign in.",
       "delivery": [
@@ -4870,6 +4895,24 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "room.kick_confirm_copy": {
+      "description": "Shared listening interface: confirmation explaining what removing a room member does.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "room.kick_confirm_title": {
+      "description": "Shared listening interface: confirmation title before the host removes a member from the room.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
     },
     "room.leave": {
       "description": "Shared listening interface: leave.",
@@ -5855,6 +5898,24 @@
       ],
       "variables": {}
     },
+    "social.block_confirm_copy": {
+      "description": "Social listener interface: confirmation explaining what blocking changes for both people.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "social.block_confirm_title": {
+      "description": "Social listener interface: confirmation title before blocking a social identity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
     "social.block_limit": {
       "description": "Social interface: refused block because the block or relationship limit was reached.",
       "delivery": [
@@ -6099,6 +6160,24 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "social.remove_confirm_copy": {
+      "description": "Social listener interface: confirmation explaining what removing a friend changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
+    },
+    "social.remove_confirm_title": {
+      "description": "Social listener interface: confirmation title before removing a friend.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "alias": "string"
+      }
     },
     "social.report": {
       "description": "Social listener interface: open the dialog to report another listener.",

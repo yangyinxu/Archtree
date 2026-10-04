@@ -47,6 +47,7 @@ const fixtureApi = () => {
         reportListening: async (who, report) => { actors.push(who); reports.push(report);
             return { accepted: true, serverTimeMs: 1, expiresAtMs: 25_001 }; },
         listeningStatuses: async (who, socialIds) => { actors.push(who); reads.push(['listeningStatuses', socialIds]); return []; },
+        listeningFriends: async (who, ...args) => { actors.push(who); reads.push(['listeningFriends', ...args]); return { items: [], nextCursor: null }; },
         relationship: async (who, targetSocialId) => { actors.push(who); reads.push(['relationship', targetSocialId]);
             return { socialId: targetSocialId, state: 'none', revision: 4 }; },
         mutate: async (who, command) => { actors.push(who); commands.push(command); return result; },
@@ -234,6 +235,38 @@ test('friend listening responses allowlist only current public identity, Audio m
     assert.deepEqual(reads, [['listeningStatuses', actor, [socialId]]]);
     assert.equal(response.headers.get('cache-control'), 'private, no-store');
     assert.doesNotMatch(JSON.stringify(data), /private-|roomId|positionMs|clientId|lastSeen/);
+});
+
+test('listening friends pages every listening friend through the same allowlisted DTO and an opaque cursor', async t => {
+    const { api, reads } = fixtureApi();
+    api.listeningFriends = async (who, limit, cursor) => {
+        reads.push(['listeningFriends', who, limit, cursor]);
+        return { items: [{ peer: { ...card, accountId: 'private-account' },
+            track: { id: 'a'.repeat(24), contentType: 'audioTrack', title: 'Public Audio', artworkUrl: '/artwork.jpg', artistNames: ['Artist'],
+                s3Key: 'private-key', streamUrl: '/private-stream' }, expiresAtMs: 25_000, roomId: 'private-room', positionMs: 1000 }],
+        nextCursor: 'signed.next-page_cursor' } as Awaited<ReturnType<SocialApi['listeningFriends']>>;
+    };
+    const { request } = await listen(t, api);
+    const first = await request('/listening-status/friends');
+    assert.equal(first.status, 200);
+    const data = await first.json();
+    assert.deepEqual(data, { items: [{ peer: card, track: { id: 'a'.repeat(24), contentType: 'audioTrack',
+        title: 'Public Audio', artworkUrl: '/artwork.jpg', artistNames: ['Artist'] }, expiresAtMs: 25_000 }], nextCursor: 'signed.next-page_cursor' });
+    assert.doesNotMatch(JSON.stringify(data), /private-|roomId|positionMs/);
+    assert.equal(first.headers.get('cache-control'), 'private, no-store');
+    assert.equal((await request('/listening-status/friends?limit=50&cursor=signed.next-page_cursor')).status, 200);
+    assert.deepEqual(reads, [['listeningFriends', actor, 20, undefined], ['listeningFriends', actor, 50, 'signed.next-page_cursor']]);
+});
+
+test('listening friends rejects unbounded pages, unknown keys and malformed cursors before service work', async t => {
+    const { api, reads } = fixtureApi(); const { request } = await listen(t, api);
+    for (const query of ['limit=0', 'limit=51', 'limit=01', 'limit=x', 'limit=1&limit=2', 'accountId=other', 'cursor=', 'cursor=a%20b',
+        `cursor=${'a'.repeat(1025)}`, 'cursor=a&cursor=b', 'kind=friends']) {
+        assert.equal((await request(`/listening-status/friends?${query}`)).status, 400, query);
+    }
+    assert.equal((await request('/listening-status/friends', {})).status, 404);
+    assert.equal((await request('/listening-status/friends', undefined, { headers: { 'x-test-auth': 'missing' } })).status, 401);
+    assert.equal(reads.length, 0);
 });
 
 test('listening routes reject malformed ownership, publisher reports and unbounded status queries before service work', async t => {

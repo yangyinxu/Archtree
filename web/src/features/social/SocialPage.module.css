@@ -51,6 +51,8 @@
 .queue { margin-top: 1.5rem; max-height: 18rem; overflow: auto; }
 .selected { color: var(--color-accent-bright); }
 .invitationRow { flex-wrap: wrap; }
+/* Artwork defaults to its container's width, so a fixed column keeps it a thumbnail beside the status. */
+.listeningItem { display: grid; grid-template-columns: 4rem minmax(0, 1fr); align-items: start; }
 .invitationCopy { max-width: 100%; min-width: 0; }
 @container (max-width: 42rem) { .grid { grid-template-columns: 1fr; } }
 @media (max-width: 950px) { .grid { grid-template-columns: 1fr; } }

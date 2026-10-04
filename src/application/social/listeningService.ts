@@ -1,17 +1,19 @@
 import { createHash } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
-import { LISTENING_LIMITS, type FriendListeningStatus, type ListeningAction, type ListeningReport, type ListeningReportResult,
-    type OwnListeningState } from '../../contracts/listeningV1';
+import { LISTENING_LIMITS, type FriendListeningPage, type FriendListeningStatus, type ListeningAction, type ListeningReport,
+    type ListeningReportResult, type OwnListeningState } from '../../contracts/listeningV1';
 import { ROOM_LIMITS } from '../../contracts/roomV1';
-import { SocialError, type SocialActor, type SocialMutationIdentity } from '../../contracts/socialV1';
+import { SOCIAL_LIMITS, SocialError, exactSocialKeys, isSocialId, type SocialActor, type SocialMutationIdentity } from '../../contracts/socialV1';
 import { getDb } from '../../infrastructure/database';
 import type { ListeningPublicationDocument, ListeningStateDocument } from '../../repositories/social/listeningDocuments';
 import type { RoomDocument } from '../../repositories/social/roomDocuments';
 import type { SocialBudgetDocument, SocialProfileDocument, SocialRelationshipDocument } from '../../repositories/social/socialDocuments';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
+import { getJwtSecret } from '../../services/authSessionService';
 import { nextListeningRevision, retireListeningPublication } from './listeningLifecycle';
 import { publicContent, resolvePublicContent, type ResolveMusicShareContent } from './musicShareService';
+import { readSocialToken, signSocialToken } from './socialTokens';
 
 type Plan = { outcome: 'applied' | 'noop'; affected: string[]; write: () => Promise<void> };
 const noop = (): Plan => ({ outcome: 'noop', affected: [], write: async () => undefined });
@@ -19,14 +21,16 @@ const fail = (code: string, status = 409): never => { throw new SocialError(stat
 
 /** Ephemeral publication work runs inside the existing social session/account transaction. */
 export const createListeningService = (options: { now: () => number; enabled: () => boolean;
-    resolveContent?: ResolveMusicShareContent; roomsEnabled?: () => boolean }) => {
+    resolveContent?: ResolveMusicShareContent; roomsEnabled?: () => boolean; secret?: () => string }) => {
     const { now, enabled } = options;
+    const secret = options.secret ?? getJwtSecret;
     const roomsEnabled = options.roomsEnabled ?? (() => process.env.FINITUDE_ROOMS_ENABLED === 'true');
     const resolveContent = options.resolveContent ?? resolvePublicContent;
     const db = () => getDb()!;
     const states = () => db().collection<ListeningStateDocument>('socialListeningStates');
     const publications = () => db().collection<ListeningPublicationDocument>('socialListeningPublications');
     const profiles = () => db().collection<SocialProfileDocument>('socialProfiles');
+    const relationships = () => db().collection<SocialRelationshipDocument>('socialRelationships');
     const result = (accepted: boolean, publication?: ListeningPublicationDocument | null): ListeningReportResult => ({ accepted,
         serverTimeMs: now(), expiresAtMs: publication?.visible ? publication.expiresAt.getTime() : null });
 
@@ -68,6 +72,28 @@ export const createListeningService = (options: { now: () => number; enabled: ()
         if (touch) await db().collection<RoomDocument>('socialRooms').updateOne({ _id: room._id, revision: room.revision },
             { $inc: { listeningPublicationFence: 1 } }, { session });
         return true;
+    };
+
+    /**
+     * Projects one friend's fresh status, or null. Every read path uses this so friendship, preference, publisher,
+     * session, source, room and public-content checks cannot drift between the ID query and the friends list.
+     */
+    const peerStatus = async (actor: SocialActor, peer: SocialProfileDocument, session: ClientSession): Promise<FriendListeningStatus | null> => {
+        if (!await relationships().findOne({ _id: [actor.userId, peer.accountId].sort().join(':'),
+            state: 'accepted', blockedBy: { $size: 0 } }, { session })) return null;
+        const state = await states().findOne({ _id: peer.accountId, enabled: true }, { session });
+        const publication = await publications().findOne({ _id: peer.accountId, visible: true, expiresAt: { $gt: new Date(now()) } }, { session });
+        if (!state || !publication?.playback || publication.preferenceRevision !== state.revision || publication.publisherRevision !== state.publisherRevision) return null;
+        if (!await db().collection('authSessions').findOne({ _id: new ObjectId(publication.sessionId), userId: peer.accountId,
+            revokedAt: { $exists: false }, expiresAt: { $gt: new Date(now()) } }, { session, projection: { _id: 1 } })) return null;
+        const currentSource = await source(publication.playback.mediaTrackId, session);
+        if (!currentSource || currentSource.fingerprint !== publication.sourceFingerprint
+            || (publication.playback.room && currentSource.revision !== publication.playback.room.mediaRevision)
+            || !await roomCurrent(publication, session)) return null;
+        const content = publicContent(await resolveContent('audioTrack', publication.playback.mediaTrackId, session), 'audioTrack', publication.playback.mediaTrackId);
+        if (!content) return null;
+        return { peer: { socialId: peer._id, handle: peer.handle, alias: peer.alias, iconSeed: peer._id },
+            track: { ...content, contentType: 'audioTrack' }, expiresAtMs: publication.expiresAt.getTime() };
     };
 
     const own = async (actor: SocialActor, session: ClientSession): Promise<OwnListeningState> => {
@@ -163,23 +189,46 @@ export const createListeningService = (options: { now: () => number; enabled: ()
             const items: FriendListeningStatus[] = [];
             for (const id of socialIds) {
                 const peer = rows.find(value => value._id === id); if (!peer) continue;
-                if (!await db().collection<SocialRelationshipDocument>('socialRelationships').findOne({ _id: [actor.userId, peer.accountId].sort().join(':'),
-                    state: 'accepted', blockedBy: { $size: 0 } }, { session })) continue;
-                const state = await states().findOne({ _id: peer.accountId, enabled: true }, { session });
-                const publication = await publications().findOne({ _id: peer.accountId, visible: true, expiresAt: { $gt: new Date(now()) } }, { session });
-                if (!state || !publication?.playback || publication.preferenceRevision !== state.revision || publication.publisherRevision !== state.publisherRevision) continue;
-                if (!await db().collection('authSessions').findOne({ _id: new ObjectId(publication.sessionId), userId: peer.accountId,
-                    revokedAt: { $exists: false }, expiresAt: { $gt: new Date(now()) } }, { session, projection: { _id: 1 } })) continue;
-                const currentSource = await source(publication.playback.mediaTrackId, session);
-                if (!currentSource || currentSource.fingerprint !== publication.sourceFingerprint
-                    || (publication.playback.room && currentSource.revision !== publication.playback.room.mediaRevision)
-                    || !await roomCurrent(publication, session)) continue;
-                const content = publicContent(await resolveContent('audioTrack', publication.playback.mediaTrackId, session), 'audioTrack', publication.playback.mediaTrackId);
-                if (!content) continue;
-                items.push({ peer: { socialId: peer._id, handle: peer.handle, alias: peer.alias, iconSeed: peer._id },
-                    track: { ...content, contentType: 'audioTrack' }, expiresAtMs: publication.expiresAt.getTime() });
+                const item = await peerStatus(actor, peer, session);
+                if (item) items.push(item);
             }
             return items;
+        },
+        /**
+         * Lists every currently listening friend, not only one page of the friend list, in opaque social-ID order.
+         * Only friends with a fresh visible publication become candidates, so a poll reads the friend edges and their
+         * publications once and runs the full checks only for friends who may actually be visible.
+         */
+        async friends(actor: SocialActor, limit: number, cursor: string | undefined, session: ClientSession): Promise<FriendListeningPage> {
+            let after = '';
+            if (cursor !== undefined) {
+                const parsed = readSocialToken(cursor, secret());
+                if (!exactSocialKeys(parsed, ['audience', 'accountId', 'after', 'expiresAt']) || parsed.audience !== 'listening-friends-v1'
+                    || parsed.accountId !== actor.userId || !isSocialId(parsed.after)
+                    || !Number.isSafeInteger(parsed.expiresAt) || Number(parsed.expiresAt) <= now()) throw new SocialError(400, 'invalid_cursor');
+                after = parsed.after;
+            }
+            if (!enabled() || !await profiles().findOne({ accountId: actor.userId, active: true }, { session })) return { items: [], nextCursor: null };
+            const edges = await relationships().find({ accountIds: actor.userId, state: 'accepted', blockedBy: { $size: 0 } },
+                { session, projection: { accountIds: 1, socialIds: 1 } }).limit(SOCIAL_LIMITS.edges + 1).toArray();
+            if (edges.length > SOCIAL_LIMITS.edges) throw new SocialError(503, 'social_unavailable');
+            const friendSocialIds = new Map(edges.map(edge => {
+                const index = edge.accountIds.findIndex(id => id !== actor.userId);
+                return [edge.accountIds[index], edge.socialIds[index]] as const;
+            }));
+            const live = friendSocialIds.size ? await publications().find({ _id: { $in: [...friendSocialIds.keys()] }, visible: true,
+                expiresAt: { $gt: new Date(now()) } }, { session, projection: { _id: 1 } }).toArray() : [];
+            const candidates = live.map(value => friendSocialIds.get(value._id)!).filter(id => id > after).sort();
+            const items: FriendListeningStatus[] = [];
+            for (const socialId of candidates) {
+                const peer = await profiles().findOne({ _id: socialId, accountId: { $ne: actor.userId }, active: true }, { session });
+                const item = peer && await peerStatus(actor, peer, session);
+                if (item) items.push(item);
+                if (items.length > limit) break;
+            }
+            const page = items.slice(0, limit);
+            return { items: page, nextCursor: items.length > limit ? signSocialToken({ audience: 'listening-friends-v1', accountId: actor.userId,
+                after: page[page.length - 1].peer.socialId, expiresAt: now() + 900_000 }, secret()) : null };
         }
     };
 };

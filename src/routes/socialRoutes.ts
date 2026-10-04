@@ -5,7 +5,7 @@ import {
     SocialActor, SocialApi, SocialCard, SocialError, SocialListKind, SocialOutcome
 } from '../contracts/socialV1';
 import { MUSIC_SHARE_LIMITS, type MusicShareDirection } from '../contracts/socialMusicV1';
-import { LISTENING_LIMITS, parseListeningReport } from '../contracts/listeningV1';
+import { LISTENING_LIMITS, parseListeningReport, type FriendListeningStatus } from '../contracts/listeningV1';
 import {
     attachOptionalAccessAuth, AuthenticatedRequest, requireAuth, requireCurrentAccountViewer
 } from '../middleware/authMiddleware';
@@ -36,6 +36,10 @@ const noQuery = (req: Request) => {
 const card = (value: SocialCard | null) => value === null ? null : ({
     socialId: value.socialId, handle: value.handle, alias: value.alias, iconSeed: value.iconSeed
 });
+/** Friends see only the public card, the ready Audio's public metadata and the expiry, never playback or device state. */
+const listeningStatus = (value: FriendListeningStatus) => ({ peer: card(value.peer), expiresAtMs: value.expiresAtMs,
+    track: { id: value.track.id, contentType: value.track.contentType, title: value.track.title,
+        artworkUrl: value.track.artworkUrl, artistNames: value.track.artistNames } });
 const outcome = (value: SocialOutcome | null) => value === null ? null : ({
     commandId: value.commandId, outcome: value.outcome, replayed: value.replayed,
     ...(value.code === undefined ? {} : { code: value.code })
@@ -124,9 +128,19 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
             || req.body.socialIds.length > LISTENING_LIMITS.query || !req.body.socialIds.every(isSocialId)
             || new Set(req.body.socialIds).size !== req.body.socialIds.length) throw invalid();
         const values = await api.listeningStatuses(actor(req), [...req.body.socialIds]);
-        res.json({ items: values.map(value => ({ peer: card(value.peer), expiresAtMs: value.expiresAtMs,
-            track: { id: value.track.id, contentType: value.track.contentType, title: value.track.title,
-                artworkUrl: value.track.artworkUrl, artistNames: value.track.artistNames } })) });
+        res.json({ items: values.map(listeningStatus) });
+    }));
+    // Every currently listening friend, paged in opaque social-ID order, with the same allowlisted DTO as the ID query.
+    router.get('/listening-status/friends', asyncHandler(async (req, res) => {
+        if (!Object.keys(req.query).every(key => ['limit', 'cursor'].includes(key))) throw invalid();
+        const rawLimit = req.query.limit;
+        if (rawLimit !== undefined && (typeof rawLimit !== 'string' || !/^[1-9]\d*$/.test(rawLimit))) throw invalid();
+        const limit = rawLimit === undefined ? LISTENING_LIMITS.page : Number(rawLimit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > LISTENING_LIMITS.maximumPage) throw invalid();
+        const cursor = req.query.cursor;
+        if (cursor !== undefined && (typeof cursor !== 'string' || !cursor.length || Buffer.byteLength(cursor) > 1024 || !/^[A-Za-z0-9_.-]+$/.test(cursor))) throw invalid();
+        const page = await api.listeningFriends(actor(req), limit, cursor as string | undefined);
+        res.json({ items: page.items.map(listeningStatus), nextCursor: page.nextCursor });
     }));
     router.get('/profiles', asyncHandler(async (req, res) => {
         if (!exactSocialKeys(req.query, ['handle'])) throw invalid();

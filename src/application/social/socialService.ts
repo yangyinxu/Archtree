@@ -60,7 +60,7 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
     const secret = options.secret ?? getJwtSecret;
     const enabled = options.enabled ?? (() => process.env.FINITUDE_SOCIAL_ENABLED === 'true');
     const music = createMusicShareService({ now, secret, resolveContent: options.resolveMusicShareContent });
-    const listening = createListeningService({ now, enabled, resolveContent: options.resolveListeningContent, roomsEnabled: options.listeningRoomsEnabled });
+    const listening = createListeningService({ now, enabled, secret, resolveContent: options.resolveListeningContent, roomsEnabled: options.listeningRoomsEnabled });
     const db = () => { const value = getDb(); if (!value) throw new SocialError(503, 'social_unavailable'); return value; };
     const profiles = () => db().collection<SocialProfileDocument>('socialProfiles');
     const relationships = () => db().collection<SocialRelationshipDocument>('socialRelationships');
@@ -324,6 +324,11 @@ export const createSocialService = (options: SocialServiceOptions = {}): SocialA
                 || !socialIds.every(isSocialId) || new Set(socialIds).size !== socialIds.length) throw new SocialError(400, 'invalid_request');
             const captured = [...socialIds];
             return readTransaction(actor, session => listening.statuses(actor, captured, session));
+        },
+        listeningFriends: async (actor, limit, cursor) => {
+            if (!Number.isSafeInteger(limit) || limit < 1 || limit > LISTENING_LIMITS.maximumPage
+                || (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 1024))) throw new SocialError(400, 'invalid_request');
+            return readTransaction(actor, session => listening.friends(actor, limit, cursor, session));
         },
         async issueScope(actor) {
             const id = randomBytes(16).toString('hex');

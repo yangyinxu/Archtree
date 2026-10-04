@@ -1,5 +1,5 @@
 import { isMusicShareId, type MusicShareAction, type MusicShareDirection, type MusicSharePage } from './socialMusicV1';
-import type { ListeningAction, OwnListeningState, ListeningReport, ListeningReportResult, FriendListeningStatus } from './listeningV1';
+import type { ListeningAction, OwnListeningState, ListeningReport, ListeningReportResult, FriendListeningStatus, FriendListeningPage } from './listeningV1';
 
 /**
  * Additive social-v1 contract; no private User or listener-v1 DTO is reused.
@@ -133,6 +133,7 @@ export interface SocialApi {
     ownListening(actor: SocialActor): Promise<OwnListeningState>;
     reportListening(actor: SocialActor, report: ListeningReport): Promise<ListeningReportResult>;
     listeningStatuses(actor: SocialActor, socialIds: string[]): Promise<FriendListeningStatus[]>;
+    listeningFriends(actor: SocialActor, limit: number, cursor?: string): Promise<FriendListeningPage>;
     mutate(actor: SocialActor, command: SocialCommand): Promise<SocialOutcome>;
     outcome(actor: SocialActor, identity: SocialMutationIdentity): Promise<SocialOutcome | null>;
 }
