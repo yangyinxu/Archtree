@@ -9,6 +9,9 @@ import { ROOM_LIMITS, type RoomActor, type RoomApi, type RoomCommand, type RoomM
 import { SOCIAL_LIMITS, SocialError, type SocialApi, type SocialScope } from '../src/contracts/socialV1';
 import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import { createRoomAuthority } from '../src/realtime/roomAuthority';
+import { createRoomGatewayMetrics } from '../src/realtime/roomGatewayMetrics';
+import { createSocialOperations, type SocialOperations } from '../src/realtime/socialOperations';
+import type { OperationalLogEntry } from '../src/infrastructure/operationalLog';
 import AuthSession from '../src/models/authSession';
 import AuthActionToken from '../src/models/authActionToken';
 import { applyPasswordReset, changeAccountPassword } from '../src/services/authCredentialService';
@@ -23,6 +26,9 @@ let epoch = 1;
 let api: RoomApi;
 let social: SocialApi;
 let media: RoomMediaDescriptor[];
+// Each case gets its own operations registry, so lifecycle lines stay out of test output and can be asserted.
+let operationLog: OperationalLogEntry[] = [];
+let operations: SocialOperations;
 const secret = 'synthetic-room-integration-secret';
 const collections = ['users', 'authSessions', 'socialProfiles', 'socialRelationships', 'socialMutations', 'socialOutbox',
     'socialBudgets', 'socialHandles', 'socialRooms', 'socialRoomParticipation', 'socialRoomOutbox', 'socialInvitations', 'audioTracks', 'roomTestAuthority', 'socialAuthority'];
@@ -40,7 +46,7 @@ const touchMedia = async (id: string, revision: string, session: ClientSession) 
     return value.value?.roomFixture as RoomMediaDescriptor | undefined ?? null;
 };
 const service = (options: RoomServiceOptions = {}) => createRoomService({ now: () => now, enabled: () => enabled, secret: () => secret,
-    resolveMedia, touchMedia, inspectAuthority: async () => epoch, assertAuthority: async session => {
+    operations, resolveMedia, touchMedia, inspectAuthority: async () => epoch, assertAuthority: async session => {
         await database().collection('roomTestAuthority').updateOne({ _id: new ObjectId('000000000000000000000001') }, { $inc: { fence: 1 } }, { session });
         return epoch;
     }, ...options });
@@ -48,6 +54,8 @@ const service = (options: RoomServiceOptions = {}) => createRoomService({ now: (
 before(async () => { harness = await startMongoReplicaSet('archtree-room-lifecycle-test'); });
 beforeEach(async () => {
     now = Date.now(); enabled = true; epoch = 1;
+    operationLog = [];
+    operations = createSocialOperations({ log: entry => { operationLog.push(entry); }, metrics: createRoomGatewayMetrics() });
     await Promise.all(collections.map(name => database().collection(name).deleteMany({})));
     await database().collection('roomTestAuthority').insertOne({ _id: new ObjectId('000000000000000000000001'), fence: 0 });
     media = Array.from({ length: 3 }, (_, index) => {
@@ -1643,4 +1651,99 @@ test('failed invitation commit rolls back inbox invalidations together with invi
     await assert.rejects(failing.mutate(host.actor, command(host, { action: 'invite', ...memberBody(room), targetSocialId: guest.profile.socialId })), isError('room_unavailable'));
     assert.deepEqual(await api.invitations(guest.actor), []);
     assert.deepEqual(await database().collection('socialOutbox').findOne({ _id: guest.actor.userId }), before);
+});
+
+test('deployment capacity refuses a room past the open-room limit and a join into a full room, counting each once', async () => {
+    const capped = service({ capacity: { maxOpenRooms: 1, maxRoomMembers: 2, maxRealtimeSockets: 16 } });
+    const host = await person('caphost'); const first = await person('capfirst'); const second = await person('capsecond');
+    const other = await person('capother');
+    await friendship(host, first); await friendship(host, second);
+    const room = await create(host, capped);
+
+    const refusedCreate = command(other, { action: 'create', mediaTrackIds: [media[0].mediaTrackId] });
+    assert.deepEqual(await capped.mutate(other.actor, refusedCreate),
+        { commandId: refusedCreate.commandId, outcome: 'rejected', code: 'room_capacity', replayed: false });
+    // A replayed receipt is the same refusal, not a second capacity event.
+    assert.equal((await capped.mutate(other.actor, refusedCreate)).replayed, true);
+    assert.equal(await capped.currentRoom(other.actor), null);
+
+    const firstInvitation = await invite(host, first);
+    assert.equal((await capped.mutate(first.actor, command(first, { action: 'acceptInvitation',
+        invitationId: firstInvitation.invitationId, generation: firstInvitation.generation }))).outcome, 'applied');
+    const secondInvitation = await invite(host, second);
+    const refusedJoin = await capped.mutate(second.actor, command(second, { action: 'acceptInvitation',
+        invitationId: secondInvitation.invitationId, generation: secondInvitation.generation }));
+    assert.equal(refusedJoin.code, 'room_full');
+    assert.equal((await snapshot(host, capped)).members.length, 2);
+    assert.deepEqual((await capped.invitations(second.actor)).map(value => value.invitationId), [secondInvitation.invitationId],
+        'A full room leaves the invitation pending.');
+
+    // The product ceiling still bounds existing rooms: a larger limit admits the waiting invitation.
+    const roomy = service();
+    assert.equal((await roomy.mutate(second.actor, command(second, { action: 'acceptInvitation',
+        invitationId: secondInvitation.invitationId, generation: secondInvitation.generation }))).outcome, 'applied');
+
+    const counts = operations.take();
+    assert.deepEqual(counts.capacityRejections, { sockets: 0, openRooms: 1, roomMembers: 1 });
+    assert.deepEqual(counts.rejections, { room_capacity: 1, room_full: 1 });
+    assert.deepEqual(operationLog.filter(entry => entry.category === 'social_capacity'), [
+        { category: 'social_capacity', limit: 'openRooms', maximum: 1 },
+        { category: 'social_capacity', limit: 'roomMembers', maximum: 2 }]);
+    assert.deepEqual(operationLog.filter(entry => entry.category === 'room_lifecycle'),
+        [{ category: 'room_lifecycle', transition: 'created', roomId: room.roomId }]);
+    const text = JSON.stringify(operationLog);
+    for (const who of [host, first, second, other]) {
+        for (const value of [who.actor.userId, who.actor.sessionId, who.profile.socialId, who.profile.handle]) assert.equal(text.includes(value), false);
+    }
+});
+
+test('lowering the member limit never removes members already admitted', async () => {
+    const { host, guest } = await pair();
+    const capped = service({ capacity: { maxOpenRooms: 1, maxRoomMembers: 2, maxRealtimeSockets: 16 } });
+    const third = await person('thirdmember'); await friendship(host, third);
+    const invitation = await invite(host, third);
+    assert.equal((await capped.mutate(third.actor, command(third, { action: 'acceptInvitation',
+        invitationId: invitation.invitationId, generation: invitation.generation }))).code, 'room_full');
+    await capped.sweep();
+    assert.equal((await snapshot(guest, capped)).members.length, 2);
+    assert.equal((await snapshot(host, capped)).status, 'open');
+});
+
+test('room lifecycle lines follow each committed transition with a fixed reason', async () => {
+    const lifecycle = () => operationLog.filter(entry => entry.category === 'room_lifecycle').map(entry => [entry.transition, entry.reason ?? null]);
+    const host = await person('lifehost');
+
+    const ended = await create(host);
+    await api.sweep();
+    assert.equal((await api.mutate(host.actor, command(host, { action: 'end', ...memberBody(ended) }))).outcome, 'applied');
+    await api.sweep(); await api.sweep();
+    assert.deepEqual(lifecycle(), [['created', null], ['closed', 'hostEnded']], 'An ended room is never reported again by the sweep.');
+
+    operationLog = [];
+    await create(host);
+    await api.disconnected(host.actor);
+    now += ROOM_LIMITS.hostGraceMs; await api.sweep();
+    now += ROOM_LIMITS.hostCloseMs; await api.sweep();
+    assert.deepEqual(lifecycle(), [['created', null], ['suspended', null], ['closed', 'hostAbsent']]);
+
+    // Account cleanup closes a hosted room inside another service's transaction; the sweep reports it.
+    operationLog = [];
+    const closedElsewhere = await create(host);
+    await api.sweep();
+    await transaction(session => applyRoomSafety({ kind: 'logoutAll', accountId: host.actor.userId }, session, now));
+    await api.sweep();
+    assert.deepEqual(lifecycle(), [['created', null]], 'A disappearance waits one sweep for a report that may be in flight.');
+    await api.sweep(); await api.sweep();
+    assert.deepEqual(operationLog.filter(entry => entry.category === 'room_lifecycle').slice(-1)[0],
+        { category: 'room_lifecycle', transition: 'closed', reason: 'accountLifecycle', roomId: closedElsewhere.roomId });
+    assert.equal(lifecycle().length, 2);
+
+    // Last, because advancing a day also expires the test's mutation scopes.
+    operationLog = [];
+    await create(host);
+    now += ROOM_LIMITS.invitationMs; await api.sweep();
+    assert.deepEqual(lifecycle(), [['created', null], ['closed', 'expired']]);
+
+    const counts = operations.take();
+    assert.deepEqual([counts.roomsCreated, counts.roomsSuspended, counts.roomsClosed], [4, 1, 4]);
 });

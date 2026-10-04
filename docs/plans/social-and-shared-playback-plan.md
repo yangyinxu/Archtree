@@ -387,6 +387,16 @@ not describe selected cases or a smoke pass as a complete browser or deployment
 matrix pass. The current evidence and its limits are recorded in the Web release
 matrix.
 
+Operational signals and deployment capacity limits are in place: `/health` room
+gauges, a minutely `ops_summary` log line, room lifecycle/authority/capacity lines
+and suggested CloudWatch alarms in the social rollout runbook. A counted local
+database budget (`test/roomCapacityBudget.integration.ts`) shows the room sweep
+dominates free-tier Atlas load, so the Elastic Beanstalk defaults allow one open
+two-member room and ten realtime sockets, with a reserved seat for each member
+that tabs outside the room cannot take. Lowering the sweep's per-room reads, or
+a dedicated cluster, is the prerequisite for raising them; measuring them on the
+actual deployment remains part of this stage.
+
 Applies to each enabled capability, beginning with Stage 4; run an Audio rollout
 gate as soon as its selected client scope is verified, without waiting for Video.
 Measure socket memory, outbox lag/backlog, reconnect storms, same-NAT stream

@@ -2,9 +2,12 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { createRoomService } from '../application/rooms/roomService';
 import { isRoomClientId, isRoomIdentifier, normalizeRoomMediaQuery, parseRoomCommand, ROOM_LIMITS, ROOM_MEDIA_DISCOVERY_LIMITS, type RoomActor, type RoomApi } from '../contracts/roomV1';
 import { exactSocialKeys, SocialError } from '../contracts/socialV1';
+import { socialCapacity, type SocialCapacity } from '../config/socialCapacity';
 import { requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { asyncHandler, limitConcurrency, rateLimit, requireSecureAuthTransport } from '../middleware/requestProtectionMiddleware';
+import { realtimeSeats, type RealtimeSeatCheck } from '../realtime/realtimeSeats';
 import { issueRoomTicket } from '../realtime/roomTickets';
+import { socialOperations, type SocialOperations, type TicketFailureKind } from '../realtime/socialOperations';
 
 const invalid = () => new SocialError(400, 'invalid_request');
 const actor = (req: Request, clientId = req.get('X-Finitude-Room-Client')): RoomActor => {
@@ -14,8 +17,25 @@ const actor = (req: Request, clientId = req.get('X-Finitude-Room-Client')): Room
     return { userId: auth.userId, sessionId: auth.sessionId, clientId };
 };
 
+export interface RoomRouterOptions {
+    capacity?: SocialCapacity;
+    /** The gateway's seat rule; defaults to the installed gateway's. */
+    seatCheck?: RealtimeSeatCheck;
+    issueTicket?: typeof issueRoomTicket;
+    operations?: SocialOperations;
+}
+/** Clients wait this long before asking for another realtime ticket while every seat is taken. */
+export const REALTIME_CAPACITY_RETRY_SECONDS = 30;
+
+const ticketFailure = (error: unknown): TicketFailureKind => error instanceof SocialError && error.code === 'ticket_limit' ? 'limit'
+    : error instanceof SocialError && error.statusCode === 401 ? 'session' : 'unavailable';
+
 /** Room endpoints precede the smaller social parser and return only current authorized projections. */
-export const createRoomRouter = (api: RoomApi = createRoomService()) => {
+export const createRoomRouter = (api: RoomApi = createRoomService(), options: RoomRouterOptions = {}) => {
+    const capacity = options.capacity ?? socialCapacity();
+    const seatCheck = options.seatCheck ?? realtimeSeats.check;
+    const issueTicket = options.issueTicket ?? issueRoomTicket;
+    const operations = options.operations ?? socialOperations;
     const router = express.Router();
     router.use((req, _res, next) => /^\/(rooms(?:\/|$)|room-commands$|room-invitations(?:\/|$)|room-media(?:\/|$)|realtime-tickets$|capabilities$)/.test(req.path) ? next() : next('router'));
     router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); res.vary('Cookie'); res.vary('Authorization');
@@ -79,7 +99,17 @@ export const createRoomRouter = (api: RoomApi = createRoomService()) => {
         if (!exactSocialKeys(req.body, ['clientId']) || !isRoomClientId(req.body.clientId)) throw invalid();
         if (req.get('X-Finitude-Room-Client') && req.get('X-Finitude-Room-Client') !== req.body.clientId) throw invalid();
         const origin = new URL(`${req.protocol}://${req.get('Host')}`).origin;
-        res.json(await issueRoomTicket(actor(req, req.body.clientId), origin));
+        const viewer = actor(req, req.body.clientId);
+        // Refusing before issuance spends no ticket transaction; the upgrade rechecks the same rule. Both
+        // refusals share one client response: the tab waits, and can still create or join a room meanwhile.
+        const refusal = await seatCheck(viewer);
+        if (refusal) {
+            operations.recordTicketFailure(refusal);
+            if (refusal === 'capacity') operations.recordCapacityRejection('sockets', capacity.maxRealtimeSockets);
+            res.setHeader('Retry-After', String(REALTIME_CAPACITY_RETRY_SECONDS));
+            throw new SocialError(503, 'realtime_capacity');
+        }
+        try { res.json(await issueTicket(viewer, origin)); } catch (error) { operations.recordTicketFailure(ticketFailure(error)); throw error; }
     }));
     router.use((_req, _res, next) => next(new SocialError(404, 'not_found')));
     router.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
@@ -88,6 +118,7 @@ export const createRoomRouter = (api: RoomApi = createRoomService()) => {
         const known = error instanceof SocialError ? error : parser?.type === 'entity.too.large'
             ? new SocialError(413, 'request_too_large') : parser?.type === 'entity.parse.failed' ? invalid() : null;
         if (!known) return next(error);
+        if (known.statusCode === 429 || known.statusCode === 503) operations.recordRejection(known.code);
         res.status(known.statusCode).json({ code: known.code, message: known.message });
     });
     return router;

@@ -224,6 +224,121 @@ test('reaction quota rejections retain no resend intent and explain the temporar
   expect(roomSession.getSnapshot()).toMatchObject({ error: 'room.reaction_limit', uncertain: null, busy: false });
 });
 
+test('capacity rejections explain a full deployment or a full room instead of a stale-state message', async () => {
+  await connected(null);
+  mocks.sendRoomCommand.mockResolvedValueOnce({ commandId: 'immutable-command-123', outcome: 'rejected', code: 'room_capacity', replayed: false });
+  await roomSession.run({ action: 'create', mediaTrackIds: ['1'.repeat(24)] });
+  expect(roomSession.getSnapshot()).toMatchObject({ error: 'room.capacity', uncertain: null, busy: false });
+  mocks.sendRoomCommand.mockResolvedValueOnce({ commandId: 'immutable-command-123', outcome: 'rejected', code: 'room_full', replayed: false });
+  await roomSession.run({ action: 'acceptInvitation', invitationId: 'invitation-a', generation: 1 });
+  expect(roomSession.getSnapshot()).toMatchObject({ error: 'room.full', uncertain: null, busy: false });
+  // Unknown and inherited-property codes keep the generic changed-state explanation.
+  for (const code of ['playback_changed', '__proto__', 'constructor']) {
+    mocks.sendRoomCommand.mockResolvedValueOnce({ commandId: 'immutable-command-123', outcome: 'rejected', code, replayed: false });
+    await roomSession.run({ action: 'acceptInvitation', invitationId: 'invitation-a', generation: 1 });
+    expect(roomSession.getSnapshot().error).toBe('social.stale');
+  }
+});
+
+test('a full realtime pool shows its own message and waits for Retry-After before reconnecting or polling', async () => {
+  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Busy.', 'http', 503, 'realtime_capacity', 30));
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: false, realtimeBusy: true, error: 'room.realtime_busy' });
+  expect(Socket.instances).toHaveLength(0);
+  const reads = mocks.getCurrentRoom.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(25_000);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(1);
+  expect(mocks.getCurrentRoom).toHaveBeenCalledTimes(reads);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+  expect(Socket.instances).toHaveLength(1);
+  Socket.instances[0].receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_000_000, room: null });
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: true, realtimeBusy: false, error: null });
+});
+
+test('a room member refused a live connection keeps reading room state while its reconnect waits', async () => {
+  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Busy.', 'http', 503, 'realtime_capacity', 30));
+  const room = pausedRoom(); mocks.getCurrentRoom.mockResolvedValue({ room });
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot()).toMatchObject({ room, realtimeBusy: true });
+  const reads = mocks.getCurrentRoom.mock.calls.length;
+  const updated = { ...room, revision: 2 }; mocks.getCurrentRoom.mockResolvedValue({ room: updated });
+  await vi.advanceTimersByTimeAsync(25_000);
+  expect(mocks.getCurrentRoom).toHaveBeenCalledTimes(reads + 5);
+  expect(roomSession.getSnapshot().room).toEqual(updated);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(1);
+});
+
+test.each<RoomAction>([
+  { action: 'create', mediaTrackIds: ['1'.repeat(24)] },
+  { action: 'acceptInvitation', invitationId: 'invitation-a', generation: 1 }
+])('a tab refused a live connection can still $action over HTTP and then connects at once', async action => {
+  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Busy.', 'http', 503, 'realtime_capacity', 30));
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  const room = pausedRoom();
+  mocks.getCurrentRoom.mockResolvedValue({ room });
+  await roomSession.run(action);
+  expect(mocks.sendRoomCommand).toHaveBeenCalledExactlyOnceWith('viewer-1', expect.objectContaining(action));
+  expect(roomSession.getSnapshot()).toMatchObject({ room, connected: false, busy: false });
+  await vi.advanceTimersByTimeAsync(0);
+  // The member's reserved seat is asked for immediately rather than after the Retry-After wait.
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+  Socket.instances[0].receive({ type: 'subscribed', protocolVersion: 1, serverTimeMs: 1_000_000, room });
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: true, realtimeBusy: false, error: null });
+});
+
+test('a tab refused a live connection keeps playback and other room commands waiting for one', async () => {
+  mocks.getRealtimeTicket.mockRejectedValue(new ApiError('Busy.', 'http', 503, 'realtime_capacity', 30));
+  const room = pausedRoom(); mocks.getCurrentRoom.mockResolvedValue({ room });
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot()).toMatchObject({ room, realtimeBusy: true });
+  await roomSession.run({ action: 'react', roomId: room.roomId, memberId: room.self.memberId, expectedEpoch: room.epoch, reaction: 'heart' });
+  await roomSession.run({ action: 'takeControl', roomId: room.roomId, memberId: room.self.memberId });
+  await roomSession.control('play');
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+  // A refused join keeps waiting for Retry-After instead of asking for a seat again.
+  mocks.sendRoomCommand.mockResolvedValueOnce({ commandId: 'immutable-command-123', outcome: 'rejected', code: 'room_full', replayed: false });
+  await roomSession.run({ action: 'acceptInvitation', invitationId: 'invitation-a', generation: 1 });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot().error).toBe('room.full');
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(1);
+});
+
+test('without a capacity refusal, creating and joining still wait for a fresh live connection', async () => {
+  mocks.getRealtimeTicket.mockRejectedValue(new ApiError('Unavailable.', 'network'));
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot()).toMatchObject({ connected: false, realtimeBusy: false, error: 'room.disconnected' });
+  await roomSession.run({ action: 'create', mediaTrackIds: ['1'.repeat(24)] });
+  await roomSession.run({ action: 'acceptInvitation', invitationId: 'invitation-a', generation: 1 });
+  expect(mocks.sendRoomCommand).not.toHaveBeenCalled();
+});
+
+test('a realtime backoff belongs to its session and never delays the next account', async () => {
+  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Busy.', 'http', 503, 'realtime_capacity', 300));
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot().error).toBe('room.realtime_busy');
+  roomSession.stop();
+  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Unavailable.', 'network'));
+  roomSession.ensure('viewer-2', vi.fn());
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(3);
+});
+
+test('other ticket failures keep the ordinary disconnected message and five-second retry', async () => {
+  mocks.getRealtimeTicket.mockRejectedValueOnce(new ApiError('Unavailable.', 'http', 503, 'rooms_disabled'));
+  roomSession.ensure('viewer-1', vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  expect(roomSession.getSnapshot().error).toBe('room.disconnected');
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(mocks.getRealtimeTicket).toHaveBeenCalledTimes(2);
+});
+
 test('ending a room retires membership before invalidating its active query observers', async () => {
   const room = pausedRoom(); await connected(room);
   const observed: (RoomSnapshot | null)[] = [];

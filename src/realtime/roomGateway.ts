@@ -5,24 +5,40 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { createRoomService } from '../application/rooms/roomService';
 import { exactSocialKeys, SocialError } from '../contracts/socialV1';
 import { parseRoomHeartbeat, parseRoomReady, ROOM_LIMITS, type RoomActor, type RoomApi } from '../contracts/roomV1';
+import { admitRealtimeSeat, generalRealtimeSeats, realtimeSeatRefusal, socialCapacity, type RealtimeSeatState, type SocialCapacity } from '../config/socialCapacity';
 import { getDb } from '../infrastructure/database';
 import type { ServerLifecycle } from '../services/serverLifecycleService';
 import { roomAuthority } from './roomAuthority';
 import { roomGatewayMetrics, type RoomGatewayMetrics } from './roomGatewayMetrics';
 import { onRoomChanges } from './roomEvents';
-import { redeemRoomTicket } from './roomTickets';
+import { realtimeSeats } from './realtimeSeats';
+import { isRoomParticipant, redeemRoomTicket } from './roomTickets';
 import { createRoomUpgradeContext, createRoomUpgradeRateLimit } from './roomUpgradeProtection';
+import { socialOperations, type SocialOperations, type UpgradeRejectionReason } from './socialOperations';
 
+/** `inRoom` is the account's room membership as this socket's latest read (or its admission lookup) saw it. */
 interface Connection { socket: WebSocket; actor: RoomActor; key: string; ip: string; version: string;
-    lastSeen: number; lastHeartbeat: number; heartbeatState: string; window: number; reports: number; pending: number; socialVersion: number }
+    lastSeen: number; lastHeartbeat: number; heartbeatState: string; window: number; reports: number; pending: number; socialVersion: number;
+    inRoom: boolean }
 interface GatewayOptions { api?: RoomApi; acquire?: typeof roomAuthority.acquire; release?: typeof roomAuthority.release;
-    redeemTicket?: typeof redeemRoomTicket; metrics?: RoomGatewayMetrics }
+    redeemTicket?: typeof redeemRoomTicket; metrics?: RoomGatewayMetrics; operations?: SocialOperations;
+    /** Resolved once at install, like the rollout flags: changing it restarts the process. */
+    capacity?: SocialCapacity; isRoomMember?: (accountId: string) => Promise<boolean>; seats?: typeof realtimeSeats }
+/** The per-address bound stays fixed; process and per-account socket bounds follow deployment capacity. */
+const SOCKETS_PER_ADDRESS = 32;
+const PENDING_UPGRADES = 32;
+const connectionKey = (actor: RoomActor) => `${actor.userId}:${actor.sessionId}:${actor.clientId}`;
 
 /** Authenticated complete-state delivery; commands stay on HTTP and media bytes stay on the stream route. */
 export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, options: GatewayOptions = {}) => {
     const api = options.api ?? createRoomService();
     const metrics = options.metrics ?? roomGatewayMetrics;
+    const operations = options.operations ?? socialOperations;
+    const capacity = options.capacity ?? socialCapacity();
+    const isRoomMember = options.isRoomMember ?? isRoomParticipant;
+    const seats = options.seats ?? realtimeSeats;
     metrics.setAuthorityState('starting');
+    metrics.setOpenSockets(0);
     const acquire = options.acquire ?? (() => roomAuthority.acquire());
     const release = options.release ?? (() => roomAuthority.release());
     const redeemTicket = options.redeemTicket ?? redeemRoomTicket;
@@ -32,6 +48,27 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
     const wss = new WebSocketServer({ noServer: true, maxPayload: 2_048, perMessageDeflate: false,
         handleProtocols: protocols => protocols.has('archtree-room-v1') ? 'archtree-room-v1' : false });
     const connections = new Map<string, Connection>();
+
+    /** Closing sockets no longer hold a seat; their close event follows shortly. */
+    const seatState = (actor: RoomActor): RealtimeSeatState => {
+        const members = new Set<string>();
+        let openSockets = 0, accountSockets = 0, accountIsMember = false;
+        for (const value of connections.values()) {
+            if (value.socket.readyState !== WebSocket.OPEN) continue;
+            openSockets += 1;
+            if (value.inRoom) members.add(value.actor.userId);
+            if (value.actor.userId === actor.userId) { accountSockets += 1; accountIsMember ||= value.inRoom; }
+        }
+        return { replacing: connections.has(connectionKey(actor)), openSockets, memberAccounts: members.size, accountSockets, accountIsMember };
+    };
+    const admission = (actor: RoomActor) => admitRealtimeSeat(() => seatState(actor), capacity, () => isRoomMember(actor.userId));
+    const uninstallSeats = seats.install(async actor => (await admission(actor)).refusal);
+    /** Sockets beyond the reserved members' first sockets; above the general seats only after membership ended. */
+    const generalOverfull = (actor: RoomActor) => {
+        const state = seatState(actor);
+        const general = generalRealtimeSeats(capacity);
+        return state.openSockets - Math.min(state.memberAccounts, capacity.maxRealtimeSockets - general) > general;
+    };
     const chains = new Map<string, Promise<unknown>>();
     let pendingUpgrades = 0;
     let stopped = false;
@@ -42,6 +79,7 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
     let lastRecovery = 0;
     let authorityReady = false;
     let sweepFailures = 0;
+    let fanoutRequestedAt: number | null = null;
 
     /** Observe lease acquisition without changing its scheduling or retry policy. */
     const acquireAuthority = async () => {
@@ -104,6 +142,12 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
             if (!resolved) return;
             const { room, socialVersion } = resolved;
             if (connections.get(connection.key) !== connection) return;
+            const wasInRoom = connection.inRoom;
+            connection.inRoom = room !== null;
+            // A socket seated as a room member gives its seat back once the account left every room, but only
+            // while the general seats are over-full. It still delivers the absence first; the tab then waits for
+            // a seat like any other.
+            const release = wasInRoom && room === null && generalOverfull(connection.actor);
             const version = room ? `${room.roomId}:${room.epoch}:${room.revision}:${room.self.controllerGeneration}:${room.self.isController}` : 'none';
             if (subscribed) send(connection, { type: 'subscribed', protocolVersion: 1, serverTimeMs: Date.now(), room });
             // HTTP may have observed a brief membership that was coalesced away on this socket.
@@ -111,23 +155,31 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
             else if (room === null || version !== connection.version) send(connection, { type: 'snapshot', room });
             connection.version = version;
             if (socialVersion !== connection.socialVersion) { connection.socialVersion = socialVersion; send(connection, { type: 'socialChanged' }); }
+            if (release) connection.socket.close(1013, 'Live updates are busy.');
         } catch (error) {
             metrics.recordFailure('refresh');
             closeForFailure(connection, error);
         }
     };
-    /** Coalesce wakeups; each send resolves fresh viewer/session authorization after the committing transaction. */
+    /**
+     * Coalesce wakeups; each send resolves fresh viewer/session authorization after the committing transaction.
+     * A pass's lag runs from the earliest wakeup it absorbed, so queued wakeups count the wait for the running pass.
+     */
     const fanout = () => {
         refreshPending = true;
+        fanoutRequestedAt ??= Date.now();
         if (refreshing || stopped) return;
         refreshing = true;
         void lifecycle.track(async () => {
             while (refreshPending && !stopped) {
                 refreshPending = false;
+                const requestedAt = fanoutRequestedAt ?? Date.now();
+                fanoutRequestedAt = null;
                 const current = [...connections.values()];
                 for (let i = 0; i < current.length && !stopped; i += 8) {
                     await Promise.all(current.slice(i, i + 8).map(connection => serialized(connection.key, () => refresh(connection)).catch(() => { metrics.recordFailure('refresh'); })));
                 }
+                if (!stopped) operations.recordFanout(Date.now() - requestedAt);
             }
         }).catch(() => { metrics.recordFailure('refresh'); }).finally(() => { refreshing = false; });
     };
@@ -181,17 +233,21 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
         } else connection.socket.close(1008, 'Unsupported message.');
     };
 
-    const connect = (socket: WebSocket, actor: RoomActor, ip: string) => {
-        const key = `${actor.userId}:${actor.sessionId}:${actor.clientId}`;
+    const connect = (socket: WebSocket, actor: RoomActor, ip: string, inRoom: boolean) => {
+        const key = connectionKey(actor);
         const previous = connections.get(key);
         const connection: Connection = { socket, actor, key, ip, version: '', lastSeen: Date.now(), lastHeartbeat: 0, heartbeatState: '',
-            window: 0, reports: 0, pending: 0, socialVersion: -1 };
+            window: 0, reports: 0, pending: 0, socialVersion: -1, inRoom: inRoom || previous?.inRoom === true };
         connections.set(key, connection);
+        metrics.setOpenSockets(connections.size);
+        operations.socketOpened(connections.size);
         previous?.socket.close(1000, 'Connection replaced.');
         socket.on('error', () => { socket.terminate(); });
-        socket.on('close', () => {
+        socket.on('close', (code: number) => {
+            operations.socketClosed(code);
             if (connections.get(key) !== connection) return;
             connections.delete(key);
+            metrics.setOpenSockets(connections.size);
             if (!stopped) void serialized(key, async () => {
                 if (!connections.has(key)) await api.disconnected(actor);
             }).catch(() => { metrics.recordFailure('disconnect'); });
@@ -204,39 +260,57 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
         });
         void serialized(key, () => refresh(connection, true)).catch(() => { metrics.recordFailure('refresh'); socket.close(1011, 'Unavailable.'); });
     };
-    const reject = (socket: Duplex, status = 401) => {
+    const reject = (socket: Duplex, status: number, reason: UpgradeRejectionReason) => {
+        operations.recordUpgradeRejection(reason);
+        if (reason === 'capacity') operations.recordCapacityRejection('sockets', capacity.maxRealtimeSockets);
         if (!socket.destroyed) socket.end(`HTTP/1.1 ${status} Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     };
+    const fromAddress = (ip: string) => [...connections.values()].filter(value => value.ip === ip).length;
     const upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
         // Upgrade sockets no longer have Express's request error handling while ticket IO is pending.
         const onSocketError = () => socket.destroy();
         socket.on('error', onSocketError);
-        if (req.url !== '/api/social/v1/realtime' || stopped || lifecycle.draining || !authorityReady || !enabled()) return reject(socket, 503);
+        if (req.url !== '/api/social/v1/realtime' || stopped || lifecycle.draining || !authorityReady || !enabled()) return reject(socket, 503, 'unavailable');
         const { ip, secure } = upgradeContext(req);
-        if (!allowUpgradeAttempt(ip) || pendingUpgrades >= 32 || connections.size >= 256
-            || [...connections.values()].filter(value => value.ip === ip).length >= 32) return reject(socket, 429);
+        if (!allowUpgradeAttempt(ip)) return reject(socket, 429, 'attemptRate');
+        if (pendingUpgrades >= PENDING_UPGRADES) return reject(socket, 429, 'pending');
+        // The socket cap waits for the ticket's identity, because replacing this client's own socket needs no seat.
+        if (fromAddress(ip) >= SOCKETS_PER_ADDRESS) return reject(socket, 429, 'perAddress');
         const origin = req.headers.origin;
         const protocols = String(req.headers['sec-websocket-protocol'] ?? '').split(',').map(value => value.trim());
-        if (!origin || protocols.length !== 2 || protocols[0] !== 'archtree-room-v1' || !/^[A-Za-z0-9_-]{43}$/.test(protocols[1])) return reject(socket);
+        if (!origin || protocols.length !== 2 || protocols[0] !== 'archtree-room-v1' || !/^[A-Za-z0-9_-]{43}$/.test(protocols[1])) return reject(socket, 401, 'unauthorized');
         try {
             const parsed = new URL(origin);
-            if (parsed.origin !== origin || parsed.host !== req.headers.host || !['http:', 'https:'].includes(parsed.protocol)) return reject(socket, 403);
-            if (process.env.NODE_ENV === 'production' && (!secure || parsed.protocol !== 'https:')) return reject(socket, 426);
-        } catch { return reject(socket, 403); }
+            if (parsed.origin !== origin || parsed.host !== req.headers.host || !['http:', 'https:'].includes(parsed.protocol)) return reject(socket, 403, 'unauthorized');
+            if (process.env.NODE_ENV === 'production' && (!secure || parsed.protocol !== 'https:')) return reject(socket, 426, 'unauthorized');
+        } catch { return reject(socket, 403, 'unauthorized'); }
         pendingUpgrades++;
         (socket as Socket).setTimeout(5_000, () => socket.destroy());
         void lifecycle.track(async () => {
             const actor = await redeemTicket(protocols[1], origin);
-            if (!actor || stopped || lifecycle.draining || socket.destroyed || !authorityReady || !enabled()) return reject(socket);
-            if (connections.size >= 256 || [...connections.values()].filter(value => value.ip === ip).length >= 32) return reject(socket, 429);
-            if ([...connections.values()].filter(value => value.actor.userId === actor.userId).length >= 4
-                && !connections.has(`${actor.userId}:${actor.sessionId}:${actor.clientId}`)) return reject(socket, 429);
+            if (!actor) return reject(socket, 401, 'unauthorized');
+            // Ticket IO and the member lookup both yield, so every bound is rechecked against current sockets.
+            const refusal = (): UpgradeRejectionReason | null => {
+                if (stopped || lifecycle.draining || socket.destroyed || !authorityReady || !enabled()) return 'unavailable';
+                return fromAddress(ip) >= SOCKETS_PER_ADDRESS ? 'perAddress' : null;
+            };
+            let refused = refusal();
+            let inRoom = false;
+            if (!refused) {
+                inRoom = (await admission(actor)).member;
+                // The membership lookup (and the await itself) yields, so the seat is judged again synchronously
+                // against current sockets; nothing yields between this judgment and the connection joining them.
+                const state = seatState(actor);
+                refused = refusal() ?? realtimeSeatRefusal(state, capacity, inRoom || state.accountIsMember);
+            }
+            // A lost race with shutdown or rollout keeps the original empty 401; every bound is a 429.
+            if (refused) return reject(socket, refused === 'unavailable' ? 401 : 429, refused);
             (socket as Socket).setTimeout(0);
             wss.handleUpgrade(req, socket, head, webSocket => {
-                connect(webSocket, actor, ip);
+                connect(webSocket, actor, ip, inRoom);
                 socket.off('error', onSocketError);
             });
-        }).catch(() => reject(socket)).finally(() => { pendingUpgrades--; });
+        }).catch(() => reject(socket, 401, 'unavailable')).finally(() => { pendingUpgrades--; });
     };
     server.on('upgrade', upgrade);
 
@@ -282,10 +356,10 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
     /** Stop admission and socket callbacks before draining; release only this process's matching lease last. */
     const stop = () => {
         if (stopped) return;
-        stopped = true; metrics.setAuthorityState('stopped'); clearInterval(interval); unsubscribe();
+        stopped = true; metrics.setAuthorityState('stopped'); clearInterval(interval); unsubscribe(); uninstallSeats();
         server.off('upgrade', upgrade);
         for (const connection of connections.values()) connection.socket.terminate();
-        connections.clear(); wss.close();
+        connections.clear(); metrics.setOpenSockets(0); wss.close();
     };
     lifecycle.onDrain(stop);
     server.once('close', stop);

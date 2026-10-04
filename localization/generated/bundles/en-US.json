@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-mV3ZWtY3J8pRXhIFYs9dmBYiRX9KY8ud5CvFotdtHcY",
+  "revision": "sha256-bt7Q8Kc6yuv5kDU7EM3pzIjgyZFzLaG7en-gCO3aSvY",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.back_login": "Back to Log in",
@@ -626,6 +626,7 @@
     "room.activity_title": "Room activity",
     "room.activity_track_changed": "{alias} changed the song.",
     "room.cancel_transfer": "Cancel transfer",
+    "room.capacity": "Rooms are at capacity right now. Try again in a few minutes.",
     "room.choose_music": "Choose songs",
     "room.close": "Close",
     "room.connected": "Connected",
@@ -646,6 +647,7 @@
     "room.entry_reconnecting": "Room reconnecting",
     "room.entry_suspended": "Room suspended",
     "room.everyone": "Everyone control",
+    "room.full": "This room is full.",
     "room.guest": "Guest",
     "room.host": "Host",
     "room.host_only": "Host control",
@@ -701,6 +703,7 @@
     "room.react_smile": "Send smile",
     "room.reaction_limit": "Please wait before sending another reaction.",
     "room.ready": "Ready",
+    "room.realtime_busy": "Live room updates are busy right now. Finitude will try again shortly.",
     "room.reconnect": "Reconnect",
     "room.request_accept": "Add to queue",
     "room.request_dismiss": "Dismiss",

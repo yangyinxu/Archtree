@@ -4513,6 +4513,13 @@
       ],
       "variables": {}
     },
+    "room.capacity": {
+      "description": "Room capacity: Rooms are at capacity right now. Try again in a few minutes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.choose_music": {
       "description": "Shared listening interface: choose music.",
       "delivery": [
@@ -4650,6 +4657,13 @@
     },
     "room.everyone": {
       "description": "Shared listening interface: everyone.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.full": {
+      "description": "Room capacity: This room is full.",
       "delivery": [
         "runtime"
       ],
@@ -5056,6 +5070,13 @@
     },
     "room.ready": {
       "description": "Shared listening interface: ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.realtime_busy": {
+      "description": "Room capacity: Live room updates are busy; the connection retries automatically.",
       "delivery": [
         "runtime"
       ],

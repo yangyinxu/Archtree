@@ -17,6 +17,17 @@ export const fenceRoomSession = async (actor: RoomActor, session: ClientSession)
     await touchActiveAccount(actor.userId, session);
 };
 
+/**
+ * Whether the account holds a room participation row. It only decides access to reserved realtime seats;
+ * a stale row costs one seat until the room service cleans it, and authorization is still decided per read.
+ */
+export const isRoomParticipant = async (accountId: string): Promise<boolean> => {
+    if (!/^[a-f0-9]{24}$/.test(accountId)) return false;
+    const db = getDb();
+    if (!db) return false;
+    return Boolean(await db.collection<{ _id: string }>('socialRoomParticipation').findOne({ _id: accountId }, { projection: { _id: 1 } }));
+};
+
 /** Tickets never appear in URL parameters and only their digest is stored. */
 export const issueRoomTicket = async (actor: RoomActor, origin: string) => {
     const ticket = randomBytes(32).toString('base64url');

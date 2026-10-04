@@ -10,6 +10,7 @@ test('request diagnostics replace caller identifiers and retain only fixed categ
   const app = express();
   app.use(diagnostics.observe);
   app.get('/content/private-title', (_req, res) => res.status(503).end());
+  app.get('/api/social/v1/rooms/current', (_req, res) => res.status(429).end());
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   try {
@@ -23,7 +24,13 @@ test('request diagnostics replace caller identifiers and retain only fixed categ
     assert.equal(snapshot.byArea.content.failed, 1);
     assert.equal(snapshot.byArea.content.completed, 1);
     assert.equal(snapshot.byArea.content.durationBuckets.reduce((a, b) => a + b), 1);
+    assert.equal(snapshot.byArea.content.limited, 0);
     assert.equal(JSON.stringify(snapshot).includes('private'), false);
+    const limited = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/social/v1/rooms/current`);
+    await limited.text();
+    const social = diagnostics.snapshot().byArea.social;
+    assert.deepEqual([social.completed, social.limited, social.failed], [1, 1, 0]);
+    assert.equal(diagnostics.snapshot().byArea.other.completed, 0, 'Social traffic no longer hides under other.');
     assert.equal(snapshot.scope, 'process');
     snapshot.byArea.content.completed = 900;
     assert.equal(diagnostics.snapshot().byArea.content.completed, 1);

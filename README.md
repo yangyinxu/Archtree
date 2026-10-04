@@ -552,6 +552,18 @@ Required variables:
   Flag changes take effect on restart; enabling, the kill switch, verification
   and rollback are in the
   [social rollout runbook](docs/deployment/social-rollout-runbook.md).
+- `FINITUDE_ROOMS_MAX_OPEN`, `FINITUDE_ROOM_MAX_MEMBERS`,
+  `FINITUDE_REALTIME_MAX_SOCKETS`: deployment capacity for open rooms (1–100),
+  members per room (2–8) and realtime sockets per process (1–256). Unset values
+  use those maximums; out-of-range whole numbers are clamped, anything else falls
+  back to the maximum, and the startup `social_capacity_config` line names the
+  variable either way. `.ebextensions/social-capacity.config` ships 1, 2 and 10 for
+  the t4g.micro with free-tier Atlas; values set on the environment take
+  precedence. Lowering a limit refuses new rooms, joins and connections without
+  removing anything already admitted. Each connected room member's first socket
+  has a reserved seat; the runbook describes the seat rule. See the
+  [capacity budget](docs/testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04)
+  before raising them.
 - `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in
@@ -805,9 +817,14 @@ avatar, and video. The shared 40/8 process/client ceiling reserves 16/2 slots
 from non-playback traffic so artwork-heavy pages cannot consume all audio or
 video playback capacity.
 The response also includes identity-free `rooms` diagnostics: current admission
-enablement, authority state, time since the last successful sweep, and five
-bounded failure counters. Room diagnostics do not change HTTP readiness; see
+enablement, authority state and its change count, time since the last successful
+sweep, open realtime sockets and rooms, and five bounded failure counters. Room
+diagnostics do not change HTTP readiness; see
 [the health contract](docs/architecture.md#database-constraints-and-additive-migrations).
+Each process also logs a minutely `ops_summary` line plus room lifecycle, room
+authority and capacity lines for CloudWatch metric filters; the
+[social rollout runbook](docs/deployment/social-rollout-runbook.md#signals)
+describes the fields and suggested alarms.
 
 ### Verify media Range behavior under bounded load
 
@@ -816,6 +833,11 @@ For a synthetic local memory screen without MongoDB or AWS access, run
 Node 24. This measures application-process RSS, not a total-machine memory
 limit or AWS throughput. See [the t4g.micro screening report](docs/testing/t4g-micro-capacity-screen.md)
 for workloads, reproduction details, observed limits, and remaining release checks.
+That screen predates social features and exercises no sockets or MongoDB. The
+database operations each room sweep, socket refresh and controller heartbeat cost
+are counted against an isolated `mongod` by `test/roomCapacityBudget.integration.ts`
+(part of `npm run test:integration`); the report's room budget derives the shipped
+capacity limits from those counts.
 
 The media load command targets `http://127.0.0.1:8081` by default and requires
 one or more database-confirmed ready Audio MediaTrack ObjectIds. Optional

@@ -13,6 +13,7 @@ import {
     uploadRateLimit,
     searchConcurrencyLimit,
     roomAudioAnalysisConcurrencyLimit,
+    takeLimiterRejections,
     uploadConcurrencyLimit
 } from '../src/middleware/requestProtectionMiddleware';
 
@@ -216,4 +217,32 @@ test('search has shared process and per-client bounds and releases finished capa
         assert.equal(invoke('client-b').admitted, true);
         assert.equal(invoke('client-c').capture.status, 429);
     } finally { for (const response of open) response.emit('close'); }
+});
+
+test('every limiter 429 is counted per fixed scope for the operations summary and reset when taken', () => {
+    resetRateLimitWindowsForTests();
+    const request = { ip: '203.0.113.40', socket: {}, body: { email: 'counted@example.test' } };
+    const window = rateLimit('synthetic-window', 1, 60_000);
+    for (let index = 0; index < 3; index += 1) window(request as any, responseCapture().response as any, () => undefined);
+    for (let index = 0; index < 11; index += 1) authEmailAccountRateLimit(request as any, responseCapture().response as any, () => undefined);
+    const open: EventEmitter[] = [];
+    try {
+        for (let index = 0; index < 3; index += 1) {
+            const events = Object.assign(new EventEmitter(), responseCapture().response);
+            searchConcurrencyLimit({ ip: '203.0.113.41', socket: {} } as any, events as any, () => { open.push(events); });
+        }
+    } finally { for (const response of open) response.emit('close'); }
+    const taken = takeLimiterRejections();
+    assert.deepEqual(taken, { 'auth-account': 1, 'catalog-search': 1, 'synthetic-window': 2 });
+    assert.doesNotMatch(JSON.stringify(taken), /203\.0\.113|counted@/);
+    assert.deepEqual(takeLimiterRejections(), {});
+});
+
+test('limiter rejection counts keep a bounded number of scopes', () => {
+    resetRateLimitWindowsForTests();
+    for (let index = 0; index < 100; index += 1) {
+        const limiter = rateLimit(`synthetic-scope-${index}`, 0, 60_000);
+        limiter({ ip: '203.0.113.42', socket: {} } as any, responseCapture().response as any, () => undefined);
+    }
+    assert.equal(Object.keys(takeLimiterRejections()).length, 64);
 });

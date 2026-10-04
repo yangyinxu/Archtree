@@ -6,7 +6,8 @@ test('room metrics expose fixed anonymous counters and a bounded successful-swee
     let now = 1_000;
     const metrics = createRoomGatewayMetrics(() => now, () => false);
     assert.deepEqual(metrics.snapshot(), {
-        scope: 'process', enabled: false, authorityState: 'inactive', lastSuccessfulSweepAgeMs: null,
+        scope: 'process', enabled: false, authorityState: 'inactive', authorityChanges: 0, lastSuccessfulSweepAgeMs: null,
+        openSockets: 0, openRooms: null,
         failures: { authorityAcquisition: 0, sweep: 0, refresh: 0, report: 0, disconnect: 0 }
     });
     metrics.setAuthorityState('ready');
@@ -39,6 +40,7 @@ test('room metrics reject arbitrary labels and never retain identity or error da
     metrics.recordFailure('constructor' as never);
     assert.equal(metrics.snapshot().authorityState, 'inactive');
     assert.equal(Object.keys(metrics.snapshot().failures).length, 5);
+    assert.equal(metrics.snapshot().authorityChanges, 0, 'Rejected states are not changes.');
 });
 
 test('room counters saturate and snapshots and registries are independent', () => {
@@ -79,4 +81,22 @@ test('a disabled wind-down reports its own authority state while rollout stays d
         metrics.setAuthorityState(state);
         assert.deepEqual([metrics.snapshot().enabled, metrics.snapshot().authorityState], [false, state]);
     }
+});
+
+test('each authority state change writes one line and counts, while renewals of the same state stay silent', () => {
+    const logged: unknown[] = [];
+    const metrics = createRoomGatewayMetrics(Date.now, () => true, entry => { logged.push(entry); });
+    for (const state of ['starting', 'ready', 'ready', 'ready', 'unavailable', 'ready', 'stopped'] as const) metrics.setAuthorityState(state);
+    metrics.setAuthorityState('private-state' as never);
+    assert.deepEqual(logged, ['starting', 'ready', 'unavailable', 'ready', 'stopped'].map(state => ({ category: 'room_authority', state })));
+    assert.equal(metrics.snapshot().authorityChanges, 5);
+});
+
+test('socket and open-room gauges accept only non-negative whole numbers', () => {
+    const metrics = createRoomGatewayMetrics();
+    metrics.setOpenSockets(3); metrics.setOpenRooms(1);
+    for (const value of [-1, 1.5, Number.NaN, Infinity]) { metrics.setOpenSockets(value); metrics.setOpenRooms(value); }
+    assert.deepEqual([metrics.snapshot().openSockets, metrics.snapshot().openRooms, metrics.openSockets()], [3, 1, 3]);
+    metrics.setOpenSockets(0); metrics.setOpenRooms(0);
+    assert.deepEqual([metrics.snapshot().openSockets, metrics.snapshot().openRooms], [0, 0]);
 });

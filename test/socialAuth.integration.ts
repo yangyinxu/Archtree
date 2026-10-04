@@ -471,9 +471,10 @@ test('social rate denials and health diagnostics retain no private route, accoun
     const denied = await request(owner, '/missing');
     assert.equal((await json<{ code: string }>(denied, 429)).code, 'rate_limited');
     assert.ok(Number(denied.headers.get('retry-after')) > 0);
-    const health = await json<{ requests: { byArea: Record<string, { completed: number }> } }>(
+    const health = await json<{ requests: { byArea: Record<string, { completed: number; limited: number }> } }>(
         await fetch(`${new URL(base).origin}/health`));
-    assert.ok(health.requests.byArea.other.completed >= 121);
+    assert.ok(health.requests.byArea.social.completed >= 121);
+    assert.ok(health.requests.byArea.social.limited >= 1);
     const diagnosticText = `${JSON.stringify(health.requests)}${logEntries.join('')}`;
     for (const value of [owner.userId, owner.email, owner.token, marker]) assert.equal(diagnosticText.includes(value), false);
 });

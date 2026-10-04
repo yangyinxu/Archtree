@@ -14,6 +14,10 @@ certification**. Production data, DNS and business rules were unchanged.
 The tested source is commit `46c5ed6`. Durable state remains in MongoDB and
 S3. Moving to serverless is not required to try the smaller instance.
 
+This screen predates social features. The
+[social and rooms database budget](#social-and-rooms-database-budget--2026-10-04)
+below adds the realtime room estimate and the capacity limits shipped for it.
+
 ## Method and limits
 
 `scripts/capacity-screen.ts` exercises the existing application imports and
@@ -255,6 +259,84 @@ available point about 1.98 credits and charged-credit points still zero. These
 lagging, short-trial metrics are not a final bill: outstanding surplus can be
 charged on termination, and sustained workload can exceed the base monthly
 estimate. The trial does not establish a hard $10 monthly cap.
+
+## Social and rooms database budget — 2026-10-04
+
+This is a local estimate for the Web-only Audio social release on the same single
+`t4g.micro` with a free-tier MongoDB Atlas cluster. It used no production load,
+AWS resources or Atlas cluster. `scripts/capacity-screen.ts` above exercises no
+sockets or MongoDB, so it cannot measure rooms; operation counts instead come from
+`test/roomCapacityBudget.integration.ts`, which reads an isolated `mongod`'s
+`opcounters` around repeated calls and fails if a change makes rooms or sockets
+more expensive. Run it with `npm run test:integration`.
+
+### Assumptions
+
+- Atlas documents these
+  [Free cluster limits](https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/):
+  100 operations per second, after which Atlas throttles the network and adds
+  one-second cooldowns; 500 connections; 10 GB in and 10 GB out per rolling seven
+  days; 0.5 GB of storage. The estimate counts every command, including
+  transaction commits and aborts, toward the operation rate.
+- The database, not the instance, binds first. Each socket's outbound buffer is
+  capped at 128 KiB (32 MiB for 256 sockets in the worst case) and the measured
+  1 GiB headroom was 187–289 MiB. Sweep CPU is a few milliseconds per tick, which
+  is an estimate rather than a measurement. Real-instance socket memory remains a
+  Stage 7 rollout check.
+- Steady state: every room member has one tab, is the playing controller and
+  heartbeats every five seconds; every socket gets the five-second recovery
+  refresh; the authority sweeps every 250 ms and renews its lease every three
+  seconds.
+- Commands, invitations, change fanout, media Range requests and catalog, auth and
+  listener traffic are bursts outside these numbers. At least 30 operations per
+  second stay in reserve for them.
+
+### Measured costs
+
+| Unit | Operations | Cadence | Per second |
+| --- | ---: | --- | ---: |
+| Sweep with no open room | 1 | 250 ms | 4 |
+| Lease renewal | 2 | 3 s | 0.7 |
+| Each open room in a sweep, M members | 2M + 5, +1 while playing | 250 ms | 8M + 20, +4 |
+| Socket refresh outside a room | 5 | 5 s | 1 |
+| Socket refresh for a room member | 8 | 5 s | 1.6 |
+| Controller heartbeat, M-member room | M + 6 | 5 s | (M + 6) / 5 |
+
+A playing room with M active members therefore costs about
+4(2M + 6) + M(M + 6)/5 + 1.6M operations per second: 46 for two members, 58 for
+three, 70 for four and 123 for eight. A paused room costs four fewer. Each visible
+social tab also polls invitations every 15 seconds and capabilities every 30
+seconds, about 0.5 operations per second by inspection of those routes, whether or
+not it holds a socket. A tab refused a socket waits for the server's 30-second
+`Retry-After` before asking again. Meanwhile only a refused tab already in a room
+keeps reading its room every five seconds, as any disconnected tab does; by
+inspection that costs about a member socket refresh plus authentication, roughly
+two operations per second per such tab. It occurs only for a member's extra tabs
+once the general seats are full.
+
+### Shipped limits
+
+`.ebextensions/social-capacity.config` sets one open room, two members and ten
+realtime sockets. The worst case is 4.7 (sweep and lease) + 46 (a playing
+two-member room) + 8 (eight sockets outside the room) + about 5 (ten visible tabs
+polling), or about 64 operations per second. That leaves about 36 for everything
+else. Three members (about 75) or a second two-member room (about 110) would use
+the reserve on the free tier. The two room members keep reserved seats: accounts
+outside a room may use only eight of the ten sockets, at most two per account.
+
+The sweep reads the whole room document four times a second. A two-member room
+with ten queued songs is about 5.5 KB of BSON, so sweeps alone transfer about
+80 MB per open-room hour, and about 100–125 MB with refreshes and heartbeats. A
+full 100-entry queue is about 43 KB, or about 620 MB per hour from sweeps. The
+free tier's 10 GB weekly egress therefore covers roughly 80 hours of small open
+rooms, or about 15 with full queues, before any catalog traffic. Watch Atlas
+**Network Out** alongside its operation counters.
+
+Raise the limits only after measuring Atlas operation counters together with the
+`ops_summary` `openRooms` and `openSockets` fields during a real enablement. A
+dedicated cluster is not subject to the Free cluster limits above. The other way
+to raise them is to lower the sweep's cost, since it re-reads every member's account
+and session and the whole room four times a second even when nothing is due.
 
 ## Cleanup and handoff
 

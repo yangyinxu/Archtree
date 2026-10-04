@@ -371,9 +371,23 @@ Server frames are `subscribed` (protocol, server time, initial room), `snapshot`
 (complete current room or null), `pong` and `socialChanged`. Clients never submit
 transport commands through WebSocket, and snapshots never generate commands.
 Frames are capped at 2 KiB inbound and 64 KiB outbound, reports at 120/minute,
-per-connection pending work at eight and output buffering at 128 KiB. The initial
-gateway caps 256 connections, 32 per IP and four per account, with 32 pending
-upgrades. These are admission bounds, not measured production capacity.
+per-connection pending work at eight and output buffering at 128 KiB. The gateway
+caps 32 connections per IP and four per account, with 32 pending upgrades. The
+process-wide connection cap is deployment capacity (`FINITUDE_REALTIME_MAX_SOCKETS`,
+at most 256). The reserved seats number the smaller of (open-room cap × member cap)
+and half the cap; each connected room member's first socket takes one, and every
+other socket takes one of the remaining general seats, so idle tabs and members'
+extra tabs cannot lock admitted members out. One account may hold a quarter of the
+general seats (one to four), plus its first socket while in a room. Membership comes
+from each socket's latest room read, or a participation lookup at admission only
+when it could change the outcome. A seated member socket whose account left every
+room is closed with 1013 only while the general seats are over-full. Replacing a
+client's own socket needs no seat. Ticket issuance applies the same rule first and
+answers `503 realtime_capacity` with `Retry-After: 30`; the upgrade rechecks it and
+answers `429`. Finitude Web lets a refused tab create, accept and invite over HTTP
+and then connect at once. These are admission bounds; the measured database cost behind the
+shipped Elastic Beanstalk values is in the
+[capacity screen](testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04).
 Transient snapshot-read contention receives at most three fresh authorized reads
 with bounded backoff. It does not retry playback commands or deliver a cached
 projection. Revoked access and lost authority close immediately; exhausted
@@ -413,7 +427,11 @@ local player remains silent until its own readiness acknowledgement is visible.
 Local pause, disconnect, takeover and revoked controller sessions clear readiness.
 
 `socialRooms` is a bounded aggregate (eight members, 100 entries, 100 active rooms
-per deployment). An account-keyed participation row enforces one active room.
+per deployment). Deployment capacity may lower the open-room and member limits
+(`FINITUDE_ROOMS_MAX_OPEN`, `FINITUDE_ROOM_MAX_MEMBERS`); `create` beyond it is
+rejected as `room_capacity` and `acceptInvitation` into a full room as `room_full`,
+leaving the invitation pending. Sweeps, cleanup and invitation scans keep the
+contract maximum as their bound, so lowering a limit never strands an open room. An account-keyed participation row enforces one active room.
 MongoDB transactions arbitrate commands, receipts, graph/account fences, source
 reference touches, membership, readiness and timers. A deployment-wide 10-second
 MongoDB authority lease renews every three seconds; every authority mutation
@@ -1458,8 +1476,12 @@ transaction, or changes data.
 A failed metadata read retains its diagnostic slot until all sibling reads settle.
 
 Both successful and unavailable health responses include a `rooms` snapshot
-with `scope: "process"`, `enabled`, `authorityState`,
-`lastSuccessfulSweepAgeMs`, and `failures`. `enabled` reflects both social and
+with `scope: "process"`, `enabled`, `authorityState`, `authorityChanges`,
+`lastSuccessfulSweepAgeMs`, `openSockets`, `openRooms`, and `failures`.
+`openSockets` counts this process's realtime sockets; `openRooms` is the open-room
+count read by this process's latest sweep, null before one. `authorityChanges`
+counts state changes since start, and each change also writes one `room_authority`
+log line. `enabled` reflects both social and
 room rollout flags; authority state is independently `inactive` while nothing in
 the process holds authority, `starting` during acquisition, `ready` while an
 admitting gateway holds it, `windingDown` while a process started with rooms
@@ -1474,6 +1496,21 @@ No account/room/session identifiers, raw exceptions, URLs, or caller-defined
 labels enter these diagnostics. A room failure remains observable without
 marking unrelated HTTP catalog and account routes unready. Monitor successive
 snapshots per process; they are not durable or cluster-wide totals.
+The `requests` snapshot groups routes into `auth`, `content`, `listener`, `media`,
+`social` (`/api/social/v1`) and `other`; per group, `failed` counts 5xx responses
+and `limited` counts 429 admission refusals.
+
+Every process also writes one `ops_summary` JSON line a minute to stdout for
+CloudWatch metric filters: configured room capacity, the room gauges above, the
+interval's socket opens/closes (by close class), upgrade refusals by reason, ticket
+failures, capacity refusals, fanout passes and maximum lag, room creations,
+suspensions and closures, per-interval room failure deltas, social/room 429/503
+codes, and 429 counts per request limiter (media admission refusals appear under
+`media-delivery`). Room lifecycle transitions (`room_lifecycle`, with the opaque room
+ID and a fixed close reason), the first refusal per minute at a capacity limit
+(`social_capacity`) and the effective capacity at startup (`social_capacity_config`)
+are immediate lines. The field reference and suggested alarms are in the
+[social rollout runbook](deployment/social-rollout-runbook.md#signals).
 
 One database health probe per application handler combines those checks and ping
 under a shared 1-second response deadline. Successful and failed results have a

@@ -46,7 +46,7 @@ const RoomTrackComposer = ({ viewerId, track, onClose }: { viewerId: string; tra
   const selectedFriend = rows.find(row => row.socialId === selected);
   const available = !media.isError && media.data?.item?.mediaTrackId === track.mediaTrackId;
   const blocked = pending || !connection.ready || connection.error || !connection.roomsEnabled || state.viewerId !== viewerId
-    || !state.connected || state.busy || Boolean(state.uncertain) || !available;
+    || !(state.connected || state.realtimeBusy) || state.busy || Boolean(state.uncertain) || !available;
   const submit = async (expected: RoomSnapshot | null, refresh?: () => Promise<unknown>) => {
     if (working.current || blocked || !expected && !selectedFriend) return;
     const guard = captureAccountOperation(viewerId), mounted = lifecycle.current;
@@ -58,7 +58,7 @@ const RoomTrackComposer = ({ viewerId, track, onClose }: { viewerId: string; tra
       && client.getQueryData<Awaited<ReturnType<typeof getSocialProfile>>>(['social', viewerId, 'profile'])?.profile?.active === true;
     const actionable = () => {
       const current = roomSession.getSnapshot();
-      return valid() && current.viewerId === viewerId && current.connected && !current.busy && !current.uncertain;
+      return valid() && current.viewerId === viewerId && (current.connected || current.realtimeBusy) && !current.busy && !current.uncertain;
     };
     const changed = async () => { await roomSession.refresh(); if (valid()) setMessage('room_track.room_changed'); };
     working.current = true; setPending(true); setMessage(null);

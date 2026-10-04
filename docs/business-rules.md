@@ -218,6 +218,18 @@ Playlist access retain their existing rules.
   most one active room and has one playing controller. Other tabs/devices are
   observers until the user explicitly chooses Use this device. Refreshing or
   duplicating a tab cannot silently take over the existing controller.
+- A deployment may set lower capacity than these maximums for open rooms, members
+  per room and live room connections. Creating a room beyond the open-room limit
+  says rooms are at capacity; accepting an invitation to a full room says the room
+  is full and leaves the invitation pending. A tab refused a live connection says
+  live updates are busy and retries automatically after a short wait. It can still
+  create a room, accept an invitation and invite friends, and connects as soon as
+  it has joined; playback and other room controls wait for the live connection.
+  Each admitted member's first live connection is reserved, so tabs outside rooms
+  and a member's extra tabs cannot lock members out of shared playback, and one
+  account's tabs may hold only a share of the other connections. A tab whose room
+  ended gives up its reserved connection only when no other connection is free.
+  Lowering a limit never removes members or closes rooms already open.
 - The host invites existing friends to a specific room. Invitations expire after
   24 hours, expose only the inviter's social card before acceptance, and require
   current friendship, capacity and block checks at admission. Removing friendship

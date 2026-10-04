@@ -111,7 +111,7 @@ const ActiveRoom = ({ room, viewerId }: { room: RoomSnapshot; viewerId: string }
         <ul className={styles.list}>{friends.data?.pages.flatMap(page => page.items).filter(friend => !participants.has(friend.socialId)).map(friend => {
           const invitation = room.self.isController && !outgoing.isError
             ? outgoing.data?.invitations.find(value => value.recipientSocialId === friend.socialId && value.expiresAtMs > now) : undefined;
-          const disabled = !state.connected || !room.self.isController || state.busy || Boolean(state.uncertain) || room.status !== 'open';
+          const disabled = !(state.connected || state.realtimeBusy) || !room.self.isController || state.busy || Boolean(state.uncertain) || room.status !== 'open';
           return <li className={`${styles.row} ${styles.invitationRow}`} key={friend.socialId}><div className={styles.rowContent}><strong>{friend.profile?.alias}</strong>{invitation && <span>{t('room.invitation_pending')}</span>}</div>
             {invitation ? <Suspense fallback={null}><CopyInvitationLink key={invitation.invitationId} viewerId={viewerId} invitationId={invitation.invitationId} alias={friend.profile?.alias ?? ''} disabled={disabled} /></Suspense>
               : <button className={styles.secondary} disabled={disabled || outgoing.isPending || outgoing.isError} onClick={() => roomSession.run({ action: 'invite', ...member, targetSocialId: friend.socialId })}>{t('room.invite')}</button>}
@@ -139,10 +139,10 @@ export const RoomsPanel = ({ viewerId, profile }: { viewerId: string; profile: S
       <p className={styles.description}>{t('room.empty')}</p><p className={styles.muted}>{t('social.signed_in', { alias: profile.alias })}</p>
       {invitations.data?.invitations.length ? <div style={{ marginTop: '1rem' }}><h3>{t('room.invitations')}</h3><ul className={styles.list}>{invitations.data.invitations.map(invitation => <li className={styles.row} key={invitation.invitationId}>
         <div className={styles.rowContent}><strong>{t('room.incoming_invite', { alias: invitation.inviter.alias })}</strong></div>
-        <button className={styles.button} disabled={!state.connected || busy} onClick={() => roomSession.run({ action: 'acceptInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('room.join')}</button>
+        <button className={styles.button} disabled={!(state.connected || state.realtimeBusy) || busy} onClick={() => roomSession.run({ action: 'acceptInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('room.join')}</button>
         <button className={styles.secondary} disabled={busy} onClick={() => roomSession.run({ action: 'declineInvitation', invitationId: invitation.invitationId, generation: invitation.generation })}>{t('social.decline')}</button>
       </li>)}</ul></div> : null}
-      <RoomCreationPicker key={viewerId} viewerId={viewerId} disabled={!state.connected || busy} />
+      <RoomCreationPicker key={viewerId} viewerId={viewerId} disabled={!(state.connected || state.realtimeBusy) || busy} />
     </>}
   </section>;
 };

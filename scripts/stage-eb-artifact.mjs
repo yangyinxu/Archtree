@@ -82,6 +82,7 @@ const requiredPlatformHooks = [
 const requiredDeploymentFiles = [
   '.ebextensions/https-instance.config',
   '.ebextensions/room-audio-decoder.config',
+  '.ebextensions/social-capacity.config',
   ...requiredPlatformHooks
 ];
 

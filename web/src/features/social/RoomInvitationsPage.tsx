@@ -33,7 +33,7 @@ const InvitationActions = ({ viewerId, invitations, unavailable = false, showEmp
   const respond = (invitation: RoomInvitation, action: 'acceptInvitation' | 'declineInvitation') => {
     const current = roomSession.getSnapshot();
     if (current.viewerId !== viewerId || current.busy || current.uncertain || invitation.expiresAtMs <= Date.now()) return;
-    if (action === 'acceptInvitation' && (current.room || !current.connected || !connection.roomsEnabled)) return;
+    if (action === 'acceptInvitation' && (current.room || !(current.connected || current.realtimeBusy) || !connection.roomsEnabled)) return;
     const pending = roomSession.run({ action, invitationId: invitation.invitationId, generation: invitation.generation });
     // A stale connection may reject the action before it begins. Such a read cannot
     // become a navigation trigger when an unrelated existing membership arrives.
@@ -65,7 +65,7 @@ const InvitationActions = ({ viewerId, invitations, unavailable = false, showEmp
             })}</time></span>
           </div>
           <div className={styles.rowActions}>
-            <button className={styles.button} disabled={blocked || !connection.roomsEnabled || !state.connected || Boolean(currentRoom)} onClick={() => respond(invitation, 'acceptInvitation')}>{t('room.join')}</button>
+            <button className={styles.button} disabled={blocked || !connection.roomsEnabled || !(state.connected || state.realtimeBusy) || Boolean(currentRoom)} onClick={() => respond(invitation, 'acceptInvitation')}>{t('room.join')}</button>
             <button className={styles.secondary} disabled={blocked} onClick={() => respond(invitation, 'declineInvitation')}>{t('social.decline')}</button>
           </div>
         </li>)}</ul>}

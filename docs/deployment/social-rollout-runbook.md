@@ -51,13 +51,51 @@ aws elasticbeanstalk update-environment --environment-name <environment> \
 Wait until the environment reports **Ok** before verifying. The HTTPS
 configuration-deployment hook re-applies the Nginx configuration on each update.
 
+### Capacity limits
+
+The free-tier Atlas cluster throttles above 100 operations per second, and rooms
+are its largest steady consumer. `.ebextensions/social-capacity.config` therefore
+ships conservative limits that apply only while both flags are `true`:
+
+| Variable | Shipped | Product maximum | Refusal the listener sees |
+| --- | ---: | ---: | --- |
+| `FINITUDE_ROOMS_MAX_OPEN` | 1 | 100 | Creating a room: "Rooms are at capacity right now." |
+| `FINITUDE_ROOM_MAX_MEMBERS` | 2 | 8 | Accepting an invitation: "This room is full." The invitation stays pending. |
+| `FINITUDE_REALTIME_MAX_SOCKETS` | 10 | 256 | Live updates: "Live room updates are busy right now." Retried after 30 seconds. |
+
+Socket seats split into reserved and general seats. The reserved seats number the
+open-room limit times the member limit, at most half of all sockets; with the
+shipped values that is 2 reserved and 8 general. Each connected room member's
+first socket takes a reserved seat, and every other socket takes a general one.
+One account may hold a quarter of the general seats (between one and four
+sockets; two when shipped), plus its first socket while it is in a room. A
+refused tab can still create a room, accept an invitation and invite friends
+over HTTP, then connects right away with the member's reserved seat. If a room
+ends while the sockets are over the general seats, each former member's socket
+that no longer fits is closed with WebSocket code 1013 and that tab waits like
+any other. Concurrent room creation cannot exceed the open-room limit, because
+every create writes the room authority fence, so conflicting creates retry
+against the committed room. Lowering a limit never removes members or
+closes open rooms.
+Derivation and the transfer caveat are in the
+[capacity budget](../testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04).
+To change a limit, set the variable as an environment property; that overrides the
+shipped default and restarts the application like a flag change. To return to the
+shipped value, set it back explicitly. Raise limits only after watching Atlas
+operation counters and **Network Out** with the `ops_summary` gauges during a
+real enablement. After each restart, the log's `social_capacity_config` line shows
+the effective values and names any setting that could not be used.
+
 ## Signals
 
 - `GET /health` is unauthenticated. Its `rooms` object reports `enabled` (both
-  flags), `authorityState`, `lastSuccessfulSweepAgeMs` and fixed failure counters.
+  flags), `authorityState` and its change count `authorityChanges`,
+  `lastSuccessfulSweepAgeMs`, `openSockets`, `openRooms` and fixed failure counters.
   `authorityState` is `ready` while rooms are enabled, `windingDown` while a
   process started with rooms off is ending rooms left open, `unavailable` after a
   lease or database failure, and `inactive` when nothing holds the room authority.
+  Its `requests.byArea.social` counts `/api/social/v1` traffic, with `limited`
+  for 429 refusals and `failed` for 5xx responses.
 - The application log (`/var/log/web.stdout.log`, included in `eb logs`) contains
   `{"category":"server_listening",...}` after each restart. A process started with
   rooms off adds `{"category":"room_wind_down","state":"started"}` when it finds an
@@ -65,6 +103,89 @@ configuration-deployment hook re-applies the Nginx configuration on each update.
   remains (immediately when there was none).
 - The WebSocket probe in the Finitude Web runbook answers `403 0` when rooms are
   enabled and the proxy forwards upgrades, and `503 0` when rooms are off.
+
+### Structured log lines
+
+Every line is one JSON object with a `category`. They contain fixed labels, counts
+and at most an opaque room ID. They never contain an account, session, address,
+handle, token or error text.
+
+| Category | When | Fields |
+| --- | --- | --- |
+| `ops_summary` | Every 60 seconds in every process | See below |
+| `room_lifecycle` | After a room is created, suspended for host absence, or closed | `transition` (`created`, `suspended`, `closed`), `roomId`, and for closures `reason`: `hostEnded`, `hostAbsent` (five minutes), `hostMissing`, `expired` (24 hours) or `accountLifecycle` (the host's account was deactivated, deleted or signed out everywhere; reported by the next sweep. During a deployment overlap, a room ended in the other process is also reported this way) |
+| `room_authority` | When the room authority state changes | `state` |
+| `social_capacity` | At most once a minute per limit while refusals occur | `limit` (`sockets`, `openRooms`, `roomMembers`), `maximum` |
+| `social_capacity_config` | At startup with rooms enabled | `maxOpenRooms`, `maxRoomMembers`, `maxRealtimeSockets`, `invalidSettings` (variable names) |
+
+`ops_summary` fields (counts cover the interval unless marked as a gauge):
+
+- `capacity`: the effective limits.
+- `rooms.enabled`, `rooms.authorityState`, `rooms.lastSuccessfulSweepAgeMs`,
+  `rooms.openRooms`, `rooms.openSockets`: gauges, as in `/health`.
+- `rooms.authorityChanges`; `rooms.socketsOpened`, `rooms.socketsClosed`,
+  `rooms.peakSockets`; `rooms.socketCloses.{normal, goingAway, policy, unavailable, abnormal}`.
+- `rooms.upgradeRejections.{unavailable, unauthorized, attemptRate, pending, capacity, perAddress, perAccount}`
+  and `rooms.upgradeRejectionsTotal`.
+- `rooms.ticketFailures.{capacity, perAccount, limit, session, unavailable}` and
+  `rooms.ticketFailuresTotal`. `capacity` means the seats were full; `perAccount`
+  means one account already held its share (no `social_capacity` line).
+- `rooms.capacityRejections.{sockets, openRooms, roomMembers}` and
+  `rooms.capacityRejectionsTotal`.
+- `rooms.fanoutPasses` and `rooms.fanoutLagMaxMs`: how long the slowest pass took,
+  from a committed change's wakeup (or the five-second recovery tick) until every
+  socket was re-read. This is the outbox delivery lag; the outboxes themselves
+  hold only invalidation versions.
+- `rooms.roomsCreated`, `rooms.roomsSuspended`, `rooms.roomsClosed`.
+- `rooms.failures.{authorityAcquisition, sweep, refresh, report, disconnect}` and
+  `rooms.failuresTotal`: increases since the previous summary.
+- `rejections.total` and `rejections.byCode`: social and room 429/503 error codes
+  (for example `social_limit`, `ticket_limit`, `realtime_capacity`,
+  `room_unavailable`) and rejected room commands for limits (`room_capacity`,
+  `room_full`, `room_reaction_limit`, ...).
+- `limiters.total` and `limiters.byScope`: HTTP 429s per request limiter (for
+  example `room-http`, `room-http-read`, `social-api`, `social-mutation`, `auth`),
+  with media admission refusals as `media-delivery`.
+
+### CloudWatch metric filters and alarms
+
+Stream the application log to CloudWatch Logs first (console: **Configuration →
+Updates, monitoring, and logging → Instance log streaming**, or option
+`aws:elasticbeanstalk:cloudwatch:logs` `StreamLogs=true`, with a short retention
+such as seven days). The log group is
+`/aws/elasticbeanstalk/<environment>/var/log/web.stdout.log`. One summary a minute
+is about 45 MB a month; streaming also sends the platform's other logs, so check
+ingestion against the 5 GB free allowance. The suggested set below uses eight
+custom metrics and eight alarms, which fits the CloudWatch free tier's ten of each
+when nothing else uses them.
+
+Create a metric from a JSON field, for example open sockets:
+
+```bash
+aws logs put-metric-filter --log-group-name /aws/elasticbeanstalk/<environment>/var/log/web.stdout.log \
+  --filter-name archtree-open-sockets --filter-pattern '{ $.category = "ops_summary" }' \
+  --metric-transformations metricName=OpenSockets,metricNamespace=Archtree/Social,metricValue='$.rooms.openSockets'
+aws cloudwatch put-metric-alarm --alarm-name archtree-open-sockets-near-cap \
+  --namespace Archtree/Social --metric-name OpenSockets --statistic Maximum --period 300 \
+  --evaluation-periods 3 --threshold 8 --comparison-operator GreaterThanOrEqualToThreshold \
+  --treat-missing-data notBreaching --alarm-actions <sns-topic-arn>
+```
+
+| Metric (filter pattern; value) | Alarm |
+| --- | --- |
+| `OpsSummary` (`{ $.category = "ops_summary" }`; `1`) | Sum below 3 over 5 minutes, missing data breaching: the process stopped or hung |
+| `OpenSockets` (summary; `$.rooms.openSockets`) | Maximum at least 80% of `FINITUDE_REALTIME_MAX_SOCKETS` for 15 minutes |
+| `CapacityRejections` (summary; `$.rooms.capacityRejectionsTotal`) | Sum above 0 in 15 minutes: listeners are being refused; review the limits |
+| `RoomFailures` (summary; `$.rooms.failuresTotal`) | Sum above 5 for three consecutive 5-minute periods |
+| `AuthorityChanges` (summary; `$.rooms.authorityChanges`) | Sum above 4 in 15 minutes: the authority is flapping |
+| `FanoutLagMax` (summary; `$.rooms.fanoutLagMaxMs`) | Maximum above 2000 for three of five minutes |
+| `TicketUnavailable` (summary; `$.rooms.ticketFailures.unavailable`) | Sum above 0 for two consecutive 5-minute periods |
+| `Limited` (summary; `$.limiters.total`) | Sum above 200 in 5 minutes: sustained throttling or abuse |
+
+Investigate a specific limiter, code or room with CloudWatch Logs Insights, for
+example `filter category = "ops_summary" | fields @timestamp, limiters.byScope`.
+On the Atlas side, watch the cluster's operation counters, connections and
+**Network Out**, and enable the project alerts the free tier offers.
 
 ## 1. Before the first enablement
 
@@ -92,9 +213,10 @@ configuration-deployment hook re-applies the Nginx configuration on each update.
    it from Music shares, enable **Share what I’m listening to** and see the
    status from the other account, then create a room with eligible Audio,
    invite and join, play, pause, react, recommend a track, leave and end.
-5. Watch `/health` failure counters and environment health for the observation
-   window. Stop and use the kill switch on any private-data exposure, sustained
-   server errors, rising room failure counters or a stop condition.
+5. Watch `/health` failure counters, the `ops_summary` lines (or their alarms)
+   and environment health for the observation window. Stop and use the kill
+   switch on any private-data exposure, sustained server errors, rising room
+   failure counters, Atlas throttling or a stop condition.
 
 ## 3. Kill switch
 
@@ -156,7 +278,7 @@ resumes by itself. Repeat the checks in section 2, step 3.
 | --- | --- |
 | Release | `RELEASE.json` commit and environment version |
 | Flags | Values before and after each change, time and owner |
-| Enablement | `/health` rooms snapshot, probe result, smoke-test result |
+| Enablement | `/health` rooms snapshot, probe result, smoke-test result, `social_capacity_config` line |
 | Kill switch rehearsal | Restart time, time to pause, time to `inactive`, probe result, social reads with rooms off |
 | Re-enable | `/health` rooms snapshot and probe result |
 | Exceptions | Accepted difference, owner, expiry/follow-up |

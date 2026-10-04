@@ -10,11 +10,30 @@ type WindowEntry = {
 
 const windows = new Map<string, WindowEntry>();
 let lastSweep = 0;
+const rejectionsByScope = new Map<string, number>();
+const maximumRejectionScopes = 64;
+
+/**
+ * Counts one HTTP 429 per limiter scope for the periodic operations summary. Scopes are code constants;
+ * the key bound only guards against a future caller passing a variable value.
+ */
+const recordLimiterRejection = (scope: string) => {
+    if (!rejectionsByScope.has(scope) && rejectionsByScope.size >= maximumRejectionScopes) return;
+    rejectionsByScope.set(scope, Math.min(Number.MAX_SAFE_INTEGER, (rejectionsByScope.get(scope) ?? 0) + 1));
+};
+
+/** Returns the 429 counts per limiter scope since the previous call and starts a new interval. */
+export const takeLimiterRejections = (): Record<string, number> => {
+    const taken = Object.fromEntries([...rejectionsByScope].sort(([left], [right]) => left.localeCompare(right)));
+    rejectionsByScope.clear();
+    return taken;
+};
 
 /** Resets process-local rate windows so sequential integration cases remain isolated. */
 export const resetRateLimitWindowsForTests = () => {
     windows.clear();
     lastSweep = 0;
+    rejectionsByScope.clear();
 };
 
 const clientKey = (req: Request) => req.ip || req.socket.remoteAddress || 'unknown';
@@ -60,6 +79,7 @@ export const rateLimit = (
         res.setHeader('RateLimit-Reset', Math.ceil(entry.resetsAt / 1000));
         if (entry.count > maximumRequests) {
             const retryAfterSeconds = Math.max(1, Math.ceil((entry.resetsAt - now) / 1000));
+            recordLimiterRejection(scope);
             res.setHeader('Retry-After', retryAfterSeconds);
             if (onRejected) return onRejected(req, res, retryAfterSeconds);
             return res.status(429).json({ message: 'Too many requests. Please try again later.' });
@@ -88,6 +108,7 @@ const consumeDigestKeyedAttempt = (
     windows.set(key, entry);
 
     if (entry.count > maximumRequests) {
+        recordLimiterRejection(scope);
         res.setHeader('Retry-After', Math.max(1, Math.ceil((entry.resetsAt - now) / 1000)));
         return res.status(429).json({ message: 'Too many requests. Please try again later.' });
     }
@@ -203,6 +224,7 @@ export const limitConcurrency = (
         const clientActive = activeByScopeAndClient.get(scopedClient) ?? 0;
         const globalActive = activeByScope.get(scope) ?? 0;
         if (clientActive >= perClientLimit || globalActive >= globalLimit) {
+            recordLimiterRejection(scope);
             res.setHeader('Retry-After', '2');
             return res.status(429).json({ message: 'Too many concurrent requests.' });
         }

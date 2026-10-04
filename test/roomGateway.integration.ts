@@ -13,6 +13,9 @@ import { getDatabaseClient, getDb } from '../src/infrastructure/database';
 import AuthSession from '../src/models/authSession';
 import { installRoomGateway } from '../src/realtime/roomGateway';
 import { createRoomGatewayMetrics, type RoomGatewayMetrics } from '../src/realtime/roomGatewayMetrics';
+import { createSocialOperations, type SocialOperations } from '../src/realtime/socialOperations';
+import type { SocialCapacity } from '../src/config/socialCapacity';
+import type { OperationalLogEntry } from '../src/infrastructure/operationalLog';
 import { createHealthController } from '../src/controllers/healthController';
 import { notifyRoomChanges } from '../src/realtime/roomEvents';
 import { ServerLifecycle } from '../src/services/serverLifecycleService';
@@ -35,10 +38,17 @@ const waitFor = async (condition: () => boolean) => {
     while (!condition()) { if (Date.now() > deadline) assert.fail('Gateway test deadline exceeded.'); await new Promise(resolve => setTimeout(resolve, 5)); }
 };
 
-/** Real TCP/WebSocket handshakes isolate admission races from the separately tested durable room API. */
-const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: () => Promise<number | null>; metrics?: RoomGatewayMetrics } = {}) => {
+/**
+ * Real TCP/WebSocket handshakes isolate admission races from the separately tested durable room API.
+ * Unless a case injects otherwise, every actor's membership lookup succeeds; a socket seated as a member whose
+ * reads then show no room gives its seat back only while the general seats are over-full.
+ */
+const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: () => Promise<number | null>; metrics?: RoomGatewayMetrics;
+    capacity?: SocialCapacity; isRoomMember?: (accountId: string) => Promise<boolean> } = {}) => {
     const lifecycle = new ServerLifecycle();
     const metrics = options.metrics ?? createRoomGatewayMetrics();
+    const logged: OperationalLogEntry[] = [];
+    const operations: SocialOperations = createSocialOperations({ metrics, log: entry => { logged.push(entry); } });
     const app = express();
     app.get('/health', createHealthController({ getRoomMetrics: metrics.snapshot }));
     const server = createServer(app);
@@ -48,7 +58,9 @@ const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: ()
     const redemptions: Array<() => void> = [];
     let sequence = 0;
     const api = options.api ?? { currentRoom: async () => null, sweep: async () => undefined, disconnected: async () => undefined } as unknown as RoomApi;
-    const gateway = installRoomGateway(server, lifecycle, { api, metrics, acquire: options.acquire ?? (async () => 1), release: async () => undefined,
+    const gateway = installRoomGateway(server, lifecycle, { api, metrics, operations, capacity: options.capacity,
+        isRoomMember: options.isRoomMember ?? (async () => true),
+        acquire: options.acquire ?? (async () => 1), release: async () => undefined,
         redeemTicket: async () => {
             const actor: RoomActor = options.actor ?? { userId: (++sequence).toString(16).padStart(24, '0'), sessionId: '1'.repeat(24), clientId: randomUUID() };
             if (held) await new Promise<void>(resolve => { redemptions.push(resolve); });
@@ -68,7 +80,7 @@ const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: ()
         });
         return { socket, result };
     };
-    return { lifecycle, server, transports, sockets, connect, redemptions, metrics, origin, hold: () => { held = true; },
+    return { lifecycle, server, transports, sockets, connect, redemptions, metrics, operations, logged, origin, hold: () => { held = true; },
         stop: async () => {
             held = false; redemptions.splice(0).forEach(resolve => resolve());
             await lifecycle.stop(server, async () => {
@@ -78,9 +90,15 @@ const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: ()
         } };
 };
 
+/** The fields the gateway reads from a projection, for accounts a case treats as room members. */
+const memberRoom = { roomId: 'r_synthetic', epoch: 1, revision: 1, self: { controllerGeneration: 1, isController: true } };
+const roomApi = (inRoom: (accountId: string) => boolean = () => true) => ({ currentRoom: async (who: RoomActor) => inRoom(who.userId) ? memberRoom : null,
+    sweep: async () => undefined, disconnected: async () => undefined }) as unknown as RoomApi;
+
 test('capacity is rechecked after concurrent ticket redemption for both source-IP and global socket limits', async () => {
     for (const global of [false, true]) {
-        const gateway = await fixture();
+        // Every account is in a room, so the reserved seats make the 256-socket ceiling reachable.
+        const gateway = await fixture({ api: roomApi() });
         try {
             const maximum = global ? 256 : 32;
             for (let index = 0; index < maximum - 1; index += 1) {
@@ -400,4 +418,120 @@ test('late authority acquisition cannot overwrite the stopped diagnostic state',
     release();
     await stopped;
     assert.equal(gateway.metrics.snapshot().authorityState, 'stopped');
+});
+
+test('a configured socket cap refuses extra sockets and keeps reserved seats for room members', async () => {
+    // Four sockets with one two-member room allowed: two general seats, two held for room participants.
+    const members = new Set([4, 5].map(value => value.toString(16).padStart(24, '0')));
+    const lookups: string[] = [];
+    const gateway = await fixture({ capacity: { maxOpenRooms: 1, maxRoomMembers: 2, maxRealtimeSockets: 4 }, api: roomApi(id => members.has(id)),
+        isRoomMember: async accountId => { lookups.push(accountId); return members.has(accountId); } });
+    try {
+        const outcomes: number[] = [];
+        for (let index = 0; index < 6; index += 1) outcomes.push(await gateway.connect(`192.0.2.${100 + index}`).result);
+        // Accounts 1–2 take the general seats without a lookup, account 3 is not in a room, accounts 4–5 are
+        // members using the reserved seats, and the sixth attempt meets the hard cap without a lookup.
+        assert.deepEqual(outcomes, [101, 101, 429, 101, 101, 429]);
+        assert.equal(lookups.length, 3, 'Only sockets past the general seats need a membership lookup.');
+        assert.equal(gateway.metrics.snapshot().openSockets, 4);
+        const counts = gateway.operations.take();
+        assert.equal(counts.socketsOpened, 4);
+        assert.equal(counts.peakSockets, 4);
+        assert.equal(counts.upgradeRejections.capacity, 2);
+        assert.equal(counts.capacityRejections.sockets, 2);
+        assert.deepEqual(gateway.logged.filter(entry => entry.category === 'social_capacity'),
+            [{ category: 'social_capacity', limit: 'sockets', maximum: 4 }], 'A burst of refusals writes one capacity line.');
+
+        gateway.sockets[0].close(1000);
+        await waitFor(() => gateway.metrics.snapshot().openSockets === 3);
+        assert.equal(gateway.operations.take().socketCloses.normal, 1);
+    } finally { await gateway.stop(); }
+});
+
+test('a non-member past the general seats is refused even while the hard cap has room', async () => {
+    const gateway = await fixture({ capacity: { maxOpenRooms: 1, maxRoomMembers: 2, maxRealtimeSockets: 4 },
+        isRoomMember: async () => { throw new Error('Synthetic unavailable membership lookup.'); } });
+    try {
+        assert.equal(await gateway.connect('192.0.2.120').result, 101);
+        assert.equal(await gateway.connect('192.0.2.121').result, 101);
+        // An unavailable lookup cannot prove membership, so the reserved seats stay closed.
+        assert.equal(await gateway.connect('192.0.2.122').result, 429);
+        assert.equal(gateway.operations.take().upgradeRejections.capacity, 1);
+    } finally { await gateway.stop(); }
+});
+
+test('operations classify refused upgrades and record fanout passes without identities', async () => {
+    const gateway = await fixture();
+    try {
+        const admitted = gateway.connect('192.0.2.130');
+        const frames: Array<{ type: string }> = [];
+        admitted.socket.on('message', bytes => { frames.push(JSON.parse(bytes.toString())); });
+        assert.equal(await admitted.result, 101);
+        await waitFor(() => frames.some(frame => frame.type === 'subscribed'));
+        gateway.operations.take();
+        notifyRoomChanges();
+        await waitFor(() => frames.some(frame => frame.type === 'snapshot'));
+        await waitFor(() => gateway.operations.take().fanoutPasses >= 1);
+
+        const foreign = new WebSocket(gateway.origin.replace('http:', 'ws:') + '/api/social/v1/realtime', ['archtree-room-v1', 'A'.repeat(43)],
+            { origin: 'https://probe.invalid', headers: { 'X-Forwarded-For': '192.0.2.131' } });
+        foreign.on('error', () => undefined);
+        assert.equal(await new Promise<number>(resolve => foreign.once('unexpected-response', (_req, response) => { response.resume(); resolve(response.statusCode!); })), 403);
+        process.env.FINITUDE_ROOMS_ENABLED = 'false';
+        assert.equal(await gateway.connect('192.0.2.132').result, 503);
+        await waitFor(() => admitted.socket.readyState === WebSocket.CLOSED);
+        process.env.FINITUDE_ROOMS_ENABLED = 'true';
+        const counts = gateway.operations.take();
+        assert.equal(counts.upgradeRejections.unauthorized, 1);
+        assert.equal(counts.upgradeRejections.unavailable, 1);
+        assert.equal(counts.socketCloses.goingAway, 1, 'A rollout stop closes sockets as going away.');
+        assert.doesNotMatch(JSON.stringify([counts, gateway.logged]), /192\.0\.2|probe\.invalid|0{20}/);
+    } finally { process.env.FINITUDE_ROOMS_ENABLED = 'true'; await gateway.stop(); }
+});
+
+test('replacing a client\'s own socket at the socket cap needs no new seat', async () => {
+    const actor: RoomActor = { userId: 'c'.repeat(24), sessionId: 'd'.repeat(24), clientId: randomUUID() };
+    const gateway = await fixture({ actor, capacity: { maxOpenRooms: 1, maxRoomMembers: 2, maxRealtimeSockets: 1 } });
+    try {
+        const first = gateway.connect('192.0.2.140');
+        assert.equal(await first.result, 101);
+        const closed = new Promise<number>(resolve => first.socket.once('close', code => resolve(code)));
+        assert.equal(await gateway.connect('192.0.2.140').result, 101, 'A reconnect replaces the half-open socket.');
+        assert.equal(await closed, 1000);
+        await waitFor(() => gateway.metrics.snapshot().openSockets === 1);
+        assert.equal(gateway.operations.take().upgradeRejections.capacity, 0);
+    } finally { await gateway.stop(); }
+});
+
+test('a member socket gives its seat back after its room ends only while the general seats are over-full', async () => {
+    // Four sockets: two general seats, two reserved. Accounts 3 and 4 are members seated in the reserved seats.
+    const id = (value: number) => value.toString(16).padStart(24, '0');
+    const members = new Set([id(3), id(4)]);
+    const gateway = await fixture({ capacity: { maxOpenRooms: 1, maxRoomMembers: 2, maxRealtimeSockets: 4 },
+        api: roomApi(accountId => members.has(accountId)), isRoomMember: async accountId => members.has(accountId) });
+    try {
+        for (let index = 0; index < 4; index += 1) assert.equal(await gateway.connect(`192.0.2.${150 + index}`).result, 101);
+        const codes = gateway.sockets.map(socket => new Promise<number>(resolve => socket.once('close', code => resolve(code))));
+        gateway.sockets[0].close(1000);
+        await waitFor(() => gateway.metrics.snapshot().openSockets === 3);
+        // One general socket left: account 3's socket now fits the general seats and stays.
+        members.delete(id(3)); notifyRoomChanges();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        assert.equal(gateway.sockets[2].readyState, WebSocket.OPEN);
+        // Account 4 leaving too would leave three sockets for two general seats: its socket delivers the
+        // absence and is then closed as busy.
+        const frames: Array<{ type: string; room?: unknown }> = [];
+        gateway.sockets[3].on('message', bytes => { frames.push(JSON.parse(bytes.toString())); });
+        members.delete(id(4)); notifyRoomChanges();
+        assert.equal(await codes[3], 1013);
+        assert.deepEqual(frames.filter(frame => frame.type === 'snapshot'), [{ type: 'snapshot', room: null }]);
+        await waitFor(() => gateway.metrics.snapshot().openSockets === 2);
+        assert.equal(gateway.sockets[1].readyState, WebSocket.OPEN);
+        assert.equal(gateway.sockets[2].readyState, WebSocket.OPEN);
+        assert.equal(gateway.operations.take().socketCloses.unavailable, 1);
+        // A fresh non-member now waits, while a new member still finds a reserved seat.
+        assert.equal(await gateway.connect('192.0.2.160').result, 429);
+        members.add(id(6));
+        assert.equal(await gateway.connect('192.0.2.161').result, 101);
+    } finally { await gateway.stop(); }
 });

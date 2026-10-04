@@ -4,6 +4,7 @@ import { ROOM_LIMITS, ROOM_MEDIA_DISCOVERY_LIMITS, normalizeRoomMediaQuery, isRo
     type RoomActor, type RoomApi, type RoomCommand, type RoomHeartbeat, type RoomInvitation, type RoomMediaDescriptor,
     type RoomCommunity, type RoomReadyReport, type RoomSnapshot } from '../../contracts/roomV1';
 import { SOCIAL_LIMITS, SocialError, exactSocialKeys, type SocialOutcome } from '../../contracts/socialV1';
+import { socialCapacity, type SocialCapacity } from '../../config/socialCapacity';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { touchActiveAccount, AccountReferenceUnavailableError } from '../../services/accountReferenceFenceService';
 import { getJwtSecret } from '../../services/authSessionService';
@@ -11,6 +12,7 @@ import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { resolveRoomAudioRepresentation, touchRoomAudioRepresentation } from '../../services/mediaRepresentationService';
 import { assertRoomAuthority, inspectRoomAuthority } from '../../realtime/roomAuthority';
 import { notifyRoomChanges } from '../../realtime/roomEvents';
+import { socialOperations, type RoomTransition, type SocialOperations } from '../../realtime/socialOperations';
 import type { SocialBudgetDocument, SocialProfileDocument, SocialReceiptDocument, SocialRelationshipDocument } from '../../repositories/social/socialDocuments';
 import type { RoomDocument, RoomInvitationDocument, RoomMemberDocument, RoomParticipationDocument, RoomQueueEntryDocument } from '../../repositories/social/roomDocuments';
 import { readSocialToken, signSocialToken } from '../social/socialTokens';
@@ -31,6 +33,9 @@ export interface RoomServiceOptions {
     beforeCommit?: (session: ClientSession) => Promise<void>;
     afterCommit?: () => Promise<void>;
     beforeSweepRoom?: (roomId: string) => Promise<void>;
+    /** Deployment limits at or below the room contract's maximums; resolved once, like the rollout flags. */
+    capacity?: SocialCapacity;
+    operations?: Pick<SocialOperations, 'roomTransition' | 'observeOpenRooms' | 'recordRejection' | 'recordCapacityRejection'>;
 }
 
 const identifier = (prefix: string) => `${prefix}_${randomBytes(16).toString('hex')}`;
@@ -42,6 +47,8 @@ type SweepCandidate = Pick<RoomDocument, '_id' | 'epoch' | 'playbackGeneration' 
 type SweepPlan = 'unchanged' | 'persist' | 'close' | 'advance';
 type SweepSession = { expiresAt: Date } | null;
 const noop = (): Planned => ({ outcome: 'noop', write: async () => undefined });
+/** Rejected command outcomes worth an operations count: deployment capacity and per-room or per-account limits. */
+const limitRejection = /(_capacity|_limit|_full)$/;
 
 /** Durable room authority: every user intent, timer and readiness transition commits before delivery. */
 export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => {
@@ -53,6 +60,8 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
     const inspectAuthority = options.inspectAuthority ?? (options.assertAuthority ? undefined : inspectRoomAuthority);
     const resolveMedia = options.resolveMedia ?? resolveRoomAudioRepresentation;
     const touchMedia = options.touchMedia ?? touchRoomAudioRepresentation;
+    const capacity = options.capacity ?? socialCapacity();
+    const operations = options.operations ?? socialOperations;
     const db = () => { const value = getDb(); if (!value) return fail('room_unavailable', 503); return value; };
     const rooms = () => db().collection<RoomDocument>('socialRooms');
     const slots = () => db().collection<RoomParticipationDocument>('socialRoomParticipation');
@@ -339,11 +348,16 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         return result;
     };
 
-    const plan = async (actor: RoomActor, command: RoomCommand, session: ClientSession, epoch: number | null): Promise<Planned> => {
+    /** `note` receives the lifecycle transition a committed write performs; the caller reports it after commit. */
+    const plan = async (actor: RoomActor, command: RoomCommand, session: ClientSession, epoch: number | null,
+        note: (transition: RoomTransition) => void): Promise<Planned> => {
         const own = await profile(actor.userId, session);
         if (command.action === 'create') {
             await cleanSlot(actor.userId, session);
-            if (await rooms().countDocuments({ state: 'open' }, { session, limit: ROOM_LIMITS.activeRooms }) >= ROOM_LIMITS.activeRooms) return fail('room_capacity', 429);
+            // The deployment limit only refuses new rooms; sweeps and cleanup stay bounded by the contract maximum.
+            // Every create also wrote the room authority fence before planning, so concurrent creates conflict and
+            // the retried one counts the committed room: a snapshot count cannot admit two rooms past the limit.
+            if (await rooms().countDocuments({ state: 'open' }, { session, limit: capacity.maxOpenRooms }) >= capacity.maxOpenRooms) return fail('room_capacity', 429);
             const queue: RoomQueueEntryDocument[] = [];
             for (const id of command.mediaTrackIds) queue.push(await queueEntry(id, session));
             const first = newMember(actor, own._id);
@@ -358,6 +372,7 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 await rooms().insertOne(room, { session });
                 await slots().insertOne({ _id: actor.userId, roomId: room._id, membershipId: first.membershipId }, { session });
                 await persistRoom(room, session, now());
+                note({ transition: 'created', roomId: room._id });
             } };
         }
         if (command.action === 'acceptInvitation' || command.action === 'declineInvitation') {
@@ -368,7 +383,8 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             if (!safeRoom(room) || host(room)?.accountId !== invitation.senderAccountId || room.epoch !== epoch) return fail('room_unavailable', 404);
             if (!await friends(actor.userId, invitation.senderAccountId, session)) return fail('invitation_unavailable', 404);
             await noBlocks(actor.userId, room, session);
-            if (room.members.length >= ROOM_LIMITS.members) return fail('room_capacity', 429);
+            // A lowered limit never removes members already admitted; it only refuses further joins.
+            if (room.members.length >= capacity.maxRoomMembers) return fail('room_full', 429);
             await cleanSlot(actor.userId, session);
             const added = newMember(actor, own._id);
             room.members.push(added);
@@ -394,7 +410,10 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         }
         if (command.action === 'end') {
             if (!isHost) return fail('room_forbidden', 403);
-            return changed(() => closeRoom(room, session, now()));
+            return changed(async () => {
+                await closeRoom(room, session, now());
+                note({ transition: 'closed', reason: 'hostEnded', roomId: room._id });
+            });
         }
         if (command.action === 'kick') {
             if (!isHost || !controls(me, actor)) return fail('room_forbidden', 403);
@@ -719,7 +738,10 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             const receiptId = hash(JSON.stringify([actor.userId, original.id, command.commandId]));
             const digest = hash(JSON.stringify(['room-v1', Object.keys(command).filter(key => key !== 'scopeToken').sort().map(key => [key, command[key as keyof RoomCommand]])]));
             const safety = ['leave', 'end', 'kick', 'declineInvitation', 'cancelTransfer', 'pause', 'dismissSongRequest'].includes(command.action);
+            // Each attempt resets it and its write sets it, so after commit it describes the committed attempt only.
+            let transition = null as RoomTransition | null;
             const result = await transaction(actor, async session => {
+                transition = null;
                 const currentScope = scope(actor, command.scopeToken);
                 const receipt = await receipts().findOne({ _id: receiptId }, { session });
                 if (receipt) { if (receipt.digest !== digest) return fail('idempotency_conflict'); return { ...receipt.result, replayed: true }; }
@@ -733,7 +755,10 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 if (count >= SOCIAL_LIMITS.commandsPerMinute) return fail('social_limit', 429);
                 let operation: Planned | undefined;
                 let outcome: Omit<SocialOutcome, 'replayed'>;
-                try { operation = await plan(actor, command, session, epoch); outcome = { commandId: command.commandId, outcome: operation.outcome }; }
+                try {
+                    operation = await plan(actor, command, session, epoch, value => { transition = value; });
+                    outcome = { commandId: command.commandId, outcome: operation.outcome };
+                }
                 catch (error) {
                     if (!(error instanceof SocialError) || error.statusCode >= 500 || error.statusCode === 401) throw error;
                     outcome = { commandId: command.commandId, outcome: 'rejected', code: error.code };
@@ -744,7 +769,15 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                     result: outcome, scopeExpiresAt: new Date(currentScope.expiresAt), expiresAt: new Date(currentScope.expiresAt + SOCIAL_LIMITS.receiptGraceMs) }, { session });
                 return { ...outcome, replayed: false };
             }, session => affectedAccounts(command, session), true);
-            if (result.outcome === 'applied' && !result.replayed) notifyRoomChanges();
+            if (result.outcome === 'applied' && !result.replayed) {
+                if (transition) operations.roomTransition(transition);
+                notifyRoomChanges();
+            }
+            if (result.outcome === 'rejected' && !result.replayed && result.code && limitRejection.test(result.code)) {
+                operations.recordRejection(result.code);
+                if (result.code === 'room_capacity') operations.recordCapacityRejection('openRooms', capacity.maxOpenRooms);
+                if (result.code === 'room_full') operations.recordCapacityRejection('roomMembers', capacity.maxRoomMembers);
+            }
             return result;
         },
         async heartbeat(actor, input) {
@@ -828,15 +861,22 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             const candidates = await rooms().find({ state: 'open' }).project<SweepCandidate>(
                 { _id: 1, epoch: 1, playbackGeneration: 1, queueRevision: 1, timeline: 1 }).limit(ROOM_LIMITS.activeRooms + 1).toArray();
             if (candidates.length > ROOM_LIMITS.activeRooms) return fail('room_capacity', 503);
+            operations.observeOpenRooms(candidates.map(candidate => candidate._id));
             let visible = false;
             for (const candidate of candidates) {
                 await options.beforeSweepRoom?.(candidate._id);
                 if (await sweepIsUnchanged(candidate)) continue;
-                await transaction(null, async session => {
+                const transition = await transaction(null, async (session): Promise<RoomTransition | null> => {
                 const epoch = await authority(session);
-                const room = await rooms().findOne({ _id: candidate._id }, { session }); if (!room || room.state !== 'open') return;
+                const room = await rooms().findOne({ _id: candidate._id }, { session }); if (!room || room.state !== 'open') return null;
+                const wasSuspended = room.hostSuspended;
                 const plan = await planSweep(candidate, room, epoch, value => readSweepSession(value, session), entry => resolveMedia(entry.mediaTrackId, session));
-                if (plan === 'close') { await closeRoom(room, session, now()); visible = true; return; }
+                if (plan === 'close') {
+                    // planSweep closes for exactly these three conditions; read them before closeRoom clears the host.
+                    const reason = room.expiresAt.getTime() <= now() ? 'expired' as const : host(room) ? 'hostAbsent' as const : 'hostMissing' as const;
+                    await closeRoom(room, session, now()); visible = true;
+                    return { transition: 'closed', reason, roomId: room._id };
+                }
                 if (plan === 'advance') {
                     const current = room.queue.find(value => value.entryId === room.timeline.entryId)!;
                     const next = room.queue[room.queue.indexOf(current) + 1];
@@ -847,7 +887,9 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                     } else { pauseRoom(room, now()); room.timeline.state = 'ended'; }
                 }
                 if (plan !== 'unchanged') { await persistRoom(room, session, now()); visible = true; }
+                return !wasSuspended && room.hostSuspended ? { transition: 'suspended', roomId: room._id } : null;
                 }, session => roomAccounts(candidate._id, session));
+                if (transition) operations.roomTransition(transition);
             }
             if (visible) notifyRoomChanges();
         }

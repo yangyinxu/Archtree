@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { z } from 'zod';
+import { ApiError } from '../../api/client';
 import { isUncertainSocialFailure } from '../../api/socialFailure';
 import { captureAccountOperation, isAccountOperationCurrent, subscribeToAccountEpoch } from '../../api/accountEpoch';
 import { getCurrentRoom, getRealtimeTicket, prepareRoomCommand, sendRoomCommand, roomControlPreconditions,
@@ -8,17 +9,21 @@ import { playerStore } from '../../player';
 import type { RoomPlaybackAttachment, RoomPlaybackIntent, RoomPlaybackObservation } from '../../player/roomPlayback';
 import type { MessageKey } from '../../localization/contract';
 
+/** `realtimeBusy`: the server refused this tab a live connection for capacity; it may still create or join a room. */
 interface RoomSessionState {
-  viewerId: string; room: RoomSnapshot | null; connected: boolean; locallyPaused: boolean;
+  viewerId: string; room: RoomSnapshot | null; connected: boolean; realtimeBusy: boolean; locallyPaused: boolean;
   busy: boolean; error: MessageKey | null; uncertain: RoomCommand | null;
 }
-const initialState: RoomSessionState = { viewerId: '', room: null, connected: false, locallyPaused: false, busy: false, error: null, uncertain: null };
+const initialState: RoomSessionState = { viewerId: '', room: null, connected: false, realtimeBusy: false, locallyPaused: false, busy: false, error: null, uncertain: null };
 const incomingMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('subscribed'), protocolVersion: z.literal(1), serverTimeMs: z.number().finite(), room: roomSnapshotSchema.nullable() }).strict(),
   z.object({ type: z.literal('snapshot'), room: roomSnapshotSchema.nullable() }).strict(),
   z.object({ type: z.literal('socialChanged') }).strict(),
   z.object({ type: z.literal('pong'), clientTimeMs: z.number().finite(), serverTimeMs: z.number().finite() }).strict()
 ]);
+/** Server capacity refusals get specific copy; every other rejected command means the room changed first. */
+const rejectionMessages = new Map<string, MessageKey>([
+  ['room_reaction_limit', 'room.reaction_limit'], ['room_capacity', 'room.capacity'], ['room_full', 'room.full']]);
 
 /** One authenticated transport controls the app's existing player across route navigation. */
 export const createRoomSession = () => {
@@ -44,6 +49,8 @@ export const createRoomSession = () => {
   let lastPongWallTime = 0;
   let lastHeartbeat = -Infinity;
   let lastHeartbeatIdentity = '';
+  // While refused a realtime seat, automatic reconnects wait for the server's Retry-After instead of five seconds.
+  let busyUntil = 0;
   let clockPings = new Set<number>();
   const pendingPongs = new Map<number, (confirmed: boolean) => void>();
   let anchor: { key: string; milliseconds: number; positionSeconds: number } | undefined;
@@ -59,7 +66,7 @@ export const createRoomSession = () => {
     const previous = socket; socket = undefined; previous?.close();
     for (const complete of pendingPongs.values()) complete(false);
     clockPings.clear(); lastHeartbeatIdentity = ''; lastHeartbeat = -Infinity;
-    detachPlayer(); emit({ connected: false, locallyPaused: Boolean(state.room), error: 'room.disconnected' });
+    detachPlayer(); emit({ connected: false, realtimeBusy: false, locallyPaused: Boolean(state.room), error: 'room.disconnected' });
   };
   const connectionFresh = () => {
     if (!current() || !realtimeEnabled || suspended || !state.connected) return false;
@@ -198,7 +205,7 @@ export const createRoomSession = () => {
         if (message.type === 'subscribed') {
           offset = message.serverTimeMs - performance.now(); bestRoundTrip = Infinity; lastPong = performance.now();
           lastPongWallTime = Date.now();
-          emit({ connected: true, error: null }); acceptSnapshot(message.room, true); ping();
+          emit({ connected: true, realtimeBusy: false, error: null }); acceptSnapshot(message.room, true); ping();
           // Refresh invitations that changed between the first HTTP read and this subscription, or during an outage.
           refreshSocial('social');
           setTimeout(() => { if (connection === socket) ping(); }, 120);
@@ -219,13 +226,19 @@ export const createRoomSession = () => {
         if (current()) retryTimer = setTimeout(() => { void connect(); }, 3000);
       };
       connection.onerror = () => { connection.close(); };
-    } catch { if (version === generation && transport === transportGeneration && current()) emit({ connected: false, error: 'room.disconnected' }); }
+    } catch (error) {
+      if (version !== generation || transport !== transportGeneration || !current()) return;
+      const busy = error instanceof ApiError && error.code === 'realtime_capacity';
+      // ApiError keeps Retry-After only from 429s (quota cooling), so this 503 deliberately falls back to the
+      // server's fixed 30 seconds (REALTIME_CAPACITY_RETRY_SECONDS).
+      if (busy) busyUntil = performance.now() + Math.min(300, Math.max(5, error.retryAfterSeconds ?? 30)) * 1000;
+      emit({ connected: false, realtimeBusy: busy, error: busy ? 'room.realtime_busy' : 'room.disconnected' });
+    }
     finally { if (version === generation && transport === transportGeneration) opening = false; }
   };
   const settle = async (outcome: { outcome: string; code?: string }, action?: RoomAction['action']) => {
     const version = generation;
-    emit({ uncertain: null, error: outcome.outcome === 'rejected'
-      ? outcome.code === 'room_reaction_limit' ? 'room.reaction_limit' : 'social.stale' : null });
+    emit({ uncertain: null, error: outcome.outcome === 'rejected' ? rejectionMessages.get(outcome.code ?? '') ?? 'social.stale' : null });
     // Retire ended memberships before active query observers can refetch their former room.
     const reconciled = await refresh();
     if (!reconciled || version !== generation || !current()) return;
@@ -237,7 +250,12 @@ export const createRoomSession = () => {
   };
   const run = async (action?: RoomAction, retry?: RoomCommand) => {
     if (!current() || state.busy || (state.uncertain && !retry)) return;
-    const needsConnection = !['leave', 'end', 'declineInvitation', 'dismissSongRequest'].includes((retry ?? action)!.action);
+    const name = (retry ?? action)!.action;
+    // Joining needs no live connection: a tab refused one for capacity creates, joins or invites over HTTP,
+    // then connects at once with the member's reserved seat. Playback controls still wait for the connection.
+    const offline = ['create', 'acceptInvitation', 'invite'].includes(name) && state.realtimeBusy && !state.connected
+      && realtimeEnabled && !suspended;
+    const needsConnection = !offline && !['leave', 'end', 'declineInvitation', 'dismissSongRequest'].includes(name);
     if (needsConnection && !connectionFresh()) return;
     if (!retry && ['create', 'acceptInvitation', 'takeControl', 'play', 'next', 'previous', 'seek', 'select'].includes(action!.action)) playerStore.notePlaybackIntent?.();
     const version = generation;
@@ -270,6 +288,10 @@ export const createRoomSession = () => {
       dispatched = true;
       const outcome = await sendRoomCommand(state.viewerId, command);
       if (version === generation && current()) await settle(outcome, command.action);
+      // A superseded attempt is discarded by its transport generation, so a new one may start at once.
+      if (offline && outcome.outcome === 'applied' && version === generation && current() && !state.connected) {
+        busyUntil = 0; opening = false; void connect();
+      }
     } catch (error) {
       if (version !== generation || !current()) return;
       const unknown = command && isUncertainSocialFailure(error);
@@ -304,7 +326,7 @@ export const createRoomSession = () => {
   };
   const onVisibilityChange = () => { if (!document.hidden) onResume(); };
   const stop = () => {
-    generation += 1; transportGeneration += 1; suspended = false; opening = false; clearInterval(heartbeat); clearTimeout(retryTimer);
+    generation += 1; transportGeneration += 1; suspended = false; opening = false; busyUntil = 0; clearInterval(heartbeat); clearTimeout(retryTimer);
     document.removeEventListener('freeze', onSuspend); document.removeEventListener('resume', onResume);
     document.removeEventListener('visibilitychange', onVisibilityChange);
     window.removeEventListener('pagehide', onSuspend); window.removeEventListener('pageshow', onResume);
@@ -335,7 +357,12 @@ export const createRoomSession = () => {
         if (suspended || !realtimeEnabled) return;
         if (state.connected) {
           if (connectionFresh()) ping();
-        } else { void refresh(); void connect(); }
+        } else {
+          // A member refused a live connection keeps reading room state; other refused tabs wait for Retry-After.
+          const waiting = performance.now() < busyUntil;
+          if (!waiting || state.room) void refresh();
+          if (!waiting) void connect();
+        }
       }, 5000);
     },
     run, refresh, reconnect: connect, stop,

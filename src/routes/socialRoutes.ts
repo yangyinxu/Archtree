@@ -12,6 +12,7 @@ import {
 import {
     accountOrClientKey, asyncHandler, limitConcurrency, rateLimit, requireSecureAuthTransport
 } from '../middleware/requestProtectionMiddleware';
+import { socialOperations } from '../realtime/socialOperations';
 
 interface SocialRouterOptions {
     api?: SocialApi;
@@ -202,6 +203,7 @@ export const createSocialRouter = (options: SocialRouterOptions = {}): Router =>
                 : parserError?.type === 'entity.parse.failed' ? invalid() : null;
         if (!known) return next(error);
         res.setHeader('Cache-Control', 'private, no-store');
+        if (known.statusCode === 429 || known.statusCode === 503) socialOperations.recordRejection(known.code);
         res.status(known.statusCode).json({ code: known.code, message: known.message });
     });
     return router;

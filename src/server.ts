@@ -7,6 +7,9 @@ import { installShutdownHandlers, ServerLifecycle } from './services/serverLifec
 import { recordStartupFailureStage, type StartupStage } from './infrastructure/startupDiagnostics';
 import { installRoomGateway } from './realtime/roomGateway';
 import { installRoomWindDown } from './realtime/roomWindDown';
+import { resolveSocialCapacity } from './config/socialCapacity';
+import { createOperationalSummary } from './services/operationalSummaryService';
+import { writeOperationalLog } from './infrastructure/operationalLog';
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -22,13 +25,17 @@ export interface ServerDependencies {
   stopped?: (outcome: 'graceful' | 'forced') => void;
   installRoomGateway?: typeof installRoomGateway;
   installRoomWindDown?: typeof installRoomWindDown;
+  /** Starts the periodic `ops_summary` line and returns its stop function. */
+  startOperationalSummary?: () => () => void;
 }
 
 /** Resolves only after listening, and releases infrastructure on every startup failure. */
 export const startServer = async (dependencies: ServerDependencies = {}): Promise<Server> => {
   const disconnectDatabase = dependencies.closeDatabase ?? disconnectFromDatabase;
   let rooms: { stop: () => void; release: () => Promise<void> } | undefined;
+  let stopSummary: (() => void) | undefined;
   const closeDatabase = async () => {
+    stopSummary?.();
     rooms?.stop();
     try { await rooms?.release(); } finally { await disconnectDatabase(); }
   };
@@ -43,7 +50,13 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
     server.on('request', app);
     // Rooms admit traffic only with both rollout flags. Otherwise a switched-off process still winds down the
     // rooms an earlier process left open instead of leaving them silently playing.
-    rooms = process.env.FINITUDE_SOCIAL_ENABLED === 'true' && process.env.FINITUDE_ROOMS_ENABLED === 'true'
+    const roomsEnabled = process.env.FINITUDE_SOCIAL_ENABLED === 'true' && process.env.FINITUDE_ROOMS_ENABLED === 'true';
+    if (roomsEnabled) {
+      // Names, never values, of unusable capacity settings, so an operator sees a typo that fell back to a ceiling.
+      const { capacity, invalid } = resolveSocialCapacity();
+      writeOperationalLog({ category: 'social_capacity_config', ...capacity, invalidSettings: invalid });
+    }
+    rooms = roomsEnabled
       ? (dependencies.installRoomGateway ?? installRoomGateway)(server, lifecycle)
       : (dependencies.installRoomWindDown ?? installRoomWindDown)(server, lifecycle);
     stage = 'listener_configuration';
@@ -69,6 +82,7 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
       server.listen(port);
     });
     console.log(JSON.stringify({ category: 'server_listening', accessTokenSeconds: accessTokenDurationSeconds() }));
+    stopSummary = (dependencies.startOperationalSummary ?? (() => createOperationalSummary().start()))();
     const stopped = dependencies.stopped ?? (outcome => {
       console.log(JSON.stringify({ category: 'server_stopped', outcome }));
       process.exit(outcome === 'graceful' ? 0 : 1);

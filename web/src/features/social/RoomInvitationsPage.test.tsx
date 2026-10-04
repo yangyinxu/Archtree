@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   profile: vi.fn(), invitation: vi.fn(), invitations: vi.fn(), capabilities: vi.fn(),
   run: vi.fn(), ensure: vi.fn(), retry: vi.fn(), checkOutcome: vi.fn(),
   listeners: new Set<() => void>(),
-  state: { viewerId: 'viewer-1', room: null as RoomSnapshot | null, connected: true, locallyPaused: false,
+  state: { viewerId: 'viewer-1', room: null as RoomSnapshot | null, connected: true, realtimeBusy: false, locallyPaused: false,
     busy: false, error: null as MessageKey | null, uncertain: null as RoomCommand | null }
 }));
 vi.mock('../../api/social', () => ({ getSocialProfile: mocks.profile }));
@@ -46,7 +46,7 @@ const show = (path = '/social/invitations/i_invitation-1', viewer: string | null
 };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.listeners.clear();
-  mocks.state = { viewerId: 'viewer-1', room: null, connected: true, locallyPaused: false, busy: false, error: null, uncertain: null };
+  mocks.state = { viewerId: 'viewer-1', room: null, connected: true, realtimeBusy: false, locallyPaused: false, busy: false, error: null, uncertain: null };
   mocks.profile.mockResolvedValue({ profile: ownProfile });
   mocks.invitation.mockResolvedValue({ invitation: invitation() });
   mocks.invitations.mockResolvedValue({ invitations: [invitation()] });
@@ -211,6 +211,16 @@ test('failed capability discovery blocks responses until an explicit refresh est
   expect(mocks.run).not.toHaveBeenCalled();
   await act(async () => { fireEvent.click(decline); });
   expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'declineInvitation', invitationId: 'i_invitation-1', generation: 3 });
+});
+
+test('a tab refused a live connection for capacity can still join, while a disconnected tab waits', async () => {
+  updateRoom({ connected: false, error: 'room.disconnected' });
+  show(); const join = await screen.findByRole('button', { name: 'Join room' });
+  expect(join).toBeDisabled();
+  act(() => { updateRoom({ realtimeBusy: true, error: 'room.realtime_busy' }); });
+  await waitFor(() => expect(join).toBeEnabled());
+  await act(async () => { fireEvent.click(join); });
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'acceptInvitation', invitationId: 'i_invitation-1', generation: 3 });
 });
 
 test('Join carries the shown invitation generation and waits for confirmed membership before navigation', async () => {
