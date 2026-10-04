@@ -33,6 +33,30 @@ after(async () => {
         if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
 });
+/**
+ * Records each attempt, each requested repair backoff, and the moment that backoff's timer has actually elapsed
+ * ('resumed'), in order. A 'resumed' step between a backoff and the next attempt proves the gateway awaited the
+ * delay before repeating (an unawaited backoff would record attempt, backoff, attempt with 'resumed' trailing),
+ * without comparing wall-clock samples that a loaded runner's timer coalescing can place less than the delay apart.
+ */
+type RepairStep = { kind: 'attempt' } | { kind: 'backoff'; ms: number } | { kind: 'resumed' };
+const repairRecorder = () => {
+    const steps: RepairStep[] = [];
+    const sleep = async (ms: number) => {
+        steps.push({ kind: 'backoff', ms });
+        await new Promise(resolve => setTimeout(resolve, ms));
+        steps.push({ kind: 'resumed' });
+    };
+    return { steps, sleep, attempt: () => { steps.push({ kind: 'attempt' }); } };
+};
+/** Three failed attempts separated by the first (100-139 ms) and final (200-239 ms) bounded backoffs. */
+const assertBoundedRepair = (steps: RepairStep[]) => {
+    assert.deepEqual(steps.map(step => step.kind), ['attempt', 'backoff', 'resumed', 'attempt', 'backoff', 'resumed', 'attempt'],
+        'Each repair must wait out its backoff before repeating, and stop after the third failure.');
+    const [first, final] = steps.flatMap(step => step.kind === 'backoff' ? [step.ms] : []);
+    assert.ok(first >= 100 && first < 140, 'First repair must back off instead of immediately repeating the conflict.');
+    assert.ok(final >= 200 && final < 240, 'Final repair uses the longer bounded backoff.');
+};
 const waitFor = async (condition: () => boolean) => {
     const deadline = Date.now() + 5000;
     while (!condition()) { if (Date.now() > deadline) assert.fail('Gateway test deadline exceeded.'); await new Promise(resolve => setTimeout(resolve, 5)); }
@@ -44,7 +68,7 @@ const waitFor = async (condition: () => boolean) => {
  * reads then show no room gives its seat back only while the general seats are over-full.
  */
 const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: () => Promise<number | null>; metrics?: RoomGatewayMetrics;
-    capacity?: SocialCapacity; isRoomMember?: (accountId: string) => Promise<boolean> } = {}) => {
+    capacity?: SocialCapacity; isRoomMember?: (accountId: string) => Promise<boolean>; sleep?: (ms: number) => Promise<void> } = {}) => {
     const lifecycle = new ServerLifecycle();
     const metrics = options.metrics ?? createRoomGatewayMetrics();
     const logged: OperationalLogEntry[] = [];
@@ -58,7 +82,7 @@ const fixture = async (options: { api?: RoomApi; actor?: RoomActor; acquire?: ()
     const redemptions: Array<() => void> = [];
     let sequence = 0;
     const api = options.api ?? { currentRoom: async () => null, sweep: async () => undefined, disconnected: async () => undefined } as unknown as RoomApi;
-    const gateway = installRoomGateway(server, lifecycle, { api, metrics, operations, capacity: options.capacity,
+    const gateway = installRoomGateway(server, lifecycle, { api, metrics, operations, capacity: options.capacity, sleep: options.sleep,
         isRoomMember: options.isRoomMember ?? (async () => true),
         acquire: options.acquire ?? (async () => 1), release: async () => undefined,
         redeemTicket: async () => {
@@ -217,11 +241,11 @@ test('actual Mongo write-conflict exhaustion repairs a fresh authorized read wit
 test('revoked authentication closes immediately while repeated availability errors have a finite repair bound', async () => {
     for (const kind of ['revoked', 'unavailable', 'authority'] as const) {
         const actor = await authenticatedActor(); const real = createRoomService(); let mode = false; let failedReads = 0;
-        const failedAt: number[] = [];
-        const gateway = await fixture({ actor, api: { ...real, currentRoom: async who => {
+        const repair = repairRecorder();
+        const gateway = await fixture({ actor, sleep: repair.sleep, api: { ...real, currentRoom: async who => {
             if (mode) {
                 failedReads += 1;
-                failedAt.push(Date.now());
+                repair.attempt();
                 if (kind !== 'revoked') throw new SocialError(503, kind === 'authority' ? 'room_authority_unavailable' : 'room_unavailable');
             }
             return real.currentRoom(who);
@@ -238,10 +262,8 @@ test('revoked authentication closes immediately while repeated availability erro
             await waitFor(() => code !== undefined);
             assert.equal(code, kind === 'revoked' ? 1008 : kind === 'authority' ? 1012 : 1013);
             assert.equal(failedReads, kind === 'unavailable' ? 3 : 1);
-            if (kind === 'unavailable') {
-                assert.ok(failedAt[1] - failedAt[0] >= 100, 'First repair must back off instead of immediately repeating the conflict.');
-                assert.ok(failedAt[2] - failedAt[1] >= 200, 'Final repair uses the longer bounded backoff.');
-            }
+            if (kind === 'unavailable') assertBoundedRepair(repair.steps);
+            else assert.deepEqual(repair.steps, [{ kind: 'attempt' }], 'A terminal failure closes without a repair backoff.');
         } finally { await gateway.stop(); }
     }
 });
@@ -284,9 +306,9 @@ test('heartbeat and readiness repair actual Mongo write conflicts with the same 
 test('dispatch rejects revoked sessions and uncertain outcomes, bounds failures, and refreshes stale observations', async () => {
     for (const kind of ['revoked', 'unavailable', 'authority', 'uncertain', 'stale', 'removed'] as const) {
         const actor = await authenticatedActor(); const real = createRoomService({ assertAuthority: async () => 1 });
-        const attempts: number[] = [];
-        const gateway = await fixture({ actor, api: { ...real, ready: async (who, report) => {
-            attempts.push(Date.now());
+        let attempts = 0; const repair = repairRecorder();
+        const gateway = await fixture({ actor, sleep: repair.sleep, api: { ...real, ready: async (who, report) => {
+            attempts += 1; repair.attempt();
             if (kind === 'revoked') { await AuthSession.revokeById(actor.userId, actor.sessionId); return real.ready(who, report); }
             if (kind === 'stale') throw new SocialError(409, 'stale_controller');
             if (kind === 'removed') throw new SocialError(404, 'room_unavailable');
@@ -310,8 +332,9 @@ test('dispatch rejects revoked sessions and uncertain outcomes, bounds failures,
                 assert.equal(code, kind === 'revoked' ? 1008 : kind === 'authority' ? 1012 : 1013);
             }
             assert.equal(gateway.metrics.snapshot().failures.report, ['stale', 'removed'].includes(kind) ? 0 : 1);
-            assert.equal(attempts.length, kind === 'unavailable' ? 3 : 1);
-            if (kind === 'unavailable') { assert.ok(attempts[1] - attempts[0] >= 100); assert.ok(attempts[2] - attempts[1] >= 200); }
+            assert.equal(attempts, kind === 'unavailable' ? 3 : 1);
+            if (kind === 'unavailable') assertBoundedRepair(repair.steps);
+            else assert.deepEqual(repair.steps, [{ kind: 'attempt' }], 'Only availability failures back off.');
         } finally { await gateway.stop(); }
     }
 });

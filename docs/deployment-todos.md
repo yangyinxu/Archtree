@@ -135,8 +135,11 @@ minutely `ops_summary` log line and `.ebextensions/social-capacity.config`
       cannot sign in again until email delivery works.
 - [ ] Merge `develop` into `main` through a pull request and require the
       release workflow on both the pull request and the merged-main push:
-      unit, integration, the nine social browser scenarios, the three-engine
-      browser/axe gate and artifact staging. Artifact staging refuses a
+      unit, integration, the blocking social browser gate, the three-engine
+      browser/axe gate and artifact staging. The blocking social gate excludes
+      only the quarantined `firefox-audio-formats` and `webkit-audio-formats`
+      projects, which run in a non-blocking step (see
+      [Enable for testing](#enable-for-testing)). Artifact staging refuses a
       bundle without the FFmpeg prebuild hook, `room-audio-decoder.config` or
       `social-capacity.config`.
 - [ ] Record the release owner, rollback owner, observation window and stop
@@ -207,6 +210,16 @@ Audio (see the README's room audio decoder and catalog backfill sections).
 
 Enabling a flag exposes it to every signed-in Web account; there is no
 per-account cohort.
+
+- [ ] **Prerequisite before `FINITUDE_ROOMS_ENABLED=true`:** stabilize the
+      quarantined cross-engine audio drift projects (`firefox-audio-formats`
+      and `webkit-audio-formats`) and return them to the blocking social gate.
+      They fail intermittently in CI: no playing media element, a seek whose
+      `playbackGeneration` did not advance, and members whose clocks never
+      synchronized within the deadline. See the symptoms and exit steps in
+      the [social runbook](deployment/social-rollout-runbook.md#quarantined-cross-engine-audio-drift-blocks-enabling-rooms).
+      Until this is done, enable at most `FINITUDE_SOCIAL_ENABLED` and leave
+      rooms `false`.
 
 - [ ] In a quiet window, set both flags to `true` in one environment update.
       The restart is a short outage on the single instance.

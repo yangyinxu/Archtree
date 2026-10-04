@@ -24,7 +24,9 @@ interface Connection { socket: WebSocket; actor: RoomActor; key: string; ip: str
 interface GatewayOptions { api?: RoomApi; acquire?: typeof roomAuthority.acquire; release?: typeof roomAuthority.release;
     redeemTicket?: typeof redeemRoomTicket; metrics?: RoomGatewayMetrics; operations?: SocialOperations;
     /** Resolved once at install, like the rollout flags: changing it restarts the process. */
-    capacity?: SocialCapacity; isRoomMember?: (accountId: string) => Promise<boolean>; seats?: typeof realtimeSeats }
+    capacity?: SocialCapacity; isRoomMember?: (accountId: string) => Promise<boolean>; seats?: typeof realtimeSeats;
+    /** Waits out one repair backoff; tests observe the requested delay instead of measuring the wall clock. */
+    sleep?: (ms: number) => Promise<void> }
 /** The per-address bound stays fixed; process and per-account socket bounds follow deployment capacity. */
 const SOCKETS_PER_ADDRESS = 32;
 const PENDING_UPGRADES = 32;
@@ -97,7 +99,8 @@ export const installRoomGateway = (server: Server, lifecycle: ServerLifecycle, o
 
     const unavailable = (error: unknown): error is SocialError => error instanceof SocialError && error.statusCode === 503
         && ['room_unavailable', 'social_unavailable'].includes(error.code);
-    const backoff = (attempt: number) => new Promise(resolve => setTimeout(resolve, (attempt + 1) * 100 + Math.floor(Math.random() * 40)));
+    const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); }));
+    const backoff = (attempt: number) => sleep((attempt + 1) * 100 + Math.floor(Math.random() * 40));
     const closeForFailure = (connection: Connection, error: unknown) => {
         if (error instanceof SocialError && error.statusCode < 500) connection.socket.close(1008, 'Session unavailable.');
         else if (error instanceof SocialError && ['room_authority_unavailable', 'rooms_disabled'].includes(error.code)) connection.socket.close(1012, 'Authority unavailable.');

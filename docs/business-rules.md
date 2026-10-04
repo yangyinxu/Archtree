@@ -434,7 +434,9 @@ Playlist access retain their existing rules.
   triggers absence handling. Revoking an observer session cannot remove another
   device's membership. Changing a password preserves a room controller on the
   retained current session; sign out everywhere and password reset remove
-  participation and end a hosted room.
+  participation and end a hosted room. A Web tab still open on that account
+  then drops the former room and shows the signed-out state without a reload
+  (see Authentication and Resolution).
 - Shared playback uses the existing single player with an online representation
   pinned to the selected media version. Only finite Audio whose duration and
   seekability have been verified is eligible. Supported sources are complete
@@ -1445,6 +1447,14 @@ The wire protocol and operational bounds are documented in
   and identity mismatch with one another, and a late response for the previous
   account cannot restore its data. Account exit clears only that account's
   device-local search history.
+- When a browser session ends elsewhere, for example through sign out
+  everywhere or a password reset on another device, a tab still showing that
+  account signs out as soon as one of its requests finds, under the shared
+  session-transition lock, that no browser session remains. It reconciles
+  without a reload, notifies the other tabs and changes no cookies. A response
+  that cannot prove the session ended, such as a rate-limited or unavailable
+  refresh, keeps the account. A late response for an account this tab has
+  already left cannot sign out the account that replaced it.
 - Browser login and refresh may install or rotate HttpOnly credentials only
   while the client holds the shared origin-wide session-transition lock. A
   client without that capability cannot set credentials. A refresh from a tab

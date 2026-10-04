@@ -226,6 +226,15 @@ const adoptUnboundBrowserSession = () => {
   publishAccountSessionChange('login', { includeCurrentTab: true });
 };
 
+/**
+ * Signs every tab out after a locked recovery proves no browser session remains, for example after sign
+ * out everywhere on another device. Reconciliation only reads the shared session, so it never changes cookies.
+ */
+const reconcileEndedBrowserSession = () => {
+  advanceAccountEpoch();
+  publishAccountSessionChange('logout', { includeCurrentTab: true });
+};
+
 const rotateBrowserSession = async (expectedViewer?: string, assertCurrent?: () => void) => {
   const response = await fetchResponse('/auth/browser/refresh', {
     method: 'POST',
@@ -268,6 +277,12 @@ const refreshBrowserSessionWhileLocked = async (
     await recoverBrowserSessionIdentityConflict(scope.capability);
     return false;
   };
+  // Only a tab still showing the expected viewer in the same epoch may end it; an unbound bootstrap is already signed out.
+  const endMissingSession = () => {
+    assertCurrent();
+    if (expectedViewer) reconcileEndedBrowserSession();
+    return false;
+  };
   let current;
   try {
     current = await readCurrentBrowserSession(assertCurrent);
@@ -296,7 +311,7 @@ const refreshBrowserSessionWhileLocked = async (
       // Another tab can consume the rotating token just before this request.
       const winner = await readCurrentBrowserSession(assertCurrent);
       assertCurrent();
-      if (!winner) return false;
+      if (!winner) return endMissingSession();
       if (expectedViewer && winner.user.id !== expectedViewer) return recoverConflict();
       if (!expectedViewer) adoptUnboundBrowserSession();
       return true;

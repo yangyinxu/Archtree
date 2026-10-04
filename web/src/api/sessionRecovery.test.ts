@@ -229,3 +229,139 @@ test('a released transition scope cannot authorize another request', async () =>
   })).rejects.toMatchObject({ name: 'BrowserSessionTransitionUnavailableError' });
   expect(fetchMock).not.toHaveBeenCalled();
 });
+
+/** Records transitions from the same event module instance that the freshly imported client publishes through. */
+const recordSessionChanges = async () => {
+  const events = await import('./accountSessionEvents');
+  const reasons: string[] = [];
+  const unsubscribe = events.subscribeToAccountSessionChanges((event) => reasons.push(event.reason));
+  window.localStorage.removeItem(events.accountSessionChangeStorageKey);
+  const broadcast = () => JSON.parse(window.localStorage.getItem(events.accountSessionChangeStorageKey) ?? 'null');
+  return { reasons, unsubscribe, broadcast };
+};
+const signedOut = () => vi.fn(async (_path: string) => json({}, 401));
+
+test.each(['json', 'empty'] as const)(
+  'a %s request whose locked recovery finds no browser session signs every tab out', async (kind) => {
+    const { request, captureAccountOperation, isAccountOperationCurrent } = await clients();
+    const { reasons, unsubscribe, broadcast } = await recordSessionChanges();
+    const prior = captureAccountOperation(viewerA);
+    const fetchMock = signedOut();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(request(kind)).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      kind === 'json' ? '/content/me/saves/status' : '/auth/activity/listening-history',
+      '/auth/browser/session', '/auth/browser/refresh', '/auth/browser/session'
+    ]);
+    // This tab reconciles at once, and the identity-free event reaches every other same-origin tab.
+    expect(reasons).toEqual(['logout']);
+    expect(isAccountOperationCurrent(prior)).toBe(false);
+    expect(broadcast()).toEqual({ id: expect.any(String), reason: 'logout' });
+    unsubscribe();
+  }
+);
+
+test('concurrent requests for an ended session share one recovery and one sign-out', async () => {
+  const { request } = await clients();
+  const { reasons, unsubscribe } = await recordSessionChanges();
+  const protectedResponses = deferred<void>();
+  const fetchMock = vi.fn(async (path: string) => {
+    if (!path.startsWith('/auth/browser/')) await protectedResponses.promise;
+    return json({}, 401);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  const settled = Promise.allSettled([request('json'), request('empty')]);
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  protectedResponses.resolve();
+  const results = await settled;
+  expect(results.every(({ status }) => status === 'rejected')).toBe(true);
+  expect(fetchMock.mock.calls.filter(([path]) => path === '/auth/browser/refresh')).toHaveLength(1);
+  expect(reasons).toEqual(['logout']);
+  unsubscribe();
+});
+
+test.each(['bootstrap', 'unbound'] as const)(
+  'a signed-out %s read that finds no session publishes nothing, so reconciliation cannot loop', async (kind) => {
+    const { apiRequest } = await clients();
+    const { getBrowserSession } = await import('./session');
+    const { reasons, unsubscribe, broadcast } = await recordSessionChanges();
+    vi.stubGlobal('fetch', signedOut());
+    if (kind === 'bootstrap') await expect(getBrowserSession()).resolves.toBeNull();
+    else await expect(apiRequest('/content/public', z.object({ ready: z.boolean() }))).rejects.toMatchObject({ status: 401 });
+    expect(reasons).toEqual([]);
+    expect(broadcast()).toBeNull();
+    unsubscribe();
+  }
+);
+
+test.each(['shared lock', 'session read', 'rotation', 'final session read'] as const)(
+  'an account transition during the %s cannot sign out the account that replaced the request', async (stage) => {
+    const { request, advanceAccountEpoch } = await clients();
+    const { reasons, unsubscribe, broadcast } = await recordSessionChanges();
+    const gate = deferred<void>();
+    let reached = false;
+    const hold = async () => { reached = true; await gate.promise; };
+    vi.stubGlobal('navigator', { locks: { request: async (
+      _name: string, _options: unknown, operation: () => Promise<unknown>
+    ) => {
+      if (stage === 'shared lock') await hold();
+      return operation();
+    } } });
+    let sessionReads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path === '/auth/browser/session') {
+        sessionReads += 1;
+        if ((stage === 'session read' && sessionReads === 1) || (stage === 'final session read' && sessionReads === 2)) await hold();
+      }
+      if (path === '/auth/browser/refresh' && stage === 'rotation') await hold();
+      return json({}, 401);
+    }));
+    const rejected = expect(request('json')).rejects.toMatchObject(stale);
+    await vi.waitFor(() => expect(reached).toBe(true));
+    advanceAccountEpoch();
+    gate.resolve();
+    await rejected;
+    expect(reasons).toEqual([]);
+    expect(broadcast()).toBeNull();
+    unsubscribe();
+  }
+);
+
+test.each(['rate-limited refresh', 'unavailable refresh', 'unreachable session', 'no Web Locks'] as const)(
+  'a %s does not prove the session ended and keeps the account', async (failure) => {
+    const { request, captureAccountOperation, isAccountOperationCurrent } = await clients();
+    const { reasons, unsubscribe, broadcast } = await recordSessionChanges();
+    const guard = captureAccountOperation(viewerA);
+    if (failure === 'no Web Locks') vi.stubGlobal('navigator', {});
+    let sessionReads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path === '/auth/browser/refresh' && failure === 'rate-limited refresh') return json({}, 429);
+      if (path === '/auth/browser/refresh' && failure === 'unavailable refresh') return json({}, 503);
+      if (path === '/auth/browser/session' && ++sessionReads === 2 && failure === 'unreachable session') {
+        throw new TypeError('Failed to fetch');
+      }
+      return json({}, 401);
+    }));
+    await expect(request('empty')).rejects.toBeInstanceOf(Error);
+    expect(reasons).toEqual([]);
+    expect(broadcast()).toBeNull();
+    expect(isAccountOperationCurrent(guard)).toBe(true);
+    unsubscribe();
+  }
+);
+
+test('Sign out everywhere from a tab whose session already ended signs the tab out and releases the lock', async () => {
+  await clients();
+  const { signOutAccountEverywhere } = await import('./accountLifecycle');
+  const { runBrowserSessionTransition } = await import('./sessionTransition');
+  const { reasons, unsubscribe } = await recordSessionChanges();
+  const fetchMock = signedOut();
+  vi.stubGlobal('fetch', fetchMock);
+  await expect(signOutAccountEverywhere(viewerA)).rejects.toMatchObject({ status: 401 });
+  expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+    '/auth/logout-all', '/auth/browser/session', '/auth/browser/refresh', '/auth/browser/session'
+  ]);
+  expect(reasons).toEqual(['logout']);
+  await expect(runBrowserSessionTransition({ kind: 'refresh' }, async () => 'released')).resolves.toBe('released');
+  unsubscribe();
+});

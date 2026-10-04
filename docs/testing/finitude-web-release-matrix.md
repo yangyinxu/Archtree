@@ -172,7 +172,14 @@ permissions, and writes bounded source/build identity to `RELEASE.json`. The CI
 release gate retains a commit-named archive for 30 days after all automated
 gates pass. Its final `release-artifact` job runs only after the parallel
 `build`, `unit-integration`, `social-e2e` and `browser-e2e` jobs succeed. It
-stages the same production build those browser jobs tested.
+stages the same production build those browser jobs tested. The `social-e2e`
+gate is its blocking step, which runs every social project except the
+quarantined `firefox-audio-formats` and `webkit-audio-formats` pair. Those two
+run afterwards in a `continue-on-error` step that reports a non-blocking
+outcome and keeps evidence under `social-quarantined/` in the
+`finitude-social-browser-evidence` artifact. They must return to the blocking
+gate before rooms are enabled in production (see the
+[social rollout runbook](../deployment/social-rollout-runbook.md#quarantined-cross-engine-audio-drift-blocks-enabling-rooms)).
 
 Follow
 [`../deployment/finitude-web-rollout-runbook.md`](../deployment/finitude-web-rollout-runbook.md)

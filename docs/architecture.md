@@ -1900,8 +1900,20 @@ transition also invalidates an older scope's reserved account generation.
 Logout-all and account deletion retain their sequence: authenticated server
 mutation, best-effort browser cookie cleanup, then account-state notification.
 An expired access cookie can refresh once inside the existing lock. A failed
-refresh releases the lock and returns a retryable failure to the confirmation UI.
+refresh releases the lock and returns a retryable failure to the confirmation UI;
+when that refresh proved the session had already ended, the tab also signs out as
+described below.
 Storage-fallback cleanup never receives permission to install or rotate cookies.
+
+A viewer-bound 401 whose locked recovery finds no session (session read 401,
+rotation 401, then a second session read 401) proves the shared cookie session
+ended elsewhere, for example through logout-all on another device. While its
+guard is still current, the client advances the account epoch and publishes a
+`logout` account-session change to this and every other tab, so live transports
+such as the room session stop at once and the coordinator resolves the signed-out
+state without a reload. Publishing changes no cookies. Unbound and bootstrap reads
+never publish, so the coordinator's own signed-out read cannot loop, and a
+rate-limited, unavailable, unreachable or lock-less recovery proves nothing.
 
 Every automatic recovery retains the initiating account epoch and viewer. The
 client checks this guard before recovery, after acquiring the lock, after each
@@ -1917,7 +1929,7 @@ An aborted request does not retry its mutation after shared recovery completes.
 Verification from `web/`:
 
 ```sh
-npx vitest run src/api/client.test.ts src/api/session.test.ts src/api/sessionTransition.test.ts src/api/sessionRecovery.test.ts src/features/account/AccountLifecyclePanel.test.tsx
+npx vitest run src/api/client.test.ts src/api/session.test.ts src/api/sessionTransition.test.ts src/api/sessionRecovery.test.ts src/app/BrowserSessionCoordinator.test.ts src/features/social/roomSessionEndedSession.test.ts src/features/account/AccountLifecyclePanel.test.tsx
 npm run typecheck
 npm run typecheck:e2e
 npm run build
