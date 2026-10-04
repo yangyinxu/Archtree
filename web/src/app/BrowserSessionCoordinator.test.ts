@@ -1,12 +1,18 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
+import { z } from 'zod';
 
+import { apiRequest } from '../api/client';
 import type { BrowserSession } from '../api/schemas';
 import {
   accountSessionChangeStorageKey
 } from '../api/accountSessionEvents';
-import { browserSessionQuery, browserSessionQueryKey } from '../api/session';
+import {
+  browserSessionQuery,
+  browserSessionQueryKey,
+  browserSessionResolvingQueryKey
+} from '../api/session';
 import { readSearchHistory, rememberSearchQuery } from '../features/search/searchHistory';
 import {
   reconcileAccountSessionChange,
@@ -172,5 +178,33 @@ test('Content Manager logout completion clears only its viewer history and publi
   const published = JSON.parse(window.localStorage.getItem(accountSessionChangeStorageKey) ?? '{}');
   expect(published).toMatchObject({ reason: 'logout' });
   expect(published).not.toHaveProperty('viewerId');
+  unsubscribe();
+});
+
+test('a request proving the browser session ended signs this tab out without a reload', async () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(browserSessionQueryKey, sessionFor('viewer-a'));
+  queryClient.setQueryData(['social', 'viewer-a', 'room-invitations'], { private: 'a' });
+  rememberSearchQuery('viewer-a', 'erase this');
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' }
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  const unsubscribe = startBrowserSessionCoordinator(queryClient);
+
+  await expect(apiRequest('/api/social/v1/rooms/current', z.object({ room: z.null() }), {
+    accountViewer: 'viewer-a'
+  })).rejects.toMatchObject({ status: 401 });
+  // Previous-account data is hidden before the authoritative signed-out session is resolved.
+  expect(queryClient.getQueryData(browserSessionQueryKey)).toBeNull();
+  expect(queryClient.getQueryData(['social', 'viewer-a', 'room-invitations'])).toBeUndefined();
+  await vi.waitFor(() => expect(queryClient.getQueryData(browserSessionResolvingQueryKey)).toBe(false));
+  expect(queryClient.getQueryState(browserSessionQueryKey)).toMatchObject({ status: 'success', data: null });
+  expect(readSearchHistory('viewer-a')).toEqual([]);
+  // The signed-out bootstrap read proves nothing new, so it cannot publish another round.
+  const calls = fetchMock.mock.calls.length;
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+  expect(fetchMock.mock.calls.length).toBe(calls);
   unsubscribe();
 });

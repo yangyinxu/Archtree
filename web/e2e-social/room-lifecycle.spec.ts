@@ -229,9 +229,16 @@ test('host absence suspends and ends rooms in both modes while observer logout a
     await expect.poll(() => guestState()).toBeNull();
     await expect(b.getByRole('button', { name: 'Start a room', exact: true })).toBeVisible();
     await silent(guest);
-    // The host's still-open controller tab keeps no audio, and its revoked session shows neither the
-    // room nor a signed-in account when the tab loads again.
+    // The host's still-open controller tab keeps no audio. Its next room request proves the browser session
+    // ended, so without a reload it drops the former room and shows the signed-out account entry.
     await silent(host);
+    const hostDocument = await host.evaluate(() => performance.timeOrigin);
+    await expect(a).toHaveCount(0, { timeout: 20_000 });
+    await expect(host.getByRole('link', { name: 'Log in', exact: true }).first()).toBeVisible();
+    await expect(host.getByRole('link', { name: /^Open room: / })).toHaveCount(0);
+    await expect(host.getByRole('button', { name: 'End room', exact: true })).toHaveCount(0);
+    expect(await host.evaluate(() => performance.timeOrigin)).toBe(hostDocument);
+    // A fresh load agrees with the reconciled tab.
     await host.reload();
     await expect(host.getByRole('link', { name: 'Log in', exact: true }).first()).toBeVisible();
     await expect(a.getByRole('button', { name: 'End room', exact: true })).toHaveCount(0);
