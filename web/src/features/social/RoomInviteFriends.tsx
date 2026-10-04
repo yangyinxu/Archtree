@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { getOutgoingRoomInvitations, type RoomSnapshot } from '../../api/rooms';
 import { useLocalization } from '../../localization/LocalizationProvider';
@@ -18,6 +18,7 @@ export const RoomInviteFriends = ({ room, viewerId }: { room: RoomSnapshot; view
   const { t } = useLocalization();
   const state = useRoomSession();
   const [replacing, setReplacing] = useState<{ socialId: string; alias: string } | null>(null);
+  const replaceTrigger = useRef<HTMLElement | null>(null);
   const friends = useInfiniteQuery({ queryKey: ['social', viewerId, 'relationships', 'friends'],
     queryFn: async ({ pageParam, signal }) => (await import('../../api/social')).getSocialPage(viewerId, 'friends', pageParam, signal),
     initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined, retry: false });
@@ -46,12 +47,12 @@ export const RoomInviteFriends = ({ room, viewerId }: { room: RoomSnapshot; view
       return <li className={`${styles.row} ${styles.invitationRow}`} key={friend.socialId}><div className={styles.rowContent}><strong>{alias}</strong>{invitation && <span>{t('room.invitation_pending')}</span>}</div>
         {invitation ? <>
           <CopyInvitationLink key={invitation.invitationId} viewerId={viewerId} invitationId={invitation.invitationId} alias={alias} disabled={disabled} />
-          <button className={styles.secondary} disabled={disabled} onClick={() => setReplacing({ socialId: friend.socialId, alias })}>{t('room.invitation_replace')}</button>
+          <button className={styles.secondary} disabled={disabled} onClick={event => { replaceTrigger.current = event.currentTarget; setReplacing({ socialId: friend.socialId, alias }); }}>{t('room.invitation_replace')}</button>
         </> : <button className={styles.secondary} disabled={disabled || outgoing.isPending || outgoing.isError} onClick={() => invite(friend.socialId)}>{t('room.invite')}</button>}
       </li>;
     })}</ul>{friends.hasNextPage && <button className={styles.secondary} disabled={friends.isFetchingNextPage} onClick={() => friends.fetchNextPage()}>{t('common.action.load_more')}</button>}
     {replacing && replaceable && <Suspense fallback={null}><ConfirmActionDialog title={t('room.invitation_replace_confirm_title', { alias: replacing.alias })}
-      description={t('room.invitation_replace_confirm_copy', { alias: replacing.alias })} confirmLabel={t('room.invitation_replace')} confirmDisabled={disabled}
+      description={t('room.invitation_replace_confirm_copy', { alias: replacing.alias })} confirmLabel={t('room.invitation_replace')} confirmDisabled={disabled} returnFocusRef={replaceTrigger}
       onCancel={() => setReplacing(null)} onConfirm={() => { const target = replacing.socialId; setReplacing(null); void invite(target); }} /></Suspense>}
   </>;
 };

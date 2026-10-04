@@ -58,6 +58,27 @@ test('hidden document stops polling and hides status', async () => {
   act(() => document.dispatchEvent(new Event('visibilitychange')));
   expect(screen.queryByText('Fresh Audio')).not.toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Refresh listening status' })).toBeDisabled();
 });
+test('an off-screen panel is read when Together opens and polls only while it is in view', async () => {
+  // Reading on open lays the list out before the listener scrolls to it or to the profile controls below it.
+  const intersect: ((entries: { isIntersecting: boolean }[]) => void)[] = [];
+  vi.stubGlobal('IntersectionObserver', class { constructor(callback: (entries: { isIntersecting: boolean }[]) => void) { intersect.push(callback); } observe() {} disconnect() {} });
+  vi.useFakeTimers();
+  try {
+    const tick = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+    show(); await tick();
+    expect(screen.getByText('Current Alice is listening')).toBeInTheDocument();
+    expect(screen.queryByText('No friends are sharing fresh listening right now.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh listening status' })).toBeEnabled();
+    await tick(12_000); expect(mocks.friends).toHaveBeenCalledOnce();
+    // Scrolling to the panel refreshes the older read at once, then polls while it stays in view.
+    act(() => intersect.forEach(callback => callback([{ isIntersecting: true }]))); await tick();
+    expect(mocks.friends).toHaveBeenCalledTimes(2);
+    await tick(5_000); expect(mocks.friends).toHaveBeenCalledTimes(3);
+    act(() => intersect.forEach(callback => callback([{ isIntersecting: false }])));
+    await tick(15_000); expect(mocks.friends).toHaveBeenCalledTimes(3);
+    expect(screen.getByText('Current Alice is listening')).toBeInTheDocument();
+  } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
+});
 test('status expires locally before the next server poll', async () => {
   mocks.friends.mockResolvedValue({ items: [{ ...item(), expiresAtMs: 100_100 }], nextCursor: null }); show(); await screen.findByText('Fresh Audio');
   await waitFor(() => expect(screen.queryByText('Fresh Audio')).not.toBeInTheDocument(), { timeout: 1000 }); expect(mocks.friends).toHaveBeenCalledTimes(1);

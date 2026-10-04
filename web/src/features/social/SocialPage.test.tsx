@@ -373,6 +373,23 @@ test('deactivating asks in the accessible dialog, says what is removed and kept,
   nativeConfirm.mockRestore();
 });
 
+test('closing Remove friend or Deactivate returns focus to its trigger even when clicking did not focus it, as in Safari', async () => {
+  current = own; friendsListed = true; show();
+  const remove = await screen.findByRole('button', { name: 'Remove friend' });
+  const deactivate = screen.getByRole('button', { name: 'Deactivate social profile' });
+  for (const [trigger, name] of [[remove, 'Remove Bob from your friends?'], [deactivate, 'Deactivate your social profile?']] as const) {
+    // fireEvent.click leaves focus on the earlier element, as a Safari mouse click on a button does.
+    screen.getByRole('tabpanel', { name: 'Friends' }).focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  }
+  expect(mutations).toEqual([]);
+});
+
 test('setup describes the handle format and counts the display name in characters, as the server does', async () => {
   show();
   const form = await screen.findByRole('form', { name: 'Your social profile' });

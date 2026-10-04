@@ -217,6 +217,8 @@ test('removing a member asks the host first and sends only the confirmed kick', 
   expect(dialog).toHaveAccessibleDescription('Bob leaves this room right away and stops listening with everyone. You can invite them again later.');
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  // fireEvent.click leaves focus where it was, as a Safari mouse click does; Cancel still returns to the trigger.
+  expect(screen.getByRole('button', { name: 'Remove from room' })).toHaveFocus();
   expect(mocks.run).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Remove from room' }));
   fireEvent.click(within(await screen.findByRole('dialog', { name: 'Remove Bob from the room?' })).getByRole('button', { name: 'Remove from room' }));
@@ -235,7 +237,11 @@ test('a pending invitation can be copied or explicitly replaced so its earlier l
   const dialog = await screen.findByRole('dialog', { name: 'Send Bob a new invitation?' });
   expect(dialog).toHaveAccessibleDescription(/The current invitation link stops working/);
   expect(mocks.run).not.toHaveBeenCalled();
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Send new invitation' }));
+  fireEvent.keyDown(document, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: 'Send new invitation' })).toHaveFocus();
+  fireEvent.click(screen.getByRole('button', { name: 'Send new invitation' }));
+  fireEvent.click(within(await screen.findByRole('dialog', { name: 'Send Bob a new invitation?' })).getByRole('button', { name: 'Send new invitation' }));
   expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'invite', roomId: 'room-a', memberId: 'member-a', targetSocialId: bob.socialId });
 });
 

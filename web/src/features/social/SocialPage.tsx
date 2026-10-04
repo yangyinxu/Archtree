@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { lazy, Suspense, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { browserSessionQuery, browserSessionResolvingQuery } from '../../api/session';
@@ -35,14 +35,16 @@ const safetyCopy = {
 /**
  * Removing a friend, blocking and deactivating cannot simply be undone (reconnecting needs a new request,
  * unblocking and reactivating restore nothing), so each asks first and says what changes. Confirming closes the
- * dialog and runs the captured gesture; its outcome appears in the page's shared action status.
+ * dialog and runs the captured gesture; its outcome appears in the page's shared action status. Closing returns focus
+ * to the trigger.
  */
-const SafetyConfirmation = ({ intent, actions, onClose }: { intent: SafetyIntent; actions: ReturnType<typeof useSocialActions>; onClose: () => void }) => {
+const SafetyConfirmation = ({ intent, actions, onClose, trigger }: { intent: SafetyIntent; actions: ReturnType<typeof useSocialActions>;
+  onClose: () => void; trigger: RefObject<HTMLElement | null> }) => {
   const { t } = useLocalization();
   const [title, description, confirmLabel] = safetyCopy[intent.action];
   const variables = intent.action === 'deactivate' ? undefined : { alias: intent.alias };
   return <Suspense fallback={null}><ConfirmActionDialog title={t(title, variables)} description={t(description, variables)}
-    confirmLabel={t(confirmLabel)} confirmDisabled={actions.busy || Boolean(actions.uncertain)}
+    confirmLabel={t(confirmLabel)} confirmDisabled={actions.busy || Boolean(actions.uncertain)} returnFocusRef={trigger}
     onCancel={onClose} onConfirm={() => {
       onClose();
       if (intent.action === 'deactivate') { void actions.run(intent); return; }
@@ -58,6 +60,7 @@ const IdentityForm = ({ profile, actions }: { profile: SocialProfile | null; act
   const [alias, setAlias] = useState(profile?.alias ?? '');
   const [discoverable, setDiscoverable] = useState(profile?.discoverable ?? true);
   const [deactivating, setDeactivating] = useState(false);
+  const deactivateTrigger = useRef<HTMLButtonElement>(null);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     // The browser already blocks an invalid nickname; this guard also covers programmatic submission.
@@ -88,8 +91,8 @@ const IdentityForm = ({ profile, actions }: { profile: SocialProfile | null; act
       <button className={styles.button} disabled={suspended || actions.busy || Boolean(actions.uncertain)}>{t(profile ? profile.active ? 'social.save_profile' : 'social.reactivate' : 'social.create_profile')}</button>
     </form>
     {profile?.active && <div className={styles.actions}><button className={styles.danger} disabled={actions.busy || Boolean(actions.uncertain)} type="button"
-      onClick={() => setDeactivating(true)}>{t('social.deactivate')}</button></div>}
-    {deactivating && <SafetyConfirmation intent={{ action: 'deactivate' }} actions={actions} onClose={() => setDeactivating(false)} />}
+      ref={deactivateTrigger} onClick={() => setDeactivating(true)}>{t('social.deactivate')}</button></div>}
+    {deactivating && <SafetyConfirmation intent={{ action: 'deactivate' }} actions={actions} onClose={() => setDeactivating(false)} trigger={deactivateTrigger} />}
   </section>;
 };
 
@@ -105,6 +108,7 @@ const FriendLookup = ({ viewerId, enabled, actions, report }: { viewerId: string
     queryFn: () => getSocialRelationship(viewerId, profile!.socialId), enabled: Boolean(profile), retry: false });
   const relation = relationship.data?.relationship;
   const [blocking, setBlocking] = useState<SafetyIntent | null>(null);
+  const blockTrigger = useRef<HTMLButtonElement>(null);
   return <section className={styles.panel}>
     <h2>{t('social.find')}</h2><p className={styles.muted} id={hintId}>{t('social.find_hint')}</p>
     <form aria-label={t('social.find')} className={styles.search} onSubmit={event => { event.preventDefault(); setSubmitted(handle.trim().toLowerCase()); }}>
@@ -122,14 +126,14 @@ const FriendLookup = ({ viewerId, enabled, actions, report }: { viewerId: string
       {relation?.state === 'incoming' && <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'accept', targetSocialId: profile.socialId, expectedRevision: relation.revision })}>{t('social.accept')}</button>}
       {/* Any identity can be blocked, including someone found by handle with no relationship yet. A missing
           relationship means the result is the viewer's own profile. */}
-      {relation && relation.state !== 'blocked' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => setBlocking({ action: 'block', targetSocialId: profile.socialId, alias: profile.alias })}>{t('social.block')}</button>}
+      {relation && relation.state !== 'blocked' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} ref={blockTrigger} onClick={() => setBlocking({ action: 'block', targetSocialId: profile.socialId, alias: profile.alias })}>{t('social.block')}</button>}
       {/* The pair state is null for the viewer's own handle, so a listener is never offered a self-report. */}
       {relation && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(profile.socialId, `${profile.alias} (@${profile.handle})`, event.currentTarget)}>{t('social.report')}</button>}
     </div>}
     {/* Without the relationship no action can be offered safely, so a failed read says so instead of showing nothing. */}
     {profile && relationship.isError && <p className={styles.error} role="alert">{t('social.relationship_error')} <button type="button" className={styles.secondary}
       disabled={relationship.isFetching} onClick={() => relationship.refetch()}>{t('common.action.retry')}</button></p>}
-    {blocking && <SafetyConfirmation intent={blocking} actions={actions} onClose={() => setBlocking(null)} />}
+    {blocking && <SafetyConfirmation intent={blocking} actions={actions} onClose={() => setBlocking(null)} trigger={blockTrigger} />}
   </section>;
 };
 
@@ -141,6 +145,8 @@ const Relationships = ({ viewerId, actions, report }: { viewerId: string; action
     initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined, retry: false });
   const rows = [...new Map((result.data?.pages ?? []).flatMap(page => page.items).map(row => [row.socialId, row])).values()];
   const [confirming, setConfirming] = useState<SafetyIntent | null>(null);
+  const confirmTrigger = useRef<HTMLElement | null>(null);
+  const askFirst = (event: MouseEvent<HTMLElement>, intent: SafetyIntent) => { confirmTrigger.current = event.currentTarget; setConfirming(intent); };
   const id = useId();
   /**
    * WAI-ARIA tabs with automatic activation: arrows wrap, Home and End jump, and only the selected tab is in the
@@ -166,11 +172,11 @@ const Relationships = ({ viewerId, actions, report }: { viewerId: string; action
       <div className={styles.rowActions}>
         {kind === 'incoming' && <button className={styles.button} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => actions.run({ action: 'accept', targetSocialId: row.socialId, expectedRevision: row.revision })}>{t('social.accept')}</button>}
         {/* Declining, cancelling and unblocking are easily redone, so only Remove and Block ask first. */}
-        <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => kind === 'friends'
-          ? setConfirming({ action: 'remove', targetSocialId: row.socialId, expectedRevision: row.revision, alias: row.profile?.alias ?? row.socialId.slice(-8) })
+        <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => kind === 'friends'
+          ? askFirst(event, { action: 'remove', targetSocialId: row.socialId, expectedRevision: row.revision, alias: row.profile?.alias ?? row.socialId.slice(-8) })
           : actions.run({ action: kind === 'incoming' ? 'decline' : kind === 'outgoing' ? 'cancel' : 'unblock', targetSocialId: row.socialId, expectedRevision: row.revision })}>
           {t(kind === 'friends' ? 'social.remove' : kind === 'incoming' ? 'social.decline' : kind === 'outgoing' ? 'social.cancel_request' : 'social.unblock')}</button>
-        {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={() => setConfirming({ action: 'block', targetSocialId: row.socialId, alias: row.profile?.alias ?? row.socialId.slice(-8) })}>{t('social.block')}</button>}
+        {kind !== 'blocks' && <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => askFirst(event, { action: 'block', targetSocialId: row.socialId, alias: row.profile?.alias ?? row.socialId.slice(-8) })}>{t('social.block')}</button>}
         {/* Blocked rows stay reportable: blocking and then reporting is a common safety sequence. */}
         <button className={styles.secondary} disabled={actions.busy || Boolean(actions.uncertain)} onClick={event => report(row.socialId,
           row.profile ? `${row.profile.alias} (@${row.profile.handle})` : `${t('social.blocked_profile')} ${row.socialId.slice(-8)}`, event.currentTarget)}>{t('social.report')}</button>
@@ -186,7 +192,7 @@ const Relationships = ({ viewerId, actions, report }: { viewerId: string; action
       {kind === tab && <>{content}
         {result.hasNextPage && <button className={styles.secondary} disabled={result.isFetchingNextPage} onClick={() => result.fetchNextPage()}>{t('common.action.load_more')}</button>}</>}
     </div>)}
-    {confirming && <SafetyConfirmation intent={confirming} actions={actions} onClose={() => setConfirming(null)} />}
+    {confirming && <SafetyConfirmation intent={confirming} actions={actions} onClose={() => setConfirming(null)} trigger={confirmTrigger} />}
   </section>;
 };
 

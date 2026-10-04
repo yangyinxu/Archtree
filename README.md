@@ -103,8 +103,9 @@ In **Together**, **Share what I’m listening to** is off by default. Enable it 
 share fresh actual Audio playback with current friends, from both ordinary and
 room playback. **Share from this device** explicitly chooses the publishing
 device. **Listening with friends** lists every friend listening now, 20 at a time
-with **Load more**, and refreshes the loaded pages while visible; status expires within
-25 seconds without fresh progress and stops on pause, buffering or opt-out.
+with **Load more**; it is read when Together opens and refreshes the loaded pages
+while visible. Status expires within 25 seconds without fresh progress and stops
+on pause, buffering or opt-out.
 Viewing a status does not play anything. Invite a friend into a room you host,
 or explicitly confirm creation of a paused room with eligible Audio before
 sending the invitation. If invitation fails, the created room remains available.

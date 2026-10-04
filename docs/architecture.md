@@ -269,9 +269,12 @@ their sequence while retaining the previous expiry. The playing-report budget is
 60 per account per minute; captured safety stops remain available after that
 budget is exhausted. Existing IP/session protections still apply.
 
-The visible Web panel reads `GET /listening-status/friends` every five seconds,
-refetching each page it has loaded (20 listening friends each, more on explicit
-Load more), so friends beyond the first page of the friend list stay visible. It
+The Web panel reads `GET /listening-status/friends` when Together opens, so its
+rows are laid out before the listener scrolls to it or to the profile controls
+below it, and then every five seconds while it is in view (immediately on
+returning to it after a longer gap), refetching each page it has loaded (20
+listening friends each, more on explicit Load more), so friends beyond the first
+page of the friend list stay visible. It
 reuses the account publisher's monotonic server clock, expires rows locally and
 hides failed reads. Claims and reports do not fan out generic social invalidations. Current
 friendship, active profiles, opt-in, unblocked relationships, publishing session

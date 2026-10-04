@@ -122,6 +122,10 @@ test.describe('Together safety actions and listening friends', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Listen together' })).toBeVisible();
     const friendsPanel = page.getByRole('tabpanel', { name: 'Friends' });
     await expect(friendsPanel.getByText('Bob', { exact: true })).toBeVisible();
+    // Listening with friends sits above the profile controls and is read when Together opens, before anyone
+    // scrolls to it, so reaching Deactivate below it can no longer grow it and move the button mid-click.
+    const listening = page.getByRole('region', { name: 'Listening with friends' });
+    await expect(listening.getByRole('button', { name: 'Create a room and invite' })).toHaveCount(20);
     await expectNoUnownedAxeViolations(page, 'together-page');
 
     // Arrows, Home and End move selection and focus together; Tab then leaves the tab list for the panel.

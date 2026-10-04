@@ -8,11 +8,15 @@ import styles from './SocialPage.module.css';
 
 const InviteListeningFriend = lazy(() => import('./InviteListeningFriend').then(module => ({ default: module.InviteListeningFriend })));
 type ListeningClock = { server: number; mono: number };
+const pollMs = 5000;
 
 /**
  * Shows every friend who is listening now, across the whole friend list: the server pages listening friends
- * directly, so a friend beyond the first 20 friends is not hidden. Only the visible panel polls (every loaded
- * page is refetched together); query identities and local expiry keep cached private status from lingering.
+ * directly, so a friend beyond the first 20 friends is not hidden. The list is read when Together opens, not when
+ * the panel is first seen: growing on first sight pushed the profile controls below it out from under the pointer
+ * or keyboard focus, and the unread panel claimed nobody was listening. Only the panel in view polls (every loaded
+ * page is refetched together) and returning to it refreshes a read older than one poll. A hidden document neither
+ * reads nor shows status; query identities and local expiry keep cached private status from lingering.
  */
 export const FriendsListening = ({ viewerId }: { viewerId: string }) => {
   const { t } = useLocalization();
@@ -27,7 +31,7 @@ export const FriendsListening = ({ viewerId }: { viewerId: string }) => {
     if (panel.current) observer?.observe(panel.current);
     return () => { observer?.disconnect(); document.removeEventListener('visibilitychange', visibility); };
   }, []);
-  const active = inView && visible;
+  const polling = inView && visible;
   const statuses = useInfiniteQuery({ queryKey: ['social', viewerId, 'listening-friends'],
     queryFn: async ({ pageParam, signal }) => {
       if (!listeningSession.getClock(viewerId)) await listeningSession.refresh();
@@ -36,14 +40,21 @@ export const FriendsListening = ({ viewerId }: { viewerId: string }) => {
       // Each page keeps the owner clock observed with it, so expiry never mixes server time from different reads.
       return { ...await getListeningFriends(viewerId, pageParam, signal), clock };
     }, initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined,
-    enabled: active, refetchInterval: active ? 5000 : false, refetchOnWindowFocus: 'always', retry: false });
+    enabled: visible, refetchInterval: polling ? pollMs : false, refetchOnWindowFocus: polling ? 'always' : false, retry: false });
+  const { data, dataUpdatedAt, refetch } = statuses;
   useEffect(() => {
-    if (!active || !statuses.data) return;
+    // A restarted interval would first poll a full period later, so a read older than that is refreshed now.
+    if (polling && data && Date.now() - dataUpdatedAt >= pollMs) void refetch({ cancelRefetch: false });
+  }, [polling, data, dataUpdatedAt, refetch]);
+  const shown = visible && !statuses.isError;
+  useEffect(() => {
+    // Statuses stay in the document while scrolled away, so they expire there too.
+    if (!shown || !data) return;
     setMonotonic(performance.now());
     const timer = setInterval(() => setMonotonic(performance.now()), 500);
     return () => clearInterval(timer);
-  }, [active, statuses.data]);
-  const pages = !statuses.isError && active ? statuses.data?.pages ?? [] : [];
+  }, [shown, data]);
+  const pages = shown ? data?.pages ?? [] : [];
   const serverNow = (clock: ListeningClock) => clock.server + Math.max(monotonic, performance.now()) - clock.mono;
   // A friend can move between pages while they are fetched in sequence; the first fresh occurrence wins.
   const seen = new Set<string>();
@@ -56,7 +67,7 @@ export const FriendsListening = ({ viewerId }: { viewerId: string }) => {
   return <section className={styles.panel} ref={panel} aria-label={t('listening.title')}>
     <h2>{t('listening.title')}</h2>
     {statuses.isError && <p role="alert" className={styles.error}>{t('social.error')}</p>}
-    {active && statuses.isLoading ? <p role="status">{t('social.loading')}</p>
+    {statuses.isLoading ? <p role="status">{t('social.loading')}</p>
       : !items.length ? <p className={styles.empty}>{t('listening.empty')}</p> : <ul className={styles.list} aria-label={t('listening.title')}>
         {items.map(({ item, expiresInMs }) => {
           // The server rechecks current friendship on every read and projects the friend's current social card.
@@ -69,8 +80,8 @@ export const FriendsListening = ({ viewerId }: { viewerId: string }) => {
           </li>;
         })}
       </ul>}
-    <div className={styles.actions}><button className={styles.secondary} disabled={!active || statuses.isFetching} onClick={() => void statuses.refetch()}>{t('listening.refresh')}</button>
-      {active && !statuses.isError && statuses.hasNextPage && <button className={styles.secondary} disabled={statuses.isFetching} onClick={() => void statuses.fetchNextPage()}>{t('common.action.load_more')}</button>}
+    <div className={styles.actions}><button className={styles.secondary} disabled={!visible || statuses.isFetching} onClick={() => void refetch()}>{t('listening.refresh')}</button>
+      {shown && statuses.hasNextPage && <button className={styles.secondary} disabled={statuses.isFetching} onClick={() => void statuses.fetchNextPage()}>{t('common.action.load_more')}</button>}
     </div>
   </section>;
 };
