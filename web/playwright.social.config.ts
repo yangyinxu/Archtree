@@ -8,13 +8,13 @@ type SocialSuite = { name: string; port: number; spec?: string; grep?: RegExp };
 type SocialBrowserSuite = SocialSuite & { browser: 'chromium' | 'firefox' | 'webkit' };
 
 // Each test owns one fixture process, so one test's requests cannot spend another's per-IP or per-account rate windows.
-// Ports 4187/4188 belong to the separate room soak configuration.
+// Ports 4187/4188 belong to the separate room soak configuration. 4190 is a Fetch-blocked port, so room-lifecycle uses 4191.
 const roomsRecovery = { name: 'rooms-recovery', port: 4189, spec: 'rooms',
   grep: /real room command races, controller recovery and running host transfer/ } satisfies SocialSuite;
 const suites: SocialSuite[] = [{ name: 'rooms', port: 4175, grep: /real social route continues background audio/ }, roomsRecovery,
   { name: 'invitations', port: 4176 }, { name: 'song-requests', port: 4177 }, { name: 'music-shares', port: 4178 },
   { name: 'room-interactions', port: 4179 }, { name: 'listening-status', port: 4180 },
-  { name: 'catalog-room', port: 4181 }, { name: 'audio-formats', port: 4182 }];
+  { name: 'catalog-room', port: 4181 }, { name: 'audio-formats', port: 4182 }, { name: 'room-lifecycle', port: 4191 }];
 
 /** Limit hardware-audio engines to isolated Linux CI and the two critical real-media scenarios. */
 export const socialBrowserSuites = (platform: NodeJS.Platform, ci: string | undefined): SocialBrowserSuite[] => [

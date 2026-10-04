@@ -15,6 +15,13 @@ const RoomInviteFriends = lazy(() => import('./RoomInviteFriends').then(module =
 const RoomMemberActions = lazy(() => import('./RoomMemberActions').then(module => ({ default: module.RoomMemberActions })));
 const RoomSongRequests = lazy(() => import('./RoomSongRequests').then(module => ({ default: module.RoomSongRequests })));
 const RoomMediaPicker = lazy(() => import('./RoomMediaPicker').then(module => ({ default: module.RoomMediaPicker })));
+/** The countdown-free status line while the deadline chunk loads, kept if that chunk cannot load (for example a stale hash after a deploy). */
+const RoomStatus = ({ kind }: { kind: 'host' | 'transfer' }) => {
+  const { t } = useLocalization();
+  const { room } = useRoomSession();
+  return kind === 'host' && room && room.status !== 'open' ? <p className={styles.status}>{t(room.status === 'ended' ? 'room.ended' : 'room.suspended')}</p> : null;
+};
+const RoomDeadline = lazy(() => import('./RoomDeadline').catch(() => ({ default: RoomStatus })));
 
 /** A creation draft is discarded on admission, and never becomes the user's personal player queue. */
 const RoomCreationPicker = ({ viewerId, disabled }: { viewerId: string; disabled: boolean }) => {
@@ -60,7 +67,7 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
   const transferTarget = offer?.targetMemberId === room.self.memberId;
   return <>
     <div className={styles.roomHeading}><h2>{t('room.title')}</h2><span className={styles.muted}>{status}</span></div>
-    {room.status !== 'open' && <p className={styles.status}>{t(room.status === 'ended' ? 'room.ended' : 'room.suspended')}</p>}
+    <Suspense fallback={<RoomStatus kind="host" />}><RoomDeadline kind="host" /></Suspense>
     {!room.self.isController && <div className={styles.status}>{t('room.observing')}<div className={styles.actions}><button className={styles.button} disabled={!state.connected || state.busy} onClick={() => roomSession.run({ action: 'takeControl', ...member })}>{t('room.take_control')}</button></div></div>}
     <div className={styles.nowPlaying}><div className={styles.artwork}><Icon name="brand" /></div><div><strong>{current?.title ?? t('room.title')}</strong><p className={styles.muted}>{room.timeline?.state === 'preparing' ? t('room.preparing') : state.locallyPaused ? t('room.locally_paused') : t('room.position', { elapsed: seconds(elapsed), duration: seconds(duration) })}</p></div></div>
     {!room.self.canControl && !playing && room.status === 'open' && <p className={styles.status}>{t('room.waiting_for_host')}</p>}
@@ -89,7 +96,7 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
         void roomSession.run({ action: host ? 'end' : 'leave', ...member });
       }}>{t(host ? 'room.end' : 'room.leave')}</button>
     </div>
-    {offer && <div className={styles.status}>{t('room.transfer_pending')}<div className={styles.actions}>
+    {offer && <div className={styles.status}><Suspense fallback={null}><RoomDeadline kind="transfer" /></Suspense><div className={styles.actions}>
       {transferTarget && <button className={styles.button} disabled={!state.connected || state.busy || !room.self.isController} onClick={() => roomSession.run({ action: 'acceptTransfer', ...member, offerId: offer.offerId })}>{t('room.accept_transfer')}</button>}
       {host && <button className={styles.secondary} disabled={state.busy} onClick={() => roomSession.run({ action: 'cancelTransfer', ...member, offerId: offer.offerId })}>{t('room.cancel_transfer')}</button>}
     </div></div>}

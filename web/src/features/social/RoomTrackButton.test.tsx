@@ -264,6 +264,6 @@ test('a suspended room explains why requests are disabled without claiming an in
   const button = await within(dialog).findByRole('button', { name: 'Request song' });
   await waitFor(() => expect(mocks.media).toHaveBeenCalled());
   expect(button).toBeDisabled();
-  expect(within(dialog).getByText('The host is disconnected. Shared playback is suspended.')).toBeVisible();
+  expect(within(dialog).getByText('Shared playback is suspended until the host starts it again.')).toBeVisible();
   expect(mocks.community).not.toHaveBeenCalled();
 });

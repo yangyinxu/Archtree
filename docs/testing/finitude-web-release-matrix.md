@@ -75,6 +75,21 @@ Retries remain zero. A platform that keeps a genuinely background native page
 visible cannot supply evidence for the strict visibility case; retain that failure
 separately from the focused recovery result.
 
+`npm run test:e2e:social --workspace @archtree/finitude-web -- --project=chromium-room-lifecycle`
+covers host absence with two real accounts and actual media. In Host control it
+waits through the real 30-second grace while the guest's audio keeps advancing
+and its countdown ticks, then requires a server suspension no earlier than the
+grace deadline, paused media and a closing countdown. The returning host's device
+reclaims control and the room stays suspended until its explicit Play. Everyone
+control keeps guest controls during the grace and disables them after suspension;
+a guest who leaves Together for six seconds while no snapshot arrives returns to a
+closing countdown at least that much lower, not one restarted from the old snapshot.
+Five-minute closure is checked in both modes, together with transfer-offer
+countdowns, an observer-session logout that leaves the playing device in the room,
+and a host's sign out everywhere that ends the room. Only this project's disposable
+fixture can age a recorded host absence; it changes no limit, timer or snapshot,
+and the application's sweep performs every transition.
+
 `npm run test:soak:rooms` is a separate 30-minute gate, with 2–8 synthetic members
 and configurable bounded duration/cycle spacing. See the
 [commands and limits](../../README.md#verify-sustained-audio-rooms-locally).

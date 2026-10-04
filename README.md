@@ -380,7 +380,13 @@ Run `npm test`, `npm run build`, `npm run test:integration`, and
 MongoDB/S3/WebSocket browser flows. Each social test owns a disposable
 server, database and object store, including separate rate-limit windows; the
 two rooms tests run as the `chromium-rooms` and `chromium-rooms-recovery`
-projects so neither can exhaust the other's rate windows. Keep the
+projects so neither can exhaust the other's rate windows. The
+`chromium-room-lifecycle` project waits through one real 30-second host-absence
+grace and verifies the visible countdowns, suspension in both control modes,
+host return without automatic resume, five-minute closure in both modes, and
+observer logout versus sign out everywhere. Only that disposable fixture exposes
+`POST /__fixture/room-host-absence`, which moves a recorded absence start into
+the past; the application's own sweep still suspends or closes the room. Keep the
 ordinary listener E2E gate for playback continuity, navigation and
 accessibility changes. The social E2E uses a disposable
 headed Chromium profile to verify real background tab visibility; run it in a

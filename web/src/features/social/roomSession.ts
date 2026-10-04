@@ -13,8 +13,10 @@ import type { MessageKey } from '../../localization/contract';
 interface RoomSessionState {
   viewerId: string; room: RoomSnapshot | null; connected: boolean; realtimeBusy: boolean; locallyPaused: boolean;
   busy: boolean; error: MessageKey | null; uncertain: RoomCommand | null;
+  /** Monotonic `performance.now()` when `room` was accepted; with its `serverTimeMs` it dates deadlines. */
+  roomReceivedAtMs: number;
 }
-const initialState: RoomSessionState = { viewerId: '', room: null, connected: false, realtimeBusy: false, locallyPaused: false, busy: false, error: null, uncertain: null };
+const initialState: RoomSessionState = { viewerId: '', room: null, connected: false, realtimeBusy: false, locallyPaused: false, busy: false, error: null, uncertain: null, roomReceivedAtMs: 0 };
 const incomingMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('subscribed'), protocolVersion: z.literal(1), serverTimeMs: z.number().finite(), room: roomSnapshotSchema.nullable() }).strict(),
   z.object({ type: z.literal('snapshot'), room: roomSnapshotSchema.nullable() }).strict(),
@@ -144,7 +146,7 @@ export const createRoomSession = () => {
     if (!room && !state.room) return;
     if (room && state.room?.roomId === room.roomId && room.epoch === state.room.epoch && room.revision < state.room.revision) return;
     if (!authoritative && state.connected) return; // A slower HTTP read cannot replace the live socket's state.
-    emit({ room });
+    emit({ room, roomReceivedAtMs: performance.now() });
     if (state.connected) ping(false);
     void syncPlayer();
   };

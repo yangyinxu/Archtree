@@ -392,6 +392,11 @@ Start with two operator-owned test accounts and measure each latency segment
 before increasing seats. Permitted actions show pending feedback immediately;
 successful commit is not displayed as proof that every participant is playing.
 
+Web shows host-absence grace, suspended-room closing and transfer-offer countdowns.
+The `chromium-room-lifecycle` social project covers the client E2E items for
+30-second suspension and five-minute close in both modes, host return without
+automatic resume, and observer logout versus logout-all.
+
 **Exit gate:** real streaming and autoplay evidence in the supported browser
 matrix; one player/queue; no feedback-loop commands, phantom activity or old
 account state. Verify preparation cancellation, late joins, deliberate guest

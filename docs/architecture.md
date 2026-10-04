@@ -528,6 +528,24 @@ preserves the converted anchor on unrelated membership revisions, applies a
 350 ms scheduled lead after preparation and performs bounded drift correction.
 Actual speaker/output alignment remains a target-environment measurement.
 
+`hostAbsenceDeadlineMs` is non-null while a host absence is recorded and marks
+the end of its grace (absence start plus 30 seconds); it remains set after
+suspension until the host's controller heartbeats again. The room closes at the
+same absence start plus five minutes, so Web derives that deadline from the
+contract limits instead of adding a field to the strict room-v1 snapshot.
+`transferOffer.expiresAtMs` is visible only to the host and the selected member.
+The Web room session records the monotonic `performance.now()` at which it
+accepted each snapshot, and a countdown subtracts the time elapsed since that
+receipt from the deadline minus the snapshot's own `serverTimeMs`. Snapshots
+arrive only when the room changes, so the countdown never starts from the moment
+its component mounted: leaving Together and returning, or loading the countdown
+chunk late, still shows the time the server has left. Every newer snapshot
+re-bases the measurement, and device wall-clock skew cannot shorten or extend the
+display. The countdown module loads lazily with the active room; until it loads,
+or if it cannot load, the panel shows the countdown-free suspended or ended line.
+A countdown at zero issues no command: the sweep owns suspension, closure and
+offer expiry.
+
 Preparation lasts at most three seconds. Readiness fences exact room epoch,
 member/controller, preparation ID, playback generation, entry and media revision
 plus a monotonically increasing report sequence. Preparation completion preserves

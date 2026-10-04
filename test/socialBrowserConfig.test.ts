@@ -18,7 +18,7 @@ test('social hardware-audio projects remain restricted to explicitly enabled Lin
       const suites = socialBrowserSuites(platform, ci);
       const hardwareAudio = suites.filter(suite => suite.browser !== 'chromium');
       assert.equal(hardwareAudio.length > 0, platform === 'linux' && (ci === 'true' || ci === '1'));
-      assert.equal(suites.filter(suite => suite.browser === 'chromium').length, 9);
+      assert.equal(suites.filter(suite => suite.browser === 'chromium').length, 10);
     }
   }
 });
@@ -33,6 +33,9 @@ test('cross-browser social gates isolate only compressed audio and room controll
   // Room scenarios cannot share another process's database, S3 or rate window, nor the soak fixture's 4187/4188.
   assert.deepEqual(suites.filter(suite => (suite.spec ?? suite.name) === 'rooms').map(suite => suite.port), [4175, 4189, 4185, 4186]);
   assert.equal(suites.some(suite => [4187, 4188].includes(suite.port)), false);
+  // Test-runner fetch calls to a fixture (Node's WHATWG fetch) refuse the Fetch standard's blocked ports.
+  const fetchBlocked = [1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080];
+  assert.equal(suites.some(suite => fetchBlocked.includes(suite.port)), false);
 });
 
 test('every social test owns exactly one Chromium fixture process and its rate windows', () => {

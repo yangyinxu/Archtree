@@ -4697,6 +4697,42 @@
       ],
       "variables": {}
     },
+    "room.host_absence": {
+      "description": "Shared listening interface: countdown until a disconnected host suspends shared playback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.host_absence_self": {
+      "description": "Shared listening interface: countdown shown to the host while their playing device is disconnected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.host_closing": {
+      "description": "Shared listening interface: countdown until a suspended room ends because its host is still absent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.host_closing_self": {
+      "description": "Shared listening interface: countdown shown to the host until their suspended room ends.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
     "room.host_exit_required": {
       "description": "Shared listening interface: refused leave or self-removal by the host.",
       "delivery": [
@@ -5354,6 +5390,13 @@
       ],
       "variables": {}
     },
+    "room.suspended_self": {
+      "description": "Shared listening interface: suspended room shown to its returned host.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "room.take_control": {
       "description": "Shared listening interface: take control.",
       "delivery": [
@@ -5370,6 +5413,22 @@
     },
     "room.transfer": {
       "description": "Shared listening interface: transfer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "room.transfer_expires": {
+      "description": "Shared listening interface: remaining time of a host transfer offer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "remaining": "string"
+      }
+    },
+    "room.transfer_offered": {
+      "description": "Shared listening interface: host transfer offer shown to its recipient.",
       "delivery": [
         "runtime"
       ],

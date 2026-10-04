@@ -394,7 +394,8 @@ Playlist access retain their existing rules.
   with readiness for connected members, and the room queue names its current
   song in text rather than by color alone.
 - The host can End room for everyone or offer Transfer and leave to a connected
-  participant. The selected controller must accept within 30 seconds. Acceptance
+  participant. The selected controller must accept within 30 seconds; Finitude
+  Web shows the host and that participant the time remaining to accept. Acceptance
   transfers the role and removes the old host atomically, preserving the mode,
   queue and running timeline; an in-progress preparation is cancelled and paused.
   There is no automatic host promotion.
@@ -413,6 +414,13 @@ Playlist access retain their existing rules.
   resumes a suspended timeline: the host explicitly starts it; personal audio
   resumes only through explicit resync and readiness. Every room expires after
   24 hours.
+- Finitude Web shows the remaining host-absence grace and, once suspended, the
+  time until the room ends; the host sees the same for its own disconnected
+  playing device. After the host returns, participants see that playback stays
+  suspended until the host starts it. Countdowns follow the server's deadlines
+  regardless of the device clock, keep counting while the participant visits
+  other pages, and reaching zero changes no room state by itself: the server
+  suspends, ends the room or expires the offer.
 - Revoking the playing controller's session disconnects that controller and
   triggers absence handling. Revoking an observer session cannot remove another
   device's membership. Changing a password preserves a room controller on the

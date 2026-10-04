@@ -3,15 +3,17 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { roomFixture } from '../../test/roomFixture';
 import type { RoomCommand, RoomSnapshot } from '../../api/rooms';
 import { RoomsPanel } from './RoomsPanel';
+// Warm the lazily loaded countdown module so its first suspension resolves without a transform delay.
+import './RoomDeadline';
 
 const mocks = vi.hoisted(() => ({ room: null as RoomSnapshot | null, run: vi.fn(), control: vi.fn(), ensure: vi.fn(),
   media: vi.fn(),
   resync: vi.fn(), pauseLocally: vi.fn(), retry: vi.fn(), checkOutcome: vi.fn(), uncertain: null as RoomCommand | null,
   connected: true, locallyPaused: false, playerError: false, roomsEnabled: true, error: null as string | null,
-  invitations: [] as unknown[], reconnect: vi.fn(), outgoing: [] as unknown[], friends: [] as unknown[] }));
+  invitations: [] as unknown[], reconnect: vi.fn(), outgoing: [] as unknown[], friends: [] as unknown[], receivedAt: 0 }));
 vi.mock('./roomSession', () => ({ roomSession: { run: mocks.run, control: mocks.control, ensure: mocks.ensure,
   resync: mocks.resync, pauseLocally: mocks.pauseLocally, retry: mocks.retry, checkOutcome: mocks.checkOutcome, reconnect: mocks.reconnect },
-  useRoomSession: () => ({ viewerId: 'viewer-1', room: mocks.room, connected: mocks.connected, locallyPaused: mocks.locallyPaused, busy: false, error: mocks.error, uncertain: mocks.uncertain }) }));
+  useRoomSession: () => ({ viewerId: 'viewer-1', room: mocks.room, connected: mocks.connected, locallyPaused: mocks.locallyPaused, busy: false, error: mocks.error, uncertain: mocks.uncertain, roomReceivedAtMs: mocks.receivedAt }) }));
 vi.mock('./RoomSongRequests', () => ({ RoomSongRequests: ({ room }: { room: RoomSnapshot }) => <section aria-label="Song requests">{room.roomId}</section> }));
 vi.mock('../../player', () => ({ usePlayer: () => ({ currentItem: null, currentTime: 0, error: mocks.playerError ? 'blocked' : null }) }));
 vi.mock('../../api/rooms', async original => ({ ...await original<typeof import('../../api/rooms')>(),
@@ -26,8 +28,10 @@ const show = () => {
   const content = () => <QueryClientProvider client={client}><RoomsPanel viewerId="viewer-1" profile={{
     ...roomFixture().members[0], active: true, discoverable: true, revision: 1
   }} /></QueryClientProvider>;
+  // Each render or rerender stands for the session accepting `mocks.room` at that moment.
+  mocks.receivedAt = performance.now();
   const rendered = render(content());
-  return () => rendered.rerender(content());
+  return () => { mocks.receivedAt = performance.now(); rendered.rerender(content()); };
 };
 beforeEach(() => { mocks.room = roomFixture(); mocks.connected = true; mocks.locallyPaused = false; mocks.playerError = false; mocks.uncertain = null; vi.clearAllMocks();
   mocks.roomsEnabled = true; mocks.error = null; mocks.invitations = []; mocks.outgoing = []; mocks.friends = [];
@@ -90,26 +94,52 @@ test('the seek bar speaks the shown time, following a drag before it is committe
   expect(slider).toHaveAttribute('aria-valuetext', '0:12 of 0:30');
 });
 
-test('everyone-control guests keep shared controls during the host-absence grace, before suspension', () => {
+test('everyone-control guests keep shared controls during the host-absence grace, before suspension', async () => {
   const fixture = roomFixture();
   mocks.room = { ...fixture, status: 'open', controlMode: 'everyone', hostMemberId: 'other-member',
     hostAbsenceDeadlineMs: fixture.serverTimeMs + 20_000, timeline: { ...fixture.timeline!, state: 'paused' }, preparation: null,
     members: [...fixture.members, { ...fixture.members[0], memberId: 'other-member', role: 'host', connected: false }] };
   show();
-  expect(screen.queryByText('The host is disconnected. Shared playback is suspended.')).not.toBeInTheDocument();
+  expect(await screen.findByRole('timer')).toHaveTextContent(
+    'The host is disconnected. Shared playback will be suspended in 0:20 unless the host returns.');
+  expect(screen.queryByText(/Shared playback is suspended/)).not.toBeInTheDocument();
   for (const name of ['Previous', 'Next']) expect(screen.getByRole('button', { name })).toBeEnabled();
   expect(screen.getByRole('slider', { name: 'Room playback position' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Play for everyone' }));
   expect(mocks.control).toHaveBeenCalledExactlyOnceWith('play');
 });
 
-test('a suspended room allows its returning host to resume and keeps guest controls disabled', () => {
+test('a suspended room allows its returning host to resume and keeps guest controls disabled', async () => {
   mocks.room = { ...mocks.room!, status: 'suspended', controlMode: 'everyone', hostMemberId: 'other-member' };
   const rerender = show();
+  expect(await screen.findByText('Shared playback is suspended until the host starts it again.')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   mocks.room = { ...mocks.room!, hostMemberId: mocks.room!.self.memberId }; rerender();
+  expect(screen.getByText('Shared playback is suspended. Start playback for everyone when you are ready.')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Play for everyone' })).toBeEnabled();
   expect(screen.getByRole('combobox', { name: 'Playback control' })).toBeDisabled();
+  expect(mocks.control).not.toHaveBeenCalled();
+});
+
+test('a suspended guest sees when the room ends while its host stays absent', async () => {
+  const fixture = roomFixture();
+  mocks.room = { ...fixture, status: 'suspended', hostMemberId: 'other-member', hostAbsenceDeadlineMs: fixture.serverTimeMs,
+    members: [...fixture.members, { ...fixture.members[0], memberId: 'other-member', role: 'host', connected: false }] };
+  show();
+  expect(await screen.findByRole('timer')).toHaveTextContent('Shared playback is suspended. The room ends in 4:30 unless the host returns.');
+  expect(screen.getByRole('button', { name: 'Play for everyone' })).toBeDisabled();
+});
+
+test('the transfer recipient sees the offer expiry and accepts only by explicit action', async () => {
+  const fixture = roomFixture();
+  mocks.room = { ...fixture, hostMemberId: 'other-member', members: [...fixture.members, { ...fixture.members[0], memberId: 'other-member', role: 'host' }],
+    transferOffer: { offerId: 'offer-a', targetMemberId: fixture.self.memberId, targetControllerGeneration: 1, expiresAtMs: fixture.serverTimeMs + 30_000 } };
+  show();
+  expect(await screen.findByRole('timer')).toHaveTextContent('This offer expires in 0:30.');
+  expect(screen.getByText(/The host offered you the host role/)).toBeVisible();
+  expect(mocks.run).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Accept host role' }));
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith({ action: 'acceptTransfer', roomId: 'room-a', memberId: 'member-a', offerId: 'offer-a' });
 });
 
 test('one primary action resumes the caller and starts a paused room', () => {

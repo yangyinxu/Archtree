@@ -153,6 +153,25 @@ test('an observer reaction is an explicit community intent and cannot emit playb
   expect(JSON.stringify(roomSession.getSnapshot().room)).toBe(before);
 });
 
+test('each accepted snapshot records its monotonic receipt time so countdowns survive remounts', async () => {
+  const room = pausedRoom();
+  const beforeSubscribe = performance.now();
+  const socket = await connected(room);
+  const first = roomSession.getSnapshot().roomReceivedAtMs;
+  expect(first).toBeGreaterThanOrEqual(beforeSubscribe);
+  expect(first).toBeLessThanOrEqual(performance.now());
+  const now = vi.spyOn(performance, 'now').mockReturnValue(first + 60_000);
+  socket.receive({ type: 'snapshot', room: { ...room, revision: 3 } });
+  expect(roomSession.getSnapshot()).toMatchObject({ room: { revision: 3 }, roomReceivedAtMs: first + 60_000 });
+  // A delayed older revision is rejected, so it cannot re-date the snapshot that is still current.
+  now.mockReturnValue(first + 90_000);
+  socket.receive({ type: 'snapshot', room: { ...room, revision: 2 } });
+  expect(roomSession.getSnapshot()).toMatchObject({ room: { revision: 3 }, roomReceivedAtMs: first + 60_000 });
+  now.mockRestore();
+  roomSession.stop();
+  expect(roomSession.getSnapshot()).toMatchObject({ room: null, roomReceivedAtMs: 0 });
+});
+
 test.each(['play', 'pause', 'seek', 'select', 'next', 'previous'] as const)('%s settlement applies the authoritative projection without waking invitation or community queries again', async action => {
   const room = pausedRoom(); await connected(room);
   const refresh = vi.fn(); roomSession.ensure('viewer-1', refresh);

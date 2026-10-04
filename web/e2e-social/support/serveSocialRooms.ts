@@ -4,7 +4,9 @@ import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
+import type { RoomDocument } from '../../../src/repositories/social/roomDocuments';
 import { runDisposableRuntime } from '../../../test/support/disposableRuntime';
 import { readRoomSoakOptions } from './roomSoakPolicy';
 import { startFixtureShutdown } from './fixtureShutdown';
@@ -12,6 +14,8 @@ import { startFixtureShutdown } from './fixtureShutdown';
 const port = Number(process.env.FINITUDE_SOCIAL_E2E_PORT ?? 4175);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error('Invalid isolated social fixture port.');
 const soak = process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'soak' ? readRoomSoakOptions() : undefined;
+// Only the room-lifecycle scenario may age a recorded host absence; every other scenario keeps real time alone.
+const lifecycleScenario = process.env.FINITUDE_SOCIAL_E2E_SCENARIO === 'room-lifecycle';
 const soakNames = ['listener_one', 'listener_two', 'listener_three', 'listener_four', 'listener_five', 'listener_six', 'listener_seven', 'listener_eight'];
 
 // This process never connects to a developer database or external object store.
@@ -135,7 +139,42 @@ await runDisposableRuntime(async resources => {
   const upgrades = new Set<Socket>();
   const { getMediaDeliveryMetrics } = await import('../../../src/services/mediaDeliveryService');
   const { defaultMediaAdmissionController } = await import('../../../src/middleware/mediaDeliveryMiddleware');
+  /**
+   * Records that the single open room's host absence began `elapsedMs` ago, so the 30-second and
+   * five-minute boundaries are reachable within a browser test. It changes no limit, timer or snapshot:
+   * the application's own sweep still decides suspension or closure and publishes the result.
+   */
+  const ageHostAbsence = async (req: IncomingMessage, res: ServerResponse) => {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of req as AsyncIterable<Buffer>) {
+      bytes += chunk.length;
+      if (bytes > 256) { res.writeHead(413).end(); return; }
+      chunks.push(chunk);
+    }
+    let elapsedMs: unknown;
+    try { elapsedMs = JSON.parse(Buffer.concat(chunks).toString('utf8')).elapsedMs; } catch { elapsedMs = undefined; }
+    if (typeof elapsedMs !== 'number' || !Number.isSafeInteger(elapsedMs) || elapsedMs < 0 || elapsedMs > 600_000) {
+      res.writeHead(400).end(); return;
+    }
+    const rooms = getDb()!.collection<RoomDocument>('socialRooms');
+    const absent = await rooms.find({ state: 'open', hostAbsentSince: { $ne: null } }).project<Pick<RoomDocument, '_id' | 'hostMembershipId'>>(
+      { _id: 1, hostMembershipId: 1 }).limit(2).toArray();
+    if (absent.length !== 1) { res.writeHead(409).end(); return; }
+    const [{ _id, hostMembershipId }] = absent;
+    const since = new Date(Date.now() - elapsedMs);
+    // Absence starts at the host's last confirmed heartbeat, so both move together; a reconnected host is never aged.
+    const result = await rooms.updateOne({ _id, state: 'open', hostMembershipId, hostAbsentSince: { $ne: null },
+      members: { $elemMatch: { membershipId: hostMembershipId, connectionPresent: false } } },
+    { $set: { hostAbsentSince: since, 'members.$[host].lastSeenAt': since } }, { arrayFilters: [{ 'host.membershipId': hostMembershipId }] });
+    res.writeHead(result.modifiedCount === 1 ? 204 : 409, { 'Cache-Control': 'no-store' }).end();
+  };
   const server = createServer((req, res) => {
+    // This disposable-fixture endpoint, like the soak endpoint below, never exists in the application.
+    if (lifecycleScenario && req.method === 'POST' && req.url === '/__fixture/room-host-absence') {
+      ageHostAbsence(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
+      return;
+    }
     // This aggregate-only endpoint exists exclusively in the disposable soak fixture, never the application.
     if (soak && req.method === 'GET' && req.url === '/__fixture/room-soak-resources') {
       // Fixture request evidence must not masquerade as application memory growth during a long run.
