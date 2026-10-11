@@ -9,7 +9,7 @@ Status: Recovered on 2026-08-05 at 23:38 EDT. Production commit `9b62537`
 deployed successfully through CodePipeline and Elastic Beanstalk, restoring a
 trusted HTTPS listener and the managed HTTP-to-HTTPS redirect.
 
-Current state:
+Historical recovery state (2026-08-05):
 
 - Route 53 resolves the production domain to the single-instance Elastic
   Beanstalk environment, which reported `Ok` after deploying the recovery
@@ -32,6 +32,31 @@ Current state:
 
 Remaining rollout and capability gates:
 
+Read-only verification on 2026-10-11 found both public authentication capability
+endpoints reporting `emailRegistration: true`, and the Web registration and
+verification routes returning the listener shell. A later signed-in console and
+CloudShell inspection confirmed the production sender, region and link origin,
+and successful SES domain verification and DKIM. SES sending is enabled in
+`us-east-1`, but production access is disabled (sandbox). The complete environment
+properties omit `AUTH_CODE_PEPPER`, so the supported `JWT_SECRET` fallback is in
+use. The runtime identity is confirmed as `ArchtreeAdmin`; its email policy has
+been narrowed to `ses:SendEmail` on the verified domain identity with the exact
+From-address condition. Readback and policy simulation confirm the approved send
+is allowed while another sender, raw email and another identity are denied. One
+authorized production registration request returned generic `202 Accepted`;
+a later authorized Gmail browser search found no application email for that test.
+The exact test recipient's SES verification was requested, and the AWS verification
+message was received at 15:02 UTC; final identity confirmation awaits operator
+approval. Application email receipt and link use remain unverified. The remaining
+email gates are SES production access, a dedicated pepper, and received-email/link
+verification. See the
+[reviewable configuration](deployment/social-rollout-runbook.md#production-authentication-email-configuration).
+
+An account that predates email verification receives
+`403 email_verification_required` when it next signs in and needs a delivered
+verification link. Existing sessions continue working, but successful capability
+checks alone cannot establish that a returning listener can sign in again.
+
 - [ ] Enroll the project in a paid Apple Developer team. The active iOS target
       intentionally omits Sign in with Apple and Associated Domains
       entitlements until this is available.
@@ -52,20 +77,34 @@ Remaining rollout and capability gates:
 - [x] Verify password login over HTTPS from a signed physical-device build.
 - [ ] Verify refresh rotation, logout, and logout-all over HTTPS from a signed
       physical-device build. `/auth/me` has been verified.
-- [ ] Verify the SES sender/domain, grant the runtime only `ses:SendEmail`, and
-      configure `AUTH_EMAIL_FROM` plus an `AUTH_CODE_PEPPER`.
-- [ ] Set `AUTH_LINK_ORIGIN` to the exact production Web origin
-      (`https://kashewt.com`) **before** deploying Web email-link
-      registration. Every account must now have a verified email, and most
-      existing accounts (including operator admin accounts) predate
-      verification: their next password sign-in returns `403
-      email_verification_required` and depends on a delivered verification
-      link. Without SES, `AUTH_EMAIL_FROM` and `AUTH_LINK_ORIGIN`, those
-      accounts cannot sign in again until email works (existing sessions keep
-      working). Deploy Archtree before the native releases.
+- [x] Verify the `kashewt.com` SES domain and DKIM in `us-east-1`, and configure
+      the approved domain sender in `AUTH_EMAIL_FROM` with that `AWS_REGION`.
+- [x] Set `AUTH_LINK_ORIGIN` to the exact production Web origin
+      (`https://kashewt.com`).
+- [ ] Obtain SES production access in `us-east-1`; the account is still in the
+      sandbox. The console request is prepared as Transactional, with
+      `https://kashewt.com`, English and no optional contacts. Its terms
+      acknowledgement is unchecked and it has not been submitted; submission
+      awaits operator approval. A request or a successful send to a verified test
+      recipient does not establish approval to send to ordinary listeners.
+- [x] Confirm the runtime AWS identity and sender-context `ses:SendEmail`
+      permission. The corrected policy simulation returns `allowed`.
+- [x] Narrow the existing policy to `ses:SendEmail` on the verified domain
+      identity, retaining its exact From-address condition. Readback confirms
+      the scope; simulations allow the approved send and return `implicitDeny`
+      for another sender, `ses:SendRawEmail` and another domain identity.
+- [ ] Configure a securely generated, dedicated `AUTH_CODE_PEPPER`, without
+      logging or committing its value. Coordinate this change because earlier
+      reset codes and email links keyed by the fallback secret will need to be
+      requested again.
 - [ ] After that deploy, send yourself a registration link, an
       already-registered notice and a verification link, and confirm each link
-      opens the Finitude Web page on the production origin.
+      opens the Finitude Web page on the production origin. The registration
+      endpoint's observed generic 202 does not close this gate. Gmail is now
+      accessible through the authorized browser session; the received AWS SES
+      recipient-verification email does not establish application email delivery.
+      Complete the exact recipient's pending identity confirmation before
+      repeating the sandbox application test.
 - [ ] Configure the iOS Associated Domains entitlement after the production
       authentication domain exists.
 - [ ] Enable Sign in with Apple for `com.example.finitude`, refresh its
@@ -107,11 +146,18 @@ Completion evidence:
 
 ## Web-only Audio Social Launch
 
-Status: Repository support added; nothing has been deployed or enabled in
-production. The first social release is Finitude Web only, with Audio-only
+Status: Public verification on 2026-10-11 found the deployed Web entry and its
+four directly referenced JS/CSS assets byte-identical to the retained
+`b7c44fdad3aa84d05ba12637beeefd75c7737108` main build. Public listener capabilities
+reported both social and rooms disabled, and `/health` reported rooms inactive.
+The console subsequently confirmed `Archtree-2024-env` (`e-qeb3ekat4i`) healthy
+and identified its running application version in the
+[dated evidence record](deployment/social-rollout-runbook.md#deployment-verification--2026-10-11).
+The complete backend's on-instance `RELEASE.json` has not been independently read.
+The first social release is Finitude Web only, with Audio-only
 rooms, behind `FINITUDE_SOCIAL_ENABLED` and `FINITUDE_ROOMS_ENABLED` (both
-default `false`). It reaches production in the same `develop` to `main` merge
-as email verification. Native social and rooms, and shared Video, are deferred
+default `false`). Its release scope includes email verification. Native social
+and rooms, and shared Video, are deferred
 (see the [social plan](plans/social-and-shared-playback-plan.md)). The
 procedures are in the [social rollout runbook](deployment/social-rollout-runbook.md)
 and the [Finitude Web runbook](deployment/finitude-web-rollout-runbook.md); this
@@ -136,9 +182,9 @@ minutely `ops_summary` log line and `.ebextensions/social-capacity.config`
 - [ ] Merge `develop` into `main` through a pull request and require the
       release workflow on both the pull request and the merged-main push:
       unit, integration, the blocking social browser gate, the three-engine
-      browser/axe gate and artifact staging. The blocking social gate excludes
-      only the quarantined `firefox-audio-formats` and `webkit-audio-formats`
-      projects, which run in a non-blocking step (see
+      browser/axe gate and artifact staging. The repair candidate's blocking
+      social gate includes `firefox-audio-formats` and `webkit-audio-formats`;
+      new consecutive pull-request and main passes remain required (see
       [Enable for testing](#enable-for-testing)). Artifact staging refuses a
       bundle without the FFmpeg prebuild hook, `room-audio-decoder.config` or
       `social-capacity.config`.
@@ -194,14 +240,34 @@ Audio (see the README's room audio decoder and catalog backfill sections).
 
 ### Monitoring and alarms
 
-- [ ] Stream the instance logs to CloudWatch Logs with about seven days of
-      retention and confirm an `ops_summary` line arrives every minute.
-- [ ] Create the social runbook's eight metric filters and alarms with an SNS
-      topic that reaches the operator. Set the open-socket alarm at 80% of the
-      effective socket limit (8 with the shipped 10). Check that other custom
-      metrics and alarms in the account leave room within the free tier's ten
-      of each.
-- [ ] Confirm the `OpsSummary` alarm is `OK`. It treats missing data as
+Status: In progress. The 2026-10-11 initial console and CloudShell inspection
+found instance and health-event log streaming disabled, no production log groups,
+no regional metric alarms and no SNS subscriptions. The log-streaming update has
+completed with `StreamLogs=true`, `RetentionInDays=7` and
+`DeleteOnTerminate=false`; the environment is `Ready/Green/Ok` with the application
+version unchanged. Seven log groups exist with seven-day retention, and real
+`ops_summary` events arrive in stdout. The events include an Elastic Beanstalk
+syslog prefix, so raw JSON filters matched zero events. A transformer tested
+against a real event now parses the JSON into `ops`; all eight metric filters
+apply to the transformed logs, and all eight alarms have been created. The
+`archtree-operations` SNS topic exists, but it has no subscription. Live metric
+readback found six real 60-second datapoints for each of the eight metrics in the
+latest 15-minute window; all eight alarms are `OK`, with actions enabled and the
+topic configured. Operator subscription and notification receipt remain pending.
+The [social runbook](deployment/social-rollout-runbook.md#cloudwatch-metric-filters-and-alarms)
+contains the applied parser and filter configuration.
+
+- [x] Stream the instance logs to CloudWatch Logs with seven-day retention and
+      confirm real `ops_summary` events reach the stdout group.
+- [x] Apply the verified stdout transformer and create the eight metric filters
+      and eight alarms using transformed JSON paths. The open-socket threshold
+      is eight, matching 80% of the shipped ten-socket limit.
+- [x] Verify new datapoints for the eight metrics after transformation/filter
+      activation, including the recurring summary cadence and alarm evaluation.
+      Each metric has six real minute-level datapoints; all eight alarms are `OK`.
+- [ ] Add and confirm an operator SNS subscription and verify receipt of a test
+      notification. The topic and alarm actions alone do not prove delivery.
+- [x] Confirm the `OpsSummary` alarm is `OK`. It treats missing data as
       breaching, so it also reports a stopped or hung process.
 - [ ] Enable the alerts the free-tier Atlas project offers and note where its
       operation counters, connections and Network Out are watched.
@@ -211,13 +277,13 @@ Audio (see the README's room audio decoder and catalog backfill sections).
 Enabling a flag exposes it to every signed-in Web account; there is no
 per-account cohort.
 
-- [ ] **Prerequisite before `FINITUDE_ROOMS_ENABLED=true`:** stabilize the
-      quarantined cross-engine audio drift projects (`firefox-audio-formats`
-      and `webkit-audio-formats`) and return them to the blocking social gate.
-      They fail intermittently in CI: no playing media element, a seek whose
-      `playbackGeneration` did not advance, and members whose clocks never
-      synchronized within the deadline. See the symptoms and exit steps in
-      the [social runbook](deployment/social-rollout-runbook.md#quarantined-cross-engine-audio-drift-blocks-enabling-rooms).
+- [ ] **Prerequisite before `FINITUDE_ROOMS_ENABLED=true`:** record new
+      consecutive pull-request and merged-main CI passes with both
+      `firefox-audio-formats` and `webkit-audio-formats` blocking. The 2026-10-11
+      candidate fixes stale seek-gesture versions and decoder readiness after
+      controller-owned correction, and restores both projects to the gate;
+      Linux decoder acceptance remains unverified. See the symptoms and exit
+      steps in the [social runbook](deployment/social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms).
       Until this is done, enable at most `FINITUDE_SOCIAL_ENABLED` and leave
       rooms `false`.
 

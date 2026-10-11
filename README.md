@@ -425,13 +425,13 @@ playback, with both participants using the selected engine. These extra projects
 are collected only on Linux CI; browser-specific results remain separate from
 Chromium proof. Chromium retains the separate strict native-background scenario.
 The Firefox and WebKit compressed-media projects (`firefox-audio-formats`,
-`webkit-audio-formats`) are currently quarantined because their cross-engine
-drift checks fail intermittently. `npm run test:e2e:social` runs every other
-project; CI runs the pair in a separate non-blocking step with retained evidence.
-On Linux, run them with
-`CI=1 xvfb-run -a npm run test:e2e:social:quarantined --workspace @archtree/finitude-web`.
-Rooms must not be enabled in production until they return to the blocking gate
-(see the [social rollout runbook](docs/deployment/social-rollout-runbook.md#quarantined-cross-engine-audio-drift-blocks-enabling-rooms)).
+`webkit-audio-formats`) are included in the blocking Linux social gate with
+every other project. To reproduce just this pair on Linux with the CI audio sink:
+`CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=firefox-audio-formats --project=webkit-audio-formats`.
+The 2026-10-11 repair candidate restores this strict gate; new consecutive
+pull-request and merged-main CI passes are still required. Keep production rooms
+disabled until that acceptance and the rollout checks pass (see the
+[social rollout runbook](docs/deployment/social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms)).
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
 It corrects startup drift after credible media-clock advancement. A corrective
@@ -445,9 +445,13 @@ Valid finite, non-negative delays within that window are retained, while
 predictive lead is capped at two seconds. Later ordinary heartbeat
 corrections can reuse the measured delay until the playback effect changes.
 All pending work is cancelled by local pause, authority loss, or source changes.
-A fully buffered Audio decoder that stays paused with only current-frame data after a
-completed seek gets at most one paused source reload per playback occurrence;
-readiness still requires future data, and local pause or leaving cancels recovery.
+A fully buffered Audio decoder that stays paused with only current-frame data
+after a completed seek gets at most one paused source reload per playback occurrence.
+After a controller-owned drift correction, `HAVE_CURRENT_DATA` (`readyState: 2`)
+can persist even while the media clock advances; that case also gets this single
+recovery. Ordinary playback is not reloaded solely for reporting current-frame
+data. Readiness still requires future data, and local pause or leaving cancels
+recovery.
 For that recovered occurrence, drift corrections use explicit measured seeks
 instead of playback-rate changes, which can trigger additional decoder seeks.
 This may produce a brief jump for smaller drift, but avoids repeated rate
@@ -1010,11 +1014,10 @@ application, or substitute a bundle produced by a smaller test suite.
 The `.github/workflows/finitude-web-release.yml` workflow runs unit/component
 tests, Mongo lifecycle integration, production builds, E2E type checking, real
 social scenarios, and all three browser/axe projects before staging its bundle.
-The `social-e2e` job's blocking step runs every social project except the
-quarantined `firefox-audio-formats` and `webkit-audio-formats` pair. A later
-`continue-on-error` step runs that pair, reports the outcome as non-blocking in
-the step summary and a warning annotation, and uploads its evidence. Only the
-blocking step's outcome is bound into the provenance as the `social` gate.
+The `social-e2e` job runs every Linux social project in one blocking step,
+including `firefox-audio-formats` and `webkit-audio-formats`. No social failure is
+ignored. The complete step's outcome is bound into provenance as the `social`
+gate, and failure evidence is retained under `web/test-results/social-real`.
 These gates are parallel jobs, each with its own timeout of 30 minutes or less:
 `build` (production build and E2E type check), `unit-integration`,
 `social-e2e` and `browser-e2e`. The two browser jobs test the one production
