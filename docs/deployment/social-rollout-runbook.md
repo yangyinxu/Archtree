@@ -367,7 +367,12 @@ The 2026-10-11 repair candidate captures the current room version when each new
 seek gesture begins, so a previous drag's version cannot reject a later command.
 It also recovers a fully buffered decoder left at current-frame readiness after
 a controller-owned drift correction, even if its media clock is still advancing.
-Recovery remains limited to one paused source reload per playback occurrence;
+Each playback occurrence permits at most one decoder-stall reload and one
+missing-duration reload. The separate budgets cover a WebKit decoder reinstall
+that reports a zero duration; neither failure can replenish its own budget.
+The merged-main run `38160763777` exposed that sequence after MP3-to-AAC
+advancement, while its other 16 social tests passed. Recovery stays bounded
+at two paused source reloads per playback occurrence;
 future-data readiness, drift tolerances, local-pause cancellation and zero test
 retries are preserved.
 
