@@ -115,6 +115,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let postSeek: { occurrence: string; effect: number; source: number; target: number; dispatchedAt: number;
     referencePosition: number; referenceAt: number; baselinePosition: number; baselineAt: number;
     expiresAt: number; completed: boolean; accepted: boolean } | undefined;
+  // Decoder recovery keeps exact seek ownership after the separate 3s latency measurement expires.
+  let correctionRecovery: { occurrence: string; effect: number; source: number; target: number;
+    completed: boolean; accepted: boolean } | undefined;
   let postSeekExpiry: ReturnType<typeof setTimeout> | undefined;
   let seekLatency: number | undefined;
   let convergenceBudget: { occurrence: string; attempts: number; startedAt: number } | undefined;
@@ -161,6 +164,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     playRequested = false;
     firstProgress = undefined;
     clearPostSeek();
+    correctionRecovery = undefined;
     seekLatency = undefined;
     latestCorrection = undefined;
     observed.clear();
@@ -204,7 +208,13 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     const startup = firstProgress;
     firstProgress = undefined; // A correction owns startup convergence; its timeupdate cannot also run the original latch.
     postSeek = pending;
+    const recovery = { occurrence: key, effect, source, target: destination, completed: false, accepted: false };
+    correctionRecovery = recovery;
     const accepted = port.seek(destination);
+    if (correctionRecovery === recovery) {
+      recovery.accepted = accepted;
+      if (!accepted) correctionRecovery = undefined;
+    }
     if (postSeek === pending) {
       pending.accepted = accepted;
       if (!accepted) { clearPostSeek(); firstProgress = startup; }
@@ -221,6 +231,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   const occurrence = () => state && JSON.stringify([state.roomId, state.epoch, state.currentEntryId, state.mediaRevision, state.playbackEpoch]);
   const currentPostSeek = () => postSeek && postSeek.effect === effect && postSeek.source === source
     && source === port.sourceGeneration() && postSeek.occurrence === occurrence();
+  const currentCorrectionRecovery = () => correctionRecovery && correctionRecovery.effect === effect
+    && correctionRecovery.source === source && source === port.sourceGeneration()
+    && correctionRecovery.occurrence === occurrence();
 
   const expirePostSeek = () => {
     if (!postSeek || now() < postSeek.expiresAt) return false;
@@ -256,11 +269,13 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     convergenceBudget.attempts += 1; // Consume before the write, including rejected or synchronously cancelled seeks.
     correctionSeek(target, position, true);
   };
-  /** Excludes loading, failed, deliberately paused, and end-of-media states from automatic repair. */
+  /** A fully buffered decoder can lose readiness after our correction even while its clock still advances. */
   const stalledDecoder = (target: PlayerAudio) => {
+    const correctedPlaying = currentCorrectionRecovery() && correctionRecovery?.accepted && correctionRecovery.completed
+      && state?.status === 'playing' && state.playbackAllowed !== false && playRequested;
     if (!state || localPaused || !matchesSource(target) || state.status === 'ended'
       || state.queue[state.entryIds.indexOf(state.currentEntryId)].mediaType !== 'audio'
-      || !target.paused || target.seeking || seekPending || needsSeek || seekFailed || target.error
+      || (!target.paused && !correctedPlaying) || target.seeking || seekPending || needsSeek || seekFailed || target.error
       || target.readyState !== 2 || !finiteNonnegative(target.currentTime) || !finiteNonnegative(target.duration)
       || target.currentTime >= target.duration - 0.35) return false;
     try {
@@ -324,7 +339,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     }, 1000);
   };
 
-  /** A fully downloaded paused decoder can stall after seeking; retry its source once. */
+  /** Reacquire real readiness once for a fully downloaded decoder stalled by preparation or our correction. */
   const recoverDecoder = (target: PlayerAudio) => scheduleSourceReload(target, stalledDecoder);
 
   /** Readiness requires real metadata, a completed seek, and enough decoded data to start. */
@@ -354,6 +369,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     }
     if (seekPending || target.seeking) return;
     if ((target.readyState ?? 0) < 3) { recoverDecoder(target); return; }
+    if (correctionRecovery?.completed) correctionRecovery = undefined;
     clearTimeout(decoderRecovery);
     decoderRecovery = undefined;
     report('ready');
@@ -625,6 +641,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     observe(event: string, target: PlayerAudio): boolean {
       if (sourceRetry?.installed && sourceRetry.source !== port.sourceGeneration()) clearSourceRetry();
       if (!matchesSource(target)) return event === 'volumechange';
+      if (correctionRecovery?.completed && !target.seeking && (target.readyState ?? 0) >= 3) correctionRecovery = undefined;
       if (sourceRetry && (target.error || (['loadedmetadata', 'canplay', 'durationchange'].includes(event)
         && hasMetadata(target)))) clearSourceRetry();
       if (event === 'play' || event === 'playing') {
@@ -640,19 +657,21 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
         return event === 'playing' && !target.paused;
       }
       if (event === 'ended') {
-        if (target.ended) { clearPostSeek(); seekLatency = undefined; }
+        if (target.ended) { clearPostSeek(); correctionRecovery = undefined; seekLatency = undefined; }
         if (target.ended && (target.readyState ?? 0) >= 2 && !seekPending) report('ended');
         return target.ended; // The store records completion without advancing its room queue.
       }
       if (event === 'pause') {
         if (!target.paused) return false;
         firstProgress = undefined;
-        clearPostSeek(); seekLatency = undefined;
+        clearPostSeek(); correctionRecovery = undefined; seekLatency = undefined;
         latestCorrection = undefined;
       }
       if (event === 'error' && !target.error) return false;
       if (event === 'error') failMedia();
-      if (event === 'seeking' && target.seeking && postSeek?.completed) { clearPostSeek(); seekLatency = undefined; }
+      if (event === 'seeking' && target.seeking && (postSeek?.completed || correctionRecovery?.completed)) {
+        clearPostSeek(); correctionRecovery = undefined; seekLatency = undefined;
+      }
       if (event === 'seeking' && target.seeking && firstProgress) firstProgress.seeking = true;
       if (event === 'seeked' && !target.seeking) {
         if (seekPending && Math.abs(target.currentTime - seekTarget) > 0.15) {
@@ -666,6 +685,10 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
           firstProgress.position = target.currentTime;
           firstProgress.monotonicMs = now();
           firstProgress.seeking = false;
+        }
+        if (correctionRecovery && !correctionRecovery.completed && currentCorrectionRecovery()) {
+          if (Math.abs(target.currentTime - correctionRecovery.target) > 0.15) correctionRecovery = undefined;
+          else correctionRecovery.completed = true;
         }
         if (postSeek && !postSeek.completed && currentPostSeek()) {
           if (Math.abs(target.currentTime - postSeek.target) > 0.15) { clearPostSeek(); seekLatency = undefined; }

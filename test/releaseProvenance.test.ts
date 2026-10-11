@@ -37,7 +37,7 @@ test('every browser release configuration rejects focused tests in CI', async ()
   // Inspect the actual exported configs in a separate CI process without launching a browser or server.
   const { execFileSync } = await import('node:child_process');
   const output = execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
-    "const a = (await import('./web/playwright.config.ts')).default; const social = await import('./web/playwright.social.config.ts'); const b = social.default; const q = social.socialConfig('quarantined', 'linux', 'true'); if (a.forbidOnly !== true || b.forbidOnly !== true || q.forbidOnly !== true) process.exit(1);"],
+    "const a = (await import('./web/playwright.config.ts')).default; const social = await import('./web/playwright.social.config.ts'); const b = social.default; const linux = social.socialConfig('linux', 'true'); if (a.forbidOnly !== true || b.forbidOnly !== true || linux.forbidOnly !== true) process.exit(1);"],
   { cwd: path.resolve(import.meta.dirname, '..'), env: { ...process.env, CI: 'true' }, encoding: 'utf8' });
   assert.equal(output, '');
 });
