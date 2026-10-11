@@ -399,6 +399,44 @@ test('a second duration-less load in the same occurrence waits for an explicit r
   room.detach();
 });
 
+test('a decoder reinstall with zero duration gets one independent metadata recovery, without a reload loop', async () => {
+  const { room, state, target, install, controller, decoded, onObservation, onIntent } = setup();
+  await room.apply(state); decoded(2);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(install).toHaveBeenCalledTimes(2);
+  missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(999);
+  expect(install).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(install).toHaveBeenCalledTimes(3);
+  missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(3);
+  expect(readyEpochs(onObservation)).toEqual([]);
+  healthy(target); decoded(2);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(3);
+  decoded(4);
+  expect(readyEpochs(onObservation)).toEqual([1]);
+  expect(target.play).not.toHaveBeenCalled();
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('metadata recovery does not consume the separate bounded decoder recovery', async () => {
+  const { room, state, target, install, controller, decoded, onObservation } = setup();
+  await room.apply(state); missingDuration(target, controller);
+  await vi.advanceTimersByTimeAsync(1000);
+  healthy(target); decoded(2);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(install).toHaveBeenCalledTimes(3);
+  decoded(2);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(3);
+  expect(readyEpochs(onObservation)).toEqual([]);
+  room.detach();
+});
+
 test('a duration that arrives late through durationchange reports readiness without a reload', async () => {
   const { room, state, target, install, controller, onObservation } = setup();
   await room.apply(state); missingDuration(target, controller);

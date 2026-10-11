@@ -97,6 +97,7 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let decoderRecovery: ReturnType<typeof setTimeout> | undefined;
   let decoderRecoveryCondition: ((target: PlayerAudio) => boolean) | undefined;
   let recoveredOccurrence: string | null = null;
+  let recoveredDurationOccurrence: string | null = null;
   let reloadingOccurrence: string | null = null;
   // install() only writes the source; native metadata can arrive much later than its promise.
   let sourceRetry: { occurrence: string; source: number; installed: boolean; timer?: ReturnType<typeof setTimeout> } | undefined;
@@ -295,12 +296,13 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     && !(Number.isFinite(target.duration) && target.duration > 0) && target.duration !== Infinity);
 
   /**
-   * Retries the current source once per occurrence while a native decoder condition persists; never manufactures
-   * readiness. The conditions are mutually exclusive, so a pending retry whose condition no longer holds yields.
+   * Each native failure class gets one reload per occurrence, so a decoder reinstall with broken metadata can
+   * still recover its duration. The total is bounded at two; a pending condition that no longer holds yields.
    */
   const scheduleSourceReload = (target: PlayerAudio, condition: (target: PlayerAudio) => boolean) => {
     const key = occurrence();
-    if (!key || key === recoveredOccurrence || !condition(target)) return;
+    const durationRecovery = condition === missingDuration;
+    if (!key || key === (durationRecovery ? recoveredDurationOccurrence : recoveredOccurrence) || !condition(target)) return;
     if (decoderRecovery !== undefined) {
       if (decoderRecoveryCondition === condition) return;
       clearTimeout(decoderRecovery);
@@ -311,7 +313,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
       decoderRecovery = undefined;
       // A duration or readiness that arrived meanwhile cancels the reload.
       if (!state || detached || effect !== expectedEffect || source !== expectedSource || occurrence() !== key || !condition(target)) return;
-      recoveredOccurrence = key;
+      if (durationRecovery) recoveredDurationOccurrence = key;
+      else recoveredOccurrence = key;
       reloadingOccurrence = key;
       cancelEffects();
       needsSeek = true;
