@@ -1480,7 +1480,16 @@ The wire protocol and operational bounds are documented in
   de-identified classification fields required by the versioned protocol.
 - The proxy is not an OpenAI-compatible pass-through. The server fixes the
   model, prompts, schemas, reasoning level, output ceiling, provider endpoint,
-  and `store: false`; client attempts to add fields or select capabilities fail.
+  and Responses `store: false`; client attempts to add fields or select capabilities fail.
+- Initial screening uses GPT-6 Luna through Decisions. Detailed analysis uses
+  GPT-6 Luna through Responses at medium reasoning. Screening discards only
+  non-product feedback with both decision and category confidence/probability
+  at least 0.95. Refused or uncertain answers proceed to detailed analysis;
+  the Windows client also retains comments when screening fails.
+- Detail prompt version `naruto-opinion-v4` retains the complete supporting
+  judgment, cause, comparison, or impact in verbatim evidence. A topic with both
+  favorable and unfavorable judgments uses mixed sentiment and evidence for
+  both sides.
 - The OpenAI key is server-only runtime configuration. It is never returned to
   the desktop app, browser, logs, database, report, or packaged EXE.
 - Every authenticated Archtree account can use the proxy. The Windows app uses
