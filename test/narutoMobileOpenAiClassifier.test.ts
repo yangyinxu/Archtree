@@ -1,3 +1,4 @@
+import {decisionsResponse} from './fixtures/decisionsResponse';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -20,14 +21,6 @@ const requestFor = (
       likes: 1, replies: 0, publishedAt: null
     }
   }))
-});
-
-const triageResult = (opinionId = 'opinion-1') => ({
-  opinionId,
-  decision: 'analyze',
-  gameRelevant: true,
-  informationType: 'product_feedback',
-  reasonCode: 'possible_feedback'
 });
 
 const detailResult = (opinionId = 'opinion-1') => ({
@@ -81,7 +74,7 @@ const successResponse = (
 const serviceWith = (fetchImpl: typeof fetch, timeoutMs = 5_000) => (
   new NarutoMobileOpenAiClassifier({
     apiKey: 'server-key',
-    model: 'gpt-5.6-luna',
+    model: 'gpt-6-luna',
     reasoningEffort: 'medium',
     timeoutMs,
     fetchImpl
@@ -96,33 +89,87 @@ const rejectsAs = (statusCode: number) => (error: unknown) => {
   return true;
 };
 
-test('owns the OpenAI model, schema, prompt and privacy settings on the server', async () => {
+test('selects the configured server organization and project for both upstream APIs', async () => {
+  const seen: string[] = [];
+  const classifier = new NarutoMobileOpenAiClassifier({
+    apiKey: 'server-key',
+    organizationId: 'org-server-test',
+    projectId: 'proj-server-test',
+    model: 'gpt-6-luna',
+    reasoningEffort: 'medium',
+    timeoutMs: 5_000,
+    fetchImpl: (async (url, init) => {
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get('OpenAI-Organization'), 'org-server-test');
+      assert.equal(headers.get('OpenAI-Project'), 'proj-server-test');
+      seen.push(String(url));
+      return String(url).endsWith('/decisions')
+        ? new Response(JSON.stringify(decisionsResponse(['opinion-1'])), {status: 200})
+        : successResponse([detailResult()]);
+    }) as typeof fetch
+  });
+  await classifier.classify(requestFor('triage'));
+  await classifier.classify(requestFor('detail'));
+  assert.deepEqual(seen, ['https://api.openai.com/v1/decisions', 'https://api.openai.com/v1/responses']);
+});
+
+test('owns the Decisions model and named questions on the server', async () => {
   let authorization = '';
   let body: Record<string, any> = {};
   const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
     authorization = String((init?.headers as Record<string, string>).authorization);
     body = JSON.parse(String(init?.body));
-    return successResponse([triageResult()]);
+    return new Response(JSON.stringify(decisionsResponse(['opinion-1'])), {status: 200});
   }) as typeof fetch;
   const result = await serviceWith(fetchImpl).classify(requestFor('triage'));
 
   assert.equal(authorization, 'Bearer server-key');
-  assert.equal(body.model, 'gpt-5.6-luna');
-  assert.equal(body.store, false);
+  assert.equal(body.model, 'gpt-6-luna');
+  assert.equal(body.store, undefined);
   assert.equal(body.tools, undefined);
-  assert.equal(body.max_output_tokens, 3_000);
-  assert.equal(body.text.format.type, 'json_schema');
-  assert.equal(body.text.format.strict, true);
-  assert.equal(body.text.format.schema.properties.results.maxItems, 50);
-  assert.equal(body.text.format.schema.properties.results.items.properties.opinionId.maxLength, undefined);
+  assert.equal(body.max_output_tokens, undefined);
+  assert.equal(body.questions.length, 3);
+  assert.equal(body.questions[0].type, 'choice');
+  assert.equal(result.promptVersion, 'naruto-decisions-v1');
   assert.equal(result.results.length, 1);
   assert.deepEqual(result.usage, {
-    inputTokens: 50,
-    cachedInputTokens: 5,
-    outputTokens: 10,
-    reasoningTokens: 4,
-    totalTokens: 60
+    inputTokens: 1000,
+    cachedInputTokens: 200,
+    cacheWriteInputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    totalTokens: 1000
   });
+});
+
+test('normalizes refused and low-confidence Decisions answers to uncertain without losing usage', async () => {
+  for (const mode of ['refused', 'low-confidence'] as const) {
+    const fetchImpl = (async (url: string | URL | Request) => {
+      assert.equal(String(url), 'https://api.openai.com/v1/decisions');
+      const response = decisionsResponse(['opinion-1'], {decision: 'skip', informationType: 'community_chatter', confidence: mode === 'refused' ? 0.99 : 0.5});
+      if (mode === 'refused') Object.assign(response.answers[0], {type: 'refusal'});
+      return new Response(JSON.stringify(response), {status: 200});
+    }) as typeof fetch;
+    const result = await serviceWith(fetchImpl).classify(requestFor('triage'));
+    assert.equal((result.results[0] as {decision: string}).decision, 'uncertain');
+    assert.equal(result.usage.inputTokens, 1000);
+    assert.equal(result.usage.outputTokens, 0);
+  }
+});
+
+test('rejects incompatible Decisions envelopes and billing counters without exposing provider payloads', async () => {
+  for (const mode of ['missing', 'duplicate', 'model', 'usage', 'output'] as const) {
+    const fetchImpl = (async () => {
+      const response = decisionsResponse(['opinion-1']);
+      if (mode === 'missing') response.answers.pop();
+      if (mode === 'duplicate') response.answers[1].name = response.answers[0].name;
+      if (mode === 'model') response.model = 'private-invalid-model';
+      if (mode === 'usage') response.usage.total_tokens = 999;
+      if (mode === 'output') response.usage.output_tokens = 1;
+      return new Response(JSON.stringify(response), {status: 200});
+    }) as typeof fetch;
+    await assert.rejects(serviceWith(fetchImpl).classify(requestFor('triage')), rejectsAs(502));
+  }
 });
 
 test('decodes and bounds the complete detail result from the raw Responses output array', async () => {
@@ -139,7 +186,7 @@ test('decodes and bounds the complete detail result from the raw Responses outpu
   assert.equal(body.text.format.schema.properties.results.maxItems, 10);
   assert.deepEqual(result.results, [detailResult()]);
   assert.equal(result.kind, 'detail');
-  assert.equal(result.promptVersion, 'naruto-opinion-v3');
+  assert.equal(result.promptVersion, 'naruto-opinion-v4');
 });
 
 test('accepts optional and future usage detail fields while validating consumed counters', async () => {
@@ -151,23 +198,24 @@ test('accepts optional and future usage detail fields while validating consumed 
     total_tokens: 60,
     future_top_level_counter: 4
   };
-  const fetchImpl = (async () => successResponse([triageResult()], {usage})) as typeof fetch;
-  const result = await serviceWith(fetchImpl).classify(requestFor('triage'));
+  const fetchImpl = (async () => successResponse([detailResult()], {usage})) as typeof fetch;
+  const result = await serviceWith(fetchImpl).classify(requestFor('detail'));
 
   assert.deepEqual(result.usage, {
     inputTokens: 50,
     cachedInputTokens: 0,
+    cacheWriteInputTokens: 12,
     outputTokens: 10,
     reasoningTokens: 0,
     totalTokens: 60
   });
 });
 
-test('rejects malformed triage and detail fields without exposing their contents', async (context) => {
+test('rejects malformed detail fields without exposing their contents', async (context) => {
   const cases: Array<{name: string; request: NarutoMobileClassifyRequest; results: unknown[]}> = [
     {
       name: 'missing required field',
-      request: requestFor('triage'),
+      request: requestFor('detail'),
       results: [{opinionId: 'opinion-1'}]
     },
     {
@@ -182,8 +230,8 @@ test('rejects malformed triage and detail fields without exposing their contents
     },
     {
       name: 'unexpected generated field',
-      request: requestFor('triage'),
-      results: [{...triageResult(), secret: 'private output'}]
+      request: requestFor('detail'),
+      results: [{...detailResult(), secret: 'private output'}]
     }
   ];
 
@@ -197,12 +245,12 @@ test('rejects malformed triage and detail fields without exposing their contents
 
 test('rejects missing, unknown, and duplicate result IDs', async (context) => {
   const cases: Array<{name: string; request: NarutoMobileClassifyRequest; results: unknown[]}> = [
-    {name: 'missing result', request: requestFor('triage'), results: []},
-    {name: 'unknown ID', request: requestFor('triage'), results: [triageResult('private-id')]},
+    {name: 'missing result', request: requestFor('detail'), results: []},
+    {name: 'unknown ID', request: requestFor('detail'), results: [detailResult('private-id')]},
     {
       name: 'duplicate ID',
-      request: requestFor('triage', ['opinion-1', 'opinion-2']),
-      results: [triageResult('opinion-1'), triageResult('opinion-1')]
+      request: requestFor('detail', ['opinion-1', 'opinion-2']),
+      results: [detailResult('opinion-1'), detailResult('opinion-1')]
     }
   ];
 
@@ -226,14 +274,14 @@ test('rejects invalid or inconsistent token usage', async (context) => {
       name: 'reasoning exceeds output',
       usage: {...validUsage, output_tokens_details: {reasoning_tokens: 11}}
     },
-    {name: 'output exceeds request ceiling', usage: {...validUsage, output_tokens: 3_001, total_tokens: 3_051}},
+    {name: 'output exceeds request ceiling', usage: {...validUsage, output_tokens: 4_001, total_tokens: 4_051}},
     {name: 'total is inconsistent', usage: {...validUsage, total_tokens: 61}}
   ];
 
   for (const candidate of cases) {
     await context.test(candidate.name, async () => {
-      const fetchImpl = (async () => successResponse([triageResult()], {usage: candidate.usage})) as typeof fetch;
-      await assert.rejects(serviceWith(fetchImpl).classify(requestFor('triage')), rejectsAs(502));
+      const fetchImpl = (async () => successResponse([detailResult()], {usage: candidate.usage})) as typeof fetch;
+      await assert.rejects(serviceWith(fetchImpl).classify(requestFor('detail')), rejectsAs(502));
     });
   }
 });
@@ -251,7 +299,7 @@ test('maps upstream rate and server failures without parsing or exposing their b
         headers: candidate.retryAfter ? {'retry-after': candidate.retryAfter} : undefined
       })) as typeof fetch;
       await assert.rejects(
-        serviceWith(fetchImpl).classify(requestFor('triage')),
+        serviceWith(fetchImpl).classify(requestFor('detail')),
         (error: unknown) => {
           rejectsAs(candidate.expected)(error);
           assert.equal(
@@ -271,19 +319,19 @@ test('rejects oversized and malformed successful provider envelopes as 502', asy
       status: 200,
       headers: {'content-length': String(2 * 1024 * 1024 + 1)}
     })) as typeof fetch;
-    await assert.rejects(serviceWith(fetchImpl).classify(requestFor('triage')), rejectsAs(502));
+    await assert.rejects(serviceWith(fetchImpl).classify(requestFor('detail')), rejectsAs(502));
   });
 
   await context.test('streamed response exceeds the byte cap without Content-Length', async () => {
     const fetchImpl = (async () => new Response(JSON.stringify({
       privatePadding: 'x'.repeat(2 * 1024 * 1024)
     }), {status: 200})) as typeof fetch;
-    await assert.rejects(serviceWith(fetchImpl).classify(requestFor('triage')), rejectsAs(502));
+    await assert.rejects(serviceWith(fetchImpl).classify(requestFor('detail')), rejectsAs(502));
   });
 
   await context.test('response JSON is malformed', async () => {
     const fetchImpl = (async () => new Response('private malformed json', {status: 200})) as typeof fetch;
-    await assert.rejects(serviceWith(fetchImpl).classify(requestFor('triage')), rejectsAs(502));
+    await assert.rejects(serviceWith(fetchImpl).classify(requestFor('detail')), rejectsAs(502));
   });
 });
 
@@ -298,7 +346,7 @@ test('maps provider timeout and an already-aborted parent request to generic 503
 
   await context.test('provider timeout', async () => {
     await assert.rejects(
-      serviceWith(waitingFetch, 5).classify(requestFor('triage')),
+      serviceWith(waitingFetch, 5).classify(requestFor('detail')),
       rejectsAs(503)
     );
   });
@@ -315,7 +363,7 @@ test('maps provider timeout and an already-aborted parent request to generic 503
       return new Response(body, {status: 200});
     }) as typeof fetch;
     await assert.rejects(
-      serviceWith(stalledBodyFetch, 5).classify(requestFor('triage')),
+      serviceWith(stalledBodyFetch, 5).classify(requestFor('detail')),
       rejectsAs(503)
     );
   });
@@ -324,7 +372,7 @@ test('maps provider timeout and an already-aborted parent request to generic 503
     const parent = new AbortController();
     parent.abort();
     await assert.rejects(
-      serviceWith(waitingFetch).classify(requestFor('triage'), parent.signal),
+      serviceWith(waitingFetch).classify(requestFor('detail'), parent.signal),
       rejectsAs(503)
     );
   });

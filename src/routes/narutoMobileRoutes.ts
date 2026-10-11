@@ -16,11 +16,15 @@ import {
 } from '../narutoMobile/protocol';
 
 const router: Router = express.Router();
-const model = 'gpt-5.6-luna';
+const model = 'gpt-6-luna';
 
 const runtimeSettings = () => {
   const apiKey = process.env.OPENAI_API_KEY?.trim() ?? '';
-  return apiKey ? {apiKey} : undefined;
+  return apiKey ? {
+    apiKey,
+    organizationId: process.env.OPENAI_ORG_ID?.trim() || undefined,
+    projectId: process.env.OPENAI_PROJECT_ID?.trim() || undefined
+  } : undefined;
 };
 
 const privateApiHeaders: RequestHandler = (req, res, next) => {
@@ -93,6 +97,8 @@ router.post(
     const request = parseNarutoMobileClassifyRequest(req.body);
     const classifier = new NarutoMobileOpenAiClassifier({
       apiKey: settings.apiKey,
+      organizationId: settings.organizationId,
+      projectId: settings.projectId,
       model,
       reasoningEffort: 'medium',
       timeoutMs: 105_000

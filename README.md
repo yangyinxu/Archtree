@@ -713,12 +713,24 @@ The fixed API lives at `/naruto-mobile/api/v1`:
 - `GET /access` verifies an authenticated Archtree Bearer session.
 - `POST /classify` accepts only the bounded `triage` or `detail` protocol.
 
-Set only `OPENAI_API_KEY` in the Elastic Beanstalk runtime environment. Every
+Set `OPENAI_API_KEY` in the Elastic Beanstalk runtime environment. Set optional
+`OPENAI_ORG_ID` and `OPENAI_PROJECT_ID` when requests must explicitly select the
+organization and project that have model access. These settings apply to both
+Decisions and Responses and are owned by the server; the Windows client cannot
+override them. Every
 authenticated Archtree account may use this endpoint. The Windows app signs in
 through the existing `/auth/login`, `/auth/refresh`, and `/auth/logout`
 endpoints and stores the rotating session with operating-system encryption.
 The proxy never returns the OpenAI key or accepts arbitrary OpenAI request
 options.
+
+Screening uses `POST /v1/decisions`, `gpt-6-luna`, and prompt version
+`naruto-decisions-v1`. Named questions address each comment independently.
+Detailed analysis uses `POST /v1/responses`, `gpt-6-luna`, medium reasoning,
+and `store: false`. Refusals, malformed item answers, and low-confidence skips
+are normalized to `uncertain`. Screening request failures are retained by the
+Windows client for detailed analysis. Deploy the matching proxy before releasing
+the updated Windows client. The protocol envelope remains version 1.
 
 ### Verify refresh-token rotation locally
 
