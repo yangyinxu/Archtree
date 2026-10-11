@@ -709,7 +709,8 @@ queued request cancels it before source validation or storage access.
 
 The fixed API lives at `/naruto-mobile/api/v1`:
 
-- `GET /status` returns availability and protocol compatibility.
+- `GET /status` returns availability, protocol compatibility, and the shared
+  `maxConcurrentRequests` capacity.
 - `GET /access` verifies an authenticated Archtree Bearer session.
 - `POST /classify` accepts only the bounded `triage` or `detail` protocol.
 
@@ -731,6 +732,13 @@ and `store: false`. Refusals, malformed item answers, and low-confidence skips
 are normalized to `uncertain`. Screening request failures are retained by the
 Windows client for detailed analysis. Deploy the matching proxy before releasing
 the updated Windows client. The protocol envelope remains version 1.
+
+The classifier admits up to 12 simultaneous requests per client IP and 12
+across the server process. The existing per-IP 60-request/minute budget still
+applies. Both Decisions and detail calls share this capacity; the desktop
+client reduces its active request budget and honors `Retry-After` when either
+the proxy or upstream provider returns 429. Chrome collection tabs have an
+independent limit and do not change model request concurrency.
 
 ### Verify refresh-token rotation locally
 
