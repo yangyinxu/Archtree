@@ -86,6 +86,82 @@ test('dragging the seek bar retains the playback precondition seen at gesture st
   expect(mocks.control).not.toHaveBeenCalled();
 });
 
+test.each(['pointer', 'keyboard'] as const)('a new %s seek captures fresh preconditions after a trailing native change', gesture => {
+  const rerender = show();
+  const slider = screen.getByRole('slider', { name: 'Room playback position' });
+  fireEvent.pointerDown(slider);
+  fireEvent.change(slider, { target: { value: '10' } }); fireEvent.pointerUp(slider);
+  // Firefox may dispatch its final change after pointerup; the next track is a separate gesture.
+  fireEvent.change(slider, { target: { value: '10.1' } });
+  mocks.room = { ...mocks.room!, revision: 4, timeline: { ...mocks.room!.timeline!, playbackGeneration: 4 } };
+  rerender();
+  if (gesture === 'pointer') fireEvent.pointerDown(slider);
+  else fireEvent.keyDown(slider, { key: 'ArrowRight' });
+  fireEvent.change(slider, { target: { value: '15' } });
+  if (gesture === 'pointer') fireEvent.pointerUp(slider);
+  else fireEvent.keyUp(slider, { key: 'ArrowRight' });
+  expect(mocks.run).toHaveBeenCalledTimes(2);
+  expect(mocks.run).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'seek', positionMs: 15_000, expectedPlaybackGeneration: 4 }));
+});
+
+test('a trailing pointer change restores neither the preview nor a seek on an unchanged keyboard gesture', () => {
+  const rerender = show();
+  const slider = screen.getByRole('slider', { name: 'Room playback position' });
+  fireEvent.pointerDown(slider);
+  fireEvent.change(slider, { target: { value: '10' } }); fireEvent.pointerUp(slider);
+  fireEvent.change(slider, { target: { value: '10.1' } });
+  expect(slider).toHaveValue('0');
+  expect(slider).toHaveAttribute('aria-valuetext', '0:00 of 0:30');
+  mocks.room = { ...mocks.room!, revision: 4, timeline: { ...mocks.room!.timeline!, playbackGeneration: 4 } };
+  rerender();
+  fireEvent.keyDown(slider, { key: 'Home' }); fireEvent.keyUp(slider, { key: 'Home' });
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+});
+
+test.each(['pointer', 'keyboard'] as const)('starting a new %s gesture clears an uncommitted preview without sending it', gesture => {
+  show();
+  const slider = screen.getByRole('slider', { name: 'Room playback position' });
+  fireEvent.change(slider, { target: { value: '10' } });
+  if (gesture === 'pointer') fireEvent.pointerDown(slider);
+  else fireEvent.keyDown(slider, { key: 'Home' });
+  expect(slider).toHaveValue('0');
+  if (gesture === 'pointer') fireEvent.pointerUp(slider);
+  else fireEvent.keyUp(slider, { key: 'Home' });
+  expect(mocks.run).not.toHaveBeenCalled();
+});
+
+test('change-only accessibility input remains available after leaving a completed pointer gesture', () => {
+  show();
+  const slider = screen.getByRole('slider', { name: 'Room playback position' });
+  fireEvent.pointerDown(slider); fireEvent.pointerCancel(slider);
+  fireEvent.change(slider, { target: { value: '10' } });
+  expect(slider).toHaveValue('0');
+  fireEvent.blur(slider); fireEvent.focus(slider);
+  fireEvent.change(slider, { target: { value: '15' } }); fireEvent.keyUp(slider, { key: 'ArrowRight' });
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ action: 'seek', positionMs: 15_000, expectedPlaybackGeneration: 1 }));
+});
+
+test('held seek keys keep their original precondition when playback changes between repeats', () => {
+  const rerender = show();
+  const slider = screen.getByRole('slider', { name: 'Room playback position' });
+  fireEvent.keyDown(slider, { key: 'ArrowRight' });
+  mocks.room = { ...mocks.room!, revision: 2, timeline: { ...mocks.room!.timeline!, playbackGeneration: 2 } };
+  rerender();
+  fireEvent.keyDown(slider, { key: 'ArrowRight', repeat: true });
+  fireEvent.change(slider, { target: { value: '10' } }); fireEvent.keyUp(slider, { key: 'ArrowRight' });
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ action: 'seek', positionMs: 10_000, expectedPlaybackGeneration: 1 }));
+});
+
+test('a change-only seek captures the current state without inheriting an unrelated key', () => {
+  const rerender = show();
+  const slider = screen.getByRole('slider', { name: 'Room playback position' });
+  fireEvent.keyDown(slider, { key: 'Tab' });
+  mocks.room = { ...mocks.room!, revision: 2, timeline: { ...mocks.room!.timeline!, playbackGeneration: 2 } };
+  rerender();
+  fireEvent.change(slider, { target: { value: '10' } }); fireEvent.keyUp(slider, { key: 'ArrowRight' });
+  expect(mocks.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ action: 'seek', positionMs: 10_000, expectedPlaybackGeneration: 2 }));
+});
+
 test('the seek bar speaks the shown time, following a drag before it is committed', () => {
   show();
   const slider = screen.getByRole('slider', { name: 'Room playback position' });

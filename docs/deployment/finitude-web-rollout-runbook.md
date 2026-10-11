@@ -62,18 +62,20 @@ npm run stage:eb-artifact
 
 CI installs Xvfb for the social suite's headed background-tab checks and a
 PulseAudio null sink for Firefox. All social Chromium launches disable hardware
-audio output. The nine isolated social scenarios cover room native lifecycle,
+audio output. The isolated social scenarios cover room native lifecycle,
 room recovery, invitations, song requests, music shares, room interactions,
 listening status, catalog room entry, and compressed-audio formats. Once the
 browser environment is ready, the ordinary browser/visual gate runs even if a
 social assertion failed so both suites retain diagnostic evidence. Both gates must pass before artifact staging. Their traces and failure
 screenshots remain under the retained `web/test-results` evidence. The blocking
-social gate excludes the quarantined `firefox-audio-formats` and
-`webkit-audio-formats` projects. CI runs them afterwards in a non-blocking step
-(locally on Linux:
-`CI=1 xvfb-run -a npm run test:e2e:social:quarantined --workspace @archtree/finitude-web`),
-and rooms stay off in production until they return to the gate (see the
-[social rollout runbook](social-rollout-runbook.md#quarantined-cross-engine-audio-drift-blocks-enabling-rooms)).
+social gate includes `firefox-audio-formats` and `webkit-audio-formats` with every
+other Linux social project. Run just the compressed-audio pair locally on Linux
+with the CI audio sink using
+`CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=firefox-audio-formats --project=webkit-audio-formats`.
+The 2026-10-11 repair candidate still needs new consecutive pull-request and
+merged-main CI acceptance. Rooms stay off in production until those full gates
+and the enablement checks pass (see the
+[social rollout runbook](social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms)).
 
 Local staging requires a clean committed worktree so `RELEASE.json` cannot
 misidentify uncommitted bytes. CI supplies the immutable source identity

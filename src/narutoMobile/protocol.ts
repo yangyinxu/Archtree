@@ -1,6 +1,6 @@
 export const NARUTO_MOBILE_PROTOCOL_VERSION = 1 as const;
-export const NARUTO_MOBILE_PROMPT_VERSION = 'naruto-opinion-v3';
-export const NARUTO_MOBILE_TRIAGE_VERSION = 'naruto-triage-v3';
+export const NARUTO_MOBILE_PROMPT_VERSION = 'naruto-opinion-v4';
+export const NARUTO_MOBILE_TRIAGE_VERSION = 'naruto-decisions-v1';
 
 export type NarutoMobileClassificationKind = 'triage' | 'detail';
 
@@ -32,6 +32,7 @@ export interface NarutoMobileClassifyRequest {
 export interface NarutoMobileUsage {
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteInputTokens?: number;
   outputTokens: number;
   reasoningTokens: number;
   totalTokens: number;

@@ -37,17 +37,25 @@ const RoomCreationPicker = ({ viewerId, disabled }: { viewerId: string; disabled
   </>;
 };
 
+const seekKeys = ['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'];
+
 const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: string; status: string }) => {
   const { t } = useLocalization();
   const state = useRoomSession();
   const player = usePlayer();
   const [seek, setSeek] = useState<number | null>(null);
   const seekExpected = useRef<ReturnType<typeof roomControlPreconditions> | null>(null);
-  const captureSeek = () => { if (!seekExpected.current && room.timeline) seekExpected.current = roomControlPreconditions(room); };
+  const pointerEnded = useRef(false);
+  // Native change can follow pointerup; only a new gesture or focus cycle may create another draft.
+  const clearSeek = () => { seekExpected.current = null; setSeek(null); };
+  const startSeek = () => {
+    pointerEnded.current = false; setSeek(null);
+    seekExpected.current = room.timeline ? roomControlPreconditions(room) : null;
+  };
+  const captureSeek = () => { if (!seekExpected.current) startSeek(); };
   const commitSeek = () => {
-    const expected = seekExpected.current; seekExpected.current = null;
+    const expected = seekExpected.current; clearSeek();
     if (seek !== null && expected) void roomSession.run({ ...expected, action: 'seek', positionMs: Math.round(seek * 1000) });
-    setSeek(null);
   };
   const host = room.self.memberId === room.hostMemberId;
   const member = { roomId: room.roomId, memberId: room.self.memberId };
@@ -74,10 +82,12 @@ const ActiveRoom = ({ room, viewerId, status }: { room: RoomSnapshot; viewerId: 
     {/* Spoken as a time ("1:05 of 3:20") rather than the raw seconds the range carries. */}
     <input className={styles.seek} aria-label={t('room.seek')} type="range" min={0} max={Math.max(duration, 1)} step={.1}
       value={seekValue} aria-valuetext={t('room.seek_value', { elapsed: seconds(seekValue), duration: seconds(duration) })} disabled={!allowed}
-      onPointerDown={captureSeek} onKeyDown={captureSeek}
-      onChange={event => { captureSeek(); setSeek(Number(event.target.value)); }}
-      onPointerUp={commitSeek} onPointerCancel={() => { seekExpected.current = null; setSeek(null); }}
-      onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) commitSeek(); }} />
+      onPointerDown={startSeek} onKeyDown={event => { if (!event.repeat && seekKeys.includes(event.key)) startSeek(); }}
+      onChange={event => { if (!pointerEnded.current) { captureSeek(); setSeek(Number(event.target.value)); } }}
+      onPointerUp={() => { pointerEnded.current = true; commitSeek(); }}
+      onPointerCancel={() => { pointerEnded.current = true; clearSeek(); }}
+      onBlur={() => { pointerEnded.current = false; clearSeek(); }}
+      onKeyUp={event => { if (seekKeys.includes(event.key)) commitSeek(); }} />
     <div className={styles.actions}>
       <button className={styles.secondary} aria-label={t('player.action.previous')} disabled={!allowed} onClick={() => roomSession.control('previous')}><Icon name="previous" /></button>
       <button className={styles.button} disabled={resumeOnly ? !localAllowed : !allowed} onClick={() => resumeOnly ? roomSession.resync() : roomSession.control(playing ? 'pause' : 'play')}><Icon name={playing && !resumeOnly ? 'pause' : 'play'} />{t(primaryLabel)}</button>

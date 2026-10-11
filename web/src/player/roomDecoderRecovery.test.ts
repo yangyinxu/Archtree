@@ -5,7 +5,7 @@ import type { PlayerAudio, PlayerQueueItem } from './types';
 const setup = () => {
   let source = 0;
   const target = { src: '/pinned.mp3', currentSrc: '/pinned.mp3', currentTime: 0, duration: 120,
-    readyState: 0, seeking: false, paused: true as boolean, ended: false, error: null as { code: number } | null,
+    readyState: 0, seeking: false as boolean, paused: true as boolean, ended: false, error: null as { code: number } | null,
     buffered: { length: 1, start: () => 0, end: () => 120 }, volume: 1, muted: false, playbackRate: 1,
     play: vi.fn(async () => { target.paused = false; }), pause: vi.fn(() => { target.paused = true; }),
     load: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() } satisfies PlayerAudio;
@@ -204,6 +204,149 @@ test('a failed reload does not mark a decoder as requiring the recovered-rate fa
   expect(target.paused).toBe(false);
   expect(room.correct(66.3)).toBe('rate');
   expect(target.playbackRate).toBe(1.05);
+  room.detach();
+});
+
+/** WebKit can keep advancing at HAVE_CURRENT_DATA after an adapter-owned seek without recovering canplay. */
+const correctingPlayback = async (seekDelayMs = 0) => {
+  const value = setup();
+  await value.room.apply(value.state); value.decoded(4);
+  const playing = { ...value.state, revision: 2, status: 'playing' as const, playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() };
+  await value.room.apply(playing);
+  expect(value.room.correct(66.5)).toBe('seek');
+  value.target.readyState = 2;
+  if (seekDelayMs > 0) {
+    value.target.seeking = true;
+    value.controller.observe('seeking', value.target);
+    await vi.advanceTimersByTimeAsync(seekDelayMs);
+    value.target.seeking = false;
+  }
+  value.controller.observe('seeked', value.target);
+  return { ...value, playing };
+};
+
+test('an advancing fully buffered decoder stuck after our correction reloads once and rejoins the live anchor', async () => {
+  const { room, target, install, decoded, controller, onIntent, onObservation } = await correctingPlayback();
+  expect(target.paused).toBe(false);
+  await vi.advanceTimersByTimeAsync(999);
+  target.currentTime += .9;
+  expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(install).toHaveBeenCalledTimes(2);
+  expect(target.paused).toBe(true);
+  expect(target.play).toHaveBeenCalledTimes(1);
+  decoded(2);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(target.play).toHaveBeenCalledTimes(1);
+  decoded(4);
+  expect(target.currentTime).toBe(67); // The reload seeks the live anchor; its later first progress refines startup delay.
+  expect(target.play).toHaveBeenCalledTimes(2);
+  expect(onObservation).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready', playbackEpoch: 1 }));
+  target.currentTime += .1;
+  await vi.advanceTimersByTimeAsync(100);
+  controller.observe('timeupdate', target);
+  expect(target.currentTime).toBe(67.6);
+  target.readyState = 2; controller.observe('seeked', target);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(2);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each([2500, 3500])('a correction completing after %dms retains its one decoder recovery beyond the measurement deadline', async seekDelayMs => {
+  const { room, target, install, decoded, controller, onIntent } = await correctingPlayback(seekDelayMs);
+  await vi.advanceTimersByTimeAsync(999);
+  expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(install).toHaveBeenCalledTimes(2);
+  expect(target.paused).toBe(true);
+  decoded(4);
+  expect(target.play).toHaveBeenCalledTimes(2);
+  // Another readiness loss in this occurrence cannot replenish the automatic reload budget.
+  target.readyState = 2;
+  controller.observe('seeked', target);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(2);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['local-pause', 'detach', 'replacement', 'source', 'ready', 'another-seek'] as const)
+('%s invalidates slow-correction recovery after its measurement has expired', async condition => {
+  const { room, target, install, controller, playing } = await correctingPlayback(2500);
+  await vi.advanceTimersByTimeAsync(600);
+  if (condition === 'local-pause') room.pauseLocally();
+  if (condition === 'detach') room.detach();
+  if (condition === 'replacement') await room.apply({ ...playing, revision: 3, playbackEpoch: 2, mediaRevision: 'mr_b',
+    queue: [{ ...playing.queue[0], streamUrl: '/replacement.mp3' }] });
+  if (condition === 'source') {
+    await install(playing.queue, 0);
+    target.currentTime = 66.5; target.readyState = 2;
+  }
+  if (condition === 'ready') {
+    target.readyState = 4; controller.observe('canplay', target);
+    target.readyState = 2; controller.observe('seeked', target);
+  }
+  if (condition === 'another-seek') {
+    target.seeking = true; controller.observe('seeking', target);
+    target.currentTime = 70; target.seeking = false; controller.observe('seeked', target);
+  }
+  const count = install.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(count);
+  room.detach();
+});
+
+test('withdrawn playback permission cannot be restored by slow-correction recovery', async () => {
+  const { room, target, playing, decoded, onIntent } = await correctingPlayback(2500);
+  await vi.advanceTimersByTimeAsync(600);
+  await room.apply({ ...playing, revision: 3, playbackAllowed: false });
+  await vi.advanceTimersByTimeAsync(1000);
+  decoded(4);
+  expect(target.paused).toBe(true);
+  expect(target.play).toHaveBeenCalledTimes(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['local-pause', 'replacement', 'detach', 'ready', 'partial-buffer', 'error', 'ended'] as const)
+('%s cannot reload an advancing corrected decoder', async condition => {
+  const { room, target, install, controller, playing } = await correctingPlayback();
+  if (condition === 'local-pause') room.pauseLocally();
+  if (condition === 'replacement') await room.apply({ ...playing, revision: 3, playbackEpoch: 2, mediaRevision: 'mr_b',
+    queue: [{ ...playing.queue[0], streamUrl: '/replacement.mp3' }] });
+  if (condition === 'detach') room.detach();
+  if (condition === 'ready') { target.readyState = 4; controller.observe('canplay', target); }
+  if (condition === 'partial-buffer') target.buffered.end = () => 80;
+  if (condition === 'error') target.error = { code: 3 };
+  if (condition === 'ended') target.currentTime = target.duration;
+  const count = install.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(count);
+  room.detach();
+});
+
+test('withdrawing readiness keeps a corrected decoder silent while it reacquires real readiness', async () => {
+  const { room, target, decoded, playing, onIntent } = await correctingPlayback();
+  await room.apply({ ...playing, revision: 3, playbackAllowed: false });
+  await vi.advanceTimersByTimeAsync(1000);
+  decoded(4);
+  expect(target.paused).toBe(true);
+  expect(target.play).toHaveBeenCalledTimes(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a playing decoder without an adapter-owned correction cannot trigger source recovery', async () => {
+  const { room, state, target, controller, install, decoded } = setup();
+  await room.apply(state); decoded(4);
+  await room.apply({ ...state, revision: 2, status: 'playing', playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() });
+  target.readyState = 2;
+  controller.observe('seeked', target);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(1);
   room.detach();
 });
 

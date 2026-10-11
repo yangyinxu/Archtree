@@ -1,3 +1,4 @@
+import {decisionsResponse} from './fixtures/decisionsResponse';
 import assert from 'node:assert/strict';
 import { Server } from 'node:http';
 import test from 'node:test';
@@ -38,7 +39,9 @@ test('protects the fixed proxy with any authenticated Archtree account', async (
   const savedEnvironment = {
     NODE_ENV: process.env.NODE_ENV,
     JWT_SECRET: process.env.JWT_SECRET,
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_ORG_ID: process.env.OPENAI_ORG_ID,
+    OPENAI_PROJECT_ID: process.env.OPENAI_PROJECT_ID
   };
   const originalFindSession = AuthSession.findActiveById;
   const originalFindUser = User.findById;
@@ -48,6 +51,8 @@ test('protects the fixed proxy with any authenticated Archtree account', async (
   process.env.NODE_ENV = 'test';
   process.env.JWT_SECRET = jwtSecret;
   process.env.OPENAI_API_KEY = 'test-key-that-must-not-be-returned';
+  process.env.OPENAI_ORG_ID = ' org-route-test ';
+  process.env.OPENAI_PROJECT_ID = ' proj-route-test ';
   AuthSession.findActiveById = async (candidateSessionId: string) => {
     const authenticatedUserId = candidateSessionId === primarySessionId ? primaryUserId
       : candidateSessionId === otherSessionId ? otherUserId : undefined;
@@ -61,23 +66,17 @@ test('protects the fixed proxy with any authenticated Archtree account', async (
   }) as Awaited<ReturnType<typeof User.findById>>;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
-    if (url.href === 'https://api.openai.com/v1/responses') {
+    if (url.href === 'https://api.openai.com/v1/decisions') {
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get('OpenAI-Organization'), 'org-route-test');
+      assert.equal(headers.get('OpenAI-Project'), 'proj-route-test');
       upstreamAuthorization = new Headers(init?.headers).get('authorization') ?? '';
       upstreamBody = String(init?.body ?? '');
       const upstreamRequest = JSON.parse(upstreamBody) as {input: string};
       const upstreamBatch = (JSON.parse(upstreamRequest.input) as {
         batch: Array<{opinionId: string}>;
       }).batch;
-      return new Response(JSON.stringify({
-        output_text: JSON.stringify({results: upstreamBatch.map(({opinionId}) => ({
-          opinionId,
-          decision: 'analyze',
-          gameRelevant: true,
-          informationType: 'product_feedback',
-          reasonCode: 'specific_claim'
-        }))}),
-        usage: {input_tokens: 20, output_tokens: 10, total_tokens: 30}
-      }), {status: 200, headers: {'content-type': 'application/json'}});
+      return new Response(JSON.stringify(decisionsResponse(upstreamBatch.map(({opinionId}) => opinionId))), {status: 200});
     }
     return originalFetch(input, init);
   }) as typeof fetch;
@@ -153,8 +152,9 @@ test('protects the fixed proxy with any authenticated Archtree account', async (
     assert.equal(classified.status, 200);
     const classifiedText = await classified.text();
     assert.match(upstreamAuthorization, /^Bearer test-key/);
-    assert.doesNotMatch(classifiedText, /test-key/);
-    assert.equal(JSON.parse(upstreamBody).store, false);
+    assert.doesNotMatch(classifiedText, /test-key|org-route-test|proj-route-test/);
+    assert.equal(JSON.parse(upstreamBody).store, undefined);
+    assert.equal(JSON.parse(upstreamBody).model, 'gpt-6-luna');
     assert.equal(JSON.parse(classifiedText).results[0].opinionId, 'opinion-1');
 
     const maximumLegalBatch = Array.from({length: 50}, (_, index) => ({

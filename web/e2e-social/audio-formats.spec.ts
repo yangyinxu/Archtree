@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type BrowserContext, type Page, type Request } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import type { RoomMedia, RoomSnapshot } from '../src/api/rooms';
 import { nativeSocialBrowser } from './support/nativeSocialBrowser';
@@ -12,6 +12,44 @@ const formats = [
   { title: 'VBR MP3 Horizon', filename: 'room-tone-vbr.mp3', contentType: 'audio/mpeg' }
 ] as const;
 type Format = typeof formats[number];
+
+const diagnosticLimit = 100;
+const commandActions = new Set(['create', 'invite', 'acceptInvitation', 'play', 'pause', 'seek', 'next', 'previous', 'select', 'end']);
+const commandCodes = new Set(['invalid_request', 'account_unavailable', 'social_session_required', 'profile_unavailable',
+  'social_limit', 'social_unavailable', 'social_disabled', 'rooms_disabled', 'room_unavailable', 'room_forbidden',
+  'room_capacity', 'room_full', 'already_in_room', 'host_absent', 'host_exit_required', 'room_media_unavailable',
+  'room_invitation_capacity', 'invitation_unavailable', 'mutation_scope_invalid', 'mutation_scope_expired',
+  'mutation_outcome_unknown', 'idempotency_conflict', 'stale_epoch', 'stale_controller', 'stale_permission',
+  'stale_playback', 'stale_queue', 'position_out_of_range', 'entry_unavailable', 'room_snapshot_too_large']);
+type CommandDiagnostic = {
+  commandIndex: number; capturedAtMs: number; action: string; positionMs?: number;
+  preconditions: Partial<Record<'expectedEpoch' | 'controllerGeneration' | 'expectedPlaybackGeneration'
+    | 'expectedControlGeneration' | 'expectedQueueRevision', number>>;
+  response?: { capturedAtMs: number; status: number; body: 'pending' | 'read' | 'unavailable';
+    outcome?: 'applied' | 'noop' | 'rejected'; code?: string };
+};
+
+/** Keep assertion inputs intact while retaining only a bounded diagnostic tail. */
+const retainDiagnostic = <T>(records: T[], value: T) => {
+  records.push(value);
+  if (records.length > diagnosticLimit) records.shift();
+};
+
+/** A snapshot history keeps timing and generations, never member, media, room or mutation identities. */
+const timelineDiagnostic = (room: RoomSnapshot | null) => room ? {
+  capturedAtMs: Date.now(), epoch: room.epoch, revision: room.revision, status: room.status,
+  controlGeneration: room.controlGeneration, queueRevision: room.queueRevision, queueLength: room.queue.length,
+  currentQueueIndex: room.queue.findIndex(entry => entry.entryId === room.timeline?.entryId),
+  controllerGeneration: room.self.controllerGeneration, isController: room.self.isController, canControl: room.self.canControl,
+  ownReady: room.members.find(member => member.memberId === room.self.memberId)?.ready ?? false,
+  connectedMembers: room.members.filter(member => member.connected).length,
+  readyMembers: room.members.filter(member => member.ready).length,
+  timeline: room.timeline ? { generation: room.timeline.playbackGeneration, state: room.timeline.state,
+    positionMs: room.timeline.positionMs, anchorServerTimeMs: room.timeline.anchorServerTimeMs } : null,
+  preparation: room.preparation ? { generation: room.preparation.playbackGeneration,
+    targetPositionMs: room.preparation.targetPositionMs, deadlineServerTimeMs: room.preparation.deadlineServerTimeMs,
+    cohortSize: room.preparation.cohortMembershipIds.length } : null
+} : { capturedAtMs: Date.now(), status: 'absent' as const };
 
 /** Observe decoded browser state without substituting media events, clocks, sockets or response bytes. */
 const media = (page: Page) => page.locator('audio, video').evaluateAll(elements => elements.map(element => {
@@ -28,15 +66,43 @@ const media = (page: Page) => page.locator('audio, video').evaluateAll(elements 
 const observe = (page: Page) => {
   let room: RoomSnapshot | null = null;
   const commands: Array<{ action: string; positionMs?: number }> = [];
+  const commandDiagnostics: CommandDiagnostic[] = [];
+  const commandRequests = new WeakMap<Request, CommandDiagnostic>();
+  const pendingResponses = new Set<Promise<void>>();
+  const timelineHistory: ReturnType<typeof timelineDiagnostic>[] = [];
   const ready: Array<{ generation: number; revision: string }> = [];
   const streams: Array<{ path: string; revision: string | null; status: number; type: string | undefined; range: string | undefined }> = [];
   page.on('request', request => {
     if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/social/v1/room-commands') return;
-    const { action, positionMs } = request.postDataJSON();
+    const body = request.postDataJSON();
+    const { action, positionMs } = body;
     commands.push({ action, ...(typeof positionMs === 'number' ? { positionMs } : {}) });
+    const diagnostic: CommandDiagnostic = { commandIndex: commands.length - 1, capturedAtMs: Date.now(),
+      action: commandActions.has(action) ? action : 'unknown',
+      ...(Number.isSafeInteger(positionMs) && positionMs >= 0 ? { positionMs } : {}), preconditions: {} };
+    for (const key of ['expectedEpoch', 'controllerGeneration', 'expectedPlaybackGeneration', 'expectedControlGeneration', 'expectedQueueRevision'] as const) {
+      if (Number.isSafeInteger(body[key]) && body[key] > 0) diagnostic.preconditions[key] = body[key];
+    }
+    commandRequests.set(request, diagnostic);
+    retainDiagnostic(commandDiagnostics, diagnostic);
   });
   page.on('response', response => {
     const url = new URL(response.url());
+    const command = commandRequests.get(response.request());
+    if (command) {
+      const result: NonNullable<CommandDiagnostic['response']> = { capturedAtMs: Date.now(), status: response.status(), body: 'pending' };
+      command.response = result;
+      // Copy fixed outcome/code labels only; commandId, scope tokens and error messages never enter evidence.
+      const pending = response.json().then((body: unknown) => {
+        result.body = 'read';
+        if (!body || typeof body !== 'object') return;
+        const outcome = Reflect.get(body, 'outcome'), code = Reflect.get(body, 'code');
+        if (outcome === 'applied' || outcome === 'noop' || outcome === 'rejected') result.outcome = outcome;
+        if (typeof code === 'string') result.code = commandCodes.has(code) ? code : 'unknown';
+      }, () => { result.body = 'unavailable'; });
+      pendingResponses.add(pending);
+      void pending.finally(() => pendingResponses.delete(pending));
+    }
     if (!url.pathname.startsWith('/content/mediaTrack/stream/')) return;
     const headers = response.headers();
     streams.push({ path: url.pathname, revision: url.searchParams.get('revision'), status: response.status(),
@@ -45,7 +111,10 @@ const observe = (page: Page) => {
   page.on('websocket', socket => {
     socket.on('framereceived', frame => {
       const value = JSON.parse(String(frame.payload));
-      if (value.type === 'subscribed' || value.type === 'snapshot') room = value.room;
+      if (value.type === 'subscribed' || value.type === 'snapshot') {
+        room = value.room;
+        retainDiagnostic(timelineHistory, timelineDiagnostic(room));
+      }
     });
     socket.on('framesent', frame => {
       const value = JSON.parse(String(frame.payload));
@@ -53,7 +122,8 @@ const observe = (page: Page) => {
         revision: value.report.mediaRevision });
     });
   });
-  return { room: () => room, commands, ready, streams };
+  return { room: () => room, commands, commandDiagnostics, timelineHistory, ready, streams,
+    flushResponses: () => Promise.allSettled([...pendingResponses]) };
 };
 
 const login = async (page: Page, username: string, baseURL: string) => {
@@ -284,14 +354,17 @@ test('uploaded MP3 and AAC rooms prepare, seek and advance with pinned bytes and
     } finally {
       const evidencePath = test.info().outputPath('compressed-audio-evidence.json');
       pulseAudio ??= await capturePulseAudioDiagnostics();
+      await Promise.all([hostState.flushResponses(), guestState.flushResponses()]);
       await writeFile(evidencePath, JSON.stringify({
         browsers: { host: browserName, guest: 'chromium' },
         pulseAudio,
         drift: driftEvidence,
         synchronization,
-        host: { commands: hostState.commands, ready: hostState.ready, streams: hostState.streams,
+        host: { commands: hostState.commands, commandDiagnostics: hostState.commandDiagnostics, timelineHistory: hostState.timelineHistory,
+          ready: hostState.ready, streams: hostState.streams,
           media: await media(host).catch(() => []), mediaEvents: await readMediaEventDiagnostics(host).catch(() => []) },
-        guest: { commands: guestState.commands, ready: guestState.ready, streams: guestState.streams,
+        guest: { commands: guestState.commands, commandDiagnostics: guestState.commandDiagnostics, timelineHistory: guestState.timelineHistory,
+          ready: guestState.ready, streams: guestState.streams,
           media: await media(guest).catch(() => []), mediaEvents: await readMediaEventDiagnostics(guest).catch(() => []) }
       }));
       await test.info().attach('compressed-audio-evidence', { contentType: 'application/json', path: evidencePath });

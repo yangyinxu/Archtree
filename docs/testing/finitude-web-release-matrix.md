@@ -173,13 +173,15 @@ release gate retains a commit-named archive for 30 days after all automated
 gates pass. Its final `release-artifact` job runs only after the parallel
 `build`, `unit-integration`, `social-e2e` and `browser-e2e` jobs succeed. It
 stages the same production build those browser jobs tested. The `social-e2e`
-gate is its blocking step, which runs every social project except the
-quarantined `firefox-audio-formats` and `webkit-audio-formats` pair. Those two
-run afterwards in a `continue-on-error` step that reports a non-blocking
-outcome and keeps evidence under `social-quarantined/` in the
-`finitude-social-browser-evidence` artifact. They must return to the blocking
-gate before rooms are enabled in production (see the
-[social rollout runbook](../deployment/social-rollout-runbook.md#quarantined-cross-engine-audio-drift-blocks-enabling-rooms)).
+gate runs every Linux social project in one blocking step, including
+`firefox-audio-formats` and `webkit-audio-formats`, and keeps evidence under
+`social-real/` in the `finitude-social-browser-evidence` artifact. The 2026-10-11
+repair candidate restores this complete gate with zero retries and unchanged
+drift/readiness thresholds. Local regression results do not establish Linux
+decoder acceptance: new consecutive pull-request and merged-main CI passes are
+still required, and production rooms remain disabled until those passes and the
+rollout checks are recorded (see the
+[social rollout runbook](../deployment/social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms)).
 
 Follow
 [`../deployment/finitude-web-rollout-runbook.md`](../deployment/finitude-web-rollout-runbook.md)

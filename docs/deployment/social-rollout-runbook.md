@@ -86,6 +86,66 @@ operation counters and **Network Out** with the `ops_summary` gauges during a
 real enablement. After each restart, the log's `social_capacity_config` line shows
 the effective values and names any setting that could not be used.
 
+## Production authentication email configuration
+
+The 2026-10-11 console and CloudShell reads confirmed `AWS_REGION=us-east-1`,
+`AUTH_EMAIL_FROM=no-reply@kashewt.com` and
+`AUTH_LINK_ORIGIN=https://kashewt.com`. SES reports `SendingEnabled: true`,
+`ProductionAccessEnabled: false`, and successful domain verification and DKIM
+for `kashewt.com`. Account-level suppression covers `BOUNCE` and `COMPLAINT`;
+the account's production-access `Details` object is empty. `AUTH_CODE_PEPPER`
+is absent from the environment properties;
+the application currently supports its `JWT_SECRET` fallback. The remaining
+configuration and acceptance sequence follows the completed permission work:
+
+1. Complete: the production runtime identity is confirmed as `ArchtreeAdmin`.
+   Its inline `ArchtreeSesSendAuthEmail` policy was narrowed and read back as
+   `ses:SendEmail` on
+   `arn:aws:ses:us-east-1:<production-account-id>:identity/kashewt.com`, conditioned
+   on `ses:FromAddress=no-reply@kashewt.com`. The identity has no groups or other
+   inline policies; its attached `ArchtreeS3Policy` contains only S3 actions.
+   Simulation returns `allowed` for the approved sender and domain, and
+   `implicitDeny` for another sender, `ses:SendRawEmail` and another identity.
+   The raw-email action and wildcard identity scope have been removed.
+2. Generate and configure a dedicated `AUTH_CODE_PEPPER` through the approved
+   secret-management path; never put its value in this document or command logs.
+   Changing from the fallback key invalidates outstanding reset codes and emailed
+   links, so make the change in the deployment window and request new links for
+   verification afterward. Do not rotate `JWT_SECRET` for this purpose.
+3. While SES remains in its regional sandbox, use only an explicitly authorized,
+   verified test recipient (or the SES mailbox simulator). Verify each exact
+   recipient address before sending; do not assume a plus-address variant inherits
+   another address's verification. The approved base test recipient is verified,
+   but the exact registration-test alias had no SES identity. Its verification
+   was requested and the AWS verification email was received; final identity
+   confirmation awaits operator approval. The console production-access form is
+   prepared with `TRANSACTIONAL`, `https://kashewt.com` and English, with optional
+   contacts blank. Its terms acknowledgement remains unchecked and the form has
+   not been submitted. Submission requires operator approval at that step;
+   production access and AWS approval remain pending. The
+   [SES production-access procedure](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html)
+   defines the regional sandbox restriction; a successful sandbox test does not
+   make ordinary listener email delivery available.
+4. After configuration and permission verification, verify receipt of registration,
+   already-registered and verification messages through the application and open
+   their links on the production origin. Retain only a timestamp, message type,
+   delivery result and link-origin result; never retain recipient addresses,
+   one-time links, tokens or private account content in the repository. Require
+   `ProductionAccessEnabled: true` before declaring public email delivery ready.
+
+The authorized production `POST /auth/browser/registration/request` test on
+2026-10-11 returned generic `202 Accepted`. This proves request acceptance only;
+it does not prove SES acceptance, mailbox receipt or a usable verification link.
+A later authorized Chrome Gmail session was available, and a search scoped to
+the approved test recipient found zero application emails. The last-hour log
+query found zero registration failure events, but log streaming began after the
+request, so that result does not establish SES acceptance. The separately
+requested AWS SES recipient-verification email was visibly received at 15:02 UTC;
+this confirms receipt of that AWS message only. Final SES identity confirmation
+awaits operator approval. Repeat the application test after the exact recipient
+is verified, then inspect the application email and its link. The delivery gate
+remains open; no recipient address, verification URL or token is retained here.
+
 ## Signals
 
 - `GET /health` is unauthenticated. Its `rooms` object reports `enabled` (both
@@ -109,9 +169,11 @@ the effective values and names any setting that could not be used.
 
 ### Structured log lines
 
-Every line is one JSON object with a `category`. They contain fixed labels, counts
-and at most an opaque room ID. They never contain an account, session, address,
-handle, token or error text.
+The application emits each line as one JSON object with a `category`. They contain
+fixed labels, counts and at most an opaque room ID, never an account, session,
+address, handle, token or error text. Elastic Beanstalk adds a syslog prefix to the
+stored stdout message; CloudWatch must parse that prefix before JSON metric
+filters can read these fields (see the transformer below).
 
 | Category | When | Fields |
 | --- | --- | --- |
@@ -152,41 +214,115 @@ handle, token or error text.
 
 ### CloudWatch metric filters and alarms
 
+Application status: In progress. The 2026-10-11 logging update completed with the
+environment `Ready/Green/Ok` and its application version unchanged. Seven log
+groups have seven-day retention and stdout receives real `ops_summary` events.
+The stdout transformer, eight transformed-log metric filters, eight alarms and
+`archtree-operations` SNS topic are created. Each metric has six real 60-second
+datapoints in the latest 15-minute readback, and all eight alarms are `OK` with
+actions enabled and the topic configured. The topic has no subscription, so
+operator notification delivery remains unverified.
+
 Stream the application log to CloudWatch Logs first (console: **Configuration →
 Updates, monitoring, and logging → Instance log streaming**, or option
 `aws:elasticbeanstalk:cloudwatch:logs` `StreamLogs=true`, with a short retention
 such as seven days). The log group is
-`/aws/elasticbeanstalk/<environment>/var/log/web.stdout.log`. One summary a minute
+`/aws/elasticbeanstalk/Archtree-2024-env/var/log/web.stdout.log`. One summary a minute
 is about 45 MB a month; streaming also sends the platform's other logs, so check
 ingestion against the 5 GB free allowance. The suggested set below uses eight
 custom metrics and eight alarms, which fits the CloudWatch free tier's ten of each
 when nothing else uses them.
 
-Create a metric from a JSON field, for example open sockets:
+Review these common parameters before creating the filters or alarms:
+
+| Setting | Configuration |
+| --- | --- |
+| Region and environment | `us-east-1`; `Archtree-2024-env` (`e-qeb3ekat4i`) |
+| Instance log streaming | Namespace `aws:elasticbeanstalk:cloudwatch:logs`: `StreamLogs=true`, `RetentionInDays=7`, `DeleteOnTerminate=false` |
+| Metric namespace and dimensions | `Archtree/Social`; no dimensions, one filter set on the production stdout group |
+| Transformer | Grok removes the platform prefix into `payload`; `parseJSON` writes that payload to `ops` |
+| Filter pattern | `{ $.ops.category = "ops_summary" }` for all eight filters, with `applyOnTransformedLogs=true` |
+| Metric unit | `Milliseconds` for `FanoutLagMax`; `Count` for the other seven |
+| SNS topic | `archtree-operations` created in the same region; use its returned ARN for every alarm action |
+| Notification target | Operator-selected recipient, retained outside the repository; its SNS subscription must be confirmed |
+| Alarm notifications | `ActionsEnabled=true`; `AlarmActions=[<confirmed-topic-arn>]`; `OKActions=[<confirmed-topic-arn>]` |
+
+Enable streaming and the transformer before creating log metric filters, and
+confirm a real `ops_summary` event reaches the stdout group. Transformations and
+metric filters apply at ingestion; they do not reconstruct historical events.
+Confirm the SNS subscription and a test notification before
+treating a configured alarm as operator-visible. Subscription confirmation and
+this notification check remain pending; creating a topic alone closes neither.
+
+The original `{ $.category = "ops_summary" }` filter matched no production
+events because the raw message contains the platform prefix. `TestTransformer`
+successfully parsed an actual stdout event with this processor sequence, which
+is now installed on the stdout group. This reproducible example tests a synthetic
+summary before creating or replacing the group transformer:
 
 ```bash
-aws logs put-metric-filter --log-group-name /aws/elasticbeanstalk/<environment>/var/log/web.stdout.log \
-  --filter-name archtree-open-sockets --filter-pattern '{ $.category = "ops_summary" }' \
-  --metric-transformations metricName=OpenSockets,metricNamespace=Archtree/Social,metricValue='$.rooms.openSockets'
-aws cloudwatch put-metric-alarm --alarm-name archtree-open-sockets-near-cap \
-  --namespace Archtree/Social --metric-name OpenSockets --statistic Maximum --period 300 \
-  --evaluation-periods 3 --threshold 8 --comparison-operator GreaterThanOrEqualToThreshold \
-  --treat-missing-data notBreaching --alarm-actions <sns-topic-arn>
+archtree_stdout_transformer='[
+  {"grok":{"match":"%{DATA}: %{GREEDYDATA:payload}"}},
+  {"parseJSON":{"source":"payload","destination":"ops"}}
+]'
+aws logs test-transformer --region us-east-1 \
+  --transformer-config "$archtree_stdout_transformer" \
+  --log-event-messages 'Oct 11 12:00:00 example-host web[1]: {"category":"ops_summary","rooms":{"openSockets":0}}' \
+  --query 'transformedLogs[].transformedEventMessage' --output text
+aws logs put-transformer --region us-east-1 \
+  --log-group-identifier /aws/elasticbeanstalk/Archtree-2024-env/var/log/web.stdout.log \
+  --transformer-config "$archtree_stdout_transformer"
 ```
 
-| Metric (filter pattern; value) | Alarm |
-| --- | --- |
-| `OpsSummary` (`{ $.category = "ops_summary" }`; `1`) | Sum below 3 over 5 minutes, missing data breaching: the process stopped or hung |
-| `OpenSockets` (summary; `$.rooms.openSockets`) | Maximum at least 80% of `FINITUDE_REALTIME_MAX_SOCKETS` for 15 minutes |
-| `CapacityRejections` (summary; `$.rooms.capacityRejectionsTotal`) | Sum above 0 in 15 minutes: listeners are being refused; review the limits |
-| `RoomFailures` (summary; `$.rooms.failuresTotal`) | Sum above 5 for three consecutive 5-minute periods |
-| `AuthorityChanges` (summary; `$.rooms.authorityChanges`) | Sum above 4 in 15 minutes: the authority is flapping |
-| `FanoutLagMax` (summary; `$.rooms.fanoutLagMaxMs`) | Maximum above 2000 for three of five minutes |
-| `TicketUnavailable` (summary; `$.rooms.ticketFailures.unavailable`) | Sum above 0 for two consecutive 5-minute periods |
-| `Limited` (summary; `$.limiters.total`) | Sum above 200 in 5 minutes: sustained throttling or abuse |
+After platform or log-format changes, test the parser against a current real
+summary before updating it; do not store private log payloads in the repository.
+The processor schema follows
+[`put-transformer`](https://docs.aws.amazon.com/cli/latest/reference/logs/put-transformer.html).
+Create or update each metric filter on transformed events, for example open sockets:
 
-Investigate a specific limiter, code or room with CloudWatch Logs Insights, for
-example `filter category = "ops_summary" | fields @timestamp, limiters.byScope`.
+```bash
+aws logs put-metric-filter --region us-east-1 \
+  --log-group-name /aws/elasticbeanstalk/Archtree-2024-env/var/log/web.stdout.log \
+  --filter-name archtree-open-sockets --filter-pattern '{ $.ops.category = "ops_summary" }' \
+  --apply-on-transformed-logs \
+  --metric-transformations metricName=OpenSockets,metricNamespace=Archtree/Social,metricValue='$.ops.rooms.openSockets',unit=Count
+aws cloudwatch put-metric-alarm --region us-east-1 --alarm-name archtree-open-sockets-near-cap \
+  --namespace Archtree/Social --metric-name OpenSockets --statistic Maximum --period 300 \
+  --evaluation-periods 3 --datapoints-to-alarm 3 --threshold 8 \
+  --comparison-operator GreaterThanOrEqualToThreshold --actions-enabled \
+  --treat-missing-data notBreaching --alarm-actions '<confirmed-topic-arn>' \
+  --ok-actions '<confirmed-topic-arn>'
+```
+
+Each row defines one filter and one alarm. Periods are in seconds; `M/N` means
+`DatapointsToAlarm=M`, `EvaluationPeriods=N`. Use `LessThanThreshold` for `<`,
+`GreaterThanThreshold` for `>`, and `GreaterThanOrEqualToThreshold` for `>=`.
+
+| Filter name / metric | Metric value | Alarm name | Statistic / period | Breach / M/N | Missing data |
+| --- | --- | --- | --- | --- | --- |
+| `archtree-ops-summary` / `OpsSummary` | `1` | `archtree-ops-summary-missing` | Sum / 300 | `< 3` / 1/1 | `breaching` |
+| `archtree-open-sockets` / `OpenSockets` | `$.ops.rooms.openSockets` | `archtree-open-sockets-near-cap` | Maximum / 300 | `>= 8` / 3/3 | `notBreaching` |
+| `archtree-capacity-rejections` / `CapacityRejections` | `$.ops.rooms.capacityRejectionsTotal` | `archtree-capacity-rejections` | Sum / 900 | `> 0` / 1/1 | `notBreaching` |
+| `archtree-room-failures` / `RoomFailures` | `$.ops.rooms.failuresTotal` | `archtree-room-failures` | Sum / 300 | `> 5` / 3/3 | `notBreaching` |
+| `archtree-authority-changes` / `AuthorityChanges` | `$.ops.rooms.authorityChanges` | `archtree-authority-flapping` | Sum / 900 | `> 4` / 1/1 | `notBreaching` |
+| `archtree-fanout-lag` / `FanoutLagMax` | `$.ops.rooms.fanoutLagMaxMs` | `archtree-fanout-lag` | Maximum / 60 | `> 2000` / 3/5 | `notBreaching` |
+| `archtree-ticket-unavailable` / `TicketUnavailable` | `$.ops.rooms.ticketFailures.unavailable` | `archtree-ticket-unavailable` | Sum / 300 | `> 0` / 2/2 | `notBreaching` |
+| `archtree-limited` / `Limited` | `$.ops.limiters.total` | `archtree-sustained-throttling` | Sum / 300 | `> 200` / 1/1 | `notBreaching` |
+
+The socket threshold assumes the shipped limit of ten; recalculate it at 80% of
+the effective limit before applying. Only `OpsSummary` treats missing data as
+breaching, so an idle optional feature does not trigger the other seven alarms.
+The CLI parameter shapes follow
+[`put-metric-filter`](https://docs.aws.amazon.com/cli/latest/reference/logs/put-metric-filter.html)
+and [`put-metric-alarm`](https://docs.aws.amazon.com/cli/latest/reference/cloudwatch/put-metric-alarm.html).
+
+Inspect newly ingested transformed summaries with CloudWatch Logs Insights, for
+example `filter ops.category = "ops_summary" | fields @timestamp, ops.limiters.byScope`.
+`GetLogEvents` and `FilterLogEvents` return original messages, so a raw JSON filter
+returning zero matches after transformer installation does not prove that the
+transformed events or metrics are absent. Use Insights and fresh metric datapoints
+to verify transformation and filters. See the
+[CloudWatch transformation behavior](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation.html).
 On the Atlas side, watch the cluster's operation counters, connections and
 **Network Out**, and enable the project alerts the free tier offers.
 
@@ -202,58 +338,65 @@ On the Atlas side, watch the cluster's operation counters, connections and
    listener's account or data for smoke tests.
 4. Optionally rehearse locally with `npm run build` and `npm run demo:social`,
    which uses its own MongoDB and fixtures.
-5. **Prerequisite for `FINITUDE_ROOMS_ENABLED=true`:** the quarantined
-   cross-engine audio drift projects must be stable and back in the blocking
-   release gate (next section). Until then, enable at most
+5. **Prerequisite for `FINITUDE_ROOMS_ENABLED=true`:** the cross-engine audio
+   repair candidate must pass the complete blocking release gate on consecutive
+   pull-request and merged-main runs (next section). Until then, enable at most
    `FINITUDE_SOCIAL_ENABLED` (social without rooms).
 
-### Quarantined cross-engine audio drift (blocks enabling rooms)
+### Cross-engine audio acceptance (blocks enabling rooms)
 
-The release workflow's `social-e2e` job runs every social browser project in its
-blocking step except `firefox-audio-formats` and `webkit-audio-formats`. Those
-two run the
+The release workflow's `social-e2e` job now runs every Linux social browser project
+in one blocking step, including `firefox-audio-formats` and
+`webkit-audio-formats`. Those two run the
 [compressed-audio room scenario](../../web/e2e-social/audio-formats.spec.ts) in
-Firefox and WebKit with real Linux decoders, and they fail intermittently with
-different timing symptoms:
+Firefox and WebKit with real Linux decoders. Their previous quarantine followed
+intermittent failures with different timing symptoms:
 
-- [`expectPlaying`](../../web/e2e-social/audio-formats.spec.ts#L99) saw no
+- [`expectPlaying`](../../web/e2e-social/audio-formats.spec.ts) saw no
   playing media element. Commit `4edc79c` fixed one root cause, a source whose
   metadata reported a zero duration and was never reloaded.
 - After a seek, the host's `playbackGeneration` stayed at the previous value
   instead of advancing by one
-  ([line 261](../../web/e2e-social/audio-formats.spec.ts#L261); CI saw 4, not 5).
+  (the seek assertion in `audio-formats.spec.ts`; CI saw 4, not 5).
 - Within the 10-second deadline, the synchronization poll never saw both
   members' clocks advancing smoothly for more than a second in samples captured
   within 50 ms of each other
-  ([`expectSynchronized`, line 184](../../web/e2e-social/audio-formats.spec.ts#L184)).
+  ([`expectSynchronized`](../../web/e2e-social/audio-formats.spec.ts)).
 
-`chromium-audio-formats` and every other project, including
-`firefox-rooms-recovery` and `webkit-rooms-recovery`, stay blocking. Each CI
-attempt still runs the quarantined pair in a separate `continue-on-error` step
-after the gate. The step summary and a warning annotation report the outcome as
-non-blocking. Their traces, screenshots and drift evidence are in the
-`social-quarantined/` folder of the `finitude-social-browser-evidence` artifact.
-Their result never fails the job or enters release provenance. To reproduce on
-Linux with an isolated audio sink:
-`CI=1 xvfb-run -a npm run test:e2e:social:quarantined --workspace @archtree/finitude-web`.
+The 2026-10-11 repair candidate captures the current room version when each new
+seek gesture begins, so a previous drag's version cannot reject a later command.
+It also recovers a fully buffered decoder left at current-frame readiness after
+a controller-owned drift correction, even if its media clock is still advancing.
+Recovery remains limited to one paused source reload per playback occurrence;
+future-data readiness, drift tolerances, local-pause cancellation and zero test
+retries are preserved.
+
+The separate quarantine config, command and `continue-on-error` step are removed.
+All social traces, screenshots and drift evidence now use the `social-real/`
+folder of the `finitude-social-browser-evidence` artifact. Any project's failure
+blocks artifact staging and the `social` provenance outcome. To reproduce just
+the compressed-audio pair on Linux with an isolated audio sink:
+`CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=firefox-audio-formats --project=webkit-audio-formats`.
+
+These are candidate repairs and gate configuration changes, not a completed
+Linux verification. The historical runs below tested earlier code and cannot
+supply acceptance for this candidate.
 
 Before rooms are enabled in production:
 
-1. Find and fix each remaining cause; do not widen tolerances or add retries
-   to hide drift.
-2. Remove the projects from `quarantinedSocialProjects` in
-   `web/playwright.social.config.ts`, so the blocking step runs them again.
-   Remove the non-blocking workflow step with them, and update
-   `test/socialBrowserConfig.test.ts` and
-   `test/finitudeWebReleaseWorkflow.test.ts`.
-3. Record consecutive passing `main` and pull-request runs of the blocking
-   gate with both projects in the evidence record.
+1. Run the complete blocking Linux gate with the repair candidate; diagnose any
+   remaining failures without widening tolerances or adding retries to hide drift.
+2. Record new consecutive passing pull-request and merged-main runs of that gate,
+   with both projects and the exact candidate/build identity in the evidence record.
+3. Keep production rooms disabled until those CI passes are recorded. Then use
+   the controlled test window below for deployment smoke, observation and
+   kill-switch checks before leaving the feature enabled for public use.
 
 ## 2. Enable for testing
 
 1. Pick a quiet window and record the start time, owner and stop conditions.
-   Confirm the cross-engine audio drift projects are back in the blocking gate
-   (section 1, step 5); otherwise do not set `FINITUDE_ROOMS_ENABLED`.
+   Confirm the repaired cross-engine audio projects have passed the blocking
+   acceptance gate (section 1, step 5); otherwise do not set `FINITUDE_ROOMS_ENABLED`.
 2. Set `FINITUDE_SOCIAL_ENABLED=true` and `FINITUDE_ROOMS_ENABLED=true` in one
    update. To test social without rooms, set only social to `true`.
 3. After the environment is **Ok**, verify `/health` `rooms.enabled: true`,
@@ -329,7 +472,7 @@ resumes by itself. Repeat the checks in section 2, step 3.
 | Field | Required value |
 | --- | --- |
 | Release | `RELEASE.json` commit and environment version |
-| Cross-engine audio gate | Before enabling rooms: the change returning `firefox-audio-formats` and `webkit-audio-formats` to the blocking gate, and the passing run links |
+| Cross-engine audio gate | Before enabling rooms: the repair candidate identity and new consecutive passing pull-request and merged-main runs with `firefox-audio-formats` and `webkit-audio-formats` blocking |
 | Flags | Values before and after each change, time and owner |
 | Enablement | `/health` rooms snapshot, probe result, smoke-test result, `social_capacity_config` line |
 | Kill switch rehearsal | Restart time, time to pause, time to `inactive`, probe result, social reads with rooms off |
@@ -340,3 +483,30 @@ Before the first public enablement, rehearse the kill switch once with the
 test accounts: start room playback, switch rooms off, confirm the pause and
 the end within about six minutes, confirm social reads still work, then switch
 rooms back on.
+
+### Deployment verification — 2026-10-11
+
+The following observations refresh the release record without closing the
+enablement, monitoring or rollback gates. These CI runs predate the repair
+candidate and restored complete gate described above:
+
+| Check | Observed evidence and limit |
+| --- | --- |
+| Latest main workflow | [Run 37220116476](https://github.com/yangyinxu/Archtree/actions/runs/37220116476), created 2026-10-04 17:20:11 UTC, commit `b7c44fdad3aa84d05ba12637beeefd75c7737108`, succeeded. Its blocking social selection passed 15 tests. The non-blocking selection failed Firefox's seek-generation check (expected 5, received 4); WebKit passed. Overall success does not close quarantine. |
+| Latest pull-request workflow | [Run 37219198449](https://github.com/yangyinxu/Archtree/actions/runs/37219198449), created 2026-10-04 17:05:34 UTC, head `9630720508e22600c220d3a76d479ec28c82406d`, succeeded, including both quarantined tests. The subsequent main failure prevents treating this as stable cross-engine acceptance. |
+| Public Web deployment | `/finitude` HTML and its four directly referenced JS/CSS assets matched the retained main artifact byte for byte. The artifact's `RELEASE.json` records the main commit above and build `github-37220116476-1`. The backend's on-instance `RELEASE.json` has not been independently read. |
+| Production environment | A later signed-in console inspection confirmed `Archtree-2024-env` (`e-qeb3ekat4i`) in `us-east-1`, Health `Ok`, running version `code-pipeline-1791171387027-ArchtreeBuildArtifacts-745b4485-c6dd-468b-b4ec-bb5b5e6bb624`, Node.js 24 on Amazon Linux 2023 platform `6.11.9`, one ARM64 `t4g.micro`, and enhanced health reporting. |
+| Public runtime | `/health` returned 200 with `rooms.enabled: false`, `authorityState: "inactive"`, zero sockets and zero room failure counters. `/api/listener/v1/capabilities` reported both social and rooms disabled. `/health` exposes no release identity. These snapshots do not prove startup logs, backfill, monitoring or a kill-switch rehearsal. |
+| Authentication prerequisite | Public capabilities reported `emailRegistration: true`; registration and verification pages returned the listener shell. Console and CloudShell confirmed the approved sender, exact production link origin and region, SES domain/DKIM success, `SendingEnabled: true`, `ProductionAccessEnabled: false`, account-level suppression for `BOUNCE` and `COMPLAINT`, and an empty production-access `Details` object. The dedicated code pepper is absent. The confirmed runtime identity's policy is now limited to `ses:SendEmail` on the verified domain with its exact From-address condition. Readback confirms the scope; simulations allow the approved send and deny another sender, raw email and another identity. |
+| Authorized registration test | One production registration request returned generic `202 Accepted`. Authorized Chrome Gmail access later found zero application messages for the test recipient. Zero registration failure events in the last-hour log query cannot establish SES acceptance because streaming started after the request. The base recipient is SES-verified, but the exact alias had no identity. Its separate AWS recipient-verification message was received at 15:02 UTC; final identity confirmation awaits operator approval. Application receipt and link use remain pending. |
+| SES production-access request | The console form is prepared with Transactional, `https://kashewt.com` and English. Optional contacts are blank and terms acknowledgement is unchecked. It has not been submitted; submission awaits operator approval and AWS production-access approval remains pending. |
+| Monitoring baseline | Initial local IAM discovery requests were denied; a later signed-in console and CloudShell session resolved that visibility limit. That inspection found instance and health-event log streaming disabled, no log groups under `/aws/elasticbeanstalk/Archtree-2024-env`, no metric alarms in `us-east-1`, zero SNS subscriptions, and empty EB notification-email/custom-metrics settings. |
+| Log-streaming update | Complete: `StreamLogs=true`, `RetentionInDays=7`, `DeleteOnTerminate=false`; environment `Ready/Green/Ok`, application version unchanged. Seven log groups exist with seven-day retention, including stdout with real `ops_summary` events. |
+| Log transformation and metric alarms | Complete: the raw platform-prefixed events matched no JSON filter. `TestTransformer` successfully parsed a real event using grok plus `parseJSON`, and that transformer was applied to stdout. All eight filters use `applyOnTransformedLogs=true` and `$.ops.*` paths. Readback found six real 60-second datapoints per metric in the latest 15-minute window. All eight alarms are `OK`, with actions enabled and the topic configured. |
+| Notification setup | In progress: SNS topic `archtree-operations` exists, but no subscription or notification receipt has been verified. Working metric ingestion and `OK` alarm state do not establish operator notification delivery. |
+
+The initial infrastructure inspection was read-only; the dated logging,
+transformation, metric, alarm and topic steps above record the authorized changes.
+Production rollout flags remain disabled. Complete the remaining delivery and monitoring
+checks with the authorized management identity and operator-owned test accounts;
+an accepted update does not establish successful runtime or notification delivery.
