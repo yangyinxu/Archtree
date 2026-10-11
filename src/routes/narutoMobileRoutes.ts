@@ -17,6 +17,7 @@ import {
 
 const router: Router = express.Router();
 const model = 'gpt-6-luna';
+const maxConcurrentRequests = 12;
 
 const runtimeSettings = () => {
   const apiKey = process.env.OPENAI_API_KEY?.trim() ?? '';
@@ -59,7 +60,7 @@ const requireBearerHeader: RequestHandler = (req, res, next) => {
 };
 
 const apiRateLimit = rateLimit('naruto-mobile', 60, 60_000);
-const classifyConcurrencyLimit = limitConcurrency('naruto-mobile-classify', 3, 3);
+const classifyConcurrencyLimit = limitConcurrency('naruto-mobile-classify', maxConcurrentRequests, maxConcurrentRequests);
 const requireDesktopAccount = [
   requireSecureAuthTransport,
   apiRateLimit,
@@ -74,7 +75,8 @@ router.get('/status', (_req, res) => {
   res.status(200).json({
     enabled: Boolean(runtimeSettings()),
     protocolVersion: NARUTO_MOBILE_PROTOCOL_VERSION,
-    serviceVersion: 'naruto-mobile-proxy-v1'
+    serviceVersion: 'naruto-mobile-proxy-v1',
+    maxConcurrentRequests
   });
 });
 

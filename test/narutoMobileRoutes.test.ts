@@ -6,6 +6,9 @@ import jwt from 'jsonwebtoken';
 import { createApp } from '../src/app';
 import AuthSession from '../src/models/authSession';
 import User from '../src/models/user';
+import { resetRateLimitWindowsForTests } from '../src/middleware/requestProtectionMiddleware';
+import { NarutoMobileOpenAiClassifier, NarutoMobileUpstreamError } from '../src/narutoMobile/openAiClassifierService';
+import { NarutoMobileClassifyRequest } from '../src/narutoMobile/protocol';
 
 const primaryUserId = '64b000000000000000000001';
 const otherUserId = '64b000000000000000000002';
@@ -13,8 +16,9 @@ const primarySessionId = '64c000000000000000000001';
 const otherSessionId = '64c000000000000000000002';
 const jwtSecret = 'naruto-mobile-route-test-secret';
 
-const listen = async () => {
+const listen = async (trustTestProxy = false) => {
   const app = createApp({environment: 'test'});
+  if (trustTestProxy) app.set('trust proxy', 1);
   const server = await new Promise<Server>((resolve) => {
     const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
   });
@@ -34,6 +38,160 @@ const accessToken = (userId: string, sessionId: string) => jwt.sign({
   sessionId,
   tokenType: 'access'
 }, jwtSecret, {algorithm: 'HS256', expiresIn: 900});
+
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {resolve = done;});
+  return {promise, resolve};
+};
+
+/** Bounds fixture waits so a reduced capacity fails and still releases every held request. */
+const fixtureReady = async (promise: Promise<void>) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([promise, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Classification fixture did not become ready')), 3_000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+for (const addressMode of ['same-address', 'different-addresses'] as const) {
+  test(`admits twelve ${addressMode} classifications, rejects thirteen, and releases only settled work`, {timeout: 15_000}, async (context) => {
+    const savedEnvironment = {
+      NODE_ENV: process.env.NODE_ENV,
+      JWT_SECRET: process.env.JWT_SECRET,
+      OPENAI_API_KEY: process.env.OPENAI_API_KEY
+    };
+    const controls = Array.from({length: 26}, () => ({
+      entered: deferred(), release: deferred(), aborted: deferred(), settled: deferred()
+    }));
+    const requests: Array<Promise<Response | undefined>> = [];
+    let active = 0;
+    let peak = 0;
+    process.env.NODE_ENV = 'test';
+    process.env.JWT_SECRET = jwtSecret;
+    process.env.OPENAI_API_KEY = 'synthetic-capacity-test-key';
+    resetRateLimitWindowsForTests();
+    context.mock.method(AuthSession, 'findActiveById', async () => (
+      {userId: primaryUserId} as Awaited<ReturnType<typeof AuthSession.findActiveById>>
+    ));
+    context.mock.method(User, 'findById', async () => (
+      {email: 'capacity@example.test', role: 'user'} as Awaited<ReturnType<typeof User.findById>>
+    ));
+    // Synthetic classifier work intentionally remains unsettled after transport abort.
+    context.mock.method(NarutoMobileOpenAiClassifier.prototype, 'classify', async (
+      request: NarutoMobileClassifyRequest, signal?: AbortSignal
+    ) => {
+      const slot = Number(request.batch[0].opinionId.split('-').at(-1));
+      const control = controls[slot];
+      active += 1;
+      peak = Math.max(peak, active);
+      signal?.addEventListener('abort', control.aborted.resolve, {once: true});
+      control.entered.resolve();
+      try {
+        await control.release.promise;
+        if (signal?.aborted) throw new NarutoMobileUpstreamError(503);
+        return {
+          protocolVersion: 1 as const, kind: request.kind, model: 'gpt-6-luna',
+          promptVersion: 'naruto-decisions-v1', results: [],
+          usage: {inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0}
+        };
+      } finally {
+        signal?.removeEventListener('abort', control.aborted.resolve);
+        active -= 1;
+        control.settled.resolve();
+      }
+    });
+    const {server, baseUrl} = await listen(true);
+    const token = accessToken(primaryUserId, primarySessionId);
+    const send = (slot: number, signal?: AbortSignal) => {
+      const response = fetch(`${baseUrl}/naruto-mobile/api/v1/classify`, {
+        method: 'POST', signal,
+        headers: {
+          authorization: `Bearer ${token}`, 'content-type': 'application/json',
+          'x-forwarded-for': addressMode === 'same-address' ? '198.51.100.1' : `198.51.100.${slot + 1}`
+        },
+        body: JSON.stringify({protocolVersion: 1, kind: 'triage', batch: [{
+          opinionId: `capacity-${slot}`,
+          content: {type: 'video', title: '标题', description: '', publishedAt: null},
+          opinion: {sourceType: 'comment', voiceType: 'viewer', text: '二技能后摇太长',
+            parentText: null, likes: 0, replies: 0, publishedAt: null}
+        }]})
+      }).catch(error => {
+        if (signal?.aborted) return undefined;
+        throw error;
+      });
+      requests.push(response);
+      return response;
+    };
+    const rejected = async (slot: number) => {
+      const response = await send(slot);
+      assert.ok(response);
+      assert.equal(response.status, 429);
+      assert.equal(response.headers.get('retry-after'), '2');
+      assert.equal(response.headers.get('ratelimit-limit'), '60');
+      assert.deepEqual(await response.json(), {message: 'Too many concurrent requests.'});
+    };
+    const cancelled = new AbortController();
+    try {
+      const firstWave = [];
+      for (let slot = 0; slot < 12; slot++) {
+        firstWave.push(send(slot, slot === 0 ? cancelled.signal : undefined));
+        await fixtureReady(controls[slot].entered.promise);
+      }
+      assert.equal(active, 12);
+      await rejected(12);
+      cancelled.abort();
+      await fixtureReady(controls[0].aborted.promise);
+      await rejected(12);
+      assert.equal(active, 12, 'Disconnected classifier work must retain its slot until it settles');
+
+      controls[0].release.resolve();
+      await fixtureReady(controls[0].settled.promise);
+      await new Promise(resolve => setImmediate(resolve));
+      const replacement = send(12);
+      await fixtureReady(controls[12].entered.promise);
+      assert.equal(active, 12);
+      controls.slice(1, 13).forEach(control => control.release.resolve());
+      for (const response of await Promise.all([...firstWave, replacement])) {
+        if (!response) continue;
+        assert.equal(response.status, 200);
+        await response.text();
+      }
+      await new Promise(resolve => setImmediate(resolve));
+
+      const secondWave = [];
+      for (let slot = 13; slot < 25; slot++) {
+        secondWave.push(send(slot));
+        await fixtureReady(controls[slot].entered.promise);
+      }
+      assert.equal(active, 12, 'All twelve slots must be reusable after completion');
+      await rejected(25);
+      controls.slice(13, 25).forEach(control => control.release.resolve());
+      for (const response of await Promise.all(secondWave)) {
+        assert.ok(response);
+        assert.equal(response.status, 200);
+        await response.text();
+      }
+      assert.equal(active, 0);
+      assert.equal(peak, 12);
+    } finally {
+      controls.forEach(control => control.release.resolve());
+      await Promise.allSettled(requests);
+      await new Promise(resolve => setImmediate(resolve));
+      server.closeAllConnections();
+      await close(server);
+      context.mock.restoreAll();
+      resetRateLimitWindowsForTests();
+      for (const [name, value] of Object.entries(savedEnvironment)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+}
 
 test('protects the fixed proxy with any authenticated Archtree account', async () => {
   const savedEnvironment = {
@@ -91,7 +249,8 @@ test('protects the fixed proxy with any authenticated Archtree account', async (
     assert.deepEqual(JSON.parse(statusBody), {
       enabled: true,
       protocolVersion: 1,
-      serviceVersion: 'naruto-mobile-proxy-v1'
+      serviceVersion: 'naruto-mobile-proxy-v1',
+      maxConcurrentRequests: 12
     });
     assert.doesNotMatch(statusBody, /test-key/);
 
