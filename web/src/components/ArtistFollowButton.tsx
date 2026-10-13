@@ -1,0 +1,131 @@
+import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { UserPlus, UserCheck } from 'lucide-react';
+import {
+  artistFollowQuery, artistFollowQueryKey, personalizationCapabilitiesQuery,
+  personalizationCapabilitiesQueryKey, setArtistFollowing
+} from '../api/artistFollows';
+import { ApiError } from '../api/client';
+import { captureAccountOperation, isAccountOperationCurrent, type AccountOperationGuard } from '../api/accountEpoch';
+import { browserSessionQuery, browserSessionResolvingQuery } from '../api/session';
+import type { ListenerHome } from '../api/contentSchemas';
+import { useLocalization } from '../localization/LocalizationProvider';
+import styles from './SaveButton.module.css';
+
+interface Mutation {
+  viewerId: string;
+  artistId: string;
+  following: boolean;
+  owner: string;
+  guard: AccountOperationGuard;
+  generation: number;
+}
+
+/** Keeps private follow state confirmed and account-fenced, including retry after an uncertain response. */
+export const ArtistFollowButton = ({ artistId }: { artistId: string }) => {
+  const { t } = useLocalization();
+  const client = useQueryClient();
+  const capabilities = useQuery(personalizationCapabilitiesQuery());
+  const session = useQuery(browserSessionQuery());
+  const resolving = useQuery(browserSessionResolvingQuery());
+  const viewerId = !resolving.data && session.isSuccess ? session.data?.user.id : undefined;
+  const owner = `${viewerId ?? 'anonymous'}:${artistId}`;
+  const activeOwner = useRef(owner);
+  const generation = useRef(0);
+  const mounted = useRef(true);
+  if (activeOwner.current !== owner) generation.current += 1;
+  activeOwner.current = owner;
+  const current = (variables: Mutation) => mounted.current && variables.generation === generation.current
+    && isAccountOperationCurrent(variables.guard) && activeOwner.current === variables.owner;
+  const [notice, setNotice] = useState<{ owner: string; message: string }>();
+  const status = useQuery({
+    ...artistFollowQuery(viewerId ?? '', artistId),
+    enabled: Boolean(viewerId && capabilities.data?.artistFollows)
+  });
+  const mutation = useMutation({
+    mutationFn: async (variables: Mutation) => {
+      // Cancel the earlier read before dispatch so it cannot overwrite a confirmed mutation.
+      await client.cancelQueries({ queryKey: artistFollowQueryKey(variables.viewerId, variables.artistId) });
+      if (!current(variables)) throw new Error('Account changed');
+      return setArtistFollowing(variables.viewerId, variables.artistId, variables.following);
+    },
+    onSuccess: async (receipt, variables) => {
+      if (!current(variables)) return;
+      // Inactive Home reads must also be canceled: invalidation only refetches active observers.
+      await client.cancelQueries({ queryKey: ['listener', 'home', variables.viewerId] });
+      if (!current(variables)) return;
+      client.setQueryData(artistFollowQueryKey(variables.viewerId, variables.artistId), receipt);
+      // A confirmed opposite action makes the old generated list obsolete even if refresh fails.
+      client.setQueryData<ListenerHome>(['listener', 'home', variables.viewerId], (home) => home && ({
+        ...home, sections: home.sections.filter((section) => !section.items.some((item) => item.reason))
+      }));
+      void client.invalidateQueries({ queryKey: ['listener', 'home', variables.viewerId] });
+      setNotice(undefined);
+    },
+    onError: async (error, variables) => {
+      if (!current(variables)) return;
+      if (error instanceof ApiError && error.status === 503 && error.code === 'ARTIST_FOLLOWS_DISABLED') {
+        await Promise.all([
+          client.cancelQueries({ queryKey: ['listener', 'home', variables.viewerId] }),
+          client.cancelQueries({ queryKey: personalizationCapabilitiesQueryKey })
+        ]);
+        if (!current(variables)) return;
+        client.setQueryData(personalizationCapabilitiesQueryKey, { contractVersion: 1, deterministicDiscovery: false, artistFollows: false });
+        client.setQueryData<ListenerHome>(['listener', 'home', variables.viewerId], (home) => home && ({
+          ...home, sections: home.sections.filter((section) => !section.items.some((item) => item.reason))
+        }));
+        void client.invalidateQueries({ queryKey: ['listener', 'home', variables.viewerId] });
+      }
+      setNotice({ owner: variables.owner, message: t('artist.follow_error') });
+    }
+  });
+  useEffect(() => {
+    mounted.current = true;
+    setNotice(undefined); mutation.reset();
+    return () => { mounted.current = false; };
+  }, [owner]);
+  useEffect(() => {
+    if (!viewerId || capabilities.data?.artistFollows !== false) return;
+    const guard = captureAccountOperation(viewerId);
+    void client.cancelQueries({ queryKey: ['listener', 'home', viewerId] }).then(() => {
+      if (!isAccountOperationCurrent(guard)) return;
+      client.setQueryData<ListenerHome>(['listener', 'home', viewerId], (home) => home && ({
+        ...home, sections: home.sections.filter((section) => !section.items.some((item) => item.reason))
+      }));
+      void client.invalidateQueries({ queryKey: ['listener', 'home', viewerId] });
+    });
+  }, [client, viewerId, capabilities.data?.artistFollows]);
+  if (!capabilities.data?.artistFollows || resolving.data || session.isPending || session.isError) return null;
+  const following = status.data?.following;
+  const pending = mutation.isPending && mutation.variables?.owner === owner;
+  const failed = mutation.isError && mutation.variables?.owner === owner;
+  const label = pending
+    ? t(mutation.variables.following ? 'artist.follow_pending' : 'artist.unfollow_pending')
+    : viewerId && following === undefined ? t('account.common.checking')
+      : t(following ? 'artist.following' : 'artist.follow');
+  const mutate = (next: boolean) => {
+    if (!viewerId || pending) return;
+    setNotice(undefined);
+    generation.current += 1;
+    mutation.mutate({ viewerId, artistId, following: next, owner, generation: generation.current, guard: captureAccountOperation(viewerId) });
+  };
+  return <span className={styles.wrapper}>
+    <button
+      aria-disabled={!viewerId || following === undefined || pending}
+      aria-pressed={following}
+      className={`${styles.button} ${viewerId ? '' : styles.signedOut}`}
+      disabled={Boolean(viewerId && (following === undefined || pending))}
+      onClick={() => viewerId ? following !== undefined && mutate(!following)
+        : setNotice({ owner, message: t('artist.follow_signed_out') })}
+      type="button"
+    >
+      {following ? <UserCheck aria-hidden="true" /> : <UserPlus aria-hidden="true" />}
+      <span>{label}</span>
+    </button>
+    {viewerId && status.isError && !status.data && <span role="alert" className={styles.message}>
+      {t('artist.follow_status_error')} <button type="button" onClick={() => { void status.refetch(); }}>{t('artist.follow_status_retry')}</button>
+    </span>}
+    {notice?.owner === owner && <span role="alert" className={styles.message}>{notice.message}</span>}
+    {failed && <button type="button" onClick={() => mutate(mutation.variables.following)}>{t('artist.follow_retry')}</button>}
+  </span>;
+};

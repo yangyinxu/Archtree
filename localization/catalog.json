@@ -906,6 +906,69 @@
       ],
       "variables": {}
     },
+    "artist.follow": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "artist.follow_error": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "artist.follow_pending": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "artist.follow_retry": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "artist.follow_signed_out": {
+      "description": "Signed-out Artist Follow activation explains the authentication requirement without opening sign-in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "artist.follow_status_error": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "artist.follow_status_retry": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "artist.following": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "artist.unfollow_pending": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "auth.email_link.description": {
       "description": "Explains the verification confirmation step; the password is unchanged.",
       "delivery": [
@@ -2697,6 +2760,15 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "home.followed_artist_release_reason": {
+      "description": "Private Artist Follow action or contextual Home release explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "artist": "string"
+      }
     },
     "home.loading.eyebrow": {
       "description": "Eyebrow above the Home loading state.",

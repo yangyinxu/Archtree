@@ -2,15 +2,21 @@
 
 ## Status
 
-The product and data-contract spike is **Complete** as of 2026-08-25. All
-production implementation stages are **Not started**. This plan is ready for
-serial contract review, but none of its recommended defaults are approved
-product behavior until the coordinator promotes them into
-`../business-rules.md`.
+The product and data-contract spike is **Complete**. Artist Follow and followed
+releases were selected on 2026-10-13; their defaults are now promoted into
+`../business-rules.md`. Discovery remains an unapproved candidate and is not
+part of this implementation.
 
-This spike intentionally does not change `../business-rules.md` or
-`../product-opportunities.md`. It does not implement, enable, or deploy either
-feature.
+Current Artist Follow implementation stages:
+
+1. Canonical contract and synthetic fixtures — **Complete**.
+2. Backend lifecycle, projections, and Web — **Complete**.
+3. iOS and Android adoption — **Complete**.
+4. Regression verification and delivery — **Complete**.
+
+Production deployment, index verification, and enabling the independent flag
+are separate rollout gates. This document's discovery recommendations remain
+planning material, not approved product behavior.
 
 ## Objective
 
@@ -648,180 +654,71 @@ only item counts.
 
 ## Staged implementation plan
 
-### Stage 0 — Product/data-contract spike
+### Stage 0 — Original product/data-contract spike
 
 **Status: Complete**
 
-- Read repository guidance and the complete canonical business rules.
-- Inventory Catalog/Credits, saves/activity, Home projections, deletion,
-  telemetry, localization, all three clients, tests, commands, and plans.
-- Define independent v1 scopes, exact ranking/defaults, private persistence,
-  lifecycle, DTOs, APIs, fixtures, rollout, and skipped decisions.
-- Leave production behavior and shared contract documents unchanged.
+The original spike inventoried both independent candidates without implementing
+or enabling them. Its discovery proposals remain unapproved.
 
-### Stage 1 — Serial contract promotion and frozen fixtures
+### Stage 1 — Follow contract promotion and frozen fixtures
 
-**Status: Not started**
+**Status: Complete**
 
-**Dependencies:** coordinator review of every Skipped decision.
+The selected Follow defaults are in `business-rules.md`. The canonical synthetic
+corpus, SHA-256 manifest, byte-identical client copies, synchronization command,
+and shared localization are implemented. Follow v1 negotiates only
+`followedArtistReleases` and the `followedArtist` reason. Its separate capability
+response always reports `deterministicDiscovery: false`.
 
-- Promote approved behavior into `business-rules.md`; update the candidate
-  disposition in `product-opportunities.md` only if the coordinator wants the
-  backlog to reflect approval.
-- Freeze source enums, reason DTO, weights, tie-breakers, dates, retention,
-  API responses/errors, account/offline behavior, and feature flags.
-- Add the canonical fixture corpus, client copies, manifest, and sync/check
-  script.
-- Update API/localization/testing documentation for approved contracts.
+### Stage 2 — Backend lifecycle, Home projections, and Web
 
-**Exit gate:** canonical rules and all fixture copies agree before persistence
-or client UI work begins.
+**Status: Complete**
 
-### Stage 2 — Backend private-state and lifecycle foundation
+Owner-scoped status/PUT/DELETE, active-account/ready-Artist transactions, deletion
+cleanup, mandatory indexes, bounded release qualification, both Home projections,
+and Web controls are implemented and locally verified. Generated Home reasons
+remain contextual; rollback preserves relationships and cleanup. No discovery
+preferences, ranking, suppression, reset, or corresponding UI are implemented.
 
-**Status: Not started**
+### Stage 3 — iOS and Android Follow adoption
 
-**Dependencies:** Stage 1; Mongo replica-set transactions; Catalog Credit reads
-and public Organization/Artist readiness contracts.
+**Status: Complete**
 
-- Add production-default-off independent feature services and the separate
-  personalization-capabilities route.
-- Add `userDiscoveryPreferences` and `artistFollows` models, validated strict
-  controllers, owner/current-viewer guards, indexes, and bounded inputs.
-- Extend account deletion, Album/MediaTrack cleanup, Artist deletion, active-
-  account/ready-Artist races, and reconciliation reporting.
-- Add reset idempotency receipts without logging request data.
-- Dark-deploy indexes and verify exact production index definitions before any
-  feature flag is enabled.
+Android implementation, build/lint, JVM and isolated emulator checks are complete.
+iOS implementation, frozen full simulator suite, quality checks and generic build
+are complete. Both clients preserve their existing
+expanded Home endpoint, playback queue, and valid local Audio resolver.
 
-**Exit gate:** private rows cannot leak, outlive an account, block account
-deletion, survive final target deletion, or race into dangling state.
+### Stage 4 — Final regression verification and delivery
 
-### Stage 3 — Deterministic discovery resolver and Home projection
+**Status: Complete**
+
+The frozen-source server/Web, Mongo, native and shared-fixture gates pass;
+intended diffs are reviewed for focused delivery on `develop`. Physical
+devices, real-account acceptance, Linux release gates and production evidence
+remain explicit external gates rather than being inferred from local success.
+
+### Stage 5 — Discovery candidate adoption
 
 **Status: Not started**
 
-**Dependencies:** Stage 2 and approved discovery fixture.
+Discovery needs its own canonical-rule promotion, finalized preferences/ranking
+contracts and fixtures. It must negotiate a later response contract before
+sending new reasons or enabling `deterministicDiscovery`; released Follow-only
+v1 clients must keep receiving their compatible Home and capability shapes.
+Follow state remains excluded from discovery scoring.
 
-- Extend the personalized source enum/parser/Content Manager UI with
-  `deterministicDiscovery` and the existing 1–20 limit.
-- Implement one pure ranking core plus bounded Mongo loaders and safe listener
-  projection; keep weights and ordering fixture-visible.
-- Resolve identical IDs/reasons through listener-v1 and expanded Home, omit an
-  empty generated source, and preserve remaining configured order.
-- Add Not interested and reset invalidation behavior.
-- Add aggregate bounded diagnostics and truncation/load evidence.
-
-**Exit gate:** all deterministic, readiness, diversity, cold-start, control,
-projection, lifecycle, and fixture tests pass with the feature disabled by
-default.
-
-### Stage 4 — Artist Follow and ready new-release resolver
+### Stage 6 — Production Follow rollout and rollback proof
 
 **Status: Not started**
 
-**Dependencies:** Stage 2, canonical Credit reads, and approved release-date
-fixture. Independent of Stage 3 implementation.
-
-- Implement Follow status/PUT/DELETE, server-confirmed multi-client behavior,
-  and Home invalidation.
-- Extend the personalized source parser/Content Manager UI with
-  `followedArtistReleases`.
-- Implement exact release-date, Credit-role, readiness, family deduplication,
-  reason, and tie-break rules in one shared resolver.
-- Project the same ordered output through both Home contracts.
-
-**Exit gate:** Follow privacy/mutation/deletion and new-release fixtures pass;
-no discovery state influences the result.
-
-### Stage 5 — Finitude Web adoption
-
-**Status: Not started**
-
-**Dependencies:** stable disabled Stage 3 and/or Stage 4 server contract. Either
-feature may ship independently.
-
-- Extend strict Home schemas with contextual reasons and add strict private
-  mutation/status clients with account-scoped keys and abort handling.
-- Send personalization response version 1 on Home; prove a request without the
-  header still decodes under the previous strict schema.
-- Add explained card copy/menu, server-confirmed Not interested, Account/
-  Privacy reset, and Artist Follow UI.
-- Fence every request to the displayed account, clear old private cache before
-  transition resolution, and reject stale responses.
-- Extend only fixed API-error telemetry operations; do not persist private
-  Home data offline.
-- Add component, schema, account-isolation, accessibility, responsive, and
-  three-engine E2E coverage.
-
-**Exit gate:** Web can use either flag without private-cache, configured-order,
-fixed-player, accessibility, or localization regressions.
-
-### Stage 6 — Finitude iOS adoption
-
-**Status: Not started**
-
-**Dependencies:** stable server fixtures and iOS authenticated account state.
-
-- Add reason/follow DTOs and fixture tests under Networking; retain the legacy
-  expanded Home endpoint until a separately approved migration.
-- Send personalization response version 1 only after the client can render the
-  explanations and complete controls.
-- Preserve Home stale-request and optional-enrichment behavior while rendering
-  explanations and pending controls.
-- Add Follow to Artist details and Reset to Account/Privacy.
-- Reuse `AudioManager`, activity policy, and canonical-ID local Audio resolver;
-  create no second player or recommendation queue.
-- Clear account-scoped in-process state on logout/switch/deletion and reject
-  stale authenticated responses.
-
-**Exit gate:** unit/UI/VoiceOver/Dynamic Type/background playback and physical-
-device account-transition checks pass.
-
-### Stage 7 — Finitude Android parity
-
-**Status: Not started**
-
-**Dependencies:** stable server/iOS contract plus Android authenticated owner-
-data foundation and Artist-details navigation.
-
-- Add authenticated current-account transport, reason/follow DTOs, fixture
-  tests, and account-epoch cancellation.
-- Send personalization response version 1 only after the complete Home
-  explanation/control contract is present.
-- Add an Artist-details destination before exposing Follow; do not put an
-  unactionable Follow state only on Search rows.
-- Render the same Home reasons/controls, reset behavior, readiness, and offline
-  limitations as iOS.
-- Reuse the app-owned Media3 queue and valid local Audio resolver.
-
-**Exit gate:** Kotlin unit, lint/build, Compose device, TalkBack/font scaling,
-account-transition, and cross-platform fixture gates pass.
-
-### Stage 8 — Staged rollout, observation, and rollback proof
-
-**Status: Not started**
-
-**Dependencies:** relevant client stage and all lifecycle/index gates.
-
-- Deploy backend/index/cleanup support with both flags off. Verify exact
-  artifact identity, indexes, health, account deletion, Artist/content cleanup,
-  and reconciliation.
-- Configure synthetic/staging Home sources and prove a non-personalized curated
-  fallback exists.
-- Verify versionless Home requests omit the two new sources before testing a
-  version-1 Web or native request.
-- Enable deterministic discovery in staging, then approved production; observe
-  bounded outcome/latency/count buckets and stop on privacy, readiness,
-  truncation, or deterministic-fixture drift.
-- Promote Artist Follows separately after its mutation/deletion matrix passes.
-  Do not make one flag or rollout cohort depend on the other.
-- Rehearse rollback by disabling resolution/UI while retaining private rows,
-  cleanup, account deletion, and safe disabled mutations.
-
-**Exit gate:** both loops have independent enable/disable proof, retained data
-is still deletable while hidden, and production behavior matches the exact
-tested artifact.
+Release the integrated candidate through the normal release matrix, verify the
+exact deployment and required indexes, configure the Home Carousel, then prove
+controlled-account Follow/Unfollow, transitions, deletion and rollback before
+enabling the independent flag. Preserve private rows, status reads, Unfollow
+and cleanup during rollback. Discovery is a separate future rollout. Track
+these gates in `deployment-todos.md`.
 
 ## Test matrix
 
@@ -844,8 +741,8 @@ tested artifact.
 
 ## Verified current commands
 
-These commands exist in the current repositories. Proposed fixture commands do
-not count as available until Stage 1 adds them.
+These commands exist in the current repositories. The fixture commands now
+validate the selected Follow v1 corpus; discovery fixtures are not implemented.
 
 ### Archtree
 
@@ -853,6 +750,8 @@ not count as available until Stage 1 adds them.
 npm run localization:check
 npm run localization:generate
 npm run localization:sync-native
+node scripts/sync-personalization-fixtures.mjs
+node scripts/sync-personalization-fixtures.mjs --check
 npm test
 npm run build
 npm run test:integration
@@ -877,8 +776,7 @@ git diff --check
 
 Run native commands from their repository roots. The iOS test runner selects
 an available iPhone simulator. Android device tests require a connected
-emulator/device; use the repository-supported JBR 21 when the default JDK is
-incompatible with Gradle 8.13.
+emulator/device; use the repository-supported JBR 21 and current Gradle wrapper.
 
 ## Dependencies and sequencing constraints
 
@@ -892,16 +790,16 @@ incompatible with Gradle 8.13.
   migrate to one contract.
 - Every new listener string must pass canonical localization generation and
   native sync before client release.
-- Android Follow UI depends on authenticated owner APIs and Artist-details
-  navigation that are not currently complete.
+- Android authenticated owner APIs and Artist-details navigation are implemented;
+  further physical-device and production acceptance remain separate gates.
 - P0/release work tracked elsewhere remains independent; this plan does not
   authorize deploying an unclosed integrated candidate.
 
-## Skipped decisions requiring product acceptance
+## Candidate decisions and selected Follow defaults
 
-The spike records recommended defaults and deliberately did not ask the user
-to accept them. Each row is **Skipped** until the coordinator approves or
-replaces it during Stage 1.
+The original spike recorded recommended defaults without product approval. The
+user selected Artist Follow on 2026-10-13; its defaults were promoted serially.
+Discovery decisions remain **Skipped** and require separate acceptance.
 
 | Status | Decision | Recommended default | Why |
 | --- | --- | --- | --- |
@@ -910,33 +808,24 @@ replaces it during Stage 1.
 | Skipped | Not-interested scope | Exact item only | Avoid inferring dislike of Artist/family |
 | Skipped | Suppression retention | 180 days, max 500 | Bounded control without permanent inferred preference |
 | Skipped | Reset meaning | Ignore earlier discovery inputs and clear suppressions; preserve product histories | Gives a real reset without unsaving/deleting history |
-| Skipped | Generated empty source | Omit it; retain configured curated sections | Safe cold start and signed-out behavior |
-| Skipped | New-release window | Inclusive 90 UTC calendar days | Useful bounded recency with existing date model |
-| Skipped | Partial/future dates | Exclude until a complete eligible date | Avoid inventing release time |
-| Skipped | Qualifying Follow roles | Album primary/featured; MediaTrack primary/featured/performer | Release-bearing roles without ambiguous legacy inference |
-| Skipped | Follow retroactivity | Show the whole current 90-day window after Follow | No read-state/follow-time persistence needed |
-| Skipped | Native durable cache | None in v1; preserve in-process rendered state only | Minimizes private offline/account-transition risk |
-| Skipped | Promotion order | Discovery backend/Web, then iOS, then Android; Follow separately after its backend/Web loop | Respects current client readiness and keeps rollback independent |
+| Accepted for Follow | Generated empty source | Omit it; retain configured curated sections | Safe cold start and signed-out behavior |
+| Accepted for Follow | New-release window | Inclusive 90 UTC calendar days | Useful bounded recency with existing date model |
+| Accepted for Follow | Partial/future dates | Exclude until a complete eligible date | Avoid inventing release time |
+| Accepted for Follow | Qualifying Follow roles | Album primary/featured; MediaTrack primary/featured/performer | Release-bearing roles without ambiguous legacy inference |
+| Accepted for Follow | Follow retroactivity | Show the whole current 90-day window after Follow | No read-state/follow-time persistence needed |
+| Accepted for Follow | Native durable cache | None in v1; preserve in-process rendered state only | Minimizes private offline/account-transition risk |
+| Accepted for Follow | Promotion order | Follow backend/Web, then both native clients; Discovery remains separate | Follows the selected scope and preserves independent rollback |
 
-## Recommended promotion order
+## Selected promotion order
 
-1. Approve shared rules, DTOs, fixtures, retention, and privacy boundaries.
-2. Dark-deploy both private-state/lifecycle foundations and verify indexes with
-   both flags off.
-3. Promote deterministic discovery resolver plus Web UI first; validate
-   deterministic fixtures, cold starts, controls, and privacy in staging.
-4. Adopt the same frozen discovery contract on iOS, then Android after its
-   authenticated foundation is ready. Versionless clients continue to omit the
-   generated source.
-5. Promote Follow/status and followed-release resolver as a separate backend
-   loop; add Web Artist Follow and staging Home source.
-6. Adopt Follow on iOS; adopt Android only with its Artist-details destination
-   and authenticated account-transition safeguards.
-7. Expand either production flag independently after its observation window.
-
-Stages 3 and 4 may be implemented in parallel after Stage 2, but their shared
-contract edits, Home DTO fixture changes, localization generation, and final
-promotion must be integrated serially.
+1. Promote the Follow-only shared rules and freeze v1 DTOs, fixtures and privacy.
+2. Implement backend lifecycle/resolution and Web controls with the flag off.
+3. Adopt the same fixtures and private-account behavior on both native clients.
+4. Complete local verification and deliver focused `develop` commits.
+5. Follow the normal release matrix and production index/controlled-account gates
+   before enabling the configured Follow source.
+6. Decide discovery independently and negotiate its future response shape before
+   sending it to released clients.
 
 ## Definition of done
 

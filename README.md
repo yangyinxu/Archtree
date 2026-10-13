@@ -81,7 +81,7 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. Startup verifies the `required-indexes-v6-social-reports` constraints before
+new scope after rotation. Startup verifies the `required-indexes-v7-artist-follows` constraints before
 admission; these are additive schema changes even when the feature is disabled.
 
 See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
@@ -665,6 +665,11 @@ Required variables:
   128. See the
   [capacity budget](docs/testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04)
   before raising them.
+- `FINITUDE_ARTIST_FOLLOWS_ENABLED`: defaults to `false` in every environment,
+  independently of Social, Playlists and Catalog Credit display switches. Set
+  `true` only after the required Artist Follow indexes and lifecycle checks
+  pass. Disabling rejects new Follow with `503 ARTIST_FOLLOWS_DISABLED`; private
+  status and Unfollow remain available and no relationship data is deleted.
 - `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in
@@ -1697,8 +1702,48 @@ Personalized Library:
 - `POST /content/me/saves/status` resolves saved state for up to 100 visible
   items, and `POST /content/me/recently-played` records explicit playback
   actions.
-- Personalized carousels mix Albums and MediaTracks from either Recently Saved
-  or Recently Played and resolve for the viewer requesting an expanded page.
+- Recently Saved and Recently Played carousels mix Albums and MediaTracks and
+  resolve for the viewer requesting an expanded page.
+- Artist Follow is a separate private relationship. `POST
+  /content/me/artist-follows/status` accepts exactly `{ "artistIds": [...] }`
+  with at most 100 hexadecimal IDs and returns input-ordered `items` containing
+  `artistId`, `following` and nullable ISO `followedAt`. `PUT` and `DELETE
+  /content/me/artist-follows/:artistId` return that same individual status.
+  All routes require existing Bearer authentication or the cookie viewer fence,
+  return `private, no-store`, and never accept a client-selected owner. Repeated
+  Follow preserves the original timestamp; repeated Unfollow succeeds even for
+  an unavailable/deleted Artist. Only ready Artists accept Follow. Account and
+  Artist write fences serialize Follow against either deletion; account cleanup
+  is transactional, and failed Artist cleanup retains lifecycle evidence.
+- `GET /api/listener/v1/personalization-capabilities` is public and `no-store`:
+  `{ "contractVersion": 1, "deterministicDiscovery": false, "artistFollows": false }`
+  (the final Boolean reflects the independent flag). The old capability DTO is
+  unchanged. This release does not implement deterministic Discovery.
+- Administrators can configure a personalized Carousel with source
+  `followedArtistReleases` and an integer limit of 1–20. Both Home projections
+  require `X-Finitude-Personalization-Version: 1`, a signed-in viewer, the enabled
+  flag and eligible results. Otherwise only this section is omitted; other
+  configured sections retain their order. The shared resolver returns ready
+  releases dated today through 89 previous UTC days, using canonical Artist
+  Credit roles and independent Album-family qualification from the shared rules.
+  Each contextual Home item may carry
+  `{ "reason": { "code": "followedArtist", "artist": { "id": "...", "name": "..." } } }`;
+  public content summaries and expanded `included` objects never gain this field.
+- Startup revision `required-indexes-v7-artist-follows` requires the unique
+  `artistFollows(userId, artistId)` index, owner/follow-date and Artist/owner
+  cleanup indexes, and the Album/MediaTrack descending calendar-date indexes.
+  The resolver uses those date indexes, bounded equality joins and a 3-second
+  database deadline per content class; it does not load an unlimited Follow ID
+  list or add an arbitrary account Follow cap. Missing required indexes prevent
+  readiness. Keep the feature disabled until the additive index rollout and
+  both Home compatibility projections have been verified.
+- Shared synthetic contract fixtures live in `test/fixtures/personalization/v1`.
+  After updating the canonical files and their SHA-256 manifest, run
+  `node scripts/sync-personalization-fixtures.mjs` to copy the exact corpus to
+  sibling iOS/Android test resources. Run
+  `node scripts/sync-personalization-fixtures.mjs --check` to verify canonical
+  hashes and byte equality without writing files. These fixtures prove contract
+  compatibility, not production enablement or real-account acceptance.
 - Each recent history is capped at 20 mixed-content entries; the full saved
   relationship is retained separately.
 - Library items expose `lastPlayedAt` and `lastActivityAt`. A new save seeds

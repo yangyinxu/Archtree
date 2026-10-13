@@ -1,0 +1,304 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import type { Server } from 'node:http';
+import { before, beforeEach, after, test } from 'node:test';
+import jwt from 'jsonwebtoken';
+import { ObjectId } from 'mongodb';
+import { createApp } from '../src/app';
+import { getDb } from '../src/infrastructure/database';
+import { followArtist, unfollowArtist, artistFollowStatuses } from '../src/services/artistFollowService';
+import { resolveFollowedArtistReleases, followedReleaseWindow } from '../src/services/followedArtistReleasesService';
+import { deleteArtistAndReferences } from '../src/services/artistLifecycleService';
+import { deleteListenerAccountData } from '../src/services/accountDeletionService';
+import { cleanupDeletedContentReferences } from '../src/services/contentReferenceService';
+import { AccountReferenceUnavailableError } from '../src/services/accountReferenceFenceService';
+import { resetRateLimitWindowsForTests } from '../src/middleware/requestProtectionMiddleware';
+import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
+
+const golden = JSON.parse(readFileSync(new URL('./fixtures/personalization/v1/followed-artist-releases.json', import.meta.url), 'utf8'));
+const expandedGolden = JSON.parse(readFileSync(new URL('./fixtures/personalization/v1/expanded-home.json', import.meta.url), 'utf8'));
+const uid = new ObjectId(), other = new ObjectId(), sid = new ObjectId(), otherSid = new ObjectId();
+let harness: MongoReplicaSetHarness | undefined, server: Server | undefined, base = '', token = '', otherToken = '';
+const oid = (id: string) => new ObjectId(id);
+const now = new Date(golden.asOf);
+const today = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
+const credit = (artistId: string, role = 'primary', order = 0) => ({ creditId: `credit_${artistId}_${role}`, subjectType: 'artist', subjectId: artistId, role, order });
+const readyTrack = (id: ObjectId, overrides: Record<string, unknown> = {}) => ({
+    _id: id, title: 'Synthetic release', uploadStatus: 'ready', publicationStatus: 'ready',
+    s3Key: id.toHexString(), mediaType: 'audio', releaseDate: today,
+    attributionStatus: 'documented', credits: [credit(golden.followedArtists[0].id)], ...overrides
+});
+const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; };
+const request = (path: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}) => fetch(base + path, {
+    method, headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+});
+
+before(async () => {
+    harness = await startMongoReplicaSet('archtree-artist-follows-test');
+    server = await new Promise<Server>(resolve => { const active = createApp().listen(0, '127.0.0.1', () => resolve(active)); });
+    const address = server.address(); assert.ok(address && typeof address !== 'string'); base = `http://127.0.0.1:${address.port}`;
+});
+beforeEach(async () => {
+    process.env.FINITUDE_ARTIST_FOLLOWS_ENABLED = 'true';
+    resetRateLimitWindowsForTests();
+    const db = getDb()!;
+    for (const name of ['users', 'authSessions', 'artistFollows', 'artists', 'albums', 'audioTracks', 'carousels', 'pages', 'imageAssets', 'catalogDeletionOperations']) await db.collection(name).deleteMany({});
+    await db.collection('users').insertMany([{ _id: uid, email: 'follow@example.test', role: 'user' }, { _id: other, email: 'other@example.test', role: 'user' }]);
+    await db.collection('authSessions').insertMany([{ _id: sid, userId: uid.toHexString(), refreshTokenHash: 'synthetic-follow', expiresAt: new Date(Date.now() + 600_000) }, { _id: otherSid, userId: other.toHexString(), refreshTokenHash: 'synthetic-other', expiresAt: new Date(Date.now() + 600_000) }]);
+    const sign = (user: ObjectId, session: ObjectId) => jwt.sign({ userId: user.toHexString(), email: user.equals(uid) ? 'follow@example.test' : 'other@example.test', sessionId: session.toHexString(), tokenType: 'access', role: 'user' }, process.env.JWT_SECRET!, { expiresIn: 600 });
+    token = sign(uid, sid); otherToken = sign(other, otherSid);
+    await db.collection('artists').insertMany(golden.followedArtists.map((artist: any) => ({ _id: oid(artist.id), name: artist.name, lifecycleStatus: 'ready' })));
+});
+after(async () => { await new Promise<void>((resolve, reject) => server ? server.close(error => error ? reject(error) : resolve()) : resolve()); await harness?.stop(); delete process.env.FINITUDE_ARTIST_FOLLOWS_ENABLED; });
+
+const seedGolden = async () => {
+    const db = getDb()!;
+    await Promise.all(golden.followedArtists.map((artist: any) => followArtist(uid.toHexString(), artist.id)));
+    await db.collection('albums').insertMany(expandedGolden.included.albums.map((album: any, i: number) => ({ ...album, _id: oid(album._id), attributionStatus: 'documented', credits: [credit(golden.followedArtists[i].id)], lifecycleStatus: 'ready' })));
+    await db.collection('audioTracks').insertMany([
+        ...expandedGolden.included.audioTracks.map((track: any, i: number) => readyTrack(oid(track._id), { ...track, _id: oid(track._id), credits: [credit(golden.followedArtists[i].id, 'performer')] })),
+        ...golden.albumFamilyTrackIds.map((id: string, i: number) => readyTrack(oid(id), { albumId: expandedGolden.included.albums[i]._id, credits: [credit(golden.followedArtists[i].id)] }))
+    ]);
+};
+
+test('capabilities are separate, public, no-store and default disabled in every environment', async () => {
+    delete process.env.FINITUDE_ARTIST_FOLLOWS_ENABLED;
+    const response = await fetch(base + '/api/listener/v1/personalization-capabilities');
+    assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await response.json(), { contractVersion: 1, deterministicDiscovery: false, artistFollows: false });
+    assert.equal('artistFollows' in await (await fetch(base + '/api/listener/v1/capabilities')).json() as any, false);
+    process.env.FINITUDE_ARTIST_FOLLOWS_ENABLED = 'true';
+    assert.deepEqual(await (await fetch(base + '/api/listener/v1/personalization-capabilities')).json(), { contractVersion: 1, deterministicDiscovery: false, artistFollows: true });
+});
+
+test('private statuses enforce authentication, cookie viewer binding, strict bounded IDs and input order', async () => {
+    const artist = golden.followedArtists[0].id;
+    const response = await fetch(base + '/content/me/artist-follows/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artistIds: [artist] }) });
+    assert.equal(response.status, 401); assert.match(response.headers.get('cache-control')!, /no-store/);
+    for (const body of [{ artistIds: Array(101).fill(artist) }, { artistIds: ['bad'] }, { artistIds: [artist], userId: other.toHexString() }, {}, []]) assert.equal((await request('/content/me/artist-follows/status', 'POST', body)).status, 400);
+    const cookie = { Authorization: '', Cookie: `session_token=${token}`, Origin: base, 'Sec-Fetch-Site': 'same-origin' };
+    assert.equal((await request('/content/me/artist-follows/status', 'POST', { artistIds: [] }, cookie)).status, 409);
+    assert.equal((await request('/content/me/artist-follows/status', 'POST', { artistIds: [] }, { ...cookie, 'X-Finitude-Account-Viewer': other.toHexString() })).status, 409);
+    assert.equal((await request('/content/me/artist-follows/status', 'POST', { artistIds: [] }, { ...cookie, 'X-Finitude-Account-Viewer': uid.toHexString() })).status, 200);
+    await followArtist(uid.toHexString(), artist);
+    const ids = [golden.followedArtists[1].id, artist.toUpperCase(), artist];
+    const payload: any = await (await request('/content/me/artist-follows/status', 'POST', { artistIds: ids })).json();
+    assert.deepEqual(payload.items.map((item: any) => [item.artistId, item.following]), [[ids[0], false], [artist, true], [artist, true]]);
+    assert.deepEqual(await (await request('/content/me/artist-follows/status', 'POST', { artistIds: [artist] }, { Authorization: `Bearer ${otherToken}` })).json(), { items: [{ artistId: artist, following: false, followedAt: null }] });
+});
+
+test('PUT preserves original followedAt under retries and concurrency; disabled keeps reads and idempotent unavailable DELETE', async () => {
+    const artist = golden.followedArtists[0].id, path = `/content/me/artist-follows/${artist}`;
+    const first: any = await (await request(path, 'PUT')).json(); assert.equal(first.following, true);
+    const results = await Promise.all(Array.from({ length: 6 }, () => followArtist(uid.toHexString(), artist)));
+    assert.ok(results.every(row => row.followedAt === first.followedAt));
+    assert.equal(await getDb()!.collection('artistFollows').countDocuments({ userId: uid.toHexString(), artistId: artist }), 1);
+    process.env.FINITUDE_ARTIST_FOLLOWS_ENABLED = 'false';
+    const rejected = await request(path, 'PUT'); assert.equal(rejected.status, 503); assert.equal((await rejected.json() as any).code, 'ARTIST_FOLLOWS_DISABLED');
+    assert.equal((await artistFollowStatuses(uid.toHexString(), [artist]))[0].following, true);
+    await getDb()!.collection('artists').deleteOne({ _id: oid(artist) });
+    for (let attempt = 0; attempt < 2; attempt++) assert.deepEqual(await (await request(path, 'DELETE')).json(), { artistId: artist, following: false, followedAt: null });
+    process.env.FINITUDE_ARTIST_FOLLOWS_ENABLED = 'true';
+    assert.equal((await request(path, 'PUT')).status, 404);
+});
+
+test('follow and opposite mutation serialize by commit and a deleted account cannot regain a follow', async () => {
+    const artist = golden.followedArtists[0].id, entered = deferred(), release = deferred();
+    const pending = followArtist(uid.toHexString(), artist, { afterArtistFence: async () => { entered.resolve(); await release.promise; } });
+    await entered.promise;
+    const removal = unfollowArtist(uid.toHexString(), artist); release.resolve(); await Promise.all([pending, removal]);
+    assert.equal((await artistFollowStatuses(uid.toHexString(), [artist]))[0].following, false);
+    await followArtist(uid.toHexString(), artist);
+    assert.deepEqual(await deleteListenerAccountData(uid.toHexString()), { status: 'deleted' });
+    assert.equal(await getDb()!.collection('artistFollows').countDocuments({ userId: uid.toHexString() }), 0);
+    await assert.rejects(followArtist(uid.toHexString(), artist), AccountReferenceUnavailableError);
+});
+
+test('account deletion rollback retains follows and concurrent follow is removed by account transaction', async () => {
+    const artist = golden.followedArtists[0].id;
+    await followArtist(uid.toHexString(), artist);
+    await assert.rejects(deleteListenerAccountData(uid.toHexString(), { afterSocialCleanup: async () => { throw new Error('synthetic rollback'); } }));
+    assert.equal((await artistFollowStatuses(uid.toHexString(), [artist]))[0].following, true);
+    const entered = deferred(), release = deferred();
+    const pending = followArtist(uid.toHexString(), golden.followedArtists[1].id, { afterArtistFence: async () => { entered.resolve(); await release.promise; } });
+    await entered.promise; const deletion = deleteListenerAccountData(uid.toHexString()); release.resolve(); await pending;
+    assert.deepEqual(await deletion, { status: 'deleted' }); assert.equal(await getDb()!.collection('artistFollows').countDocuments({}), 0);
+});
+
+test('Artist deletion fences new follows, removes all owners and retains failed lifecycle evidence for retry', async () => {
+    const artist = golden.followedArtists[0].id;
+    await Promise.all([followArtist(uid.toHexString(), artist), followArtist(other.toHexString(), artist)]);
+    const failed = await deleteArtistAndReferences(artist, { cleanupReferences: async () => { throw new Error('synthetic cleanup failure'); } });
+    assert.equal(failed.ownerDeleted, false); assert.equal(failed.cleanupPending, true);
+    assert.equal(await getDb()!.collection('artistFollows').countDocuments({ artistId: artist }), 2);
+    await assert.rejects(followArtist(uid.toHexString(), artist), (error: any) => error.statusCode === 404);
+    const done = await deleteArtistAndReferences(artist); assert.equal(done.ownerDeleted, true);
+    assert.equal(await getDb()!.collection('artistFollows').countDocuments({ artistId: artist }), 0);
+    await cleanupDeletedContentReferences('artist', artist);
+    assert.equal(await getDb()!.collection('artists').countDocuments({ _id: oid(artist) }), 0);
+});
+
+test('a concurrently committed Follow is cleaned before Artist metadata deletion', async () => {
+    const artist = golden.followedArtists[0].id, entered = deferred(), release = deferred();
+    const pending = followArtist(uid.toHexString(), artist, { afterArtistFence: async () => { entered.resolve(); await release.promise; } });
+    await entered.promise; const deletion = deleteArtistAndReferences(artist); release.resolve(); await pending;
+    assert.equal((await deletion).ownerDeleted, true); assert.equal(await getDb()!.collection('artistFollows').countDocuments({ artistId: artist }), 0);
+});
+
+test('shared golden follows releases resolve exact reason/order/family and independently qualify before limit', async () => {
+    await seedGolden();
+    assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 12, true, now), golden.expectedItems);
+    assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 1, true, now), golden.expectedItems.slice(0, 1));
+    assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 20, false, now), []);
+    assert.deepEqual(await resolveFollowedArtistReleases(undefined, 20, true, now), []);
+    assert.deepEqual(await resolveFollowedArtistReleases(other.toHexString(), 20, true, now), []);
+    process.env.FINITUDE_ARTIST_FOLLOWS_ENABLED = 'false'; assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now), []);
+});
+
+test('UTC complete dates include day89 only, reject future, rollover, fractional and partial dates', async () => {
+    const asOf = new Date('2026-03-01T23:59:59Z');
+    const { start } = followedReleaseWindow(asOf); const previous = new Date(start.getTime() - 86_400_000);
+    const calendar = (value: Date) => ({ year: value.getUTCFullYear(), month: value.getUTCMonth() + 1, day: value.getUTCDate() });
+    const dates = [calendar(start), { year: 2026, month: 3, day: 1 }, calendar(previous), { year: 2026, month: 3, day: 2 }, { year: 2026, month: 2, day: 29 }, { year: 2026, month: 2 }, { year: 2026, month: 2, day: 1.5 }, { year: '2026', month: 2, day: 1 }, { year: [2026], month: 2, day: 1 }, { year: 2026, month: -1, day: 1 }, { year: 2026, month: 2, day: 0 }];
+    const ids = dates.map(() => new ObjectId());
+    await followArtist(uid.toHexString(), golden.followedArtists[0].id);
+    await getDb()!.collection('audioTracks').insertMany(dates.map((releaseDate, i) => readyTrack(ids[i], { releaseDate })));
+    assert.deepEqual((await resolveFollowedArtistReleases(uid.toHexString(), 20, true, asOf)).map(row => row.contentId), [ids[1].toHexString(), ids[0].toHexString()]);
+});
+
+test('own Credit roles and ready reason selection do not inherit from Album or legacy relationships', async () => {
+    await seedGolden();
+    const db = getDb()!, a = golden.followedArtists[0].id, b = golden.followedArtists[1].id;
+    await db.collection('albums').updateMany({}, { $set: { credits: [credit(a, 'producer')] } });
+    const ranked = oid(golden.albumFamilyTrackIds[0]);
+    await db.collection('audioTracks').updateOne({ _id: ranked }, { $set: { credits: [credit(b, 'featured', 0), credit(a, 'primary', 1)] } });
+    const excluded = ['legacyUnspecified', 'producer', 'composer', 'remixer'].map(role => readyTrack(new ObjectId(), { credits: [credit(a, role)] }));
+    const legacy = readyTrack(new ObjectId(), { credits: undefined, artistIds: [a] });
+    await db.collection('audioTracks').insertMany([...excluded, legacy]);
+    let items = await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now);
+    assert.equal(items.some(row => row.contentType === 'album'), false);
+    assert.equal(items.length, 4); assert.equal(items.find(row => row.contentId === ranked.toHexString())?.reason.artist.id, a);
+    await db.collection('artists').updateOne({ _id: oid(a) }, { $set: { lifecycleStatus: 'deleting' } });
+    items = await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now);
+    assert.equal(items.find(row => row.contentId === ranked.toHexString())?.reason.artist.id, b);
+    assert.equal(items.every(row => row.reason.artist.id === b), true);
+});
+
+test('Album must contain a ready canonical track; pending, detached, nonready and future families do not suppress eligible tracks', async () => {
+    await seedGolden(); const db = getDb()!;
+    await db.collection('albums').updateOne({ _id: oid(expandedGolden.included.albums[0]._id) }, { $set: { audioTrackIds: [] } });
+    await db.collection('albums').updateOne({ _id: oid(expandedGolden.included.albums[1]._id) }, { $set: { lifecycleStatus: 'deleting' } });
+    const items = await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now);
+    assert.equal(items.length, 4); assert.equal(items.every(row => row.contentType === 'audioTrack'), true);
+    await db.collection('audioTracks').updateMany({}, { $set: { publicationStatus: 'pending' } });
+    assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now), []);
+});
+
+test('Home header gates both projections identically, omits only new source and keeps reason out of public catalog', async () => {
+    await seedGolden(); const db = getDb()!;
+    // HTTP uses wall-clock calendar; retain the golden identities and ordering at the current UTC date.
+    const current = new Date(); const day = { year: current.getUTCFullYear(), month: current.getUTCMonth() + 1, day: current.getUTCDate() };
+    await db.collection('albums').updateMany({}, { $set: { releaseDate: day } }); await db.collection('audioTracks').updateMany({}, { $set: { releaseDate: day } });
+    const beforeId = new ObjectId(), followedId = oid(expandedGolden.page.items[0].carouselId), afterId = new ObjectId();
+    await db.collection('carousels').insertMany([{ _id: beforeId, name: 'Before', mode: 'manual', items: [] }, { _id: followedId, name: 'Followed', mode: 'personalized', personalizedConfig: { source: 'followedArtistReleases', limit: 12 }, items: [] }, { _id: afterId, name: 'After', mode: 'manual', items: [] }]);
+    await db.collection('pages').insertOne({ slug: 'home', title: 'Home', items: [beforeId, followedId, afterId].map((id, order) => ({ itemId: id.toHexString(), itemType: 'carousel', carouselId: id.toHexString(), order })) });
+    for (const header of [undefined, '0', '2', '1, 1', '01']) {
+        const headers = header ? { 'X-Finitude-Personalization-Version': header } : {};
+        const listener: any = await (await request('/api/listener/v1/home', 'GET', undefined, headers)).json();
+        const expanded: any = await (await request('/content/pages/home/expanded', 'GET', undefined, headers)).json();
+        assert.deepEqual(listener.sections.map((section: any) => section.title), ['Before', 'After']);
+        assert.deepEqual(expanded.page.items.map((item: any) => item.carousel.name), ['Before', 'After']);
+    }
+    const headers = { 'X-Finitude-Personalization-Version': '1' };
+    const listener: any = await (await request('/api/listener/v1/home', 'GET', undefined, headers)).json();
+    const expanded: any = await (await request('/content/pages/home/expanded', 'GET', undefined, headers)).json();
+    assert.deepEqual(listener.sections.map((section: any) => section.title), ['Before', 'Followed', 'After']);
+    assert.deepEqual(listener.sections[1].items.map((item: any, order: number) => ({ contentType: item.contentType, contentId: item.id, order, reason: item.reason })), expanded.page.items[1].carousel.items);
+    assert.equal(JSON.stringify(expanded.included).includes('reason'), false);
+    const artistDetail = await (await request(`/api/listener/v1/artists/${golden.followedArtists[0].id}`)).json(); assert.equal(JSON.stringify(artistDetail).includes('followedArtist'), false);
+    const anonymous: any = await (await request('/api/listener/v1/home', 'GET', undefined, { ...headers, Authorization: '' })).json(); assert.deepEqual(anonymous.sections.map((item: any) => item.title), ['Before', 'After']);
+});
+
+test('only administrator configures the generated source and its integer 1 through20 limit', async () => {
+    const body = { name: 'Followed releases', mode: 'personalized', personalizedSource: 'followedArtistReleases', personalizedLimit: 12 };
+    assert.equal((await request('/content/carousels', 'POST', body)).status, 403);
+    await getDb()!.collection('users').updateOne({ _id: uid }, { $set: { role: 'admin' } });
+    for (const limit of [0, 21, 1.5]) assert.equal((await request('/content/carousels', 'POST', { ...body, personalizedLimit: limit })).status, 400);
+    assert.equal((await request('/content/carousels', 'POST', body)).status, 201);
+});
+
+test('stored Credit order beats array order, blank Artists are skipped and invalid order excludes the owner', async () => {
+    const db = getDb()!, a = golden.followedArtists[0].id, b = golden.followedArtists[1].id;
+    await Promise.all([followArtist(uid.toHexString(), a), followArtist(uid.toHexString(), b)]);
+    const id = new ObjectId();
+    await db.collection('audioTracks').insertOne(readyTrack(id, { credits: [credit(a, 'primary', 9), credit(b, 'primary', 1)] }));
+    assert.equal((await resolveFollowedArtistReleases(uid.toHexString(), 1, true, now))[0].reason.artist.id, b);
+    await db.collection('audioTracks').updateOne({ _id: id }, { $set: { credits: [credit(a, 'primary', 0), credit(b, 'featured', 1)] } });
+    await db.collection('artists').updateOne({ _id: oid(a) }, { $set: { name: ' \t\n ' } });
+    assert.equal((await resolveFollowedArtistReleases(uid.toHexString(), 1, true, now))[0].reason.artist.id, b);
+    await db.collection('artists').updateOne({ _id: oid(a) }, { $set: { name: 'Valid Name' } });
+    for (const invalidOrder of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, '0', true, [0], null]) {
+        await db.collection('audioTracks').updateOne({ _id: id }, { $set: { credits: [{ ...credit(a), order: invalidOrder }, credit(b, 'featured', 1)] } });
+        assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 1, true, now), []);
+    }
+});
+
+test('the complete canonical Credit list must be valid before the release limit is applied', async () => {
+    const db = getDb()!, a = golden.followedArtists[0].id, b = golden.followedArtists[1].id;
+    await followArtist(uid.toHexString(), a);
+    const valid = credit(a);
+    const duplicateRelationship = { ...valid, creditId: 'another_credit_id', order: 1 };
+    const invalid: Record<string, unknown>[] = [
+        { attributionStatus: 'unknown' }, { attributionStatus: ['documented'] }, { attributionStatus: null },
+        { credits: { ...valid } }, { credits: [] },
+        { credits: [valid, null] }, { credits: [valid, [credit(b)]] },
+        ...['bad', ' invalid_credit ', 'invalid.credit', 'x'.repeat(101), null, ['valid_credit_id']].map(creditId => ({ credits: [valid, { ...credit(b), creditId }] })),
+        { credits: [valid, { ...credit(b), creditId: valid.creditId }] },
+        { credits: [valid, duplicateRelationship] },
+        ...['bad', 'A'.repeat(24), [b], null].map(subjectId => ({ credits: [valid, { ...credit(b), subjectId }] })),
+        { credits: [valid, { ...credit(b), subjectType: 'unknown' }] },
+        { credits: [valid, { ...credit(b), subjectType: 'organization' }] },
+        { credits: [valid, { ...credit(b), role: 'label' }] },
+        { credits: [valid, { ...credit(b), role: 'unknown' }] },
+        { credits: Array.from({ length: 51 }, (_, order) => ({ ...credit(order.toString(16).padStart(24, '0')), creditId: `extra_credit_${order}`, order })) }
+    ];
+    const yesterday = new Date(now.getTime() - 86_400_000);
+    const eligible = new ObjectId();
+    await db.collection('audioTracks').insertMany([
+        ...invalid.map(overrides => readyTrack(new ObjectId(), overrides)),
+        readyTrack(eligible, { releaseDate: { year: yesterday.getUTCFullYear(), month: yesterday.getUTCMonth() + 1, day: yesterday.getUTCDate() },
+            credits: [valid, { ...credit(b, 'label', 1), subjectType: 'organization' }] })
+    ]);
+    const expected = [{ contentType: 'audioTrack', contentId: eligible.toHexString(), order: 0,
+        reason: { code: 'followedArtist', artist: golden.followedArtists[0] } }];
+    assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now), expected);
+    assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 1, true, now), expected);
+});
+
+test('invalid Album attribution or Credits cannot consume limit one or suppress a valid canonical member', async () => {
+    const db = getDb()!, a = golden.followedArtists[0].id, b = golden.followedArtists[1].id;
+    await followArtist(uid.toHexString(), a);
+    const album = new ObjectId(), track = new ObjectId(), valid = credit(a);
+    await db.collection('albums').insertOne({ _id: album, title: 'Synthetic invalid Album', lifecycleStatus: 'ready',
+        releaseDate: today, attributionStatus: 'documented', credits: [valid], audioTrackIds: [track.toHexString()] });
+    await db.collection('audioTracks').insertOne(readyTrack(track, { albumId: album.toHexString() }));
+    for (const overrides of [
+        { attributionStatus: 'unknown', credits: [valid] },
+        { attributionStatus: 'documented', credits: [{ ...valid, creditId: 'bad' }] },
+        { attributionStatus: 'documented', credits: [valid, { ...credit(b), creditId: valid.creditId }] },
+        { attributionStatus: 'documented', credits: [valid, { ...valid, creditId: 'another_credit_id', order: 1 }] }
+    ]) {
+        await db.collection('albums').updateOne({ _id: album }, { $set: overrides });
+        assert.deepEqual((await resolveFollowedArtistReleases(uid.toHexString(), 1, true, now)).map(row => row.contentId), [track.toHexString()]);
+    }
+});
+
+test('a ready unlisted track keeps its release even when its referenced Album independently qualifies', async () => {
+    await seedGolden();
+    const unlisted = new ObjectId();
+    await getDb()!.collection('audioTracks').insertOne(readyTrack(unlisted, { albumId: expandedGolden.included.albums[0]._id }));
+    const items = await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now);
+    assert.equal(items.length, 5); assert.ok(items.some(item => item.contentId === unlisted.toHexString()));
+    assert.ok(golden.albumFamilyTrackIds.every((id: string) => !items.some(item => item.contentId === id)));
+});

@@ -17,6 +17,10 @@
   padding-right: var(--space-2);
 }
 
+.primary {
+  min-width: 0;
+}
+
 .action {
   align-items: center;
   background: transparent;

@@ -4,6 +4,16 @@
   min-width: 0;
 }
 
+.withReason {
+  display: flex;
+  flex-direction: column;
+}
+
+.withReason .action {
+  height: auto;
+  flex: 1;
+}
+
 .shareAction {
   position: absolute;
   top: .25rem;

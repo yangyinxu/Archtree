@@ -5,6 +5,7 @@ import { listenerArtistQuery } from '../../api/listener';
 import { browserSessionQuery } from '../../api/session';
 import { Artwork } from '../../components/Artwork';
 import { PageSection } from '../../components/PageSection';
+import { LazyArtistFollowButton } from '../../components/LazyArtistFollowButton';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
 import styles from './CatalogPages.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
@@ -53,6 +54,7 @@ export const ArtistPage = () => {
           <p className={styles.eyebrow}>{t('common.label.artist')}</p>
           <h1>{artist.name || t('content.title.unknown_artist')}</h1>
           {artist.bio && <p className={styles.bio}>{artist.bio}</p>}
+          <LazyArtistFollowButton artistId={artist.id} />
         </div>
       </header>
 

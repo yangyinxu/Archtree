@@ -1,5 +1,6 @@
 import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import { resolveFollowedArtistReleases, type FollowedArtistReleaseRef } from '../services/followedArtistReleasesService';
 import { ActivitySource, UserLibrary } from './userLibrary';
 import {
     readyArtistLifecycleFilter,
@@ -44,7 +45,7 @@ export interface ArtistCarouselConfig {
 }
 
 export interface PersonalizedCarouselConfig {
-    source: ActivitySource;
+    source: ActivitySource | 'followedArtistReleases';
     limit: number;
 }
 
@@ -164,7 +165,7 @@ export class Carousel {
             .then((carousels) => this.resolveCarousels(carousels, viewerUserId));
     }
 
-    static fetchByIds(carouselIds: string[], viewerUserId?: string) {
+    static fetchByIds(carouselIds: string[], viewerUserId?: string, personalizationV1 = false) {
         const db = getDb();
         const objectIds = carouselIds
             .filter(Boolean)
@@ -178,10 +179,10 @@ export class Carousel {
             .collection(collectionId)
             .find({ _id: { $in: objectIds } })
             .toArray()
-            .then((carousels) => this.resolveCarousels(carousels, viewerUserId));
+            .then((carousels) => this.resolveCarousels(carousels, viewerUserId, personalizationV1));
     }
 
-    static async resolveCarousel(carousel: any, viewerUserId?: string) {
+    static async resolveCarousel(carousel: any, viewerUserId?: string, personalizationV1 = false, followedReleases?: FollowedArtistReleaseRef[]) {
         const mode: CarouselMode = carousel?.mode === 'artist'
             ? 'artist'
             : carousel?.mode === 'personalized' ? 'personalized' : 'manual';
@@ -199,6 +200,10 @@ export class Carousel {
 
         if (mode === 'personalized') {
             const config = carousel?.personalizedConfig as PersonalizedCarouselConfig | undefined;
+            if (config?.source === 'followedArtistReleases') {
+                return { ...carousel, mode, items: Number.isSafeInteger(config.limit) && config.limit >= 1 && config.limit <= 20
+                    ? (followedReleases ?? await resolveFollowedArtistReleases(viewerUserId, 20, personalizationV1)).slice(0, config.limit) : [] };
+            }
             if (!viewerUserId || !config || (config.source !== 'recentlySaved' && config.source !== 'recentlyPlayed')) {
                 return { ...carousel, mode, items: [] };
             }
@@ -364,11 +369,13 @@ export class Carousel {
         return { ...carousel, mode, items };
     }
 
-    static async resolveCarousels(carousels: any[], viewerUserId?: string) {
+    static async resolveCarousels(carousels: any[], viewerUserId?: string, personalizationV1 = false) {
+        const followedReleases = carousels.some(carousel => carousel.mode === 'personalized' && carousel.personalizedConfig?.source === 'followedArtistReleases')
+            ? await resolveFollowedArtistReleases(viewerUserId, 20, personalizationV1) : [];
         const resolved: any[] = [];
         for (let index = 0; index < carousels.length; index += 10) {
             resolved.push(...await Promise.all(
-                carousels.slice(index, index + 10).map((carousel) => this.resolveCarousel(carousel, viewerUserId))
+                carousels.slice(index, index + 10).map((carousel) => this.resolveCarousel(carousel, viewerUserId, personalizationV1, followedReleases))
             ));
         }
         return resolved;

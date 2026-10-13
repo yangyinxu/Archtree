@@ -1,0 +1,10 @@
+{
+  "contractVersion": 1,
+  "files": {
+    "artist-follow-status.json": "1f84c5cf2f9207cb0db2d8d649c1dec2e0446a798ce3cd894c6f092bf273016a",
+    "expanded-home.json": "c4f677abe41a40f348b055bc96eed9774247d7346c74c985e9589add54c0ef13",
+    "followed-artist-releases.json": "ee99b82bcb0aa6a222e3f4354493d7ac1ffec3ca4f048e2c7e03ef4166165093",
+    "listener-home.json": "a6ed57bd7abeeab01bdc788e61e4e51b5c8a6a6cb8d444be468df88b3a028348",
+    "personalization-capabilities.json": "1db830b3d105852f7306b9e3b5fbef8497359752f0be97295d7a897b080f1841"
+  }
+}

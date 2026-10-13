@@ -42,6 +42,7 @@ const sharedProvenanceCollections = [
 ] as const;
 
 const personalCollections = [
+    ['artistFollows', 'userId'],
     ['userSaves', 'userId'],
     ['userActivity', 'userId'],
     ['authActionTokens', 'userId'],

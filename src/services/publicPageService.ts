@@ -59,7 +59,8 @@ const isVisibleContent = (
 export const toPublicContentRefs = (
     items: unknown,
     visibility: PublicContentVisibility,
-    allowedTypes: ReadonlySet<string> = new Set(['post', 'album', 'audioTrack'])
+    allowedTypes: ReadonlySet<string> = new Set(['post', 'album', 'audioTrack']),
+    contextualReasons = false
 ) => sortedItems(items, maximumSectionItems).flatMap((item: any) => {
     const contentType = String(item?.contentType ?? '');
     const contentId = asObjectId(item?.contentId);
@@ -67,7 +68,14 @@ export const toPublicContentRefs = (
         || !isVisibleContent(contentType, contentId, visibility)) {
         return [];
     }
-    return [{ contentType, contentId }];
+    const reasonArtistId = contextualReasons && typeof item?.reason?.artist?.id === 'string'
+        ? asObjectId(item.reason.artist.id)?.toLowerCase() : null;
+    const reasonName = typeof item?.reason?.artist?.name === 'string' ? item.reason.artist.name.trim() : '';
+    const reason = contextualReasons && item?.reason?.code === 'followedArtist' && reasonArtistId && reasonName
+        ? { code: 'followedArtist', artist: { id: reasonArtistId, name: reasonName } } : null;
+    // A generated placement without a valid explanation cannot be consumed safely by strict clients.
+    if (contextualReasons && !reason) return [];
+    return [{ contentType, contentId, ...(reason ? { reason } : {}) }];
 }).map((item, order) => ({ ...item, order }));
 
 const publicArtistConfig = (value: any) => {
@@ -93,7 +101,8 @@ const publicArtistConfig = (value: any) => {
 const publicPersonalizedConfig = (value: any) => {
     const source = value?.source === 'recentlySaved'
         ? 'recentlySaved'
-        : value?.source === 'recentlyPlayed' ? 'recentlyPlayed' : null;
+        : value?.source === 'recentlyPlayed' ? 'recentlyPlayed'
+            : value?.source === 'followedArtistReleases' ? 'followedArtistReleases' : null;
     if (!source) return null;
     const requestedLimit = Number(value?.limit ?? 20);
     return {
@@ -111,7 +120,7 @@ export const toPublicCarousel = (carousel: any, visibility: PublicContentVisibil
     const projected: Record<string, unknown> = {
         ...(id ? { _id: id } : {}),
         name: String(carousel?.name ?? '').trim(),
-        items: toPublicContentRefs(carousel?.items, visibility),
+        items: toPublicContentRefs(carousel?.items, visibility, undefined, mode === 'personalized' && carousel?.personalizedConfig?.source === 'followedArtistReleases'),
         mode
     };
     if (mode === 'artist') projected.artistConfig = publicArtistConfig(carousel?.artistConfig);
@@ -162,6 +171,8 @@ export const toPublicExpandedPage = (
     const items = publicPage.items.flatMap((item: any): Array<Record<string, unknown>> => {
         if (item.itemType === 'carousel') {
             const carousel = carouselsById.get(item.carouselId);
+            if (carousel?.mode === 'personalized' && carousel?.personalizedConfig?.source === 'followedArtistReleases'
+                && toPublicContentRefs(carousel.items, visibility, undefined, true).length === 0) return [];
             return carousel ? [{
                 itemId: item.itemId,
                 itemType: 'carousel',

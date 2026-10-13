@@ -1,3 +1,4 @@
+import { resolveFollowedArtistReleases, type FollowedArtistReason, type FollowedArtistReleaseRef } from './followedArtistReleasesService';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { ObjectId } from 'mongodb';
 
@@ -39,6 +40,7 @@ import type {
     ListenerAudioTrackSummary,
     ListenerCatalogCredit,
     ListenerPlayableSummary,
+    ListenerHomeItem,
     ListenerPresentation,
     ListenerHomeSection,
     ListenerPageSlug,
@@ -66,6 +68,7 @@ export class ListenerCollectionPageError extends Error {
 }
 
 interface ListenerContentRef {
+    reason?: FollowedArtistReason;
     contentType: 'album' | 'audioTrack';
     contentId: string;
     order: number;
@@ -535,14 +538,18 @@ const toAudioTrackSummary = (
     };
 };
 
-const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
+const resolveCarouselRefs = async (carousel: any, viewerUserId?: string, followedReleases: FollowedArtistReleaseRef[] = []) => {
     const mode = carousel?.mode === 'artist'
         ? 'artist'
         : carousel?.mode === 'personalized' ? 'personalized' : 'manual';
     if (mode === 'manual') return orderedRefs(carousel?.items);
 
     if (mode === 'personalized') {
-        const source = carousel?.personalizedConfig?.source as ActivitySource | undefined;
+        const source = carousel?.personalizedConfig?.source as ActivitySource | 'followedArtistReleases' | undefined;
+        if (source === 'followedArtistReleases') {
+            const limit = carousel.personalizedConfig.limit;
+            return Number.isSafeInteger(limit) && limit >= 1 && limit <= 20 ? followedReleases.slice(0, limit) : [];
+        }
         const requestedLimit = Number(carousel?.personalizedConfig?.limit ?? 20);
         if (!viewerUserId || (source !== 'recentlySaved' && source !== 'recentlyPlayed')) return [];
         const limit = Math.max(
@@ -593,7 +600,7 @@ const resolveCarouselRefs = async (carousel: any, viewerUserId?: string) => {
 };
 
 /** Resolves the composed Home page to public, presentation-preserving sections. */
-export const getListenerHome = async (viewerUserId?: string): Promise<ListenerHome | null> => {
+export const getListenerHome = async (viewerUserId?: string, personalizationV1 = false): Promise<ListenerHome | null> => {
     const db = getDb()!;
     const page: any = await db.collection('pages')
         .find({ slug: 'home' })
@@ -628,11 +635,14 @@ export const getListenerHome = async (viewerUserId?: string): Promise<ListenerHo
     const carouselMap = documentsById(carousels);
     const collectionMap = documentsById(collections);
 
+    const followedReleases = carousels.some(carousel => carousel.mode === 'personalized' && carousel.personalizedConfig?.source === 'followedArtistReleases')
+        ? await resolveFollowedArtistReleases(viewerUserId, 20, personalizationV1) : [];
     const sectionDefinitions: Array<{
         id: string;
         title: string;
         presentation: ListenerPresentation;
         refs: ListenerContentRef[];
+        omitWhenEmpty?: boolean;
     }> = [];
     for (const item of pageItems) {
         if (item?.itemType === 'carousel') {
@@ -642,7 +652,8 @@ export const getListenerHome = async (viewerUserId?: string): Promise<ListenerHo
                 id: item.itemId,
                 title: normalizeText(carousel.name),
                 presentation: 'carousel',
-                refs: await resolveCarouselRefs(carousel, viewerUserId)
+                refs: await resolveCarouselRefs(carousel, viewerUserId, followedReleases),
+                omitWhenEmpty: carousel.mode === 'personalized' && carousel.personalizedConfig?.source === 'followedArtistReleases'
             });
             continue;
         }
@@ -689,17 +700,17 @@ export const getListenerHome = async (viewerUserId?: string): Promise<ListenerHo
         id: section.id,
         title: section.title,
         presentation: section.presentation,
-        items: section.refs.flatMap((ref): ListenerPlayableSummary[] => {
+        items: section.refs.flatMap((ref): ListenerHomeItem[] => {
             if (ref.contentType === 'album') {
                 const album = context.albumsById.get(ref.contentId);
-                return album ? [toAlbumSummary(album, context)] : [];
+                return album ? [{ ...toAlbumSummary(album, context), ...(ref.reason ? { reason: ref.reason } : {}) }] : [];
             }
             const track = context.tracksById.get(ref.contentId);
-            return track ? [toAudioTrackSummary(track, context)] : [];
+            return track ? [{ ...toAudioTrackSummary(track, context), ...(ref.reason ? { reason: ref.reason } : {}) }] : [];
         })
     }));
 
-    return { title: normalizeText(page.title) || 'Home', sections };
+    return { title: normalizeText(page.title) || 'Home', sections: sections.filter((section, index) => !sectionDefinitions[index].omitWhenEmpty || section.items.length > 0) };
 };
 
 const collectionPageNotFound = () => new ListenerCollectionPageError(

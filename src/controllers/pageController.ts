@@ -1,3 +1,4 @@
+import { supportsArtistFollowHome } from '../config/artistFollowRollout';
 import { NextFunction, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 
@@ -90,7 +91,8 @@ const parseCarouselDefinition = (body: any): {
     if (mode === 'personalized') {
         const source = String(body?.personalizedSource ?? '').trim();
         const requestedLimit = Number(body?.personalizedLimit ?? 20);
-        if ((source !== 'recentlySaved' && source !== 'recentlyPlayed') || !Number.isFinite(requestedLimit)) {
+        if ((source !== 'recentlySaved' && source !== 'recentlyPlayed' && source !== 'followedArtistReleases') || !Number.isFinite(requestedLimit)
+            || (source === 'followedArtistReleases' && (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 20))) {
             return null;
         }
         return {
@@ -207,6 +209,11 @@ export const getPageBySlug = async (req: Request, res: Response, next: NextFunct
 };
 
 export const getExpandedPageBySlug = async (req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Pragma', 'no-cache');
+    res.vary('Cookie');
+    res.vary('Authorization');
+    res.vary('X-Finitude-Personalization-Version');
     try {
         const slug = getPageSlug(String(req.params.slug ?? ''));
         if (!slug) {
@@ -236,7 +243,7 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         // Expand carousel references into full carousel payloads for client rendering.
         const viewerUserId = (req as AuthenticatedRequest).auth?.userId;
         const [carousels, contentCollections]: any[][] = await Promise.all([
-            Carousel.fetchByIds(carouselIds, viewerUserId),
+            Carousel.fetchByIds(carouselIds, viewerUserId, slug === 'home' && supportsArtistFollowHome(req.headers['x-finitude-personalization-version'])),
             ContentCollection.fetchByIds(collectionIds)
         ]);
         const resolvedRefs = [

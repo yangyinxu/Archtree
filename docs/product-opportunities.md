@@ -37,7 +37,7 @@ also be added to `business-rules.md` during implementation.
 | P1 | Adopt server-backed Playlists on Android | Implementation complete with local Audio resolution; production/device rollout remains | High | Medium |
 | P1 | Explainable personalized discovery | Contract spike complete; implementation not started | Very high | Medium |
 | P2 | Content Manager validation, preview, drafts, and atomic publishing | Contract/lifecycle spike complete; implementation not started | High | Medium–high |
-| P2 | Follow Artists and show new releases | Contract spike complete; implementation not started | High | Medium |
+| P2 | Follow Artists and show new releases | Implemented and locally verified; production rollout remains | High | Medium |
 | P3 | Cross-device playback checkpoints | Deferred | Medium–high | Medium–high |
 | P3 | Read-only Playlist sharing, then collaboration | Deferred | Medium–high | High |
 
@@ -196,10 +196,10 @@ Implementation and canonical rule changes are not started.
 Listeners should be able to express durable interest in an Artist and quickly
 see new ready releases from followed Artists.
 
-### Proposed first release
+### Selected first release
 
 - Add owner-scoped Follow and Unfollow actions.
-- Add an in-app **New from Artists you follow** section or destination.
+- Add a configured **New from Artists you follow** Home Carousel.
 - Derive release membership from canonical Album and MediaTrack Credits.
 - Keep email, push notifications, public follower counts, and public profiles
   out of the first release.
@@ -208,7 +208,10 @@ see new ready releases from followed Artists.
 The independent Follow/new-release contract is recorded alongside discovery in
 [`plans/explainable-discovery-and-artist-follows-plan.md`](plans/explainable-discovery-and-artist-follows-plan.md).
 Follow is private, owner-only, independently flagged, and not a discovery input
-in v1. Its product choices remain `Skipped`; implementation is not started.
+in v1. The Follow defaults were selected on 2026-10-13 and promoted into
+`business-rules.md`. Backend/Web, iOS and Android implementation and local
+automated verification are complete; production and physical-device acceptance
+remain external rollout gates. Discovery remains a separate unapproved candidate.
 
 ## P3 — Cross-Device Playback Checkpoints
 
@@ -272,7 +275,7 @@ The completed automated native Playlist work can move through its normal local
 review/merge path, while unavailable user/device gates remain `Skipped`.
 Android password authentication, authenticated activity and local Audio
 resolution now make its Playlist client reachable. The next rollout step is
-controlled staging/production and physical-device acceptance. Discovery/Follow
-and Content Manager now have implementation-ready spikes, but their canonical-rule
-promotion and production stages remain `Not started` because the required
-product choices were deliberately skipped rather than silently approved.
+controlled staging/production and physical-device acceptance. Artist Follow
+and new releases were selected for implementation on 2026-10-13. Discovery and
+Content Manager remain implementation-ready candidates; their product choices
+and canonical-rule promotion are separate from the selected Follow work.

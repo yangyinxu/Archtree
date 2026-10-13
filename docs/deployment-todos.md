@@ -3,6 +3,28 @@
 This file tracks infrastructure work that is intentionally deferred and cannot
 be completed solely through application code.
 
+## Artist Follow and New Releases Rollout
+
+Status: Local implementation and automated verification are **Complete** as of
+2026-10-13. Production deployment and enablement are **Not started**.
+
+- [ ] Release the integrated backend/Web and compatible native clients through
+      their normal release gates; old clients remain compatible without the
+      personalization version header.
+- [ ] Verify the exact mandatory Follow and release-date indexes documented in
+      [README](../README.md), including the unique owner/Artist constraint.
+- [ ] Configure a Home Carousel with source `followedArtistReleases`, its name,
+      persisted position, and a limit from 1 through 20.
+- [ ] Enable `FINITUDE_ARTIST_FOLLOWS_ENABLED` only after controlled-account
+      Follow, Unfollow, new-release visibility, account transition, and flag
+      rollback checks pass. Keep discovery independent and disabled.
+- [ ] Verify compatible physical-device clients against that same deployment.
+
+The flag defaults off in every environment. Disabling it hides Follow and the
+generated Home source while preserving status reads, Unfollow, relationships,
+and deletion cleanup. Local fixtures and simulator evidence do not establish
+production rollout or real-device delivery.
+
 ## Production HTTPS for Authentication
 
 Status: Recovered on 2026-08-05 at 23:38 EDT. Production commit `9b62537`

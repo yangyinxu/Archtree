@@ -1,0 +1,156 @@
+{
+  "page": {
+    "slug": "home",
+    "title": "Home",
+    "items": [
+      {
+        "itemId": "000000000000000000000191",
+        "itemType": "carousel",
+        "carouselId": "000000000000000000000191",
+        "order": 0,
+        "carousel": {
+          "_id": "000000000000000000000191",
+          "name": "New from artists you follow",
+          "mode": "personalized",
+          "personalizedConfig": {
+            "source": "followedArtistReleases",
+            "limit": 12
+          },
+          "items": [
+            {
+              "contentType": "album",
+              "contentId": "0000000000000000000000c9",
+              "order": 0,
+              "reason": {
+                "code": "followedArtist",
+                "artist": {
+                  "id": "000000000000000000000065",
+                  "name": "Lorem Ensemble"
+                }
+              }
+            },
+            {
+              "contentType": "album",
+              "contentId": "0000000000000000000000ca",
+              "order": 1,
+              "reason": {
+                "code": "followedArtist",
+                "artist": {
+                  "id": "000000000000000000000066",
+                  "name": "Ipsum Quartet"
+                }
+              }
+            },
+            {
+              "contentType": "audioTrack",
+              "contentId": "00000000000000000000012d",
+              "order": 2,
+              "reason": {
+                "code": "followedArtist",
+                "artist": {
+                  "id": "000000000000000000000065",
+                  "name": "Lorem Ensemble"
+                }
+              }
+            },
+            {
+              "contentType": "audioTrack",
+              "contentId": "00000000000000000000012e",
+              "order": 3,
+              "reason": {
+                "code": "followedArtist",
+                "artist": {
+                  "id": "000000000000000000000066",
+                  "name": "Ipsum Quartet"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "included": {
+    "albums": [
+      {
+        "_id": "0000000000000000000000c9",
+        "title": "Dolor Dawn",
+        "coverArtUrl": "",
+        "audioTrackIds": [
+          "00000000000000000000012f"
+        ],
+        "releaseDate": {
+          "year": 2026,
+          "month": 10,
+          "day": 13
+        }
+      },
+      {
+        "_id": "0000000000000000000000ca",
+        "title": "Sit Sunset",
+        "coverArtUrl": "",
+        "audioTrackIds": [
+          "000000000000000000000130"
+        ],
+        "releaseDate": {
+          "year": 2026,
+          "month": 10,
+          "day": 13
+        }
+      }
+    ],
+    "audioTracks": [
+      {
+        "_id": "00000000000000000000012d",
+        "title": "Amet Current",
+        "coverArtUrl": "",
+        "displayCoverArtUrl": "",
+        "albumId": null,
+        "artistIds": [
+          "000000000000000000000065"
+        ],
+        "releaseDate": {
+          "year": 2026,
+          "month": 10,
+          "day": 13
+        },
+        "duration": "2:00",
+        "format": {
+          "container": "mp3",
+          "codec": "MPEG 1 Layer 3",
+          "sampleRate": 44100,
+          "numberOfChannels": 2,
+          "bitrate": 128000
+        },
+        "mediaType": "audio",
+        "streamUrl": "/content/mediaTrack/stream/00000000000000000000012d"
+      },
+      {
+        "_id": "00000000000000000000012e",
+        "title": "Consectetur Rain",
+        "coverArtUrl": "",
+        "displayCoverArtUrl": "",
+        "albumId": null,
+        "artistIds": [
+          "000000000000000000000066"
+        ],
+        "releaseDate": {
+          "year": 2026,
+          "month": 10,
+          "day": 12
+        },
+        "duration": "2:00",
+        "format": {
+          "container": "mp3",
+          "codec": "MPEG 1 Layer 3",
+          "sampleRate": 44100,
+          "numberOfChannels": 2,
+          "bitrate": 128000
+        },
+        "mediaType": "audio",
+        "streamUrl": "/content/mediaTrack/stream/00000000000000000000012e"
+      }
+    ],
+    "posts": []
+  }
+}

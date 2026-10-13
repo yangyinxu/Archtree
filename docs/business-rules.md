@@ -813,10 +813,11 @@ The wire protocol and operational bounds are documented in
 
 ## Personalized Carousels
 
-- Personalized carousels have one of two sources:
+- Personalized carousels have one of three sources:
   - Recently Saved
   - Recently Played
-- Albums and MediaTracks are mixed in both carousel sources.
+  - New from artists you follow
+- Albums and MediaTracks are mixed in all three carousel sources.
 - Content Manager does not offer Album-only or MediaTrack-only filters for
   personalized carousels.
 - Content Manager configures only the carousel name, source, and item limit.
@@ -824,6 +825,60 @@ The wire protocol and operational bounds are documented in
   moved between carousels.
 - Activity is stored by appending new entries to the end of its history, while
   carousels display the newest activity first.
+
+## Artist Follows and New Releases
+
+- Following an Artist is private, authenticated account state. It does not
+  save the Artist to Library, affect discovery ranking, expose follower counts,
+  or send email or push notifications.
+- Follow and Unfollow are server-confirmed, naturally idempotent actions.
+  Repeating Follow preserves the original follow time; repeating Unfollow
+  confirms the unfollowed state. Follow requires a ready Artist; Unfollow
+  remains possible when that Artist is unavailable.
+- Follow updates transact with the active account and ready Artist. Artist
+  deletion prevents new follows and removes every follow relationship before
+  final metadata deletion, retaining lifecycle evidence after partial failure.
+  Artist artwork cleanup retains its existing database/S3 lifecycle.
+- Account deletion removes all follows transactionally. Follow ownership does
+  not count as shared Catalog provenance.
+- Artist pages offer Follow when the deployment reports this feature enabled.
+  A signed-out listener sees the action and receives the existing sign-in
+  required alert when selecting it; selecting it does not open sign-in.
+  An unresolved or failed status is not presented as unfollowed. During a
+  request the action is disabled, and failure preserves confirmed state with
+  an explicit retry.
+- Successful Follow or Unfollow refreshes that account's Home. Account exit,
+  deletion, switch, or identity mismatch immediately removes private follow
+  state and generated sections and invalidates pending responses. Clients
+  retain no durable private follow cache or offline mutation queue.
+- New from artists you follow uses only that listener's follows and the ready
+  public Catalog. Content Manager chooses its name, Home position,
+  and limit of 1–20 items using the existing configured Carousel order. Clients do
+  not insert an unconfigured section.
+- Eligible releases have a complete valid UTC calendar release date, from today
+  through 89 days before today inclusive. Partial, invalid, and future dates
+  are excluded. Upload, publication, and follow times do not define eligibility.
+- A ready Album qualifies when it has at least one ready canonical MediaTrack
+  and its own canonical Artist Credit names a followed ready Artist with role
+  primary or featured. A ready MediaTrack qualifies through its own canonical
+  Artist Credit with role primary, featured, or performer. Legacy unspecified,
+  composer, producer, and remixer Credits do not qualify.
+- A qualifying Album represents its qualifying linked MediaTracks. A qualifying
+  MediaTrack remains when its Album does not independently qualify. Results
+  sort by complete release date descending, Album before MediaTrack, then
+  lowercase canonical content ID ascending.
+- Each generated item explains the followed Artist using a ready public Artist
+  ID and name. When several Artists qualify, choose primary before featured
+  before performer, then Credit order, then Artist ID. The explanation is
+  contextual Home data and does not change ordinary public content summaries.
+- Following immediately makes all qualifying releases in the 90-day window
+  eligible; there is no read/unread state or persisted release feed. Empty,
+  signed-out, disabled, and unsupported-client sections are omitted while
+  preserving the relative order of the other configured Home sections.
+- Rollout is independent of discovery and defaults off. Disabling the feature
+  hides its UI and generated Home source but preserves follow records, status
+  reads, Unfollow, and deletion cleanup. Clients negotiate this Home contract
+  explicitly so older clients continue receiving their existing sections.
 
 ## Recent-Activity Limits
 

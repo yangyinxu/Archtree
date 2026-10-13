@@ -38,6 +38,11 @@ export const databaseIndexes: Array<{
     { collection: 'userSaves', keys: { userId: 1, savedAt: -1 } },
     { collection: 'userSaves', keys: { userId: 1, lastPlayedAt: -1, _id: -1 } },
     { collection: 'userSaves', keys: { userId: 1, lastActivityAt: -1, _id: -1 } },
+    { collection: 'artistFollows', keys: { userId: 1, artistId: 1 }, options: { unique: true } },
+    { collection: 'artistFollows', keys: { userId: 1, followedAt: -1, _id: -1 }, required: true },
+    { collection: 'artistFollows', keys: { artistId: 1, userId: 1 }, required: true },
+    { collection: 'albums', keys: { 'releaseDate.year': -1, 'releaseDate.month': -1, 'releaseDate.day': -1, _id: 1 }, required: true },
+    { collection: 'audioTracks', keys: { 'releaseDate.year': -1, 'releaseDate.month': -1, 'releaseDate.day': -1, _id: 1 }, required: true },
     { collection: 'userActivity', keys: { userId: 1 }, options: { unique: true } },
     { collection: 'playlists', keys: { ownerUserId: 1, updatedAt: -1, _id: -1 } },
     {
@@ -128,7 +133,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v6-social-reports';
+export const requiredIndexRevision = 'required-indexes-v7-artist-follows';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */
