@@ -417,6 +417,139 @@
       ],
       "variables": {}
     },
+    "account.native.back": {
+      "description": "Native account and device download interface: account.native.back",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.cleanup_pending": {
+      "description": "Native account and device download interface: account.native.cleanup_pending",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.avatar_cleanup": {
+      "description": "Native account and device download interface: account.native.error.avatar_cleanup",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.code": {
+      "description": "Native account and device download interface: account.native.error.code",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.current_password": {
+      "description": "Native account and device download interface: account.native.error.current_password",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.email": {
+      "description": "Native account and device download interface: account.native.error.email",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.password_used": {
+      "description": "Native account and device download interface: account.native.error.password_used",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.pause_downloads": {
+      "description": "Native account and device download interface: account.native.error.pause_downloads",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.rate": {
+      "description": "Native account and device download interface: account.native.error.rate",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.sign_in_again": {
+      "description": "Native account and device download interface: account.native.error.sign_in_again",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.error.unconfirmed": {
+      "description": "Native account and device download interface: account.native.error.unconfirmed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.hide_password": {
+      "description": "Native account and device download interface: account.native.hide_password",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.manage": {
+      "description": "Native account and device download interface: account.native.manage",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.password_lede": {
+      "description": "Native account and device download interface: account.native.password_lede",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.profile_refresh_failed": {
+      "description": "Native account and device download interface: account.native.profile_refresh_failed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.refresh": {
+      "description": "Native account and device download interface: account.native.refresh",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.secure_storage_unavailable": {
+      "description": "Native account and device download interface: account.native.secure_storage_unavailable",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.show_password": {
+      "description": "Native account and device download interface: account.native.show_password",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.native.signout_description": {
+      "description": "Native account and device download interface: account.native.signout_description",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "account.page.change_password": {
       "description": "Change-password action and title.",
       "delivery": [
@@ -599,8 +732,61 @@
       ],
       "variables": {}
     },
+    "account.recovery.accepted": {
+      "description": "Native account and device download interface: account.recovery.accepted",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "email": "string"
+      }
+    },
+    "account.recovery.send": {
+      "description": "Native account and device download interface: account.recovery.send",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.recovery.start_over": {
+      "description": "Native account and device download interface: account.recovery.start_over",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.confirm_action": {
+      "description": "Native account and device download interface: account.sessions.confirm_action",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.confirm_description": {
+      "description": "Native account and device download interface: account.sessions.confirm_description",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "device": "string"
+      }
+    },
+    "account.sessions.confirm_title": {
+      "description": "Native account and device download interface: account.sessions.confirm_title",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "account.sessions.current": {
       "description": "Badge identifying the current session.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.empty": {
+      "description": "Native account and device download interface: account.sessions.empty",
       "delivery": [
         "runtime"
       ],
@@ -657,6 +843,13 @@
       ],
       "variables": {}
     },
+    "account.sessions.refresh_after_revoke_failed": {
+      "description": "Native account and device download interface: account.sessions.refresh_after_revoke_failed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "account.sessions.remove": {
       "description": "Remove-session action.",
       "delivery": [
@@ -678,6 +871,13 @@
       ],
       "variables": {}
     },
+    "account.sessions.signed_out": {
+      "description": "Native account and device download interface: account.sessions.signed_out",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "account.sessions.this_device": {
       "description": "Label for the current browser session.",
       "delivery": [
@@ -694,6 +894,13 @@
     },
     "account.sessions.unavailable": {
       "description": "Heading when signed-in devices cannot be opened.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "account.sessions.unconfirmed": {
+      "description": "Native account and device download interface: account.sessions.unconfirmed",
       "delivery": [
         "runtime"
       ],
@@ -910,6 +1117,20 @@
     },
     "auth.native.email_domain_undeliverable": {
       "description": "Native password-recovery error when the server rejects the address because its domain cannot receive email, for example a mistyped or nonexistent domain. Never implies whether an account exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.existing_account": {
+      "description": "Native optional authentication fallback: auth.native.existing_account",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "auth.native.optional_unavailable": {
+      "description": "Native optional authentication fallback: auth.native.optional_unavailable",
       "delivery": [
         "runtime"
       ],
@@ -1309,6 +1530,27 @@
     },
     "avatar.choose_type": {
       "description": "Client-side avatar file type validation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.cleanup.description": {
+      "description": "Confirmed avatar deletion with unfinished private-file cleanup: avatar.cleanup.description",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.cleanup.retry": {
+      "description": "Confirmed avatar deletion with unfinished private-file cleanup: avatar.cleanup.retry",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "avatar.cleanup.title": {
+      "description": "Confirmed avatar deletion with unfinished private-file cleanup: avatar.cleanup.title",
       "delivery": [
         "runtime"
       ],
@@ -2100,6 +2342,329 @@
     },
     "content.title.untitled_track": {
       "description": "Fallback title for an unnamed MediaTrack.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.action.delete": {
+      "description": "Native account and device download interface: downloads.action.delete",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.album.action": {
+      "description": "Native account and device download interface: downloads.album.action",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.album.manage": {
+      "description": "Native account and device download interface: downloads.album.manage",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.album.play": {
+      "description": "Native account and device download interface: downloads.album.play",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.clear_all": {
+      "description": "Native account and device download interface: downloads.clear_all",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.clear_title": {
+      "description": "Native account and device download interface: downloads.clear_title",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.delete": {
+      "description": "Native account and device download interface: downloads.delete",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "downloads.delete_copy": {
+      "description": "Native account and device download interface: downloads.delete_copy",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.delete_title": {
+      "description": "Native account and device download interface: downloads.delete_title",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.device_copy": {
+      "description": "Native account and device download interface: downloads.device_copy",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.empty.copy": {
+      "description": "Native account and device download interface: downloads.empty.copy",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.empty.title": {
+      "description": "Native account and device download interface: downloads.empty.title",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.account_changed": {
+      "description": "Native account and device download interface: downloads.error.account_changed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.album_incomplete": {
+      "description": "Native account and device download interface: downloads.error.album_incomplete",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.background_unavailable": {
+      "description": "Native account and device download interface: downloads.error.background_unavailable",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.delete_failed": {
+      "description": "Native account and device download interface: downloads.error.delete_failed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.file_missing_or_changed": {
+      "description": "Native account and device download interface: downloads.error.file_missing_or_changed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.incompatible_manifest": {
+      "description": "Native account and device download interface: downloads.error.incompatible_manifest",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.invalid_identity": {
+      "description": "Native account and device download interface: downloads.error.invalid_identity",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.invalid_manifest": {
+      "description": "Native account and device download interface: downloads.error.invalid_manifest",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.invalid_response": {
+      "description": "Native account and device download interface: downloads.error.invalid_response",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.metadata_incomplete": {
+      "description": "Native account and device download interface: downloads.error.metadata_incomplete",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.network_failure": {
+      "description": "Native account and device download interface: downloads.error.network_failure",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.sign_in_required": {
+      "description": "Native account and device download interface: downloads.error.sign_in_required",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.storage_unavailable": {
+      "description": "Native account and device download interface: downloads.error.storage_unavailable",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.unavailable": {
+      "description": "Native account and device download interface: downloads.error.unavailable",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.error.video_unsupported": {
+      "description": "Native account and device download interface: downloads.error.video_unsupported",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.manage": {
+      "description": "Native account and device download interface: downloads.manage",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.metadata": {
+      "description": "Native account and device download interface: downloads.metadata",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.notification.pause": {
+      "description": "Native account and device download interface: downloads.notification.pause",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.notification.preparing": {
+      "description": "Native account and device download interface: downloads.notification.preparing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.notification.progress": {
+      "description": "Native account and device download interface: downloads.notification.progress",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "string"
+      }
+    },
+    "downloads.notification.title": {
+      "description": "Native account and device download interface: downloads.notification.title",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.pause": {
+      "description": "Native account and device download interface: downloads.pause",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "downloads.resume": {
+      "description": "Native account and device download interface: downloads.resume",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "downloads.signed_out_copy": {
+      "description": "Native account and device download interface: downloads.signed_out_copy",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.status.completed": {
+      "description": "Native account and device download interface: downloads.status.completed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.status.corrupted": {
+      "description": "Native account and device download interface: downloads.status.corrupted",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.status.deleting": {
+      "description": "Native account and device download interface: downloads.status.deleting",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.status.downloading": {
+      "description": "Native account and device download interface: downloads.status.downloading",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.status.failed": {
+      "description": "Native account and device download interface: downloads.status.failed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.status.paused": {
+      "description": "Native account and device download interface: downloads.status.paused",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.status.queued": {
+      "description": "Native account and device download interface: downloads.status.queued",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.status.unavailable": {
+      "description": "Native account and device download interface: downloads.status.unavailable",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "downloads.title": {
+      "description": "Native account and device download interface: downloads.title",
       "delivery": [
         "runtime"
       ],

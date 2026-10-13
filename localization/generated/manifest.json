@@ -6,13 +6,13 @@
       "locale": "en-US",
       "nativeName": "English (United States)",
       "englishName": "English (United States)",
-      "revision": "sha256-FSOh4OLFxGvaAr2w7V94cxswvT_Q-aL1xFInVAHm8p8"
+      "revision": "sha256-lC4qMWfeEh7M2SlOAhWGQs0nGb5kFKDhDqbvfWTIUjg"
     },
     {
       "locale": "zh-Hans",
       "nativeName": "简体中文",
       "englishName": "Simplified Chinese",
-      "revision": "sha256--AZowEtB7X7LrduHdbliG10OQi7MjZvC4pHbDCAj-Vo"
+      "revision": "sha256-OFGgcdx6fdg1u3wVCi5nPkHGoJzmj1vA3Ff2zVJL6bU"
     }
   ]
 }

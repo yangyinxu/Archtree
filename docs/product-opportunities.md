@@ -3,7 +3,7 @@
 Status: Candidate backlog. These ideas are not approved product behavior and
 do not replace the canonical rules in [`business-rules.md`](business-rules.md).
 
-Last reviewed: 2026-08-26
+Last reviewed: 2026-10-13
 
 ## Purpose
 
@@ -34,7 +34,7 @@ also be added to `business-rules.md` during implementation.
 | --- | --- | --- | --- | --- |
 | P0 | Close the current integrated release | Automated release baseline complete; remaining user/device gates Skipped | Very high | Medium |
 | P1 | Adopt server-backed Playlists on iOS | Implemented; automated contract/simulator verification complete | High | Medium |
-| P1 | Adopt server-backed Playlists on Android | Local candidate complete except local-Audio resolution and rollout evidence | High | Medium |
+| P1 | Adopt server-backed Playlists on Android | Implementation complete with local Audio resolution; production/device rollout remains | High | Medium |
 | P1 | Explainable personalized discovery | Contract spike complete; implementation not started | Very high | Medium |
 | P2 | Content Manager validation, preview, drafts, and atomic publishing | Contract/lifecycle spike complete; implementation not started | High | Medium–high |
 | P2 | Follow Artists and show new releases | Contract spike complete; implementation not started | High | Medium |
@@ -52,16 +52,21 @@ also be added to `business-rules.md` during implementation.
   Album concurrency, strict resume validation, account-transition fencing,
   shared-asset ownership, explicit incompatible-manifest protection, and a
   SQLite-backed offline catalog used for bounded Library and device-local Home
-  pagination. System-restored background `URLSession` work and physical-device
-  suspend/termination evidence remain in its dedicated plan.
+  pagination. Stable background `URLSession` restoration, task/generation
+  reconciliation and app-delegate event delivery are now implemented and
+  locally tested; physical suspend/termination acceptance remains in its plan.
 - Finitude Android now has secure password authentication, encrypted rotating
   credentials, authoritative viewer recovery, account-epoch fencing, and a
   real Bearer-authenticated path to the existing Playlist client. Its Home
   supports strict, independently paged Grid/List sections, and one shared
   actual-start coordinator records the correct Album or MediaTrack from Home,
   Search, Album details, and Playlists without navigation or retry duplicates.
-  Completed local-Audio resolution, a Saved/Downloaded Library surface,
-  broader account flows, and release enablement remain separate work.
+  Device Song/complete-Album downloads share assets and merge with saved rows;
+  user-started dataSync transfers continue in the background and restore paused
+  work after interruption. Expanded-player Save, password recovery/change,
+  private avatars, devices, history clearing, logout-all and eligible account
+  deletion use owner/generation fences. Optional provider configuration,
+  production enablement and physical-device acceptance remain separate gates.
 
 ## P0 — Close the Current Integrated Release
 
@@ -120,10 +125,11 @@ Current disposition:
   credentials, authoritative viewer recovery, and a real Bearer-authenticated
   ready-only shared-queue path. Playlist playback records Recently Played only
   after the exact initial MediaTrack actually starts, through the same
-  coordinator now used by Home, Search, and Album playback. Completed
-  local-Audio resolution, broader account flows, production capability
-  enablement, and physical-device evidence remain separate milestones; the
-  local implementation does not prove that the feature is deployed.
+  coordinator now used by Home, Search, and Album playback. Ordinary Audio
+  queues resolve validated device files first. Broader account and Song/Album
+  download code is implemented; production capability enablement and
+  physical-device evidence remain separate milestones;
+  the local implementation does not prove that the feature is deployed.
 
 ## P1 — Explainable Personalized Discovery
 
@@ -251,9 +257,10 @@ abuse-rate limits, and concurrent mutation behavior.
   contract and requires a separate product decision.
 - **AI DJ or prompt-generated Playlists:** premature before Finitude has a
   reviewed recommendation model, listener controls, and success evidence.
-- **Real-time group listening:** substantially expands presence, queue
-  authority, abuse, and reconnect behavior; read-only sharing should come
-  first.
+- **Further native and Video group listening:** Web Audio Rooms already has
+  an implemented authority/reconnect contract. Native production adapters and
+  shared Video remain separate work; controlled production rollout is still
+  gated in [`deployment-todos.md`](deployment-todos.md).
 - **Lyrics:** requires a licensed, attributable source and correction policy,
   not only a presentation surface.
 - **Voice Search:** lower expected value than completing Native Playlists and
@@ -263,8 +270,9 @@ abuse-rate limits, and concurrent mutation behavior.
 
 The completed automated native Playlist work can move through its normal local
 review/merge path, while unavailable user/device gates remain `Skipped`.
-Android authentication plus authenticated activity recording is the next
-dependency if Android Playlists are to become reachable. Discovery/Follow and
-Content Manager now have implementation-ready spikes, but their canonical-rule
+Android password authentication, authenticated activity and local Audio
+resolution now make its Playlist client reachable. The next rollout step is
+controlled staging/production and physical-device acceptance. Discovery/Follow
+and Content Manager now have implementation-ready spikes, but their canonical-rule
 promotion and production stages remain `Not started` because the required
 product choices were deliberately skipped rather than silently approved.
