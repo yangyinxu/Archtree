@@ -46,11 +46,51 @@ is allowed while another sender, raw email and another identity are denied. One
 authorized production registration request returned generic `202 Accepted`;
 a later authorized Gmail browser search found no application email for that test.
 The exact test recipient's SES verification was requested, and the AWS verification
-message was received at 15:02 UTC; final identity confirmation awaits operator
-approval. Application email receipt and link use remain unverified. The remaining
-email gates are SES production access, a dedicated pepper, and received-email/link
-verification. See the
+message was received at 15:02 UTC; final identity confirmation still awaited
+operator approval. Application email receipt and link use were unverified. At that point,
+the remaining email gates were SES production access, a dedicated pepper, and
+received-email/link verification. See the
 [reviewable configuration](deployment/social-rollout-runbook.md#production-authentication-email-configuration).
+
+The initial 2026-10-12 read-only check reconfirmed SES sandbox status, verified
+domain and DKIM, and the absence of `AUTH_CODE_PEPPER`. Application email receipt
+and link use were unverified at that point. Subsequent tests use the operator's
+dedicated test mailbox, whose address stays outside the repository; verify that
+exact recipient before a sandbox send and preserve the operator's primary
+signed-in session.
+
+Later on 2026-10-12, the operator configured the dedicated pepper in CloudShell.
+The environment update completed, and a boolean-only configuration readback
+confirmed `dedicatedPepperConfigured: true`. The dedicated test mailbox's exact
+SES identity is now verified. The operator has chosen to retain the SES sandbox;
+production access remains disabled and its request is intentionally deferred.
+The unsubmitted console form was cancelled, returning to the sandbox setup page.
+Public email delivery is not ready. See the
+[completion update](deployment/social-rollout-runbook.md#configuration-and-notification-completion--2026-10-12).
+
+The later application registration test failed after its generic 202 response:
+the fully paginated 22:32–22:36:59 UTC log window contains one
+`email_registration_request_failed` at `2026-10-12T22:34:16.393Z`, with no error
+class recorded. Two independent SDK transport probes returned `AccessDenied`;
+safe error classification identified the exact approved test-recipient SES
+identity as the denied resource. The policy then allowed only the sender
+domain identity. A proposed addition of that exact recipient identity passed
+five simulation cases and awaited approval. This was a failed test, not evidence
+of a delivery delay. See the
+[diagnostic record](deployment/social-rollout-runbook.md#email-diagnostics-and-catalog-inventory--2026-10-12).
+
+Later that evening, the operator approved the exact-recipient permission update.
+All five simulations passed again, the policy update returned HTTP 200, and
+strict readback matched the approved policy. The independent transport test was
+accepted and received. A new application T1 registration email arrived at 22:54
+UTC, and its production link passed initial inspection and opened the account
+setup form. The operator completed registration and login, and Account reported
+email verified. Replaying the consumed T1 link within its 30-minute lifetime
+was rejected. T2 was received with the correct token-free destinations, and a
+password-reset email containing a six-digit code was received without performing
+a reset. T3/legacy verification and password-reset completion remain open;
+SES production access is intentionally deferred by the operator. See the
+[evening completion record](deployment/social-rollout-runbook.md#email-permission-and-t1-completion--2026-10-12).
 
 An account that predates email verification receives
 `403 email_verification_required` when it next signs in and needs a delivered
@@ -81,30 +121,48 @@ checks alone cannot establish that a returning listener can sign in again.
       the approved domain sender in `AUTH_EMAIL_FROM` with that `AWS_REGION`.
 - [x] Set `AUTH_LINK_ORIGIN` to the exact production Web origin
       (`https://kashewt.com`).
-- [ ] Obtain SES production access in `us-east-1`; the account is still in the
-      sandbox. The console request is prepared as Transactional, with
-      `https://kashewt.com`, English and no optional contacts. Its terms
-      acknowledgement is unchecked and it has not been submitted; submission
-      awaits operator approval. A request or a successful send to a verified test
-      recipient does not establish approval to send to ordinary listeners.
-- [x] Confirm the runtime AWS identity and sender-context `ses:SendEmail`
-      permission. The corrected policy simulation returns `allowed`.
+- [ ] **Deferred by operator:** obtain SES production access in `us-east-1`
+      before declaring ordinary-listener email delivery ready. The operator has
+      chosen to retain the sandbox and defer the request. The earlier console
+      form was cancelled without submitting a request or accepting its terms;
+      the console returned to the sandbox setup page. Continue
+      only authorized tests to exact verified recipients; successful sandbox
+      delivery does not establish public email readiness.
+- [x] Confirm the runtime AWS identity and simulate sender-context
+      `ses:SendEmail` on the domain identity. That simulation returns `allowed`;
+      it does not prove permission for the exact sandbox-recipient identity.
 - [x] Narrow the existing policy to `ses:SendEmail` on the verified domain
       identity, retaining its exact From-address condition. Readback confirms
-      the scope; simulations allow the approved send and return `implicitDeny`
-      for another sender, `ses:SendRawEmail` and another domain identity.
-- [ ] Configure a securely generated, dedicated `AUTH_CODE_PEPPER`, without
-      logging or committing its value. Coordinate this change because earlier
-      reset codes and email links keyed by the fallback secret will need to be
-      requested again.
-- [ ] After that deploy, send yourself a registration link, an
-      already-registered notice and a verification link, and confirm each link
-      opens the Finitude Web page on the production origin. The registration
-      endpoint's observed generic 202 does not close this gate. Gmail is now
-      accessible through the authorized browser session; the received AWS SES
-      recipient-verification email does not establish application email delivery.
-      Complete the exact recipient's pending identity confirmation before
-      repeating the sandbox application test.
+      the scope; simulations allow that sender/domain-resource combination and
+      return `implicitDeny` for another sender, `ses:SendRawEmail` and another
+      domain identity.
+- [x] Apply the approved exact test-recipient SES identity addition and verify
+      it through policy readback, an independent transport send and an
+      application registration send. Five simulation cases passed again;
+      `put_user_policy` returned HTTP 200 and strict readback returned
+      `approvedPolicyApplied: true`. Both the transport test and T1 application
+      email were received after the update.
+- [x] Configure a securely generated, dedicated `AUTH_CODE_PEPPER`, without
+      logging or committing its value. The operator applied the update on
+      2026-10-12; boolean-only readback confirmed it is configured. Request new
+      reset codes and email links because those keyed by the earlier fallback
+      secret no longer verify.
+- [x] Receive a T1 registration email and verify its production-origin link
+      reaches the initial account setup form. The dedicated inbox received
+      `Finish creating your Finitude account` at 22:54 UTC on 2026-10-12; the
+      link passed inspection and showed the confirmed-email account setup form.
+      No private address or token is retained here.
+- [x] Complete registration with the operator's chosen password and verify
+      account creation, link consumption and replay/single-use behavior.
+      The operator completed registration and login; Account reported email
+      verified. Replay of the consumed T1 link within 30 minutes was invalid.
+- [x] Receive the application T2 already-registered notice and verify its
+      production-origin login and password-reset destinations contain no token.
+- [x] Receive a password-reset email containing a six-digit code. No code or
+      private recipient is retained here, and no password reset was performed.
+- [ ] Verify T3/legacy-account verification receipt and completion, and the
+      password-reset completion/session-revocation flow. Successful code receipt
+      does not close reset acceptance or justify changing the original account.
 - [ ] Configure the iOS Associated Domains entitlement after the production
       authentication domain exists.
 - [ ] Enable Sign in with Apple for `com.example.finitude`, refresh its
@@ -146,14 +204,22 @@ Completion evidence:
 
 ## Web-only Audio Social Launch
 
-Status: Public verification on 2026-10-11 found the deployed Web entry and its
-four directly referenced JS/CSS assets byte-identical to the retained
-`b7c44fdad3aa84d05ba12637beeefd75c7737108` main build. Public listener capabilities
-reported both social and rooms disabled, and `/health` reported rooms inactive.
-The console subsequently confirmed `Archtree-2024-env` (`e-qeb3ekat4i`) healthy
-and identified its running application version in the
-[dated evidence record](deployment/social-rollout-runbook.md#deployment-verification--2026-10-11).
-The complete backend's on-instance `RELEASE.json` has not been independently read.
+Status: The 2026-10-12 read-only production check found `Archtree-2024-env`
+(`e-qeb3ekat4i`) `Ready/Green/Ok`. Its current application version's registered
+SourceBundle identifies main `2c1cf6e` and build `github-38170519764-1`; this is
+not an independent read of the backend's on-instance `RELEASE.json`. HTTPS
+`/health` returned 200 with rooms disabled, HTTP redirected with 308, and one
+synthetic-ticket WebSocket upgrade probe returned `503 0`. Startup and decoder
+hook evidence are in the
+[current record](deployment/social-rollout-runbook.md#production-verification--2026-10-12);
+the [2026-10-11 record](deployment/social-rollout-runbook.md#deployment-verification--2026-10-11)
+remains historical. The
+[release matrix](testing/finitude-web-release-matrix.md#verified-release-status--checked-2026-10-12)
+records the completed consecutive PR/main CI gates and served Web-byte match.
+After the later pepper update, the environment reported `Ready/Green/Info` and
+HTTPS `/health` reported `status: "ok"`, rooms disabled and authority inactive;
+the [completion update](deployment/social-rollout-runbook.md#configuration-and-notification-completion--2026-10-12)
+records that subsequent state.
 The first social release is Finitude Web only, with Audio-only
 rooms, behind `FINITUDE_SOCIAL_ENABLED` and `FINITUDE_ROOMS_ENABLED` (both
 default `false`). Its release scope includes email verification. Native social
@@ -171,7 +237,7 @@ started with rooms off pauses and winds down open rooms, and `/health`, the
 minutely `ops_summary` log line and `.ebextensions/social-capacity.config`
 (1 open room, 2 members, 10 realtime sockets) cover signals and capacity.
 
-### Before the release reaches production
+### Before the first public enablement
 
 - [ ] Complete the email items under Production HTTPS for Authentication
       above: the verified SES sender/domain, a runtime limited to
@@ -179,39 +245,39 @@ minutely `ops_summary` log line and `.ebextensions/social-capacity.config`
       `AUTH_LINK_ORIGIN`. The same merge stops unverified accounts from
       opening new sessions with any sign-in method, so most existing accounts
       cannot sign in again until email delivery works.
-- [ ] Merge `develop` into `main` through a pull request and require the
+- [x] Merge `develop` into `main` through a pull request and require the
       release workflow on both the pull request and the merged-main push:
       unit, integration, the blocking social browser gate, the three-engine
-      browser/axe gate and artifact staging. The repair candidate's blocking
-      social gate includes `firefox-audio-formats` and `webkit-audio-formats`;
-      new consecutive pull-request and main passes remain required (see
-      [Enable for testing](#enable-for-testing)). Artifact staging refuses a
-      bundle without the FFmpeg prebuild hook, `room-audio-decoder.config` or
-      `social-capacity.config`.
+      browser/axe gate and artifact staging. The
+      [2026-10-12 release evidence](testing/finitude-web-release-matrix.md#verified-release-status--checked-2026-10-12)
+      records both complete passes, including `firefox-audio-formats` and
+      `webkit-audio-formats`. Artifact staging refuses a bundle without the
+      FFmpeg prebuild hook, `room-audio-decoder.config` or `social-capacity.config`.
 - [ ] Record the release owner, rollback owner, observation window and stop
       conditions, and keep the current production artifact retrievable for
       rollback.
-- [ ] Confirm both rollout flags are absent or `false` on the environment with
-      the social runbook's query, which prints only the `FINITUDE_*` values.
+- [x] Confirm both rollout flags are absent or `false` before the controlled
+      window. The guarded 2026-10-12 environment inspection found both unset
+      (the documented false default), `Ready/Green` on the original version,
+      and no rehearsal version. No enablement has run.
 - [ ] Deploy in a quiet window. The first deployment downloads about 117 MB of
       FFmpeg from GitHub, and `npm install` runs beside the old process on the
       1 GiB instance, where an earlier configuration update stalled.
 
 ### Deploy with both flags off
 
-- [ ] `/health` returns 200. Startup creates the social and room indexes and
+- [x] `/health` returns 200. Startup creates the social and room indexes and
       stops if a unique or required index cannot be verified; the log shows no
-      `optional_index_unavailable` line.
-- [ ] The `/health` `rooms` object reports `enabled: false` and
-      `authorityState: "inactive"`, and the log shows `room_wind_down`
-      `complete` for the latest process start (it can appear just before
-      `server_listening`).
-- [ ] The Nginx WebSocket upgrade fix is live. The deployment rewrites the
-      existing HTTPS configuration in place without reissuing the certificate.
-      The Finitude Web runbook's WebSocket probe returns `503 0` while rooms
-      are off: the empty refusal comes from the application's upgrade handler,
-      so Nginx forwarded the upgrade. Any status with a non-empty body means
-      Nginx dropped `Upgrade`/`Connection`.
+      `optional_index_unavailable` line. The fully paginated current-deployment
+      startup window, 2026-10-11 19:45–20:30 UTC, contains one `server_listening`
+      and zero `optional_index_unavailable` events.
+- [x] The `/health` `rooms` object reports `enabled: false`, and the current
+      deployment's startup window contains one completed room wind-down. This
+      verifies startup with rooms off, not the playing-room kill-switch rehearsal.
+- [x] The Nginx WebSocket upgrade reaches the application's disabled-room
+      handler. One 2026-10-12 probe using a synthetic ticket and foreign Origin
+      returned `503 0`. This proves forwarding while rooms are off; it does not
+      prove an authenticated room connection or enabled-room Origin enforcement.
 - [ ] For a signed-in test account, `GET /api/social/v1/capabilities` reports
       `socialEnabled: false` and `roomsEnabled: false`, and Finitude Web shows
       no Together entry or social actions.
@@ -223,25 +289,59 @@ minutely `ops_summary` log line and `.ebextensions/social-capacity.config`
 The prebuild hook installs FFmpeg and the operator backfill analyzes existing
 Audio (see the README's room audio decoder and catalog backfill sections).
 
-- [ ] Confirm `/var/log/eb-hooks.log` shows the verified install,
-      `/usr/local/bin/ffmpeg -hide_banner -version` runs, and
-      `ROOM_AUDIO_FFMPEG_PATH` resolves to `/usr/local/bin/ffmpeg`.
-- [ ] Upload a short original MP3 through Content Manager and confirm the Room
-      audio analysis page lists it as eligible.
-- [ ] From an operator machine with FFmpeg, run the backfill dry run against
-      production and review its `wouldAnalyze` count. The dry run counts each
-      `wouldAnalyze` row toward `--max-analyses` (default 100), so a default
-      preview stops at 100 with `stopReason: "limit"`. To see the full count,
-      pass `--max-analyses=1000` and follow `resumeAfter` until
-      `finished=true`.
-- [ ] Apply the backfill in paced runs until a summary reports `finished=true`,
-      then rerun once without `--after` to retry any `retryLater` tracks.
-- [ ] Keep the backfill log's final summary with the rooms release evidence.
+- [x] Confirm the deployment hook revalidates the pinned FFmpeg installation
+      and reports the decoder ready. The current startup window contains one
+      installed-pin message and one ready message. The hook checks the recorded
+      archive-digest marker and runs the actual binaries' version and decoder
+      capability checks, including the final `/usr/local/bin/ffmpeg` path. This
+      is deployment-hook evidence, not an independent SSH/SSM command or a fresh
+      digest of the installed binary; see the
+      [dated record](deployment/social-rollout-runbook.md#production-verification--2026-10-12).
+- [x] Upload original synthetic QA Audio through Content Manager and confirm
+      room eligibility. After the original Chrome session recovered through
+      Finitude's normal refresh, all three authorized tracks were created and
+      publicly ready; the analysis UI's final fourth page showed all three
+      as Ready for rooms. Canonical HEAD and two byte-range comparisons passed
+      for each source. The M4A probe's initial strict MIME failure is retained;
+      an explicit supplemental check for the stored `audio/x-m4a` type passed.
+      See the [current record](deployment/social-rollout-runbook.md#email-permission-and-t1-completion--2026-10-12).
+      A later read-only storage audit found 104 track records, 98 current S3
+      objects, zero orphans, six historical missing-file records and zero
+      incomplete audio lifecycles. None of the three QA IDs appeared in issue
+      findings. No remediation ran; replacement/deletion and noncurrent-version
+      acceptance remain unverified. The linked record preserves the audit limits.
+- [x] Verify ordinary Web play, pause, paused seek and explicit resume for all
+      three QA tracks in the isolated test account while both rollout flags
+      remain off. Each used one canonical media element and a single-track
+      queue, advanced during play, stayed paused at a keyboard seek to 60
+      seconds, and resumed on Play. The VBR source recovered from transient
+      `readyState: 1` to `4` before resume. This narrow check does not close the
+      full Listener smoke, queue Next, pinned-player, Rooms/synchronization,
+      physical-device or audible-output gates; the QA player finished paused.
+- [x] Identify existing pending backfill candidates across the complete
+      production catalog. The administrator Room audio analysis UI covered all
+      four pages on 2026-10-12: 94 ready/published Audio sources, with 72
+      `eligible`, 22 `unsupported`, and zero `notAnalyzed`, `retryable`, `running`
+      or `unavailable`; the final page had no continuation. Its list service is
+      the same one used by the CLI dry run, so no candidate in that inventory
+      requires apply. This was a status read: no CLI, S3 HEAD/GET or Analyze action ran,
+      and it does not prove fresh decoding of these sources. See the
+      [inventory record](deployment/social-rollout-runbook.md#email-diagnostics-and-catalog-inventory--2026-10-12).
+
+If a later complete inventory contains `notAnalyzed` or `retryable` sources,
+preview the approved backfill, apply in paced runs, and retain its final summary
+with the release evidence. A CLI dry run counts each `wouldAnalyze` row toward
+`--max-analyses` (default 100); use `--max-analyses=1000` and follow `resumeAfter`
+until `finished=true` for a complete preview. After apply finishes, rerun once
+without `--after` to retry any `retryLater` sources. None of those CLI steps was
+performed or needed for the observed zero-candidate inventory.
 
 ### Monitoring and alarms
 
-Status: In progress. The 2026-10-11 initial console and CloudShell inspection
-found instance and health-event log streaming disabled, no production log groups,
+Status: CloudWatch ingestion, alarms and operator test-notification delivery
+are complete; Atlas-side checks remain open. The 2026-10-11 initial console and
+CloudShell inspection found instance and health-event log streaming disabled,
+no production log groups,
 no regional metric alarms and no SNS subscriptions. The log-streaming update has
 completed with `StreamLogs=true`, `RetentionInDays=7` and
 `DeleteOnTerminate=false`; the environment is `Ready/Green/Ok` with the application
@@ -250,12 +350,24 @@ version unchanged. Seven log groups exist with seven-day retention, and real
 syslog prefix, so raw JSON filters matched zero events. A transformer tested
 against a real event now parses the JSON into `ops`; all eight metric filters
 apply to the transformed logs, and all eight alarms have been created. The
-`archtree-operations` SNS topic exists, but it has no subscription. Live metric
+`archtree-operations` SNS topic was created without a subscription. Live metric
 readback found six real 60-second datapoints for each of the eight metrics in the
 latest 15-minute window; all eight alarms are `OK`, with actions enabled and the
-topic configured. Operator subscription and notification receipt remain pending.
+topic configured. Operator subscription and notification receipt were pending
+at that baseline check.
 The [social runbook](deployment/social-rollout-runbook.md#cloudwatch-metric-filters-and-alarms)
 contains the applied parser and filter configuration.
+
+The initial 2026-10-12 readback again found all eight alarms `OK` with actions
+enabled. The operations topic had zero confirmed and zero pending subscriptions, so
+notification delivery was still open at that point.
+
+Later that day, the operator approved and confirmed the dedicated test mailbox's
+ongoing SNS subscription. Fully paginated readback found exactly one confirmed
+subscription for the approved email endpoint. A clearly marked `TEST ONLY`
+publication returned HTTP 200, and the dedicated inbox received the test
+notification with its subject and body verified. This closes the subscription
+and receipt gate; the earlier zero-subscription observations remain historical.
 
 - [x] Stream the instance logs to CloudWatch Logs with seven-day retention and
       confirm real `ops_summary` events reach the stdout group.
@@ -265,8 +377,10 @@ contains the applied parser and filter configuration.
 - [x] Verify new datapoints for the eight metrics after transformation/filter
       activation, including the recurring summary cadence and alarm evaluation.
       Each metric has six real minute-level datapoints; all eight alarms are `OK`.
-- [ ] Add and confirm an operator SNS subscription and verify receipt of a test
-      notification. The topic and alarm actions alone do not prove delivery.
+- [x] Add and confirm an operator SNS subscription and verify receipt of a test
+      notification. The approved confirmed email subscription and received
+      `Archtree P0 test notification` are recorded in the
+      [2026-10-12 completion update](deployment/social-rollout-runbook.md#configuration-and-notification-completion--2026-10-12).
 - [x] Confirm the `OpsSummary` alarm is `OK`. It treats missing data as
       breaching, so it also reports a stopped or hung process.
 - [ ] Enable the alerts the free-tier Atlas project offers and note where its
@@ -277,26 +391,29 @@ contains the applied parser and filter configuration.
 Enabling a flag exposes it to every signed-in Web account; there is no
 per-account cohort.
 
-- [ ] **Prerequisite before `FINITUDE_ROOMS_ENABLED=true`:** record new
-      consecutive pull-request and merged-main CI passes with both
-      `firefox-audio-formats` and `webkit-audio-formats` blocking. The 2026-10-11
-      candidate fixes stale seek-gesture versions and decoder readiness after
-      controller-owned correction, and restores both projects to the gate;
-      Linux decoder acceptance remains unverified. See the symptoms and exit
-      steps in the [social runbook](deployment/social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms).
-      Until this is done, enable at most `FINITUDE_SOCIAL_ENABLED` and leave
-      rooms `false`.
+- [x] **CI prerequisite before `FINITUDE_ROOMS_ENABLED=true`:** record consecutive
+      pull-request and merged-main CI passes with both `firefox-audio-formats`
+      and `webkit-audio-formats` blocking. The
+      [2026-10-12 release evidence](testing/finitude-web-release-matrix.md#verified-release-status--checked-2026-10-12)
+      closes this prerequisite. Keep rooms disabled until the remaining email,
+      audio-catalog and controlled rollout checks are ready.
 
-- [ ] In a quiet window, set both flags to `true` in one environment update.
-      The restart is a short outage on the single instance.
+- [x] Prepare two distinct operator-owned application accounts in separate
+      contexts: the recovered original Chrome account and the newly registered,
+      verified account signed in through the in-app browser. The earlier Gmail
+      plus-address attempt did not create a separate account. Keep the primary
+      Gmail and original Finitude sessions signed in during controlled testing.
+- [ ] Obtain separate approval for the controlled Rooms window, then set both
+      flags to `true` in one environment update during that quiet window.
+      Approval remains pending; retaining the SES sandbox does not authorize
+      this window. The restart is a short outage on the single instance.
 - [ ] `/health` shows `rooms.enabled: true`, `authorityState: "ready"` and a
       `lastSuccessfulSweepAgeMs` of a few seconds or less. The
       `social_capacity_config` log line shows 1 open room, 2 members and 10
       sockets with no `invalidSettings`. The probe returns `403 0`, and a test
       room connects over `wss://`.
 - [ ] Run the social runbook's two-account smoke test with operator-owned
-      accounts only, including an MP3 track that became eligible through the
-      backfill.
+      accounts only, including an MP3 track with confirmed production analysis.
 - [ ] With one playing two-member room, record the `ops_summary` peaks,
       instance memory, and Atlas operation counters and Network Out. Compare
       them with the capacity budget: one playing two-member room costs about

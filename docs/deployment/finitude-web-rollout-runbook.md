@@ -72,9 +72,13 @@ social gate includes `firefox-audio-formats` and `webkit-audio-formats` with eve
 other Linux social project. Run just the compressed-audio pair locally on Linux
 with the CI audio sink using
 `CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=firefox-audio-formats --project=webkit-audio-formats`.
-The 2026-10-11 repair candidate still needs new consecutive pull-request and
-merged-main CI acceptance. Rooms stay off in production until those full gates
-and the enablement checks pass (see the
+The 2026-10-12 check confirmed consecutive successful
+[pull-request](https://github.com/yangyinxu/Archtree/actions/runs/38169379414) and
+[merged-main](https://github.com/yangyinxu/Archtree/actions/runs/38170519764)
+acceptance: all 17 social scenarios and 347 listener browser tests passed in
+each run, with ten intentional Chromium-owned listener skips. Production rooms
+remain disabled; the controlled rollout checks are still required before public
+enablement (see the
 [social rollout runbook](social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms)).
 
 Local staging requires a clean committed worktree so `RELEASE.json` cannot
@@ -363,6 +367,38 @@ Retain the following with the release ticket or approved evidence store:
 | Observation | Window, traffic profile, health/error/Web Vitals summary |
 | Rollback rehearsal | Previous artifact and route contract, compatibility redirect, start/end time, smoke result |
 | Exceptions | Accepted difference, owner, expiry/follow-up |
+
+### Verified release and served Web bytes — checked 2026-10-12
+
+| Check | Evidence and limit |
+| --- | --- |
+| Pull-request gate | [Run 38169379414](https://github.com/yangyinxu/Archtree/actions/runs/38169379414), source `7fd123132a45869c20ba68679db0abe2303d5bcc`, created 2026-10-11 19:45:43 UTC: all five release jobs passed on Ubuntu 24.04. |
+| Merged-main gate | [Run 38170519764](https://github.com/yangyinxu/Archtree/actions/runs/38170519764), source `2c1cf6e37e9ea95bf13b8218a153f3e3aa5b45cc`, created 2026-10-11 20:02:22 UTC: all five release jobs passed and the tested deployment artifact was retained. |
+| Browser coverage | Each run passed social 17/17, including Firefox/WebKit compressed audio and recovery with zero retries, and listener 347 with ten intentional skips for Chromium-owned checks. The listener gate used all three engines and strict `--update-snapshots=none`. |
+| Public Web bytes | `/finitude/` HTML and its four directly referenced JS/CSS resources matched the retained main artifact above byte for byte on 2026-10-12. This does not independently identify the backend's on-instance `RELEASE.json`. |
+| Remaining production acceptance | Remaining authentication email/link acceptance, the controlled Rooms enablement and observation, and the rollout/rollback smoke checks remain separate from CI and static Web-byte matching. Production rooms remain disabled pending those checks. |
+
+### Production authentication and media checks — 2026-10-12
+
+| Check | Evidence and limit |
+| --- | --- |
+| Registration and replay | The operator completed registration for the approved QA account, signed in, and observed **Email verified** in Account. Reopening the original T1 registration link was rejected within its 30-minute validity period. |
+| Already-registered email | T2 was received for that account; its login and forgot-password links used the production origin and contained no token. |
+| Password-reset email | A requested reset email was received with a six-digit code. Reset completion and session revocation were not exercised; T3 and legacy verification also remain open. |
+| New public audio | The administrator created each approved fixture below once through Content Manager. One credential-free public search found exactly one ready/published audio match per title. All three passed canonical HEAD plus two Range checks against their original fixture bytes. The initial checker passed 2/3 because it required `audio/mp4` for AAC, while canonical streaming uses its stored `audio/x-m4a`. An explicit supplemental canonical check passed: AAC HEAD returned 200, 1,941,885 bytes and a strong ETag; both 256-byte ranges returned 206 and matched the fixture. The initial checker failure is retained; this supplemental result does not exercise pinned Room media. |
+| New-source Room eligibility | After a normal administrator SPA refresh restored Content Manager access, the Operations link opened the actual Room audio analysis page. Reviewing all four pages found the three exact QA titles below marked **Ready for rooms**. Upload had analyzed them automatically; no manual Analyze action was needed. This closes eligibility for these three new sources only, not fresh decoding of the older 94-source inventory. |
+| Ordinary production playback | In the isolated signed-in QA in-app browser with both flags off, each exact public Search result was selected once into a single-track queue. Each used one DOM media element and its correct canonical URL without a query, reported duration 120 seconds, no media error and `readyState=4`, and advanced its clock by more than one second while playing. Pause plus keyboard Home and five PageUp actions sought to 60 seconds while preserving pause and a stable clock; explicit Play resumed clock advancement. VBR briefly reported `readyState=1` after seeking, then reached 4 while still paused before Play. Next was disabled as expected for each single-track queue; queue advancement was not tested. The final QA player was paused. This closes ordinary playback only in that in-app browser, not audible output, Room/pinned-media/synchronization, other browsers or physical devices. |
+| Rooms boundary | Pinned Room-media responses, including AAC's required `audio/mp4` MIME type, and actual Room playback are not yet proved. Both production flags remain false; the controlled Rooms window still requires approval, and no flags-on test, playing-room redeployment or kill-switch rehearsal has run. The remaining rollout/rollback checks stay open. |
+| SES sandbox decision | The operator intentionally deferred production access and chose to retain the sandbox. The prepared request was cancelled; the console returned to its Sandbox setup page without terms or submission controls, and no request was submitted. Testing may continue only with approved, SES-verified recipients; public delivery to ordinary recipients is not ready. This decision does not close the remaining authentication checks or approve a Rooms test window. |
+
+These public fixture identities connect the upload, public search and administrator
+eligibility evidence. Pinned-media and Room-playback checks remain separate:
+
+| Exact public title | MediaTrack ID | Type |
+| --- | --- | --- |
+| Finitude QA 2026-10-12 — CBR MP3 | `6acd6a6548717d54937d7116` | `audio` |
+| Finitude QA 2026-10-12 — AAC-LC | `6acd6ada48717d54937d7118` | `audio` |
+| Finitude QA 2026-10-12 — VBR MP3 | `6acd6aea48717d54937d711a` | `audio` |
 
 This runbook defines the rollback contract. Release execution is not complete
 until the candidate and previous exact CI archives are confirmed retained, and

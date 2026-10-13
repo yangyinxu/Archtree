@@ -428,10 +428,32 @@ The Firefox and WebKit compressed-media projects (`firefox-audio-formats`,
 `webkit-audio-formats`) are included in the blocking Linux social gate with
 every other project. To reproduce just this pair on Linux with the CI audio sink:
 `CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=firefox-audio-formats --project=webkit-audio-formats`.
-The 2026-10-11 repair candidate restores this strict gate; new consecutive
-pull-request and merged-main CI passes are still required. Keep production rooms
-disabled until that acceptance and the rollout checks pass (see the
+Checked on 2026-10-12: the complete blocking gate passed for both the
+[pull request](https://github.com/yangyinxu/Archtree/actions/runs/38169379414)
+and [merged main `2c1cf6e`](https://github.com/yangyinxu/Archtree/actions/runs/38170519764).
+Each run passed all 17 social scenarios, including the Firefox/WebKit audio and
+recovery projects, plus 347 listener browser tests with 10 intentional
+Chromium-owned skips. The production `/finitude/` HTML and its four directly
+referenced JS/CSS resources also matched that main artifact byte for byte.
+The [release matrix](docs/testing/finitude-web-release-matrix.md#verified-release-status--checked-2026-10-12)
+records the exact identities and evidence limits. Production rooms remain disabled;
+the controlled rollout checks are still required before public enablement (see the
 [social rollout runbook](docs/deployment/social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms)).
+Later production checks on 2026-10-12 completed QA registration, verified-email
+login and registration-link replay rejection. Already-registered and six-digit
+password-reset emails were received; reset completion and session revocation
+remain untested. Three original QA audio fixtures were published, and each passed
+canonical HEAD plus two Range checks against the source bytes. AAC passed a
+supplemental check using its stored `audio/x-m4a` MIME type. The administrator
+analysis page confirmed all three new sources **Ready for rooms** after automatic
+upload analysis. In an isolated signed-in in-app browser with both flags off,
+each track played, paused, sought to 60 seconds while staying paused, and resumed
+with an advancing clock. This verifies ordinary playback in that browser only,
+not audible output, other browsers or physical devices. Pinned Room media,
+including AAC's required `audio/mp4` response, and actual Room playback remain
+pending; see
+the [production acceptance record](docs/deployment/finitude-web-rollout-runbook.md#production-authentication-and-media-checks--2026-10-12).
+
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
 It corrects startup drift after credible media-clock advancement. A corrective
