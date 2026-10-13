@@ -1,6 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { describeSessionDevice } from '../src/services/deviceSessionService';
+import { describeDeclaredSessionDevice, describeSessionDevice } from '../src/services/deviceSessionService';
+
+test('explicit app categories distinguish Android and preserve older iOS clients', () => {
+    for (const [category, deviceName, deviceType] of [
+        ['phone', 'iPhone', 'phone'],
+        ['tablet', 'iPad', 'tablet'],
+        ['android-phone', 'Android phone', 'phone'],
+        ['ANDROID-TABLET', 'Android tablet', 'tablet'],
+    ]) {
+        assert.deepEqual(describeDeclaredSessionDevice(category), { deviceName, deviceType });
+    }
+    for (const category of [undefined, '', 'My private device', 'phone\nother', 'phone '.repeat(100)]) {
+        assert.equal(describeDeclaredSessionDevice(category), undefined);
+    }
+});
 
 test('describes Finitude app sessions without exposing networking versions', () => {
     assert.deepEqual(

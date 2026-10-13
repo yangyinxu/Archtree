@@ -1401,6 +1401,12 @@ App session endpoints:
 - `DELETE /auth/activity/listening-history`
 - `DELETE /auth/account`
 
+Native authentication requests can declare `X-Finitude-Device-Type` as
+`android-phone` or `android-tablet`. The older `phone` and `tablet` categories
+remain iPhone and iPad for existing iOS clients. Archtree stores a fixed friendly
+label for these allowlisted categories; arbitrary device names are ignored.
+This applies to newly created sessions and does not rewrite older stored labels.
+
 Retired code-based registration endpoints answer immediately, before
 validation, rate limiting or any database access, with
 `410 {"code":"email_registration_moved","message":"Email sign-up has moved to the Finitude website. Create your account there, then sign in."}`:

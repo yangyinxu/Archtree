@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { Request } from 'express';
 import { getDb } from '../src/infrastructure/database';
 import AuthActionToken from '../src/models/authActionToken';
 import AuthSession, { AuthSessionDocument } from '../src/models/authSession';
@@ -24,6 +25,24 @@ before(async () => {
 
 after(async () => {
     await harness?.stop();
+});
+
+test('new app sessions persist explicit platform labels without changing older iOS metadata', async () => {
+    const user = { _id: new ObjectId(), email: 'device-label@example.test', role: 'user', emailVerified: true };
+    await getDb()!.collection('users').insertOne(user);
+    for (const [category, deviceName, deviceType] of [
+        ['phone', 'iPhone', 'phone'],
+        ['tablet', 'iPad', 'tablet'],
+        ['android-phone', 'Android phone', 'phone'],
+        ['android-tablet', 'Android tablet', 'tablet'],
+        ['private-device-name', undefined, undefined],
+    ]) {
+        const request = { get: (header: string) => header === 'X-Finitude-Device-Type' ? category : undefined } as Request;
+        const tokens = await createSession(user, request);
+        const stored = await AuthSession.findActiveById(tokens.sessionId);
+        assert.equal(stored?.deviceName, deviceName);
+        assert.equal(stored?.deviceType, deviceType);
+    }
 });
 
 test('concurrent reuse of one refresh token leaves exactly one current pair and revocation is immediate', async () => {
