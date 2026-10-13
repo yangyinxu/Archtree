@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import { ObjectId } from 'mongodb';
+import type { Request, Response } from 'express';
 
+import { attachCarouselToPage, attachCarouselToPageWeb } from '../src/controllers/pageController';
+import { attachContentCollectionToPage } from '../src/controllers/contentCollectionController';
 import { getDb } from '../src/infrastructure/database';
 import { Page } from '../src/models/page';
 import {
@@ -114,6 +117,106 @@ const seedRace = async (fixture: TargetFixture) => {
     ]);
     return { attachActorId, deleteActorId, targetId };
 };
+
+/** Calls the real attachment controller against the isolated replica set. */
+const attachThroughController = async (
+    actorId: ObjectId,
+    targetId: ObjectId,
+    surface: 'api' | 'web',
+    presentation: 'carousel' | 'grid' | 'list' = 'carousel'
+) => {
+    const captured = { status: 200, body: undefined as any, redirect: '' };
+    const response = {
+        status(status: number) { captured.status = status; return response; },
+        json(body: unknown) { captured.body = body; return response; },
+        redirect(location: string) { captured.status = 302; captured.redirect = location; return response; }
+    } as unknown as Response;
+    const request = {
+        auth: { userId: actorId.toHexString(), role: 'admin' },
+        params: { slug: 'home' },
+        body: presentation === 'carousel'
+            ? { slug: 'home', carouselId: targetId.toHexString() }
+            : { collectionId: targetId.toHexString() }
+    } as unknown as Request;
+    const controller = presentation !== 'carousel' ? attachContentCollectionToPage
+        : surface === 'api' ? attachCarouselToPage : attachCarouselToPageWeb;
+    await controller(request, response, (error) => {
+        throw error ?? new Error('Attachment unexpectedly called next.');
+    });
+    return captured;
+};
+
+test('a full Page remains unchanged and the attachment API reports a conflict', async () => {
+    const { attachActorId, targetId } = await seedRace(targetFixtures[0]);
+    const items = Array.from({ length: 100 }, (_, order) => ({
+        itemId: new ObjectId().toHexString(),
+        itemType: 'carousel',
+        carouselId: targetId.toHexString(),
+        order
+    }));
+    await getDb()!.collection('pages').updateOne({ slug: 'home' }, { $set: { items } });
+    const before = await getDb()!.collection('pages').findOne({ slug: 'home' });
+
+    const response = await attachThroughController(attachActorId, targetId, 'api');
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'page_attachment_not_applied');
+    assert.equal('items' in response.body, false);
+    assert.deepEqual(await getDb()!.collection('pages').findOne({ slug: 'home' }), before);
+    assert.equal((await getDb()!.collection('carousels').findOne({ _id: targetId }))!.referenceRevision, 0);
+});
+
+test('a Page removed after the controller lookup is not recreated or reported attached on Web', async (t) => {
+    const { attachActorId, targetId } = await seedRace(targetFixtures[0]);
+    const findBySlug = Page.findBySlug;
+    t.mock.method(Page, 'findBySlug', async (slug) => {
+        const page = await findBySlug(slug);
+        assert.ok(page, 'the preliminary controller lookup must succeed');
+        await getDb()!.collection('pages').deleteOne({ _id: page._id });
+        return page;
+    });
+
+    const response = await attachThroughController(attachActorId, targetId, 'web');
+
+    assert.equal(response.status, 302);
+    const redirect = new URL(response.redirect, 'https://example.test');
+    assert.match(redirect.searchParams.get('message')!, /not attached.*full or no longer available.*Refresh/i);
+    assert.equal(await getDb()!.collection('pages').findOne({ slug: 'home' }), null);
+    assert.equal((await getDb()!.collection('carousels').findOne({ _id: targetId }))!.referenceRevision, 0);
+});
+
+for (const presentation of ['grid', 'list'] as const) {
+    test(`${presentation} attachment refuses a full Page and a Page removed after lookup`, async (t) => {
+        const { attachActorId, targetId } = await seedRace(targetFixtures[1]);
+        await getDb()!.collection('contentCollections').updateOne(
+            { _id: targetId }, { $set: { presentation } }
+        );
+        const items = Array.from({ length: 100 }, (_, order) => ({
+            itemId: new ObjectId().toHexString(), itemType: presentation,
+            collectionId: targetId.toHexString(), order
+        }));
+        await getDb()!.collection('pages').updateOne({ slug: 'home' }, { $set: { items } });
+        const before = await getDb()!.collection('pages').findOne({ slug: 'home' });
+
+        const full = await attachThroughController(attachActorId, targetId, 'api', presentation);
+        assert.equal(full.status, 409);
+        assert.equal(full.body.code, 'page_attachment_not_applied');
+        assert.deepEqual(await getDb()!.collection('pages').findOne({ slug: 'home' }), before);
+
+        const findBySlug = Page.findBySlug;
+        t.mock.method(Page, 'findBySlug', async (slug) => {
+            const page = await findBySlug(slug);
+            assert.ok(page);
+            await getDb()!.collection('pages').deleteOne({ _id: page._id });
+            return page;
+        });
+        const missing = await attachThroughController(attachActorId, targetId, 'api', presentation);
+        assert.equal(missing.status, 409);
+        assert.equal(missing.body.code, 'page_attachment_not_applied');
+        assert.equal(await getDb()!.collection('pages').findOne({ slug: 'home' }), null);
+        assert.equal((await getDb()!.collection('contentCollections').findOne({ _id: targetId }))!.referenceRevision, 0);
+    });
+}
 
 for (const fixture of targetFixtures) {
     test(`${fixture.label} add-first commits before deletion, which then removes the Page reference`, async () => {

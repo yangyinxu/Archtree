@@ -1569,6 +1569,13 @@ Web content management:
   configuration, and manual-item maintenance are grouped into collapsible
   tools; Page and Carousel reorder controls support both drag-and-drop and
   Move up/Move down buttons.
+- Page attachment is confirmed only after its transaction succeeds. The
+  administrator-only `POST /content/pages/:slug/items/carousel` and
+  `POST /content/pages/:slug/items/collection` endpoints return
+  `409 page_attachment_not_applied` when the Page reaches its 100-item limit
+  or disappears after the initial lookup. Existing items remain unchanged;
+  refresh the Page before retrying. The Carousel attachment form reports the
+  same failure instead of showing a successful placement.
 - Operations links the focused MediaTrack and storage-audit workspaces, shows
   the retained step status for each guided Artist release, links completed
   content back to its workspace, and only offers retry when an operation needs

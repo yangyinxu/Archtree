@@ -138,6 +138,13 @@ export const attachContentCollectionToPage = async (req: Request, res: Response,
             authReq.auth.userId,
             position(req.body.position)
         );
+        // The transaction can find the Page full or gone after the preliminary lookup.
+        if (items === null) {
+            return res.status(409).json({
+                code: 'page_attachment_not_applied',
+                message: 'Grid/List was not attached because the page is full or no longer available. Refresh the page and try again.'
+            });
+        }
         return res.status(200).json({ message: 'Grid/List attached to page.', items });
     } catch (error) {
         return next(error);

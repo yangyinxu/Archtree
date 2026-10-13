@@ -28,6 +28,12 @@ import { ManualCompositionConflictError } from '../services/manualCompositionSer
 // v1 only allows composition pages for Home and Library.
 const allowedSlugs: PageSlug[] = ['home', 'library'];
 
+// A null attachment result means the transaction found a full or missing Page, not a committed write.
+const pageAttachmentNotApplied = {
+    code: 'page_attachment_not_applied',
+    message: 'Carousel was not attached because the page is full or no longer available. Refresh the page and try again.'
+};
+
 const getPageSlug = (value: string): PageSlug | null => {
     const normalized = value.trim().toLowerCase();
     if (normalized === 'home' || normalized === 'library') {
@@ -539,6 +545,9 @@ export const attachCarouselToPage = async (req: Request, res: Response, next: Ne
 
         const position = parseOptionalPosition(req.body.position);
         const items = await Page.addCarouselItem(slug, carouselId, authReq.auth.userId, position);
+        if (items === null) {
+            return res.status(409).json(pageAttachmentNotApplied);
+        }
 
         return res.status(200).json({
             message: 'Carousel attached to page.',
@@ -979,7 +988,10 @@ export const attachCarouselToPageWeb = async (req: Request, res: Response, next:
         }
 
         const position = parseOptionalPosition(req.body.position);
-        await Page.addCarouselItem(slug, carouselId, authReq.auth.userId, position);
+        const items = await Page.addCarouselItem(slug, carouselId, authReq.auth.userId, position);
+        if (items === null) {
+            return redirectWithMessage(res, pageAttachmentNotApplied.message);
+        }
 
         return redirectWithMessage(res, 'Carousel attached to page.');
     } catch (error) {
