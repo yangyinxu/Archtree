@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { build } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { writeFile } from 'node:fs/promises';
@@ -14,6 +14,49 @@ let requestSequence = 0, caseRequestStart = 0;
 let toneSha256 = '';
 const transport: { sequence: number; method: string; pathname: string; range: string | null; status: number;
   contentLength: number; contentRange: string | null; finished: boolean }[] = [];
+
+/** Native Play can precede decoder progress; prove a continuous clock window before testing playback transitions. */
+const expectCredibleProgress = async (page: Page) => {
+  const progress = await page.evaluate(() => new Promise<{ advancedSeconds: number; elapsedSeconds: number }>((resolve, reject) => {
+    const media = document.querySelector('video');
+    if (!media) { reject(new Error('The room media element is missing.')); return; }
+    let baseline = media.currentTime, startedAt = performance.now();
+    const resetWindow = () => { baseline = media.currentTime; startedAt = performance.now(); };
+    const observeSeek = (event: Event) => { if (event.isTrusted) resetWindow(); };
+    const cleanup = () => {
+      clearTimeout(deadline);
+      media.removeEventListener('timeupdate', observe);
+      media.removeEventListener('seeking', observeSeek);
+      media.removeEventListener('seeked', observeSeek);
+      media.removeEventListener('ended', failed);
+      media.removeEventListener('error', failed);
+    };
+    const failed = () => { cleanup(); reject(new Error('Native playback stopped before credible progress.')); };
+    const deadline = setTimeout(() => {
+      cleanup(); reject(new Error(`Native playback did not establish credible progress: ${JSON.stringify({
+        baseline, startedAt, currentTime: media.currentTime, readyState: media.readyState,
+        paused: media.paused, seeking: media.seeking, ended: media.ended, error: media.error?.code ?? null
+      })}; see room-playback-evidence.json.`));
+    }, 7_000);
+    const observe = (event: Event) => {
+      const advancedSeconds = media.currentTime - baseline, elapsedSeconds = (performance.now() - startedAt) / 1000;
+      if (!event.isTrusted) return;
+      // A real startup correction may seek; only the following continuous clock window proves natural progress.
+      if (media.paused || media.seeking || media.readyState < 3 || elapsedSeconds <= 0 || advancedSeconds < 0
+        || advancedSeconds > elapsedSeconds * Math.max(1, media.playbackRate) + 0.05) { resetWindow(); return; }
+      if (advancedSeconds <= 0.02) return;
+      cleanup(); resolve({ advancedSeconds, elapsedSeconds });
+    };
+    media.addEventListener('timeupdate', observe);
+    media.addEventListener('seeking', observeSeek);
+    media.addEventListener('seeked', observeSeek);
+    media.addEventListener('ended', failed);
+    media.addEventListener('error', failed);
+    if (media.ended || media.error) failed();
+  }));
+  expect(progress.advancedSeconds).toBeGreaterThan(0.02);
+  expect(progress.elapsedSeconds).toBeGreaterThan(0);
+};
 
 /** Uses native loopback HTTP for both the probe and media; intercepted responses are not a real decoder transport. */
 const startProbeServer = async () => {
@@ -182,51 +225,13 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().observations.filter((item) => item.type === 'actual-start').length)).toBe(1);
   const actual = await page.evaluate(() => window.roomProbe.state().observations.find((item) => item.type === 'actual-start')!.monotonicMs);
   expect(actual).toBeGreaterThanOrEqual(anchor - 10);
+  await expectCredibleProgress(page);
   await page.evaluate(() => window.roomProbe.pauseLocally());
   await page.evaluate(() => window.roomProbe.apply(5, { revision: 10, playbackEpoch: 50 }));
   expect(await page.evaluate(() => window.roomProbe.state().paused)).toBe(true);
   await page.evaluate(() => window.roomProbe.resync());
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().paused)).toBe(false);
-  // Native Play can precede decoder progress; wait for a real advancing timeupdate before testing rate correction.
-  const progress = await page.evaluate(() => new Promise<{ advancedSeconds: number; elapsedSeconds: number }>((resolve, reject) => {
-    const media = document.querySelector('video');
-    if (!media) { reject(new Error('The room media element is missing.')); return; }
-    let baseline = media.currentTime, startedAt = performance.now();
-    const resetWindow = () => { baseline = media.currentTime; startedAt = performance.now(); };
-    const observeSeek = (event: Event) => { if (event.isTrusted) resetWindow(); };
-    const cleanup = () => {
-      clearTimeout(deadline);
-      media.removeEventListener('timeupdate', observe);
-      media.removeEventListener('seeking', observeSeek);
-      media.removeEventListener('seeked', observeSeek);
-      media.removeEventListener('ended', failed);
-      media.removeEventListener('error', failed);
-    };
-    const failed = () => { cleanup(); reject(new Error('Native playback stopped before credible progress.')); };
-    const deadline = setTimeout(() => {
-      cleanup(); reject(new Error(`Native playback did not establish credible progress: ${JSON.stringify({
-        baseline, startedAt, currentTime: media.currentTime, readyState: media.readyState,
-        paused: media.paused, seeking: media.seeking, ended: media.ended, error: media.error?.code ?? null
-      })}; see room-playback-evidence.json.`));
-    }, 7_000);
-    const observe = (event: Event) => {
-      const advancedSeconds = media.currentTime - baseline, elapsedSeconds = (performance.now() - startedAt) / 1000;
-      if (!event.isTrusted) return;
-      // A real startup correction may seek; only the following continuous clock window proves natural progress.
-      if (media.paused || media.seeking || media.readyState < 3 || elapsedSeconds <= 0 || advancedSeconds < 0
-        || advancedSeconds > elapsedSeconds * Math.max(1, media.playbackRate) + 0.05) { resetWindow(); return; }
-      if (advancedSeconds <= 0.02) return;
-      cleanup(); resolve({ advancedSeconds, elapsedSeconds });
-    };
-    media.addEventListener('timeupdate', observe);
-    media.addEventListener('seeking', observeSeek);
-    media.addEventListener('seeked', observeSeek);
-    media.addEventListener('ended', failed);
-    media.addEventListener('error', failed);
-    if (media.ended || media.error) failed();
-  }));
-  expect(progress.advancedSeconds).toBeGreaterThan(0.02);
-  expect(progress.elapsedSeconds).toBeGreaterThan(0);
+  await expectCredibleProgress(page);
   expect(await page.evaluate(() => window.roomProbe.correct((window.roomProbe.state().currentTime ?? 0) + 0.25))).toBe('rate');
   expect(await page.evaluate(() => window.roomProbe.state().rate)).toBe(1.05);
   await page.evaluate(() => window.roomProbe.seekThroughNativeElement(1.8));

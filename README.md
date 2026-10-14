@@ -1139,6 +1139,8 @@ Range responses; evidence includes native metadata, events, and transport outcom
 Diagnostics inspect native ranges only after finite metadata is available, since
 an early WebKit range query can change its unknown-duration cache. Synthetic
 playback epochs retain their own clock anchors, including explicitly scheduled starts.
+The pause/resume scenario proves natural clock movement both before pausing and
+after resuming; a native `playing` event alone does not prove advancing playback.
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
