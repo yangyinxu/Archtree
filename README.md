@@ -1151,9 +1151,6 @@ after resuming; a native `playing` event alone does not prove advancing playback
 The probe samples native progress before controller event handlers, then confirms
 the decoder remains ready and continuous after those handlers finish. A seek or
 readiness change in the same event cannot masquerade as stable playback.
-This native timing spec disables compositor video recording while retaining its
-traces, failure screenshots, and bounded native media/transport evidence. Other
-browser specs retain their configured video recording.
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
@@ -1168,7 +1165,10 @@ The same two commands retain
 `WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L4101-L4144)
 disables WPE's viewport power-saving pause for hidden muted video elements,
 including audio-only sources. Media clocks, readiness, seeks, rates, and end events
-remain native. The independent social gate sets neither switch and continues
+remain native. These commands also set `WEBKIT_GST_USE_PLAYBIN3=1` to select
+WebKit's official optional GStreamer playbin3 backend for ordinary HTTP media;
+setup verifies the installed `playbin3` plugin before testing. The independent
+social gate sets none of these switches and continues
 to verify real audio and background playback under the default browser policy.
 Both jobs retain preflight and full-matrix evidence, and every invocation is
 blocking. `release-artifact` needs all four jobs, so it is skipped unless every

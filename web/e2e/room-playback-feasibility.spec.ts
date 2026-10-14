@@ -8,9 +8,6 @@ import { execFileSync } from 'node:child_process';
 import { createTestTone } from './fixtures/audio';
 import type {} from './support/roomPlaybackHarness';
 
-// Native timing evidence uses traces, screenshots, and bounded media events without compositor recording.
-test.use({ video: 'off' });
-
 let harnessBundle = '';
 let probeServer: Server | undefined;
 let probeOrigin = '';
