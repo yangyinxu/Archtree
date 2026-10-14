@@ -456,6 +456,10 @@ the [production acceptance record](docs/deployment/finitude-web-rollout-runbook.
 
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
+Installing a new source relies on native `load()` to reset playback to zero;
+any pending startup position is cleared on the previous source before switching.
+It does not request an extra seek before the new source has metadata. Explicit
+restart and room-position seeks retain their existing behavior.
 It corrects startup drift after credible media-clock advancement. Small-drift
 heartbeats retain their clock reference but defer rate changes until that first
 progress, avoiding a decoder flush before playback begins; larger drift can still
@@ -1137,8 +1141,8 @@ zero retries and a separate evidence directory, then runs its complete matrix.
 Its synthetic two-second WAV uses real loopback HTTP with verified HEAD and
 Range responses; evidence includes native metadata, events, and transport outcomes.
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
-browser job also checks its PCM and output plugins and records GStreamer warnings
-for the synthetic startup preflight.
+browser job also checks its PCM and audio-output plugins before the synthetic
+startup preflight.
 Both jobs retain preflight and full-matrix evidence, and every invocation is
 blocking. `release-artifact` needs all four jobs, so it is skipped unless every
 gate succeeds. It stages those same build bytes without rebuilding and binds each
