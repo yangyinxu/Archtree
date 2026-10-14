@@ -1134,6 +1134,8 @@ with its own fixture processes and evidence directory, then runs the complete
 social matrix. The ordinary browser job first verifies native scheduled startup,
 pause/resume, rate correction, and natural completion in all three engines with
 zero retries and a separate evidence directory, then runs its complete matrix.
+Its synthetic two-second WAV uses real loopback HTTP with verified HEAD and
+Range responses; evidence includes native metadata, events, and transport outcomes.
 Both jobs retain preflight and full-matrix evidence, and every invocation is
 blocking. `release-artifact` needs all four jobs, so it is skipped unless every
 gate succeeds. It stages those same build bytes without rebuilding and binds each

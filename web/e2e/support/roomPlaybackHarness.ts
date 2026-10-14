@@ -72,7 +72,7 @@ const createHarness = () => {
       return {
         snapshot: store.getSnapshot(), intents: [...intents], observations: [...observations],
         loads, plays, creations, mediaCount: document.querySelectorAll('video').length,
-        paused: media?.paused, currentTime: media?.currentTime,
+        paused: media?.paused, currentTime: media?.currentTime, duration: media?.duration,
         rate: media?.playbackRate, readyState: media?.readyState, seeking: media?.seeking,
         networkState: media?.networkState, ended: media?.ended, error: media?.error?.code ?? null,
         buffered: media ? ranges(media.buffered) : [], seekable: media ? ranges(media.seekable) : [],
