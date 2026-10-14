@@ -54,10 +54,12 @@ function Workbench() {
   const importItems = [...new Map((imports.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()];
   const reviewItems = [...new Map((reviews.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()];
   const empty = source === 'imports' ? importItems.length === 0 : reviewItems.length === 0;
+  const unfiltered = filter === 'all' && !mine && !submitted;
   return <section className={styles.page}><AdminNav />
     <header className={styles.header}><div><h1 className={styles.title}>{t('workbench.title')}</h1><div className={styles.actions}>
       <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button>
       <Link className={styles.link} to="/admin/catalog">{t('workbench.manage_albums')}</Link>
+      <Link className={styles.link} to="/admin/conversions">{t('conversion.title')}</Link>
       {access.imports && <Link className={`${styles.link} ${styles.primary}`} to="/admin/imports/new">{t('workbench.new')}</Link>}
     </div></div></header>
     <div className={styles.filters} role="group" aria-label={t('workbench.source')}>
@@ -66,7 +68,8 @@ function Workbench() {
     </div>
     <div className={styles.filters} aria-label={t('workbench.title')}>
       {filters.map(value => <button type="button" className={styles.filter} aria-pressed={value === filter} key={value} onClick={() => setFilter(value)}>
-        {t(`workbench.${value}`)}{query.data && ` (${query.data.pages[0].counts[value]})`}</button>)}
+        {t(source === 'catalogReviews' && value === 'awaitingReview' ? 'workbench.review_unfinished'
+          : source === 'catalogReviews' && value === 'completed' ? 'workbench.review_completed' : `workbench.${value}`)}{query.data && ` (${query.data.pages[0].counts[value]})`}</button>)}
     </div>
     <form className={styles.toolbar} onSubmit={event => { event.preventDefault(); setSubmitted(search.trim()); }}>
       <label className={styles.field}>{t('workbench.search')}<input className={styles.input} value={search} maxLength={100} onChange={event => setSearch(event.target.value)} /></label>
@@ -76,7 +79,10 @@ function Workbench() {
     {!online && <p role="status" className={styles.error}>{t('common.offline')}</p>}
     {query.isPending && online && <p role="status">{t('common.loading')}</p>}
     {query.isError && <div role="alert" className={styles.error}><p>{t('common.error')}</p><button className={styles.button} type="button" onClick={() => void query.refetch()}>{t('common.retry')}</button></div>}
-    {query.isSuccess && empty && <p className={styles.empty}>{t(filter === 'all' && !mine && !submitted ? source === 'imports' ? 'workbench.empty' : 'workbench.review_empty' : 'workbench.no_matches')}</p>}
+    {query.isSuccess && empty && <div className={styles.notice}>
+      <p>{t(unfiltered ? source === 'imports' ? 'workbench.empty' : 'workbench.review_empty' : 'workbench.no_matches')}</p>
+      {unfiltered && <Link className={styles.link} to="/admin/catalog">{t('workbench.choose_existing')}</Link>}
+    </div>}
     <ul className={styles.cards}>{source === 'imports' ? importItems.map(item => <li className={styles.card} key={item.id}>
       <h2><Link className={styles.itemLink} to={`/admin/imports/${item.id}`}>{item.title || item.rootLabel || t('common.untitled')}</Link></h2>
       <p className={styles.muted}>{item.artistName}</p><ImportStages item={item} />
@@ -85,13 +91,19 @@ function Workbench() {
         if (!['preparing', 'needsAttention', 'complete'].includes(item.publication)) adminWorkspace.retain(`stage:${item.id}`, 'draft', access);
       }}>{t(['preparing', 'needsAttention', 'complete'].includes(item.publication) ? 'workbench.open' : 'action.edit')}</Link>
     </li>) : reviewItems.map(item => {
-      const analysis = item.analysis.state === 'idle' ? 'notStarted' : item.analysis.state === 'needsAttention' ? 'failed' : item.analysis.state;
+      // A finished analysis is not a catalog write; applied reviews close any historical suggestions.
+      const stage = item.state === 'applied' ? 'workbench.review_closed'
+        : ['queued', 'running'].includes(item.analysis.state) ? 'workbench.review_analyzing'
+        : item.analysis.state === 'needsAttention' ? 'workbench.review_needs_attention'
+        : item.pendingSuggestions > 0 ? 'workbench.review_pending'
+        : item.analysis.state === 'complete' ? 'workbench.review_handled'
+        : item.analysis.state === 'cancelled' ? 'state.cancelled' : 'workbench.review_not_started';
       return <li className={styles.card} key={item.id}>
         <h2><Link className={styles.itemLink} to={`/admin/catalog-reviews/${item.id}`}>{item.title || t('common.untitled')}</Link></h2>
         {item.state === 'applied' && <span className={styles.badge}>{t('catalog_review.applied')}</span>}
         <dl className={styles.statusRow}>
-          <div><dt>{t('stage.analysis')}</dt><dd>{t(`state.${analysis}`)}{item.analysis.totalChunks > 0 && ` · ${item.analysis.completedChunks}/${item.analysis.totalChunks}`}</dd></div>
-          <div><dt>{t('stage.review')}</dt><dd>{item.state === 'applied' ? t('state.approved') : item.pendingSuggestions ? `${t('state.needsReview')} · ${item.pendingSuggestions}` : t(item.analysis.state === 'complete' ? 'state.approved' : 'state.notStarted')}</dd></div>
+          <div><dt>{t('workbench.review_stage')}</dt><dd>{t(stage, { count: item.pendingSuggestions })}{['queued', 'running'].includes(item.analysis.state) && item.analysis.totalChunks > 0 && ` · ${item.analysis.completedChunks}/${item.analysis.totalChunks}`}</dd></div>
+          <div><dt>{t('workbench.review_album')}</dt><dd>{t(item.state === 'applied' ? 'workbench.review_updated' : 'workbench.review_not_updated')}</dd></div>
         </dl>
         <p className={styles.muted}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString() })}</p>
         <div className={styles.actions}>

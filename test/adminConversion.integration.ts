@@ -1,0 +1,396 @@
+import assert from 'node:assert/strict';
+import express from 'express';
+import { createHash, randomUUID } from 'node:crypto';
+import { after, before, beforeEach, test } from 'node:test';
+import type { Server } from 'node:http';
+import { ObjectId } from 'mongodb';
+import { getDb } from '../src/infrastructure/database';
+import { createSession } from '../src/services/authSessionService';
+import { getConversionAlbumSource, getConversionTrackSource } from '../src/administration/conversionSources';
+import { cancelConversionOperation, getConversionOperation, prepareConversionOperation, reconcileConversionOperation, uploadConversionOutput, type AdminConversionDependencies } from '../src/administration/conversionService';
+import { getConversionImportReady } from '../src/administration/conversionImportProof';
+import { createAdminConversionRouter } from '../src/routes/adminConversionRoutes';
+import { CONVERSION_PRESET, type ConversionIntent } from '../src/administration/conversionContract';
+import type { ConversionObjectStorage, ConversionStorageIdentity } from '../src/administration/conversionStorage';
+import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
+
+let harness: MongoReplicaSetHarness, server: Server, base = '', token = '', userToken = '', otherToken = '';
+const actor = new ObjectId(), other = new ObjectId(), user = new ObjectId(), album = new ObjectId(), first = new ObjectId(), second = new ObjectId();
+const sourceBytes = Buffer.from('Synthetic retained lossless source'), outputBytes = Buffer.from('Synthetic already validated MP3 payload');
+const sha256 = createHash('sha256').update(outputBytes).digest('hex');
+const file = { buffer: outputBytes, size: outputBytes.length, mimetype: 'audio/mpeg', originalname: 'Output.mp3' } as Express.Multer.File;
+const objects = new Map<string, ConversionStorageIdentity>(); let puts: string[] = [], deletes: string[] = [], failCleanup = false, hideOutput = false, rejectPut = false;
+const oldIdentity = (): ConversionStorageIdentity => ({ etag: '"source"', versionId: 'source-version', byteLength: sourceBytes.length, contentType: 'audio/flac', sha256: null, operationId: null, trackId: null });
+const storage: ConversionObjectStorage = {
+    async head(target, versionId) { const value = objects.get(target.key); return !value || versionId && value.versionId !== versionId || hideOutput && target.key.startsWith('audio/') ? null : structuredClone(value); },
+    async put(target, _file, metadata) {
+        puts.push(target.key);
+        if (rejectPut) throw new Error('Synthetic unknown PUT response');
+        const identity = { etag: '"output"', versionId: 'output-version', byteLength: outputBytes.length, contentType: 'audio/mpeg', sha256: metadata.sha256, operationId: metadata.operationId, trackId: metadata.trackId };
+        objects.set(target.key, identity); return identity;
+    },
+    async delete(target, identity) { deletes.push(target.key); if (failCleanup && !target.key.startsWith('audio/')) throw new Error('Synthetic cleanup error'); assert.equal(objects.get(target.key)?.versionId, identity.versionId); objects.delete(target.key); }
+};
+const dependencies: AdminConversionDependencies = { storage, validate: async () => ({ durationMs: 2034, sampleRate: 44100, channels: 2 }) };
+const db = () => getDb()!, code = (expected: string) => (error: any) => error.code === expected;
+const flags = ['FINITUDE_ADMIN_CATALOG_ENABLED', 'S3_BUCKET_NAME'] as const, previous = Object.fromEntries(flags.map(key => [key, process.env[key]]));
+const currentTrack = (id = first) => db().collection('audioTracks').findOne({ _id: id });
+async function intent(id = first): Promise<ConversionIntent> {
+    const source = await getConversionTrackSource(String(actor), String(id)), track = source.tracks[0];
+    return { operationId: randomUUID(), expectedRevision: track.revision, sourceRevision: track.sourceRevision,
+        sourceEtag: '"source"', sourceByteLength: sourceBytes.length,
+        album: source.album ? { id: source.album.id, revision: source.album.revision, membershipRevision: source.album.membershipRevision } : null,
+        output: { sha256, byteLength: outputBytes.length, filename: 'Output.mp3', preset: CONVERSION_PRESET } };
+}
+const prepare = async (body?: ConversionIntent, id = first) => { const approved = body ?? await intent(id); await prepareConversionOperation(String(actor), String(id), approved, dependencies); return approved; };
+const upload = (body: ConversionIntent, id = first, deps = dependencies) => uploadConversionOutput(String(actor), String(id), body.operationId, file, deps);
+const request = (path: string, method = 'GET', body?: unknown, access = token, viewer = String(actor)) => fetch(base + '/api/admin/v1' + path, {
+    method, headers: { ...(access ? { Authorization: `Bearer ${access}` } : {}), 'X-Finitude-Account-Viewer': viewer, 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+});
+before(async () => {
+    harness = await startMongoReplicaSet('archtree-admin-conversion-test');
+    const app = express(); app.use('/api/admin/v1', createAdminConversionRouter(dependencies));
+    server = await new Promise(resolve => { const listening = app.listen(0, '127.0.0.1', () => resolve(listening)); });
+    const address = server.address(); assert.ok(address && typeof address !== 'string'); base = `http://127.0.0.1:${address.port}`;
+});
+beforeEach(async () => {
+    for (const collection of ['users', 'authSessions', 'albums', 'audioTracks', 'adminMp3ConversionOperations', 'adminAlbumImports', 'socialRooms', 'socialRoomOutbox']) await db().collection(collection).deleteMany({});
+    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.S3_BUCKET_NAME = 'synthetic-conversion-bucket';
+    const admin = { _id: actor, role: 'admin', emailVerified: true, email: 'conversion-admin@example.test' }, adminOther = { _id: other, role: 'admin', emailVerified: true, email: 'conversion-other@example.test' }, ordinary = { _id: user, role: 'user', emailVerified: true, email: 'conversion-user@example.test' };
+    await db().collection('users').insertMany([admin, adminOther, ordinary]);
+    token = (await createSession(admin)).accessToken; userToken = (await createSession(ordinary)).accessToken; otherToken = (await createSession(adminOther)).accessToken;
+    await db().collection('albums').insertOne({ _id: album, title: 'Synthetic hidden Album', visibility: 'hidden', lifecycleStatus: 'ready', audioTrackIds: [String(first), String(second)] });
+    await db().collection('audioTracks').insertMany([first, second].map((id, index) => ({ _id: id, title: `Synthetic track ${index + 1}`, mediaType: 'audio', s3Key: String(id), albumId: String(album), originalFileName: index ? 'Source.wav' : 'Source.flac', format: { type: index ? 'WAV' : 'FLAC' }, duration: '00:02', uploadStatus: 'ready', publicationStatus: 'ready', createdBy: String(actor), trackNumber: index + 1, artistIds: [], genres: [], playlistReferenceRevision: 0, contentReferenceRevision: 0 })));
+    objects.clear(); for (const id of [first, second]) objects.set(String(id), oldIdentity());
+    puts = []; deletes = []; failCleanup = false; hideOutput = false; rejectPut = false;
+});
+after(async () => {
+    await new Promise<void>(resolve => server?.close(() => resolve())); await harness?.stop();
+    for (const key of flags) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }
+});
+
+test('private source snapshots are atomic, allowlisted, ordered, hidden-capable and administrator-only', async () => {
+    const path = `/conversions/albums/${album}/source`;
+    assert.equal((await request(path, 'GET', undefined, '')).status, 401);
+    assert.equal((await request(path, 'GET', undefined, userToken, String(user))).status, 403);
+    assert.equal((await fetch(base + '/api/admin/v1' + path, { headers: { Cookie: `session_token=${token}`, 'X-Finitude-Account-Viewer': String(other) } })).status, 409);
+    const response = await request(path); assert.equal(response.status, 200); assert.match(response.headers.get('cache-control')!, /no-store/);
+    const body = await response.json(); assert.deepEqual(body.tracks.map((track: any) => track.id), [String(first), String(second)]);
+    assert.equal(body.tracks[0].format.lossless, null); assert.match(body.album.membershipRevision, /^cm_[A-Za-z0-9_-]{43}$/);
+    for (const privateField of ['s3Key', 'source-version', 'synthetic-conversion-bucket', 'createdBy', 'uploadStatus']) assert.equal(JSON.stringify(body).includes(privateField), false);
+    await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); assert.equal((await request(path)).status, 403);
+});
+test('missing, Video, duplicate, excessive and inconsistent Album members fail closed', async () => {
+    for (const ids of [[String(first), String(first)], ['bad'], Array.from({ length: 101 }, () => String(new ObjectId()))]) {
+        await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: ids } });
+        await assert.rejects(getConversionAlbumSource(String(actor), String(album)), code('ADMIN_CONVERSION_MEMBERSHIP_UNAVAILABLE'));
+    }
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [String(first), String(second)] } });
+    for (const change of [{ albumId: '' }, { mediaType: 'video', s3Key: `video/${second}/${new ObjectId()}` }, { uploadStatus: 'failed' }]) {
+        await db().collection('audioTracks').updateOne({ _id: second }, { $set: change });
+        await assert.rejects(getConversionAlbumSource(String(actor), String(album)), code('ADMIN_CONVERSION_MEMBERSHIP_UNAVAILABLE'));
+    }
+});
+test('operation approval is actor scoped and exact-intent idempotent before or after source changes', async () => {
+    const body = await prepare(); const firstResult = await getConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(firstResult.operation.status, 'awaitingUpload'); assert.equal(firstResult.operation.ready, false);
+    await db().collection('audioTracks').updateOne({ _id: first }, { $set: { title: 'New external title' } });
+    assert.deepEqual(await prepareConversionOperation(String(actor), String(first), body, dependencies), firstResult);
+    await assert.rejects(prepareConversionOperation(String(actor), String(first), { ...body, output: { ...body.output, filename: 'Different.mp3' } }, dependencies), code('ADMIN_CONVERSION_IDEMPOTENCY_CONFLICT'));
+    await assert.rejects(getConversionOperation(String(other), String(first), body.operationId, dependencies), code('ADMIN_CONVERSION_OPERATION_NOT_FOUND'));
+    assert.equal((await request(`/conversions/tracks/${first}/operations/${body.operationId}`, 'GET', undefined, otherToken, String(other))).status, 404);
+});
+test('MP3 replacement installs one object with exact format, hash and receipt before old-source cleanup', async () => {
+    const body = await prepare(), original = await currentTrack(); const result = await upload(body);
+    assert.equal(result.operation.ready, true); assert.equal(result.operation.cleanupPending, false); assert.equal(result.operation.publication, 'ready');
+    const record = await currentTrack(); assert.equal(String(record!._id), String(first)); assert.equal(record!.albumId, original!.albumId);
+    assert.deepEqual(record!.format, { type: 'MP3' }); assert.equal(record!.duration, '00:02'); assert.equal(record!.mediaByteHash.value, sha256);
+    assert.equal(record!.mediaRepresentation.format, 'mp3'); assert.equal(record!.mediaRepresentation.versionId, 'output-version');
+    assert.deepEqual(deletes, [String(first)]); assert.equal(objects.has(String(first)), false); assert.equal(puts.length, 1);
+    const raw = await db().collection('adminMp3ConversionOperations').findOne({ actor: String(actor), operationId: body.operationId }); assert.equal(raw!.stage, 'attached');
+    assert.deepEqual(await prepareConversionOperation(String(actor), String(first), body, dependencies), result); assert.equal(puts.length, 1);
+});
+test('an Album keeps fixed members and the second upload does not conflict with the first success', async () => {
+    const firstIntent = await prepare(), secondIntent = await prepare(undefined, second);
+    assert.equal((await upload(firstIntent)).operation.ready, true); assert.equal((await upload(secondIntent, second)).operation.ready, true);
+    assert.equal(puts.length, 2); assert.deepEqual((await db().collection('albums').findOne({ _id: album }))!.audioTrackIds, [String(first), String(second)]);
+});
+test('replacement invalidates the old Room timeline and outbox in the same installation transaction', async () => {
+    const body = await prepare(), time = Date.now();
+    await db().collection('socialRooms').insertOne({ _id: 'conversion-room' as any, state: 'open', epoch: 1, revision: 1,
+        hostMembershipId: 'host', controlMode: 'everyone', controlGeneration: 1, queueRevision: 1, playbackGeneration: 1, members: [],
+        queue: [{ mediaTrackId: String(first), mediaRevision: `mr_${'1'.repeat(32)}`, durationMs: 2034, mediaType: 'Audio', title: 'Synthetic queue', streamUrl: `/content/mediaTrack/stream/${first}`, entryId: 'first-entry' }],
+        songRequests: [], timeline: { entryId: 'first-entry', state: 'playing', positionMs: 0, anchorServerTimeMs: time },
+        preparation: null, transfer: null, hostAbsentSince: null, hostSuspended: false, createdAt: new Date(time), expiresAt: new Date(time + 60_000) });
+    assert.equal((await upload(body)).operation.ready, true);
+    const room = await db().collection('socialRooms').findOne({ _id: 'conversion-room' as any });
+    assert.equal(room!.timeline.state, 'paused'); assert.equal(room!.queue[0].unavailable, true); assert.equal(room!.playbackGeneration, 2);
+    assert.ok(await db().collection('socialRoomOutbox').findOne({ _id: 'conversion-room' as any }));
+});
+test('HTTP creation, upload and recovery retain one concrete operation and reject another account before decoding', async () => {
+    const body = await intent(); const path = `/conversions/tracks/${first}/operations`;
+    const created = await request(path, 'POST', body); assert.equal(created.status, 201); assert.equal((await created.json()).operation.operationId, body.operationId);
+    const form = () => { const value = new FormData(); value.append('audioFile', new Blob([outputBytes], { type: 'audio/mpeg' }), 'Output.mp3'); return value; };
+    const otherUpload = await fetch(base + '/api/admin/v1' + path + `/${body.operationId}/upload`, { method: 'POST', headers: { Authorization: `Bearer ${otherToken}`, 'X-Finitude-Account-Viewer': String(other) }, body: form() });
+    assert.equal(otherUpload.status, 404); assert.equal(puts.length, 0);
+    const accepted = await fetch(base + '/api/admin/v1' + path + `/${body.operationId}/upload`, { method: 'POST', headers: { Cookie: `session_token=${token}`, 'X-Finitude-Account-Viewer': String(actor) }, body: form() });
+    assert.equal(accepted.status, 200); const response = await accepted.json(); assert.equal(response.operation.ready, true);
+    assert.equal(accepted.headers.get('x-finitude-account-viewer'), String(actor)); assert.equal(puts.length, 1);
+    assert.equal((await request(path + `/${body.operationId}/reconcile`, 'POST', { unexpected: 'field' })).status, 400);
+    const repeated = await request(path + `/${body.operationId}/reconcile`, 'POST', {}); assert.equal(repeated.status, 200); assert.equal((await repeated.json()).operation.ready, true); assert.equal(puts.length, 1);
+    for (const privateValue of ['source-version', 'output-version', 'synthetic-conversion-bucket', 'pendingS3Key', 'target']) assert.equal(JSON.stringify(response).includes(privateValue), false);
+});
+test('source, bytes and membership changes block stale uploads before PUT', async () => {
+    const body = await prepare(); await db().collection('audioTracks').updateOne({ _id: first }, { $set: { title: 'Changed externally' } });
+    await assert.rejects(upload(body), code('ADMIN_CONVERSION_SOURCE_CHANGED')); assert.equal(puts.length, 0);
+    await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    const next = await prepare(); objects.set(String(first), { ...oldIdentity(), etag: '"changed-bytes"' });
+    await assert.rejects(upload(next), code('ADMIN_CONVERSION_SOURCE_CHANGED')); assert.equal(puts.length, 0);
+});
+test('a lost PUT response reconciles the same output without another upload or new identity', async () => {
+    const body = await prepare();
+    const uncertain: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async put(target, input, metadata) { await storage.put(target, input, metadata); throw new Error('Synthetic lost response'); } } };
+    const result = await upload(body, first, uncertain); assert.equal(result.operation.ready, true); assert.equal(puts.length, 1);
+    assert.equal((await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.ready, true); assert.equal(puts.length, 1);
+});
+test('unknown missing upload preserves the local-retention signal and a retry uses the same destination key', async () => {
+    const body = await prepare(); rejectPut = true; const unknown = await upload(body);
+    assert.equal(unknown.operation.ready, false); assert.equal(unknown.operation.upload, 'unknown');
+    const before = await currentTrack(); assert.equal(before!.s3Key, String(first)); assert.ok(before!.pendingS3Key);
+    const reconciled = await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies); assert.equal(reconciled.operation.ready, false); assert.equal(puts.length, 1);
+    rejectPut = false; const recovered = await upload(body); assert.equal(recovered.operation.ready, true);
+    assert.equal(puts.length, 2); assert.equal(puts[0], puts[1]);
+});
+test('a first single-attempt definite PUT rejection clears only the unused reservation and keeps one retry identity', async () => {
+    const body = await prepare();
+    const rejected: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async put(target) {
+        puts.push(target.key); throw Object.assign(new Error('Synthetic rejected request'), { $metadata: { httpStatusCode: 403, attempts: 1 } });
+    } } };
+    const result = await upload(body, first, rejected);
+    assert.equal(result.operation.ready, false); assert.equal(result.operation.upload, 'failed'); assert.equal(result.operation.status, 'awaitingUpload');
+    assert.equal((await currentTrack())!.s3Key, String(first)); assert.equal((await currentTrack())!.pendingS3Key, null); assert.deepEqual(deletes, []);
+    const raw = await db().collection('adminMp3ConversionOperations').findOne({ actor: String(actor), operationId: body.operationId });
+    assert.equal(raw!.putAttempted, true); assert.equal(raw!.putMayHaveSucceeded, false); assert.equal(raw!.stage, 'prepared'); assert.equal(raw!.target.key, puts[0]);
+    assert.equal((await upload(body)).operation.ready, true); assert.equal(puts.length, 2); assert.equal(puts[0], puts[1]);
+});
+test('a later definite rejection or SDK retry never erases an earlier potentially accepted PUT', async () => {
+    const body = await prepare(); rejectPut = true; await upload(body);
+    const rejected: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async put(target) {
+        puts.push(target.key); throw Object.assign(new Error('Synthetic rejected request'), { $metadata: { httpStatusCode: 403, attempts: 1 } });
+    } } };
+    const pendingKey = (await currentTrack())!.pendingS3Key;
+    const retried = await upload(body, first, rejected); assert.equal(retried.operation.upload, 'unknown'); assert.equal(retried.operation.ready, false);
+    assert.equal((await currentTrack())!.pendingS3Key, pendingKey);
+    const raw = await db().collection('adminMp3ConversionOperations').findOne({ actor: String(actor), operationId: body.operationId });
+    assert.equal(raw!.putAttempted, true); assert.equal(raw!.putMayHaveSucceeded, true);
+    const cancelled = await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(cancelled.operation.cleanupPending, true); assert.equal((await currentTrack())!.pendingS3Key, pendingKey); assert.deepEqual(deletes, []);
+    const secondBody = await prepare(undefined, second);
+    const sdkRetried: AdminConversionDependencies = { ...rejected, storage: { ...storage, async put(target) {
+        puts.push(target.key); throw Object.assign(new Error('Synthetic SDK retried request'), { $metadata: { httpStatusCode: 403, attempts: 2 } });
+    } } };
+    assert.equal((await upload(secondBody, second, sdkRetried)).operation.upload, 'unknown'); assert.ok((await currentTrack(second))!.pendingS3Key);
+});
+test('unknown PUT history created during validation is read from the claimed operation before rejection classification', async () => {
+    const body = await prepare();
+    const concurrent: AdminConversionDependencies = { ...dependencies,
+        validate: async () => { rejectPut = true; await upload(body); return { durationMs: 2034, sampleRate: 44100, channels: 2 }; },
+        storage: { ...storage, async put(target) {
+            puts.push(target.key); throw Object.assign(new Error('Synthetic rejected request'), { $metadata: { httpStatusCode: 403, attempts: 1 } });
+        } }
+    };
+    assert.equal((await upload(body, first, concurrent)).operation.upload, 'unknown'); assert.ok((await currentTrack())!.pendingS3Key);
+    const raw = await db().collection('adminMp3ConversionOperations').findOne({ actor: String(actor), operationId: body.operationId });
+    assert.equal(raw!.putMayHaveSucceeded, true); assert.equal(puts.length, 2); assert.equal(puts[0], puts[1]);
+});
+test('cancellation clears a reservation never dispatched to S3 even when storage is unavailable', async () => {
+    const body = await prepare(); let reads = 0;
+    const unavailable: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async head(target, versionId) {
+        reads++; if (target.key.startsWith('audio/')) throw new Error('Synthetic unavailable storage'); return storage.head(target, versionId);
+    } } };
+    await assert.rejects(upload(body, first, unavailable), code('ADMIN_CONVERSION_STORAGE_UNCONFIRMED')); assert.equal(puts.length, 0); assert.ok((await currentTrack())!.pendingS3Key);
+    const before = reads; const cancelled = await cancelConversionOperation(String(actor), String(first), body.operationId, unavailable);
+    assert.equal(reads, before); assert.equal(cancelled.operation.cleanupPending, false); assert.equal(cancelled.operation.issue, 'ADMIN_CONVERSION_CANCELLED');
+    assert.equal((await currentTrack())!.s3Key, String(first)); assert.equal((await currentTrack())!.pendingS3Key, null); assert.deepEqual(deletes, []);
+});
+test('approval expiry and rollout shutdown during the target HEAD prevent dispatch but preserve cancellation', async () => {
+    for (const change of ['expiry', 'rollout'] as const) {
+        const body = await prepare();
+        const interrupted: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async head(target, versionId) {
+            const actual = await storage.head(target, versionId);
+            if (target.key.startsWith('audio/')) {
+                if (change === 'expiry') await db().collection('adminMp3ConversionOperations').updateOne({ actor: String(actor), operationId: body.operationId }, { $set: { grantExpiresAt: new Date(0) } });
+                else process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'false';
+            }
+            return actual;
+        } } };
+        await assert.rejects(upload(body, first, interrupted), code(change === 'expiry' ? 'ADMIN_CONVERSION_APPROVAL_EXPIRED' : 'ADMIN_CONVERSION_UNAVAILABLE'));
+        assert.equal(puts.length, 0); assert.ok((await currentTrack())!.pendingS3Key);
+        const cancelled = await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
+        assert.equal(cancelled.operation.cleanupPending, false); assert.equal((await currentTrack())!.pendingS3Key, null);
+        process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true';
+    }
+});
+test('a stored output that was hidden during the response is discovered by readback recovery', async () => {
+    const body = await prepare(); hideOutput = true;
+    const uncertain: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async put(target, input, metadata) { await storage.put(target, input, metadata); throw new Error('Synthetic lost response'); } } };
+    assert.equal((await upload(body, first, uncertain)).operation.ready, false); assert.equal(puts.length, 1);
+    hideOutput = false; assert.equal((await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.ready, true); assert.equal(puts.length, 1);
+});
+test('publication failure retains the MP3 until an explicit publication-only recovery succeeds', async () => {
+    const body = await prepare(); const failed: AdminConversionDependencies = { ...dependencies, publish: async () => ({ requestedCount: 1, readyCount: 0, failedCount: 1, results: [{ audioTrackId: String(first), albumId: String(album), uploadStatus: 'ready', uploadReady: true, publicationStatusBefore: 'ready', publicationStatus: 'failed', outcome: 'failed', error: null }] }) };
+    const result = await upload(body, first, failed); assert.equal(result.operation.ready, false); assert.equal(result.operation.upload, 'ready'); assert.equal(result.operation.publication, 'failed');
+    assert.equal((await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.ready, true); assert.equal(puts.length, 1);
+});
+test('an old conversion reconcile preserves a later Album move, its saved order and unrelated metadata', async () => {
+    const body = await prepare(); await upload(body);
+    const nextAlbum = new ObjectId(), third = new ObjectId();
+    await db().collection('audioTracks').insertOne({ _id: third, title: 'Later Album member', trackNumber: 2, albumId: String(nextAlbum),
+        mediaType: 'audio', s3Key: String(third), uploadStatus: 'ready', publicationStatus: 'ready', createdBy: String(actor) });
+    // A legacy saved order remains canonical until an explicit membership edit; conversion is not such an edit.
+    await db().collection('albums').insertOne({ _id: nextAlbum, title: 'Later saved Album', lifecycleStatus: 'ready', visibility: 'hidden',
+        audioTrackIds: [String(third), String(first)], releaseDate: { year: 2020, month: null, day: null }, credits: [], referenceRevision: 11 });
+    await db().collection('albums').updateOne({ _id: album }, { $pull: { audioTrackIds: String(first) } as any });
+    await db().collection('audioTracks').updateOne({ _id: first }, { $set: { albumId: String(nextAlbum), title: 'Later saved title', visibility: 'hidden',
+        coverArtUrl: '/later-artwork', credits: [], releaseDate: { year: 2021, month: null, day: null } } });
+    const beforeTrack = await currentTrack(), beforeAlbum = await db().collection('albums').findOne({ _id: nextAlbum });
+    const result = await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(result.operation.ready, true); assert.equal(puts.length, 1);
+    assert.deepEqual(await currentTrack(), beforeTrack); assert.deepEqual(await db().collection('albums').findOne({ _id: nextAlbum }), beforeAlbum);
+    assert.deepEqual((await db().collection('albums').findOne({ _id: album }))!.audioTrackIds, [String(second)]);
+});
+test('publication retry fences the exact output and existing current Album membership without silently repairing relations', async () => {
+    const body = await prepare(); await upload(body);
+    await db().collection('albums').updateOne({ _id: album }, { $pull: { audioTrackIds: String(first) } as any });
+    assert.equal((await getConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.ready, false);
+    await db().collection('audioTracks').updateOne({ _id: first }, { $set: { publicationStatus: 'failed', publicationError: 'Synthetic publication failed' } });
+    const missing = await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(missing.operation.ready, false); assert.equal(missing.operation.publication, 'failed'); assert.equal(puts.length, 1);
+    assert.deepEqual((await db().collection('albums').findOne({ _id: album }))!.audioTrackIds, [String(second)]);
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [String(first), String(second)] } });
+    const result = await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(result.operation.ready, true); assert.equal((await currentTrack())!.publicationStatus, 'ready'); assert.equal(puts.length, 1);
+    const before = await currentTrack();
+    await db().collection('audioTracks').updateOne({ _id: first }, { $set: { publicationStatus: 'failed' } });
+    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'false';
+    const disabled = await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(disabled.operation.ready, false); assert.equal((await currentTrack())!.publicationStatus, 'failed');
+    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true';
+    await db().collection('adminMp3ConversionOperations').updateOne({ actor: String(actor), operationId: body.operationId }, { $set: { grantExpiresAt: new Date(0) } });
+    assert.equal((await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.ready, false);
+    assert.equal((await currentTrack())!.publicationStatus, 'failed'); assert.equal((await currentTrack())!.s3Key, before!.s3Key);
+});
+test('failed old-source cleanup stays exact-version retryable while the installed MP3 can be ready', async () => {
+    const body = await prepare(); failCleanup = true; const result = await upload(body);
+    assert.equal(result.operation.ready, true); assert.equal(result.operation.cleanupPending, true);
+    assert.equal((await currentTrack())!.storageCleanupS3VersionId, 'source-version');
+    failCleanup = false; const recovered = await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(recovered.operation.ready, true); assert.equal(recovered.operation.cleanupPending, false); assert.equal(puts.length, 1);
+});
+test('current output and exact S3 identity are rechecked before disposal proof is returned', async () => {
+    const body = await prepare(); await upload(body); const track = await currentTrack(), target = track!.s3Key;
+    objects.set(target, { ...objects.get(target)!, sha256: '0'.repeat(64) }); assert.equal((await getConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.ready, false);
+    await db().collection('audioTracks').updateOne({ _id: first }, { $set: { s3Key: `audio/${first}/${new ObjectId()}` } });
+    assert.equal((await getConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.status, 'superseded');
+});
+test('a metadata change during a verified import HEAD never grants stale disposal proof', async () => {
+    const body = await prepare(); await upload(body); const slotId = randomUUID(), projectId = new ObjectId();
+    await db().collection('adminAlbumImports').insertOne({ _id: projectId, purpose: 'import', actorId: String(actor), media: {
+        assets: [{ slotId, state: 'ready', sha256, byteLength: outputBytes.length }], publication: { operationId: randomUUID(), state: 'complete', albumId: String(album), tracks: [{ slotId, id: String(first) }] }
+    } });
+    const replaced: ConversionObjectStorage = { ...storage, async head(target, versionId) {
+        const actual = await storage.head(target, versionId);
+        await db().collection('audioTracks').updateOne({ _id: first }, { $set: { s3Key: `audio/${first}/${new ObjectId()}` } });
+        return actual;
+    } };
+    assert.deepEqual((await getConversionImportReady(String(actor), String(projectId), replaced)).ready, []);
+});
+test('late permission loss during a ready-object HEAD cannot grant disposal proof', async () => {
+    const body = await prepare(); await upload(body);
+    const revoked: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async head(target, versionId) {
+        const actual = await storage.head(target, versionId);
+        await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); return actual;
+    } } };
+    await assert.rejects(getConversionOperation(String(actor), String(first), body.operationId, revoked), code('ADMIN_PERMISSION_REQUIRED'));
+});
+test('permission loss after PUT preserves pending object evidence and prevents promotion', async () => {
+    const body = await prepare(); const lost: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async put(target, input, metadata) {
+        const identity = await storage.put(target, input, metadata); await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); return identity;
+    } } };
+    await assert.rejects(upload(body, first, lost), code('ADMIN_PERMISSION_REQUIRED')); assert.equal((await currentTrack())!.s3Key, String(first)); assert.ok((await currentTrack())!.pendingS3Key);
+    await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'admin' } });
+    assert.equal((await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.ready, true); assert.equal(puts.length, 1);
+});
+test('an external edit after storage can cancel only the unused exact output and preserves the original', async () => {
+    const body = await prepare(); const changed: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async put(target, input, metadata) {
+        const identity = await storage.put(target, input, metadata); await db().collection('audioTracks').updateOne({ _id: first }, { $set: { title: 'External correction' } }); return identity;
+    } } };
+    await assert.rejects(upload(body, first, changed), code('ADMIN_CONVERSION_SOURCE_CHANGED'));
+    const result = await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(result.operation.issue, 'ADMIN_CONVERSION_CANCELLED'); assert.equal(result.operation.cleanupPending, false);
+    const track = await currentTrack(); assert.equal(track!.s3Key, String(first)); assert.equal(track!.title, 'External correction'); assert.equal(track!.pendingS3Key, null);
+    assert.equal(objects.has(String(first)), true); assert.equal(objects.has(puts[0]), false);
+});
+test('a delete marker never hides a known output version from cancellation or confirms an uncertain version cleanup', async () => {
+    const body = await prepare();
+    const changed: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async put(target, input, metadata) {
+        const identity = await storage.put(target, input, metadata);
+        await db().collection('audioTracks').updateOne({ _id: first }, { $set: { title: 'External correction' } }); return identity;
+    } } };
+    await assert.rejects(upload(body, first, changed), code('ADMIN_CONVERSION_SOURCE_CHANGED'));
+    const key = puts[0]; let unavailableVersion = true, exactVersionReads = 0;
+    const hidden: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async head(target, versionId) {
+        if (target.key === key) {
+            if (!versionId) return null;
+            exactVersionReads++; if (unavailableVersion) throw new Error('Synthetic exact version unavailable');
+        }
+        return storage.head(target, versionId);
+    } } };
+    const unknown = await cancelConversionOperation(String(actor), String(first), body.operationId, hidden);
+    assert.equal(unknown.operation.cleanupPending, true); assert.equal((await currentTrack())!.pendingS3Key, key);
+    assert.equal(objects.has(key), true); assert.deepEqual(deletes, []);
+    unavailableVersion = false;
+    const result = await cancelConversionOperation(String(actor), String(first), body.operationId, hidden);
+    assert.equal(result.operation.cleanupPending, false); assert.equal(result.operation.issue, 'ADMIN_CONVERSION_CANCELLED');
+    assert.equal((await currentTrack())!.pendingS3Key, null); assert.equal(objects.has(String(first)), true); assert.equal(objects.has(key), false);
+    assert.deepEqual(deletes, [key]); assert.ok(exactVersionReads >= 3);
+});
+test('cancel of an unknown absent PUT retains evidence; successful attachment cannot be undone by cancel', async () => {
+    const body = await prepare(); rejectPut = true; await upload(body);
+    const cancelled = await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(cancelled.operation.cleanupPending, true); assert.equal(cancelled.operation.ready, false); assert.ok((await currentTrack())!.pendingS3Key);
+    const otherBody = await prepare(undefined, second); rejectPut = false; await upload(otherBody, second);
+    await assert.rejects(cancelConversionOperation(String(actor), String(second), otherBody.operationId, dependencies), code('ADMIN_CONVERSION_ALREADY_ATTACHED'));
+});
+test('expired upload approvals and rollback flags stop new work while installed cleanup remains recoverable', async () => {
+    const body = await prepare(); await db().collection('adminMp3ConversionOperations').updateOne({ actor: String(actor), operationId: body.operationId }, { $set: { grantExpiresAt: new Date(0) } });
+    await assert.rejects(upload(body), code('ADMIN_CONVERSION_APPROVAL_EXPIRED')); assert.equal(puts.length, 0);
+    await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    const next = await prepare(); failCleanup = true; await upload(next); process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'false'; failCleanup = false;
+    assert.equal((await reconcileConversionOperation(String(actor), String(first), next.operationId, dependencies)).operation.cleanupPending, false);
+    await assert.rejects(getConversionAlbumSource(String(actor), String(album)), code('ADMIN_CONVERSION_UNAVAILABLE'));
+});
+test('new import disposal proof excludes unpublished stages, reused different bytes and missing S3 confirmation', async () => {
+    const body = await prepare(); await upload(body); const track = await currentTrack(), slotId = randomUUID(), projectId = new ObjectId(), publicationOperationId = randomUUID();
+    await db().collection('adminAlbumImports').insertOne({ _id: projectId, purpose: 'import', actorId: String(actor), media: {
+        assets: [{ slotId, state: 'ready', sha256, byteLength: outputBytes.length }], publication: { operationId: publicationOperationId, state: 'preparing', albumId: String(album), tracks: [{ slotId, id: String(first) }] }
+    } });
+    assert.deepEqual((await getConversionImportReady(String(actor), String(projectId), storage)).ready, []);
+    await db().collection('adminAlbumImports').updateOne({ _id: projectId }, { $set: { 'media.publication.state': 'complete' } });
+    const proof = await getConversionImportReady(String(actor), String(projectId), storage);
+    assert.deepEqual(proof.ready, [{ slotId, trackId: String(first), sha256, byteLength: outputBytes.length }]); assert.equal(proof.publicationOperationId, publicationOperationId);
+    let heads = 0;
+    const counted = { ...storage, async head(target: Parameters<ConversionObjectStorage['head']>[0], versionId?: string | null) { heads++; return storage.head(target, versionId); } };
+    assert.deepEqual((await getConversionImportReady(String(actor), String(projectId), counted, [])).ready, []); assert.equal(heads, 0);
+    assert.deepEqual((await getConversionImportReady(String(actor), String(projectId), counted, [slotId])).ready, proof.ready); assert.equal(heads, 1);
+    await assert.rejects(getConversionImportReady(String(actor), String(projectId), counted, [slotId, slotId]), code('ADMIN_CONVERSION_INVALID_INPUT'));
+    const scoped = await request(`/conversions/imports/${projectId}/ready`, 'POST', { slots: [slotId] }); assert.equal(scoped.status, 200); assert.deepEqual((await scoped.json()).ready, proof.ready);
+    await db().collection('adminAlbumImports').updateOne({ _id: projectId }, { $set: { 'media.assets.0.state': 'deleted' } });
+    assert.deepEqual((await getConversionImportReady(String(actor), String(projectId), storage)).ready, proof.ready);
+    await assert.rejects(getConversionImportReady(String(other), String(projectId), storage), code('ADMIN_CONVERSION_IMPORT_NOT_FOUND'));
+    await db().collection('adminAlbumImports').updateOne({ _id: projectId }, { $set: { 'media.assets.0.sha256': '0'.repeat(64) } });
+    assert.deepEqual((await getConversionImportReady(String(actor), String(projectId), storage)).ready, []);
+    await db().collection('adminAlbumImports').updateOne({ _id: projectId }, { $set: { 'media.assets.0.sha256': sha256 } });
+    objects.delete(track!.s3Key); assert.deepEqual((await getConversionImportReady(String(actor), String(projectId), storage)).ready, []);
+});

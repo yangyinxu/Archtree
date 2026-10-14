@@ -1,0 +1,160 @@
+import { sha256 } from '@noble/hashes/sha2.js';
+import type { ConversionWorkerFailureCode } from './conversionWorkerProtocol';
+
+const readLimit = 64 * 1024;
+const maximumChunks = 4096;
+const maximumDurationSeconds = 86400;
+const maximumMetadataBytes = 16 * 1024 * 1024;
+export const conversionFileByteLimit = 512 * 1024 * 1024;
+
+/** Validation failures contain classifications only, never names, paths, decoded tags or service errors. */
+export class ConversionSourceValidationError extends Error {
+  constructor(readonly code: ConversionWorkerFailureCode) { super(code); }
+}
+function fail(code: ConversionWorkerFailureCode): never { throw new ConversionSourceValidationError(code); }
+
+export interface LosslessSourceEvidence {
+  codec: 'flac' | 'wav-pcm' | 'wav-float';
+  frames: number;
+  sampleRate: number;
+  channels: number;
+  bitDepth: number;
+  audioOffset: number;
+  audioBytes: number;
+}
+
+/** Reads small container headers; no source-wide ArrayBuffer is allocated. */
+export async function readConversionBytes(source: Blob, offset: number, length: number): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0
+    || length > readLimit || offset + length > source.size) fail('conversion_source_incomplete');
+  const bytes = new Uint8Array(await source.slice(offset, offset + length).arrayBuffer());
+  if (bytes.length !== length) fail('conversion_source_incomplete');
+  return bytes;
+}
+const equalBytes = (bytes: Uint8Array, values: readonly number[]) => values.every((value, index) => bytes[index] === value);
+const text = (bytes: Uint8Array) => String.fromCharCode(...bytes);
+
+/** The fixed profile preserves CD/48 kHz rates and explicitly resamples higher-rate sources to 48 kHz. */
+export const conversionOutputSampleRate = (sourceRate: number) => {
+  if (sourceRate === 44100 || sourceRate === 48000) return sourceRate;
+  if (Number.isSafeInteger(sourceRate) && sourceRate > 48000 && sourceRate <= 384000) return 48000;
+  return fail('conversion_source_unsupported');
+};
+const validateAudioShape = (frames: number, rate: number, channels: number, bits: number) => {
+  conversionOutputSampleRate(rate);
+  if (![1, 2].includes(channels) || !Number.isSafeInteger(frames) || frames < 1
+    || frames / rate > maximumDurationSeconds || !Number.isSafeInteger(bits) || bits < 4 || bits > 64) fail('conversion_source_unsupported');
+};
+
+/** Parses a complete RIFF/WAVE layout and admits only explicitly uncompressed PCM or IEEE float. */
+async function inspectWave(source: Blob): Promise<LosslessSourceEvidence> {
+  const header = await readConversionBytes(source, 0, 12);
+  const riffBytes = new DataView(header.buffer).getUint32(4, true) + 8;
+  if (riffBytes !== source.size) fail('conversion_source_incomplete');
+  let offset = 12, chunks = 0, metadataBytes = 0;
+  let format: { codec: 'wav-pcm' | 'wav-float'; channels: number; rate: number; bits: number; align: number } | null = null;
+  let audio: { offset: number; bytes: number } | null = null;
+  while (offset < source.size) {
+    if (++chunks > maximumChunks) fail('conversion_source_invalid');
+    const chunk = await readConversionBytes(source, offset, 8), view = new DataView(chunk.buffer);
+    const kind = text(chunk.subarray(0, 4)), length = view.getUint32(4, true), end = offset + 8 + length;
+    if (end + length % 2 > source.size) fail('conversion_source_incomplete');
+    if (kind !== 'data' && (metadataBytes += length) > maximumMetadataBytes) fail('conversion_source_unsupported');
+    if (kind === 'fmt ') {
+      if (format || length < 16 || length > 64) fail('conversion_source_invalid');
+      const bytes = await readConversionBytes(source, offset + 8, length), fmt = new DataView(bytes.buffer);
+      let encoding = fmt.getUint16(0, true);
+      const channels = fmt.getUint16(2, true), rate = fmt.getUint32(4, true), byteRate = fmt.getUint32(8, true);
+      const align = fmt.getUint16(12, true), bits = fmt.getUint16(14, true);
+      if (encoding === 0xfffe) {
+        const extraBytes = length >= 18 ? fmt.getUint16(16, true) : 0;
+        if (length < 40 || extraBytes < 22 || 18 + extraBytes > length) fail('conversion_source_unsupported');
+        const validBits = fmt.getUint16(18, true), channelMask = fmt.getUint32(20, true);
+        if (validBits < 1 || validBits > bits || channelMask !== 0 && channelMask !== (channels === 1 ? 4 : channels === 2 ? 3 : -1)) fail('conversion_source_unsupported');
+        const subtype = bytes.subarray(24, 40);
+        if (!equalBytes(subtype.subarray(2), [0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113])) fail('conversion_source_unsupported');
+        encoding = fmt.getUint16(24, true);
+        if (encoding === 3 && validBits !== 32) fail('conversion_source_unsupported');
+      }
+      if (encoding !== 1 && encoding !== 3 || encoding === 1 && ![8, 16, 24, 32].includes(bits)
+        || encoding === 3 && bits !== 32 || align !== channels * bits / 8 || byteRate !== rate * align) fail('conversion_source_unsupported');
+      conversionOutputSampleRate(rate);
+      if (![1, 2].includes(channels)) fail('conversion_source_unsupported');
+      format = { codec: encoding === 1 ? 'wav-pcm' : 'wav-float', channels, rate, bits, align };
+    } else if (kind === 'data') {
+      if (!format || audio || length === 0 || length % format.align) fail('conversion_source_invalid');
+      audio = { offset: offset + 8, bytes: length };
+    }
+    offset = end + length % 2;
+  }
+  if (!format || !audio || offset !== source.size) fail('conversion_source_invalid');
+  const frames = audio.bytes / format.align;
+  validateAudioShape(frames, format.rate, format.channels, format.bits);
+  return { codec: format.codec, frames, sampleRate: format.rate, channels: format.channels, bitDepth: format.bits, audioOffset: audio.offset, audioBytes: audio.bytes };
+}
+
+/** STREAMINFO supplies exact accounting; unknown sample counts cannot prove complete conversion. */
+async function inspectFlac(source: Blob): Promise<LosslessSourceEvidence> {
+  let offset = 4, last = false, blocks = 0;
+  let evidence: Omit<LosslessSourceEvidence, 'audioOffset' | 'audioBytes'> | null = null;
+  while (!last) {
+    if (++blocks > maximumChunks) fail('conversion_source_invalid');
+    const header = await readConversionBytes(source, offset, 4);
+    last = Boolean(header[0] & 128);
+    const kind = header[0] & 127, length = header[1] * 65536 + header[2] * 256 + header[3];
+    if (offset + 4 + length > source.size) fail('conversion_source_incomplete');
+    if (offset + 4 + length > maximumMetadataBytes) fail('conversion_source_unsupported');
+    if (blocks === 1 && kind !== 0 || kind === 127) fail('conversion_source_invalid');
+    if (kind === 0) {
+      if (evidence || length !== 34) fail('conversion_source_invalid');
+      const bytes = await readConversionBytes(source, offset + 4, 34), view = new DataView(bytes.buffer);
+      if (view.getUint16(0) < 16 || view.getUint16(2) < view.getUint16(0)) fail('conversion_source_invalid');
+      const maximumFrameBytes = bytes[7] * 65536 + bytes[8] * 256 + bytes[9];
+      if (maximumFrameBytes > 1024 * 1024) fail('conversion_source_unsupported');
+      const packed = view.getBigUint64(10);
+      const sampleRate = Number(packed >> 44n), channels = Number(packed >> 41n & 7n) + 1;
+      const bitDepth = Number(packed >> 36n & 31n) + 1, frames = Number(packed & 0xfffffffffn);
+      validateAudioShape(frames, sampleRate, channels, bitDepth);
+      evidence = { codec: 'flac', frames, sampleRate, channels, bitDepth };
+    }
+    offset += 4 + length;
+  }
+  if (!evidence || offset === source.size) fail('conversion_source_incomplete');
+  return { ...evidence, audioOffset: offset, audioBytes: source.size - offset };
+}
+
+/** Container identity is derived from bytes; uploaded names and MIME hints never authorize a codec. */
+export async function inspectLosslessConversionSource(source: Blob): Promise<LosslessSourceEvidence> {
+  if (!Number.isSafeInteger(source.size) || source.size < 12) fail('conversion_source_invalid');
+  if (source.size > conversionFileByteLimit) fail('conversion_storage_unavailable');
+  const bytes = await readConversionBytes(source, 0, 12);
+  if (equalBytes(bytes, [82, 73, 70, 70]) && equalBytes(bytes.subarray(8), [87, 65, 86, 69])) return inspectWave(source);
+  if (equalBytes(bytes, [102, 76, 97, 67])) return inspectFlac(source);
+  return fail('conversion_source_unsupported');
+}
+
+/** Streaming digest bounds memory and verifies that the entire immutable File was readable. */
+export async function hashConversionFile(source: Blob, progress?: (fraction: number) => void): Promise<string> {
+  const digest = sha256.create();
+  let offset = 0;
+  try {
+    while (offset < source.size) {
+      const bytes = await readConversionBytes(source, offset, Math.min(readLimit, source.size - offset));
+      digest.update(bytes); offset += bytes.length; progress?.(offset / source.size);
+    }
+    return Array.from(digest.digest(), byte => byte.toString(16).padStart(2, '0')).join('');
+  } finally { digest.destroy(); }
+}
+
+const crc16Table = Uint16Array.from({ length: 256 }, (_, value) => {
+  let crc = value << 8;
+  for (let bit = 0; bit < 8; bit++) crc = ((crc << 1) ^ (crc & 0x8000 ? 0x8005 : 0)) & 0xffff;
+  return crc;
+});
+/** RFC 9639 frame CRC covers header, subframes and footer; browser decoding alone may ignore this evidence. */
+export function isValidFlacFrameCrc(bytes: Uint8Array): boolean {
+  if (bytes.length < 2) return false;
+  let crc = 0;
+  for (const byte of bytes) crc = ((crc << 8) ^ crc16Table[(crc >> 8 ^ byte) & 255]) & 0xffff;
+  return crc === 0;
+}

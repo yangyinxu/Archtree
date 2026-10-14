@@ -1,6 +1,7 @@
 import type { Db, CreateIndexesOptions, IndexSpecification, Document } from 'mongodb';
 import { catalogSearchCollections } from '../utils/catalogSearch';
 import { adminImportIndexes } from '../administration/adminImportService';
+import { adminConversionIndexes } from '../administration/conversionService';
 
 const catalogSearchIndexKeys: IndexSpecification[] = [
   { catalogSearchVersion: 1 },
@@ -16,6 +17,7 @@ export const databaseIndexes: Array<{
     required?: boolean;
   }> = [
     ...adminImportIndexes,
+    ...adminConversionIndexes,
     { collection: 'adminCatalogCoverOperations', keys: { actor: 1, operationId: 1 }, options: { unique: true } },
     { collection: 'adminCatalogCoverOperations', keys: { 'cancellation.actor': 1, 'cancellation.operationId': 1 }, options: { unique: true, partialFilterExpression: { 'cancellation.actor': { $type: 'string' }, 'cancellation.operationId': { $type: 'string' } } }, required: true },
     { collection: 'adminCatalogCoverOperations', keys: { kind: 1, ownerId: 1, state: 1 }, required: true },
@@ -145,7 +147,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v8-administrator-imports';
+export const requiredIndexRevision = 'required-indexes-v9-administrator-conversions';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */

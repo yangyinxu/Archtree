@@ -209,10 +209,6 @@
   transform: scale(0.98);
 }
 
-.stateIcon {
-  color: var(--color-accent-bright);
-}
-
 .loadMore {
   display: flex;
   justify-content: center;

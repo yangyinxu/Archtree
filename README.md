@@ -81,7 +81,7 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. Startup verifies the `required-indexes-v7-artist-follows` constraints before
+new scope after rotation. Startup verifies the `required-indexes-v9-administrator-conversions` constraints before
 admission; these are additive schema changes even when the feature is disabled.
 
 See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
@@ -1387,12 +1387,82 @@ cannot be recalled. Private preview GET/HEAD accepts the account-viewer header,
 or a non-secret `viewer` query parameter for browser media elements; neither is
 an authentication credential. Every preview requires the current admin session.
 
-The Web and native import editors use Draft, Review, Files and Publish sections.
+The Web import editor uses Draft, Review, Files and Publish sections.
 Section navigation retains account-fenced local work and does not dispatch a
 mutation. Compact value comparisons keep source evidence expandable; publication
 recovery has its own status and actions. Confirmation windows show the frozen
 named target and proposed change before secondary explanations. Technical IDs
 remain available in Details rather than leading normal catalog and Page rows.
+
+The workbench is Web-only. Finitude iOS and Android expose listener features even
+for administrator accounts; they do not load administrator capabilities, private
+previews, import/catalog/Page editors or upload controls.
+
+### Device-local MP3 conversion
+
+Open `/finitude/admin/conversions`, or choose **Convert to MP3** for an existing
+Album or AudioTrack in Catalog. The device queue accepts up to 100 FLAC/PCM WAVE
+files, each at most 512 MiB. Actual complete decoding determines eligibility.
+Generated outputs also have a 512 MiB hard limit. Embedded metadata is bounded
+to 16 MiB/4096 blocks, and declared FLAC frame lengths to 1 MiB. Invalid, corrupt,
+unsupported or oversized sources remain separate failed members of the batch.
+Folder intake inspects at most 1024 selected entries, keeps FLAC/WAVE signatures
+and named audio candidates, and skips unrelated covers or text files. Individually
+selected files are decoded regardless of their extension; stored MP3 paths use
+the same normalized, bounded output filename as the generated file.
+The preset is 320 kbps CBR, retaining mono/stereo and 44.1/48 kHz; other supported
+sample rates are converted to 48 kHz. No volume normalization or channel downmix
+is applied. MP3 encoder delay and padding mean this is not a gapless guarantee.
+
+The feature requires a secure context, OPFS, IndexedDB and Web Locks. It requests
+persistent browser storage, but browsers may deny persistence or evict data.
+Keep external originals. Only one same-account tab executes device jobs at a
+time. Jobs and bytes remain on this browser/profile/device under their initiating
+account; current administrator authorization is required to see or recover them.
+Closing a page/process pauses conversion. An unfinished track starts again from
+its retained source; verified MP3s are reused. Source downloads resume only under
+the same strong ETag and exact range. A changed source is never appended.
+
+New local files create an import draft after all selected tracks finish; metadata,
+duplicate review, upload and publication retain the existing import workflow.
+Existing tracks use a frozen operation and preserve Track identity and relations.
+Unknown uploads reconcile the original operation before resending bytes. Local
+MP3 deletion requires exact current S3 and ready-publication proof. Failed or
+uncertain results retain the MP3. Retained lossless copies and selected external
+originals are never removed by MP3-cache cleanup.
+
+Conversion endpoints, relative to `/api/admin/v1`, all require current admin and
+matching account-viewer identity:
+
+- `GET /conversions/albums/:id/source`, `/conversions/tracks/:id/source`:
+  private ordered sources and opaque catalog/media/membership revisions.
+- `POST /conversions/tracks/:id/operations`: fixed UUID, source revisions,
+  strong ETag/length, Album snapshot and output SHA-256/length/preset/filename.
+- `POST /conversions/tracks/:id/operations/:operationId/upload`: one bounded
+  multipart `audioFile`; actual 320 kbps MP3 frames and digest are validated.
+- `GET /conversions/tracks/:id/operations/:operationId`, `POST .../reconcile`:
+  exact actor-owned operation and storage/publication recovery. Never infer
+  completion from a reservation or merely successful PUT.
+- `POST /conversions/tracks/:id/operations/:operationId/cancel`: abandon only an
+  unattached output, retaining exact cleanup evidence for an unknown PUT.
+- `GET /conversions/imports/:id/ready`: creator-only exact published slot proof;
+  staged assets and different-byte duplicate reuse cannot clear MP3 cache.
+  `POST` to the same path with `{slots: [uuid]}` checks only selected pending
+  cache slots, allowing later members to progress under the bounded S3-read budget.
+
+`FINITUDE_ADMIN_CATALOG_ENABLED` advertises `localMp3Conversion` capability and
+admits new conversion operations. Turning it off does not prevent recovery of an
+already attached output or cleanup. No server encoding service or extra key is
+needed. Source files remain private authenticated media, not public S3 redirects.
+The isolated hashed conversion Worker alone receives `wasm-unsafe-eval`; the
+document keeps strict script policy. The LAME WASM module is bundled locally,
+with no runtime CDN fetch or COOP/COEP requirement.
+
+Dependencies are pinned to Mediabunny/MP3 encoder 1.61.4 and noble hashes 2.4.0.
+Licenses, attribution, LAME 3.100 source, wrapper/source modules and rebuild
+instructions ship at `/finitude/licenses/mp3/NOTICES.txt` alongside the source
+archives. The Worker has a separate 256 KiB gzip budget; ordinary route and CSS
+budgets are unchanged. `npm run build:web` checks all three budgets.
 
 Import routes (relative to `/api/admin/v1`):
 
@@ -1451,9 +1521,25 @@ cost/quality measurements and real S3 proof are separate from mocked tests.
 Daily reservations are persisted in the same transaction as a chunk checkpoint;
 uncertain outcomes and dispatches stopped after reservation remain counted.
 
-Web **Workbench → Manage published Albums** exposes explicit manual editing and
-creation of an existing-Album review. The separate **Catalog reviews** queue
-retains saved projects when the browser closes. Analysis uses retained original
+Web **Workbench → Edit or review existing Album** exposes explicit manual editing
+and creation of an existing-Album review. The separate **Existing Album reviews**
+queue retains saved projects when the browser closes. **Unfinished** includes all
+unapplied reviews; **Album updated** confirms that this project's selected fields
+were applied. Luna progress and the original-Album update status are shown
+separately. **Save review draft** changes only the private draft; **Update original
+Album** requires selecting saved changes and confirming their frozen old/new
+values. **Start Luna review** is available above the track editor and always has
+its own confirmation. All `/finitude/admin/*` pages use a dedicated administration
+layout with management navigation, language/account controls and the Admin/User
+view switch. Listener navigation, global music search and playback controls are
+absent. Switching back to User view restores the listener layout while retaining
+the authenticated session, playback state and active Room connection.
+Direct catalog saves also confirm the frozen partial patch with per-field saved
+and proposed values, including coupled Credits and attribution. A newer catalog
+revision disables the open confirmation and shows its recovery instruction;
+cancelling preserves unsaved edits. Offline or failed reads do not report a
+revision change without a confirmed newer item.
+Analysis uses retained original
 filenames and saved metadata; absent historical folder/file evidence stays empty.
 No media is uploaded, copied or published by this workflow. Artist attribution,
 artwork and visibility remain separate catalog edits.
@@ -2023,7 +2109,7 @@ Personalized Library:
   Each contextual Home item may carry
   `{ "reason": { "code": "followedArtist", "artist": { "id": "...", "name": "..." } } }`;
   public content summaries and expanded `included` objects never gain this field.
-- Startup revision `required-indexes-v7-artist-follows` requires the unique
+- Startup revision `required-indexes-v9-administrator-conversions` requires the unique
   `artistFollows(userId, artistId)` index, owner/follow-date and Artist/owner
   cleanup indexes, and the Album/MediaTrack descending calendar-date indexes.
   The resolver uses those date indexes, bounded equality joins and a 3-second

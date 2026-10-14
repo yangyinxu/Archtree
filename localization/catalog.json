@@ -1137,6 +1137,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.analysis_again": {
+      "description": "Run Luna review again",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.analysis_confirm": {
       "description": "Start Luna review",
       "delivery": [
@@ -1158,6 +1165,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.analysis_running": {
+      "description": "Luna is reviewing in the background. You can leave this page; results will be saved here.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.applied": {
       "description": "Changes applied to the existing Album",
       "delivery": [
@@ -1173,28 +1187,30 @@
       "variables": {}
     },
     "admin.catalog_review.apply_action": {
-      "description": "Apply selected changes",
+      "description": "Update original Album ({count})",
       "delivery": [
         "runtime"
       ],
-      "variables": {}
+      "variables": {
+        "count": "number"
+      }
     },
     "admin.catalog_review.apply_confirm": {
-      "description": "Confirm catalog changes",
+      "description": "Confirm updating the original Album",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_copy": {
-      "description": "Only the selected saved fields will change. Other metadata and the existing media stay in place.",
+      "description": "Only selected saved changes will update the original Album. Other information and media stay in place.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_tab": {
-      "description": "Apply changes",
+      "description": "Update original Album",
       "delivery": [
         "runtime"
       ],
@@ -1208,14 +1224,28 @@
       "variables": {}
     },
     "admin.catalog_review.artist_hint": {
-      "description": "Artist suggestions are identity hints. Review Artist attribution in the catalog editor; they are not applied automatically.",
+      "description": "Artist suggestions are identity clues. Confirm attribution in the original Album; adopting draft metadata does not change it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.artist_read_only": {
+      "description": "Artist name (read-only)",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.context_copy": {
-      "description": "The source is this saved Album. Original filenames are used when available; historical folder names are not inferred. Artist identity, artwork and visibility are managed in the catalog editor.",
+      "description": "Luna uses saved metadata and retained original filenames. Missing historical filenames and folder names stay unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.context_title": {
+      "description": "What Luna can use",
       "delivery": [
         "runtime"
       ],
@@ -1243,7 +1273,77 @@
       "variables": {}
     },
     "admin.catalog_review.draft_saved": {
-      "description": "Saved to private review",
+      "description": "Review draft saved",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.draft_tab": {
+      "description": "Edit draft",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.edit_artist": {
+      "description": "Edit attribution in original Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.edit_visibility": {
+      "description": "Edit visibility in original Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.empty_artist": {
+      "description": "Artist identity suggestions are shown below. Confirm attribution in the original Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.empty_attention": {
+      "description": "Luna review needs attention. Check the issue above or continue editing manually.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.empty_cancelled": {
+      "description": "The Luna review was stopped. You can still edit the draft manually.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.empty_handled": {
+      "description": "Suggestions have been handled. The saved review draft has no changes to apply.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.empty_idle": {
+      "description": "Luna has not run yet. Start a review or edit the draft manually.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.empty_no_suggestions": {
+      "description": "Luna did not suggest changes. You can still edit the draft manually.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.empty_ready": {
+      "description": "Changes are saved to the draft. The original Album has not been updated yet.",
       "delivery": [
         "runtime"
       ],
@@ -1251,6 +1351,20 @@
     },
     "admin.catalog_review.filename_missing": {
       "description": "Original filename not retained",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.manage_copy": {
+      "description": "Artist attribution, cover and visibility are edited in the original Album. Changing that Album requires creating a new review before applying draft changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.manage_original": {
+      "description": "Manage original Album",
       "delivery": [
         "runtime"
       ],
@@ -1264,14 +1378,42 @@
       "variables": {}
     },
     "admin.catalog_review.no_changes": {
-      "description": "The saved draft has no applicable metadata changes.",
+      "description": "The saved review draft has no changes to apply. Edit the draft or review Luna suggestions to prepare changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.original_value": {
+      "description": "Original Album information",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.review_copy": {
+      "description": "Adopting suggestions saves them to the draft. Then choose which changes to apply to the original Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.review_tab": {
+      "description": "Review Luna suggestions",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.save_draft": {
+      "description": "Save review draft",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.save_draft_first": {
-      "description": "Save the private draft before analyzing, reviewing suggestions or applying changes.",
+      "description": "Save your draft edits before running Luna, adopting suggestions or updating the original Album.",
       "delivery": [
         "runtime"
       ],
@@ -1285,20 +1427,28 @@
       "variables": {}
     },
     "admin.catalog_review.saved_value": {
-      "description": "Reviewed value",
+      "description": "Value to apply",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.scope_copy": {
+      "description": "You are editing a review draft visible to administrators. Saving or adopting suggestions does not update the original Album; confirm that update separately. Luna is optional.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.select_field": {
-      "description": "Apply target · field",
+      "description": "Update {type} · {target} · {field}",
       "delivery": [
         "runtime"
       ],
       "variables": {
         "field": "string",
-        "target": "string"
+        "target": "string",
+        "type": "string"
       }
     },
     "admin.catalog_review.selected": {
@@ -1324,6 +1474,20 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.target_album": {
+      "description": "Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.target_track": {
+      "description": "Track",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.title": {
       "description": "Existing Album review",
       "delivery": [
@@ -1337,6 +1501,15 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.view_changes": {
+      "description": "Review changes to apply ({count})",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
     },
     "admin.catalog.add_credit": {
       "description": "Add credit",
@@ -1415,6 +1588,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog.confirm_stale": {
+      "description": "Explains a stale catalog confirmation and how to review again without discarding unsaved edits.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog.content_missing": {
       "description": "Confirmed missing catalog owner; editor is cleared while cover operation recovery remains available.",
       "delivery": [
@@ -1443,8 +1623,45 @@
       ],
       "variables": {}
     },
+    "admin.catalog.credit_record": {
+      "description": "Expandable exact Credit subject identity and private record link, including same-named subjects.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.credit_unavailable": {
+      "description": "Fallback identity when a private Credit name cannot be loaded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
+    },
     "admin.catalog.credits": {
       "description": "Credits",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.credits_unavailable": {
+      "description": "Distinguishes unavailable canonical Credits from an explicitly empty list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.current_value": {
+      "description": "Saved catalog value captured when opening manual confirmation; it does not rebase during refresh.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.direct_edit_copy": {
+      "description": "Saving confirmed changes updates this existing item directly.",
       "delivery": [
         "runtime"
       ],
@@ -1494,6 +1711,13 @@
     },
     "admin.catalog.list": {
       "description": "List",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.no_credits": {
+      "description": "An explicitly empty canonical Credit list.",
       "delivery": [
         "runtime"
       ],
@@ -1784,6 +2008,386 @@
       ],
       "variables": {}
     },
+    "admin.conversion.cancel_upload": {
+      "description": "Web administrator conversion cancel_upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.cancelled": {
+      "description": "Web administrator conversion cancelled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.capture": {
+      "description": "Web administrator local MP3 conversion: capture.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.check": {
+      "description": "Web administrator local MP3 conversion: check.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.cleanup_pending": {
+      "description": "Web conversion cleanup_pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.corrupt": {
+      "description": "Web administrator conversion corrupt.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.count": {
+      "description": "Web administrator local MP3 conversion: count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.conversion.device": {
+      "description": "Web administrator local MP3 conversion: device.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.download": {
+      "description": "Web administrator local MP3 conversion: download.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.download_source": {
+      "description": "Export the retained private original source to an external local file.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.empty": {
+      "description": "Web administrator local MP3 conversion: empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.error": {
+      "description": "Web administrator local MP3 conversion: error.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.existing": {
+      "description": "Web administrator local MP3 conversion: existing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.existing_help": {
+      "description": "Web administrator local MP3 conversion: existing help.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.folder": {
+      "description": "Web administrator local MP3 conversion: folder.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.import": {
+      "description": "Web administrator local MP3 conversion: import.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.import_help": {
+      "description": "Web administrator local MP3 conversion: import help.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.intro": {
+      "description": "Web administrator local MP3 conversion: intro.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.invalid": {
+      "description": "Web administrator local MP3 conversion: invalid.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.limits": {
+      "description": "Web administrator local MP3 conversion: limits.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.mono": {
+      "description": "Web administrator conversion mono.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.open_import": {
+      "description": "Web administrator local MP3 conversion: open import.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.pause": {
+      "description": "Web administrator local MP3 conversion: pause.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.recovery": {
+      "description": "Web administrator local MP3 conversion: recovery.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.recovery_summary": {
+      "description": "Expandable local conversion quality and interruption details.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.removed": {
+      "description": "Web administrator local MP3 conversion: removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.retained": {
+      "description": "Web administrator local MP3 conversion: retained.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.root": {
+      "description": "Web administrator local MP3 conversion: root.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.root_help": {
+      "description": "Web administrator local MP3 conversion: root help.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.run": {
+      "description": "Web administrator local MP3 conversion: run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.select": {
+      "description": "Web administrator local MP3 conversion: select.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.source": {
+      "description": "Web administrator local MP3 conversion: source.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.source_changed": {
+      "description": "Web administrator local MP3 conversion: source changed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.stage_encoding": {
+      "description": "Web administrator local MP3 conversion: stage encoding.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.stage_fetching": {
+      "description": "Web conversion stage_fetching.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.stage_uploading": {
+      "description": "Web conversion stage_uploading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.stage_validating": {
+      "description": "Web administrator local MP3 conversion: stage validating.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.stage_verifying": {
+      "description": "Web administrator local MP3 conversion: stage verifying.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.status_complete": {
+      "description": "Web administrator local MP3 conversion: status complete.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.status_encoding": {
+      "description": "Web administrator local MP3 conversion: status encoding.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.status_fetching": {
+      "description": "Web administrator local MP3 conversion: status fetching.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.status_needs_attention": {
+      "description": "Web administrator local MP3 conversion: status needsAttention.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.status_paused": {
+      "description": "Web administrator local MP3 conversion: status paused.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.status_queued": {
+      "description": "Web administrator local MP3 conversion: status queued.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.status_uploaded": {
+      "description": "Web administrator local MP3 conversion: status uploaded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.status_uploading": {
+      "description": "Web administrator local MP3 conversion: status uploading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.stereo": {
+      "description": "Web administrator conversion stereo.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.storage": {
+      "description": "Web administrator conversion storage.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.title": {
+      "description": "Web administrator local MP3 conversion: title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.unavailable": {
+      "description": "Web administrator local MP3 conversion: unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.unsupported": {
+      "description": "Web administrator conversion unsupported.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.upload": {
+      "description": "Web administrator local MP3 conversion: upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.upload_confirm": {
+      "description": "Web administrator local MP3 conversion: upload confirm.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.conversion.upload_submit": {
+      "description": "Web administrator local MP3 conversion: upload submit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.cover.cancel_confirm": {
       "description": "Administrator cover cancellation and cleanup feedback.",
       "delivery": [
@@ -1863,6 +2467,13 @@
     },
     "admin.cover.copy": {
       "description": "Choose a ready private image from an import project. Changing this cover is separate from publishing that Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.editor_copy": {
+      "description": "Choose a ready image from an import project. Replacing or removing the cover requires its own confirmation.",
       "delivery": [
         "runtime"
       ],
@@ -2959,6 +3570,13 @@
       ],
       "variables": {}
     },
+    "admin.workbench.choose_existing": {
+      "description": "Choose existing Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.workbench.completed": {
       "description": "Administrator workbench: workbench completed.",
       "delivery": [
@@ -2967,21 +3585,21 @@
       "variables": {}
     },
     "admin.workbench.empty": {
-      "description": "Administrator workbench: workbench empty.",
+      "description": "No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.workbench.import_source": {
-      "description": "Album imports",
+      "description": "New Album imports",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.workbench.manage_albums": {
-      "description": "Manage published Albums",
+      "description": "Edit or review existing Album",
       "delivery": [
         "runtime"
       ],
@@ -3009,7 +3627,7 @@
       "variables": {}
     },
     "admin.workbench.new": {
-      "description": "Administrator workbench: workbench new.",
+      "description": "Upload new Album",
       "delivery": [
         "runtime"
       ],
@@ -3036,15 +3654,101 @@
       ],
       "variables": {}
     },
-    "admin.workbench.review_empty": {
-      "description": "No catalog reviews yet. Open a published Album to begin.",
+    "admin.workbench.review_album": {
+      "description": "Original Album",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
+    "admin.workbench.review_analyzing": {
+      "description": "In progress",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_closed": {
+      "description": "Closed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_completed": {
+      "description": "Album updated",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_empty": {
+      "description": "No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_handled": {
+      "description": "No pending suggestions",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_needs_attention": {
+      "description": "Needs attention",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_not_started": {
+      "description": "Not started",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_not_updated": {
+      "description": "Not updated",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_pending": {
+      "description": "Suggestions awaiting review · {count}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
     "admin.workbench.review_source": {
-      "description": "Catalog reviews",
+      "description": "Existing Album reviews",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_stage": {
+      "description": "Luna review",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_unfinished": {
+      "description": "Unfinished",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_updated": {
+      "description": "Updated",
       "delivery": [
         "runtime"
       ],

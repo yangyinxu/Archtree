@@ -14,6 +14,7 @@ function mount(route: string) {
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[route]}>
     <Link to="/admin/imports/eeeeeeeeeeeeeeeeeeeeeeee">Other project</Link><Routes>
       <Route path="/admin/imports" element={<AdminWorkbenchPage />} />
+      <Route path="/admin/catalog" element={<h1>Existing Album selection</h1>} />
       <Route path="/admin/imports/new" element={<AdminCreateImportPage />} />
       <Route path="/admin/imports/:importId" element={<AdminImportPage />} />
     </Routes></MemoryRouter></QueryClientProvider>);
@@ -26,10 +27,11 @@ test('workbench distinguishes confirmed empty from failed load and does not quer
   const fetch = vi.fn(async (path: string, _init: RequestInit) => path.endsWith('capabilities') ? json(capabilities) : json({ code: 'unavailable' }, 503)); vi.stubGlobal('fetch', fetch);
   adminWorkspace.select('user'); mount('/admin/imports'); expect(fetch).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Switch to Admin view' }));
-  await screen.findByRole('alert'); expect(screen.queryByText('No projects yet. Create an Album draft to begin.')).not.toBeInTheDocument();
+  await screen.findByRole('alert'); expect(screen.queryByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.')).not.toBeInTheDocument();
   fetch.mockImplementation(async () => json({ items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null }));
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-  await screen.findByText('No projects yet. Create an Album draft to begin.'); expect(fetch.mock.calls[1][0]).toContain('limit=25');
+  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.'); expect(fetch.mock.calls[1][0]).toContain('limit=25');
+  expect(screen.getByRole('link', { name: 'Choose existing Album' })).toHaveAttribute('href', '/admin/catalog');
 });
 
 test('manual edits save only the private draft and never start analysis or publication', async () => {
@@ -130,11 +132,11 @@ test('stage navigation keeps private edits and selected suggestions without a mu
 test('workbench refresh stays in its header while personal filtering remains with search', async () => {
   const reads: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string) => { reads.push(path); return json({ items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null }); }));
-  mount('/admin/imports'); await screen.findByText('No projects yet. Create an Album draft to begin.');
+  mount('/admin/imports'); await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.');
   const header = screen.getByRole('heading', { name: 'Workbench' }).closest('header')!;
   expect(within(header).getByRole('button', { name: 'Refresh status' })).toBeVisible();
-  expect(within(header).getByRole('link', { name: 'New Album' })).toBeVisible();
-  expect(within(header).getByRole('link', { name: 'Manage published Albums' })).toHaveAttribute('href', '/admin/catalog');
+  expect(within(header).getByRole('link', { name: 'Upload new Album' })).toBeVisible();
+  expect(within(header).getByRole('link', { name: 'Edit or review existing Album' })).toHaveAttribute('href', '/admin/catalog');
   const search = screen.getByRole('textbox', { name: 'Search projects' }).closest('form')!;
   expect(within(search).queryByRole('button', { name: 'Refresh status' })).not.toBeInTheDocument();
   fireEvent.click(within(search).getByRole('checkbox', { name: 'Started by me' }));
@@ -153,16 +155,16 @@ test('catalog reviews are a separate read-only workbench source with search, own
     return json({ items: cursor ? [review, { ...review, id: 'ffffffffffffffffffffffff', title: 'Second Album review' }] : [review], counts, nextCursor: cursor ? null : 'next-review-page' });
   }));
   mount('/admin/imports');
-  await screen.findByText('No projects yet. Create an Album draft to begin.');
+  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.');
   expect(reads.some(path => path.includes('/catalog-reviews'))).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Catalog reviews' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Existing Album reviews' }));
   await screen.findByRole('heading', { name: 'Published Album review' });
-  expect(screen.getByRole('button', { name: 'Catalog reviews' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Existing Album reviews' })).toHaveAttribute('aria-pressed', 'true');
   expect(screen.getByRole('link', { name: 'Open review' })).toHaveAttribute('href', '/admin/catalog-reviews/eeeeeeeeeeeeeeeeeeeeeeee');
   expect(screen.getByRole('link', { name: 'Edit published Album' })).toHaveAttribute('href', '/admin/catalog/album/111111111111111111111111');
   expect(screen.queryByText('Upload')).not.toBeInTheDocument();
   expect(screen.queryByText('Publication')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: /^Awaiting review/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^Unfinished/ }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Search projects' }), { target: { value: ' Published Album ' } });
   fireEvent.click(screen.getByRole('button', { name: 'Search projects' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Started by me' }));
@@ -180,13 +182,16 @@ test('the catalog review empty state distinguishes confirmed absence from a fail
   const counts = { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 };
   vi.stubGlobal('fetch', vi.fn(async (path: string) => path.includes('/catalog-reviews?') && failed ? json({ code: 'unavailable' }, 503) : json({ items: [], counts, nextCursor: null })));
   mount('/admin/imports');
-  await screen.findByText('No projects yet. Create an Album draft to begin.');
-  fireEvent.click(screen.getByRole('button', { name: 'Catalog reviews' }));
+  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.');
+  fireEvent.click(screen.getByRole('button', { name: 'Existing Album reviews' }));
   await screen.findByRole('alert');
-  expect(screen.queryByText('No catalog reviews yet. Open a published Album to begin.')).not.toBeInTheDocument();
+  expect(screen.queryByText('No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Choose existing Album' })).not.toBeInTheDocument();
   failed = false;
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-  await screen.findByText('No catalog reviews yet. Open a published Album to begin.');
+  await screen.findByText('No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.');
+  fireEvent.click(screen.getByRole('link', { name: 'Choose existing Album' }));
+  expect(screen.getByRole('heading', { name: 'Existing Album selection' })).toBeVisible();
 });
 
 test('returning to the catalog review source reads that queue without querying imports or starting analysis', async () => {
@@ -196,9 +201,55 @@ test('returning to the catalog review source reads that queue without querying i
     return json({ items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null });
   }));
   mount('/admin/imports?source=catalogReviews');
-  await screen.findByText('No catalog reviews yet. Open a published Album to begin.');
-  expect(screen.getByRole('button', { name: 'Catalog reviews' })).toHaveAttribute('aria-pressed', 'true');
+  await screen.findByText('No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.');
+  expect(screen.getByRole('button', { name: 'Existing Album reviews' })).toHaveAttribute('aria-pressed', 'true');
   expect(reads.every(path => path.startsWith('/api/admin/v1/catalog-reviews?'))).toBe(true);
+  expect(writes).toEqual([]);
+});
+
+test('catalog review Unfinished filtering preserves the private queue contract without suggesting creation on no matches', async () => {
+  const reads: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    reads.push(path);
+    return json({ items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null });
+  }));
+  mount('/admin/imports?source=catalogReviews');
+  await screen.findByRole('link', { name: 'Choose existing Album' });
+  fireEvent.click(screen.getByRole('button', { name: 'Unfinished (0)' }));
+  await screen.findByText('No projects match this filter.');
+  expect(reads.some(path => path.includes('/catalog-reviews?') && path.includes('filter=awaitingReview'))).toBe(true);
+  expect(screen.queryByRole('link', { name: 'Choose existing Album' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Awaiting review/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Album updated (0)' }));
+  await waitFor(() => expect(reads.some(path => path.includes('/catalog-reviews?') && path.includes('filter=completed'))).toBe(true));
+  expect(screen.queryByRole('button', { name: /^Completed/ })).not.toBeInTheDocument();
+});
+
+test.each([
+  { analysisState: 'idle', pendingSuggestions: 0, applied: false, label: 'Not started' },
+  { analysisState: 'queued', pendingSuggestions: 0, applied: false, label: 'In progress · 2/2' },
+  { analysisState: 'running', pendingSuggestions: 1, applied: false, label: 'In progress · 2/2' },
+  { analysisState: 'complete', pendingSuggestions: 2, applied: false, label: 'Suggestions awaiting review · 2' },
+  { analysisState: 'complete', pendingSuggestions: 0, applied: false, label: 'No pending suggestions' },
+  { analysisState: 'needsAttention', pendingSuggestions: 0, applied: false, label: 'Needs attention' },
+  { analysisState: 'cancelled', pendingSuggestions: 0, applied: false, label: 'Cancelled' },
+  { analysisState: 'complete', pendingSuggestions: 1, applied: true, label: 'Closed' }
+])('catalog review status separates $analysisState analysis with $pendingSuggestions pending suggestions from applied=$applied', async ({ analysisState, pendingSuggestions, applied, label }) => {
+  const writes: string[] = [];
+  const review = { id: 'eeeeeeeeeeeeeeeeeeeeeeee', albumId: '111111111111111111111111', revision: 1, title: 'Existing Album task', pendingSuggestions,
+    createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true,
+    state: applied ? 'applied' : 'reviewing', analysis: { ...detail().analysis, state: analysisState } };
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (init.method && init.method !== 'GET') writes.push(path);
+    return json({ items: [review], counts: { all: 1, analyzing: 0, awaitingReview: applied ? 0 : 1, needsAttention: 0, completed: applied ? 1 : 0 }, nextCursor: null });
+  }));
+  mount('/admin/imports?source=catalogReviews');
+  const card = within((await screen.findByRole('heading', { name: 'Existing Album task' })).closest('li')!);
+  expect(card.getByText('Luna review')).toBeVisible();
+  expect(card.getByText(label)).toBeVisible();
+  expect(card.getByText('Original Album')).toBeVisible();
+  expect(card.getByText(applied ? 'Updated' : 'Not updated')).toBeVisible();
+  expect(card.queryByText('Reviewed')).not.toBeInTheDocument();
   expect(writes).toEqual([]);
 });
 
@@ -208,7 +259,10 @@ test('completed catalog reviews describe applied changes rather than an import p
   mount('/admin/imports?source=catalogReviews');
   await screen.findByRole('heading', { name: 'Corrected existing Album' });
   expect(screen.getByText('Changes applied to the existing Album')).toBeVisible();
-  expect(screen.getByText('Reviewed')).toBeVisible();
+  expect(screen.getByText('Closed')).toBeVisible();
+  expect(screen.getByText('Updated')).toBeVisible();
+  expect(screen.queryByText('Reviewed')).not.toBeInTheDocument();
+  expect(screen.queryByText('Suggestions awaiting review · 1')).not.toBeInTheDocument();
   expect(screen.queryByText('Publication')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
 });

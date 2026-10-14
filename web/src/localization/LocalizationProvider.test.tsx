@@ -31,6 +31,29 @@ afterEach(() => {
   document.documentElement.removeAttribute('dir');
 });
 
+test('the standalone management header keeps a language entry and its accessible dialog', async () => {
+  const user = userEvent.setup();
+  render(<LocalizationProvider><LanguageSelector placement="header" /></LocalizationProvider>);
+  await user.click(screen.getByRole('button', { name: 'Change language. Current language: English (United States)' }));
+  expect(screen.getByRole('dialog', { name: 'Choose your language' })).toBeVisible();
+  expect(screen.getByRole('radio', { name: 'English (United States)' })).toHaveAttribute('name', 'finitude-language-header');
+});
+
+test('an inactive listener language entry releases its dialog and keyboard trap', async () => {
+  const user = userEvent.setup();
+  const view = render(<LocalizationProvider><LanguageSelector /></LocalizationProvider>);
+  await user.click(screen.getByRole('button', { name: 'Change language. Current language: English (United States)' }));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  view.rerender(<LocalizationProvider><LanguageSelector active={false} /></LocalizationProvider>);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  const event = new KeyboardEvent('keydown', { key: 'Tab', cancelable: true });
+  document.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  view.rerender(<LocalizationProvider><LanguageSelector /></LocalizationProvider>);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Change language. Current language: English (United States)' })).toBeVisible();
+});
+
 test('downloads, activates, persists, and restores a selected language', async () => {
   const user = userEvent.setup();
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "npm run localization:check && vite",
-    "build": "npm run localization:check && tsc -p tsconfig.json && vite build && node scripts/check-initial-js-budget.mjs && node scripts/check-static-asset-budget.mjs",
+    "build": "npm run localization:check && tsc -p tsconfig.json && vite build && node scripts/check-initial-js-budget.mjs && node scripts/check-static-asset-budget.mjs && node ../scripts/check-conversion-worker-budget.mjs",
     "localization:check": "node ../scripts/build-localizations.mjs --check",
     "preview": "vite preview",
     "test": "npm run localization:check && vitest run",
@@ -18,9 +18,12 @@
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit"
   },
   "dependencies": {
+    "@mediabunny/mp3-encoder": "1.61.4",
+    "@noble/hashes": "2.4.0",
     "@tanstack/react-query": "^5.85.5",
     "intl-messageformat": "^11.2.14",
     "lucide-react": "^0.468.0",
+    "mediabunny": "1.61.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router": "8.3.0",
@@ -39,6 +42,6 @@
     "jsdom": "^26.1.0",
     "typescript": "^5.8.3",
     "vite": "^7.1.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }

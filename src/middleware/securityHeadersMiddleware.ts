@@ -4,7 +4,7 @@ import { Request, RequestHandler } from 'express';
  * Allows the listener's external artwork and local previews while keeping code,
  * API calls, forms, and audio on the Archtree origin.
  */
-export const buildContentSecurityPolicy = (allowInlineStyles = false) => [
+export const buildContentSecurityPolicy = (allowInlineStyles = false, conversionWorker = false) => [
     "default-src 'self'",
     "base-uri 'none'",
     "connect-src 'self'",
@@ -14,9 +14,9 @@ export const buildContentSecurityPolicy = (allowInlineStyles = false) => [
     "frame-src 'none'",
     "img-src 'self' data: blob: https:",
     "manifest-src 'self'",
-    "media-src 'self'",
+    "media-src 'self' blob:",
     "object-src 'none'",
-    "script-src 'self'",
+    conversionWorker ? "script-src 'self' 'wasm-unsafe-eval'" : "script-src 'self'",
     "script-src-attr 'none'",
     allowInlineStyles
         ? "style-src 'self' 'unsafe-inline'"
@@ -26,6 +26,11 @@ export const buildContentSecurityPolicy = (allowInlineStyles = false) => [
         : "style-src-attr 'none'",
     "worker-src 'self' blob:"
 ].join('; ');
+
+/** Only the isolated, hashed encoder asset may compile its bundled LAME WebAssembly. */
+export const isConversionWorkerAsset = (req: Pick<Request, 'path' | 'method'>) =>
+    (req.method === 'GET' || req.method === 'HEAD')
+    && /^\/finitude\/assets\/conversionWorker-[A-Za-z0-9_-]+\.js$/.test(req.path);
 
 /** Restricts the inline-style compatibility policy to legacy server-rendered HTML. */
 export const requiresInlineStyleCompatibility = (req: Request) => {
@@ -60,7 +65,7 @@ export const permissionsPolicy = [
 export const applySecurityHeaders: RequestHandler = (req, res, next) => {
     res.setHeader(
         'Content-Security-Policy',
-        buildContentSecurityPolicy(requiresInlineStyleCompatibility(req))
+        buildContentSecurityPolicy(requiresInlineStyleCompatibility(req), isConversionWorkerAsset(req))
     );
     res.setHeader('Permissions-Policy', permissionsPolicy);
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');

@@ -194,6 +194,9 @@ run cleanup.
 ## Windows and Linux gates
 
 `npm test` runs all portable server and Web unit tests on every supported host.
+Web tests use Vitest 4 with jsdom, collect `web/src` and the resource-budget script
+tests, clear mock call history before each test and restore spies. Deferred-account tests wait for the captured
+generation change rather than assuming when a lazy module finishes loading.
 On Linux it also runs both `*.linux.test.ts` suites: HTTPS platform hooks and
 Elastic Beanstalk artifact validation. Windows and macOS print their exclusion
 explicitly; these hosts cannot verify Bash/systemd behavior or POSIX executable

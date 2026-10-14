@@ -8,10 +8,10 @@ import { z } from 'zod';
 import { capabilities, deferred, json, session, viewer } from './adminFixtures.testSupport';
 import { advanceAccountEpoch } from '../../api/accountEpoch';
 
-const mount = (role = 'admin') => {
+const mount = (role = 'admin', hideWorkbenchLink = false) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(['browser-session'], { ...session, user: { ...session.user, role } });
-  render(<QueryClientProvider client={client}><MemoryRouter><AdminControls /><AdminGate><p>Private workbench</p></AdminGate></MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><MemoryRouter><AdminControls hideWorkbenchLink={hideWorkbenchLink} /><AdminGate><p>Private workbench</p></AdminGate></MemoryRouter></QueryClientProvider>);
   return client;
 };
 beforeEach(() => adminWorkspace.reset());
@@ -29,12 +29,24 @@ test('confirmed administrators start in User view; explicit switch preserves acc
   expect(screen.queryByText('Private workbench')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Switch to Admin view' }));
   await screen.findByText('Private workbench');
+  expect(screen.getByRole('link', { name: 'Workbench' })).toHaveAttribute('href', '/admin/imports');
   const epoch = adminWorkspace.getSnapshot().epoch; expect(epoch).toBeGreaterThanOrEqual(before);
   fireEvent.click(screen.getByRole('button', { name: 'Current view: Admin' }));
   fireEvent.click(screen.getByRole('button', { name: 'User' }));
   expect(screen.queryByText('Private workbench')).not.toBeInTheDocument();
   expect(adminWorkspace.getSnapshot().epoch).toBe(epoch); expect(fetch).toHaveBeenCalledTimes(2);
 });
+test('standalone administration omits the redundant workbench shortcut while its view switch remains effective', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json(capabilities))); mount('admin', true);
+  fireEvent.click(await screen.findByRole('button', { name: 'Switch to Admin view' }));
+  await screen.findByText('Private workbench');
+  expect(screen.queryByRole('link', { name: 'Workbench' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Current view: Admin' }));
+  fireEvent.click(screen.getByRole('button', { name: 'User' }));
+  expect(screen.queryByText('Private workbench')).not.toBeInTheDocument();
+  expect(adminWorkspace.getSnapshot().mode).toBe('user');
+});
+
 test('late capability response cannot revive private access after explicit permission rejection', async () => {
   const pending = deferred<Response>(); let count = 0;
   vi.stubGlobal('fetch', vi.fn(async path => {

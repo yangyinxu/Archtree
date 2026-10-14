@@ -1,0 +1,165 @@
+import { Blob as NodeBlob } from 'node:buffer';
+import { ConversionSourceValidationError, conversionFileByteLimit, conversionOutputSampleRate, hashConversionFile, inspectLosslessConversionSource, isValidFlacFrameCrc, readConversionBytes } from './conversionSourceValidation';
+
+const source = (bytes: Uint8Array) => new NodeBlob([new Uint8Array(bytes).buffer]) as unknown as Blob;
+/** Synthetic RIFF contains exact declared bytes; mutations exercise container boundaries independently. */
+function wave({ rate = 44100, channels = 2, bits = 16, encoding = 1, frames = 8, extra = false } = {}) {
+  const align = channels * bits / 8, dataBytes = frames * align;
+  const bytes = new Uint8Array(44 + dataBytes + (extra ? 10 : 0)), view = new DataView(bytes.buffer);
+  bytes.set(new TextEncoder().encode('RIFF')); view.setUint32(4, bytes.length - 8, true); bytes.set(new TextEncoder().encode('WAVEfmt '), 8);
+  view.setUint32(16, 16, true); view.setUint16(20, encoding, true); view.setUint16(22, channels, true); view.setUint32(24, rate, true);
+  view.setUint32(28, rate * align, true); view.setUint16(32, align, true); view.setUint16(34, bits, true);
+  bytes.set(new TextEncoder().encode('data'), 36); view.setUint32(40, dataBytes, true);
+  if (extra) { const offset = 44 + dataBytes; bytes.set(new TextEncoder().encode('JUNK'), offset); view.setUint32(offset + 4, 1, true); bytes[offset + 8] = 99; }
+  return bytes;
+}
+function flac({ rate = 44100, channels = 2, bits = 24, frames = 264600, frameBytes = 10 } = {}) {
+  const bytes = new Uint8Array(42 + frameBytes), view = new DataView(bytes.buffer);
+  bytes.set(new TextEncoder().encode('fLaC')); bytes[4] = 128; bytes[7] = 34;
+  view.setUint16(8, 4096); view.setUint16(10, 4096);
+  view.setBigUint64(18, BigInt(rate) << 44n | BigInt(channels - 1) << 41n | BigInt(bits - 1) << 36n | BigInt(frames));
+  return bytes;
+}
+function extensible({ channels = 2, bits = 24, validBits = bits, mask = channels === 1 ? 4 : 3, subtype = 1, extraBytes = 22 }: {
+  channels?: number; bits?: number; validBits?: number; mask?: number; subtype?: number; extraBytes?: number;
+} = {}) {
+  const old = wave({ channels, bits, encoding: subtype }), bytes = Uint8Array.from([...old.slice(0, 36), ...new Uint8Array(24), ...old.slice(36)]);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(4, bytes.length - 8, true); view.setUint32(16, 40, true); view.setUint16(20, 0xfffe, true);
+  view.setUint16(36, extraBytes, true); view.setUint16(38, validBits, true); view.setUint32(40, mask, true);
+  bytes.set([subtype, 0, 0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113], 44);
+  return bytes;
+}
+const code = async (bytes: Uint8Array) => {
+  try { await inspectLosslessConversionSource(source(bytes)); return 'accepted'; }
+  catch (error) { expect(error).toBeInstanceOf(ConversionSourceValidationError); return (error as ConversionSourceValidationError).code; }
+};
+
+test.each([
+  [{ rate: 44100, channels: 2, bits: 16, encoding: 1 }, 'wav-pcm'],
+  [{ rate: 48000, channels: 1, bits: 24, encoding: 1 }, 'wav-pcm'],
+  [{ rate: 96000, channels: 2, bits: 32, encoding: 3 }, 'wav-float']
+])('byte-derived PCM evidence preserves rate, channel count and exact sample accounting', async (shape, codec) => {
+  const bytes = wave(shape), result = await inspectLosslessConversionSource(source(bytes));
+  expect(result).toMatchObject({ codec, sampleRate: shape.rate, channels: shape.channels, bitDepth: shape.bits, frames: 8, audioOffset: 44, audioBytes: bytes.length - 44 });
+});
+
+test('bounded parser accepts padded ancillary chunks without treating them as PCM', async () => {
+  expect(await inspectLosslessConversionSource(source(wave({ extra: true })))).toMatchObject({ frames: 8, audioBytes: 32 });
+});
+
+test('WAVEFORMATEXTENSIBLE admits exact PCM/float GUIDs and valid precision within mono/stereo containers', async () => {
+  expect(await inspectLosslessConversionSource(source(extensible()))).toMatchObject({ codec: 'wav-pcm', bitDepth: 24, channels: 2, frames: 8 });
+  expect(await inspectLosslessConversionSource(source(extensible({ bits: 32, validBits: 24 })))).toMatchObject({ codec: 'wav-pcm', bitDepth: 32 });
+  expect(await inspectLosslessConversionSource(source(extensible({ channels: 1, bits: 16 })))).toMatchObject({ channels: 1 });
+  expect(await inspectLosslessConversionSource(source(extensible({ bits: 32, subtype: 3 })))).toMatchObject({ codec: 'wav-float' });
+});
+
+test('extensible GUID, cbSize, precision and channel-mask corruption never changes channel interpretation', async () => {
+  const wrongGuid = extensible(); wrongGuid[59] ^= 1;
+  expect(await code(wrongGuid)).toBe('conversion_source_unsupported');
+  for (const shape of [{ extraBytes: 21 }, { extraBytes: 24 }, { validBits: 25 }, { validBits: 0 }, { mask: 5 }, { mask: 4 }, { subtype: 6 }, { channels: 1, mask: 3 }, { bits: 32, subtype: 3, validBits: 24 }]) {
+    expect(await code(extensible(shape))).toBe('conversion_source_unsupported');
+  }
+});
+
+test('compressed WAVE and incompatible shape are not admitted as lossless merely by their container', async () => {
+  expect(await code(wave({ encoding: 85 }))).toBe('conversion_source_unsupported');
+  expect(await code(wave({ channels: 6 }))).toBe('conversion_source_unsupported');
+  expect(await code(wave({ rate: 22050 }))).toBe('conversion_source_unsupported');
+  const wrongByteRate = wave(); new DataView(wrongByteRate.buffer).setUint32(28, 7, true);
+  expect(await code(wrongByteRate)).toBe('conversion_source_unsupported');
+});
+
+test('truncated, appended, unaligned and missing-padding WAVE cannot pass complete-boundary validation', async () => {
+  expect(await code(wave().slice(0, -1))).toBe('conversion_source_incomplete');
+  expect(await code(Uint8Array.from([...wave(), 0]))).toBe('conversion_source_incomplete');
+  const unaligned = wave(); new DataView(unaligned.buffer).setUint32(40, 31, true);
+  expect(await code(unaligned)).toBe('conversion_source_invalid');
+  const padding = wave({ extra: true }).slice(0, -1); new DataView(padding.buffer).setUint32(4, padding.length - 8, true);
+  expect(await code(padding)).toBe('conversion_source_incomplete');
+});
+
+test('duplicate format and data chunks are rejected instead of silently selecting the last', async () => {
+  const original = wave(), duplicateData = Uint8Array.from([...original, ...original.slice(36)]);
+  new DataView(duplicateData.buffer).setUint32(4, duplicateData.length - 8, true);
+  expect(await code(duplicateData)).toBe('conversion_source_invalid');
+  const duplicateFmt = Uint8Array.from([...original.slice(0, 36), ...original.slice(12, 36), ...original.slice(36)]);
+  new DataView(duplicateFmt.buffer).setUint32(4, duplicateFmt.length - 8, true);
+  expect(await code(duplicateFmt)).toBe('conversion_source_invalid');
+});
+
+test('STREAMINFO captures exact FLAC identity without needing a filename or MIME hint', async () => {
+  expect(await inspectLosslessConversionSource(source(flac()))).toEqual({ codec: 'flac', frames: 264600, sampleRate: 44100, channels: 2, bitDepth: 24, audioOffset: 42, audioBytes: 10 });
+  expect(await inspectLosslessConversionSource(source(flac({ rate: 48000, channels: 1, bits: 16 })))).toMatchObject({ sampleRate: 48000, channels: 1, bitDepth: 16 });
+});
+
+test('missing/unknown FLAC sample evidence and malformed metadata remain unconvertible', async () => {
+  expect(await code(flac({ frames: 0 }))).toBe('conversion_source_unsupported');
+  expect(await code(flac({ frameBytes: 0 }))).toBe('conversion_source_incomplete');
+  expect(await code(flac().slice(0, 20))).toBe('conversion_source_incomplete');
+  const missing = flac(); missing[4] = 129;
+  expect(await code(missing)).toBe('conversion_source_invalid');
+  const invalidLength = flac(); invalidLength[7] = 33;
+  expect(await code(invalidLength)).toBe('conversion_source_invalid');
+});
+
+test('untrusted FLAC frame and metadata declarations cannot request unbounded decoder reads', async () => {
+  const oversizedFrame = flac(); oversizedFrame[15] = 32;
+  expect(await code(oversizedFrame)).toBe('conversion_source_unsupported');
+  const prefix = flac({ frameBytes: 4 }); prefix[4] = 0;
+  prefix.set([132, 255, 255, 255], 42);
+  const prefixBlob = source(prefix);
+  const padded = { size: 46 + 0xffffff, slice: prefixBlob.slice.bind(prefixBlob) } as unknown as Blob;
+  await expect(inspectLosslessConversionSource(padded)).rejects.toThrow('conversion_source_unsupported');
+});
+
+test('oversized ancillary WAVE data is rejected before allocating its body', async () => {
+  const prefix = Uint8Array.from([...wave(), 74, 85, 78, 75, 1, 0, 0, 1]);
+  const size = prefix.length + 16 * 1024 * 1024 + 2;
+  new DataView(prefix.buffer).setUint32(4, size - 8, true);
+  const prefixBlob = source(prefix);
+  await expect(inspectLosslessConversionSource({ size, slice: prefixBlob.slice.bind(prefixBlob) } as unknown as Blob)).rejects.toThrow('conversion_source_unsupported');
+});
+
+test('FLAC CRC16 rejects a changed footer even when the payload still decodes', () => {
+  // CRC-16/UMTS check vector uses the same 0x8005 polynomial, initial zero and no reflection as FLAC.
+  const bytes = Uint8Array.from([...new TextEncoder().encode('123456789'), 0xfe, 0xe8]);
+  expect(isValidFlacFrameCrc(bytes)).toBe(true);
+  bytes[bytes.length - 1] ^= 1;
+  expect(isValidFlacFrameCrc(bytes)).toBe(false);
+  expect(isValidFlacFrameCrc(new Uint8Array())).toBe(false);
+});
+
+test('profile preserves 44.1/48 kHz and explicitly resamples high-rate audio without silently downmixing', () => {
+  expect(conversionOutputSampleRate(44100)).toBe(44100);
+  expect(conversionOutputSampleRate(48000)).toBe(48000);
+  expect(conversionOutputSampleRate(96000)).toBe(48000);
+  expect(conversionOutputSampleRate(192000)).toBe(48000);
+  expect(() => conversionOutputSampleRate(0)).toThrow('conversion_source_unsupported');
+  expect(() => conversionOutputSampleRate(44800)).toThrow('conversion_source_unsupported');
+});
+
+test('streaming hash matches a known digest and never reads the whole File or an unbounded range', async () => {
+  const bytes = new Uint8Array(200000).fill(97), blob = source(bytes), lengths: number[] = [];
+  const originalSlice = blob.slice.bind(blob);
+  const instrumented = { size: blob.size, slice(start: number, end: number) { lengths.push(end - start); return originalSlice(start, end); }, arrayBuffer() { throw new Error('Forbidden full read'); } } as unknown as Blob;
+  expect(await hashConversionFile(source(new TextEncoder().encode('abc')))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  const fractions: number[] = [];
+  expect(await hashConversionFile(instrumented, value => fractions.push(value))).toMatch(/^[a-f0-9]{64}$/);
+  expect(lengths).toEqual([65536, 65536, 65536, 3392]);
+  expect(fractions.at(-1)).toBe(1);
+  await expect(readConversionBytes(blob, 0, 65537)).rejects.toThrow('conversion_source_incomplete');
+});
+
+test('unknown, empty, encrypted-container lookalikes are safely classified without retaining names', async () => {
+  expect(await code(new Uint8Array())).toBe('conversion_source_invalid');
+  expect(await code(new TextEncoder().encode('not a sound source'))).toBe('conversion_source_unsupported');
+  expect(new ConversionSourceValidationError('conversion_source_corrupt').message).toBe('conversion_source_corrupt');
+});
+
+test('oversized sources fail before reading bytes or admitting a disk-consuming output', async () => {
+  const slice = vi.fn(() => { throw new Error('No oversized reads allowed'); });
+  await expect(inspectLosslessConversionSource({ size: conversionFileByteLimit + 1, slice } as unknown as Blob)).rejects.toThrow('conversion_storage_unavailable');
+  expect(slice).not.toHaveBeenCalled();
+});

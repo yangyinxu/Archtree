@@ -1,7 +1,10 @@
 import type { Page } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
 
 import { catalogIds } from './fixtures/catalog';
 import { expect, test } from './support/test';
+import { installPrivateListenerRoutes } from './support/privateRoutes';
+import { capabilities as adminCapabilities, session as adminSession, viewer } from '../src/features/admin/adminFixtures.testSupport';
 
 interface MediaProbeWindow extends Window {
   __finitudeE2EMediaElements?: HTMLVideoElement[];
@@ -255,4 +258,103 @@ test('preserves one media element, queue, and elapsed time through every shell p
   await expect(aside.getByRole('region', { name: 'Video playback queue' })).toContainText('Night Window');
   await expect(compactControls.getByRole('button', { name: 'Next MediaTrack' })).toBeEnabled();
   await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
+});
+
+test('keeps real Audio and Video playback alive through dedicated Admin transitions and suppresses admin shortcuts', async ({ page }) => {
+  test.setTimeout(60_000);
+  const recentTargets: unknown[] = [], privateReads: string[] = [];
+  await installPrivateListenerRoutes(page, { session: adminSession });
+  await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.fallback() : route.abort('blockedbyclient'));
+  await page.route('**/api/listener/v1/capabilities', route => route.fulfill({ json: { playlists: true, social: { enabled: false, rooms: false } } }));
+  await page.route('**/content/me/recently-played', async route => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().headers()['x-finitude-account-viewer']).toBe(viewer);
+    const target = route.request().postDataJSON(); recentTargets.push(target);
+    await route.fulfill({ json: { ...target, recorded: true }, headers: { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' } });
+  });
+  // All administration is read-only and fabricated; the strict public fixture still owns real media bytes.
+  await page.route('**/api/admin/v1/**', async route => {
+    const request = route.request(), path = new URL(request.url()).pathname;
+    expect(request.method()).toBe('GET');
+    expect(request.headers()['x-finitude-account-viewer']).toBe(viewer);
+    privateReads.push(path);
+    const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
+    if (path === '/api/admin/v1/capabilities') return route.fulfill({ json: adminCapabilities, headers });
+    expect(path).toBe('/api/admin/v1/imports');
+    return route.fulfill({ json: { items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null }, headers });
+  });
+  await installMediaProbe(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/finitude/albums/${catalogIds.album}`);
+  await page.getByRole('main').locator('header').getByRole('button', { name: 'Play', exact: true }).click();
+  const player = page.getByRole('region', { name: 'Now playing' });
+  const controls = player.getByRole('group', { name: 'Playback controls' });
+  await expect(controls.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await expect.poll(() => recentTargets.length).toBe(1);
+  const initial = await readMediaProbe(page);
+  const videoPath = `/content/mediaTrack/stream/${catalogIds.firstTrack}`;
+  const audioPath = `/content/mediaTrack/stream/${catalogIds.secondTrack}`;
+  expect(initial.count).toBe(1); expect(initial.sourcePath).toBe(videoPath);
+  const enterAdmin = async () => {
+    await page.getByRole('button', { name: 'Current view: User', exact: true }).click();
+    await page.getByRole('button', { name: 'Admin', exact: true }).click();
+    await page.getByRole('banner').getByRole('link', { name: 'Workbench', exact: true }).click();
+    await expect(page).toHaveURL(/\/finitude\/admin\/imports$/);
+    await expect(page.getByRole('main').getByRole('heading', { name: 'Workbench', exact: true })).toBeVisible();
+    await expect(page.getByRole('main')).toHaveCount(1); await expect(page.getByRole('main')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Current view: Admin', exact: true })).toBeVisible();
+    for (const [role, name] of [['navigation', 'Primary'], ['search', 'Global search'], ['complementary', 'Finitude Library'], ['complementary', 'Now Playing details'], ['region', 'Now playing'], ['group', 'Playback controls'], ['region', 'First Light']] as const) {
+      await expect(page.getByRole(role, { name, exact: true })).toHaveCount(0);
+    }
+    await expect(page.locator('#library-sidebar')).toBeHidden();
+    await expect(page.locator('#now-playing-aside')).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth)).toBe(true);
+  };
+  const returnUser = async () => {
+    await page.getByRole('button', { name: 'Current view: Admin', exact: true }).click();
+    await page.getByRole('button', { name: 'User', exact: true }).click();
+    await expect(page).toHaveURL(/\/finitude\/?$/);
+    await expect(page.getByRole('navigation', { name: 'Primary', exact: true }).first()).toBeVisible();
+    await expect(player).toBeVisible();
+  };
+  await setMediaSentinel(page, 1.25);
+  let activeTime = await expectActiveMedia(page, initial.identity, 1.25, videoPath);
+  await enterAdmin();
+  activeTime = await expectActiveMedia(page, initial.identity, activeTime, videoPath);
+  const shots = '/tmp/finitude-standalone-admin-20261014';
+  await mkdir(shots, { recursive: true });
+  await page.screenshot({ path: `${shots}/18-real-video-standalone-admin-1280.png`, fullPage: true, animations: 'disabled' });
+  await writeFile(`${shots}/18-real-video-standalone-admin-1280.json`, JSON.stringify(await readMediaProbe(page), null, 2));
+  await returnUser();
+  activeTime = await expectActiveMedia(page, initial.identity, activeTime, videoPath);
+  await expect(page.getByRole('region', { name: 'First Light', exact: true })).toBeVisible();
+  await expect(page.getByRole('main')).toBeHidden();
+  await expect(page.getByRole('complementary', { name: 'Now Playing details' }).getByRole('region', { name: 'Video playback queue' })).toContainText('Night Window');
+  await page.screenshot({ path: `${shots}/19-real-video-user-restored-1280.png`, fullPage: true, animations: 'disabled' });
+  await controls.getByRole('button', { name: 'Next MediaTrack', exact: true }).click();
+  await expect(player).toContainText('Night Window');
+  await expect.poll(async () => (await readMediaProbe(page)).sourcePath).toBe(audioPath);
+  await expect.poll(async () => (await readMediaProbe(page)).paused).toBe(false);
+  await setMediaSentinel(page, 1.25);
+  activeTime = await expectActiveMedia(page, initial.identity, 1.25, audioPath);
+  await enterAdmin();
+  activeTime = await expectActiveMedia(page, initial.identity, activeTime, audioPath);
+  await returnUser();
+  await expectActiveMedia(page, initial.identity, activeTime, audioPath);
+  await expect(page.getByRole('main')).toBeVisible();
+  await expect(controls.getByRole('button', { name: 'Previous MediaTrack', exact: true })).toBeEnabled();
+  await controls.getByRole('button', { name: 'Pause', exact: true }).click();
+  await setMediaSentinel(page, 4.3);
+  await expectStableMedia(page, initial.identity, 4.3, audioPath);
+  await enterAdmin();
+  // A non-editable focus target proves Admin disables playback shortcuts, rather than typing merely bypassing them.
+  await page.getByRole('main').focus();
+  await page.keyboard.press('ArrowRight'); await page.keyboard.press('Space');
+  await expectStableMedia(page, initial.identity, 4.3, audioPath);
+  await returnUser();
+  await expectStableMedia(page, initial.identity, 4.3, audioPath);
+  await expect(controls.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  await expect.poll(async () => Number(await player.getByRole('slider', { name: 'Playback position' }).inputValue())).toBeCloseTo(4.3, 2);
+  expect(recentTargets).toHaveLength(1);
+  expect(privateReads.filter(path => path === '/api/admin/v1/imports').length).toBeGreaterThanOrEqual(3);
 });

@@ -7,10 +7,10 @@ export type AdminGuard = ReturnType<typeof adminWorkspace.capture>;
 
 /** Read results belong to a view generation; admitted writes may finish while that same account uses User view. */
 export async function adminEndpointRequest<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, guard = adminWorkspace.capture()): Promise<T> {
-  if (!adminWorkspace.current(guard)) throw new DOMException('Administrator view changed', 'AbortError');
+  if (!adminWorkspace.current(guard)) throw new DOMException('Admin view changed', 'AbortError');
   try {
     const result = await apiRequest(`/api/admin/v1${path}`, schema, { ...init, accountViewer: guard.viewerId, cache: 'no-store' });
-    if (!adminWorkspace.current(guard, !init.method || init.method === 'GET')) throw new DOMException('Administrator view changed', 'AbortError');
+    if (!adminWorkspace.current(guard, !init.method || init.method === 'GET')) throw new DOMException('Admin view changed', 'AbortError');
     return result;
   } catch (error) {
     if (adminWorkspace.current(guard, false) && error instanceof ApiError && [401, 403].includes(error.status ?? 0)) adminWorkspace.reset();

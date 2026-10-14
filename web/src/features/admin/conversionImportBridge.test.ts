@@ -1,0 +1,159 @@
+import { captureAccountOperation } from '../../api/accountEpoch';
+import { adminWorkspace } from './adminWorkspace';
+import { cleanConversionImport, createConversionImport, hydrateConversionImport } from './conversionImportBridge';
+import type { ConversionBatch } from './conversionStore';
+import type { ConversionEncodingResult } from './conversionWorkerProtocol';
+
+const mocks = vi.hoisted(() => ({ get: vi.fn(), list: vi.fn(), output: vi.fn(), update: vi.fn(), cleanup: vi.fn(),
+  request: vi.fn(), proof: vi.fn(), locks: vi.fn(), uuid: vi.fn() }));
+vi.mock('./conversionStore', async importOriginal => {
+  const actual = await importOriginal<typeof import('./conversionStore')>();
+  return { conversionExecutorLock: actual.conversionExecutorLock, conversionOutputRelativePath: actual.conversionOutputRelativePath,
+    conversionStore: { get: mocks.get, list: mocks.list, getOutputFile: mocks.output, updateBatch: mocks.update, cleanupConfirmed: mocks.cleanup } };
+});
+vi.mock('./conversionApi', () => ({ conversionApi: { importProof: mocks.proof } }));
+vi.mock('./adminApi', () => ({ adminRequest: mocks.request, responseSchema: {} }));
+vi.mock('./adminTransport', () => ({ adminRequest: mocks.request }));
+
+const owner = 'aaaaaaaaaaaaaaaaaaaaaaaa', project = 'bbbbbbbbbbbbbbbbbbbbbbbb', track = 'cccccccccccccccccccccccc';
+const batchId = '30000000-0000-4000-8000-000000000001', taskId = '30000000-0000-4000-8000-000000000002';
+const operationId = '30000000-0000-4000-8000-000000000003', slotId = '30000000-0000-4000-8000-000000000004';
+let durable: ConversionBatch;
+const result = (): ConversionEncodingResult => ({ preset: 'mp3-320', codec: 'mp3', bitrate: 320000, sourceCodec: 'flac',
+  sourceSha256: 'a'.repeat(64), sourceBytes: 100, sourceFrames: 264600, sourceSampleRate: 44100, sourceChannels: 2, sourceDurationSeconds: 6,
+  outputSha256: 'b'.repeat(64), outputBytes: 3, outputFrames: 266112, sampleRate: 44100, channels: 2, durationSeconds: 6.034285714285715, resampled: false });
+const localBatch = (): ConversionBatch => ({ schemaVersion: 1, ownerId: owner, id: batchId, kind: 'local', rootLabel: 'Synthetic Album',
+  album: null, createdAt: 1, updatedAt: 1, tasks: [{ ownerId: owner, batchId, id: taskId, title: 'Synthetic Track', filename: 'Track.flac',
+    relativePath: 'Synthetic Album/Track.flac', status: 'complete', source: { kind: 'local', byteLength: 100, sha256: 'a'.repeat(64), complete: true },
+    result: result(), intent: null, receipt: null, error: null, cacheRemoved: false }] });
+const withIntent = () => {
+  durable.importIntent = { operationId, projectId: project,
+    manifest: { rootLabel: durable.rootLabel, files: [{ slotId, filename: 'Track.mp3', relativePath: 'Synthetic Album/Track.mp3', byteLength: 3 }] },
+    slots: [{ taskId, slotId }] };
+  return structuredClone(durable);
+};
+const readyProof = () => ({ schemaVersion: 1 as const, projectId: project,
+  publicationOperationId: '30000000-0000-4000-8000-000000000005', ready: [{ slotId, trackId: track, sha256: 'b'.repeat(64), byteLength: 3 }] });
+const guard = () => adminWorkspace.capture();
+
+beforeEach(() => {
+  vi.clearAllMocks(); durable = localBatch(); let sequence = 0;
+  mocks.uuid.mockImplementation(() => `50000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`);
+  vi.stubGlobal('crypto', { randomUUID: mocks.uuid });
+  mocks.locks.mockImplementation(async (_name: string, _options: unknown, callback: (lock: object) => unknown) => callback({ mode: 'exclusive' }));
+  vi.stubGlobal('navigator', { locks: { request: mocks.locks } });
+  mocks.get.mockImplementation(async () => structuredClone(durable));
+  mocks.list.mockImplementation(async () => [structuredClone(durable)]);
+  mocks.output.mockResolvedValue(new File([new Uint8Array([1, 2, 3])], 'Track.mp3', { type: 'audio/mpeg' }));
+  mocks.update.mockImplementation(async (_owner: string, _id: string, patch: Partial<ConversionBatch>) => { durable = structuredClone({ ...durable, ...patch }); return durable; });
+  mocks.proof.mockResolvedValue(readyProof());
+  mocks.request.mockImplementation(async (_path: string, _schema: unknown, init: RequestInit) => {
+    const payload = JSON.parse(String(init.body));
+    return { item: { id: project, manifest: payload.manifest, startedByMe: true }, receipt: { operationId: payload.operationId, kind: 'create', revision: 1 } };
+  });
+  adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(owner), true, true, undefined, undefined, true); adminWorkspace.select('admin');
+});
+afterEach(() => { adminWorkspace.reset(); vi.unstubAllGlobals(); });
+
+test('a lost create response replays persisted operation and slots even with the same stale UI snapshot', async () => {
+  const stale = structuredClone(durable), checked = guard();
+  mocks.request.mockRejectedValueOnce(new Error('Unconfirmed synthetic response'));
+  await expect(createConversionImport(stale, checked)).rejects.toThrow('Unconfirmed synthetic response');
+  const firstBody = String(mocks.request.mock.calls[0][2].body), frozen = structuredClone(durable.importIntent);
+  expect(frozen?.projectId).toBeNull(); expect(frozen?.operationId).toBeTruthy();
+  expect(await createConversionImport(stale, checked)).toBe(project);
+  expect(String(mocks.request.mock.calls[1][2].body)).toBe(firstBody);
+  expect(durable.importIntent?.operationId).toBe(frozen?.operationId);
+  expect(durable.importIntent?.slots).toEqual(frozen?.slots);
+  expect(mocks.uuid).toHaveBeenCalledTimes(2);
+  expect(mocks.cleanup).not.toHaveBeenCalled();
+  expect(mocks.locks.mock.calls.map(call => call[0])).toEqual([`finitude-conversion-executor-${owner}`, `finitude-conversion-executor-${owner}`]);
+});
+
+test('only a matched create receipt and manifest can attach a project to durable intent', async () => {
+  mocks.request.mockImplementationOnce(async (_path: string, _schema: unknown, init: RequestInit) => {
+    const payload = JSON.parse(String(init.body));
+    return { item: { id: project, manifest: payload.manifest, startedByMe: true }, receipt: { operationId, kind: 'create' } };
+  });
+  await expect(createConversionImport(structuredClone(durable), guard())).rejects.toThrow('CONVERSION_IMPORT_UNCONFIRMED');
+  expect(durable.importIntent?.projectId).toBeNull();
+  expect(mocks.cleanup).not.toHaveBeenCalled();
+});
+
+test('busy cross-tab executor does not mint or dispatch an import', async () => {
+  mocks.locks.mockImplementationOnce(async (_name: string, _options: unknown, callback: (lock: null) => unknown) => callback(null));
+  await expect(createConversionImport(durable, guard())).rejects.toThrow('CONVERSION_BUSY');
+  expect(mocks.get).not.toHaveBeenCalled(); expect(mocks.uuid).not.toHaveBeenCalled(); expect(mocks.request).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['Track', 'Track.mp3'],
+  ['a'.repeat(253) + '.x', 'a'.repeat(251) + '.mp3']
+])('import context follows the actual output filename for source %s', async (sourceName, outputName) => {
+  durable.tasks[0].filename = sourceName; durable.tasks[0].relativePath = `Synthetic Album/${sourceName}`;
+  mocks.output.mockResolvedValue(new File([new Uint8Array([1, 2, 3])], outputName, { type: 'audio/mpeg' }));
+  expect(await createConversionImport(structuredClone(durable), guard())).toBe(project);
+  const payload = JSON.parse(String(mocks.request.mock.calls[0][2].body));
+  expect(payload.manifest.files[0]).toMatchObject({ filename: outputName, relativePath: `Synthetic Album/${outputName}` });
+  expect(durable.tasks[0].filename).toBe(sourceName);
+});
+
+test.each(['project', 'publication', 'slot', 'hash', 'length'] as const)('cache is retained when current S3 publication proof mismatches %s', async mismatch => {
+  const batch = withIntent(), proof = readyProof();
+  if (mismatch === 'project') proof.projectId = 'dddddddddddddddddddddddd';
+  if (mismatch === 'publication') proof.publicationOperationId = '';
+  if (mismatch === 'slot') proof.ready[0].slotId = '60000000-0000-4000-8000-000000000001';
+  if (mismatch === 'hash') proof.ready[0].sha256 = 'c'.repeat(64);
+  if (mismatch === 'length') proof.ready[0].byteLength = 4;
+  mocks.proof.mockResolvedValue(proof);
+  await cleanConversionImport(batch, guard());
+  expect(mocks.cleanup).not.toHaveBeenCalled();
+  expect(durable.tasks[0].cacheRemoved).toBe(false);
+});
+
+test('staged-only/unknown publication and failed ready read never delete a local MP3', async () => {
+  const batch = withIntent();
+  mocks.proof.mockResolvedValueOnce({ schemaVersion: 1, projectId: project, publicationOperationId: null, ready: [] });
+  await cleanConversionImport(batch, guard());
+  mocks.proof.mockRejectedValueOnce(new Error('Synthetic ready read unavailable'));
+  await expect(cleanConversionImport(batch, guard())).rejects.toThrow('Synthetic ready read unavailable');
+  expect(mocks.cleanup).not.toHaveBeenCalled(); expect(durable.tasks[0].result).not.toBeNull();
+});
+
+test('exact S3 proof deletes only the matching MP3 while leaving other outputs and every source alone', async () => {
+  const batch = withIntent(), other = structuredClone(batch.tasks[0]);
+  other.id = '70000000-0000-4000-8000-000000000001'; other.filename = 'Second.flac'; other.relativePath = 'Synthetic Album/Second.flac';
+  other.result!.outputSha256 = 'c'.repeat(64); batch.tasks.push(other);
+  batch.importIntent!.slots.push({ taskId: other.id, slotId: '70000000-0000-4000-8000-000000000002' });
+  batch.importIntent!.manifest.files.push({ slotId: '70000000-0000-4000-8000-000000000002', filename: 'Second.mp3', relativePath: 'Synthetic Album/Second.mp3', byteLength: 3 });
+  durable = structuredClone(batch);
+  await cleanConversionImport(batch, guard());
+  expect(mocks.proof.mock.calls[0][3]).toEqual([slotId, '70000000-0000-4000-8000-000000000002']);
+  expect(mocks.cleanup).toHaveBeenCalledTimes(1);
+  expect(mocks.cleanup).toHaveBeenCalledWith(batch.tasks[0], { ready: true, trackId: track, sha256: 'b'.repeat(64), byteLength: 3 });
+  expect(batch.tasks.map(task => task.source.complete)).toEqual([true, true]);
+});
+
+test('removed caches no longer request proof or hydrate file choices', async () => {
+  const batch = withIntent(); batch.tasks[0].cacheRemoved = true; durable = batch;
+  await cleanConversionImport(batch, guard()); await hydrateConversionImport(project, guard());
+  expect(mocks.proof).not.toHaveBeenCalled(); expect(mocks.output).not.toHaveBeenCalled(); expect(mocks.cleanup).not.toHaveBeenCalled();
+});
+
+test('view loss during hydration cannot expose cached private files in the replacement presentation', async () => {
+  withIntent(); const checked = guard();
+  mocks.output.mockImplementationOnce(async () => { adminWorkspace.select('user'); return new File(['mp3'], 'Track.mp3'); });
+  await expect(hydrateConversionImport(project, checked)).rejects.toThrow('View changed');
+  expect(adminWorkspace.buffer(`files:${project}`)).toBeUndefined();
+});
+
+test('User then Admin view transition while publication proof is pending cannot authorize cache cleanup with the old guard', async () => {
+  const batch = withIntent(), checked = guard();
+  mocks.proof.mockImplementationOnce(async () => {
+    adminWorkspace.select('user'); adminWorkspace.select('admin');
+    return readyProof();
+  });
+  await expect(cleanConversionImport(batch, checked)).rejects.toThrow();
+  expect(mocks.cleanup).not.toHaveBeenCalled();
+  expect(durable.tasks[0].cacheRemoved).toBe(false);
+});

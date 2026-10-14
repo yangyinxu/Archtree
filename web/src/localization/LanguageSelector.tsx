@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Icon } from '../components/Icon';
 import { ModalDialog } from '../components/ModalDialog';
@@ -10,11 +10,12 @@ import type { LocalePreference } from './contract';
 import styles from './LanguageSelector.module.css';
 
 export interface LanguageSelectorProps {
-  placement?: 'sidebar' | 'mobile';
+  active?: boolean;
+  placement?: 'sidebar' | 'mobile' | 'header';
 }
 
 /** Provides a Spotify-like quick language switch without coupling it to account state. */
-export const LanguageSelector = ({ placement = 'sidebar' }: LanguageSelectorProps) => {
+export const LanguageSelector = ({ active = true, placement = 'sidebar' }: LanguageSelectorProps) => {
   const {
     availableLocales,
     clearSelectionError,
@@ -26,6 +27,7 @@ export const LanguageSelector = ({ placement = 'sidebar' }: LanguageSelectorProp
     t
   } = useLocalization();
   const [open, setOpen] = useState(false);
+  useEffect(() => { if (!active) setOpen(false); }, [active]);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const firstOptionRef = useRef<HTMLInputElement>(null);
   const activeLanguage = availableLocales.find((entry) => entry.locale === locale)?.nativeName
@@ -67,11 +69,13 @@ export const LanguageSelector = ({ placement = 'sidebar' }: LanguageSelectorProp
     </button>
   );
 
+  if (!active) return null;
+
   return (
     <>
       {placement === 'sidebar'
         ? <div className={styles.footer}>{trigger}</div>
-        : <div className={styles.mobileTrigger}>{trigger}</div>}
+        : <div className={placement === 'mobile' ? styles.mobileTrigger : styles.headerTrigger}>{trigger}</div>}
       {open && (
         <ModalDialog
           closeDisabled={Boolean(pendingPreference)}

@@ -5,6 +5,8 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig(({ command, mode }) => ({
   base: '/finitude/',
   plugins: [react()],
+  // One isolated module asset includes LAME and its runtime; it never enters a listener route bundle.
+  worker: { format: 'es', rollupOptions: { output: { inlineDynamicImports: true } } },
   css: {
     modules: {
       // Production transfers compact identifiers; development and tests retain readable names.
@@ -15,6 +17,11 @@ export default defineConfig(({ command, mode }) => ({
   build: {
     manifest: true,
     outDir: 'dist',
+    modulePreload: {
+      // Pure helpers reuse the active application's core; keep CSS preloads for visible lazy screens.
+      resolveDependencies: (_file, dependencies, context) => context.hostType === 'js'
+        && !dependencies.some(file => file.endsWith('.css')) ? [] : dependencies
+    },
     rollupOptions: {
       output: {
         onlyExplicitManualChunks: true,
@@ -47,11 +54,14 @@ export default defineConfig(({ command, mode }) => ({
     }
   },
   test: {
+    include: [...configDefaults.include.map(pattern => `src/${pattern}`), 'scripts/*.test.mjs'],
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     exclude: [...configDefaults.exclude, 'e2e/**', 'e2e-social/**'],
     css: true,
     globals: true,
+    // Vitest 4 restores spies without clearing their call history; keep tests independent.
+    clearMocks: true,
     restoreMocks: true
   }
 }));

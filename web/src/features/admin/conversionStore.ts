@@ -1,0 +1,312 @@
+import { z } from 'zod';
+import { adminWorkspace } from './adminWorkspace';
+import type { AdminGuard } from './adminTransport';
+import { conversionManifestSchema, conversionTrackSchema, conversionReceiptSchema, type ConversionIntent, type ConversionManifest, type ConversionReceipt, type ConversionTrack } from './conversionSchemas';
+import type { NamingManifest } from './manifest';
+import type { ConversionEncodingResult } from './conversionWorkerProtocol';
+const hashConversionFile: typeof import('./conversionSourceValidation')['hashConversionFile'] = async (...args) =>
+  (await import('./conversionSourceValidation')).hashConversionFile(...args);
+
+export const conversionMaximumBytes = 512 * 1024 ** 2;
+export const conversionTaskStatuses = ['queued', 'fetching', 'encoding', 'paused', 'complete', 'uploading', 'uploaded', 'needsAttention'] as const;
+export type ConversionTaskStatus = typeof conversionTaskStatuses[number];
+export const conversionErrorCodes = ['conversion_source_invalid', 'conversion_source_unsupported', 'conversion_source_incomplete', 'conversion_source_corrupt',
+  'conversion_storage_unavailable', 'conversion_storage_full', 'conversion_storage_unsupported', 'conversion_encoder_unavailable', 'conversion_encoder_failed',
+  'conversion_output_invalid', 'conversion_cancelled', 'conversion_source_changed', 'conversion_source_unavailable', 'conversion_upload_unknown',
+  'conversion_upload_failed', 'conversion_permission_changed', 'conversion_busy', 'conversion_state_invalid', 'conversion_cache_missing'] as const;
+export type ConversionErrorCode = typeof conversionErrorCodes[number];
+/** Persisted failures retain a finite classification and never a provider/body/file error message. */
+export class ConversionLocalError extends Error {
+  constructor(readonly code: ConversionErrorCode) { super(code); }
+}
+export type ConversionSource =
+  | { kind: 'local'; byteLength: number; sha256: string | null; complete: boolean }
+  | { kind: 'remote'; track: ConversionTrack; etag: string | null; byteLength: number | null; downloadedBytes: number; sha256: string | null; complete: boolean };
+export interface ConversionTask {
+  ownerId: string; batchId: string; id: string; title: string; filename: string; relativePath: string;
+  status: ConversionTaskStatus; source: ConversionSource; result: ConversionEncodingResult | null;
+  intent: ConversionIntent | null; receipt: ConversionReceipt | null; error: ConversionErrorCode | null; cacheRemoved: boolean;
+}
+export interface ConversionImportIntent {
+  operationId: string; manifest: NamingManifest; projectId: string | null; slots: { taskId: string; slotId: string }[];
+}
+export interface ConversionBatch {
+  schemaVersion: 1; ownerId: string; id: string; kind: 'local' | 'existing'; rootLabel: string; createdAt: number; updatedAt: number;
+  album: ConversionManifest['album']; tasks: ConversionTask[]; importIntent?: ConversionImportIntent;
+}
+export interface ConversionCleanupProof { ready: true; trackId: string; sha256: string; byteLength: number }
+export type ConversionBatchPatch = Pick<Partial<ConversionBatch>, 'importIntent'>;
+export type ConversionTaskPatch = Pick<Partial<ConversionTask>, 'status' | 'source' | 'result' | 'intent' | 'receipt' | 'error' | 'cacheRemoved'>;
+
+const objectId = z.string().regex(/^[a-f0-9]{24}$/);
+const uuid = z.uuid();
+const bytes = z.number().int().positive().max(conversionMaximumBytes);
+const sha = z.string().regex(/^[a-f0-9]{64}$/);
+const etag = z.string().regex(/^"[\x21\x23-\x7E]{1,200}"$/);
+const filename = z.string().min(1).max(255).refine(value => value === value.normalize('NFC') && value.trim() === value && !/[\\/:\u0000-\u001f\u007f-\u009f]/u.test(value));
+const rootLabel = z.string().max(200).refine(value => !/[\\/:\u0000-\u001f\u007f-\u009f]/u.test(value) && value.trim() === value);
+const relativePath = z.string().min(1).max(1024).refine(value => {
+  const parts = value.split('/');
+  return parts.length <= 16 && parts.every(part => filename.safeParse(part).success && part !== '.' && part !== '..');
+});
+const positive = z.number().finite().positive();
+/** The exact worker profile and source accounting must survive complete durable decoding. */
+export const conversionEncodingResultSchema: z.ZodType<ConversionEncodingResult> = z.object({
+  preset: z.literal('mp3-320'), codec: z.literal('mp3'), bitrate: z.literal(320000), sourceCodec: z.enum(['flac', 'wav-pcm', 'wav-float']),
+  sourceSha256: sha, sourceBytes: bytes, sourceFrames: positive.int(), sourceSampleRate: positive.int().max(384000),
+  sourceChannels: z.union([z.literal(1), z.literal(2)]), sourceDurationSeconds: positive.max(86400),
+  outputSha256: sha, outputBytes: bytes, outputFrames: positive.int(), sampleRate: z.union([z.literal(44100), z.literal(48000)]),
+  channels: z.union([z.literal(1), z.literal(2)]), durationSeconds: positive.max(86400), resampled: z.boolean()
+}).strict().refine(value => value.channels === value.sourceChannels
+  && value.sampleRate === (value.sourceSampleRate === 44100 ? 44100 : value.sourceSampleRate >= 48000 ? 48000 : 0)
+  && Math.abs(value.sourceFrames / value.sourceSampleRate - value.sourceDurationSeconds) < 1 / value.sourceSampleRate
+  && Math.abs(value.outputFrames / value.sampleRate - value.durationSeconds) < 1 / value.sampleRate
+  && Math.abs(value.durationSeconds - value.sourceDurationSeconds) <= 0.1
+  && value.resampled === (value.sampleRate !== value.sourceSampleRate));
+const sourceSchema: z.ZodType<ConversionSource> = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('local'), byteLength: bytes, sha256: sha.nullable(), complete: z.boolean() }).strict(),
+  z.object({ kind: z.literal('remote'), track: conversionTrackSchema, etag: etag.nullable(), byteLength: bytes.nullable(),
+    downloadedBytes: z.number().int().min(0).max(conversionMaximumBytes), sha256: sha.nullable(), complete: z.boolean() }).strict()
+]).refine(source => !source.complete || source.sha256 !== null && source.byteLength !== null)
+  .refine(source => source.kind !== 'remote' || source.downloadedBytes <= (source.byteLength ?? 0)
+    && (!source.complete || source.downloadedBytes === source.byteLength && source.etag !== null));
+const intentSchema: z.ZodType<ConversionIntent> = z.object({ operationId: uuid, expectedRevision: z.string().regex(/^cr_[A-Za-z0-9_-]{43}$/),
+  sourceRevision: z.string().regex(/^mr_[a-f0-9]{32}$/), sourceEtag: etag, sourceByteLength: bytes,
+  album: z.object({ id: objectId, revision: z.string().regex(/^cr_[A-Za-z0-9_-]{43}$/), membershipRevision: z.string().regex(/^cm_[A-Za-z0-9_-]{43}$/) }).strict().nullable(),
+  output: z.object({ sha256: sha, byteLength: bytes, preset: z.literal('mp3-320'), filename: filename.refine(value => /\.mp3$/i.test(value)) }).strict()
+}).strict();
+const receiptSchema = conversionReceiptSchema.shape.operation.refine(receipt => (receipt.issue === null || /^[A-Za-z0-9_]{1,128}$/.test(receipt.issue))
+  && (!receipt.ready || receipt.status === 'complete' && receipt.upload === 'ready' && receipt.publication === 'ready'));
+const taskSchema: z.ZodType<ConversionTask> = z.object({ ownerId: objectId, batchId: uuid, id: uuid, title: z.string().max(1000), filename, relativePath,
+  status: z.enum(conversionTaskStatuses), source: sourceSchema, result: conversionEncodingResultSchema.nullable(), intent: intentSchema.nullable(),
+  receipt: receiptSchema.nullable(), error: z.enum(conversionErrorCodes).nullable(), cacheRemoved: z.boolean() }).strict().refine(task => {
+  if (task.relativePath.split('/').at(-1) !== task.filename) return false;
+  if (task.result && (!task.source.complete || task.result.sourceSha256 !== task.source.sha256 || task.result.sourceBytes !== task.source.byteLength)) return false;
+  if (task.intent && (task.source.kind !== 'remote' || !task.result || task.intent.sourceRevision !== task.source.track.sourceRevision
+    || task.intent.expectedRevision !== task.source.track.revision || task.intent.sourceEtag !== task.source.etag || task.intent.sourceByteLength !== task.source.byteLength
+    || task.intent.output.sha256 !== task.result.outputSha256 || task.intent.output.byteLength !== task.result.outputBytes)) return false;
+  if (task.receipt && (!task.intent || task.source.kind !== 'remote' || task.receipt.operationId !== task.intent.operationId
+    || task.receipt.trackId !== task.source.track.id || task.receipt.output.sha256 !== task.intent.output.sha256 || task.receipt.output.byteLength !== task.intent.output.byteLength)) return false;
+  return !task.cacheRemoved || task.result !== null;
+});
+const namingSchema = z.object({ rootLabel, files: z.array(z.object({ slotId: uuid, filename, relativePath, byteLength: bytes }).strict()).min(1).max(100) }).strict();
+const importIntentSchema: z.ZodType<ConversionImportIntent> = z.object({ operationId: uuid, manifest: namingSchema,
+  projectId: objectId.nullable(), slots: z.array(z.object({ taskId: uuid, slotId: uuid }).strict()).min(1).max(100) }).strict()
+  .refine(intent => new Set(intent.slots.map(slot => slot.taskId)).size === intent.slots.length
+    && new Set(intent.slots.map(slot => slot.slotId)).size === intent.slots.length
+    && intent.slots.length === intent.manifest.files.length && intent.slots.every(slot => intent.manifest.files.some(file => file.slotId === slot.slotId)));
+/** One envelope is the source of truth, allowing intent and per-track transitions to commit atomically. */
+export const conversionBatchSchema: z.ZodType<ConversionBatch> = z.object({ schemaVersion: z.literal(1), ownerId: objectId, id: uuid,
+  kind: z.enum(['local', 'existing']), rootLabel, createdAt: z.number().int().nonnegative(), updatedAt: z.number().int().nonnegative(),
+  album: conversionManifestSchema.shape.album, tasks: z.array(taskSchema).min(1).max(100), importIntent: importIntentSchema.optional() }).strict()
+  .refine(batch => new Set(batch.tasks.map(task => task.id)).size === batch.tasks.length
+    && batch.tasks.every(task => task.ownerId === batch.ownerId && task.batchId === batch.id && task.source.kind === (batch.kind === 'local' ? 'local' : 'remote'))
+    && (!batch.importIntent || batch.kind === 'local' && batch.importIntent.slots.every(slot => batch.tasks.some(task => task.id === slot.taskId))));
+
+/** Storage abstraction permits real IndexedDB/OPFS durability and deterministic fault injection. */
+export interface ConversionPersistence {
+  supported(): boolean;
+  list(ownerId: string): Promise<unknown[]>;
+  get(ownerId: string, batchId: string): Promise<unknown | undefined>;
+  create(batch: ConversionBatch): Promise<void>;
+  mutate(ownerId: string, batchId: string, update: (value: unknown) => ConversionBatch): Promise<void>;
+  file(ownerId: string, taskId: string, kind: 'source' | 'output', create: boolean): Promise<FileSystemFileHandle>;
+  removeOutput(ownerId: string, taskId: string): Promise<void>;
+  estimate(): Promise<StorageEstimate>;
+  persist(): Promise<boolean>;
+}
+const requestValue = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
+  request.onsuccess = () => resolve(request.result); request.onerror = () => reject(new ConversionLocalError('conversion_storage_unavailable'));
+});
+const transactionDone = (transaction: IDBTransaction) => new Promise<void>((resolve, reject) => {
+  transaction.oncomplete = () => resolve(); transaction.onabort = transaction.onerror = () => reject(new ConversionLocalError('conversion_storage_unavailable'));
+});
+const supported = () => Boolean(globalThis.isSecureContext && globalThis.indexedDB && typeof navigator.storage?.getDirectory === 'function'
+  && typeof navigator.locks?.request === 'function' && typeof Worker === 'function');
+const productionPersistence = (): ConversionPersistence => {
+  let database: Promise<IDBDatabase> | undefined;
+  const open = () => database ??= new Promise((resolve, reject) => {
+    if (!supported()) { reject(new ConversionLocalError('conversion_storage_unsupported')); return; }
+    const request = indexedDB.open('finitude-admin-conversions', 1);
+    request.onupgradeneeded = () => { const batches = request.result.createObjectStore('batches', { keyPath: ['ownerId', 'id'] }); batches.createIndex('owner', 'ownerId'); };
+    request.onsuccess = () => { request.result.onversionchange = () => { request.result.close(); database = undefined; }; resolve(request.result); };
+    request.onerror = request.onblocked = () => { database = undefined; reject(new ConversionLocalError('conversion_storage_unavailable')); };
+  });
+  const directory = async (owner: string, task: string, create: boolean) => {
+    objectId.parse(owner); uuid.parse(task);
+    const root = await navigator.storage.getDirectory();
+    const conversions = await root.getDirectoryHandle('finitude-admin-conversions-v1', { create });
+    const owned = await conversions.getDirectoryHandle(owner, { create });
+    return owned.getDirectoryHandle(task, { create });
+  };
+  return {
+    supported,
+    async list(owner) { const db = await open(), tx = db.transaction('batches', 'readonly'); const done = transactionDone(tx);
+      const [rows] = await Promise.all([requestValue(tx.objectStore('batches').index('owner').getAll(objectId.parse(owner))), done]); return rows; },
+    async get(owner, batch) { const db = await open(), tx = db.transaction('batches', 'readonly'); const done = transactionDone(tx);
+      const [row] = await Promise.all([requestValue(tx.objectStore('batches').get([objectId.parse(owner), uuid.parse(batch)])), done]); return row; },
+    async create(batch) { const db = await open(), tx = db.transaction('batches', 'readwrite'); const done = transactionDone(tx);
+      tx.objectStore('batches').add(batch); await done; },
+    async mutate(owner, batch, update) { const db = await open(), tx = db.transaction('batches', 'readwrite'); const done = transactionDone(tx);
+      const store = tx.objectStore('batches'), request = store.get([objectId.parse(owner), uuid.parse(batch)]);
+      let failure: unknown;
+      request.onsuccess = () => { try { store.put(update(request.result)); } catch (error) { failure = error; tx.abort(); } };
+      try { await done; } catch (error) { throw failure ?? error; } },
+    async file(owner, task, kind, create) { return (await directory(owner, task, create)).getFileHandle(kind === 'source' ? 'source.bin' : 'output.mp3', { create }); },
+    async removeOutput(owner, task) { try { await (await directory(owner, task, false)).removeEntry('output.mp3'); }
+      catch (error) { if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error; } },
+    estimate: () => navigator.storage.estimate(), persist: () => navigator.storage.persist()
+  };
+};
+const parseBatch = (value: unknown, owner: string, id?: string): ConversionBatch => {
+  const result = conversionBatchSchema.safeParse(value);
+  if (!result.success || result.data.ownerId !== owner || id && result.data.id !== id) throw new ConversionLocalError('conversion_state_invalid');
+  return result.data;
+};
+const gate = (owner: string, guard?: AdminGuard, feature = false) => {
+  objectId.parse(owner); const current = guard ?? adminWorkspace.capture();
+  if (current.viewerId !== owner || !adminWorkspace.current(current) || feature && !adminWorkspace.getSnapshot().conversion) throw new ConversionLocalError('conversion_permission_changed');
+  return current;
+};
+const outputName = (task: Pick<ConversionTask, 'filename'>) => `${task.filename.replace(/\.[^.]+$/, '').slice(0, 251).replace(/[\uD800-\uDBFF]$/u, '')}.mp3`;
+/** Derived import paths use the actual output filename, including extensionless or truncated source names. */
+export const conversionOutputRelativePath = (task: Pick<ConversionTask, 'filename' | 'relativePath'>) =>
+  task.relativePath.slice(0, task.relativePath.lastIndexOf('/') + 1) + outputName(task);
+
+/** Keeps private metadata and files account-scoped; completed source bytes are never a cleanup target. */
+export const conversionExecutorLock = (owner: string) => `finitude-conversion-executor-${owner}`;
+export const createConversionStore = (persistence: ConversionPersistence = productionPersistence()) => {
+  const listeners = new Set<() => void>();
+  let channel: BroadcastChannel | undefined;
+  const notify = () => { for (const listener of listeners) listener(); channel?.postMessage('changed'); };
+  const get = async (owner: string, batchId: string, guard?: AdminGuard) => { const checked = gate(owner, guard), row = await persistence.get(owner, uuid.parse(batchId));
+    gate(owner, checked); if (row === undefined) throw new ConversionLocalError('conversion_state_invalid'); return parseBatch(row, owner, batchId); };
+  const updateBatch = async (owner: string, batchId: string, patch: ConversionBatchPatch, guard?: AdminGuard) => {
+    const checked = gate(owner, guard); if (Object.keys(patch).some(key => key !== 'importIntent')) throw new ConversionLocalError('conversion_state_invalid');
+    await persistence.mutate(owner, batchId, raw => { gate(owner, checked); const before = parseBatch(raw, owner, batchId);
+      if (before.importIntent && (!patch.importIntent || before.importIntent.operationId !== patch.importIntent.operationId
+        || JSON.stringify(before.importIntent.manifest) !== JSON.stringify(patch.importIntent.manifest)
+        || JSON.stringify(before.importIntent.slots) !== JSON.stringify(patch.importIntent.slots)
+        || before.importIntent.projectId !== null && before.importIntent.projectId !== patch.importIntent.projectId)) throw new ConversionLocalError('conversion_state_invalid');
+      return parseBatch({ ...before, ...patch, updatedAt: Date.now() }, owner, batchId); }); gate(owner, checked); notify(); return get(owner, batchId, checked);
+  };
+  const updateTask = async (owner: string, batchId: string, taskId: string, patch: ConversionTaskPatch, guard?: AdminGuard) => {
+    const checked = gate(owner, guard); if (Object.keys(patch).some(key => !['status', 'source', 'result', 'intent', 'receipt', 'error', 'cacheRemoved'].includes(key))) throw new ConversionLocalError('conversion_state_invalid');
+    await persistence.mutate(owner, batchId, raw => { gate(owner, checked); const before = parseBatch(raw, owner, batchId), task = before.tasks.find(item => item.id === taskId);
+      if (!task || patch.source && (patch.source.kind !== task.source.kind || patch.source.kind === 'remote' && task.source.kind === 'remote'
+        && JSON.stringify(patch.source.track) !== JSON.stringify(task.source.track)) || task.intent && patch.intent && JSON.stringify(task.intent) !== JSON.stringify(patch.intent)
+        || task.intent && patch.intent === null) throw new ConversionLocalError('conversion_state_invalid');
+      return parseBatch({ ...before, updatedAt: Date.now(), tasks: before.tasks.map(item => item.id === taskId ? { ...item, ...patch } : item) }, owner, batchId);
+    }); gate(owner, checked); notify(); return (await get(owner, batchId, checked)).tasks.find(task => task.id === taskId)!;
+  };
+  const list = async (owner: string) => { const checked = gate(owner), rows = await persistence.list(owner); gate(owner, checked);
+    const locks = typeof navigator.locks?.query === 'function' ? await navigator.locks.query() : null; gate(owner, checked);
+    const active = locks?.held?.some(lock => lock.name === conversionExecutorLock(owner));
+    // Query the origin-wide lease before describing a crashed job as paused; another tab may still own it.
+    return rows.map(row => parseBatch(row, owner)).sort((left, right) => right.createdAt - left.createdAt).map(batch => ({ ...batch,
+      tasks: batch.tasks.map(task => !active && ['fetching', 'encoding', 'uploading'].includes(task.status) ? { ...task, status: 'paused' as const } : task) })); };
+  const reserve = async (required: number, checked: AdminGuard) => { await persistence.persist(); gate(checked.viewerId, checked);
+    const estimate = await persistence.estimate(); gate(checked.viewerId, checked);
+    if (typeof estimate.quota === 'number' && typeof estimate.usage === 'number' && required > estimate.quota - estimate.usage) throw new ConversionLocalError('conversion_storage_full'); };
+  const copy = async (owner: string, taskId: string, file: File, checked: AdminGuard) => {
+    const handle = await persistence.file(owner, taskId, 'source', true), output = await handle.createWritable();
+    try { for (let offset = 0; offset < file.size; offset += 1024 * 1024) { gate(owner, checked); await output.write(file.slice(offset, offset + 1024 * 1024)); }
+      gate(owner, checked); await output.close(); const stored = await handle.getFile();
+      if (stored.size !== file.size) throw new ConversionLocalError('conversion_source_incomplete');
+      const digest = await hashConversionFile(stored, () => { gate(owner, checked); }); gate(owner, checked); return digest;
+    } catch (error) { await output.abort().catch(() => undefined); throw error; }
+  };
+  const createLocalUnlocked = async (owner: string, files: readonly File[], label: string) => {
+    const checked = gate(owner, undefined, true); if (!persistence.supported()) throw new ConversionLocalError('conversion_storage_unsupported');
+    if (files.length < 1 || files.length > 100) throw new ConversionLocalError('conversion_source_invalid');
+    // macOS may present decomposed names; only task metadata is normalized, never the source File.
+    const identities = files.map(file => ({ name: file.name.normalize('NFC'),
+      path: (file.webkitRelativePath || file.name).split('/').map(part => part.normalize('NFC')).join('/') }));
+    const fingerprints: string[] = [];
+    for (const file of files) { bytes.parse(file.size); fingerprints.push(await hashConversionFile(file, () => { gate(owner, checked); })); }
+    const previous = await list(owner);
+    const reusable = previous.find(batch => batch.kind === 'local' && batch.rootLabel === label && !batch.importIntent && batch.tasks.length === files.length
+      && batch.tasks.every((task, index) => task.source.kind === 'local' && task.relativePath === identities[index].path
+        && task.source.byteLength === files[index].size && task.source.sha256 === fingerprints[index]));
+    const batchId = reusable?.id ?? crypto.randomUUID(), now = Date.now();
+    const tasks: ConversionTask[] = files.map((file, index) => { const { name, path } = identities[index];
+      if (!filename.safeParse(name).success || !relativePath.safeParse(path).success || !bytes.safeParse(file.size).success || path.split('/').at(-1) !== name) throw new ConversionLocalError('conversion_source_invalid');
+      return { ownerId: owner, batchId, id: crypto.randomUUID(), title: name, filename: name, relativePath: path, status: 'queued',
+        source: { kind: 'local', byteLength: file.size, sha256: fingerprints[index], complete: false }, result: null, intent: null, receipt: null, error: null, cacheRemoved: false }; });
+    const outputPaths = tasks.map(conversionOutputRelativePath);
+    if (outputPaths.some(path => !relativePath.safeParse(path).success) || new Set(outputPaths).size !== tasks.length) throw new ConversionLocalError('conversion_source_invalid');
+    const batch = parseBatch({ schemaVersion: 1, ownerId: owner, id: batchId, kind: 'local', rootLabel: label, createdAt: now, updatedAt: now, album: null, tasks }, owner);
+    await reserve(files.reduce((sum, file) => sum + file.size * 2, 0), checked); gate(owner, checked); if (!reusable) await persistence.create(batch); notify();
+    const copying = reusable?.tasks ?? tasks;
+    for (let index = 0; index < copying.length; index++) {
+      if (copying[index].source.complete) {
+        try { const file = await (await persistence.file(owner, copying[index].id, 'source', false)).getFile();
+          if (file.size === files[index].size && await hashConversionFile(file, () => { gate(owner, checked); }) === fingerprints[index]) continue;
+        } catch (error) { gate(owner, checked); }
+      }
+      try { const digest = await copy(owner, copying[index].id, files[index], checked);
+        if (digest !== fingerprints[index]) throw new ConversionLocalError('conversion_source_changed');
+        await updateTask(owner, batchId, copying[index].id, { source: { kind: 'local', byteLength: files[index].size, sha256: digest, complete: true }, status: 'queued', error: null }, checked); }
+      catch (error) { if (adminWorkspace.current(checked)) await updateTask(owner, batchId, copying[index].id, { status: 'needsAttention', error: error instanceof ConversionLocalError ? error.code : 'conversion_storage_unavailable' }, checked); throw error; }
+    }
+    return get(owner, batchId, checked);
+  };
+  const createExistingUnlocked = async (owner: string, input: ConversionManifest) => {
+    const checked = gate(owner, undefined, true); if (!persistence.supported()) throw new ConversionLocalError('conversion_storage_unsupported');
+    const manifest = conversionManifestSchema.parse(input);
+    if (!manifest.tracks.length) throw new ConversionLocalError('conversion_source_invalid');
+    const previous = await list(owner);
+    const existing = previous.find(batch => batch.kind === 'existing' && !batch.tasks.some(task => task.receipt?.issue === 'ADMIN_CONVERSION_CANCELLED' && !task.receipt.cleanupPending) && JSON.stringify(batch.album) === JSON.stringify(manifest.album)
+      && batch.tasks.length === manifest.tracks.length && batch.tasks.every((task, index) => task.source.kind === 'remote'
+        && JSON.stringify(task.source.track) === JSON.stringify(manifest.tracks[index])));
+    if (existing) return existing;
+    await reserve(manifest.tracks.length * 1024 * 1024, checked);
+    const batchId = crypto.randomUUID(), now = Date.now();
+    const tasks: ConversionTask[] = manifest.tracks.map(track => { const normalized = track.originalFileName?.normalize('NFC');
+      const name = normalized && filename.safeParse(normalized).success ? normalized : `${track.id}.source`;
+      return { ownerId: owner, batchId, id: crypto.randomUUID(), title: track.title, filename: name, relativePath: name, status: 'queued',
+        source: { kind: 'remote', track, etag: null, byteLength: null, downloadedBytes: 0, sha256: null, complete: false }, result: null, intent: null, receipt: null, error: null, cacheRemoved: false }; });
+    const batch = parseBatch({ schemaVersion: 1, ownerId: owner, id: batchId, kind: 'existing', rootLabel: (manifest.album?.title ?? '').slice(0, 200).replace(/[\\/:\u0000-\u001f\u007f-\u009f]/gu, '').trim(),
+      createdAt: now, updatedAt: now, album: manifest.album, tasks }, owner);
+    gate(owner, checked); await persistence.create(batch); notify(); return get(owner, batchId, checked);
+  };
+  const exclusive = <T>(owner: string, work: () => Promise<T>) => navigator.locks?.request
+    ? navigator.locks.request(conversionExecutorLock(owner), { mode: 'exclusive', ifAvailable: true }, lock => { if (!lock) throw new ConversionLocalError('conversion_busy'); return work(); })
+    : work();
+  const createLocal = (owner: string, files: readonly File[], label: string) => exclusive(owner, () => createLocalUnlocked(owner, files, label));
+  const createExisting = (owner: string, manifest: ConversionManifest) => exclusive(owner, () => createExistingUnlocked(owner, manifest));
+  return {
+    storageSupported: () => persistence.supported(), list, get, createLocal, createExisting, updateBatch, updateTask,
+    subscribe(listener: () => void) { listeners.add(listener); if (!channel && typeof BroadcastChannel === 'function') { channel = new BroadcastChannel('finitude-conversion-changes-v1'); channel.onmessage = () => { for (const entry of listeners) entry(); }; }
+      return () => { listeners.delete(listener); if (!listeners.size) { channel?.close(); channel = undefined; } }; },
+    async getSourceFile(task: ConversionTask) { const checked = gate(task.ownerId); const current = (await get(task.ownerId, task.batchId, checked)).tasks.find(item => item.id === task.id);
+      if (!current?.source.complete) throw new ConversionLocalError('conversion_source_incomplete');
+      const file = await (await persistence.file(task.ownerId, task.id, 'source', false)).getFile(); gate(task.ownerId, checked);
+      if (file.size !== current.source.byteLength || await hashConversionFile(file, () => { gate(task.ownerId, checked); }) !== current.source.sha256) throw new ConversionLocalError('conversion_source_corrupt'); gate(task.ownerId, checked); return file; },
+    async getOutputFile(task: ConversionTask) { const checked = gate(task.ownerId); const current = (await get(task.ownerId, task.batchId, checked)).tasks.find(item => item.id === task.id);
+      if (!current?.result || current.cacheRemoved) throw new ConversionLocalError('conversion_cache_missing');
+      try {
+        const file = await (await persistence.file(task.ownerId, task.id, 'output', false)).getFile(); gate(task.ownerId, checked);
+        if (file.size !== current.result.outputBytes || await hashConversionFile(file, () => { gate(task.ownerId, checked); }) !== current.result.outputSha256) throw new ConversionLocalError('conversion_output_invalid');
+        gate(task.ownerId, checked); return new File([file], outputName(current), { type: 'audio/mpeg' });
+      } catch (error) {
+        gate(task.ownerId, checked); const failure = error instanceof ConversionLocalError ? error : new ConversionLocalError('conversion_cache_missing');
+        await updateTask(task.ownerId, task.batchId, task.id, { status: 'needsAttention', error: failure.code }, checked); throw failure;
+      } },
+    async sourceHandle(task: ConversionTask, create = false) { gate(task.ownerId); return persistence.file(task.ownerId, task.id, 'source', create); },
+    async outputHandle(task: ConversionTask) { gate(task.ownerId); return persistence.file(task.ownerId, task.id, 'output', true); },
+    async reserveBytes(owner: string, required: number, guard: AdminGuard) { gate(owner, guard); await reserve(required, guard); },
+    async cleanupConfirmed(task: ConversionTask, proof: ConversionCleanupProof) {
+      const checked = gate(task.ownerId), parsed = z.object({ ready: z.literal(true), trackId: objectId, sha256: sha, byteLength: bytes }).strict().parse(proof);
+      const batch = await get(task.ownerId, task.batchId, checked), current = batch.tasks.find(item => item.id === task.id);
+      if (!current?.result || current.result.outputSha256 !== parsed.sha256 || current.result.outputBytes !== parsed.byteLength
+        || current.source.kind === 'remote' && (!current.receipt?.ready || current.receipt.trackId !== parsed.trackId || current.receipt.output.sha256 !== parsed.sha256 || current.receipt.output.byteLength !== parsed.byteLength)
+        || current.source.kind === 'local' && (!batch.importIntent?.projectId || !batch.importIntent.slots.some(slot => slot.taskId === current.id))) throw new ConversionLocalError('conversion_state_invalid');
+      gate(task.ownerId, checked); await persistence.removeOutput(task.ownerId, task.id); gate(task.ownerId, checked);
+      await updateTask(task.ownerId, task.batchId, task.id, { cacheRemoved: true, status: 'uploaded', error: null }, checked);
+    }
+  };
+};
+export type ConversionStore = ReturnType<typeof createConversionStore>;
+export const conversionStore = createConversionStore();
+export const storageSupported = () => conversionStore.storageSupported();

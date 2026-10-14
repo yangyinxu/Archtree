@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type ReactNode } from 'react';
 import type { ImportDetail, ImportDraft, ImportSuggestion } from './adminApi';
 import { useAdminText } from './AdminAccess';
 import styles from './adminStyles';
@@ -12,9 +12,11 @@ export const suggestionValue = (draft: ImportDraft, suggestion: ImportSuggestion
 export const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** A changed baseline cannot be force-adopted; the administrator can edit or reject it explicitly. */
-export function ImportReview({ draft, suggestions, selected, onSelect, onAdopt, onReject, disabled, filenames }: {
+export function ImportReview({ draft, suggestions, selected, onSelect, onAdopt, onReject, disabled, filenames, emptyContent, draftCopy }: {
   draft: ImportDraft; suggestions: ImportSuggestion[]; selected: string[]; onSelect: (ids: string[]) => void;
   onAdopt: (ids: string[]) => void; onReject: (ids: string[]) => void; disabled: boolean; filenames?: ImportDetail['manifest']['files'];
+  // The owning workflow knows whether an empty list means idle, running or handled.
+  emptyContent?: ReactNode; draftCopy?: string;
 }) {
   const t = useAdminText();
   const contextId = useId();
@@ -22,8 +24,8 @@ export function ImportReview({ draft, suggestions, selected, onSelect, onAdopt, 
   const eligible = pending.filter(item => sameValue(suggestionValue(draft, item), item.baseline));
   const allowed = selected.filter(id => eligible.some(item => item.id === id));
   return <section className={styles.panel}>
-    <header className={styles.sectionHeader}><div><h2>{t('review.title')}</h2><p className={styles.muted}>{t('review.draft_only')}</p></div></header>
-    {pending.length === 0 && <p>{t('review.empty')}</p>}
+    <header className={styles.sectionHeader}><div><h2>{t('review.title')}</h2><p className={styles.muted}>{draftCopy ?? t('review.draft_only')}</p></div></header>
+    {pending.length === 0 && (emptyContent ?? <p>{t('review.empty')}</p>)}
     {pending.map((suggestion, index) => {
       const current = suggestionValue(draft, suggestion);
       const conflict = !sameValue(current, suggestion.baseline);

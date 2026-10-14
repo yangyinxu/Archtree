@@ -93,10 +93,33 @@ async function setup(page: Page, admin = true, media = false, publication?: Publ
   return writes;
 }
 
+/** Admission gates and private management both use one main without accessible listener controls. */
+async function expectStandaloneAdministration(page: Page, currentView?: string) {
+  await expect(page.locator('main')).toHaveCount(1);
+  await expect(page.getByRole('main')).toHaveCount(1);
+  await expect(page.getByRole('main')).toBeVisible();
+  for (const [role, name] of [
+    ['navigation', 'Primary'], ['search', 'Global search'],
+    ['searchbox', 'Search artists, organizations, albums, and MediaTracks'],
+    ['complementary', 'Finitude Library'], ['complementary', 'Now Playing details'],
+    ['region', 'Now playing'], ['group', 'Playback controls']
+  ] as const) await expect(page.getByRole(role, { name, exact: true })).toHaveCount(0);
+  await expect(page.locator('#library-sidebar')).toBeHidden();
+  await expect(page.locator('#now-playing-aside')).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Now playing', exact: true, includeHidden: true })).toBeHidden();
+  if (currentView) await expect(page.getByRole('button', { name: currentView, exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth)).toBe(true);
+}
+test.afterEach(async ({ page }, result) => {
+  if (result.status === 'passed' && new URL(page.url()).pathname.startsWith('/finitude/admin')) await expectStandaloneAdministration(page);
+});
+
 test('admin explicitly opens workbench, adopts only selected suggestion, and User view hides private project', async ({ page }) => {
   const writes = await setup(page); await page.goto('/finitude/admin/imports');
   await expect(page.getByRole('button', { name: 'Current view: User' })).toBeVisible();
+  await expectStandaloneAdministration(page, 'Current view: User');
   await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expectStandaloneAdministration(page, 'Current view: Admin');
   await page.getByRole('link', { name: 'Synthetic Album', exact: true }).click();
   await page.getByRole('tab', { name: 'Review', exact: true }).click();
   await expect(page.getByText('Suggested Album', { exact: true })).toBeVisible();
@@ -276,11 +299,17 @@ test('ordinary account has no admin switch and requests no admin data', async ({
   await page.goto('/finitude/admin/imports');
   await expect(page.getByText('Switch to Admin view to open the workbench. Current administrator access is required.')).toBeVisible();
   await expect(page.getByRole('button', { name: /Current view:/ })).toHaveCount(0); expect(calls).toBe(0);
+  await expectStandaloneAdministration(page);
+  await page.getByRole('banner').getByRole('link', { name: 'Finitude home', exact: true }).click();
+  await expect(page).toHaveURL(/\/finitude\/?$/);
+  await expect(page.getByRole('navigation', { name: 'Primary', exact: true }).first()).toBeVisible();
+  expect(calls).toBe(0);
 });
 
 test('mobile administrator control and workbench remain accessible without horizontal overflow', async ({ page }) => {
   await setup(page); await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/finitude/admin/imports'); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expectStandaloneAdministration(page, 'Current view: Admin');
   await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -322,7 +351,7 @@ test('existing catalog edits and Page placement visibility require separate expl
   await page.route('**/api/admin/v1/catalog/**', async route => { if (new URL(route.request().url()).pathname.endsWith('/cover-operations')) return route.fulfill({json:{items:[]},headers}); if (route.request().method() === 'DELETE') { const body = route.request().postDataJSON(); writes.push({path:new URL(route.request().url()).pathname,body}); item = {...item,coverUrl:null,revision:`cr_${'c'.repeat(43)}`}; return route.fulfill({json:{item,receipt:{operationId:body.operationId},coverOperation:{state:'complete',cleanupPending:true}},headers}); } if (route.request().method() === 'PATCH') { const body = route.request().postDataJSON(); writes.push({path: new URL(route.request().url()).pathname,body}); item = { ...item, revision: `cr_${'b'.repeat(43)}`, fields: { ...item.fields, ...body.fields } }; return route.fulfill({json:{item,receipt:{operationId:body.operationId}},headers}); } return route.fulfill({json:{item},headers}); });
   await page.route('**/api/admin/v1/pages/**', async route => { if (route.request().method() === 'PATCH') { const body = route.request().postDataJSON(); writes.push({path:new URL(route.request().url()).pathname,body}); pageDTO = { ...pageDTO, revision:`cr_${'b'.repeat(43)}`,items:[{...pageDTO.items[0],visibility:body.visibility}] }; return route.fulfill({json:{page:pageDTO,receipt:{operationId:body.operationId}},headers}); } return route.fulfill({json:{page:pageDTO},headers}); });
   await page.goto('/finitude/admin/catalog/artist/111111111111111111111111'); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
-  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Edited synthetic artist'); await page.getByRole('button', { name: 'Save' }).click(); expect(writes).toHaveLength(0); await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click(); await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled(); expect(writes[0].body.fields).toEqual({name:'Edited synthetic artist'});
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Edited synthetic artist'); await page.getByRole('button', { name: 'Save catalog changes' }).click(); expect(writes).toHaveLength(0); await page.getByRole('dialog').getByRole('button', { name: 'Save catalog changes' }).click(); await expect(page.getByRole('button', { name: 'Save catalog changes' })).toBeDisabled(); expect(writes[0].body.fields).toEqual({name:'Edited synthetic artist'});
   await page.getByRole('button', {name:'Remove catalog cover'}).click(); expect(writes).toHaveLength(1); await page.getByRole('dialog').getByRole('button', {name:'Remove catalog cover'}).click(); await expect(page.getByText('The cover change is confirmed. Previous image cleanup still needs attention.')).toBeVisible(); expect(writes).toHaveLength(2);
   await page.getByRole('link', { name: 'Page items', exact: true }).click();
   await expect(page).toHaveTitle('Page items · Finitude');

@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { z } from 'zod';
 import { ApiError, apiRequest } from '../../api/client';
 import { browserSessionQuery, browserSessionResolvingQuery } from '../../api/session';
 import { captureAccountOperation, isAccountOperationCurrent } from '../../api/accountEpoch';
@@ -11,12 +10,6 @@ import { adminWorkspace, useAdminWorkspace } from './adminWorkspace';
 import { Icon } from '../../components/Icon';
 import page from '../../styles/Pages.module.css';
 const styles: Record<string, string> = { view: page.view, viewButton: page.viewButton, workbenchLink: page.workbenchLink, menu: page.menu, page: page.page, title: page.pageTitle, muted: page.lede, button: `${page.button} ${page.buttonSecondary}`, link: page.secondaryLink };
-
-const capabilitySchema = z.object({
-  schemaVersion: z.literal(1), admin: z.literal(true),
-  albumImports: z.object({ enabled: z.boolean(), analysisAvailable: z.boolean(), model: z.literal('gpt-6-luna'), maxFiles: z.literal(100) }).strict(),
-  catalog: z.object({ editing: z.boolean(), visibility: z.boolean() }).strict()
-}).strict();
 
 /** One text wrapper keeps line breaks intact inside the shell flex button. */
 export function AdminViewLabel({ label, role }: { label: string; role: string }) {
@@ -41,7 +34,7 @@ export const useAdminAccess = () => {
 };
 
 /** The shell owns capability refresh; view changes never replace the player or account session. */
-export const AdminControls = () => {
+export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink?: boolean }) => {
   const t = useAdminText();
   const client = useQueryClient();
   const session = useQuery(browserSessionQuery());
@@ -56,6 +49,8 @@ export const AdminControls = () => {
     queryKey: ['admin-capabilities', viewerId, epoch], enabled: Boolean(viewerId),
     queryFn: async ({ signal }) => {
       const authority = adminWorkspace.getSnapshot().authority;
+      const { capabilitySchema } = await import('./adminCapabilities');
+      signal.throwIfAborted();
       const data = await apiRequest('/api/admin/v1/capabilities', capabilitySchema, { accountViewer: viewerId, signal, cache: 'no-store' });
       return { ...data, authority };
     },
@@ -69,7 +64,7 @@ export const AdminControls = () => {
       return;
     }
     if (capabilities.isSuccess && !capabilities.isFetching) {
-      adminWorkspace.authorize({ viewerId, epoch }, capabilities.data.albumImports.enabled, capabilities.data.albumImports.analysisAvailable, capabilities.data.authority, capabilities.data.catalog);
+      adminWorkspace.authorize({ viewerId, epoch }, capabilities.data.albumImports.enabled, capabilities.data.albumImports.analysisAvailable, capabilities.data.authority, capabilities.data.catalog, Boolean(capabilities.data.localMp3Conversion?.enabled));
     } else if (state.authorized) adminWorkspace.suspend();
   }, [viewerId, epoch, capabilities.data, capabilities.isError, capabilities.isSuccess, capabilities.isFetching]);
   useEffect(() => adminWorkspace.subscribe(() => {
@@ -99,7 +94,7 @@ export const AdminControls = () => {
         className={styles.button} type="button" onClick={() => { if (mode === 'admin') void enterAdminView(); else adminWorkspace.select(mode); setOpen(false); }}>
         {t(`view.${mode}`)}</button>)}
     </div>}
-    {state.mode === 'admin' && <Link aria-label={t('workbench.title')} title={t('workbench.title')} className={`${styles.link} ${styles.workbenchLink}`} to="/admin/imports"><Icon name="library" /><span>{t('workbench.title')}</span></Link>}
+    {state.mode === 'admin' && !hideWorkbenchLink && <Link aria-label={t('workbench.title')} title={t('workbench.title')} className={`${styles.link} ${styles.workbenchLink}`} to="/admin/imports"><Icon name="library" /><span>{t('workbench.title')}</span></Link>}
   </div>;
 };
 
@@ -119,8 +114,10 @@ export async function enterAdminView() {
   if (!previous.authorized || !isAccountOperationCurrent(previous)) return;
   adminWorkspace.suspend();
   try {
+    const { capabilitySchema } = await import('./adminCapabilities');
+    if (!adminWorkspace.current(previous, false)) return;
     const result = await apiRequest('/api/admin/v1/capabilities', capabilitySchema, { accountViewer: previous.viewerId, cache: 'no-store' });
-    adminWorkspace.authorize(previous, result.albumImports.enabled, result.albumImports.analysisAvailable, previous.authority, result.catalog);
+    adminWorkspace.authorize(previous, result.albumImports.enabled, result.albumImports.analysisAvailable, previous.authority, result.catalog, Boolean(result.localMp3Conversion?.enabled));
     if (adminWorkspace.getSnapshot().authority === previous.authority) adminWorkspace.select('admin');
   } catch (error) { revokeOnAdminFailure(error); }
 }

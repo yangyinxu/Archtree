@@ -364,8 +364,8 @@ Deactivation retains the profile/handle, blocks, receipts and clocks so later
 reactivation cannot restore an old intent or relationship.
 
 Startup migration `required-indexes-v4-social-participation` (now verified as part of
-`required-indexes-v6-social-reports`, which follows v5's `emailLinkTokens` cleanup
-index with the `socialReports` constraints) adds mandatory unique constraints
+`required-indexes-v9-administrator-conversions`, after the email-link, social-report,
+Artist Follow and administrator lifecycle additions) adds mandatory unique constraints
 and required nonunique cleanup indexes. A sparse, partial, hidden, wrong-key or
 wrong-uniqueness substitute is rejected. TTL is opportunistic reclamation and is
 never an authorization or admission decision. See the active plan for actual

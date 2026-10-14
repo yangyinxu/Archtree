@@ -24,6 +24,7 @@ function ImportProject({ id }: { id: string }) {
   const [confirmed, setConfirmed] = useState<ImportDetail | null>(null);
   const [stage, setStage] = useState<'draft' | 'review' | 'files' | 'publication'>(() => adminWorkspace.buffer(`stage:${id}`) ?? 'draft');
   const [reviewVisited, setReviewVisited] = useState(stage === 'review');
+  const [, refreshLocalFiles] = useState(0);
   const mutation = useAdminMutation(id);
   const query = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, id],
@@ -51,6 +52,16 @@ function ImportProject({ id }: { id: string }) {
   // Keep candidate search state mounted after its first visit while deferring the initial review bundle.
   useEffect(() => { if (stage === 'review') setReviewVisited(true); }, [stage]);
   const item = confirmed;
+  useEffect(() => {
+    if (!item || stage !== 'files' && item.publication !== 'complete') return;
+    const guard = adminWorkspace.capture();
+    // This bridge is lazy: ordinary import editing does not load the local encoding queue.
+    void import('./conversionImportBridge').then(async bridge => {
+      if (item.publication === 'complete') await bridge.finalizeConversionImport(id, guard);
+      else await bridge.hydrateConversionImport(id, guard);
+      if (adminWorkspace.current(guard)) refreshLocalFiles(value => value + 1);
+    }).catch(() => { /* The local queue offers explicit recovery when storage is unavailable. */ });
+  }, [id, stage, item?.publication]);
   const locked = mutation.running || Boolean(mutation.intent) || !online;
   const publicationLocked = Boolean(confirmed && ['preparing', 'needsAttention', 'complete'].includes(confirmed.publication));
   const conflict = Boolean(editor && item && editor.dirty && editor.revision !== item.revision);

@@ -1,21 +1,25 @@
+.shell,
+.adminShell {
+  background: var(--color-canvas);
+  display: grid;
+  height: 100dvh;
+  inset: 0;
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+
 .shell {
   --sidebar-column: var(--user-sidebar-width, var(--sidebar-width));
   --now-playing-column: var(--user-now-playing-width, var(--now-playing-width, 17.5rem));
 
-  background: var(--color-canvas);
-  display: grid;
   gap: var(--shell-gap, 0.5rem);
   grid-template-columns:
     var(--sidebar-column)
     minmax(var(--main-pane-min, 26rem), 1fr)
     var(--now-playing-column);
   grid-template-rows: var(--topbar-height) minmax(0, 1fr) auto;
-  height: 100dvh;
-  inset: 0;
-  overflow: hidden;
   padding: var(--shell-gap, 0.5rem) var(--shell-gap, 0.5rem) 0;
-  position: fixed;
-  width: 100%;
 }
 
 .skipLink {
@@ -296,6 +300,8 @@
   flex: 1;
 }
 
+.videoSlot { display: contents; }
+
 .shell[data-video-playing="true"] {
   --now-playing-column: clamp(19rem, 23vw, 24rem);
 }
@@ -375,11 +381,11 @@
     --sidebar-column: var(--sidebar-width);
   }
 
-  .brand {
+  .shell .brand {
     justify-self: center;
   }
 
-  .brandName,
+  .shell .brandName,
   .navigationLink span {
     display: none;
   }
@@ -437,7 +443,7 @@
     padding: 0.5rem 0.75rem;
   }
 
-  .brand,
+  .shell .brand,
   .sidebar,
   .nowPlayingSlot,
   .account > span:last-child {
@@ -575,4 +581,13 @@
   .searchSubmit {
     min-width: var(--control-min-size);
   }
+}
+
+/* Management routes keep the listener mounted behind a separate, full-width workspace. */
+.adminShell [hidden] { display: none; }
+.adminShell { grid-template: auto minmax(0, 1fr) / minmax(0, 1fr); }
+.adminShell .topbar { gap: .75rem; grid-template-columns: minmax(0, 1fr) auto; padding: .75rem 1.25rem; }
+.adminShell .workspace { border-radius: 0; grid-column: 1; }
+@media (max-width: 767px) {
+  .adminShell .topbar { gap: .5rem; padding: .65rem .75rem; }
 }

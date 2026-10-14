@@ -1,0 +1,27 @@
+Finitude device-local MP3 conversion
+
+Mediabunny and @mediabunny/mp3-encoder 1.61.4
+Copyright (c) Vanilagy. Mozilla Public License 2.0.
+https://github.com/Vanilagy/mediabunny
+The unmodified package source files and license are available alongside this
+notice as mediabunny-1.61.4-source.tar.gz and mp3-encoder-1.61.4-source.tar.gz.
+
+The encoder includes a SIMD-enabled WebAssembly build of LAME 3.100.
+Copyright (c) the LAME project contributors. GNU Lesser General Public License
+version 2 or later. Finitude does not modify LAME. Decoder support is disabled
+in the encoder build. https://lame.sourceforge.io/
+The full LAME source is available here as lame-3.100.tar.gz; LGPL-2.0.txt is the
+license from that source archive. The wrapper archive contains lame-bridge.c,
+the generated LAME JavaScript/WebAssembly module and Emscripten build commands
+in README.md, so the library can be modified and rebuilt. Replacing that module
+and rebuilding the wrapper, then running npm run build:web in Archtree, relinks
+the conversion Worker with the modified library. Ordinary listening does not
+load the encoder. No restriction is imposed on modifying this library or
+reverse engineering for debugging such modifications.
+
+@noble/hashes 2.4.0
+Copyright (c) 2022 Paul Miller (https://paulmillr.com). MIT License.
+https://github.com/paulmillr/noble-hashes
+See noble-MIT.txt. This dependency provides bounded incremental SHA-256 hashing.
+
+These notices and source archives are served at /finitude/licenses/mp3/.

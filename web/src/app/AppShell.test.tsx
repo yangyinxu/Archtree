@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   createMemoryRouter,
+  Link,
   MemoryRouter,
   Route,
   RouterProvider,
@@ -10,8 +11,11 @@ import {
   useLocation
 } from 'react-router';
 
-import { browserSessionQueryKey } from '../api/session';
+import { browserSessionQueryKey, browserSessionResolvingQueryKey } from '../api/session';
+import { captureAccountOperation } from '../api/accountEpoch';
 import { listenerCapabilitiesQueryKey } from '../api/listenerCapabilities';
+import { adminWorkspace } from '../features/admin/adminWorkspace';
+import { capabilities as adminCapabilities, session as adminSession, viewer } from '../features/admin/adminFixtures.testSupport';
 import { HomePage } from '../features/home/HomePage';
 import { LoginPage } from '../features/account/LoginPage';
 import { SearchQueryProvider } from '../features/search/SearchQueryProvider';
@@ -20,6 +24,8 @@ import { readSearchHistory } from '../features/search/searchHistory';
 import { AppShell } from './AppShell';
 import { appRoutes } from './router';
 import { shellLayoutStorageKey } from './shellLayoutPreferences';
+import shellStyles from './AppShell.module.css';
+import { playerStore, type PlayerQueueItem } from '../player';
 
 const renderRoute = (path: string, social?: { enabled: boolean; rooms: boolean }) => {
   const queryClient = new QueryClient({
@@ -55,7 +61,24 @@ const renderLoginFlow = () => {
   );
 };
 
-afterEach(() => window.localStorage.clear());
+afterEach(() => { cleanup(); adminWorkspace.reset(); window.localStorage.clear(); });
+
+/** Keeps route/layout tests on a confirmed synthetic administrator without private network requests. */
+const renderAdminShell = (path = '/admin/catalog', mode: 'admin' | 'user' = 'admin') => {
+  adminWorkspace.reset();
+  const guard = captureAccountOperation(viewer);
+  adminWorkspace.authorize(guard, true, true);
+  adminWorkspace.select(mode);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(browserSessionQueryKey, adminSession);
+  queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: false });
+  queryClient.setQueryData(['admin-capabilities', viewer, guard.epoch], {
+    ...adminCapabilities, authority: adminWorkspace.getSnapshot().authority
+  });
+  return { queryClient, ...render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[path]}><Routes>
+    <Route element={<AppShell />}><Route path="*" element={<div>Workspace content <Link to="/library">Listener route</Link><Link to="/admin/catalog">Admin route</Link></div>} /></Route>
+  </Routes></MemoryRouter></QueryClientProvider>) };
+};
 
 const LocationProbe = () => {
   const location = useLocation();
@@ -111,6 +134,101 @@ test('toggles the read-only Now Playing pane without remounting the player', asy
   expect(aside).not.toHaveAttribute('aria-hidden');
   expect(aside).not.toHaveAttribute('inert');
   expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
+});
+
+test.each(['admin', 'user'] as const)('uses a standalone workspace on Admin addresses in %s view', async mode => {
+  const { container } = renderAdminShell('/admin/catalog', mode);
+  await screen.findByRole('button', { name: 'Current view: ' + (mode === 'admin' ? 'Admin' : 'User') });
+  expect(container.querySelector('.' + shellStyles.adminShell)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Finitude home' })).toHaveAttribute('href', '/');
+  expect(screen.getByRole('button', { name: 'Change language. Current language: English (United States)' })).toBeVisible();
+  expect(screen.getByRole('main')).not.toHaveAttribute('inert');
+  expect(screen.getByRole('main')).not.toHaveAttribute('aria-hidden');
+  expect(screen.queryByRole('search', { name: 'Global search' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('navigation', { name: 'Primary' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Now playing' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Now Playing view/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  for (const id of ['library-sidebar', 'now-playing-aside']) {
+    expect(container.querySelector('#' + id)).toHaveAttribute('hidden');
+    expect(container.querySelector('#' + id)).toHaveAttribute('inert');
+  }
+});
+
+test('a direct signed-out Admin address uses the standalone shell while retaining the private gate', async () => {
+  const { container } = renderRoute('/admin/imports');
+  await screen.findByRole('heading', { name: 'Workbench' });
+  expect(screen.getByRole('link', { name: 'Finitude home' })).toHaveAttribute('href', '/');
+  expect(screen.getByText('Switch to Admin view to open the workbench. Current administrator access is required.')).toBeInTheDocument();
+  expect(container.querySelector('.' + shellStyles.adminShell)).toBeInTheDocument();
+  expect(screen.queryByRole('search')).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Now playing' })).not.toBeInTheDocument();
+  expect(container.querySelector('#library-sidebar')).not.toHaveTextContent('New Playlist');
+});
+
+test.each(['/library', '/administrator'])('keeps the music shell on the listener address %s', async path => {
+  const { container } = renderAdminShell(path);
+  await screen.findByRole('region', { name: 'Now playing' });
+  expect(container.querySelector('.' + shellStyles.adminShell)).toBeNull();
+  expect(screen.getByRole('search', { name: 'Global search' })).toBeVisible();
+  expect(container.querySelector('#now-playing-aside')).not.toHaveAttribute('hidden');
+  expect(screen.getByRole('button', { name: 'Hide Now Playing view' })).toHaveAttribute('aria-expanded', 'true');
+});
+
+test('the management layout remains independent during authority suspension and identity reconciliation', async () => {
+  const { container, queryClient } = renderAdminShell();
+  await screen.findByRole('button', { name: 'Current view: Admin' });
+  act(() => adminWorkspace.suspend());
+  expect(container.querySelector('.' + shellStyles.adminShell)).toBeInTheDocument();
+  act(() => queryClient.setQueryData(browserSessionResolvingQueryKey, true));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Current view: Admin' })).not.toBeInTheDocument());
+  expect(screen.queryByRole('region', { name: 'Now playing' })).not.toBeInTheDocument();
+  expect(screen.getByRole('main')).not.toHaveAttribute('inert');
+});
+
+test('round trips through management preserve the player queue, position and listener panel choice', async () => {
+  const user = userEvent.setup();
+  const item: PlayerQueueItem = { id: 'synthetic-track', title: 'Synthetic track', artworkUrl: '', artistNames: ['Synthetic artist'], mediaType: 'audio', streamUrl: '' };
+  const snapshot = { ...playerStore.getSnapshot(), queue: [item], currentIndex: 0, currentItem: item, status: 'paused' as const, currentTime: 42, duration: 180 };
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue(snapshot);
+  const pause = vi.spyOn(playerStore, 'pause');
+  const preference = JSON.stringify({ version: 1, sidebarWidth: 350, nowPlayingWidth: 360 });
+  window.localStorage.setItem(shellLayoutStorageKey, preference);
+  const { container } = renderAdminShell('/library');
+  await screen.findByRole('region', { name: 'Now playing' });
+  await user.click(screen.getByRole('button', { name: 'Hide Now Playing view' }));
+  await user.click(screen.getByRole('link', { name: 'Admin route' }));
+  expect(screen.queryByRole('region', { name: 'Now playing' })).not.toBeInTheDocument();
+  for (const key of [' ', 'ArrowLeft', 'ArrowRight']) fireEvent.keyDown(document, { key });
+  expect(playerStore.getSnapshot()).toBe(snapshot);
+  expect(pause).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('link', { name: 'Listener route' }));
+  expect(await screen.findByRole('region', { name: 'Now playing' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Show Now Playing view' })).toHaveAttribute('aria-expanded', 'false');
+  expect(container.querySelector('#now-playing-aside')).not.toHaveAttribute('hidden');
+  expect(playerStore.getSnapshot()).toBe(snapshot);
+  expect(window.localStorage.getItem(shellLayoutStorageKey)).toBe(preference);
+});
+
+test('ongoing Video retains its mounted surface without obscuring management content', async () => {
+  const user = userEvent.setup();
+  const item: PlayerQueueItem = { id: 'synthetic-video', title: 'Synthetic video', artworkUrl: '', artistNames: ['Synthetic artist'], mediaType: 'video', streamUrl: '' };
+  const snapshot = { ...playerStore.getSnapshot(), queue: [item], currentIndex: 0, currentItem: item, status: 'paused' as const, currentTime: 42 };
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue(snapshot);
+  const { container } = renderAdminShell('/library');
+  await waitFor(() => expect(container.querySelector('[aria-labelledby="video-theater-title"]')).toBeInTheDocument());
+  const surface = container.querySelector('[aria-labelledby="video-theater-title"]');
+  // Programmatic route changes represent navigation outside the temporarily obscured listener main.
+  fireEvent.click(screen.getByRole('link', { name: 'Admin route', hidden: true }));
+  expect(screen.getByRole('main')).not.toHaveAttribute('inert');
+  expect(screen.getByRole('main')).not.toHaveAttribute('aria-hidden');
+  expect(container.querySelector('[data-video-playing]')).toBeNull();
+  expect(surface?.parentElement).toHaveAttribute('hidden');
+  expect(screen.queryByRole('heading', { name: 'Synthetic video' })).not.toBeInTheDocument();
+  expect(playerStore.getSnapshot()).toBe(snapshot);
+  await user.click(screen.getByRole('link', { name: 'Listener route' }));
+  expect(within(surface as HTMLElement).getByRole('heading', { name: 'Synthetic video' })).toBe(surface?.querySelector('h1'));
+  expect(surface?.parentElement).not.toHaveAttribute('hidden');
 });
 
 test('resizes and restores wide panels without remounting the player', async () => {

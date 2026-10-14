@@ -103,13 +103,16 @@ test('reopening and manual editing touch only the private review, preserving cat
   const title = await screen.findByRole('textbox', { name: 'Title' });
   expect(writes).toEqual([]);
   expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveAttribute('readonly');
+  expect(screen.getByText('Artist name (read-only)')).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Edit attribution in original Album' })).toHaveAttribute('href', `/admin/catalog/album/${catalogAlbum().id}`);
+  expect(screen.getByRole('link', { name: 'Edit visibility in original Album' })).toHaveAttribute('href', `/admin/catalog/album/${catalogAlbum().id}`);
   expect(screen.getByRole('combobox', { name: 'Visibility' })).toBeDisabled();
   expect(screen.getByText('Original filename not retained')).toBeVisible();
   fireEvent.change(title, { target: { value: 'Private human correction' } });
-  expect(screen.getByRole('button', { name: 'Analyze again' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(screen.getByRole('button', { name: 'Run Luna review again' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
   await waitFor(() => expect(writes).toHaveLength(1));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled());
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save review draft' })).toBeDisabled());
   expect(writes[0]).toMatchObject({ path: `/api/admin/v1/catalog-reviews/${reviewId}`, body: { expectedRevision: 1, draft: { album: { title: 'Private human correction', visibility: 'public', artistName: 'Synthetic catalog Artist' } } } });
   expect(query.getQueryData(['listener', 'album', catalogAlbum().id])).toEqual({ title: 'Cached catalog title' });
 });
@@ -121,14 +124,14 @@ test('Luna analysis requires its own confirmation and a lost acknowledgement nev
     if (init.method === 'POST') { bodies.push(String(init.body)); throw new TypeError('Synthetic connection loss'); }
     return reviewJson({ item, receipt: null });
   }));
-  mountPage(); fireEvent.click(await screen.findByRole('button', { name: 'Analyze' }));
+  mountPage(); fireEvent.click(await screen.findByRole('button', { name: 'Start Luna review' }));
   const dialog = within(await screen.findByRole('dialog'));
   expect(dialog.getByText(/may incur an AI service charge/)).toBeVisible();
   expect(bodies).toEqual([]);
   fireEvent.click(dialog.getByRole('button', { name: 'Start Luna review' }));
   const retry = await screen.findByRole('button', { name: 'Retry original operation' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Review' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'Draft' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh status' })).toBeEnabled());
   expect(bodies).toHaveLength(1);
@@ -139,12 +142,29 @@ test('Luna analysis requires its own confirmation and a lost acknowledgement nev
 
 test('a durable unknown provider outcome prevents another paid generation while retaining manual review', async () => {
   const item = catalogReview(); item.analysis = { ...item.analysis, state: 'needsAttention', issue: 'providerOutcomeUnknown' };
+  item.suggestions = [];
   const fetch = vi.fn(async (_path: string, _init: RequestInit) => reviewJson({ item, receipt: null })); vi.stubGlobal('fetch', fetch);
   mountPage();
-  expect(await screen.findByRole('button', { name: 'Analyze again' })).toBeDisabled();
+  expect(await screen.findByRole('button', { name: 'Run Luna review again' })).toBeDisabled();
   expect(screen.getByRole('textbox', { name: 'Title' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  expect(await within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' })).findByText('Luna review needs attention. Check the issue above or continue editing manually.')).toBeVisible();
   expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+});
+
+test('Artist-only suggestions explain separate attribution management without offering identity adoption', async () => {
+  const item = catalogReview();
+  item.suggestions = [{ ...item.suggestions[0], field: 'artistName', baseline: item.draft.album.artistName, value: 'A synthetic identity clue' }];
+  const fetch = vi.fn(async () => reviewJson({ item, receipt: null })); vi.stubGlobal('fetch', fetch);
+  mountPage(); await screen.findByRole('textbox', { name: 'Title' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  expect(await panel.findByText('Artist identity suggestions are shown below. Confirm attribution in the original Album.')).toBeVisible();
+  expect(panel.getByText('A synthetic identity clue')).toBeVisible();
+  expect(panel.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(panel.queryByRole('button', { name: 'Apply selected' })).not.toBeInTheDocument();
+  expect(fetch.mock.calls).toHaveLength(1);
 });
 
 test.each(['changed', 'unavailable'] as const)('a %s source keeps private review readable and prevents applying catalog changes', async sourceStatus => {
@@ -156,9 +176,9 @@ test.each(['changed', 'unavailable'] as const)('a %s source keeps private review
   }));
   mountPage(); await screen.findByRole('textbox', { name: 'Title' });
   expect(screen.getByRole('alert')).toHaveTextContent(sourceStatus === 'changed' ? 'create a new review' : 'no longer ready');
-  fireEvent.click(screen.getByRole('tab', { name: 'Apply changes' }));
-  expect(await screen.findByRole('checkbox', { name: 'Apply Synthetic catalog Album · Title' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Apply selected changes' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  expect(await screen.findByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Title' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /^Update original Album \(/ })).toBeDisabled();
   expect(writes).toEqual([]);
 });
 
@@ -172,11 +192,11 @@ test('an applied historical review remains read-only on every stage and never st
   }));
   mountPage(); expect(await screen.findByRole('textbox', { name: 'Title' })).toBeDisabled();
   expect(screen.getByRole('heading', { name: 'Changes applied to the existing Album' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Analyze again' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('tab', { name: 'Review' }));
+  expect(screen.queryByRole('button', { name: 'Run Luna review again' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
   expect(await screen.findByRole('checkbox', { name: 'Title' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('tab', { name: 'Apply changes' }));
-  expect(screen.getByRole('button', { name: 'Apply selected changes' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  expect(screen.getByRole('button', { name: /^Update original Album \(/ })).toBeDisabled();
   expect(writes).toEqual([]);
 });
 
@@ -196,14 +216,14 @@ test('selected suggestion adoption and independent rejection preserve manual val
     return reviewJson({ item, receipt: null });
   }));
   const query = mountPage(); query.setQueryData(['listener', 'album', catalogAlbum().id], 'Catalog projection');
-  await screen.findByRole('textbox', { name: 'Title' }); fireEvent.click(screen.getByRole('tab', { name: 'Review' }));
+  await screen.findByRole('textbox', { name: 'Title' }); fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
   const conflict = await screen.findByRole('checkbox', { name: 'Title' });
   expect(conflict).toBeDisabled();
   expect(screen.queryByRole('checkbox', { name: 'Artist name' })).not.toBeInTheDocument();
   expect(screen.getByText('Another synthetic Artist identity hint')).toBeVisible();
   fireEvent.click(screen.getByRole('checkbox', { name: '1 · Title' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'Draft' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'Review' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
   expect(await screen.findByRole('checkbox', { name: '1 · Title' })).toBeChecked();
   expect(writes).toEqual([]);
   fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
@@ -214,7 +234,7 @@ test('selected suggestion adoption and independent rejection preserve manual val
   fireEvent.click(within(currentConflict.closest('article')!).getByRole('button', { name: 'Keep current' }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1].body).toMatchObject({ selectedIds: [], rejectIds: [titleSuggestionId] });
-  fireEvent.click(screen.getByRole('tab', { name: 'Draft' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('A manual Album correction');
   expect(query.getQueryData(['listener', 'album', catalogAlbum().id])).toBe('Catalog projection');
 });
@@ -230,12 +250,17 @@ test('catalog application confirms only selected saved fields and invalidates pr
     return reviewJson({ item, receipt: null });
   }));
   const query = mountPage(); query.setQueryData(['listener', 'album', catalogAlbum().id], 'Prior catalog'); query.setQueryData(['listener', 'save-statuses', viewer], 'Saved membership');
-  await screen.findByRole('textbox', { name: 'Title' }); fireEvent.click(screen.getByRole('tab', { name: 'Apply changes' }));
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Apply Synthetic catalog Album · Title' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Apply selected changes' }));
-  const dialog = within(screen.getByRole('dialog')); expect(dialog.getByText('Selected changes: 1')).toBeVisible();
+  await screen.findByRole('textbox', { name: 'Title' }); fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Title' }));
+  fireEvent.click(screen.getByRole('button', { name: /^Update original Album \(/ }));
+  const dialog = within(await screen.findByRole('dialog')); expect(dialog.getByText('Selected changes: 1')).toBeVisible();
+  await waitFor(() => expect(screen.getByRole('dialog')).toHaveFocus());
+  expect(dialog.getByText('Saved Album correction')).toBeVisible();
+  expect(dialog.queryByText('Unselected Track correction')).not.toBeInTheDocument();
+  expect(dialog.getByText('Original Album information')).toBeVisible();
+  expect(dialog.getByText('Value to apply')).toBeVisible();
   expect(writes).toEqual([]); expect(query.getQueryData(['listener', 'album', catalogAlbum().id])).toBe('Prior catalog');
-  fireEvent.click(dialog.getByRole('button', { name: 'Apply selected changes' }));
+  fireEvent.click(dialog.getByRole('button', { name: /^Update original Album \(/ }));
   await screen.findByRole('heading', { name: 'Changes applied to the existing Album' });
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({ path: `/api/admin/v1/catalog-reviews/${reviewId}/apply`, body: { expectedRevision: 1, fields: [{ scope: 'album', slotId: null, field: 'title' }] } });
@@ -248,13 +273,15 @@ test('a newer saved revision invalidates an open Apply confirmation rather than 
   let item = catalogReview(); item.draft.album.title = 'Saved Album correction'; const writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => { if (init.method === 'POST') writes.push(path); return reviewJson({ item, receipt: null }); }));
   const query = mountPage(); await screen.findByRole('textbox', { name: 'Title' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Apply changes' }));
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Apply Synthetic catalog Album · Title' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Apply selected changes' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Title' }));
+  fireEvent.click(screen.getByRole('button', { name: /^Update original Album \(/ }));
   item = { ...item, revision: 2, draft: { ...item.draft, album: { ...item.draft.album, title: 'Another administrator revision' } } };
   await act(async () => { await query.refetchQueries({ queryKey: ['admin-catalog-reviews'] }); });
-  await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Apply selected changes' })).toBeDisabled());
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Apply selected changes' }));
+  await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: /^Update original Album \(/ })).toBeDisabled());
+  expect(within(screen.getByRole('dialog')).getByText('Saved Album correction')).toBeVisible();
+  expect(within(screen.getByRole('dialog')).queryByText('Another administrator revision')).not.toBeInTheDocument();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Update original Album \(/ }));
   expect(writes).toEqual([]);
 });
 
@@ -265,7 +292,7 @@ test('changing review routes cannot show or retry another project unknown intent
     return reviewJson({ item: path.includes(otherReviewId) ? other : catalogReview(), receipt: null });
   }));
   mountPage(); fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A private correction' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save' })); await screen.findByRole('button', { name: 'Retry original operation' });
+  fireEvent.click(screen.getByRole('button', { name: 'Save review draft' })); await screen.findByRole('button', { name: 'Retry original operation' });
   fireEvent.click(screen.getByRole('link', { name: 'Other review' }));
   await screen.findByRole('heading', { name: 'Another private review Album' });
   expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
@@ -294,12 +321,12 @@ test('same-revision refresh and stage changes retain Apply selection, but a newe
     return reviewJson({ item, receipt: null });
   }));
   mountPage(); await screen.findByRole('textbox', { name: 'Title' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Apply changes' }));
-  let selection = await screen.findByRole('checkbox', { name: 'Apply Synthetic catalog Album · Title' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  let selection = await screen.findByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Title' });
   fireEvent.click(selection);
-  fireEvent.click(screen.getByRole('tab', { name: 'Draft' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'Apply changes' }));
-  selection = await screen.findByRole('checkbox', { name: 'Apply Synthetic catalog Album · Title' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  selection = await screen.findByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Title' });
   expect(selection).toBeChecked();
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
   await waitFor(() => expect(reads).toBe(2));
@@ -307,10 +334,10 @@ test('same-revision refresh and stage changes retain Apply selection, but a newe
   expect(selection).toBeChecked();
   item = { ...item, revision: 2, draft: { ...item.draft, album: { ...item.draft.album, title: 'Reviewed value B from another administrator' } } };
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
-  await within(screen.getByRole('tabpanel', { name: 'Apply changes' })).findByText('Reviewed value B from another administrator');
+  await within(screen.getByRole('tabpanel', { name: 'Update original Album' })).findByText('Reviewed value B from another administrator');
   await waitFor(() => expect(selection).not.toBeChecked());
-  expect(screen.getByRole('button', { name: 'Apply selected changes' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Apply selected changes' }));
+  expect(screen.getByRole('button', { name: /^Update original Album \(/ })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /^Update original Album \(/ }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(writes).toEqual([]);
 });
@@ -328,7 +355,7 @@ test('a delayed successful Save cannot overwrite a newer observed revision or er
   }));
   mountPage();
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'My private saved correction' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
   await waitFor(() => expect(writes).toHaveLength(1));
   const receipt = { operationId: writes[0].operationId, kind: 'edit' as const, revision: 2 };
   const saved = { ...initial, revision: 2, draft: writes[0].draft, receipts: [receipt] };
@@ -340,10 +367,61 @@ test('a delayed successful Save cannot overwrite a newer observed revision or er
   complete(reviewJson({ item: saved, receipt }));
   await waitFor(() => expect(failedReads).toBe(1));
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My private saved correction');
-  expect(screen.queryByText('Saved to private review')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  expect(screen.queryByText('Review draft saved')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save review draft' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Discard local edits and load saved version' }));
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('A newer administrator revision');
-  expect(screen.getByText('Saved to private review')).toBeVisible();
+  expect(screen.getByText('Review draft saved')).toBeVisible();
   expect(writes).toHaveLength(1);
+});
+
+test.each(['idle', 'running', 'empty', 'handled', 'manual', 'cancelled'] as const)('the %s review empty state explains the next step without starting paid work', async state => {
+  const item = catalogReview();
+  item.suggestions = [];
+  if (state === 'idle') item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null };
+  if (state === 'running') item.analysis.state = 'running';
+  if (state === 'cancelled') item.analysis.state = 'cancelled';
+  if (state === 'handled') item.suggestions = catalogReview().suggestions.map(value => ({ ...value, decision: 'rejected' }));
+  if (state === 'manual') { item.analysis.state = 'idle'; item.draft.album.title = 'Manually saved correction without Luna'; }
+  const writes: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (init.method && init.method !== 'GET') writes.push(path);
+    return reviewJson({ item, receipt: null });
+  }));
+  mountPage();
+  await screen.findByRole('textbox', { name: 'Title' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  const copy = {
+    idle: 'Luna has not run yet. Start a review or edit the draft manually.',
+    running: 'Luna is reviewing in the background. You can leave this page; results will be saved here.',
+    empty: 'Luna did not suggest changes. You can still edit the draft manually.',
+    handled: 'Suggestions have been handled. The saved review draft has no changes to apply.',
+    manual: 'Changes are saved to the draft. The original Album has not been updated yet.',
+    cancelled: 'The Luna review was stopped. You can still edit the draft manually.'
+  };
+  expect(await panel.findByText(copy[state])).toBeVisible();
+  expect(panel.queryByText('There are no pending suggestions.')).not.toBeInTheDocument();
+  if (state === 'running') expect(panel.queryByRole('button')).not.toBeInTheDocument();
+  else {
+    fireEvent.click(panel.getByRole('button', { name: state === 'manual' ? 'Review changes to apply (1)' : 'Edit draft' }));
+    expect(screen.getByRole('tab', { name: state === 'manual' ? 'Update original Album' : 'Edit draft' })).toHaveFocus();
+    if (state === 'manual') expect(await screen.findByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Title' })).toBeVisible();
+    else expect(screen.getByRole('textbox', { name: 'Title' })).toBeVisible();
+  }
+  expect(writes).toEqual([]);
+});
+
+test('completed review guidance is read-only and no longer invites draft editing or a paid run', async () => {
+  const original = catalogReview(); original.suggestions = [];
+  const item = applied(original, '30000000-0000-4000-8000-000000000003', [{ scope: 'album', slotId: null, field: 'title' }]);
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage();
+  await screen.findByRole('textbox', { name: 'Title' });
+  expect(screen.queryByText(/You are editing a review draft/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Luna review/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  expect(await panel.findByText(/This review is complete and read-only/)).toBeVisible();
+  expect(panel.queryByRole('button')).not.toBeInTheDocument();
 });
