@@ -12,6 +12,15 @@ const createHarness = () => {
     duration: number; paused: boolean; seeking: boolean; readyState: number; networkState: number;
     ended: boolean; rate: number; error: number | null; buffered: number[][]; seekable: number[][] }[] = [];
   const ranges = (value: TimeRanges) => Array.from({ length: Math.min(value.length, 4) }, (_, index) => [value.start(index), value.end(index)]);
+  /** Early native range queries can change WebKit's unknown-duration cache; diagnostics wait for real metadata. */
+  const readNativeMedia = (media: HTMLVideoElement) => {
+    const readyState = media.readyState;
+    const duration = readyState >= 1 ? media.duration : Number.NaN;
+    const readableRanges = readyState >= 1 && Number.isFinite(duration) && duration > 0;
+    return { currentTime: media.currentTime, duration, paused: media.paused, seeking: media.seeking, readyState,
+      networkState: media.networkState, ended: media.ended, rate: media.playbackRate, error: media.error?.code ?? null,
+      buffered: readableRanges ? ranges(media.buffered) : [], seekable: readableRanges ? ranges(media.seekable) : [] };
+  };
   let loads = 0;
   let plays = 0;
   let creations = 0;
@@ -28,10 +37,7 @@ const createHarness = () => {
       for (const event of ['loadstart', 'loadedmetadata', 'durationchange', 'canplay', 'play', 'playing', 'pause',
         'timeupdate', 'seeking', 'seeked', 'waiting', 'stalled', 'ratechange', 'ended', 'error']) {
         media.addEventListener(event, (value) => {
-          mediaEvents.push({ event, trusted: value.isTrusted, monotonicMs: performance.now(), currentTime: media.currentTime,
-            duration: media.duration, paused: media.paused, seeking: media.seeking, readyState: media.readyState,
-            networkState: media.networkState, ended: media.ended, rate: media.playbackRate, error: media.error?.code ?? null,
-            buffered: ranges(media.buffered), seekable: ranges(media.seekable) });
+          mediaEvents.push({ event, trusted: value.isTrusted, monotonicMs: performance.now(), ...readNativeMedia(media) });
           if (mediaEvents.length > 200) mediaEvents.shift();
         });
       }
@@ -55,27 +61,29 @@ const createHarness = () => {
     /** Translate each synthetic playback occurrence once; membership revisions keep its anchor. */
     apply(index: number, override: Partial<RoomPlaybackState> = {}) {
       const value = trace.snapshots[index].snapshot;
-      if (!localAnchors.has(value.playbackGeneration)) localAnchors.set(value.playbackGeneration, performance.now());
+      const playbackEpoch = override.playbackEpoch ?? value.playbackGeneration;
+      if (!localAnchors.has(playbackEpoch)) localAnchors.set(playbackEpoch, override.anchorMonotonicMs ?? performance.now());
       return room.apply({
         roomId: value.roomId, epoch: value.epoch, mediaRevision: value.mediaRevision,
-        revision: value.revision, playbackEpoch: value.playbackGeneration,
+        revision: value.revision, playbackEpoch,
         controlEpoch: value.controlGeneration, queueRevision: value.queueRevision,
         canControl: true,
         queue, entryIds: ['entry-a', 'entry-b'], currentEntryId: value.entryId,
         positionSeconds: value.positionMs / 1000,
-        anchorMonotonicMs: localAnchors.get(value.playbackGeneration)!, status: value.state as 'playing' | 'paused',
+        anchorMonotonicMs: localAnchors.get(playbackEpoch)!, status: value.state as 'playing' | 'paused',
         ...override
       });
     },
     state() {
       const media = document.querySelector('video');
+      const native = media ? readNativeMedia(media) : undefined;
       return {
         snapshot: store.getSnapshot(), intents: [...intents], observations: [...observations],
         loads, plays, creations, mediaCount: document.querySelectorAll('video').length,
-        paused: media?.paused, currentTime: media?.currentTime, duration: media?.duration,
-        rate: media?.playbackRate, readyState: media?.readyState, seeking: media?.seeking,
-        networkState: media?.networkState, ended: media?.ended, error: media?.error?.code ?? null,
-        buffered: media ? ranges(media.buffered) : [], seekable: media ? ranges(media.seekable) : [],
+        paused: native?.paused, currentTime: native?.currentTime, duration: native?.duration,
+        rate: native?.rate, readyState: native?.readyState, seeking: native?.seeking,
+        networkState: native?.networkState, ended: native?.ended, error: native?.error ?? null,
+        buffered: native?.buffered ?? [], seekable: native?.seekable ?? [],
         mediaEvents: [...mediaEvents]
       };
     },

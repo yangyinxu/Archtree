@@ -486,9 +486,8 @@ export const createPlayerStore = (
       // Room preparation must buffer while paused, before the server permits a scheduled start.
       target.preload = room ? 'auto' : 'metadata';
       target.poster = item.artworkUrl;
-      // Clear only an old pending start before replacing its source; native load resets an already prepared clock.
-      if (target.readyState === 0 && target.currentTime !== 0) target.currentTime = 0;
       target.src = item.streamUrl;
+      target.currentTime = 0;
       target.load();
     } catch {
       reportPlaybackError('source_set', 'streamUnavailable');

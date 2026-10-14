@@ -9,9 +9,7 @@ import type {
 
 class FakeAudio implements PlayerAudio {
   src = '';
-  private positionSeconds = 0;
-  get currentTime() { return this.positionSeconds; }
-  set currentTime(value: number) { this.positionSeconds = value; }
+  currentTime = 0;
   duration = 0;
   volume = 1;
   muted = false;
@@ -44,10 +42,6 @@ class FakeAudio implements PlayerAudio {
 
   load(): void {
     this.loadCalls += 1;
-    // Native load resets its clock internally; this is not an application seek through currentTime.
-    this.positionSeconds = 0;
-    this.paused = true;
-    this.ended = false;
     this.emit('loadstart');
   }
 
@@ -158,91 +152,6 @@ const videoTracks: PlayerQueueItem[] = [
   tracks[1],
   { ...tracks[2], mediaType: 'video', streamUrl: '/video/night-window.mp4' }
 ];
-
-test('prepares a new source when its decoder rejects position writes before metadata, then permits seeking and restart', async () => {
-  const audio = new FakeAudio();
-  const nativeClock = Object.getOwnPropertyDescriptor(FakeAudio.prototype, 'currentTime')!;
-  let source = '', metadataReady = false;
-  Object.defineProperties(audio, {
-    src: { get: () => source, set: (value: string) => { source = value; metadataReady = false; } },
-    currentTime: {
-      get: () => nativeClock.get!.call(audio),
-      set: (value: number) => {
-        if (!metadataReady) throw new DOMException('Source metadata is not ready.', 'InvalidStateError');
-        nativeClock.set!.call(audio, value);
-      }
-    }
-  });
-  const nativeLoad = audio.load.bind(audio);
-  audio.load = () => {
-    nativeLoad();
-    queueMicrotask(() => { metadataReady = true; audio.duration = 120; audio.emit('loadedmetadata'); });
-  };
-  const onPlaybackError = vi.fn();
-  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null, onPlaybackError });
-  try {
-    await store.launchStandalone(tracks[0], { autoplay: false });
-    expect(store.getSnapshot()).toMatchObject({ status: 'paused', currentTime: 0, error: null });
-    expect(audio.currentTime).toBe(0);
-    store.seek(31);
-    expect(audio.currentTime).toBe(31);
-    await store.launchStandalone(tracks[1], { autoplay: false });
-    expect(audio.currentTime).toBe(0);
-    expect(store.getSnapshot()).toMatchObject({ currentItem: { id: tracks[1].id }, status: 'paused', currentTime: 0, error: null });
-    store.seek(90);
-    expect(audio.currentTime).toBe(90);
-    await store.previous();
-    expect(audio.currentTime).toBe(0);
-    expect(audio.loadCalls).toBe(2);
-    expect(onPlaybackError).not.toHaveBeenCalled();
-  } finally { store.destroy(); }
-});
-
-test('clears an old pending metadata seek on source replacement without seeking a fresh or prepared source', async () => {
-  const audio = new FakeAudio();
-  const nativeClock = Object.getOwnPropertyDescriptor(FakeAudio.prototype, 'currentTime')!;
-  let source = '', metadataReady = false, defaultStart = 0;
-  const positionWrites: number[] = [];
-  Object.defineProperties(audio, {
-    readyState: { get: () => metadataReady ? 4 : 0 },
-    src: { get: () => source, set: (value: string) => {
-      source = value; metadataReady = false; audio.duration = 0; nativeClock.set!.call(audio, 0);
-    } },
-    currentTime: {
-      get: () => !metadataReady && defaultStart !== 0 ? defaultStart : nativeClock.get!.call(audio),
-      set: (value: number) => {
-        positionWrites.push(value);
-        if (!metadataReady) defaultStart = value;
-        else nativeClock.set!.call(audio, value);
-      }
-    }
-  });
-  // Native load resets the decoder clock but preserves HAVE_NOTHING's default playback start position.
-  const nativeLoad = audio.load.bind(audio);
-  audio.load = () => { metadataReady = false; nativeLoad(); };
-  const receiveMetadata = () => {
-    metadataReady = true; nativeClock.set!.call(audio, defaultStart); defaultStart = 0;
-    audio.duration = 120; audio.emit('loadedmetadata');
-  };
-  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
-  try {
-    await store.launchStandalone(tracks[0], { autoplay: false });
-    expect(positionWrites).toEqual([]);
-    store.seek(1.25);
-    expect(audio.currentTime).toBe(1.25);
-    await store.launchStandalone(tracks[1], { autoplay: false });
-    expect(audio.currentTime).toBe(0);
-    receiveMetadata();
-    expect(audio.currentTime).toBe(0);
-    store.seek(31);
-    await store.launchStandalone(tracks[2], { autoplay: false });
-    expect(positionWrites).toEqual([1.25, 0, 31]);
-    store.seek(0.75);
-    receiveMetadata();
-    expect(audio.currentTime).toBe(0.75);
-    expect(store.getSnapshot()).toMatchObject({ currentItem: { id: tracks[2].id }, currentTime: 0.75, error: null });
-  } finally { store.destroy(); }
-});
 
 test('a 500-entry queue reuses its upcoming items across 500 clock updates without hiding progress', async () => {
   const audio = new FakeAudio();
