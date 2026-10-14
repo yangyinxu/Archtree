@@ -1496,7 +1496,7 @@
       "variables": {}
     },
     "admin.catalog_review.unavailable": {
-      "description": "Catalog reviews are currently unavailable. You can still open the Album to edit it manually.",
+      "description": "Catalog editing and new reviews are currently turned off. You can view saved information and recover existing operations.",
       "delivery": [
         "runtime"
       ],
@@ -1781,6 +1781,13 @@
     },
     "admin.catalog.private_copy": {
       "description": "This is a protected administrator view. Hidden content is not available in User view.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.readonly": {
+      "description": "Catalog editing is currently turned off. This page is read-only; recovery of existing operations remains available.",
       "delivery": [
         "runtime"
       ],

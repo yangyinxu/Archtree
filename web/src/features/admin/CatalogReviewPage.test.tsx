@@ -74,6 +74,17 @@ test('an Album revision change leaves its open creation approval disabled instea
   expect(fetch).not.toHaveBeenCalled();
 });
 
+test.each(['item', 'workspace'] as const)('same-revision editing capability loss from %s blocks an open review creation approval', source => {
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  const view = mountStart(); fireEvent.click(screen.getByRole('button', { name: 'Review existing Album' }));
+  if (source === 'item') view.update({ ...catalogAlbum(), capabilities: { editing: false, visibility: false } });
+  else act(() => adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: false, visibility: false }));
+  const dialog = within(screen.getByRole('dialog')), confirm = dialog.getByRole('button', { name: 'Create review project' });
+  expect(confirm).toBeDisabled(); fireEvent.click(confirm); expect(fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Review existing Album' })).toBeDisabled();
+  expect(dialog.getByText('Synthetic catalog Album')).toBeVisible();
+});
+
 test('an unconfirmed review creation retries the original UUID and snapshot only when explicitly requested', async () => {
   const bodies: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => { bodies.push(String(init.body)); throw new TypeError('Synthetic transport loss'); }));

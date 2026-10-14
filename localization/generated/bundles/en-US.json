@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-XDBuR-P0XsqsxxNfzYPTax9d-S22XxN1nBx18C8Eps4",
+  "revision": "sha256-Ty4my0oj67GGMo7LuD7EDTXm3wt2A-pAVuwR_YMPVXQ",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.back_login": "Back to Log in",
@@ -213,7 +213,7 @@
     "admin.catalog_review.target_album": "Album",
     "admin.catalog_review.target_track": "Track",
     "admin.catalog_review.title": "Existing Album review",
-    "admin.catalog_review.unavailable": "Catalog reviews are currently unavailable. You can still open the Album to edit it manually.",
+    "admin.catalog_review.unavailable": "Catalog editing and new reviews are currently turned off. You can view saved information and recover existing operations.",
     "admin.catalog_review.view_changes": "Review changes to apply ({count})",
     "admin.catalog.add_credit": "Add credit",
     "admin.catalog.album": "Albums",
@@ -254,6 +254,7 @@
     "admin.catalog.placement_unsupported": "Unsupported reference",
     "admin.catalog.preview": "Private audio preview",
     "admin.catalog.private_copy": "This is a protected administrator view. Hidden content is not available in User view.",
+    "admin.catalog.readonly": "Catalog editing is currently turned off. This page is read-only; recovery of existing operations remains available.",
     "admin.catalog.remove_credit": "Remove credit",
     "admin.catalog.role": "Role",
     "admin.catalog.save": "Save catalog changes",

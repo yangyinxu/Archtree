@@ -1378,6 +1378,24 @@ closed and accept only the literal `true`:
 | `FINITUDE_ADMIN_VISIBILITY_ENABLED` | Admit explicit public/hidden changes |
 | `FINITUDE_HIDDEN_DELIVERY_ENFORCED` | Operator assertion that historical object URLs, S3 policies and CDN delivery deny hidden access |
 
+Signing in as an administrator does not enable catalog writes. When
+`FINITUDE_ADMIN_CATALOG_ENABLED` is closed, the catalog editor is read-only and
+cannot create a new existing-Album review. Readback and authorized recovery of
+previous operations remain available. An existing Album review needs no staging
+bucket; starting Luna also requires the imports flag and configured provider.
+
+For an explicitly enabled local administrator session, use the existing ignored
+`.env` for provider configuration, then start the application with:
+
+```sh
+npx --no-install cross-env FINITUDE_ADMIN_CATALOG_ENABLED=true FINITUDE_ADMIN_IMPORTS_ENABLED=true npm run dev
+```
+
+Restart the running server after configuration changes and refresh the browser's
+administrator capabilities. Existing inherited environment values take precedence
+over `.env`, so the explicit startup values above also override a closed parent
+shell flag. This command does not assert private staging storage or hidden delivery.
+
 A private ACL alone does not override a public bucket policy. Verify denied
 unauthenticated access to the staging prefix and historical canonical URLs
 before enabling the corresponding assertion. The application enforces hidden

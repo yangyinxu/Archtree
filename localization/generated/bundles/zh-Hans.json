@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-PU_gygJLB1lgKvWOl7Soa4Vd1IgKphLEAsyn1YjJ_SI",
+  "revision": "sha256-X-3Y-4f_b-5jQwFDTosrpsbhXno2UQ6VIpWjek0kZ1s",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.back_login": "返回登录",
@@ -213,7 +213,7 @@
     "admin.catalog_review.target_album": "专辑",
     "admin.catalog_review.target_track": "曲目",
     "admin.catalog_review.title": "现有专辑校对",
-    "admin.catalog_review.unavailable": "目录校对暂未开放。仍可打开专辑进行手动编辑。",
+    "admin.catalog_review.unavailable": "目录编辑和新校对暂未开启。当前可查看已保存的信息，或恢复已有操作。",
     "admin.catalog_review.view_changes": "查看待更新信息（{count} 项）",
     "admin.catalog.add_credit": "添加署名",
     "admin.catalog.album": "专辑",
@@ -254,6 +254,7 @@
     "admin.catalog.placement_unsupported": "不支持的引用",
     "admin.catalog.preview": "私有音频预览",
     "admin.catalog.private_copy": "这是受保护的管理员视角。用户视角无法访问隐藏内容。",
+    "admin.catalog.readonly": "目录编辑暂未开启。此页面为只读，仍可恢复已有操作。",
     "admin.catalog.remove_credit": "移除署名",
     "admin.catalog.role": "角色",
     "admin.catalog.save": "保存原内容修改",

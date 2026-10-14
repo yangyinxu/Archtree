@@ -198,6 +198,115 @@ test('offline and failed reads do not masquerade as a stale confirmation', async
   expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
 });
 
+test.each([
+  ['editing', 'dto'], ['visibility', 'dto'], ['editing', 'workspace'], ['visibility', 'workspace']
+] as const)('same-revision %s capability loss from %s preserves the draft and blocks its frozen confirmation', async (capability, source) => {
+  let item = album(); const original = item, writes: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') writes.push(String(init.body));
+    return json({ item });
+  }));
+  const client = mount(<AdminCatalogPage kind="album" id={item.id} />);
+  const title = await screen.findByRole('textbox', { name: 'Title' });
+  const control = capability === 'editing' ? title : screen.getByRole('combobox', { name: 'Visibility' });
+  const value = capability === 'editing' ? 'My retained correction' : 'hidden';
+  fireEvent.change(control, { target: { value } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  const dialog = await screen.findByRole('dialog');
+  if (source === 'dto') {
+    item = { ...item, capabilities: { ...item.capabilities, [capability]: false } };
+    await act(async () => { await client.refetchQueries({ queryKey: ['admin-imports'] }); });
+  } else act(() => adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined,
+    { editing: capability !== 'editing', visibility: capability !== 'visibility' }));
+  await waitFor(() => expect(control).toBeDisabled()); expect(control).toHaveValue(value);
+  const save = within(dialog).getByRole('button', { name: 'Save catalog changes' });
+  expect(save).toBeDisabled(); fireEvent.click(save); expect(writes).toEqual([]);
+  expect(adminWorkspace.buffer<{ base: CatalogItem; dirty: boolean }>(`catalog:album:${item.id}`)).toMatchObject({ base: { revision: original.revision }, dirty: true });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+  expect(control).toHaveValue(value); expect(screen.getByRole('button', { name: 'Save catalog changes' })).toBeDisabled();
+  if (source === 'dto') {
+    item = original; await act(async () => { await client.refetchQueries({ queryKey: ['admin-imports'] }); });
+  } else act(() => adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }));
+  await waitFor(() => expect(control).toBeEnabled()); expect(control).toHaveValue(value);
+  expect(screen.getByRole('button', { name: 'Save catalog changes' })).toBeEnabled();
+});
+
+test('an unknown manual operation permits read-only refresh while retaining its exact intent and unsaved values', async () => {
+  let item = album(), reads = 0; const pending = deferred<Response>(), bodies: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') { bodies.push(String(init.body)); return pending.promise; }
+    reads++; return json({ item });
+  }));
+  mount(<AdminCatalogPage kind="album" id={item.id} />);
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Unconfirmed correction' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save catalog changes' }));
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  const refresh = screen.getAllByRole('button', { name: /^Refresh/ })[0]; expect(refresh).toBeDisabled();
+  await act(async () => { pending.resolve(json({ code: 'Synthetic_unconfirmed_write' }, 503)); });
+  await screen.findByRole('button', { name: 'Retry original operation' });
+  const command = adminWorkspace.buffer<{ getSnapshot: () => { intent: { body: string; operationId: string } } }>(`command:catalog:album:${item.id}`)!;
+  const intent = command.getSnapshot().intent, previousReads = reads;
+  expect(refresh).toBeEnabled();
+  item = { ...item, revision: `cr_${'b'.repeat(43)}`, fields: { ...item.fields, title: 'Current saved title' } };
+  fireEvent.click(refresh); await waitFor(() => expect(reads).toBeGreaterThan(previousReads));
+  await screen.findByRole('button', { name: 'Discard local edits and load saved version' });
+  expect(command.getSnapshot().intent).toEqual(intent); expect(bodies).toHaveLength(1);
+  expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Unconfirmed correction');
+  expect(screen.getByRole('textbox', { name: 'Title' })).toBeDisabled();
+});
+
+test('historical cover cleanup preserves dirty manual values and exposes a changed saved revision for explicit review', async () => {
+  const item = album(), operationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let current = item, recovered = false;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: recovered ? [] : [{ operationId, state: 'cancelled', cleanupPending: true, startedByMe: false }] });
+    if (path.endsWith('/reconcile') && init.method === 'POST') {
+      recovered = true; current = { ...item, revision: `cr_${'b'.repeat(43)}` };
+      return json({ item: current, receipt: { operationId }, coverOperation: { state: 'cancelled', cleanupPending: false } });
+    }
+    return json({ item: current });
+  }));
+  mount(<AdminCatalogPage kind="album" id={item.id} />);
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'My retained draft' } });
+  const recover = await screen.findByRole('button', { name: 'Retry cleanup' }); expect(recover).toBeEnabled();
+  fireEvent.click(recover); await waitFor(() => expect(recovered).toBe(true));
+  await screen.findByRole('button', { name: 'Discard local edits and load saved version' });
+  expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My retained draft');
+  expect(adminWorkspace.buffer<{ base: CatalogItem; dirty: boolean }>(`catalog:album:${item.id}`)).toMatchObject({ base: { revision: item.revision }, dirty: true });
+});
+
+test('historical cover cancellation binds the latest saved owner while retaining an older dirty manual baseline', async () => {
+  const original = album(), operationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let current = original, cancelled = false; const writes: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: cancelled ? [] : [{ operationId, state: 'needsAttention', cleanupPending: false, startedByMe: false }] });
+    if (path.endsWith('/cancel') && init.method === 'POST') {
+      const body = JSON.parse(String(init.body)); writes.push(body);
+      if (body.expectedRevision !== current.revision) return json({ code: 'ADMIN_CATALOG_REVISION_CONFLICT' }, 409);
+      cancelled = true;
+      return json({ item: current, receipt: { operationId: body.operationId }, coverOperation: { state: 'cancelled', cleanupPending: false } });
+    }
+    return json({ item: current });
+  }));
+  const client = mount(<AdminCatalogPage kind="album" id={original.id} />);
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'My retained manual correction' } });
+  current = { ...original, revision: `cr_${'b'.repeat(43)}`, fields: { ...original.fields, title: 'Latest saved Album title' } };
+  await act(async () => { await client.refetchQueries({ queryKey: ['admin-imports'] }); });
+  await screen.findByRole('button', { name: 'Discard local edits and load saved version' });
+  const cancel = await screen.findByRole('button', { name: 'Cancel approval' }); expect(cancel).toBeEnabled(); fireEvent.click(cancel);
+  const dialog = within(screen.getByRole('dialog')); expect(dialog.getByText(current.fields.title)).toBeVisible();
+  fireEvent.click(dialog.getByRole('button', { name: 'Cancel approval' }));
+  await waitFor(() => expect(cancelled).toBe(true));
+  expect(writes).toHaveLength(1); expect(writes[0]).toMatchObject({ expectedRevision: current.revision });
+  expect(writes[0].operationId).not.toBe(operationId);
+  expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My retained manual correction');
+  expect(screen.getByRole('button', { name: 'Discard local edits and load saved version' })).toBeVisible();
+  expect(adminWorkspace.buffer<{ base: CatalogItem; dirty: boolean }>(`catalog:album:${original.id}`)).toMatchObject({ base: { revision: original.revision }, dirty: true });
+});
+
 test.each(['fields', 'visibility'])('reverting %s unlocks review and artwork without an empty save', async source => {
   const item = album();
   vi.stubGlobal('fetch', vi.fn(async (path: string) => path.endsWith('/cover-operations') ? json({ items: [] }) : json({ item })));

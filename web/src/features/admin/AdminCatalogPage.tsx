@@ -60,6 +60,11 @@ function CatalogEditor({ kind, id }: { kind: CatalogKind; id: string }) {
   useEffect(() => { if (mutation.result) { const item = mutation.result.item; void client.cancelQueries({ queryKey }); client.setQueryData(queryKey, { item }); setEdit({ base: item, fields: item.fields, visibility: item.visibility, dirty: false }); mutation.command.acknowledge(); void query.refetch(); } }, [mutation.result]);
   useEffect(() => { const element = media.current; return () => { if (element) { element.pause(); element.removeAttribute('src'); element.load(); } }; }, [edit?.base.mediaUrl]);
   const locked = mutation.running || Boolean(mutation.intent) || !online;
+  // Draft values retain their captured revision; live admission capabilities never come from that old snapshot.
+  const canEdit = Boolean(query.data?.item.capabilities.editing && access.catalogEditing);
+  const canChangeVisibility = Boolean(query.data?.item.capabilities.visibility && access.catalogVisibility);
+  const allowsPatch = (patch: ReturnType<typeof catalogPatch>) => (!patch.fields || canEdit) && (!patch.visibility || canChangeVisibility);
+  const draftPatch = edit ? catalogPatch(edit.base, edit.fields, edit.visibility) : null;
   // Reverting local values must not hide a newer revision that was already observed.
   const conflict = Boolean(edit && query.data && edit.base.revision !== query.data.item.revision);
   const confirmationStale = Boolean(confirm && query.data && confirm.item.revision !== query.data.item.revision);
@@ -69,12 +74,14 @@ function CatalogEditor({ kind, id }: { kind: CatalogKind; id: string }) {
     const patch = catalogPatch(edit.base, fields, visibility);
     setEdit({ ...edit, fields, visibility, dirty: Boolean(patch.fields || patch.visibility) });
   };
-  const item = missing ? undefined : edit?.base;
-  return <section className={styles.page}><AdminNav /><header className={styles.header}><div><h1 className={styles.title}>{item ? ('name' in item.fields ? item.fields.name : item.fields.title) || t('catalog.edit') : t('catalog.edit')}</h1><p className={styles.meta}>{t(`catalog.${kind}`)}</p></div><button className={styles.button} disabled={query.isFetching || locked} onClick={() => void query.refetch()}>{t('common.refresh')}</button></header>
+  const item = missing || !edit ? undefined : { ...edit.base, capabilities: { editing: canEdit, visibility: canChangeVisibility } };
+  // Historical cover cancellation reviews the latest saved owner independently of an unsaved metadata baseline.
+  const coverItem = missing ? null : query.data?.item ? { ...query.data.item, capabilities: { editing: canEdit, visibility: canChangeVisibility } } : item ?? null;
+  return <section className={styles.page}><AdminNav /><header className={styles.header}><div><h1 className={styles.title}>{item ? ('name' in item.fields ? item.fields.name : item.fields.title) || t('catalog.edit') : t('catalog.edit')}</h1><p className={styles.meta}>{t(`catalog.${kind}`)}</p></div><button className={styles.button} disabled={query.isFetching || mutation.running || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button></header>
     {!online && <p role="status">{t('common.offline')}</p>}{query.isPending && <p role="status">{t('common.loading')}</p>}{query.isError && <p role="alert" className={styles.notice}>{t(missing ? 'catalog.content_missing' : 'common.error')}</p>}
     {mutation.error && <div className={styles.error} role="alert"><p>{t(`common.${mutation.error}`)}</p>{mutation.intent && <button className={styles.button} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}</div>}
     {item && edit && <>
-      <p className={styles.notice}>{t('catalog.direct_edit_copy')}</p>
+      <p className={styles.notice}>{t(canEdit ? 'catalog.direct_edit_copy' : 'catalog.readonly')}</p>
       {kind === 'album' && <div className={styles.actions}><Suspense fallback={null}><CatalogReviewStart item={item} disabled={locked || conflict || edit.dirty} /></Suspense>
         {edit.dirty && <p className={styles.muted}>{t('catalog_review.save_first')}</p>}</div>}
       {item.coverUrl && <img alt={t('catalog.cover')} src={`${item.coverUrl}?viewer=${encodeURIComponent(access.viewerId)}`} className={styles.artwork} width={140} height={140} />}
@@ -83,23 +90,26 @@ function CatalogEditor({ kind, id }: { kind: CatalogKind; id: string }) {
       {conflict && <div className={styles.error} role="alert"><p>{t('common.conflict')}</p><details><summary>{t('review.saved_version')}</summary><pre className={styles.rawDraft}>{JSON.stringify(query.data!.item.fields, null, 2)}</pre></details><button className={styles.button} onClick={() => { const next = query.data!.item; setEdit({ base: next, fields: next.fields, visibility: next.visibility, dirty: false }); }}>{t('review.load_saved')}</button></div>}
       <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) {
         const patch = catalogPatch(edit.base, edit.fields, edit.visibility);
-        if (patch.fields || patch.visibility) setConfirm(structuredClone({ item: edit.base, patch }));
+        if ((patch.fields || patch.visibility) && allowsPatch(patch)) setConfirm(structuredClone({ item: edit.base, patch }));
       } }}>
         <header className={styles.sectionHeader}><h2>{t('layout.catalog_details')}</h2></header>
         <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogFields item={item} fields={edit.fields} disabled={locked || !item.capabilities.editing} onChange={fields => updateEdit(fields, edit.visibility)} /></Suspense>
         <label className={styles.field}>{t('field.visibility')}<select className={styles.input} value={edit.visibility} disabled={locked || !item.capabilities.visibility} onChange={event => updateEdit(edit.fields, event.target.value as 'public' | 'hidden')}><option value="public">{t('field.public')}</option><option value="hidden">{t('field.hidden')}</option></select></label>
         <p className={styles.muted}>{t('catalog.visibility_copy')}</p>
         {item.effectiveVisibility !== item.visibility && <p>{t('catalog.parent_hidden')}</p>}
-        <button className={`${styles.button} ${styles.primary}`} disabled={locked || !edit.dirty || conflict || !item.capabilities.editing}>{t('catalog.save')}</button>
+        <button className={`${styles.button} ${styles.primary}`} disabled={locked || !edit.dirty || conflict || !draftPatch || !allowsPatch(draftPatch)}>{t('catalog.save')}</button>
       </form>
       {confirm && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogEditConfirmation snapshot={confirm}
-        stale={confirmationStale} disabled={locked || conflict || confirm.item.revision !== query.data?.item.revision}
+        stale={confirmationStale} disabled={locked || conflict || confirm.item.revision !== query.data?.item.revision || !allowsPatch(confirm.patch)}
         onClose={() => setConfirm(null)} onConfirm={() => {
-          if (locked || conflict || confirm.item.revision !== query.data?.item.revision) return;
+          if (locked || conflict || confirm.item.revision !== query.data?.item.revision || !allowsPatch(confirm.patch)) return;
           setConfirm(null); void client.cancelQueries({ queryKey }); mutation.command.run(path, confirm.patch);
         }} /></Suspense>}
     </>}
-    {kind !== 'organization' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogCover item={item??null} kind={kind} id={id} disabled={locked || (!missing && (conflict || Boolean(edit?.dirty))) || (item ? !item.capabilities.editing : !missing)} onConfirmed={next => { void client.cancelQueries({ queryKey }); client.setQueryData(queryKey, { item: next }); setEdit({ base: next, fields: next.fields, visibility: next.visibility, dirty: false }); }} onRemoved={()=>{setEdit(null);adminWorkspace.retain(key,null,access);void client.resetQueries({queryKey,exact:true});}} /></Suspense>}
+    {kind !== 'organization' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogCover item={coverItem} kind={kind} id={id} disabled={locked}
+      approvalDisabled={!canEdit || conflict || Boolean(edit?.dirty) || (!item && !missing)}
+      onConfirmed={next => { void client.cancelQueries({ queryKey }); client.setQueryData(queryKey, { item: next }); setEdit(previous => previous?.dirty ? previous : { base: next, fields: next.fields, visibility: next.visibility, dirty: false }); }}
+      onRemoved={()=>{setEdit(previous=>previous?.dirty?previous:null);if(!edit?.dirty)adminWorkspace.retain(key,null,access);void client.resetQueries({queryKey,exact:true});}} /></Suspense>}
   </section>;
 }
 export function AdminCatalogPage({ kind, id }: { kind?: CatalogKind; id?: string }) {
