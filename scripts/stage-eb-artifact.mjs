@@ -14,6 +14,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { validateNarutoWebDistribution } from './prepare-naruto-web.mjs';
 
 const repositoryRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const defaultOutputDirectory = path.join(repositoryRoot, 'elastic-beanstalk-artifact');
@@ -402,9 +403,16 @@ const validateForbiddenPaths = async (artifactRoot) => {
 
 const validateExactLayout = async (artifactRoot) => {
   const rootEntries = new Set(await readdir(artifactRoot));
-  if (rootEntries.size !== expectedRootEntries.size
-    || [...rootEntries].some((entry) => !expectedRootEntries.has(entry))) {
+  const permittedEntries = new Set(expectedRootEntries);
+  if (rootEntries.has('naruto-web')) permittedEntries.add('naruto-web');
+  if (rootEntries.size !== permittedEntries.size
+    || [...rootEntries].some((entry) => !permittedEntries.has(entry))) {
     throw new Error(`Deployment artifact root does not match the explicit allowlist: ${[...rootEntries].sort().join(', ')}`);
+  }
+  if (rootEntries.has('naruto-web')) {
+    const entries = await readdir(path.join(artifactRoot, 'naruto-web'));
+    if (entries.length !== 1 || entries[0] !== 'dist') throw new Error('Naruto deployment directory must contain only dist.');
+    await validateNarutoWebDistribution(path.join(artifactRoot, 'naruto-web', 'dist'), true);
   }
 
   const engineeringEntries = await readdir(path.join(artifactRoot, 'engineering'));
@@ -471,6 +479,15 @@ export const stageElasticBeanstalkArtifact = async ({
       await access(source, fsConstants.R_OK);
       await mkdir(path.dirname(destination), { recursive: true });
       await cp(source, destination, { recursive: true, errorOnExist: true });
+    }
+    // A separately prepared, provenance-checked Naruto build is optional for non-Naruto releases.
+    const narutoSource = path.join(resolvedSourceRoot, 'naruto-web', 'dist');
+    let narutoStats;
+    try { narutoStats = await lstat(narutoSource); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (narutoStats) {
+      if (!narutoStats.isDirectory() || narutoStats.isSymbolicLink()) throw new Error('Naruto distribution must be a regular directory.');
+      await validateNarutoWebDistribution(narutoSource, true);
+      await cp(narutoSource, path.join(temporaryDirectory, 'naruto-web', 'dist'), {recursive: true, errorOnExist: true});
     }
 
     await writeFile(

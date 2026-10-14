@@ -7,6 +7,21 @@ import { createRoomPlaybackController } from '../../src/player/roomPlayback';
 const createHarness = () => {
   const intents: RoomPlaybackIntent[] = [];
   const observations: RoomPlaybackObservation[] = [];
+  // Preserve bounded native decoder evidence even if a browser stalls before a Playwright assertion completes.
+  const mediaEvents: { event: string; trusted: boolean; monotonicMs: number; currentTime: number;
+    duration: number; paused: boolean; seeking: boolean; readyState: number; networkState: number;
+    ended: boolean; rate: number; error: number | null; rangesObserved: boolean; buffered: number[][]; seekable: number[][] }[] = [];
+  const ranges = (value: TimeRanges) => Array.from({ length: Math.min(value.length, 4) }, (_, index) => [value.start(index), value.end(index)]);
+  /** Native callbacks avoid decoder range queries; explicit snapshots sample only stable decoded media. */
+  const readNativeMedia = (media: HTMLVideoElement, includeRanges = false) => {
+    const readyState = media.readyState;
+    const duration = readyState >= 1 ? media.duration : Number.NaN;
+    const readableRanges = includeRanges && readyState >= 3 && !media.seeking && Number.isFinite(duration) && duration > 0;
+    return { currentTime: media.currentTime, duration, paused: media.paused, seeking: media.seeking, readyState,
+      networkState: media.networkState, ended: media.ended, rate: media.playbackRate, error: media.error?.code ?? null,
+      rangesObserved: readableRanges,
+      buffered: readableRanges ? ranges(media.buffered) : [], seekable: readableRanges ? ranges(media.seekable) : [] };
+  };
   let loads = 0;
   let plays = 0;
   let creations = 0;
@@ -20,6 +35,13 @@ const createHarness = () => {
       const media = document.createElement('video');
       media.playsInline = true;
       media.controls = false;
+      for (const event of ['loadstart', 'loadedmetadata', 'durationchange', 'canplay', 'play', 'playing', 'pause',
+        'timeupdate', 'seeking', 'seeked', 'waiting', 'stalled', 'ratechange', 'ended', 'error']) {
+        media.addEventListener(event, (value) => {
+          mediaEvents.push({ event, trusted: value.isTrusted, monotonicMs: performance.now(), ...readNativeMedia(media) });
+          if (mediaEvents.length > 200) mediaEvents.shift();
+        });
+      }
       const load = media.load.bind(media);
       const play = media.play.bind(media);
       media.load = () => { loads += 1; load(); };
@@ -27,38 +49,53 @@ const createHarness = () => {
       return media;
     }
   });
+  const parameters = new URL(location.href).searchParams;
+  const isolatedAudioButton = parameters.get('isolatedAudio') === '1' ? document.createElement('button') : undefined;
+  if (isolatedAudioButton) {
+    isolatedAudioButton.type = 'button';
+    isolatedAudioButton.textContent = 'Enable isolated test audio';
+    isolatedAudioButton.onclick = event => { if (event.isTrusted) store.setMuted(false); };
+    document.body.appendChild(isolatedAudioButton);
+  }
   const room = store.attachRoomPlayback({
     onIntent: (value) => intents.push(value),
     onObservation: (value) => observations.push(value)
   });
+  const format = parameters.get('format') === 'mp3' ? 'mp3' : 'wav';
   const queue = ['a', 'b'].map((name, index) => ({
     id: `00000000000000000000000${index + 1}`, title: name,
     artworkUrl: '', artistNames: [], mediaType: 'audio' as const,
-    streamUrl: `/__room-tone/${name}.wav`
+    streamUrl: `/__room-tone/${name}.${format}`
   }));
   return {
     /** Translate each synthetic playback occurrence once; membership revisions keep its anchor. */
     apply(index: number, override: Partial<RoomPlaybackState> = {}) {
       const value = trace.snapshots[index].snapshot;
-      if (!localAnchors.has(value.playbackGeneration)) localAnchors.set(value.playbackGeneration, performance.now());
+      const playbackEpoch = override.playbackEpoch ?? value.playbackGeneration;
+      if (!localAnchors.has(playbackEpoch)) localAnchors.set(playbackEpoch, override.anchorMonotonicMs ?? performance.now());
       return room.apply({
         roomId: value.roomId, epoch: value.epoch, mediaRevision: value.mediaRevision,
-        revision: value.revision, playbackEpoch: value.playbackGeneration,
+        revision: value.revision, playbackEpoch,
         controlEpoch: value.controlGeneration, queueRevision: value.queueRevision,
         canControl: true,
         queue, entryIds: ['entry-a', 'entry-b'], currentEntryId: value.entryId,
         positionSeconds: value.positionMs / 1000,
-        anchorMonotonicMs: localAnchors.get(value.playbackGeneration)!, status: value.state as 'playing' | 'paused',
+        anchorMonotonicMs: localAnchors.get(playbackEpoch)!, status: value.state as 'playing' | 'paused',
         ...override
       });
     },
     state() {
       const media = document.querySelector('video');
+      const native = media ? readNativeMedia(media, true) : undefined;
       return {
         snapshot: store.getSnapshot(), intents: [...intents], observations: [...observations],
         loads, plays, creations, mediaCount: document.querySelectorAll('video').length,
-        paused: media?.paused, currentTime: media?.currentTime,
-        rate: media?.playbackRate, readyState: media?.readyState, seeking: media?.seeking
+        paused: native?.paused, currentTime: native?.currentTime, duration: native?.duration,
+        rate: native?.rate, readyState: native?.readyState, seeking: native?.seeking,
+        networkState: native?.networkState, ended: native?.ended, error: native?.error ?? null,
+        buffered: native?.buffered ?? [], seekable: native?.seekable ?? [],
+        nativeRangesObserved: native?.rangesObserved ?? false,
+        mediaEvents: [...mediaEvents]
       };
     },
     next: () => store.next(),
@@ -70,7 +107,7 @@ const createHarness = () => {
       if (media) media.currentTime = positionSeconds;
     },
     detach: () => room.detach(),
-    destroy: () => store.destroy()
+    destroy() { isolatedAudioButton?.remove(); store.destroy(); }
   };
 };
 

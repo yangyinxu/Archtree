@@ -7,3 +7,6 @@ web/playwright-report
 web/test-results
 /elastic-beanstalk-artifact/
 engineering/dist
+/naruto-web/dist/
+/naruto-web/qa/
+/.naruto-source/

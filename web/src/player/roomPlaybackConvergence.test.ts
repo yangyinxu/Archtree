@@ -82,10 +82,25 @@ test('a no-op heartbeat still supplies the authoritative clock for first progres
   expect(seek).not.toHaveBeenCalled();
 });
 
-test('first progress projects a fresh rate-correction heartbeat instead of the older apply anchor', async () => {
+test('an early small-drift heartbeat preserves authority without changing a decoder before natural progress', async () => {
+  const { room, target, seek, advance, onIntent } = await setup();
+  let rate = 1;
+  const writeRate = vi.fn((value: number) => { rate = value; target.readyState = 2; });
+  Object.defineProperty(target, 'playbackRate', { get: () => rate, set: writeRate });
+  await advance(260);
+  expect(room.correct(20.26)).toBe('none');
+  expect(writeRate).not.toHaveBeenCalled();
+  expect(target.readyState).toBe(4);
+  await advance(1000, 0.2); // The native decoder starts late, independently of any position write.
+  expect(seek).toHaveBeenCalledExactlyOnceWith(21.26);
+  expect(writeRate).not.toHaveBeenCalled();
+  expect(onIntent).not.toHaveBeenCalled();
+});
+
+test('first progress projects a deferred small-drift heartbeat instead of the older apply anchor', async () => {
   const { room, target, seek, advance } = await setup();
   await advance(2000);
-  expect(room.correct(20.3)).toBe('rate');
+  expect(room.correct(20.3)).toBe('none');
   await advance(100, 0.105);
   expect(seek).not.toHaveBeenCalled(); // Fresh authority is 20.4; the cached anchor would incorrectly hard-seek to 22.1.
   expect(target.currentTime).toBeCloseTo(20.105);
@@ -253,7 +268,8 @@ test('a new occurrence receives its own bounded compensation opportunity', async
   const { room, state, seek, seeked, advance } = await setup();
   room.correct(21); seeked(); await advance(1000); await advance(100, 0.1);
   await room.apply({ ...state, revision: 2, playbackEpoch: 2, positionSeconds: 40, anchorMonotonicMs: 10000 + performance.now() });
-  seeked();
+  seeked(); // Complete the old correction before the new occurrence dispatches its preparation seek.
+  seeked(); // Only this completion makes the new occurrence ready for drift correction.
   const count = seek.mock.calls.length;
   room.correct(41); seeked(); await advance(1000); await advance(100, 0.1);
   expect(seek).toHaveBeenCalledTimes(count + 2);

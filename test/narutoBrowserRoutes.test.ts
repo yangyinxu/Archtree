@@ -1,0 +1,203 @@
+import assert from 'node:assert/strict';
+import { type Server } from 'node:http';
+import test, { type TestContext } from 'node:test';
+import jwt from 'jsonwebtoken';
+import { createApp } from '../src/app';
+import User from '../src/models/user';
+import AuthSession from '../src/models/authSession';
+import { resetRateLimitWindowsForTests } from '../src/middleware/requestProtectionMiddleware';
+import { NarutoMobileOpenAiClassifier, NarutoMobileUpstreamError } from '../src/narutoMobile/openAiClassifierService';
+import type { NarutoMobileClassifyRequest } from '../src/narutoMobile/protocol';
+
+const userId = '64b000000000000000000001';
+const otherUserId = '64b000000000000000000002';
+const sessionId = '64c000000000000000000001';
+const jwtSecret = 'synthetic-naruto-browser-secret';
+const body = JSON.stringify({protocolVersion: 1, kind: 'triage', batch: [{
+  opinionId: 'opinion-1', content: {type: 'video', title: '标题', description: '', publishedAt: null},
+  opinion: {sourceType: 'comment', voiceType: 'viewer', text: '二技能后摇太长',
+    parentText: null, likes: 0, replies: 0, publishedAt: null}
+}]});
+const result = (request: NarutoMobileClassifyRequest) => ({
+  protocolVersion: 1 as const, kind: request.kind, model: 'gpt-6-luna',
+  promptVersion: 'naruto-decisions-v1', results: [],
+  usage: {inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0}
+});
+
+/** Installs synthetic credentials and mocked persistence; no provider or database receives test data. */
+const withServer = async (context: TestContext, run: (baseUrl: string, token: string) => Promise<void>) => {
+  const savedEnvironment = Object.fromEntries(['NODE_ENV', 'JWT_SECRET', 'OPENAI_API_KEY', 'BROWSER_ALLOWED_ORIGINS']
+    .map(key => [key, process.env[key]]));
+  process.env.NODE_ENV = 'test';
+  process.env.JWT_SECRET = jwtSecret;
+  process.env.OPENAI_API_KEY = 'synthetic-naruto-browser-provider-key';
+  process.env.BROWSER_ALLOWED_ORIGINS = 'https://sibling.example.test';
+  resetRateLimitWindowsForTests();
+  context.mock.method(AuthSession, 'findActiveById', async (id: string) => id === sessionId
+    ? {userId} as Awaited<ReturnType<typeof AuthSession.findActiveById>> : null);
+  context.mock.method(User, 'findById', async () => (
+    {email: 'browser@example.test', role: 'user'} as Awaited<ReturnType<typeof User.findById>>
+  ));
+  const server = await new Promise<Server>(resolve => {
+    const listening = createApp().listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const token = jwt.sign({userId, email: 'browser@example.test', sessionId, tokenType: 'access'},
+    jwtSecret, {algorithm: 'HS256', expiresIn: 900});
+  try { await run(`http://127.0.0.1:${address.port}`, token); }
+  finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    context.mock.restoreAll();
+    resetRateLimitWindowsForTests();
+    for (const [key, value] of Object.entries(savedEnvironment)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+};
+
+/** Adds only browser-owned proof and its currently displayed account identity. */
+const browserHeaders = (baseUrl: string, token: string): Record<string, string> => ({
+  origin: baseUrl, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json',
+  cookie: `session_token=${token}`, 'x-finitude-account-viewer': userId
+});
+
+test('browser capabilities are same-origin and keep the desktop proxy browser-inaccessible', async context => {
+  await withServer(context, async baseUrl => {
+    const status = await fetch(`${baseUrl}/naruto/api/v1/status`, {headers: {'sec-fetch-site': 'same-origin'}});
+    assert.equal(status.status, 200);
+    assert.equal(status.headers.get('cache-control'), 'no-store');
+    assert.equal(status.headers.get('access-control-allow-origin'), null);
+    assert.deepEqual(await status.json(), {
+      enabled: true, protocolVersion: 1, serviceVersion: 'naruto-browser-proxy-v1',
+      maxConcurrentRequests: 12, model: 'gpt-6-luna'
+    });
+    for (const origin of ['https://elsewhere.example.test', 'https://sibling.example.test', 'null']) {
+      const crossOrigin = await fetch(`${baseUrl}/naruto/api/v1/status`, {headers: {origin}});
+      assert.equal(crossOrigin.status, 403);
+      assert.equal(crossOrigin.headers.get('access-control-allow-origin'), null);
+    }
+    const sameSite = await fetch(`${baseUrl}/naruto/api/v1/status`, {headers: {'sec-fetch-site': 'same-site'}});
+    assert.equal(sameSite.status, 403);
+    const noProof = await fetch(`${baseUrl}/naruto/api/v1/status`);
+    assert.equal(noProof.status, 403);
+    const desktop = await fetch(`${baseUrl}/naruto-mobile/api/v1/status`, {headers: {origin: baseUrl}});
+    assert.equal(desktop.status, 403);
+    assert.equal((await desktop.json()).code, 'browser_origin_rejected');
+    delete process.env.OPENAI_API_KEY;
+    const disabled = await fetch(`${baseUrl}/naruto/api/v1/status`, {headers: {origin: baseUrl}});
+    assert.equal((await disabled.json()).enabled, false);
+  });
+});
+
+test('browser classify authenticates and fences the account before bounded parsing', async context => {
+  let calls = 0;
+  context.mock.method(NarutoMobileOpenAiClassifier.prototype, 'classify', async (request: NarutoMobileClassifyRequest) => {
+    calls += 1;
+    return result(request);
+  });
+  await withServer(context, async (baseUrl, token) => {
+    const endpoint = `${baseUrl}/naruto/api/v1/classify`;
+    const headers = browserHeaders(baseUrl, token);
+    const invalidBody = '{';
+    process.env.NODE_ENV = 'production';
+    assert.equal((await fetch(endpoint, {method: 'POST', headers, body: invalidBody})).status, 426);
+    process.env.NODE_ENV = 'test';
+    const missingCookie = {...headers}; delete missingCookie.cookie;
+    const unauthenticated = await fetch(endpoint, {method: 'POST', headers: missingCookie, body: invalidBody});
+    assert.equal(unauthenticated.status, 401);
+    const stale = await fetch(endpoint, {method: 'POST', headers: {...headers, 'x-finitude-account-viewer': otherUserId}, body: invalidBody});
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).code, 'account_viewer_mismatch');
+    const missingViewer = {...headers}; delete missingViewer['x-finitude-account-viewer'];
+    assert.equal((await fetch(endpoint, {method: 'POST', headers: missingViewer, body: invalidBody})).status, 409);
+    assert.equal((await fetch(endpoint, {method: 'POST', headers: {...headers, authorization: `Bearer ${token}`}, body: invalidBody})).status, 401);
+    assert.equal((await fetch(endpoint, {method: 'POST', headers: {...headers, cookie: 'session_token=invalid'}, body: invalidBody})).status, 401);
+    assert.equal((await fetch(endpoint, {method: 'POST', headers: {...headers, origin: 'https://sibling.example.test'}, body: invalidBody})).status, 403);
+    assert.equal((await fetch(endpoint, {method: 'POST', headers: {...headers, 'content-type': 'text/plain'}, body})).status, 415);
+    delete process.env.OPENAI_API_KEY;
+    const unavailable = await fetch(endpoint, {method: 'POST', headers, body: invalidBody});
+    assert.equal(unavailable.status, 503);
+    assert.equal((await unavailable.json()).code, 'service_disabled');
+    process.env.OPENAI_API_KEY = 'synthetic-naruto-browser-provider-key';
+    const malformed = await fetch(endpoint, {method: 'POST', headers, body: invalidBody});
+    assert.equal(malformed.status, 400);
+    assert.equal((await malformed.json()).code, 'invalid_json');
+    const oversized = await fetch(endpoint, {method: 'POST', headers, body: JSON.stringify({private: 'x'.repeat(1024 * 1024)})});
+    assert.equal(oversized.status, 413);
+    assert.equal((await oversized.json()).code, 'request_too_large');
+    const unsupported = await fetch(endpoint, {method: 'POST', headers, body: JSON.stringify({protocolVersion: 1, kind: 'triage', batch: [], model: 'arbitrary'})});
+    assert.equal(unsupported.status, 400);
+    assert.equal((await unsupported.json()).code, 'invalid_request');
+    assert.equal(calls, 0);
+    const classified = await fetch(endpoint, {method: 'POST', headers, body});
+    assert.equal(classified.status, 200);
+    assert.equal(classified.headers.get('x-finitude-account-viewer'), userId);
+    assert.equal(classified.headers.get('access-control-allow-origin'), null);
+    const responseText = await classified.text();
+    assert.deepEqual(JSON.parse(responseText), result(JSON.parse(body)));
+    assert.doesNotMatch(responseText, /synthetic-naruto-browser-provider-key|session_token|Bearer/);
+    assert.equal(calls, 1);
+    const largerLegalBody = JSON.stringify({protocolVersion: 1, kind: 'triage', batch:
+      Array.from({length: 50}, (_, index) => ({...JSON.parse(body).batch[0], opinionId: `opinion-${index}`,
+        opinion: {...JSON.parse(body).batch[0].opinion, text: '评'.repeat(1_800)}}))});
+    assert.ok(Buffer.byteLength(largerLegalBody) > 128 * 1024);
+    assert.ok(Buffer.byteLength(largerLegalBody) < 1024 * 1024);
+    assert.equal((await fetch(endpoint, {method: 'POST', headers, body: largerLegalBody})).status, 200);
+    assert.equal(calls, 2, 'The browser router must own its larger parser before the general JSON parser');
+    context.mock.method(NarutoMobileOpenAiClassifier.prototype, 'classify', async () => {throw new NarutoMobileUpstreamError(429, 8);});
+    const throttled = await fetch(endpoint, {method: 'POST', headers, body});
+    assert.equal(throttled.status, 429);
+    assert.equal(throttled.headers.get('retry-after'), '8');
+    assert.equal((await throttled.json()).code, 'upstream_rate_limited');
+  });
+});
+
+test('browser and desktop classifiers share request-rate and unsettled-work capacity', {timeout: 15_000}, async context => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => {release = resolve;});
+  let entered = 0;
+  let allEntered!: () => void;
+  const enteredPromise = new Promise<void>(resolve => {allEntered = resolve;});
+  context.mock.method(NarutoMobileOpenAiClassifier.prototype, 'classify', async (request: NarutoMobileClassifyRequest) => {
+    entered += 1;
+    if (entered === 12) allEntered();
+    await held;
+    return result(request);
+  });
+  await withServer(context, async (baseUrl, token) => {
+    const pending = Array.from({length: 12}, () => fetch(`${baseUrl}/naruto-mobile/api/v1/classify`, {
+      method: 'POST', headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'}, body
+    }));
+    try {
+      await Promise.race([enteredPromise, new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error('Classifier fixture did not enter')), 3_000);
+        enteredPromise.finally(() => clearTimeout(timer));
+      })]);
+      const rejected = await fetch(`${baseUrl}/naruto/api/v1/classify`, {
+        method: 'POST', headers: browserHeaders(baseUrl, token), body
+      });
+      assert.equal(rejected.status, 429);
+      assert.equal(rejected.headers.get('retry-after'), '2');
+      assert.equal((await rejected.json()).message, 'Too many concurrent requests.');
+    } finally { release(); await Promise.all(pending); }
+    await new Promise(resolve => setImmediate(resolve));
+    const reusable = await fetch(`${baseUrl}/naruto/api/v1/classify`, {
+      method: 'POST', headers: browserHeaders(baseUrl, token), body
+    });
+    assert.equal(reusable.status, 200);
+    resetRateLimitWindowsForTests();
+    for (let index = 0; index < 60; index++) {
+      assert.equal((await fetch(`${baseUrl}/naruto-mobile/api/v1/access`, {
+        headers: {authorization: `Bearer ${token}`}
+      })).status, 200);
+    }
+    const limited = await fetch(`${baseUrl}/naruto/api/v1/classify`, {
+      method: 'POST', headers: browserHeaders(baseUrl, token), body: '{'
+    });
+    assert.equal(limited.status, 429);
+    assert.ok(Number(limited.headers.get('retry-after')) > 0);
+    assert.equal(limited.headers.get('ratelimit-limit'), '60');
+  });
+});

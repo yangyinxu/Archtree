@@ -20,6 +20,7 @@ jobs:
     outputs:
       build: ${{ steps.build.outcome }}
       e2e_typecheck: ${{ steps.e2e_typecheck.outcome }}
+      naruto_enabled: ${{ steps.naruto_release.outputs.enabled }}
 
     steps:
       - name: Check out repository
@@ -34,6 +35,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate optional Naruto release configuration
+        id: naruto_release
+        env:
+          NARUTO_SOURCE_COMMIT: ${{ vars.NARUTO_SOURCE_COMMIT }}
+        run: node scripts/naruto-release-configuration.mjs
+
+      - name: Check out the pinned Naruto source
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        uses: actions/checkout@v6
+        with:
+          repository: yangyinxu/naruto-mobile
+          ref: ${{ steps.naruto_release.outputs.commit }}
+          path: .naruto-source
+          token: ${{ secrets.NARUTO_SOURCE_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Install Naruto source dependencies
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        working-directory: .naruto-source
+        run: npm ci
+
+      - name: Install the Naruto source Chromium runtime
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        working-directory: .naruto-source
+        run: npx playwright install --with-deps chromium
+
+      - name: Test the pinned Naruto source
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        working-directory: .naruto-source
+        run: npm test
+
       - name: Build production server and listener
         id: build
         run: npm run build
@@ -41,6 +73,18 @@ jobs:
       - name: Type-check browser fixtures and release specs
         id: e2e_typecheck
         run: npm run typecheck:e2e --workspace @archtree/finitude-web
+
+      - name: Prepare the pinned Naruto hosted distribution
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        run: npm run prepare:naruto-web -- .naruto-source
+
+      - name: Install Chromium for the hosted Naruto smoke
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        run: npx playwright install chromium
+
+      - name: Verify the prepared Naruto browser distribution
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        run: npm run smoke:naruto-web
 
       # The exact bytes tested by both browser gates are the bytes staged for release.
       # web/dist/.vite/manifest.json is hidden, so hidden files must be included.
@@ -51,6 +95,7 @@ jobs:
           path: |
             web/dist
             engineering/dist
+            naruto-web/dist
           include-hidden-files: true
           if-no-files-found: error
           overwrite: true
@@ -168,11 +213,19 @@ jobs:
           pactl list short sinks
 
       # Every social project is blocking, including Firefox/WebKit compressed audio with real Linux decoders.
+      - name: Verify WebKit compressed audio before the complete social matrix
+        env:
+          PULSE_LATENCY_MSEC: '100'
+          WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
+        run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=webkit-audio-formats --output=test-results/social-webkit-preflight
+
       - name: Run real social MongoDB, media, and WebSocket browser tests
         id: social
         env:
           # Bound the simulated device buffer; PulseAudio's default can add seconds before audio advances.
           PULSE_LATENCY_MSEC: '100'
+          # Keep real streaming/decoding without WPE's downloaded-file seek/buffering state mismatch.
+          WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
         run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web
 
       - name: Retain social browser evidence
@@ -182,6 +235,7 @@ jobs:
           name: finitude-social-browser-evidence
           path: |
             web/test-results/social-real
+            web/test-results/social-webkit-preflight
           if-no-files-found: ignore
           retention-days: 30
 
@@ -220,17 +274,40 @@ jobs:
         run: |
           # Refresh package lists here so this step never depends on an earlier step's apt-get update.
           sudo apt-get update
-          sudo apt-get install --yes pulseaudio xvfb
+          sudo apt-get install --yes pulseaudio xvfb gstreamer1.0-tools
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=archtree_ci
           pactl set-default-sink archtree_ci
           pactl list short sinks
 
+      - name: Verify native PCM and audio-output plugins
+        run: |
+          for plugin in wavparse audioconvert audioresample pulsesink
+          do
+            gst-inspect-1.0 "$plugin" > "${RUNNER_TEMP}/gst-${plugin}.txt"
+            sed -n '1,14p' "${RUNNER_TEMP}/gst-${plugin}.txt"
+          done
+
+      - name: Verify native playback startup before the complete browser matrix
+        env:
+          DEBUG: pw:browser
+          GST_DEBUG: '0,webkitmediaplayer:5'
+          PULSE_LATENCY_MSEC: '100'
+          WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS: '1'
+          WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
+          FINITUDE_E2E_ISOLATED_AUDIO: '1'
+        run: |
+          set -o pipefail
+          xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts --grep='real scheduled start' --retries=0 --update-snapshots=none --output=test-results/room-playback-preflight 2>&1 | node scripts/filter-native-media-evidence.mjs
+
       - name: Run production-bundle browser and accessibility tests
         id: browser
         env:
           PULSE_LATENCY_MSEC: '100'
-        run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
+          WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS: '1'
+          WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
+          FINITUDE_E2E_ISOLATED_AUDIO: '1'
+        run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 
       - name: Retain browser evidence
         if: ${{ !cancelled() }}
@@ -273,10 +350,18 @@ jobs:
       - name: Create the versioned Elastic Beanstalk rollback bundle
         env:
           EB_BUNDLE_NAME: archtree-eb-${{ github.sha }}.zip
+          NARUTO_RELEASE_ENABLED: ${{ needs.build.outputs.naruto_enabled }}
         run: |
           cd elastic-beanstalk-artifact
-          zip -q -r "../${EB_BUNDLE_NAME}" \
-            .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json localization src tsconfig.json web engineering
+          if [ "${NARUTO_RELEASE_ENABLED}" = 'true' ]; then test -d naruto-web/dist; fi
+          entries=(
+            .archtree-eb-artifact .ebextensions .platform RELEASE.json
+            package-lock.json package.json localization src tsconfig.json
+            web
+            engineering
+          )
+          if [ -d naruto-web/dist ]; then entries+=(naruto-web); fi
+          zip -q -r "../${EB_BUNDLE_NAME}" "${entries[@]}"
 
       - name: Bind the tested bundle to this workflow attempt
         env:
