@@ -916,6 +916,7 @@ test('rate correction resets by deadline and uses seek fallback; unsupported rat
   const { room, audio, store, onObservation } = setup();
   audio.duration = 20;
   await room.apply(frame(5)); audio.ready();
+  await vi.advanceTimersByTimeAsync(100); audio.currentTime = 0.1; audio.emit('timeupdate');
   audio.currentTime = 1;
   expect(room.correct(1.3)).toBe('rate');
   expect(audio.playbackRate).toBe(1.05);

@@ -581,6 +581,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
       if (!correctionAllowed(target)) return 'none';
       latestCorrection = { position: positionSeconds, monotonicMs: now() };
       const drift = positionSeconds - target.currentTime;
+      // A ready/playing decoder may not have advanced yet; an early rate write can flush its startup buffer.
+      // Retain the heartbeat for first-progress convergence while larger drift may still seek immediately.
+      if (firstProgress && Math.abs(drift) <= 0.35 && rateFallbackOccurrence !== occurrence()) return 'none';
       clearTimeout(correction);
       resetRate();
       if (!correctionAllowed(target)) return 'none';

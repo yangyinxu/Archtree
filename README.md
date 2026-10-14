@@ -456,7 +456,10 @@ the [production acceptance record](docs/deployment/finitude-web-rollout-runbook.
 
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
-It corrects startup drift after credible media-clock advancement. A corrective
+It corrects startup drift after credible media-clock advancement. Small-drift
+heartbeats retain their clock reference but defer rate changes until that first
+progress, avoiding a decoder flush before playback begins; larger drift can still
+seek immediately. A corrective
 seek measures the clock time lost during that seek, separately from initial
 play startup. At most two additional seeks per playback occurrence may compensate
 the measured delay, within six seconds of the first compensation. The second

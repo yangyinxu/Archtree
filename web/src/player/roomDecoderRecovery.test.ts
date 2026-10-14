@@ -158,7 +158,7 @@ test('an older pending reload cannot ready or reposition a replacement occurrenc
 });
 
 test('successful decoder recovery uses controlled seek instead of soft rate only for that occurrence', async () => {
-  const { room, state, target, seek, decoded, onIntent } = setup();
+  const { room, state, target, seek, decoded, controller, onIntent } = setup();
   await room.apply(state); decoded(2);
   await vi.advanceTimersByTimeAsync(1000); decoded(4);
   const playing = { ...state, revision: 2, status: 'playing' as const, playbackAllowed: true,
@@ -168,6 +168,7 @@ test('successful decoder recovery uses controlled seek instead of soft rate only
   expect(seek).toHaveBeenLastCalledWith(66.3);
   expect(target.playbackRate).toBe(1);
   await room.apply({ ...playing, revision: 3, playbackEpoch: 2 });
+  await vi.advanceTimersByTimeAsync(100); target.currentTime += 0.1; controller.observe('timeupdate', target);
   expect(room.correct(66.3)).toBe('rate');
   expect(target.playbackRate).toBe(1.05);
   expect(onIntent).not.toHaveBeenCalled();
@@ -194,7 +195,7 @@ test.each(['local pause', 'permission loss', 'detach'] as const)('%s blocks the 
 });
 
 test('a failed reload does not mark a decoder as requiring the recovered-rate fallback', async () => {
-  const { room, state, target, install, decoded } = setup();
+  const { room, state, target, install, decoded, controller } = setup();
   await room.apply(state); decoded(2);
   install.mockRejectedValueOnce(new Error('Source unavailable'));
   await vi.advanceTimersByTimeAsync(1000); decoded(4);
@@ -202,6 +203,7 @@ test('a failed reload does not mark a decoder as requiring the recovered-rate fa
     anchorMonotonicMs: 10000 + performance.now() });
   await room.resync();
   expect(target.paused).toBe(false);
+  await vi.advanceTimersByTimeAsync(100); target.currentTime += 0.1; controller.observe('timeupdate', target);
   expect(room.correct(66.3)).toBe('rate');
   expect(target.playbackRate).toBe(1.05);
   room.detach();
