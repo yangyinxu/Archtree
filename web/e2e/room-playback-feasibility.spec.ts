@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { build } from 'vite';
 import { fileURLToPath } from 'node:url';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
 import { createTestTone } from './fixtures/audio';
@@ -11,10 +11,11 @@ let harnessBundle = '';
 let probeServer: Server | undefined;
 let probeOrigin = '';
 let requestSequence = 0, caseRequestStart = 0;
-let toneSha256 = '';
-let toneBytes = 0;
-const toneDurationSeconds = 15;
-const toneSampleRate = 48_000;
+let caseFormat: 'wav' | 'mp3' = 'wav';
+const fixtures = {
+  wav: { format: 'wav', durationSeconds: 2, sampleRate: 8_000, bytes: 0, sha256: '' },
+  mp3: { format: 'mp3', durationSeconds: 120, sampleRate: 44_100, bytes: 0, sha256: '' }
+};
 const transport: { sequence: number; method: string; pathname: string; range: string | null; status: number;
   contentLength: number; contentRange: string | null; finished: boolean }[] = [];
 
@@ -80,16 +81,22 @@ const expectCredibleProgress = async (page: Page) => {
 
 /** Uses native loopback HTTP for both the probe and media; intercepted responses are not a real decoder transport. */
 const startProbeServer = async () => {
-  // Standard-rate PCM avoids low-rate output buffering while leaving time for real controller convergence.
-  const tone = createTestTone(toneSampleRate);
-  expect((tone.length - 44) / tone.readUInt32LE(28)).toBe(toneDurationSeconds);
-  toneBytes = tone.length;
-  toneSha256 = createHash('sha256').update(tone).digest('hex');
-  const resources = new Map([
+  const tone = createTestTone().subarray(0, 44 + 2 * 8000 * 2);
+  tone.writeUInt32LE(tone.length - 8, 4);
+  tone.writeUInt32LE(tone.length - 44, 40);
+  expect((tone.length - 44) / tone.readUInt32LE(28)).toBe(fixtures.wav.durationSeconds);
+  const mp3 = await readFile(new URL('../../test/fixtures/room-audio/room-tone.mp3', import.meta.url));
+  for (const [format, body] of [['wav', tone], ['mp3', mp3]] as const) {
+    fixtures[format].bytes = body.length;
+    fixtures[format].sha256 = createHash('sha256').update(body).digest('hex');
+  }
+  const resources = new Map<string, { body: Buffer; type: string; etag?: string }>([
     ['/__room-probe', { body: Buffer.from('<!doctype html><html><body><script src="/__room-probe.js"></script></body></html>'), type: 'text/html; charset=utf-8' }],
     ['/__room-probe.js', { body: Buffer.from(harnessBundle), type: 'text/javascript; charset=utf-8' }],
-    ['/__room-tone/a.wav', { body: tone, type: 'audio/wav' }],
-    ['/__room-tone/b.wav', { body: tone, type: 'audio/wav' }]
+    ['/__room-tone/a.wav', { body: tone, type: 'audio/wav', etag: '"room-tone-wav"' }],
+    ['/__room-tone/b.wav', { body: tone, type: 'audio/wav', etag: '"room-tone-wav"' }],
+    ['/__room-tone/a.mp3', { body: mp3, type: 'audio/mpeg', etag: '"room-tone-mp3"' }],
+    ['/__room-tone/b.mp3', { body: mp3, type: 'audio/mpeg', etag: '"room-tone-mp3"' }]
   ]);
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
@@ -108,15 +115,15 @@ const startProbeServer = async () => {
       evidence.contentRange = contentRange ?? null;
       response.writeHead(status, { 'Content-Type': resource?.type ?? 'text/plain', 'Content-Length': body.length,
         'Cache-Control': 'no-store, no-transform', 'X-Content-Type-Options': 'nosniff',
-        ...(resource?.type === 'audio/wav' ? { 'Accept-Ranges': 'bytes', ETag: '"room-tone-two-seconds"' } : {}),
+        ...(resource?.etag ? { 'Accept-Ranges': 'bytes', ETag: resource.etag } : {}),
         ...(contentRange ? { 'Content-Range': contentRange } : {}) });
       response.end(method === 'HEAD' ? undefined : body);
     };
     if (!['GET', 'HEAD'].includes(method)) { send(405, Buffer.alloc(0)); return; }
     if (!resource) { send(404, Buffer.alloc(0)); return; }
     if (method === 'HEAD') { send(200, resource.body); return; }
-    if (!rangeHeader || resource.type !== 'audio/wav'
-      || (request.headers['if-range'] && request.headers['if-range'] !== '"room-tone-two-seconds"')) {
+    if (!rangeHeader || !resource.etag
+      || (request.headers['if-range'] && request.headers['if-range'] !== resource.etag)) {
       send(200, resource.body); return;
     }
     const range = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
@@ -137,24 +144,36 @@ const startProbeServer = async () => {
   if (!address || typeof address === 'string') throw new Error('The loopback media server did not acquire a port.');
   probeServer = server;
   probeOrigin = `http://127.0.0.1:${address.port}`;
-  const url = `${probeOrigin}/__room-tone/a.wav`;
-  const head = await fetch(url, { method: 'HEAD', headers: { Range: 'bytes=0-1' } });
-  expect(head.status).toBe(200);
-  expect(head.headers.get('content-length')).toBe(String(tone.length));
-  expect((await head.arrayBuffer()).byteLength).toBe(0);
-  expect(Buffer.from(await (await fetch(url)).arrayBuffer()).equals(tone)).toBe(true);
-  for (const [range, start, end] of [['bytes=0-1', 0, 1], ['bytes=16022-16277', 16022, 16277],
-    ['bytes=16022-', 16022, tone.length - 1], ['bytes=-1', tone.length - 1, tone.length - 1]] as const) {
-    const response = await fetch(url, { headers: { Range: range } });
-    expect(response.status).toBe(206);
-    expect(response.headers.get('content-length')).toBe(String(end - start + 1));
-    expect(response.headers.get('content-range')).toBe(`bytes ${start}-${end}/${tone.length}`);
-    expect(Buffer.from(await response.arrayBuffer()).equals(tone.subarray(start, end + 1))).toBe(true);
+  for (const [format, body, contentType] of [['wav', tone, 'audio/wav'], ['mp3', mp3, 'audio/mpeg']] as const) {
+    const url = `${probeOrigin}/__room-tone/a.${format}`, etag = `"room-tone-${format}"`;
+    const head = await fetch(url, { method: 'HEAD', headers: { Range: 'bytes=0-1' } });
+    expect(head.status).toBe(200);
+    expect(head.headers.get('content-type')).toBe(contentType);
+    expect(head.headers.get('content-length')).toBe(String(body.length));
+    expect(head.headers.get('accept-ranges')).toBe('bytes');
+    expect(head.headers.get('etag')).toBe(etag);
+    expect((await head.arrayBuffer()).byteLength).toBe(0);
+    expect(Buffer.from(await (await fetch(url)).arrayBuffer()).equals(body)).toBe(true);
+    const middle = Math.floor(body.length / 2);
+    for (const [range, start, end] of [['bytes=0-1', 0, 1], [`bytes=${middle}-${middle + 255}`, middle, middle + 255],
+      [`bytes=${middle}-`, middle, body.length - 1], ['bytes=-1', body.length - 1, body.length - 1]] as const) {
+      const response = await fetch(url, { headers: { Range: range, 'If-Range': etag } });
+      expect(response.status).toBe(206);
+      expect(response.headers.get('content-length')).toBe(String(end - start + 1));
+      expect(response.headers.get('content-range')).toBe(`bytes ${start}-${end}/${body.length}`);
+      expect(response.headers.get('etag')).toBe(etag);
+      expect(Buffer.from(await response.arrayBuffer()).equals(body.subarray(start, end + 1))).toBe(true);
+    }
+    const changed = await fetch(url, { headers: { Range: 'bytes=0-1', 'If-Range': '"unrecognized"' } });
+    expect(changed.status).toBe(200);
+    expect(changed.headers.get('content-length')).toBe(String(body.length));
+    expect(changed.headers.get('content-range')).toBeNull();
+    expect(Buffer.from(await changed.arrayBuffer()).equals(body)).toBe(true);
+    const unavailable = await fetch(url, { headers: { Range: `bytes=${body.length}-` } });
+    expect(unavailable.status).toBe(416);
+    expect(unavailable.headers.get('content-range')).toBe(`bytes */${body.length}`);
+    expect((await unavailable.arrayBuffer()).byteLength).toBe(0);
   }
-  const unavailable = await fetch(url, { headers: { Range: `bytes=${tone.length}-` } });
-  expect(unavailable.status).toBe(416);
-  expect(unavailable.headers.get('content-range')).toBe(`bytes */${tone.length}`);
-  expect((await unavailable.arrayBuffer()).byteLength).toBe(0);
 };
 
 test.beforeAll(async () => {
@@ -178,9 +197,10 @@ test.beforeAll(async () => {
   await startProbeServer();
 });
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
   caseRequestStart = requestSequence;
-  await page.goto(`${probeOrigin}/__room-probe`);
+  caseFormat = testInfo.title.startsWith('real scheduled start') ? 'mp3' : 'wav';
+  await page.goto(`${probeOrigin}/__room-probe${caseFormat === 'mp3' ? '?format=mp3' : ''}`);
   await page.waitForFunction(() => Boolean(window.roomProbe));
 });
 
@@ -189,8 +209,9 @@ test.afterEach(async ({ page }, testInfo) => {
   const state = await page.evaluate(() => window.roomProbe?.state()).catch(() => undefined);
   if (state) {
     const path = testInfo.outputPath('room-playback-evidence.json');
-    await writeFile(path, JSON.stringify({ ...state, fixture: { durationSeconds: toneDurationSeconds,
-      sampleRate: toneSampleRate, bytes: toneBytes, sha256: toneSha256 },
+    const nativeDurationSeconds = state.duration
+      ?? state.mediaEvents.filter(event => event.event === 'loadedmetadata').at(-1)?.duration ?? null;
+    await writeFile(path, JSON.stringify({ ...state, fixture: { ...fixtures[caseFormat], nativeDurationSeconds },
       transport: transport.filter(item => item.sequence > caseRequestStart) }, null, 2));
     await testInfo.attach('room-playback-evidence', { contentType: 'application/json', path });
   }
@@ -237,9 +258,11 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().readyState)).toBeGreaterThanOrEqual(3);
   await expect.poll(() => page.evaluate((durationSeconds) => {
     const state = window.roomProbe.state();
-    return { finiteFixtureDuration: Math.abs((state.duration ?? 0) - durationSeconds) < 0.005,
+    // Match the social MP3 gate's 150 ms boundary for native gapless/frame-padding differences.
+    return { finiteFixtureDuration: Number.isFinite(state.duration) && (state.duration ?? 0) > 0
+      && Math.abs((state.duration ?? 0) - durationSeconds) < 0.15,
       seekable: state.seekable.length > 0 };
-  }, toneDurationSeconds), { message: 'Native PCM must expose its real fixture duration and seekable range before scheduling.' })
+  }, fixtures.mp3.durationSeconds), { message: 'Native MP3 must expose its real fixture duration and seekable range before scheduling.' })
     .toEqual({ finiteFixtureDuration: true, seekable: true });
   const anchor = await page.evaluate(() => performance.now() + 350);
   await page.evaluate((anchorMonotonicMs) => window.roomProbe.apply(5, { anchorMonotonicMs }), anchor);
@@ -256,7 +279,7 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
   await expectCredibleProgress(page);
   expect(await page.evaluate(() => window.roomProbe.correct((window.roomProbe.state().currentTime ?? 0) + 0.25))).toBe('rate');
   expect(await page.evaluate(() => window.roomProbe.state().rate)).toBe(1.05);
-  await page.evaluate((position) => window.roomProbe.seekThroughNativeElement(position), toneDurationSeconds - 0.2);
+  await page.evaluate(() => window.roomProbe.seekThroughNativeElement(window.roomProbe.state().duration! - 0.2));
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().snapshot.status)).toBe('ended');
   const ended = await page.evaluate(() => window.roomProbe.state());
   expect(ended.snapshot.currentItem?.title).toBe('b');

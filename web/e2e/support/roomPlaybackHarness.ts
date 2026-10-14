@@ -52,10 +52,11 @@ const createHarness = () => {
     onIntent: (value) => intents.push(value),
     onObservation: (value) => observations.push(value)
   });
+  const format = new URL(location.href).searchParams.get('format') === 'mp3' ? 'mp3' : 'wav';
   const queue = ['a', 'b'].map((name, index) => ({
     id: `00000000000000000000000${index + 1}`, title: name,
     artworkUrl: '', artistNames: [], mediaType: 'audio' as const,
-    streamUrl: `/__room-tone/${name}.wav`
+    streamUrl: `/__room-tone/${name}.${format}`
   }));
   return {
     /** Translate each synthetic playback occurrence once; membership revisions keep its anchor. */

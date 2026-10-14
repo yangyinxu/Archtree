@@ -1134,9 +1134,15 @@ with its own fixture processes and evidence directory, then runs the complete
 social matrix. The ordinary browser job first verifies native scheduled startup,
 pause/resume, rate correction, and natural completion in all three engines with
 zero retries and a separate evidence directory, then runs its complete matrix.
-Its synthetic fifteen-second 48 kHz PCM WAV leaves room for native startup and controller
-convergence before the rate/end transitions, and uses real loopback HTTP with verified HEAD and
-Range responses; evidence includes native metadata, events, and transport outcomes.
+The prepare/seek trace uses its original synthetic two-second 8 kHz PCM WAV. The
+combined scheduled-start, pause/resume, rate, and end scenario uses the existing
+original synthetic `room-tone.mp3`, shared with the independent social format gate.
+Both use real loopback HTTP with byte-verified HEAD, Range, and If-Range responses;
+evidence records each format's actual bytes, SHA-256, native metadata, events, and
+transport outcomes. Completion seeks to 0.2 seconds before the native MP3 duration
+and still requires a real end event without automatic queue advancement.
+MP3 duration uses the social format gate's 150 ms boundary for native gapless and
+frame-padding differences; readiness and continuous-clock checks remain unchanged.
 Diagnostics inspect native ranges only after finite metadata is available, since
 an early WebKit range query can change its unknown-duration cache. Synthetic
 playback epochs retain their own clock anchors, including explicitly scheduled starts.
