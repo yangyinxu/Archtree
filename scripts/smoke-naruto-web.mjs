@@ -1,0 +1,262 @@
+import assert from 'node:assert/strict';
+import {mkdir, mkdtemp, readFile, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {mock} from 'node:test';
+import jwt from 'jsonwebtoken';
+import {ObjectId} from 'mongodb';
+import {chromium} from '@playwright/test';
+import {serverTestEnvironment} from './lib/server-test-environment.mjs';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const evidence = path.join(root, 'naruto-web', 'qa');
+const executablePath = process.env.NARUTO_HOSTED_EXTENSION_EXECUTABLE?.trim();
+const extensionMode = Boolean(executablePath);
+const screenshotName = name => `${extensionMode ? 'extension-' : ''}${name}.png`;
+const extension = path.resolve(root, '..', 'naruto-mobile', 'build', 'chrome-extension');
+Object.assign(process.env, serverTestEnvironment(), {NODE_ENV: 'test',
+  ...(extensionMode ? {OPENAI_API_KEY: 'synthetic-hosted-smoke-provider-key'} : {})});
+delete process.env.AWS_SESSION_TOKEN;
+const userId = '64b000000000000000000001', sessionId = '64c000000000000000000001';
+let classificationCalls = 0, providerRequests = 0;
+const classificationKinds = new Set();
+let sessionCookie;
+// Installed only in this process: real cookie/JWT middleware and the fixed protocol still run.
+if (extensionMode) {
+  await readFile(path.join(extension, 'manifest.json'));
+  const userModule = await import('../src/models/user.ts');
+  const sessionModule = await import('../src/models/authSession.ts');
+  const identityModule = await import('../src/models/authIdentity.ts');
+  const passkeyModule = await import('../src/models/passkey.ts');
+  const classifierModule = await import('../src/narutoMobile/openAiClassifierService.ts');
+  const defaultExport = module => module.default?.default ?? module.default;
+  const User = defaultExport(userModule), AuthSession = defaultExport(sessionModule), AuthIdentity = defaultExport(identityModule);
+  const Passkey = passkeyModule.Passkey ?? passkeyModule.default?.Passkey;
+  const Classifier = classifierModule.NarutoMobileOpenAiClassifier ?? classifierModule.default?.NarutoMobileOpenAiClassifier;
+  mock.method(AuthSession, 'findActiveById', async id => id === sessionId ? {userId} : null);
+  mock.method(User, 'findById', async id => id === userId ? {_id: new ObjectId(userId), email: 'synthetic-hosted@example.test',
+    role: 'user', emailVerified: true, displayName: 'Synthetic hosted account'} : null);
+  mock.method(AuthIdentity, 'listForUser', async () => []);
+  mock.method(Passkey, 'listForUser', async () => []);
+  mock.method(globalThis, 'fetch', async () => {
+    providerRequests += 1;
+    throw new Error('Hosted smoke prohibits all server outbound fetch calls.');
+  });
+  mock.method(Classifier.prototype, 'classify', async request => {
+    classificationCalls += 1;
+    classificationKinds.add(request.kind);
+    const serialized = JSON.stringify(request);
+    assert.doesNotMatch(serialized, /Synthetic Bilibili account|Fixture author|Fixture reply author|123456789012345678|synthetic-hosted-smoke-provider-key/);
+    const assertPrivateFieldsAbsent = value => {
+      if (!value || typeof value !== 'object') return;
+      for (const [key, child] of Object.entries(value)) {
+        assert.equal(/author|sourceUrl|sourcePageUrl|credential|authorization|cookie|password|apiKey|accessToken|refreshToken/i.test(key), false,
+          'The server classifier receives only de-identified versioned fields.');
+        assertPrivateFieldsAbsent(child);
+      }
+    };
+    assertPrivateFieldsAbsent(request);
+    return {protocolVersion: 1, kind: request.kind, model: 'gpt-6-luna',
+      promptVersion: request.kind === 'triage' ? 'naruto-decisions-v1' : 'naruto-opinion-v4',
+      results: request.batch.map(item => {
+        if (request.kind === 'triage') return {opinionId: item.opinionId, decision: 'analyze', gameRelevant: true,
+          informationType: 'product_feedback', reasonCode: 'synthetic_keep_for_detail'};
+        const strong = item.opinion.text.includes('后摇');
+        return {opinionId: item.opinionId, gameRelevant: true, relevanceScore: 0.96, insightValue: strong ? 'strong' : 'weak',
+          informationType: strong ? 'product_feedback' : 'community_chatter', claimObject: strong ? '二技能后摇' : '',
+          claim: strong ? '技能后摇过长导致无法反打' : '', specificitySignals: strong ? ['mechanism', 'impact'] : [],
+          reasonCodes: [strong ? 'synthetic_mechanic_issue' : 'synthetic_context_needed'],
+          topics: strong ? [{name: '决斗场体验', sentiment: 'negative', evidence: item.opinion.text}] : [],
+          emotion: 'frustration', stance: 'complaint', severity: strong ? 4 : 2, behaviorIntents: [], playerSegment: 'unknown',
+          actionability: strong ? 'high' : 'low', confidence: 0.93, needsReview: !strong};
+      }), usage: {inputTokens: 100, cachedInputTokens: 20, outputTokens: request.kind === 'triage' ? 0 : 30,
+        reasoningTokens: request.kind === 'triage' ? 0 : 5, totalTokens: request.kind === 'triage' ? 100 : 130}};
+  });
+  sessionCookie = jwt.sign({userId, email: 'synthetic-hosted@example.test', sessionId, tokenType: 'access'},
+    process.env.JWT_SECRET, {algorithm: 'HS256', expiresIn: 900});
+}
+const application = await import('../src/app.ts');
+const createApp = application.createApp ?? application.default?.createApp;
+const app = createApp();
+const server = await new Promise((resolve, reject) => {
+  const listening = app.listen(3765, '127.0.0.1', () => resolve(listening));
+  listening.once('error', reject);
+});
+let browser, context;
+const profile = await mkdtemp(path.join(tmpdir(), 'naruto-hosted-qa-'));
+try {
+  await mkdir(evidence, {recursive: true});
+  if (extensionMode) {
+    // Chrome's optional debugging capability is confined to this fresh, temporary profile and local pipe.
+    context = await chromium.launchPersistentContext(profile, {executablePath, headless: true, acceptDownloads: true,
+      viewport: {width: 1440, height: 1100}, ignoreDefaultArgs: ['--disable-extensions'], args: ['--enable-unsafe-extension-debugging']});
+  } else {
+    browser = await chromium.launch({headless: true});
+    context = await browser.newContext({acceptDownloads: true, viewport: {width: 1440, height: 1100}});
+  }
+  const origin = 'http://127.0.0.1:3765';
+  const unexpected = [], errors = [];
+  let bilibiliRequests = 0;
+  let loginBlocked = extensionMode;
+  const publishedAt = new Date(Date.now() - 86_400_000).toISOString();
+  await context.route('**/*', async route => {
+    const url = route.request().url();
+    if (url.startsWith(`${origin}/`)) {
+      if (extensionMode && new URL(url).pathname === '/naruto/api/v1/classify') {
+        const headers = route.request().headers();
+        assert.equal(headers['x-finitude-account-viewer'], userId, 'Every classifier request is bound to the resolved cookie viewer.');
+        assert.equal(headers.authorization, undefined, 'The browser must never expose a Bearer/provider credential.');
+      }
+      return route.continue();
+    }
+    if (url.startsWith('blob:')) return route.continue();
+    const parsed = new URL(url);
+    if (extensionMode && parsed.protocol === 'https:'
+      && ['www.bilibili.com', 'search.bilibili.com', 't.bilibili.com', 'api.bilibili.com'].includes(parsed.hostname)) {
+      bilibiliRequests += 1;
+      if (parsed.hostname === 'api.bilibili.com' && parsed.pathname === '/x/web-interface/nav') {
+        if (loginBlocked) return route.abort('blockedbyclient');
+        return route.fulfill({contentType: 'application/json', body: JSON.stringify({code: 0,
+          data: {isLogin: true, uname: 'Synthetic Bilibili account', mid: 12345678}})});
+      }
+      if (parsed.hostname === 'search.bilibili.com') {
+        const links = parsed.pathname === '/video'
+          ? [0, 1, 2].map(index => `<div><a href="https://www.bilibili.com/video/BVFixture${index}" title="火影忍者手游 Fixture video ${index}">火影忍者手游 Fixture video ${index}</a></div>`).join('')
+          : '<div><a href="https://www.bilibili.com/opus/1234567890123">火影忍者手游 Fixture dynamic</a></div>';
+        return route.fulfill({contentType: 'text/html; charset=utf-8', body: `<!doctype html><meta charset="utf-8"><title>Synthetic Bilibili search</title>${links}`});
+      }
+      const title = parsed.pathname.includes('/opus/') ? '火影忍者手游 Fixture dynamic' : '火影忍者手游 Fixture video';
+      return route.fulfill({contentType: 'text/html; charset=utf-8', body: `<!doctype html><meta charset="utf-8"><title>${title}_哔哩哔哩</title>
+        <meta property="og:description" content="Synthetic public game context">
+        <meta itemprop="datePublished" content="${publishedAt}">
+        <div id="commentapp">
+          <div class="reply-item" data-rpid="1001"><a class="user-name" href="https://space.bilibili.com/123456789012345678">Fixture author</a><span class="reply-content">技能后摇太长，无法反打</span><span class="like">12</span><time>1天前</time></div>
+          <div class="sub-reply-item" data-rpid="1002" data-parent-id="1001"><span class="user-name">Fixture reply author</span><span class="sub-reply-content">我也遇到同样的问题</span><span class="like">2</span></div>
+        </div>`});
+    }
+    if (extensionMode && parsed.protocol === 'chrome-extension:') return route.continue();
+    unexpected.push(new URL(url).origin);
+    return route.abort();
+  });
+  let original;
+  if (extensionMode) {
+    const browserSession = await context.browser().newBrowserCDPSession();
+    try {
+      const loaded = await browserSession.send('Extensions.loadUnpacked', {path: extension});
+      assert.equal(typeof loaded.id, 'string');
+    } finally {await browserSession.detach();}
+    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', {timeout: 15_000});
+    assert.match(worker.url(), /^chrome-extension:\/\//);
+    await context.addCookies([{name: 'session_token', value: sessionCookie, url: origin, httpOnly: true, sameSite: 'Lax'}]);
+    original = await context.newPage();
+    await original.goto('https://www.bilibili.com/video/BVOriginal', {waitUntil: 'domcontentloaded'});
+  }
+  const page = await context.newPage();
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`${origin}/naruto/`);
+  if (extensionMode) {
+    assert.doesNotMatch(await page.evaluate(() => document.cookie), /session_token/,
+      'The synthetic Archtree credential must remain HttpOnly.');
+    const sessionProbe = await page.evaluate(async () => {
+      const response = await fetch('/auth/browser/session', {credentials: 'same-origin'});
+      const body = await response.json();
+      return {status: response.status, userId: body.user?.id, message: body.message};
+    });
+    assert.equal(sessionProbe.status, 200, `Synthetic cookie/session setup failed: ${sessionProbe.message}`);
+    assert.equal(sessionProbe.userId, userId);
+  }
+  await page.getByRole('heading', {name: /把社区声音/}).waitFor();
+  assert.equal(await page.getByLabel('Archtree 密码').count(), 0);
+  await page.screenshot({path: path.join(evidence, screenshotName('home')), fullPage: true});
+  if (extensionMode) {
+    await page.getByText('已登录 Archtree', {exact: true}).waitFor({timeout: 15_000});
+    await page.getByRole('button', {name: /扩展.*教程/}).click();
+    await page.getByRole('button', {name: '连接扩展并检查 B站'}).click();
+    await page.getByText('B站登录检查页面无法读取。请确认 api.bilibili.com 未被 Chrome 或其他扩展拦截，再重新连接。', {exact: true}).waitFor({timeout: 45_000});
+    assert.equal(await page.getByText('Chrome 扩展状态格式不正确，请更新扩展。', {exact: true}).count(), 0);
+    loginBlocked = false;
+    await page.getByRole('button', {name: '连接扩展并检查 B站'}).click();
+    await page.getByText('B站已登录，可以开始调查。', {exact: true}).waitFor({timeout: 45_000});
+    await page.getByRole('button', {name: '返回并创建调查'}).click();
+    assert.equal(await page.getByRole('button', {name: /开始调查/}).isEnabled(), true);
+  } else {
+    await page.getByText('本地演示', {exact: true}).click();
+  }
+  await page.getByRole('button', {name: /开始调查/}).click();
+  const reportButton = page.getByRole('button', {name: '查看调查报告'});
+  const completionTimeout = extensionMode ? 120_000 : 30_000;
+  try {
+    // Stop on a visible collection failure instead of waiting for an impossible report.
+    await Promise.race([
+      reportButton.waitFor({timeout: completionTimeout}),
+      page.getByRole('alert').waitFor({timeout: completionTimeout}).then(() => {throw new Error('Hosted smoke displayed an error.');}),
+      page.getByRole('button', {name: '继续采集', exact: true}).waitFor({timeout: completionTimeout})
+        .then(() => {throw new Error('Hosted smoke paused before completing collection.');})
+    ]);
+  } catch (error) {
+    // This fresh test profile contains only synthetic account and content fixtures.
+    await writeFile(path.join(evidence, `${extensionMode ? 'extension-' : ''}failure.txt`), await page.locator('body').innerText()).catch(() => undefined);
+    await page.screenshot({path: path.join(evidence, screenshotName('failure')), fullPage: true}).catch(() => undefined);
+    throw error;
+  }
+  if (extensionMode) {
+    const stored = await page.evaluate(() => new Promise((resolveRead, reject) => {
+      const request = indexedDB.open('naruto-browser-local-v1', 1);
+      request.onerror = () => reject(new Error('Cannot inspect synthetic local run.'));
+      request.onsuccess = () => {
+        const database = request.result, read = database.transaction('runs').objectStore('runs').getAll();
+        read.onsuccess = () => {database.close(); resolveRead(read.result);};
+        read.onerror = () => {database.close(); reject(new Error('Cannot read synthetic local run.'));};
+      };
+    }));
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0].manifest.state, 'completed');
+    assert.equal(stored[0].manifest.analysis.mode, 'ai');
+    assert.equal(stored[0].manifest.analysis.strongOpinions, 4);
+    assert.equal(stored[0].contents.length, 4);
+    assert.equal(stored[0].opinions.length, 12);
+    assert.equal(stored[0].opinions.some(item => item.parentSourceRecordId === '1001'), true);
+    assert.equal(stored[0].cache.length, 12);
+    assert.deepEqual([...classificationKinds].sort(), ['detail', 'triage']);
+    assert.ok(classificationCalls >= 2);
+    assert.equal(original.isClosed(), false);
+    assert.equal(original.url(), 'https://www.bilibili.com/video/BVOriginal');
+    assert.equal(context.pages().filter(tab => tab.url().includes('bilibili.com')).length, 1);
+  }
+  const archiveDownload = page.waitForEvent('download');
+  await page.getByRole('button', {name: '导出调查 ZIP'}).click();
+  const archive = path.join(profile, 'investigation.zip');
+  await (await archiveDownload).saveAs(archive);
+  assert.equal((await readFile(archive)).subarray(0, 2).toString(), 'PK');
+  await reportButton.click();
+  await page.getByRole('button', {name: '导出 HTML'}).waitFor();
+  await page.screenshot({path: path.join(evidence, screenshotName('report')), fullPage: true});
+  const htmlDownload = page.waitForEvent('download');
+  await page.getByRole('button', {name: '导出 HTML'}).click();
+  await (await htmlDownload).saveAs(path.join(profile, 'report.html'));
+  await page.getByRole('button', {name: /历史调查/}).click();
+  await page.locator('.run-row').first().waitFor();
+  await page.getByLabel('选择调查 ZIP 文件').setInputFiles(archive);
+  await page.waitForFunction(() => document.querySelectorAll('.run-row').length === 2);
+  await page.reload();
+  await page.getByRole('button', {name: /历史调查/}).click();
+  await page.waitForFunction(() => document.querySelectorAll('.run-row').length === 2);
+  await page.getByRole('button', {name: /浏览完整记录/}).first().click();
+  await page.getByLabel('搜索完整记录').waitFor();
+  await page.screenshot({path: path.join(evidence, screenshotName('records')), fullPage: true});
+  assert.deepEqual(errors, [], 'Hosted UI must have no uncaught browser errors.');
+  assert.deepEqual(unexpected, [], 'Local demo/ZIP/report must not send data to other origins.');
+  assert.equal(providerRequests, 0, 'No OpenAI/provider request may run during hosted smoke.');
+  console.log(extensionMode
+    ? `Naruto hosted extension smoke passed: isolated Chrome ${context.browser().version()}, ${bilibiliRequests} fixture Bilibili requests, 4 sources/12 raw records, ${classificationCalls} mocked server classification requests, report HTML, ZIP round trip, IndexedDB reload, and no provider calls.`
+    : 'Naruto hosted browser smoke passed: local demo, report HTML, ZIP round trip, IndexedDB reload, record browsing, and no external data requests.');
+} finally {
+  await context?.close();
+  await browser?.close();
+  await new Promise(resolve => server.close(resolve));
+  assert.equal(path.dirname(path.resolve(profile)), path.resolve(tmpdir()));
+  assert.ok(path.basename(profile).startsWith('naruto-hosted-qa-'));
+  await rm(profile, {recursive: true, force: true});
+  mock.restoreAll();
+}

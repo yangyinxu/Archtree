@@ -20,6 +20,7 @@ jobs:
     outputs:
       build: ${{ steps.build.outcome }}
       e2e_typecheck: ${{ steps.e2e_typecheck.outcome }}
+      naruto_enabled: ${{ steps.naruto_release.outputs.enabled }}
 
     steps:
       - name: Check out repository
@@ -34,6 +35,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate optional Naruto release configuration
+        id: naruto_release
+        env:
+          NARUTO_SOURCE_COMMIT: ${{ vars.NARUTO_SOURCE_COMMIT }}
+        run: node scripts/naruto-release-configuration.mjs
+
+      - name: Check out the pinned Naruto source
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        uses: actions/checkout@v6
+        with:
+          repository: yangyinxu/naruto-mobile
+          ref: ${{ steps.naruto_release.outputs.commit }}
+          path: .naruto-source
+          token: ${{ secrets.NARUTO_SOURCE_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Install Naruto source dependencies
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        working-directory: .naruto-source
+        run: npm ci
+
+      - name: Install the Naruto source Chromium runtime
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        working-directory: .naruto-source
+        run: npx playwright install --with-deps chromium
+
+      - name: Test the pinned Naruto source
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        working-directory: .naruto-source
+        run: npm test
+
       - name: Build production server and listener
         id: build
         run: npm run build
@@ -41,6 +73,18 @@ jobs:
       - name: Type-check browser fixtures and release specs
         id: e2e_typecheck
         run: npm run typecheck:e2e --workspace @archtree/finitude-web
+
+      - name: Prepare the pinned Naruto hosted distribution
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        run: npm run prepare:naruto-web -- .naruto-source
+
+      - name: Install Chromium for the hosted Naruto smoke
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        run: npx playwright install chromium
+
+      - name: Verify the prepared Naruto browser distribution
+        if: ${{ steps.naruto_release.outputs.enabled == 'true' }}
+        run: npm run smoke:naruto-web
 
       # The exact bytes tested by both browser gates are the bytes staged for release.
       # web/dist/.vite/manifest.json is hidden, so hidden files must be included.
@@ -51,6 +95,7 @@ jobs:
           path: |
             web/dist
             engineering/dist
+            naruto-web/dist
           include-hidden-files: true
           if-no-files-found: error
           overwrite: true
@@ -273,10 +318,18 @@ jobs:
       - name: Create the versioned Elastic Beanstalk rollback bundle
         env:
           EB_BUNDLE_NAME: archtree-eb-${{ github.sha }}.zip
+          NARUTO_RELEASE_ENABLED: ${{ needs.build.outputs.naruto_enabled }}
         run: |
           cd elastic-beanstalk-artifact
-          zip -q -r "../${EB_BUNDLE_NAME}" \
-            .archtree-eb-artifact .ebextensions .platform RELEASE.json package-lock.json package.json localization src tsconfig.json web engineering
+          if [ "${NARUTO_RELEASE_ENABLED}" = 'true' ]; then test -d naruto-web/dist; fi
+          entries=(
+            .archtree-eb-artifact .ebextensions .platform RELEASE.json
+            package-lock.json package.json localization src tsconfig.json
+            web
+            engineering
+          )
+          if [ -d naruto-web/dist ]; then entries+=(naruto-web); fi
+          zip -q -r "../${EB_BUNDLE_NAME}" "${entries[@]}"
 
       - name: Bind the tested bundle to this workflow attempt
         env:

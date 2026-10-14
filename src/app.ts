@@ -16,6 +16,8 @@ import { createLocalizationRouter } from './routes/localizationRoutes';
 import { createEngineeringRouter } from './routes/engineeringRoutes';
 import videoRoutes from './routes/videoRoutes';
 import narutoMobileRoutes from './routes/narutoMobileRoutes';
+import { createNarutoBrowserRouter } from './narutoMobile/browserRoutes';
+import { mountNarutoBrowserApplication } from './narutoMobile/browserApplication';
 import { createSocialRouter } from './routes/socialRoutes';
 import { createRoomRouter } from './routes/roomRoutes';
 import { createAdminCapabilitiesRouter } from './routes/adminCapabilitiesRoutes';
@@ -52,6 +54,8 @@ export interface CreateAppOptions {
   lifecycle?: ServerLifecycle;
   /** Overrides the production listener bundle location for isolated route tests. */
   listenerDistPath?: string;
+  /** Overrides the Naruto browser bundle location for isolated route tests. */
+  narutoDistPath?: string;
   /** Overrides the generated internal engineering guide for isolated route tests. */
   engineeringDistPath?: string;
   /** Overrides generated localization artifacts for isolated route tests. */
@@ -262,6 +266,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
 
   // Authenticate paid Naruto requests before accepting their bounded JSON bodies.
   app.use('/naruto-mobile/api/v1', narutoMobileRoutes);
+  app.use('/naruto/api/v1', createNarutoBrowserRouter());
 
   // Social authentication and its smaller JSON limit precede the general parser.
   app.use('/api/social/v1', createRoomRouter());
@@ -293,6 +298,8 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   const listenerDistPath = options.listenerDistPath
     ?? path.resolve(__dirname, '..', 'web', 'dist');
   mountListenerApplication(app, listenerDistPath);
+  mountNarutoBrowserApplication(app, options.narutoDistPath
+    ?? path.resolve(__dirname, '..', 'naruto-web', 'dist'));
 
   app.get('/', attachOptionalAuth, async (req, res, next) => {
     try {

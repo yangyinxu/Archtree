@@ -1,0 +1,90 @@
+import express, { type Application, type NextFunction, type Request, type Response } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const applicationPath = '/naruto';
+const extensionFilename = 'naruto-mobile-chrome-extension.zip';
+
+/** Reads emitted Vite resources while rejecting paths outside the bundle. */
+const manifestAssets = (distPath: string) => {
+  const assets = new Set<string>();
+  try {
+    const manifest: unknown = JSON.parse(fs.readFileSync(path.join(distPath, '.vite', 'manifest.json'), 'utf8'));
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return assets;
+    for (const value of Object.values(manifest)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const chunk = value as { file?: unknown; css?: unknown; assets?: unknown };
+      const filenames = [chunk.file, ...Array.isArray(chunk.css) ? chunk.css : [],
+        ...Array.isArray(chunk.assets) ? chunk.assets : []];
+      for (const filename of filenames) {
+        if (typeof filename !== 'string' || filename.includes('\\') || filename === 'release-source.json') continue;
+        const resolved = path.resolve(distPath, filename);
+        const relative = path.relative(distPath, resolved);
+        if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+          && relative.split(path.sep).every(segment => !segment.startsWith('.'))) assets.add(resolved);
+      }
+    }
+  } catch {
+    // A missing or malformed manifest serves no resources and disables immutable caching.
+  }
+  return assets;
+};
+
+/** Hosts only public bundle resources and extensionless SPA paths under `/naruto`. */
+export const mountNarutoBrowserApplication = (app: Application, distPath: string) => {
+  const indexPath = path.resolve(distPath, 'index.html');
+  const emittedAssets = manifestAssets(distPath);
+  const serveStatic = express.static(distPath, {
+    index: false,
+    redirect: false,
+    dotfiles: 'deny',
+    setHeaders: (res, filename) => {
+      res.setHeader('Cache-Control', path.resolve(filename) !== indexPath
+        && path.resolve(filename) !== path.resolve(distPath, extensionFilename)
+        && emittedAssets.has(path.resolve(filename))
+        ? 'public, max-age=31536000, immutable' : 'no-cache');
+      if (path.resolve(filename) === path.resolve(distPath, extensionFilename)) {
+        res.setHeader('Content-Disposition', `attachment; filename="${extensionFilename}"`);
+      }
+    }
+  });
+  app.use(applicationPath, (req, res, next) => {
+    let relativePath: string;
+    try { relativePath = decodeURIComponent(req.path).replace(/^\/+/, ''); }
+    catch {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(400).json({ message: 'The requested Naruto path is invalid.' });
+    }
+    // Backend routes are mounted earlier; protect the entire namespace, including unknown versions.
+    if (/^api(?:\/|$)/i.test(relativePath)) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(404).json({ message: 'The requested Naruto API was not found.' });
+    }
+    if (!fs.existsSync(indexPath)) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).json({ message: 'The Naruto Web bundle is unavailable. Prepare naruto-web/dist before starting the site.' });
+    }
+    const resourcePath = path.resolve(distPath, relativePath);
+    if (relativePath === 'index.html' || relativePath === extensionFilename
+      || (relativePath !== 'release-source.json' && emittedAssets.has(resourcePath))) {
+      return serveStatic(req, res, next);
+    }
+    return next();
+  });
+  const sendIndex = (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(indexPath, error => { if (error) next(error); });
+  };
+  app.get(applicationPath, sendIndex);
+  app.get(`${applicationPath}/*`, (req, res, next) => {
+    const relativePath = decodeURIComponent(req.path.slice(applicationPath.length)).replace(/^\/+/, '');
+    if (/^assets(?:\/|$)/i.test(relativePath)
+      || relativePath.includes('\\')
+      || relativePath.split('/').some(segment => segment.startsWith('.'))
+      || path.posix.extname(relativePath) !== '') {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(404).json({ message: 'The requested Naruto asset was not found.' });
+    }
+    return sendIndex(req, res, next);
+  });
+};

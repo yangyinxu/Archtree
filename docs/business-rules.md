@@ -1643,8 +1643,52 @@ The wire protocol and operational bounds are documented in
 ## Naruto Mobile private analysis proxy
 
 - Naruto Mobile collection, Chrome access, raw records, cache, and reports remain
-  on the user's Windows computer. Archtree receives only the bounded,
+  on the user's computer. Archtree receives only the bounded,
   de-identified classification fields required by the versioned protocol.
+- The hosted Naruto Web entry uses a Chrome extension for collection in the
+  user's own signed-in browser. The server does not run Chrome, collect Bilibili
+  cookies, or store raw collection data, local tasks, caches, or reports.
+- Naruto Web requires no EXE. The existing Windows EXE remains available with
+  its existing collection, analysis, and export behavior.
+- Browser-local tasks retain recoverable progress when the Web page closes.
+  Reopening the page restores the last committed browser-local checkpoint and
+  offers an explicit resume; interrupted analysis reuses saved results without
+  silently discarding collected records. Users can
+  explicitly export local data and reports in desktop-compatible formats.
+  Browser site-data removal deletes those local records, so the Web explains
+  this boundary and offers investigation ZIP backups.
+- Transient browser analysis transport failures use bounded retries while
+  preserving completed local results. Exhausted detail retries leave the
+  investigation recoverable and offer explicit resume from saved results.
+  Cancellation and account transitions never retry work under another account.
+- The browser collector scrolls to trigger public comment loading and waits for
+  lazily mounted comments. An unreadable or still-loading comment area remains
+  pending for explicit retry; it must not silently become a completed title-only
+  source. A rendered explicit empty state may complete the source, including a
+  visible zero-comment count paired with a loaded end-of-comments state. An end
+  marker alone is insufficient. On the first
+  explicit resume after this recovery change, an older live investigation retries
+  saved sources with only creator/title evidence once, preserving every saved
+  record, pending source, deduplication identity, and elapsed collection time.
+- Browser collection and login checks open their tool tabs in a separate, newly
+  created normal Chrome window without requesting focus. Each collection uses
+  one such window for its parallel tabs and creates its own tab group named
+  `火影调查` inside it. The user's existing window, active tab, and groups are
+  not adopted, moved, or selected by the collector.
+- When background comments remain unreadable, the browser collector may activate
+  its own investigation tab inside the separate collection window for one
+  bounded retry. These retries run one at a time and never request window focus.
+  It restores the previous selection inside that window only if the user has
+  not changed it. Paused or expired work does not start queued retries.
+- The browser collector never adopts other groups or pre-existing user tabs.
+  Pause, completion, and recovery manage only individually owned tabs whose
+  navigation is still owned; user-added or repurposed tabs remain open.
+  An empty collection window closes naturally after its last owned tab closes;
+  a window containing user-added or repurposed tabs stays open. Closing the
+  collection window interrupts collection without falling back to a user window.
+  A platform-added tracking query or trailing slash on the same canonical
+  content does not relinquish ownership. Another content identity or changed
+  tab-group/window placement does.
 - The proxy is not an OpenAI-compatible pass-through. The server fixes the
   model, prompts, schemas, reasoning level, output ceiling, provider endpoint,
   and Responses `store: false`; client attempts to add fields or select capabilities fail.
@@ -1652,7 +1696,7 @@ The wire protocol and operational bounds are documented in
   GPT-6 Luna through Responses at medium reasoning. Screening discards only
   non-product feedback with both decision and category confidence/probability
   at least 0.95. Refused or uncertain answers proceed to detailed analysis;
-  the Windows client also retains comments when screening fails.
+  both desktop and browser clients retain comments when screening fails.
 - Detail prompt version `naruto-opinion-v4` retains the complete supporting
   judgment, cause, comparison, or impact in verbatim evidence. A topic with both
   favorable and unfavorable judgments uses mixed sentiment and evidence for
@@ -1663,9 +1707,17 @@ The wire protocol and operational bounds are documented in
   the existing access/refresh session contract, encrypts that session with
   operating-system secure storage, and never stores the account password. No
   Naruto-specific account, invitation, token, or allowlist record is created.
+- Naruto Web uses the existing shared HttpOnly browser session and displayed
+  account identity fence. The page and extension never persist an Archtree
+  password or Bearer credential. Account transitions immediately hide the old
+  account and prevent late analysis responses from adopting a replacement
+  account's identity. Desktop and Web requests share the analysis capacity.
 - Bearer authentication runs before the classifier body parser. Request bodies,
   comments, model output, authorization headers, and session tokens are not
   logged or stored by the proxy.
+- Browser classification requires exact same-origin proof, cookie authentication,
+  and the current displayed account identity before the bounded body parser.
+  The desktop analysis API remains Bearer-only and rejects browser origins.
 
 ## Database and S3 Lifecycle
 
