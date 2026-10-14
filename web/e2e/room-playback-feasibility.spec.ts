@@ -12,6 +12,8 @@ let probeServer: Server | undefined;
 let probeOrigin = '';
 let requestSequence = 0, caseRequestStart = 0;
 let toneSha256 = '';
+let toneBytes = 0;
+const toneDurationSeconds = 15;
 const transport: { sequence: number; method: string; pathname: string; range: string | null; status: number;
   contentLength: number; contentRange: string | null; finished: boolean }[] = [];
 
@@ -20,11 +22,14 @@ const expectCredibleProgress = async (page: Page) => {
   const progress = await page.evaluate(() => new Promise<{ advancedSeconds: number; elapsedSeconds: number }>((resolve, reject) => {
     const media = document.querySelector('video');
     if (!media) { reject(new Error('The room media element is missing.')); return; }
-    let baseline = media.currentTime, startedAt = performance.now();
-    const resetWindow = () => { baseline = media.currentTime; startedAt = performance.now(); };
+    let baseline = media.currentTime, startedAt = performance.now(), windowVersion = 0, finished = false;
+    let confirmation: ReturnType<typeof setTimeout> | undefined;
+    const resetWindow = () => { windowVersion += 1; baseline = media.currentTime; startedAt = performance.now(); };
     const observeSeek = (event: Event) => { if (event.isTrusted) resetWindow(); };
     const cleanup = () => {
+      finished = true;
       clearTimeout(deadline);
+      clearTimeout(confirmation);
       media.removeEventListener('timeupdate', observe, true);
       media.removeEventListener('seeking', observeSeek);
       media.removeEventListener('seeked', observeSeek);
@@ -39,13 +44,26 @@ const expectCredibleProgress = async (page: Page) => {
       })}; see room-playback-evidence.json.`));
     }, 7_000);
     const observe = (event: Event) => {
+      if (finished) return;
       const advancedSeconds = media.currentTime - baseline, elapsedSeconds = (performance.now() - startedAt) / 1000;
       if (!event.isTrusted) return;
       // A real startup correction may seek; only the following continuous clock window proves natural progress.
       if (media.paused || media.seeking || media.readyState < 3 || elapsedSeconds <= 0 || advancedSeconds < 0
         || advancedSeconds > elapsedSeconds * Math.max(1, media.playbackRate) + 0.05) { resetWindow(); return; }
       if (advancedSeconds <= 0.02) return;
-      cleanup(); resolve({ advancedSeconds, elapsedSeconds });
+      if (confirmation !== undefined) return;
+      const sampleTime = media.currentTime, sampledAt = performance.now(), sampleWindowVersion = windowVersion;
+      // The same event can trigger an authoritative correction. Confirm after all its listeners finish.
+      confirmation = setTimeout(() => {
+        confirmation = undefined;
+        if (finished || sampleWindowVersion !== windowVersion || media.paused || media.seeking || media.readyState < 3) return;
+        const subsequentAdvance = media.currentTime - sampleTime;
+        if (subsequentAdvance < 0
+          || subsequentAdvance > (performance.now() - sampledAt) / 1000 * Math.max(1, media.playbackRate) + 0.05) {
+          resetWindow(); return;
+        }
+        cleanup(); resolve({ advancedSeconds, elapsedSeconds });
+      }, 0);
     };
     // Read the native clock before the controller can seek while handling this same event.
     media.addEventListener('timeupdate', observe, true);
@@ -61,9 +79,10 @@ const expectCredibleProgress = async (page: Page) => {
 
 /** Uses native loopback HTTP for both the probe and media; intercepted responses are not a real decoder transport. */
 const startProbeServer = async () => {
-  const tone = createTestTone().subarray(0, 44 + 2 * 8000 * 2);
-  tone.writeUInt32LE(tone.length - 8, 4);
-  tone.writeUInt32LE(tone.length - 44, 40);
+  // Keep the stock PCM long enough for real startup and controller convergence before testing rate/end transitions.
+  const tone = createTestTone();
+  expect((tone.length - 44) / tone.readUInt32LE(28)).toBe(toneDurationSeconds);
+  toneBytes = tone.length;
   toneSha256 = createHash('sha256').update(tone).digest('hex');
   const resources = new Map([
     ['/__room-probe', { body: Buffer.from('<!doctype html><html><body><script src="/__room-probe.js"></script></body></html>'), type: 'text/html; charset=utf-8' }],
@@ -169,7 +188,7 @@ test.afterEach(async ({ page }, testInfo) => {
   const state = await page.evaluate(() => window.roomProbe?.state()).catch(() => undefined);
   if (state) {
     const path = testInfo.outputPath('room-playback-evidence.json');
-    await writeFile(path, JSON.stringify({ ...state, fixture: { durationSeconds: 2, bytes: 32044, sha256: toneSha256 },
+    await writeFile(path, JSON.stringify({ ...state, fixture: { durationSeconds: toneDurationSeconds, bytes: toneBytes, sha256: toneSha256 },
       transport: transport.filter(item => item.sequence > caseRequestStart) }, null, 2));
     await testInfo.attach('room-playback-evidence', { contentType: 'application/json', path });
   }
@@ -214,12 +233,12 @@ test('real audio prepares and seeks without feedback; shared trace keeps one med
 test('real scheduled start, local pause, rate correction and natural end cannot echo commands', async ({ page }) => {
   await page.evaluate(() => window.roomProbe.apply(0));
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().readyState)).toBeGreaterThanOrEqual(3);
-  await expect.poll(() => page.evaluate(() => {
+  await expect.poll(() => page.evaluate((durationSeconds) => {
     const state = window.roomProbe.state();
-    return { finiteTwoSecondDuration: Math.abs((state.duration ?? 0) - 2) < 0.005,
+    return { finiteFixtureDuration: Math.abs((state.duration ?? 0) - durationSeconds) < 0.005,
       seekable: state.seekable.length > 0 };
-  }), { message: 'Native PCM must expose its real two-second duration and seekable range before scheduling.' })
-    .toEqual({ finiteTwoSecondDuration: true, seekable: true });
+  }, toneDurationSeconds), { message: 'Native PCM must expose its real fixture duration and seekable range before scheduling.' })
+    .toEqual({ finiteFixtureDuration: true, seekable: true });
   const anchor = await page.evaluate(() => performance.now() + 350);
   await page.evaluate((anchorMonotonicMs) => window.roomProbe.apply(5, { anchorMonotonicMs }), anchor);
   expect(await page.evaluate(() => window.roomProbe.state().paused)).toBe(true);
@@ -235,7 +254,7 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
   await expectCredibleProgress(page);
   expect(await page.evaluate(() => window.roomProbe.correct((window.roomProbe.state().currentTime ?? 0) + 0.25))).toBe('rate');
   expect(await page.evaluate(() => window.roomProbe.state().rate)).toBe(1.05);
-  await page.evaluate(() => window.roomProbe.seekThroughNativeElement(1.8));
+  await page.evaluate((position) => window.roomProbe.seekThroughNativeElement(position), toneDurationSeconds - 0.2);
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().snapshot.status)).toBe('ended');
   const ended = await page.evaluate(() => window.roomProbe.state());
   expect(ended.snapshot.currentItem?.title).toBe('b');

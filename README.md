@@ -1134,13 +1134,17 @@ with its own fixture processes and evidence directory, then runs the complete
 social matrix. The ordinary browser job first verifies native scheduled startup,
 pause/resume, rate correction, and natural completion in all three engines with
 zero retries and a separate evidence directory, then runs its complete matrix.
-Its synthetic two-second WAV uses real loopback HTTP with verified HEAD and
+Its synthetic fifteen-second WAV leaves room for native startup and controller
+convergence before the rate/end transitions, and uses real loopback HTTP with verified HEAD and
 Range responses; evidence includes native metadata, events, and transport outcomes.
 Diagnostics inspect native ranges only after finite metadata is available, since
 an early WebKit range query can change its unknown-duration cache. Synthetic
 playback epochs retain their own clock anchors, including explicitly scheduled starts.
 The pause/resume scenario proves natural clock movement both before pausing and
 after resuming; a native `playing` event alone does not prove advancing playback.
+The probe samples native progress before controller event handlers, then confirms
+the decoder remains ready and continuous after those handlers finish. A seek or
+readiness change in the same event cannot masquerade as stable playback.
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
