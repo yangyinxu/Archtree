@@ -1175,12 +1175,16 @@ The same two commands retain
 `WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L4101-L4144)
 disables WPE's viewport power-saving pause for hidden muted video elements,
 including audio-only sources. Media clocks, readiness, seeks, rates, and end events
-remain native. These commands also set `WPE_SHELL_DISABLE_MEDIA_DISK_CACHE=1`
+remain native. Both ordinary and social Linux test commands set
+`WPE_SHELL_DISABLE_MEDIA_DISK_CACHE=1`
 using [WPE's media cache setting](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L3345-L3359).
-This isolates the synthetic pause/seek scenario from the GStreamer download-cache
-completion path while retaining the default decoder and real HTTP/Range transport.
-The independent social gate sets none of these switches and continues
-to verify real audio and background playback under the default browser policy.
+This isolates native seek scenarios from the GStreamer download-cache completion
+path while retaining the default decoder and real HTTP/Range transport. With
+disk caching enabled, the Linux WPE backend can keep reporting current-frame
+data after a fully buffered seek even as its media clock advances. This CI
+isolation does not establish support for that default-cache path. The independent
+social gate keeps the default autoplay and visibility policies, and still requires
+real decoded readiness, continuous progress and synchronization within 750 ms.
 Both jobs retain preflight and full-matrix evidence, and every invocation is
 blocking. `release-artifact` needs all four jobs, so it is skipped unless every
 gate succeeds. It stages those same build bytes without rebuilding and binds each

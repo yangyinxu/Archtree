@@ -216,6 +216,7 @@ jobs:
       - name: Verify WebKit compressed audio before the complete social matrix
         env:
           PULSE_LATENCY_MSEC: '100'
+          WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
         run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=webkit-audio-formats --output=test-results/social-webkit-preflight
 
       - name: Run real social MongoDB, media, and WebSocket browser tests
@@ -223,6 +224,8 @@ jobs:
         env:
           # Bound the simulated device buffer; PulseAudio's default can add seconds before audio advances.
           PULSE_LATENCY_MSEC: '100'
+          # Keep real streaming/decoding without WPE's downloaded-file seek/buffering state mismatch.
+          WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
         run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web
 
       - name: Retain social browser evidence

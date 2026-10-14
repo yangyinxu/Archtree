@@ -146,12 +146,12 @@ test('native playback startup fails early without replacing the complete browser
     /^ {12}web\/test-results$/m);
 });
 
-test('ordinary browser audio isolation does not change the native social environment', async () => {
+test('ordinary browser gesture and viewport isolation does not change native social policy', async () => {
   const workflow = (await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n');
   const jobs = jobBlocks(workflow);
   const browser = jobs.get('browser-e2e')!;
   assert.doesNotMatch(workflow, /WEBKIT_GST_USE_PLAYBIN3/);
-  for (const name of ['WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS', 'WPE_SHELL_DISABLE_MEDIA_DISK_CACHE', 'FINITUDE_E2E_ISOLATED_AUDIO']) {
+  for (const name of ['WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS', 'FINITUDE_E2E_ISOLATED_AUDIO']) {
     const flag = `${name}: '1'`;
     const steps = stepBlocks(browser).filter(step => step.body.includes(flag));
     assert.equal(steps.length, 2);
@@ -160,6 +160,21 @@ test('ordinary browser audio isolation does not change the native social environ
     assert.equal(browser.split(flag).length - 1, 2, 'The switch belongs only to the two ordinary browser invocations.');
     assert.equal(workflow.split(name).length - 1, 2, 'No global environment or other job may inherit the ordinary browser switch.');
     assert.ok(!jobs.get('social-e2e')!.includes(name));
+  }
+});
+
+test('both complete native browser gates use the same WPE download-cache isolation as their preflights', async () => {
+  const workflow = (await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n');
+  const jobs = jobBlocks(workflow);
+  const flag = "WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'";
+  assert.equal(workflow.split(flag).length - 1, 4, 'Only the four Linux browser test invocations disable WPE disk caching.');
+  for (const name of ['browser-e2e', 'social-e2e']) {
+    const steps = stepBlocks(jobs.get(name)!);
+    const isolated = steps.filter(step => step.body.includes(flag));
+    assert.equal(isolated.length, 2, `${name} must test the full matrix with the same cache backend as its preflight.`);
+    assert.ok(isolated.some(step => step.name.startsWith('Verify ')));
+    assert.ok(isolated.some(step => /^ {8}id: (browser|social)$/m.test(step.body)));
+    for (const step of isolated) assert.doesNotMatch(step.body, /continue-on-error|^ {8}if:/m);
   }
 });
 
