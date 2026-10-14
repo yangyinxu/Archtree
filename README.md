@@ -1156,6 +1156,11 @@ readiness change in the same event cannot masquerade as stable playback.
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
+Only that synthetic preflight enables decoder debug output. A streaming filter
+discards raw browser/GStreamer lines and emits at most 200 fixed buffering, seek,
+and pipeline-state records without URLs or payloads. Ordinary test failures stay
+visible, and `pipefail` preserves the original test exit status. Full browser and
+social runs do not enable decoder logging.
 Only the two ordinary Linux browser test commands set
 `FINITUDE_E2E_ISOLATED_AUDIO=1`. Before exposing an audio-enable button, the probe
 requires Linux CI and verifies through `pactl` that the default `archtree_ci` output

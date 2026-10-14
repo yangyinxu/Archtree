@@ -134,7 +134,11 @@ test('native playback startup fails early without replacing the complete browser
   assert.match(preflight.body, /room-playback-feasibility\.spec\.ts --grep='real scheduled start' --retries=0/);
   assert.match(preflight.body, /--output=test-results\/room-playback-preflight/);
   assert.match(preflight.body, /PULSE_LATENCY_MSEC: '100'/);
-  assert.match(preflight.body, /run: xvfb-run -a npm run test:e2e/);
+  assert.match(preflight.body, /^ {10}xvfb-run -a npm run test:e2e/m);
+  assert.match(preflight.body, /set -o pipefail/);
+  assert.match(preflight.body, /2>&1 \| node scripts\/filter-native-media-evidence\.mjs/);
+  assert.match(preflight.body, /GST_DEBUG: '0,webkitmediaplayer:5'/);
+  assert.doesNotMatch(gate.body, /GST_DEBUG|DEBUG:|filter-native-media-evidence/);
   assert.doesNotMatch(preflight.body, /continue-on-error|^ {8}if:|--project/m);
   assert.ok(gate.body.includes('run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none\n'));
   assert.doesNotMatch(gate.body, /continue-on-error|^ {8}if:|--grep|--project/m);

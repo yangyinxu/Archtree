@@ -287,11 +287,15 @@ jobs:
 
       - name: Verify native playback startup before the complete browser matrix
         env:
+          DEBUG: pw:browser
+          GST_DEBUG: '0,webkitmediaplayer:5'
           PULSE_LATENCY_MSEC: '100'
           WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS: '1'
           WEBKIT_GST_USE_PLAYBIN3: '1'
           FINITUDE_E2E_ISOLATED_AUDIO: '1'
-        run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts --grep='real scheduled start' --retries=0 --update-snapshots=none --output=test-results/room-playback-preflight
+        run: |
+          set -o pipefail
+          xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts --grep='real scheduled start' --retries=0 --update-snapshots=none --output=test-results/room-playback-preflight 2>&1 | node scripts/filter-native-media-evidence.mjs
 
       - name: Run production-bundle browser and accessibility tests
         id: browser
