@@ -271,22 +271,31 @@ jobs:
         run: |
           # Refresh package lists here so this step never depends on an earlier step's apt-get update.
           sudo apt-get update
-          sudo apt-get install --yes pulseaudio xvfb
+          sudo apt-get install --yes pulseaudio xvfb gstreamer1.0-tools
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=archtree_ci
           pactl set-default-sink archtree_ci
           pactl list short sinks
 
+      - name: Verify native PCM and audio-output plugins
+        run: |
+          for plugin in wavparse audioconvert audioresample pulsesink
+          do
+            gst-inspect-1.0 "$plugin" > "${RUNNER_TEMP}/gst-${plugin}.txt"
+            sed -n '1,14p' "${RUNNER_TEMP}/gst-${plugin}.txt"
+          done
+
       - name: Verify native playback startup before the complete browser matrix
         env:
           PULSE_LATENCY_MSEC: '100'
-        run: npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts --grep='real scheduled start' --retries=0 --update-snapshots=none --output=test-results/room-playback-preflight
+          GST_DEBUG: '2'
+        run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts --grep='real scheduled start' --retries=0 --update-snapshots=none --output=test-results/room-playback-preflight
 
       - name: Run production-bundle browser and accessibility tests
         id: browser
         env:
           PULSE_LATENCY_MSEC: '100'
-        run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
+        run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 
       - name: Retain browser evidence
         if: ${{ !cancelled() }}

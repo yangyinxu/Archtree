@@ -134,8 +134,9 @@ test('native playback startup fails early without replacing the complete browser
   assert.match(preflight.body, /room-playback-feasibility\.spec\.ts --grep='real scheduled start' --retries=0/);
   assert.match(preflight.body, /--output=test-results\/room-playback-preflight/);
   assert.match(preflight.body, /PULSE_LATENCY_MSEC: '100'/);
+  assert.match(preflight.body, /run: xvfb-run -a npm run test:e2e/);
   assert.doesNotMatch(preflight.body, /continue-on-error|^ {8}if:|--project/m);
-  assert.ok(gate.body.includes('run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none\n'));
+  assert.ok(gate.body.includes('run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none\n'));
   assert.doesNotMatch(gate.body, /continue-on-error|^ {8}if:|--grep|--project/m);
   assert.match(steps.find(step => step.body.includes('name: finitude-web-browser-evidence'))!.body,
     /^ {12}web\/test-results$/m);
