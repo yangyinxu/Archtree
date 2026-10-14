@@ -1143,8 +1143,10 @@ transport outcomes. Completion seeks to 0.2 seconds before the native MP3 durati
 and still requires a real end event without automatic queue advancement.
 MP3 duration uses the social format gate's 150 ms boundary for native gapless and
 frame-padding differences; readiness and continuous-clock checks remain unchanged.
-Diagnostics inspect native ranges only after finite metadata is available, since
-an early WebKit range query can change its unknown-duration cache. Synthetic
+Diagnostics inspect native ranges only in explicit stable snapshots with decoded
+data and no pending seek; native event callbacks never query ranges. Unobserved
+ranges are marked separately from observed empty ranges. An early WebKit range
+query can change its unknown-duration cache. Synthetic
 playback epochs retain their own clock anchors, including explicitly scheduled starts.
 The pause/resume scenario proves natural clock movement both before pausing and
 after resuming; a native `playing` event alone does not prove advancing playback.

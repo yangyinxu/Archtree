@@ -10,15 +10,16 @@ const createHarness = () => {
   // Preserve bounded native decoder evidence even if a browser stalls before a Playwright assertion completes.
   const mediaEvents: { event: string; trusted: boolean; monotonicMs: number; currentTime: number;
     duration: number; paused: boolean; seeking: boolean; readyState: number; networkState: number;
-    ended: boolean; rate: number; error: number | null; buffered: number[][]; seekable: number[][] }[] = [];
+    ended: boolean; rate: number; error: number | null; rangesObserved: boolean; buffered: number[][]; seekable: number[][] }[] = [];
   const ranges = (value: TimeRanges) => Array.from({ length: Math.min(value.length, 4) }, (_, index) => [value.start(index), value.end(index)]);
-  /** Early native range queries can change WebKit's unknown-duration cache; diagnostics wait for real metadata. */
-  const readNativeMedia = (media: HTMLVideoElement) => {
+  /** Native callbacks avoid decoder range queries; explicit snapshots sample only stable decoded media. */
+  const readNativeMedia = (media: HTMLVideoElement, includeRanges = false) => {
     const readyState = media.readyState;
     const duration = readyState >= 1 ? media.duration : Number.NaN;
-    const readableRanges = readyState >= 1 && Number.isFinite(duration) && duration > 0;
+    const readableRanges = includeRanges && readyState >= 3 && !media.seeking && Number.isFinite(duration) && duration > 0;
     return { currentTime: media.currentTime, duration, paused: media.paused, seeking: media.seeking, readyState,
       networkState: media.networkState, ended: media.ended, rate: media.playbackRate, error: media.error?.code ?? null,
+      rangesObserved: readableRanges,
       buffered: readableRanges ? ranges(media.buffered) : [], seekable: readableRanges ? ranges(media.seekable) : [] };
   };
   let loads = 0;
@@ -85,7 +86,7 @@ const createHarness = () => {
     },
     state() {
       const media = document.querySelector('video');
-      const native = media ? readNativeMedia(media) : undefined;
+      const native = media ? readNativeMedia(media, true) : undefined;
       return {
         snapshot: store.getSnapshot(), intents: [...intents], observations: [...observations],
         loads, plays, creations, mediaCount: document.querySelectorAll('video').length,
@@ -93,6 +94,7 @@ const createHarness = () => {
         rate: native?.rate, readyState: native?.readyState, seeking: native?.seeking,
         networkState: native?.networkState, ended: native?.ended, error: native?.error ?? null,
         buffered: native?.buffered ?? [], seekable: native?.seekable ?? [],
+        nativeRangesObserved: native?.rangesObserved ?? false,
         mediaEvents: [...mediaEvents]
       };
     },
