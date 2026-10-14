@@ -213,6 +213,11 @@ jobs:
           pactl list short sinks
 
       # Every social project is blocking, including Firefox/WebKit compressed audio with real Linux decoders.
+      - name: Verify WebKit compressed audio before the complete social matrix
+        env:
+          PULSE_LATENCY_MSEC: '100'
+        run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=webkit-audio-formats --output=test-results/social-webkit-preflight
+
       - name: Run real social MongoDB, media, and WebSocket browser tests
         id: social
         env:
@@ -227,6 +232,7 @@ jobs:
           name: finitude-social-browser-evidence
           path: |
             web/test-results/social-real
+            web/test-results/social-webkit-preflight
           if-no-files-found: ignore
           retention-days: 30
 

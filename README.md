@@ -471,11 +471,14 @@ predictive lead is capped at two seconds. Later ordinary heartbeat
 corrections can reuse the measured delay until the playback effect changes.
 All pending work is cancelled by local pause, authority loss, or source changes.
 A fully buffered Audio decoder that stays paused with only current-frame data
-after a completed seek gets at most one paused source reload per playback occurrence.
-After a controller-owned drift correction, `HAVE_CURRENT_DATA` (`readyState: 2`)
-can persist even while the media clock advances; that case also gets this single
-recovery. Ordinary playback is not reloaded solely for reporting current-frame
-data. Readiness still requires future data, and local pause or leaving cancels
+after preparation gets at most one paused source reload per playback occurrence.
+A later completed controller-owned drift correction has one separate recovery
+for that occurrence: `HAVE_CURRENT_DATA` (`readyState: 2`) can persist even while
+the media clock advances. A successful preparation reload does not consume this
+later correction recovery. Each phase rechecks its own source and seek ownership,
+and explicit resync does not replenish either budget. Ordinary playback is not
+reloaded solely for reporting current-frame data. Readiness still requires future
+data, and local pause or leaving cancels
 recovery.
 For that recovered occurrence, drift corrections use explicit measured seeks
 instead of playback-rate changes, which can trigger additional decoder seeks.
@@ -1126,7 +1129,10 @@ These gates are parallel jobs, each with its own timeout of 30 minutes or less:
 `build` (production build and E2E type check), `unit-integration`,
 `social-e2e` and `browser-e2e`. The two browser jobs test the one production
 build that `build` shares as the short-lived `finitude-web-release-build`
-artifact. `release-artifact` needs all four jobs, so it is skipped unless every
+artifact. The social job first runs the unchanged WebKit compressed-audio scenario
+with its own fixture processes and evidence directory, then runs the complete
+social matrix. Both invocations remain blocking and retain their evidence even
+on failure. `release-artifact` needs all four jobs, so it is skipped unless every
 gate succeeds. It stages those same build bytes without rebuilding and binds each
 gate step's outcome into the provenance. A run normally finishes in about 20–25
 minutes, inside the promoter's wait. If branch protection is added, require every

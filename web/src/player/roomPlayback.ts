@@ -96,7 +96,9 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   let correction: ReturnType<typeof setTimeout> | undefined;
   let decoderRecovery: ReturnType<typeof setTimeout> | undefined;
   let decoderRecoveryCondition: ((target: PlayerAudio) => boolean) | undefined;
+  let decoderRecoveryKind: 'duration' | 'preparation' | 'correction' | undefined;
   let recoveredOccurrence: string | null = null;
+  let recoveredCorrectionOccurrence: string | null = null;
   let recoveredDurationOccurrence: string | null = null;
   let reloadingOccurrence: string | null = null;
   // install() only writes the source; native metadata can arrive much later than its promise.
@@ -235,6 +237,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   const currentCorrectionRecovery = () => correctionRecovery && correctionRecovery.effect === effect
     && correctionRecovery.source === source && source === port.sourceGeneration()
     && correctionRecovery.occurrence === occurrence();
+  const ownsCompletedCorrection = () => Boolean(currentCorrectionRecovery() && correctionRecovery?.accepted
+    && correctionRecovery.completed && state?.status === 'playing' && state.playbackAllowed !== false && playRequested);
 
   const expirePostSeek = () => {
     if (!postSeek || now() < postSeek.expiresAt) return false;
@@ -272,12 +276,10 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
   };
   /** A fully buffered decoder can lose readiness after our correction even while its clock still advances. */
   const stalledDecoder = (target: PlayerAudio) => {
-    const correctedPlaying = currentCorrectionRecovery() && correctionRecovery?.accepted && correctionRecovery.completed
-      && state?.status === 'playing' && state.playbackAllowed !== false && playRequested;
     if (!state || localPaused || !matchesSource(target) || state.status === 'ended'
       || state.queue[state.entryIds.indexOf(state.currentEntryId)].mediaType !== 'audio'
-      || (!target.paused && !correctedPlaying) || target.seeking || seekPending || needsSeek || seekFailed || target.error
-      || target.readyState !== 2 || !finiteNonnegative(target.currentTime) || !finiteNonnegative(target.duration)
+      || (!target.paused && !ownsCompletedCorrection()) || target.seeking || seekPending || needsSeek || seekFailed || target.error
+      || target.ended || target.readyState !== 2 || !finiteNonnegative(target.currentTime) || !finiteNonnegative(target.duration)
       || target.currentTime >= target.duration - 0.35) return false;
     try {
       const buffered = target.buffered;
@@ -296,24 +298,31 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     && !(Number.isFinite(target.duration) && target.duration > 0) && target.duration !== Infinity);
 
   /**
-   * Each native failure class gets one reload per occurrence, so a decoder reinstall with broken metadata can
-   * still recover its duration. The total is bounded at two; a pending condition that no longer holds yields.
+   * Each owned failure phase gets one reload per occurrence. A completed preparation recovery must not consume
+   * recovery for a later adapter-owned correction. Metadata, preparation and correction never borrow budgets.
    */
   const scheduleSourceReload = (target: PlayerAudio, condition: (target: PlayerAudio) => boolean) => {
     const key = occurrence();
-    const durationRecovery = condition === missingDuration;
-    if (!key || key === (durationRecovery ? recoveredDurationOccurrence : recoveredOccurrence) || !condition(target)) return;
-    if (decoderRecovery !== undefined) {
-      if (decoderRecoveryCondition === condition) return;
+    const classify = () => condition === missingDuration ? 'duration' as const
+      : ownsCompletedCorrection() ? 'correction' as const : 'preparation' as const;
+    const kind = classify();
+    const recovered = kind === 'duration' ? recoveredDurationOccurrence
+      : kind === 'correction' ? recoveredCorrectionOccurrence : recoveredOccurrence;
+    if (decoderRecovery !== undefined && (decoderRecoveryCondition !== condition || decoderRecoveryKind !== kind)) {
       clearTimeout(decoderRecovery);
+      decoderRecovery = undefined;
     }
+    if (!key || key === recovered || !condition(target) || decoderRecovery !== undefined) return;
     decoderRecoveryCondition = condition;
+    decoderRecoveryKind = kind;
     const expectedEffect = effect, expectedSource = source;
     decoderRecovery = setTimeout(() => {
       decoderRecovery = undefined;
       // A duration or readiness that arrived meanwhile cancels the reload.
-      if (!state || detached || effect !== expectedEffect || source !== expectedSource || occurrence() !== key || !condition(target)) return;
-      if (durationRecovery) recoveredDurationOccurrence = key;
+      if (!state || detached || effect !== expectedEffect || source !== expectedSource || occurrence() !== key
+        || classify() !== kind || !condition(target)) return;
+      if (kind === 'duration') recoveredDurationOccurrence = key;
+      else if (kind === 'correction') recoveredCorrectionOccurrence = key;
       else recoveredOccurrence = key;
       reloadingOccurrence = key;
       cancelEffects();

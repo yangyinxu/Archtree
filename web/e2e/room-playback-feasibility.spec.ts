@@ -78,6 +78,38 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
   expect(await page.evaluate(() => window.roomProbe.state().paused)).toBe(true);
   await page.evaluate(() => window.roomProbe.resync());
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().paused)).toBe(false);
+  // Native Play can precede decoder progress; wait for a real advancing timeupdate before testing rate correction.
+  const progress = await page.evaluate(() => new Promise<{ advancedSeconds: number; elapsedSeconds: number }>((resolve, reject) => {
+    const media = document.querySelector('video');
+    if (!media) { reject(new Error('The room media element is missing.')); return; }
+    let baseline = media.currentTime, startedAt = performance.now();
+    const resetWindow = () => { baseline = media.currentTime; startedAt = performance.now(); };
+    const observeSeek = (event: Event) => { if (event.isTrusted) resetWindow(); };
+    const cleanup = () => {
+      media.removeEventListener('timeupdate', observe);
+      media.removeEventListener('seeking', observeSeek);
+      media.removeEventListener('seeked', observeSeek);
+      media.removeEventListener('ended', failed);
+      media.removeEventListener('error', failed);
+    };
+    const failed = () => { cleanup(); reject(new Error('Native playback stopped before credible progress.')); };
+    const observe = (event: Event) => {
+      const advancedSeconds = media.currentTime - baseline, elapsedSeconds = (performance.now() - startedAt) / 1000;
+      if (!event.isTrusted) return;
+      // A real startup correction may seek; only the following continuous clock window proves natural progress.
+      if (media.paused || media.seeking || media.readyState < 3 || elapsedSeconds <= 0 || advancedSeconds < 0
+        || advancedSeconds > elapsedSeconds * Math.max(1, media.playbackRate) + 0.05) { resetWindow(); return; }
+      if (advancedSeconds <= 0.02) return;
+      cleanup(); resolve({ advancedSeconds, elapsedSeconds });
+    };
+    media.addEventListener('timeupdate', observe);
+    media.addEventListener('seeking', observeSeek);
+    media.addEventListener('seeked', observeSeek);
+    media.addEventListener('ended', failed);
+    media.addEventListener('error', failed);
+  }));
+  expect(progress.advancedSeconds).toBeGreaterThan(0.02);
+  expect(progress.elapsedSeconds).toBeGreaterThan(0);
   expect(await page.evaluate(() => window.roomProbe.correct((window.roomProbe.state().currentTime ?? 0) + 0.25))).toBe('rate');
   expect(await page.evaluate(() => window.roomProbe.state().rate)).toBe(1.05);
   await page.evaluate(() => window.roomProbe.seekThroughNativeElement(1.8));

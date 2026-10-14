@@ -141,4 +141,11 @@ test('every social browser project participates in one blocking release outcome'
   assert.doesNotMatch(jobs.get('release-artifact')!, /quarantined/);
   const evidence = steps.find(step => step.body.includes('name: finitude-social-browser-evidence'))!;
   assert.match(evidence.body, /^ {12}web\/test-results\/social-real$/m);
+  assert.match(evidence.body, /^ {12}web\/test-results\/social-webkit-preflight$/m);
+  const preflight = steps.find(step => step.name === 'Verify WebKit compressed audio before the complete social matrix');
+  assert.ok(preflight, 'The original WebKit scenario must fail early before the complete social matrix.');
+  assert.ok(steps.indexOf(preflight) < steps.indexOf(gate));
+  assert.match(preflight.body, /--project=webkit-audio-formats --output=test-results\/social-webkit-preflight/);
+  assert.match(preflight.body, /PULSE_LATENCY_MSEC: '100'/);
+  assert.doesNotMatch(preflight.body, /continue-on-error|^ {8}if:|--retries/m);
 });

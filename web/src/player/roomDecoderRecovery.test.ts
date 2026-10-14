@@ -5,7 +5,7 @@ import type { PlayerAudio, PlayerQueueItem } from './types';
 const setup = () => {
   let source = 0;
   const target = { src: '/pinned.mp3', currentSrc: '/pinned.mp3', currentTime: 0, duration: 120,
-    readyState: 0, seeking: false as boolean, paused: true as boolean, ended: false, error: null as { code: number } | null,
+    readyState: 0, seeking: false as boolean, paused: true as boolean, ended: false as boolean, error: null as { code: number } | null,
     buffered: { length: 1, start: () => 0, end: () => 120 }, volume: 1, muted: false, playbackRate: 1,
     play: vi.fn(async () => { target.paused = false; }), pause: vi.fn(() => { target.paused = true; }),
     load: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() } satisfies PlayerAudio;
@@ -227,6 +227,130 @@ const correctingPlayback = async (seekDelayMs = 0) => {
   value.controller.observe('seeked', value.target);
   return { ...value, playing };
 };
+
+/** Reproduces WebKit's preparation reload followed by a distinct first-progress corrective seek. */
+const preparationThenCorrection = async () => {
+  const value = setup();
+  await value.room.apply(value.state); value.decoded(2);
+  await vi.advanceTimersByTimeAsync(1000); value.decoded(4);
+  const playing = { ...value.state, revision: 2, status: 'playing' as const, playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() };
+  await value.room.apply(playing);
+  await vi.advanceTimersByTimeAsync(1500);
+  value.target.currentTime += 0.25;
+  value.controller.observe('timeupdate', value.target);
+  expect(value.seek).toHaveBeenLastCalledWith(67.5);
+  value.target.seeking = true; value.controller.observe('seeking', value.target);
+  value.target.readyState = 2; value.target.seeking = false; value.controller.observe('seeked', value.target);
+  return { ...value, playing };
+};
+
+test('a preparation reload does not consume recovery for a later completed owned correction', async () => {
+  const { room, target, install, decoded, controller, onIntent } = await preparationThenCorrection();
+  expect(install).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(999); target.currentTime += 0.9;
+  expect(install).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(install).toHaveBeenCalledTimes(3);
+  expect(target.paused).toBe(true);
+  expect(target.readyState).toBe(0);
+  decoded(2); expect(target.play).toHaveBeenCalledTimes(1);
+  decoded(4); expect(target.play).toHaveBeenCalledTimes(2);
+  // The same occurrence cannot replenish either recovery through resync or another corrective seek.
+  expect(room.correct(target.currentTime + 0.5)).toBe('seek');
+  target.readyState = 2; controller.observe('seeked', target);
+  await room.resync();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(3);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test.each(['local-pause', 'detach', 'replacement', 'physical-source', 'permission-loss', 'ready', 'another-seek', 'error', 'ended', 'partial-buffer'] as const)
+('%s fences the independent correction recovery after a preparation reload', async condition => {
+  const { room, target, install, controller, playing, onIntent } = await preparationThenCorrection();
+  if (condition === 'local-pause') room.pauseLocally();
+  if (condition === 'detach') room.detach();
+  if (condition === 'replacement') await room.apply({ ...playing, revision: 3, playbackEpoch: 2, mediaRevision: 'mr_b',
+    queue: [{ ...playing.queue[0], streamUrl: '/replacement.mp3' }] });
+  if (condition === 'physical-source') await install(playing.queue, 0);
+  if (condition === 'permission-loss') await room.apply({ ...playing, revision: 3, playbackAllowed: false });
+  if (condition === 'ready') {target.readyState = 4; controller.observe('canplay', target);}
+  if (condition === 'another-seek') {
+    target.seeking = true; controller.observe('seeking', target);
+    target.seeking = false; controller.observe('seeked', target);
+  }
+  if (condition === 'error') target.error = {code: 3};
+  if (condition === 'ended') target.ended = true;
+  if (condition === 'partial-buffer') target.buffered.end = () => 80;
+  const count = install.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(count);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('failed independent correction recovery remains fenced without an automatic reload loop', async () => {
+  const { room, target, install, decoded, controller, onIntent } = await preparationThenCorrection();
+  install.mockRejectedValueOnce(new Error('Source unavailable'));
+  await vi.advanceTimersByTimeAsync(1000);
+  decoded(4); controller.observe('timeupdate', target);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(install).toHaveBeenCalledTimes(3);
+  expect(target.play).toHaveBeenCalledTimes(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a new playback occurrence gets independent preparation and owned-correction recovery', async () => {
+  const { room, state, target, install, decoded, controller, onIntent } = await preparationThenCorrection();
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  expect(install).toHaveBeenCalledTimes(3);
+  const preparing = { ...state, revision: 3, playbackEpoch: 2, positionSeconds: 88,
+    anchorMonotonicMs: 10000 + performance.now() };
+  await room.apply(preparing); decoded(2);
+  await vi.advanceTimersByTimeAsync(1000); expect(install).toHaveBeenCalledTimes(4);
+  decoded(4);
+  await room.apply({ ...preparing, revision: 4, status: 'playing', playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() });
+  await vi.advanceTimersByTimeAsync(1500); target.currentTime += 0.25; controller.observe('timeupdate', target);
+  target.readyState = 2; controller.observe('seeked', target);
+  await vi.advanceTimersByTimeAsync(1000); expect(install).toHaveBeenCalledTimes(5);
+  decoded(4);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
+test('a changed recovery phase starts its own wait and never consumes an older preparation timer', async () => {
+  const { room, state, target, install, decoded, controller } = setup();
+  await room.apply(state); decoded(4);
+  await room.apply({ ...state, revision: 2, status: 'playing', playbackAllowed: true });
+  target.paused = true; target.readyState = 2; controller.observe('seeked', target);
+  await vi.advanceTimersByTimeAsync(600);
+  target.paused = false; target.readyState = 4;
+  expect(room.correct(66.5)).toBe('seek');
+  target.readyState = 2; controller.observe('seeked', target);
+  await vi.advanceTimersByTimeAsync(400); expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(599); expect(install).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1); expect(install).toHaveBeenCalledTimes(2);
+  room.detach();
+});
+
+test('an exhausted correction phase cancels an older preparation timer instead of borrowing its remaining wait', async () => {
+  const { room, target, install, decoded, controller } = await correctingPlayback();
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  expect(install).toHaveBeenCalledTimes(2);
+  target.paused = true; target.readyState = 2; controller.observe('seeked', target);
+  await vi.advanceTimersByTimeAsync(600);
+  target.paused = false; target.readyState = 4;
+  expect(room.correct(target.currentTime + 0.5)).toBe('seek');
+  target.readyState = 2; controller.observe('seeked', target);
+  target.paused = true; controller.observe('pause', target); controller.observe('seeked', target);
+  await vi.advanceTimersByTimeAsync(400); expect(install).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(599); expect(install).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1); expect(install).toHaveBeenCalledTimes(3);
+  room.detach();
+});
 
 test('an advancing fully buffered decoder stuck after our correction reloads once and rejoins the live anchor', async () => {
   const { room, target, install, decoded, controller, onIntent, onObservation } = await correctingPlayback();
