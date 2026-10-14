@@ -1151,6 +1151,9 @@ after resuming; a native `playing` event alone does not prove advancing playback
 The probe samples native progress before controller event handlers, then confirms
 the decoder remains ready and continuous after those handlers finish. A seek or
 readiness change in the same event cannot masquerade as stable playback.
+This native timing spec disables compositor video recording while retaining its
+traces, failure screenshots, and bounded native media/transport evidence. Other
+browser specs retain their configured video recording.
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
