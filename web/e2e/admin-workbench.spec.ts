@@ -2,9 +2,20 @@ import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { capabilities, detail, projectId, session, slotId, viewer } from '../src/features/admin/adminFixtures.testSupport';
 
-async function setup(page: Page, admin = true, media = false) {
+/** Admission and completion are independent server events, not counts of automatic status reads. */
+interface PublicationControl { admission: Promise<void>; completion: Promise<void> }
+function publicationControl() {
+  let admit!: () => void, complete!: () => void;
+  const admission = new Promise<void>(resolve => { admit = resolve; });
+  const completion = new Promise<void>(resolve => { complete = resolve; });
+  return { admission, completion, admit, complete };
+}
+
+async function setup(page: Page, admin = true, media = false, publication?: PublicationControl) {
   let item = detail(); const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   let uploadAttempts = 0; let publicationReads = 0;
+  let publicationComplete = false;
+  void publication?.completion.then(() => { publicationComplete = true; });
   if (media) { item.capabilities = { analysis: true, upload: true, publish: true }; item.upload.available = true; item.publication = 'notStarted'; item.draft.album.title = 'Reviewed Album'; item.draft.album.artistName = 'Synthetic artist'; item.draft.tracks.forEach((track, index) => { track.title = `Song ${index + 1}`; track.trackNumber = index + 1; }); }
   const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
   await page.route('**/auth/browser/session', route => route.fulfill({ json: { user: { ...session.user, role: admin ? 'admin' : 'user' } } }));
@@ -23,7 +34,11 @@ async function setup(page: Page, admin = true, media = false) {
     }
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON(); writes.push({ path, body });
-      if (path.endsWith('/publish')) { item.publication = 'preparing'; item.revision++; return route.fulfill({ status: 202, json: { item, receipt: { operationId: body.operationId, kind: 'publish', revision: item.revision } }, headers }); }
+      if (path.endsWith('/publish')) {
+        item.publication = 'preparing'; item.revision++;
+        if (publication) await publication.admission;
+        return route.fulfill({ status: 202, json: { item, receipt: { operationId: body.operationId, kind: 'publish', revision: item.revision } }, headers });
+      }
       if (path.endsWith('/adopt')) {
         expect(body.selectedIds).toEqual([item.suggestions[0].id]);
         item.draft.album.title = String(item.suggestions[0].value); item.suggestions[0].decision = 'accepted'; item.revision++;
@@ -35,7 +50,7 @@ async function setup(page: Page, admin = true, media = false) {
       const { manifest, draft, suggestions, decisions: _decisions, capabilities: _capabilities, receipts: _receipts, assets: _assets, published: _published, publicationRecovery: _recovery, selectedCoverSlotId: _selectedCover, ...common } = item;
       return route.fulfill({ json: { items: [{ ...common, title: draft.album.title, rootLabel: manifest.rootLabel, artistName: draft.album.artistName, visibility: draft.album.visibility, pendingSuggestions: suggestions.filter(s => s.decision === 'pending').length }], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null }, headers });
     }
-    if (item.publication === 'preparing' && ++publicationReads > 1) { item.publication = 'complete'; item.published = { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: ['333333333333333333333333'] }; item.revision++; }
+    if (item.publication === 'preparing' && (publication ? publicationComplete : ++publicationReads > 1)) { item.publication = 'complete'; item.published = { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: ['333333333333333333333333'] }; item.revision++; }
     return route.fulfill({ json: { item, receipt: null }, headers });
   });
   return writes;
@@ -231,16 +246,28 @@ test('mobile administrator control and workbench remain accessible without horiz
 
 
 test('private upload retries the same multipart operation and publication waits for confirmed completion', async ({ page }) => {
-  const writes = await setup(page, true, true); await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const publication = publicationControl();
+  const writes = await setup(page, true, true, publication); await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
   await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await page.locator('input[type=file]').first().setInputFiles({ name: '01 First.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('a'.repeat(100)) });
   expect(writes).toHaveLength(0); await page.getByRole('button', { name: 'Choose file' }).click();
   await expect(page.getByText('Upload outcome unknown', { exact: true })).toBeVisible(); await page.getByRole('button', { name: 'Retry original operation' }).click();
   await expect(page.getByText('Ready', { exact: true })).toBeVisible(); expect(writes).toHaveLength(2); expect(writes[0]).toEqual(writes[1]);
   await page.getByRole('tab', { name: 'Publish', exact: true }).click();
-  await page.getByRole('button', { name: 'Publish Album', exact: true }).click(); await page.getByRole('dialog').getByRole('button', { name: 'Publish Album' }).click();
+  await page.getByRole('button', { name: 'Publish Album', exact: true }).click();
+  const publishRequest = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === `/api/admin/v1/imports/${projectId}/publish`);
+  await page.getByRole('dialog').getByRole('button', { name: 'Publish Album' }).click(); await publishRequest;
+  // Let WebKit finish the closing-dialog click before the intercepted admission response arrives.
+  publication.admit();
   await expect(page.getByRole('tabpanel', { name: 'Publish', exact: true }).getByText('Publication in progress', { exact: true })).toBeVisible();
   await expect(page.getByRole('definition').filter({ hasText: 'Publication in progress' })).toBeVisible(); await expect(page.getByText('The Album publication is confirmed.')).toHaveCount(0);
+  // Repeated reads prove that a successful admission and its receipt do not complete publication.
+  for (let read = 0; read < 2; read++) {
+    await page.getByRole('button', { name: 'Refresh status' }).click();
+    await expect(page.getByRole('tabpanel', { name: 'Publish', exact: true }).getByText('Publication in progress', { exact: true })).toBeVisible();
+    await expect(page.getByText('The Album publication is confirmed.')).toHaveCount(0);
+  }
+  publication.complete();
   await page.getByRole('button', { name: 'Refresh status' }).click(); await expect(page.getByText('The Album publication is confirmed.')).toBeVisible();
 });
 
