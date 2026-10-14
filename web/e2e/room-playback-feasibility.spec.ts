@@ -25,7 +25,7 @@ const expectCredibleProgress = async (page: Page) => {
     const observeSeek = (event: Event) => { if (event.isTrusted) resetWindow(); };
     const cleanup = () => {
       clearTimeout(deadline);
-      media.removeEventListener('timeupdate', observe);
+      media.removeEventListener('timeupdate', observe, true);
       media.removeEventListener('seeking', observeSeek);
       media.removeEventListener('seeked', observeSeek);
       media.removeEventListener('ended', failed);
@@ -47,7 +47,8 @@ const expectCredibleProgress = async (page: Page) => {
       if (advancedSeconds <= 0.02) return;
       cleanup(); resolve({ advancedSeconds, elapsedSeconds });
     };
-    media.addEventListener('timeupdate', observe);
+    // Read the native clock before the controller can seek while handling this same event.
+    media.addEventListener('timeupdate', observe, true);
     media.addEventListener('seeking', observeSeek);
     media.addEventListener('seeked', observeSeek);
     media.addEventListener('ended', failed);
