@@ -114,10 +114,86 @@ test.beforeAll(async () => {
   await startProbeServer();
 });
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, browserName }, testInfo) => {
   caseRequestStart = requestSequence;
   await page.goto(`${probeOrigin}/__room-probe`);
   await page.waitForFunction(() => Boolean(window.roomProbe));
+  if (browserName === 'webkit') {
+    // Isolate one native initialization action at a time; these temporary elements never request playback.
+    const comparison = await page.evaluate(async () => {
+      const initialMediaCount = document.querySelectorAll('video').length;
+      const results = [];
+      for (const variant of ['bare', 'eager-state-readers', 'early-duration-reader', 'early-range-readers',
+        'detached-attributes-before-append', 'pause-before-src', 'pause-after-load', 'empty-poster',
+        'bound-load-wrapper', 'metadata-to-auto']) {
+        const result = await new Promise<Record<string, unknown>>(resolve => {
+          const host = document.createElement('div'), media = document.createElement('video');
+          host.hidden = true;
+          const configure = () => {
+            media.playsInline = true;
+            media.controls = false;
+            media.volume = 1;
+            media.muted = true;
+            media.preload = variant === 'metadata-to-auto' ? 'metadata' : 'auto';
+          };
+          if (variant === 'detached-attributes-before-append') configure();
+          const nativeLoad = media.load.bind(media);
+          let wrapperCalls = 0, finished = false;
+          if (variant === 'bound-load-wrapper') media.load = () => { wrapperCalls += 1; nativeLoad(); };
+          const startedAt = performance.now(), operations: string[] = [];
+          const events: { event: string; trusted: boolean; monotonicMs: number; state?: Record<string, unknown> }[] = [];
+          const readRanges = (ranges: TimeRanges) => Array.from({ length: Math.min(ranges.length, 4) }, (_, index) => [ranges.start(index), ranges.end(index)]);
+          const readState = () => ({ duration: Number.isFinite(media.duration) ? media.duration : null,
+            currentTime: media.currentTime, readyState: media.readyState, networkState: media.networkState,
+            paused: media.paused, seeking: media.seeking, error: media.error?.code ?? null,
+            buffered: readRanges(media.buffered), seekable: readRanges(media.seekable) });
+          const watched = ['loadstart', 'durationchange', 'loadedmetadata', 'canplay', 'error'];
+          const complete = (outcome: string, event?: Event) => {
+            if (finished) return;
+            finished = true;
+            let value: Record<string, unknown>;
+            try { value = { ...readState(), outcome, trusted: event?.isTrusted ?? null }; }
+            catch { value = { outcome: 'state-read-failed', trusted: event?.isTrusted ?? null }; }
+            clearTimeout(deadline);
+            for (const name of watched) media.removeEventListener(name, observe);
+            try { media.removeAttribute('src'); nativeLoad(); } catch { /* Always remove the diagnostic node. */ }
+            host.remove();
+            resolve({ variant, ...value, wrapperCalls, operations, events, elapsedMs: performance.now() - startedAt });
+          };
+          const observe = (event: Event) => {
+            const entry: typeof events[number] = { event: event.type, trusted: event.isTrusted, monotonicMs: performance.now() };
+            // Other cases deliberately avoid early media getters so the observer is itself an isolated variable.
+            try {
+              if (variant === 'eager-state-readers') entry.state = readState();
+              if (variant === 'early-duration-reader') entry.state = { duration: Number.isFinite(media.duration) ? media.duration : null };
+              if (variant === 'early-range-readers') entry.state = { buffered: readRanges(media.buffered), seekable: readRanges(media.seekable) };
+            } catch { entry.state = { readFailed: true }; }
+            events.push(entry);
+            if (events.length > 16) events.shift();
+            if (event.type === 'loadedmetadata' || event.type === 'error') complete(event.type, event);
+          };
+          const deadline = setTimeout(() => complete('timeout'), 1500);
+          for (const name of watched) media.addEventListener(name, observe);
+          host.append(media);
+          document.body.append(host);
+          if (variant !== 'detached-attributes-before-append') configure();
+          try {
+            if (variant === 'pause-before-src') { operations.push('pause-before-src'); media.pause(); }
+            if (variant === 'metadata-to-auto') { operations.push('preload-auto'); media.preload = 'auto'; }
+            if (variant === 'empty-poster') { operations.push('empty-poster'); media.poster = ''; }
+            operations.push('src'); media.src = '/__room-tone/a.wav';
+            operations.push('load'); media.load();
+            if (variant === 'pause-after-load') { operations.push('pause-after-load'); media.pause(); }
+          } catch { complete('initialization-failed'); }
+        });
+        results.push(result);
+      }
+      return { initialMediaCount, finalMediaCount: document.querySelectorAll('video').length, results };
+    });
+    const path = testInfo.outputPath('room-playback-init-comparison.json');
+    await writeFile(path, JSON.stringify(comparison, null, 2));
+    await testInfo.attach('room-playback-init-comparison', { contentType: 'application/json', path });
+  }
 });
 
 test.afterEach(async ({ page }, testInfo) => {
