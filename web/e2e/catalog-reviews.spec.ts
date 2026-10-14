@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import english from '../../localization/locales/en-US.json' with { type: 'json' };
 import chinese from '../../localization/locales/zh-Hans.json' with { type: 'json' };
 import AxeBuilder from '@axe-core/playwright';
+import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 import { albumId, catalogAlbum, catalogReview, reviewId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
 import type { CatalogReview } from '../src/features/admin/catalogReviewApi';
@@ -18,11 +19,36 @@ function label(key: keyof typeof english, parameters: Record<string, string | nu
 }
 test.beforeEach(() => { locale = 'en-US'; });
 type Write = { path: string; method: string; body: Record<string, unknown> };
+const privateCoverPath = `/api/admin/v1/catalog/album/${albumId}/artwork`;
+// Self-authored artwork becomes actual decoded PNG bytes; the visual gate cannot pass on a placeholder or a broken img.
+const coverSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640">
+  <rect width="640" height="640" fill="#122c3c"/><rect x="28" y="28" width="584" height="584" fill="#f3cda0"/>
+  <path d="M28 450L310 112 612 420V612H28Z" fill="#ca5e4b"/><path d="M28 515L275 252 490 612H28Z" fill="#213c4c"/>
+  <circle cx="495" cy="145" r="57" fill="#e59759"/><path d="M52 84H588M52 96H588" stroke="#213c4c" stroke-width="3"/>
+  <text x="52" y="70" fill="#213c4c" font-family="sans-serif" font-size="25" letter-spacing="5">FIELD RECORDINGS</text>
+  <text x="52" y="571" fill="#f3cda0" font-family="sans-serif" font-size="43" letter-spacing="4">FIRST LIGHT</text>
+  <text x="54" y="596" fill="#f3cda0" font-family="sans-serif" font-size="13" letter-spacing="3">SYNTHETIC COVER FIXTURE</text>
+</svg>`;
+const coverPalettes = [['#122c3c', '#f3cda0', '#ca5e4b', '#213c4c', '#e59759'],
+  ['#33273a', '#edcbdc', '#a36793', '#56344f', '#e6a989'],
+  ['#25332b', '#e3d9bd', '#82916a', '#394b40', '#d7ac6d'],
+  ['#293242', '#d5e1e3', '#628eac', '#334a65', '#9bb8c0']];
+const privateCoverFixtures = coverPalettes.map(palette => sharp(Buffer.from(coverSvg.replace(/#[a-f0-9]{6}/g,
+  color => palette[coverPalettes[0].indexOf(color)] ?? color))).png().toBuffer());
+type CatalogPresentation = { title?: string; cover?: 'ready' | 'missing' | 'failed'; additionalAlbums?: number };
 
 /** Only fabricated catalog data and route responses are used; no provider, storage or account is contacted. */
-async function setup(page: Page, administrator = true, initialReleaseDate: { year: number; month: number | null; day: number | null } | null = null) {
+async function setup(page: Page, administrator = true, initialReleaseDate: { year: number; month: number | null; day: number | null } | null = null, presentation: CatalogPresentation = {}) {
   let album = catalogAlbum(), review = catalogReview(), created = false, denied = false, finishAnalysis = false;
   album.fields.releaseDate = initialReleaseDate;
+  album.fields.title = presentation.title ?? album.fields.title;
+  album.coverUrl = presentation.cover === 'missing' ? null : privateCoverPath;
+  const extraAlbums = Array.from({ length: presentation.additionalAlbums ?? 0 }, (_, index) => {
+    const id = (index + 2).toString(16).repeat(24), visibility = index % 2 ? 'hidden' as const : 'public' as const;
+    return { ...catalogAlbum(), id, visibility, effectiveVisibility: visibility, coverUrl: `/api/admin/v1/catalog/album/${id}/artwork`,
+      fields: { ...catalogAlbum().fields, title: `Synthetic Album ${index + 2} · ${['夜间录音', '静默回声', '无声海岸'][index] ?? 'Collected recordings'}`,
+        releaseDate: { year: 2023 + index, month: null, day: null } } };
+  });
   const reads: string[] = [], writes: Write[] = [];
   const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort('blockedbyclient'));
@@ -38,12 +64,19 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
   };
   await page.route('**/api/admin/v1/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method();
-    expect(request.headers()['x-finitude-account-viewer']).toBe(viewer);
     if (method === 'GET') reads.push(path);
+    const coverIndex = [album, ...extraAlbums].findIndex(item => item.coverUrl === path);
+    if (coverIndex >= 0) {
+      expect(method).toBe('GET'); expect(new URL(request.url()).searchParams.get('viewer')).toBe(viewer);
+      if (denied || presentation.cover === 'failed') return route.fulfill({ status: denied ? 403 : 404, body: '', headers });
+      return route.fulfill({ contentType: 'image/png', body: await privateCoverFixtures[coverIndex % privateCoverFixtures.length], headers });
+    }
+    expect(request.headers()['x-finitude-account-viewer']).toBe(viewer);
     if (denied) return route.fulfill({ status: 403, json: { code: 'ADMIN_REQUIRED' }, headers });
-    if (path.endsWith('/capabilities')) return route.fulfill({ json: { ...capabilities, catalog: { editing: true, visibility: true } }, headers });
+    if (path.endsWith('/capabilities')) return route.fulfill({ json: { ...capabilities, catalog: { editing: true, visibility: true },
+      localMp3Conversion: { enabled: true, readSources: true, replace: true, preset: 'mp3-320', maxFiles: 100 } }, headers });
     if (path === '/api/admin/v1/imports') return route.fulfill({ json: { items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null }, headers });
-    if (path === '/api/admin/v1/catalog/album') return route.fulfill({ json: { items: [album], nextCursor: null }, headers });
+    if (path === '/api/admin/v1/catalog/album') return route.fulfill({ json: { items: [album, ...extraAlbums], nextCursor: null }, headers });
     if (path === `/api/admin/v1/catalog/album/${albumId}/cover-operations`) return route.fulfill({ json: { items: [] }, headers });
     if (path === `/api/admin/v1/catalog/album/${albumId}`) {
       if (method === 'GET') return route.fulfill({ json: { item: album }, headers });
@@ -245,6 +278,96 @@ async function reflow(page: Page) {
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 }
 
+async function expectDecodedPrivateCover(image: Locator) {
+  await expect(image).toBeVisible();
+  await image.evaluate(element => (element as HTMLImageElement).decode());
+  const evidence = await image.evaluate(element => {
+    const value = element as HTMLImageElement, rect = value.getBoundingClientRect(), url = new URL(value.src);
+    return { width: rect.width, height: rect.height, naturalWidth: value.naturalWidth, naturalHeight: value.naturalHeight,
+      path: url.pathname, viewer: url.searchParams.get('viewer'), origin: url.origin, srcset: value.getAttribute('srcset') };
+  });
+  expect(evidence.naturalWidth).toBe(640); expect(evidence.naturalHeight).toBe(640);
+  expect(evidence.width).toBeGreaterThan(32); expect(Math.abs(evidence.width - evidence.height)).toBeLessThan(1);
+  expect(evidence.path).toMatch(/^\/api\/admin\/v1\/catalog\/album\/[a-f0-9]{24}\/artwork$/);
+  expect(evidence.viewer).toBe(viewer); expect(evidence.origin).toBe(new URL(image.page().url()).origin); expect(evidence.srcset).toBeNull();
+  return evidence;
+}
+
+for (const variant of localizedViewports) {
+  test(`cover-led Album gallery opens dedicated details without row actions at ${variant.width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    const title = 'Synthetic catalog Album — 夜间录音与海岸回声 / Collected histories and an intentionally long subtitle for careful administration';
+    await page.setViewportSize({ width: variant.width, height: variant.width === 1280 ? 720 : 844 });
+    const api = await setup(page, true, { year: 2024, month: null, day: null }, { title, additionalAlbums: 3 });
+    await enter(page, '/finitude/admin/catalog');
+    const entry = page.getByRole('link', { name: title, exact: true });
+    await expect(entry).toBeVisible(); await expect(entry).toHaveAttribute('href', `/finitude/admin/catalog/album/${albumId}`);
+    const row = page.getByRole('listitem').filter({ has: entry });
+    await expect(row.getByRole('link')).toHaveCount(1); await expect(row.getByRole('button')).toHaveCount(0);
+    await expect(row).toContainText('2024'); await expect(row).toContainText(label('admin.field.public'));
+    await expect(page.getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: label('admin.conversion.existing'), exact: true })).toHaveCount(0);
+    const galleryImages = page.getByRole('main').locator('li img'); await expect(galleryImages).toHaveCount(4);
+    for (const image of await galleryImages.all()) await expectDecodedPrivateCover(image);
+    await capture(page, '20-cover-led-inventory', variant.width); await reflow(page);
+    await entry.click();
+    await expect(page.getByRole('heading', { name: title, level: 1, exact: true })).toBeVisible();
+    const image = page.getByRole('img', { name: label('content.album.cover_alt', { title }), exact: true });
+    const hero = await expectDecodedPrivateCover(image);
+    expect(hero.width).toBeGreaterThanOrEqual(variant.width === 1280 ? 235 : 185);
+    expect(hero.width).toBeLessThanOrEqual(variant.width === 1280 ? 245 : 195);
+    const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
+    await expect(actions).toBeVisible();
+    const manual = actions.getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true });
+    await expect(manual).toHaveAttribute('href', /#catalog-details$/);
+    await expect(actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toBeVisible();
+    await expect(actions.getByRole('link', { name: label('admin.conversion.existing'), exact: true })).toHaveAttribute('href', `/finitude/admin/conversions?album=${albumId}`);
+    await expect(page.locator('#catalog-details')).toBeVisible();
+    await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveValue(title);
+    await capture(page, '21-cover-led-detail', variant.width); await reflow(page);
+    await manual.click();
+    await expect(page.getByRole('heading', { name: label('admin.layout.catalog_details'), exact: true })).toBeInViewport();
+    await expect(page).toHaveURL(/#catalog-details$/);
+    await page.getByRole('link', { name: label('admin.catalog.back'), exact: true }).click();
+    await expect(page).toHaveURL(/\/finitude\/admin\/catalog$/); await expect(entry).toBeVisible();
+    expect(api.writes).toEqual([]);
+  });
+}
+
+test('private Album covers disappear on User view or role loss and make no later private image reads', async ({ page }) => {
+  const api = await setup(page); await enter(page, `/finitude/admin/catalog/album/${albumId}`);
+  const coverName = label('content.album.cover_alt', { title: 'Synthetic catalog Album' });
+  await expectDecodedPrivateCover(page.getByRole('img', { name: coverName, exact: true }));
+  await page.getByRole('button', { name: label('admin.view.current_admin'), exact: true }).click();
+  await page.getByRole('button', { name: label('admin.view.user'), exact: true }).click();
+  await expect(page).toHaveURL(/\/finitude\/?$/); await expect(page.getByRole('img', { name: coverName, exact: true })).toHaveCount(0);
+  const afterUser = api.reads.filter(path => path === privateCoverPath).length;
+  await page.goto(`/finitude/admin/catalog/album/${albumId}`); await expect(page.getByText(label('admin.view.required'))).toBeVisible();
+  expect(api.reads.filter(path => path === privateCoverPath)).toHaveLength(afterUser);
+  await page.getByRole('button', { name: label('admin.view.switch_admin'), exact: true }).click();
+  await expectDecodedPrivateCover(page.getByRole('img', { name: coverName, exact: true }));
+  api.revoke(); await page.getByRole('button', { name: label('admin.common.refresh'), exact: true }).first().click();
+  await expect(page.getByRole('img', { name: coverName, exact: true })).toHaveCount(0);
+  const afterLoss = api.reads.filter(path => path.startsWith('/api/admin/v1/catalog/')).length;
+  await page.goto(`/finitude/admin/catalog/album/${albumId}`); await expect(page.getByText(label('admin.view.required'))).toBeVisible();
+  expect(api.reads.filter(path => path.startsWith('/api/admin/v1/catalog/'))).toHaveLength(afterLoss); expect(api.writes).toEqual([]);
+});
+
+for (const condition of ['missing', 'failed'] as const) {
+  test(`a ${condition} Album cover keeps its square fallback and usable dedicated actions at 390px`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const api = await setup(page, true, null, { cover: condition });
+    await enter(page, `/finitude/admin/catalog/album/${albumId}`);
+    const artwork = page.getByRole('img', { name: label('content.album.cover_alt', { title: 'Synthetic catalog Album' }), exact: true });
+    await expect(artwork).toBeVisible(); await expect(artwork.locator('svg')).toHaveCount(1);
+    const box = await artwork.boundingBox(); expect(box).not.toBeNull(); expect(Math.abs(box!.width - box!.height)).toBeLessThan(1);
+    await expect(page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }).getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toBeEnabled();
+    await capture(page, `22-cover-${condition}-fallback`, 390); await reflow(page); expect(api.writes).toEqual([]);
+    if (condition === 'missing') expect(api.reads.filter(path => path === privateCoverPath)).toEqual([]);
+  });
+}
+
 for (const variant of localizedViewports) {
   const { width } = variant;
   test(`existing Album manual editing and selective durable Luna review stay separate at ${width}px ${variant.locale}`, async ({ page }) => {
@@ -257,11 +380,13 @@ for (const variant of localizedViewports) {
     await expect(page.getByRole('link', { name: label('admin.workbench.choose_existing'), exact: true })).toBeVisible();
     await capture(page, '01-workbench', width); await reflow(page);
     await page.getByRole('link', { name: label('admin.workbench.choose_existing'), exact: true }).click();
-    await expect(page.getByRole('link', { name: label('admin.catalog_review.manual_edit') })).toBeVisible();
-    await expect(page.getByRole('button', { name: label('admin.catalog_review.create') })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Synthetic catalog Album', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: label('admin.catalog_review.manual_edit') })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.create') })).toHaveCount(0);
     expect(api.writes).toEqual([]);
     await capture(page, '02-catalog-entry', width); await reflow(page);
-    await page.getByRole('link', { name: label('admin.catalog_review.manual_edit') }).click();
+    await page.getByRole('link', { name: 'Synthetic catalog Album', exact: true }).click();
+    await page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }).getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true }).click();
     await page.getByRole('textbox', { name: label('admin.field.title'), exact: true }).fill('Manually corrected synthetic Album');
     await expect(page.getByRole('heading', { name: label('admin.layout.catalog_details'), exact: true })).toBeVisible();
     await capture(page, '02b-manual-editor', width);
@@ -278,6 +403,7 @@ for (const variant of localizedViewports) {
     await expect(page.getByRole('button', { name: label('admin.catalog.save'), exact: true })).toBeDisabled();
     expect(api.writes).toHaveLength(1); expect(api.writes[0]).toMatchObject({ path: `/api/admin/v1/catalog/album/${albumId}`, method: 'PATCH', body: { fields: { title: 'Manually corrected synthetic Album' } } });
     await page.getByRole('navigation', { name: label('admin.workbench.title'), exact: true }).getByRole('link', { name: label('admin.catalog.title'), exact: true }).click();
+    await page.getByRole('link', { name: 'Manually corrected synthetic Album', exact: true }).click();
     await page.getByRole('button', { name: label('admin.catalog_review.create') }).click();
     const creation = page.getByRole('dialog', { name: label('admin.catalog_review.create') });
     await expect(creation.getByRole('heading', { name: label('admin.catalog_review.create'), exact: true })).toBeVisible();

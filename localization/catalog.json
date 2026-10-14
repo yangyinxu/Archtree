@@ -1553,6 +1553,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog.back": {
+      "description": "Back to catalog",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog.carousel": {
       "description": "Carousel",
       "delivery": [

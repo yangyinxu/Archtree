@@ -9,7 +9,13 @@ import { adminWorkspace } from './adminWorkspace';
 import { catalogKinds, catalogList, catalogResponse, catalogMutationResponse, catalogPatch, type CatalogItem, type CatalogKind } from './catalogApi';
 import { useAdminCommand } from './useAdminCommand';
 import { useOnline } from './useAdminOnline';
+import { Artwork } from '../../components/Artwork';
+import { useLocalization } from '../../localization/LocalizationProvider';
+import { reviewValueText } from './reviewValueText';
 import type { CatalogEditSnapshot } from './CatalogEditConfirmation';
+import cardStyles from '../../components/ContentCard.module.css';
+import sectionStyles from '../../components/PageSection.module.css';
+import catalogStyles from '../catalog/CatalogPages.module.css';
 import styles from './adminStyles';
 const CatalogCover = lazy(() => import('./CatalogCover').then(module => ({ default: module.CatalogCover })));
 const CatalogFields = lazy(() => import('./CatalogFields').then(module => ({ default: module.CatalogFields })));
@@ -22,16 +28,22 @@ function CatalogInventory() {
   const [kind, setKind] = useState<CatalogKind>('album');
   const [targetId,setTargetId]=useState('');
   const [text, setText] = useState(''), [search, setSearch] = useState('');
+  const [artworkRefresh, setArtworkRefresh] = useState(0);
   const query = useInfiniteQuery({ queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, 'catalog', kind, search], initialPageParam: null as string | null,
     queryFn: ({ signal, pageParam }) => adminEndpointRequest(`/catalog/${kind}?${new URLSearchParams({ query: search, ...(pageParam ? { cursor: pageParam } : {}) })}`, catalogList.refine(value => value.items.every(item => item.kind === kind)), { signal }), getNextPageParam: page => page.nextCursor ?? undefined, retry: false, gcTime: 0 });
   return <section className={styles.page}><AdminNav /><header className={styles.header}><div><h1 className={styles.title}>{t('catalog.title')}</h1><p className={styles.meta}>{t('catalog.private_copy')}</p></div></header>
     <div className={styles.filters}>{catalogKinds.map(value => <button className={styles.filter} key={value} aria-pressed={value === kind} onClick={() => setKind(value)}>{t(`catalog.${value}`)}</button>)}</div>
-    <form className={styles.toolbar} onSubmit={event => { event.preventDefault(); setSearch(text.trim()); }}><label>{t('catalog.search')}<input className={styles.input} maxLength={100} value={text} onChange={event => setText(event.target.value)} /></label><button className={styles.button}>{t('catalog.search')}</button><button className={styles.button} type="button" onClick={() => void query.refetch()}>{t('common.refresh')}</button></form>
+    <form className={styles.toolbar} onSubmit={event => { event.preventDefault(); setSearch(text.trim()); }}><label>{t('catalog.search')}<input className={styles.input} maxLength={100} value={text} onChange={event => setText(event.target.value)} /></label><button className={styles.button}>{t('catalog.search')}</button><button className={styles.button} type="button" onClick={() => { setArtworkRefresh(value => value + 1); void query.refetch(); }}>{t('common.refresh')}</button></form>
     {query.isPending && <p role="status">{t('common.loading')}</p>}{query.isError && <p role="alert" className={styles.notice}>{t('common.error')}</p>}
-    <ul className={styles.cards}>{[...new Map((query.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()].map(item => <li className={styles.card} key={item.id}><div className={styles.row}><Link className={styles.itemLink} to={`/admin/catalog/${kind}/${item.id}`}>{'name' in item.fields ? item.fields.name : item.fields.title}</Link><span className={styles.badge}>{t(`field.${item.visibility}`)}</span></div>
+    <ul className={kind === 'album' ? sectionStyles.grid : styles.cards}>{[...new Map((query.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()].map(item => item.kind === 'album' ? <li className={sectionStyles.cardItem} key={item.id}>
+      <Link className={cardStyles.action} aria-label={item.fields.title || t('common.untitled')} aria-describedby={`catalog-summary-${item.id}`} to={`/admin/catalog/album/${item.id}`}>
+        <Artwork key={`${item.revision}:${artworkRefresh}`} alt="" kind="album" src={item.coverUrl ? `${item.coverUrl}?viewer=${encodeURIComponent(access.viewerId)}` : null} />
+        <span className={cardStyles.copy}><span className={cardStyles.title} title={item.fields.title}>{item.fields.title || t('common.untitled')}</span><span className={cardStyles.metadata} id={`catalog-summary-${item.id}`}>{[t(`field.${item.visibility}`), item.fields.releaseDate?.year].filter(Boolean).join(' · ')}</span></span>
+      </Link>
+    </li> : <li className={styles.card} key={item.id}><div className={styles.row}><Link className={styles.itemLink} to={`/admin/catalog/${kind}/${item.id}`}>{'name' in item.fields ? item.fields.name : item.fields.title}</Link><span className={styles.badge}>{t(`field.${item.visibility}`)}</span></div>
       <div className={styles.actions}><Link className={styles.link} to={`/admin/catalog/${kind}/${item.id}`}>{t('catalog_review.manual_edit')}</Link>
-        {kind === 'album' && <Suspense fallback={null}><CatalogReviewStart item={item} /></Suspense>}</div>
-      {(kind === 'album' || kind === 'audioTrack') && access.conversion && <Link className={styles.link} to={`/admin/conversions?${kind === 'album' ? 'album' : 'track'}=${item.id}`}>{t('conversion.existing')}</Link>}
+      </div>
+      {kind === 'audioTrack' && access.conversion && <Link className={styles.link} to={`/admin/conversions?track=${item.id}`}>{t('conversion.existing')}</Link>}
     </li>)}</ul>
     {query.isSuccess && query.data.pages[0].items.length === 0 && <p>{t('workbench.no_matches')}</p>}
     {query.hasNextPage && <button className={styles.button} disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{t('workbench.more')}</button>}
@@ -40,10 +52,11 @@ function CatalogInventory() {
 }
 interface CatalogBuffer { base: CatalogItem; fields: CatalogItem['fields']; visibility: 'public' | 'hidden'; dirty: boolean }
 function CatalogEditor({ kind, id }: { kind: CatalogKind; id: string }) {
-  const t = useAdminText(), access = useAdminAccess(), online = useOnline();
+  const t = useAdminText(), access = useAdminAccess(), online = useOnline(), { t: sharedText } = useLocalization();
   const key = `catalog:${kind}:${id}`, path = `/catalog/${kind}/${id}`;
   const [edit, setEdit] = useState<CatalogBuffer | null>(() => adminWorkspace.buffer(key) ?? null);
   const [confirm, setConfirm] = useState<CatalogEditSnapshot | null>(null);
+  const [artworkRefresh, setArtworkRefresh] = useState(0);
   const media = useRef<HTMLAudioElement>(null);
   const client = useQueryClient();
   const queryKey = ['admin-imports', access.viewerId, access.epoch, access.generation, 'catalog', kind, id];
@@ -77,18 +90,31 @@ function CatalogEditor({ kind, id }: { kind: CatalogKind; id: string }) {
   const item = missing || !edit ? undefined : { ...edit.base, capabilities: { editing: canEdit, visibility: canChangeVisibility } };
   // Historical cover cancellation reviews the latest saved owner independently of an unsaved metadata baseline.
   const coverItem = missing ? null : query.data?.item ? { ...query.data.item, capabilities: { editing: canEdit, visibility: canChangeVisibility } } : item ?? null;
-  return <section className={styles.page}><AdminNav /><header className={styles.header}><div><h1 className={styles.title}>{item ? ('name' in item.fields ? item.fields.name : item.fields.title) || t('catalog.edit') : t('catalog.edit')}</h1><p className={styles.meta}>{t(`catalog.${kind}`)}</p></div><button className={styles.button} disabled={query.isFetching || mutation.running || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button></header>
+  const album = item && coverItem?.kind === 'album' ? coverItem : null;
+  const refresh = <button className={styles.button} disabled={query.isFetching || mutation.running || !online} onClick={() => { setArtworkRefresh(value => value + 1); void query.refetch(); }}>{t('common.refresh')}</button>;
+  return <section className={styles.page}><AdminNav />{album ? <>
+    <Link className={styles.back} to="/admin/catalog">{t('catalog.back')}</Link>
+    <header className={catalogStyles.hero} style={{ alignItems: 'center' }}>
+      <Artwork key={`${album.revision}:${artworkRefresh}`} alt={sharedText('content.album.cover_alt', { title: album.fields.title })} className={catalogStyles.heroArtwork} kind="album" loading="eager" fetchPriority="high" src={album.coverUrl ? `${album.coverUrl}?viewer=${encodeURIComponent(access.viewerId)}` : null} />
+      <div className={catalogStyles.heroCopy}><p className={catalogStyles.eyebrow}>{sharedText('common.label.album')}</p><h1 style={{ fontSize: 'clamp(1.5rem, 3.2vw, 2.5rem)', maxWidth: 'none', lineHeight: 1.1 }}>{album.fields.title || t('common.untitled')}</h1><p className={catalogStyles.metadata}>{[t(`field.${album.visibility}`), album.fields.releaseDate ? reviewValueText(album.fields.releaseDate) : null].filter(Boolean).join(' · ')}</p>
+        <div className={styles.actions} role="group" aria-label={t('catalog.edit')}>{canEdit && !locked ? <a className={styles.link} href="#catalog-details">{t('catalog_review.manual_edit')}</a> : <button className={styles.button} type="button" disabled>{t('catalog_review.manual_edit')}</button>}
+          <Suspense fallback={null}><CatalogReviewStart item={item!} disabled={locked || conflict || Boolean(edit?.dirty)} /></Suspense>
+          {access.conversion && !edit?.dirty && !conflict && <Link className={styles.link} to={`/admin/conversions?album=${id}`}>{t('conversion.existing')}</Link>}
+        </div>
+        {edit?.dirty && <p className={styles.muted}>{t('catalog_review.save_first')}</p>}
+        <div className={styles.actions}>{refresh}</div>
+      </div>
+    </header>
+  </> : <header className={styles.header}><div><h1 className={styles.title}>{item ? ('name' in item.fields ? item.fields.name : item.fields.title) || t('catalog.edit') : t('catalog.edit')}</h1><p className={styles.meta}>{t(`catalog.${kind}`)}</p></div>{refresh}</header>}
     {!online && <p role="status">{t('common.offline')}</p>}{query.isPending && <p role="status">{t('common.loading')}</p>}{query.isError && <p role="alert" className={styles.notice}>{t(missing ? 'catalog.content_missing' : 'common.error')}</p>}
     {mutation.error && <div className={styles.error} role="alert"><p>{t(`common.${mutation.error}`)}</p>{mutation.intent && <button className={styles.button} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}</div>}
     {item && edit && <>
       <p className={styles.notice}>{t(canEdit ? 'catalog.direct_edit_copy' : 'catalog.readonly')}</p>
-      {kind === 'album' && <div className={styles.actions}><Suspense fallback={null}><CatalogReviewStart item={item} disabled={locked || conflict || edit.dirty} /></Suspense>
-        {edit.dirty && <p className={styles.muted}>{t('catalog_review.save_first')}</p>}</div>}
-      {item.coverUrl && <img alt={t('catalog.cover')} src={`${item.coverUrl}?viewer=${encodeURIComponent(access.viewerId)}`} className={styles.artwork} width={140} height={140} />}
-      {(kind === 'album' || kind === 'audioTrack') && access.conversion && !edit.dirty && !conflict && <Link className={styles.link} to={`/admin/conversions?${kind === 'album' ? 'album' : 'track'}=${id}`}>{t('conversion.existing')}</Link>}
+      {kind !== 'album' && item.coverUrl && <img alt={t('catalog.cover')} src={`${item.coverUrl}?viewer=${encodeURIComponent(access.viewerId)}`} className={styles.artwork} width={140} height={140} />}
+      {kind === 'audioTrack' && access.conversion && !edit.dirty && !conflict && <Link className={styles.link} to={`/admin/conversions?track=${id}`}>{t('conversion.existing')}</Link>}
       {item.mediaUrl && <audio ref={media} aria-label={t('catalog.preview')} controls preload="none" src={`${item.mediaUrl}?viewer=${encodeURIComponent(access.viewerId)}`} style={{ maxWidth: '100%' }} />}
       {conflict && <div className={styles.error} role="alert"><p>{t('common.conflict')}</p><details><summary>{t('review.saved_version')}</summary><pre className={styles.rawDraft}>{JSON.stringify(query.data!.item.fields, null, 2)}</pre></details><button className={styles.button} onClick={() => { const next = query.data!.item; setEdit({ base: next, fields: next.fields, visibility: next.visibility, dirty: false }); }}>{t('review.load_saved')}</button></div>}
-      <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) {
+      <form className={styles.panel} id="catalog-details" onSubmit={event => { event.preventDefault(); if (!locked && !conflict) {
         const patch = catalogPatch(edit.base, edit.fields, edit.visibility);
         if ((patch.fields || patch.visibility) && allowsPatch(patch)) setConfirm(structuredClone({ item: edit.base, patch }));
       } }}>

@@ -704,6 +704,12 @@ The wire protocol and operational bounds are documented in
 - The Web workbench exposes management of existing Albums and a separate catalog
   review queue. A completed import links to its confirmed catalog Album and
   Artist for subsequent edits; it never unlocks or republishes its old approval.
+- The Web Album inventory presents covers and titles as a single detail entry
+  for each Album. Manual editing, existing-Album proofreading and local MP3
+  conversion are available from that Album's administrator detail page instead
+  of repeated inventory actions. The detail page displays its current saved
+  cover, including supported legacy artwork, through protected administrator
+  delivery and retains the dedicated administrator layout.
 - Administrators may create a private proofreading project for a ready existing
   Album with at most 100 ready Audio members. Empty Albums are supported; missing,
   malformed, mixed Video, or inconsistent memberships require repair before

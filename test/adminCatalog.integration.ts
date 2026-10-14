@@ -13,6 +13,7 @@ import { resolveFollowedArtistReleases } from '../src/services/followedArtistRel
 import { Carousel } from '../src/models/carousel';
 import { getS3 } from '../src/infrastructure/s3';
 import { Readable } from 'node:stream';
+import { legacyCatalogArtwork } from '../src/administration/adminLegacyArtwork';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
 
 let harness: MongoReplicaSetHarness, server: Server, base = '', token = '', userToken = '';
@@ -31,7 +32,7 @@ before(async () => {
     const address = server.address(); assert.ok(address && typeof address !== 'string'); base = `http://127.0.0.1:${address.port}`;
 });
 beforeEach(async () => {
-    for (const name of ['users', 'authSessions', 'artists', 'albums', 'audioTracks', 'pages', 'carousels', 'contentCollections', 'artistFollows', 'adminCatalogMutations']) await db().collection(name).deleteMany({});
+    for (const name of ['users', 'authSessions', 'artists', 'albums', 'audioTracks', 'imageAssets', 'pages', 'carousels', 'contentCollections', 'artistFollows', 'adminCatalogMutations']) await db().collection(name).deleteMany({});
     for (const key of flags) process.env[key] = 'true';
     const adminUser = { _id: admin, role: 'admin', emailVerified: true, email: 'catalog-admin@example.test' }, ordinary = { _id: user, role: 'user', emailVerified: true, email: 'catalog-user@example.test' };
     await db().collection('users').insertMany([adminUser, ordinary]);
@@ -197,6 +198,86 @@ test('private preview cannot pin missing or weak object validators', async t => 
     t.mock.method(getS3(), 'send', async () => ({ ContentLength: 7, ETag: etag, Body: Readable.from([Buffer.from('preview')]) }));
     const path = `${base}/api/admin/v1/catalog/audioTrack/${track}/media?viewer=${admin}`;
     for (etag of [undefined, 'W/"weak"']) assert.equal((await fetch(path, { method: 'HEAD', headers: { Cookie: `session_token=${token}` } })).status, 404);
+});
+
+test('legacy HTTPS artwork uses only the private allowlisted path for hidden Album snapshots and bytes', async t => {
+    const legacy = 'https://images.example.test/private-album-cover.png?legacy=retained';
+    await db().collection('albums').updateOne({ _id: album }, { $set: { visibility: 'hidden', coverArtUrl: legacy } });
+    const item = (await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item;
+    const path = `/api/admin/v1/catalog/album/${album}/artwork`;
+    assert.equal(item.coverUrl, path);
+    const inventory = await listAdminCatalog(admin.toHexString(), 'album', {});
+    assert.equal(inventory.items[0].coverUrl, path);
+    assert.equal(JSON.stringify({ item, inventory }).includes(legacy), false);
+    let calls = 0;
+    t.mock.method(legacyCatalogArtwork, 'load', async (url: string, signal: AbortSignal) => {
+        calls++; assert.equal(url, legacy); assert.equal(signal.aborted, false); return Buffer.from('decoded-webp');
+    });
+    assert.equal((await request(path, undefined, '')).status, 401);
+    assert.equal((await request(path, undefined, userToken)).status, 403);
+    assert.equal(calls, 0);
+    const headers = { Cookie: `session_token=${token}` };
+    assert.equal((await fetch(base + path, { headers })).status, 409);
+    const response = await fetch(`${base}${path}?viewer=${admin}`, { headers });
+    assert.equal(response.status, 200); assert.equal(await response.text(), 'decoded-webp');
+    assert.equal(response.headers.get('content-type'), 'image/webp');
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(response.headers.get('cache-control')!, /private, no-store/);
+    assert.equal(response.headers.get('location'), null);
+    const etag = response.headers.get('etag'); assert.ok(etag);
+    const head = await fetch(`${base}${path}?viewer=${admin}`, { method: 'HEAD', headers });
+    assert.equal(head.status, 200); assert.equal(head.headers.get('content-length'), '12'); assert.equal(head.headers.get('etag'), etag);
+    const range = await fetch(`${base}${path}?viewer=${admin}`, { headers: { ...headers, Range: 'bytes=0-2', 'If-Match': etag } });
+    assert.equal(range.status, 206); assert.equal(await range.text(), 'dec');
+    assert.equal((await fetch(`${base}${path}?viewer=${admin}`, { headers: { ...headers, 'If-Match': '"older-image"' } })).status, 412);
+    assert.equal(await getListenerAlbum(album.toHexString()), null);
+});
+
+test('legacy artwork rechecks role, session, readiness and exact URL after the external read', async t => {
+    const path = `/api/admin/v1/catalog/album/${album}/artwork`;
+    const legacy = 'https://images.example.test/original.png';
+    const mutations = [
+        () => db().collection('albums').updateOne({ _id: album }, { $set: { coverArtUrl: 'https://images.example.test/replaced.png' } }),
+        () => db().collection('albums').updateOne({ _id: album }, { $set: { lifecycleStatus: 'deleting' } }),
+        () => db().collection('users').updateOne({ _id: admin }, { $set: { role: 'user' } }),
+        () => db().collection('authSessions').updateMany({ userId: admin.toHexString() }, { $set: { revokedAt: new Date() } })
+    ];
+    for (const mutate of mutations) {
+        await db().collection('users').updateOne({ _id: admin }, { $set: { role: 'admin' } });
+        await db().collection('authSessions').updateMany({ userId: admin.toHexString() }, { $unset: { revokedAt: '' } });
+        await db().collection('albums').updateOne({ _id: album }, { $set: { lifecycleStatus: 'ready', coverArtUrl: legacy } });
+        const mock = t.mock.method(legacyCatalogArtwork, 'load', async () => { await mutate(); return Buffer.from('must-not-deliver'); });
+        const response = await request(path);
+        assert.equal(response.status, 404); assert.equal(await response.text(), '');
+        mock.mock.restore();
+    }
+});
+
+test('legacy internal image paths still require exact ready image ownership and never bypass invalid explicit IDs', async t => {
+    const imageId = new ObjectId();
+    const path = `/api/admin/v1/catalog/album/${album}/artwork`;
+    await db().collection('albums').updateOne({ _id: album }, { $set: { visibility: 'hidden', coverArtUrl: `/content/images/${imageId}` } });
+    await db().collection('imageAssets').insertOne({ _id: imageId, ownerId: album.toHexString(), ownerType: 'album', uploadStatus: 'pending', s3Key: `images/${imageId}`, contentType: 'image/png' });
+    let calls = 0;
+    t.mock.method(getS3(), 'send', async () => { calls++; return { ContentLength: 7, ETag: '"stored-image"', Body: Readable.from([Buffer.from('preview')]) }; });
+    assert.equal((await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item.coverUrl, path);
+    assert.equal((await request(path)).status, 404); assert.equal(calls, 0);
+    await db().collection('imageAssets').updateOne({ _id: imageId }, { $set: { uploadStatus: 'ready', ownerId: artist.toHexString() } });
+    assert.equal((await request(path)).status, 404); assert.equal(calls, 0);
+    await db().collection('imageAssets').updateOne({ _id: imageId }, { $set: { ownerId: album.toHexString() } });
+    const response = await request(path); assert.equal(response.status, 200); assert.equal(await response.text(), 'preview');
+    await db().collection('albums').updateOne({ _id: album }, { $set: { coverArtId: 'invalid' } });
+    assert.equal((await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item.coverUrl, null);
+    assert.equal((await request(path)).status, 404);
+});
+
+test('legacy external artwork failures stay private and never reveal the source or error details', async t => {
+    const legacy = 'https://images.example.test/private-path.png?private=source';
+    await db().collection('albums').updateOne({ _id: album }, { $set: { coverArtUrl: legacy } });
+    t.mock.method(legacyCatalogArtwork, 'load', async () => { throw new Error(legacy); });
+    const response = await request(`/api/admin/v1/catalog/album/${album}/artwork`);
+    assert.equal(response.status, 404); assert.equal(await response.text(), '');
+    assert.equal(response.headers.get('location'), null); assert.match(response.headers.get('cache-control')!, /no-store/);
 });
 
 test('a Track Number edit reorders existing members atomically and rejects invalid dates', async () => {

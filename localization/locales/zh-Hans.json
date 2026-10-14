@@ -217,6 +217,7 @@
   "admin.catalog.attribution": "归属信息",
   "admin.catalog.audio_track": "曲目",
   "admin.catalog.automatic_order": "曲号自动决定专辑顺序。保存曲号会同步所属专辑的顺序。",
+  "admin.catalog.back": "返回目录",
   "admin.catalog.carousel": "轮播",
   "admin.catalog.confirm": "确认目录修改",
   "admin.catalog.confirm_copy": "这些修改会更新已有目录内容。保存前请核对已修改字段和可见度。",

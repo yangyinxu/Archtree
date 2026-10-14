@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-Ty4my0oj67GGMo7LuD7EDTXm3wt2A-pAVuwR_YMPVXQ",
+  "revision": "sha256-tBsp1c2ZHVfdoB_YcrDiojQSGXmnNq-AvNzC2SHXuh0",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.back_login": "Back to Log in",
@@ -221,6 +221,7 @@
     "admin.catalog.attribution": "Attribution",
     "admin.catalog.audio_track": "Tracks",
     "admin.catalog.automatic_order": "Track numbers determine Album order automatically. Saving a number updates the linked Album order.",
+    "admin.catalog.back": "Back to catalog",
     "admin.catalog.carousel": "Carousel",
     "admin.catalog.confirm": "Confirm catalog changes",
     "admin.catalog.confirm_copy": "These changes update existing catalog content. Review the edited fields and visibility before saving.",

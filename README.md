@@ -1405,6 +1405,29 @@ cannot be recalled. Private preview GET/HEAD accepts the account-viewer header,
 or a non-secret `viewer` query parameter for browser media elements; neither is
 an authentication credential. Every preview requires the current admin session.
 
+Catalog snapshots expose only the protected `/catalog/:kind/:id/artwork` path,
+including supported legacy `coverArtUrl` records. A stored image preview requires
+the ready image lifecycle record to belong to the current ready owner and retain
+its exact reference. Legacy external artwork uses a credential-free HTTPS proxy:
+only port 443, all DNS answers must be public unicast, the socket pins one checked
+answer, and TLS verifies the original hostname of each connection. A fixed
+application User-Agent identifies the image client without account information.
+At most three HTTPS redirects are followed; every destination repeats the URL,
+DNS and TLS checks. Missing or duplicate Location fields, unsafe destinations
+and loops fail closed, and redirect bodies are destroyed without forwarding
+cookies, authorization or referrer headers. Download and decoding share an eight-second
+deadline, a 10 MiB input limit and a 16-million-pixel ceiling. The process admits
+two legacy downloads/decodes at once, queues at most 16 (eight per account), and
+cancels queued work on disconnect or expiry. Raster decoding also shares the
+canonical artwork-transform budget. Supported static
+JPEG, PNG, WebP and GIF inputs are completely decoded, stripped of metadata and
+returned as WebP at most 1280 pixels per side. The response is private/no-store
+and stops waiting at its deadline; an already-started native decode retains its
+capacity until its actual promise settles and has a separate native timeout.
+Every response rechecks the current administrator session, ready owner and exact source
+before delivery. It never exposes the legacy URL or changes storage, and does
+not satisfy the separate historical-URL migration requirement for hiding content.
+
 The Web import editor uses Draft, Review, Files and Publish sections.
 Section navigation retains account-fenced local work and does not dispatch a
 mutation. Compact value comparisons keep source evidence expandable; publication

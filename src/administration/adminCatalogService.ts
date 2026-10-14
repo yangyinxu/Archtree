@@ -15,6 +15,7 @@ import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
 import { pageItemIdentity } from '../utils/pageItemIdentity';
 import { touchAvailablePageItemReferences } from '../services/pageReferenceLifecycleService';
 import { parseImportDate, cleanText, uuid, type ImportDate } from './adminImportContract';
+import { adminCatalogArtworkSource } from './adminCatalogArtworkSource';
 
 export type AdminCatalogKind = 'album' | 'artist' | 'audioTrack' | 'organization';
 export class AdminCatalogError extends Error {
@@ -99,9 +100,9 @@ export const adminCatalogSnapshot = async (kind: AdminCatalogKind, doc: any, ses
         if (!album || visibility(album.visibility) === 'hidden') effectiveVisibility = 'hidden';
     }
     const ownerId = String(doc._id);
-    const coverId = /^[0-9a-f]{24}$/.test(String(doc.coverArtId)) ? String(doc.coverArtId) : null;
+    const artwork = adminCatalogArtworkSource(doc);
     return { kind, id: ownerId, revision: revision(stateForRevision(kind, doc)), visibility: visibility(doc.visibility), effectiveVisibility,
-        fields: fields(kind, doc), coverUrl: coverId ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
+        fields: fields(kind, doc), coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
         mediaUrl: kind === 'audioTrack' ? `/api/admin/v1/catalog/audioTrack/${ownerId}/media` : null,
         capabilities: { editing: isAdminCatalogEditingEnabled(), visibility: isAdminVisibilityEditingEnabled() } };
 };

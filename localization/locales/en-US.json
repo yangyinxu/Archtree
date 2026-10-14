@@ -217,6 +217,7 @@
   "admin.catalog.attribution": "Attribution",
   "admin.catalog.audio_track": "Tracks",
   "admin.catalog.automatic_order": "Track numbers determine Album order automatically. Saving a number updates the linked Album order.",
+  "admin.catalog.back": "Back to catalog",
   "admin.catalog.carousel": "Carousel",
   "admin.catalog.confirm": "Confirm catalog changes",
   "admin.catalog.confirm_copy": "These changes update existing catalog content. Review the edited fields and visibility before saving.",

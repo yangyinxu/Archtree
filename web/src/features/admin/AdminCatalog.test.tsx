@@ -13,6 +13,55 @@ const album = (): Extract<CatalogItem, { kind: 'album' }> => ({ kind: 'album', i
 function mount(element: React.ReactNode) { const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session); render(<QueryClientProvider client={client}><MemoryRouter>{element}</MemoryRouter></QueryClientProvider>); return client; }
 beforeEach(() => { adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }); adminWorkspace.select('admin'); });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); vi.restoreAllMocks(); onlineManager.setOnline(true); });
+test('Album inventory uses its private cover and title as one detail entry without repeated management actions', async () => {
+  const item = { ...album(), coverUrl: '/api/admin/v1/catalog/album/111111111111111111111111/artwork', fields: { ...album().fields, releaseDate: { year: 2024, month: null, day: null } } };
+  adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }, true);
+  vi.stubGlobal('fetch', vi.fn(async () => json({ items: [item], nextCursor: null })));
+  mount(<AdminCatalogPage />);
+  const link = await screen.findByRole('link', { name: item.fields.title });
+  expect(link).toHaveAttribute('href', `/admin/catalog/album/${item.id}`);
+  expect(link).toHaveAccessibleDescription('Public · 2024');
+  const image = link.querySelector('img')!;
+  expect(image).toHaveAttribute('src', `${item.coverUrl}?viewer=${viewer}`);
+  expect(image).toHaveAttribute('alt', ''); expect(image).not.toHaveAttribute('srcset');
+  expect(screen.queryByRole('link', { name: 'Edit manually' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Review existing Album' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Convert to MP3' })).not.toBeInTheDocument();
+  act(() => adminWorkspace.select('user')); expect(document.querySelector('img')).toBeNull();
+});
+
+test('Album details display the saved cover and keep all management actions behind the detail entry', async () => {
+  const item = { ...album(), coverUrl: '/api/admin/v1/catalog/album/111111111111111111111111/artwork', fields: { ...album().fields, releaseDate: { year: 2024, month: 1, day: null } } };
+  adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }, true);
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => path.endsWith('/cover-operations') ? json({ items: [] }) : json({ item })));
+  mount(<AdminCatalogPage kind="album" id={item.id} />);
+  const image = await screen.findByRole('img', { name: `${item.fields.title} cover` });
+  expect(image).toHaveAttribute('src', `${item.coverUrl}?viewer=${viewer}`); expect(image).not.toHaveAttribute('srcset');
+  expect(image).toHaveAttribute('loading', 'eager');
+  expect(screen.getByText('Public · 2024-01')).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Back to catalog' })).toHaveAttribute('href', '/admin/catalog');
+  const actions = within(screen.getByRole('group', { name: 'Edit catalog content' }));
+  expect(actions.getByRole('link', { name: 'Edit manually' })).toHaveAttribute('href', '#catalog-details');
+  expect(await actions.findByRole('button', { name: 'Review existing Album' })).toBeEnabled();
+  expect(actions.getByRole('link', { name: 'Convert to MP3' })).toHaveAttribute('href', `/admin/conversions?album=${item.id}`);
+  expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue(item.fields.title);
+});
+
+test.each(['inventory', 'details'] as const)('explicit %s refresh retries a failed private cover without exposing a public URL', async mode => {
+  const item = { ...album(), coverUrl: '/api/admin/v1/catalog/album/111111111111111111111111/artwork' }; let reads = 0;
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    reads++; return mode === 'inventory' ? json({ items: [item], nextCursor: null }) : json({ item });
+  }));
+  mount(mode === 'inventory' ? <AdminCatalogPage /> : <AdminCatalogPage kind="album" id={item.id} />);
+  await waitFor(() => expect(document.querySelector('img')).not.toBeNull());
+  const original = document.querySelector('img')!; fireEvent.error(original); expect(document.querySelector('img')).toBeNull();
+  const previousReads = reads; fireEvent.click(screen.getAllByRole('button', { name: 'Refresh status' })[0]);
+  await waitFor(() => expect(reads).toBeGreaterThan(previousReads));
+  const recovered = document.querySelector('img')!; expect(recovered).not.toBe(original);
+  expect(recovered).toHaveAttribute('src', `${item.coverUrl}?viewer=${viewer}`); expect(recovered).not.toHaveAttribute('srcset');
+});
+
 test('existing catalog save is explicit, partial and preserves unsaved edits on revision conflict', async () => {
   const item = album(); const writes: any[] = [];
   vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => { if (_path.endsWith('/cover-operations')) return json({items:[]}); if (init.method === 'PATCH') { writes.push(JSON.parse(String(init.body))); return json({ code: 'revision' }, 409); } return json({ item }); }));
@@ -220,6 +269,7 @@ test.each([
   } else act(() => adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined,
     { editing: capability !== 'editing', visibility: capability !== 'visibility' }));
   await waitFor(() => expect(control).toBeDisabled()); expect(control).toHaveValue(value);
+  if (capability === 'editing') expect(screen.getByRole('button', { name: 'Edit manually' })).toBeDisabled();
   const save = within(dialog).getByRole('button', { name: 'Save catalog changes' });
   expect(save).toBeDisabled(); fireEvent.click(save); expect(writes).toEqual([]);
   expect(adminWorkspace.buffer<{ base: CatalogItem; dirty: boolean }>(`catalog:album:${item.id}`)).toMatchObject({ base: { revision: original.revision }, dirty: true });
