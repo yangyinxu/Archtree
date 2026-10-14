@@ -279,7 +279,7 @@ jobs:
 
       - name: Verify native PCM and audio-output plugins
         run: |
-          for plugin in wavparse audioconvert audioresample pulsesink playbin3
+          for plugin in wavparse audioconvert audioresample pulsesink
           do
             gst-inspect-1.0 "$plugin" > "${RUNNER_TEMP}/gst-${plugin}.txt"
             sed -n '1,14p' "${RUNNER_TEMP}/gst-${plugin}.txt"
@@ -291,7 +291,7 @@ jobs:
           GST_DEBUG: '0,webkitmediaplayer:5'
           PULSE_LATENCY_MSEC: '100'
           WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS: '1'
-          WEBKIT_GST_USE_PLAYBIN3: '1'
+          WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
           FINITUDE_E2E_ISOLATED_AUDIO: '1'
         run: |
           set -o pipefail
@@ -302,7 +302,7 @@ jobs:
         env:
           PULSE_LATENCY_MSEC: '100'
           WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS: '1'
-          WEBKIT_GST_USE_PLAYBIN3: '1'
+          WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
           FINITUDE_E2E_ISOLATED_AUDIO: '1'
         run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 

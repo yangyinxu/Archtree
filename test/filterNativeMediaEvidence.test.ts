@@ -86,6 +86,54 @@ test('native records are capped while later test failures remain visible and ove
   assert.ok(output.endsWith('  1 failed\n'));
 });
 
+test('repeated downloads leave room for the final seek and ready-state failure without losing load boundaries', async () => {
+  const messages: string[] = [];
+  for (let load = 0; load < 8; load += 1) {
+    messages.push('Creating pipeline for video player', 'Using legacy playbin element: false');
+    for (let percent = 4; percent <= 100; percent += 4) {
+      messages.push(`[Buffering] mode: GST_BUFFERING_DOWNLOAD, status: ${percent}.000000%`,
+        'Async: State: READY, pending: PAUSED');
+    }
+    messages.push('WebKitWebSrc has EOS', 'State: PAUSED, pending: VOID_PENDING', '[Buffering] Complete.');
+  }
+  messages.push('State: PLAYING, pending: VOID_PENDING',
+    'Setting high-percent=0 on GstDownloadBuffer to force 100% buffered reporting',
+    '[Seek] Performing actual seek to 0:00:07.000000000 at rate 1.000000',
+    'Async: State: PAUSED, pending: PAUSED', 'Async: State: PAUSED, pending: PLAYING',
+    'Ready State Changed from HaveEnoughData to HaveCurrentData',
+    'State: PLAYING, pending: VOID_PENDING');
+  const output = await filterOutput([messages.map(message => browser(message)).join('\n'), '\n  1 failed\n']);
+  const evidence = records(output);
+  assert.ok(evidence.length < nativeMediaEvidenceLimit);
+  assert.equal(evidence.filter(value => value.label === 'pipeline-created').length, 8);
+  assert.equal(evidence.filter(value => value.label === 'pipeline-mode').length, 8);
+  assert.equal(evidence.filter(value => value.label === 'source-eos').length, 8);
+  assert.deepEqual(evidence.filter(value => value.label === 'buffering-status').map(value => value.percent),
+    Array.from({ length: 8 }, () => [4, 28, 52, 76, 100]).flat());
+  assert.equal(evidence.filter(value => value.label === 'pipeline-state' && value.state === 'READY').length, 8);
+  assert.deepEqual(evidence.slice(-6).map(({ monotonicMs: _time, ...fields }) => fields), [
+    { label: 'seek-download-buffer' }, { label: 'seek-dispatched' },
+    { label: 'pipeline-state', transition: 'async', state: 'PAUSED', pending: 'PAUSED' },
+    { label: 'pipeline-state', transition: 'async', state: 'PAUSED', pending: 'PLAYING' },
+    { label: 'ready-state', from: 'HaveEnoughData', to: 'HaveCurrentData' },
+    { label: 'pipeline-state', transition: 'settled', state: 'PLAYING', pending: 'VOID_PENDING' }
+  ]);
+  assert.ok(output.endsWith('  1 failed\n'));
+});
+
+test('buffering mode changes and exact empty/full boundaries survive progress compression', async () => {
+  const messages = [
+    ['DOWNLOAD', 4], ['DOWNLOAD', 20], ['DOWNLOAD', 0], ['DOWNLOAD', 0],
+    ['STREAM', 4], ['STREAM', 20], ['STREAM', 28], ['STREAM', 100], ['STREAM', 100], ['STREAM', 0]
+  ];
+  const output = await filterOutput(messages.map(([mode, percent]) =>
+    `${browser(`[Buffering] mode: GST_BUFFERING_${mode}, status: ${percent}.000000%`)}\n`));
+  assert.deepEqual(records(output).map(({ mode, percent }) => [mode, percent]), [
+    ['download', 4], ['download', 0], ['download', 0], ['stream', 4], ['stream', 28],
+    ['stream', 100], ['stream', 100], ['stream', 0]
+  ]);
+});
+
 test('emitted times are finite, nonnegative and monotonic even if an injected observer clock regresses', async () => {
   const times = [20, 22.1254, 21, Number.NaN];
   const filter = createNativeMediaEvidenceFilter({ now: () => times.shift()! });

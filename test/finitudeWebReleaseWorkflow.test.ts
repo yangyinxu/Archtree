@@ -150,7 +150,8 @@ test('ordinary browser audio isolation does not change the native social environ
   const workflow = (await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n');
   const jobs = jobBlocks(workflow);
   const browser = jobs.get('browser-e2e')!;
-  for (const name of ['WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS', 'WEBKIT_GST_USE_PLAYBIN3', 'FINITUDE_E2E_ISOLATED_AUDIO']) {
+  assert.doesNotMatch(workflow, /WEBKIT_GST_USE_PLAYBIN3/);
+  for (const name of ['WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS', 'WPE_SHELL_DISABLE_MEDIA_DISK_CACHE', 'FINITUDE_E2E_ISOLATED_AUDIO']) {
     const flag = `${name}: '1'`;
     const steps = stepBlocks(browser).filter(step => step.body.includes(flag));
     assert.equal(steps.length, 2);

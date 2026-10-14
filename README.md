@@ -1172,10 +1172,11 @@ The same two commands retain
 `WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L4101-L4144)
 disables WPE's viewport power-saving pause for hidden muted video elements,
 including audio-only sources. Media clocks, readiness, seeks, rates, and end events
-remain native. These commands also set `WEBKIT_GST_USE_PLAYBIN3=1` to select
-WebKit's official optional GStreamer playbin3 backend for ordinary HTTP media;
-setup verifies the installed `playbin3` plugin before testing. The independent
-social gate sets none of these switches and continues
+remain native. These commands also set `WPE_SHELL_DISABLE_MEDIA_DISK_CACHE=1`
+using [WPE's media cache setting](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L3345-L3359).
+This isolates the synthetic pause/seek scenario from the GStreamer download-cache
+completion path while retaining the default decoder and real HTTP/Range transport.
+The independent social gate sets none of these switches and continues
 to verify real audio and background playback under the default browser policy.
 Both jobs retain preflight and full-matrix evidence, and every invocation is
 blocking. `release-artifact` needs all four jobs, so it is skipped unless every

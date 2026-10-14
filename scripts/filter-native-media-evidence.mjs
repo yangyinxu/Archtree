@@ -70,6 +70,7 @@ export const createNativeMediaEvidenceFilter = ({ now = () => performance.now() 
   const decoder = new StringDecoder('utf8');
   const startedAt = now();
   let pending = '', droppingLine = false, evidenceCount = 0, previousMonotonicMs = 0;
+  let previousPipelineState = '', previousBufferingBucket = '';
   const filter = new Transform({
     transform(chunk, _encoding, callback) {
       consume(decoder.write(chunk));
@@ -87,6 +88,18 @@ export const createNativeMediaEvidenceFilter = ({ now = () => performance.now() 
     if (evidenceCount >= nativeMediaEvidenceLimit) return;
     const fields = classifyNativeMediaLine(clean);
     if (!fields) return;
+    // Download progress can alternate with hundreds of identical state reports before a seek begins.
+    if (fields.label === 'pipeline-created') {
+      previousPipelineState = ''; previousBufferingBucket = '';
+    } else if (fields.label === 'pipeline-state') {
+      const state = `${fields.transition}:${fields.state}:${fields.pending}`;
+      if (state === previousPipelineState) return;
+      previousPipelineState = state;
+    } else if (fields.label === 'buffering-status') {
+      const bucket = `${fields.mode}:${Math.floor(fields.percent / 25)}`;
+      if (fields.percent !== 0 && fields.percent !== 100 && bucket === previousBufferingBucket) return;
+      previousBufferingBucket = bucket;
+    }
     const elapsed = now() - startedAt;
     previousMonotonicMs = Math.max(previousMonotonicMs, Number.isFinite(elapsed) ? Math.max(0, Math.round(elapsed * 1000) / 1000) : 0);
     evidenceCount += 1;
