@@ -31,6 +31,7 @@ const titleKeyFor = (pathname: string): MessageKey => {
   if (pathname === '/admin/pages') return 'admin.catalog.pages';
   if (pathname === '/admin/imports/new') return 'admin.workbench.new';
   if (/^\/admin\/imports\/[a-f0-9]{24}$/.test(pathname)) return 'admin.route.title.import';
+  if (/^\/admin\/catalog-reviews\/[a-f0-9]{24}$/.test(pathname)) return 'admin.catalog_review.title';
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin.workbench.title';
   return 'route.title.not_found';
 };

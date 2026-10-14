@@ -1137,6 +1137,207 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.analysis_confirm": {
+      "description": "Start Luna review",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.analysis_copy": {
+      "description": "Luna will use the saved metadata and available original filenames. This may incur an AI service charge. It creates suggestions only; applying them requires a separate confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.analysis_limit": {
+      "description": "This project has reached its analysis limit. Continue reviewing manually.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied": {
+      "description": "Changes applied to the existing Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_copy": {
+      "description": "This review is complete and read-only. Open the Album to make further edits or create a new review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.apply_action": {
+      "description": "Apply selected changes",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.apply_confirm": {
+      "description": "Confirm catalog changes",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.apply_copy": {
+      "description": "Only the selected saved fields will change. Other metadata and the existing media stay in place.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.apply_tab": {
+      "description": "Apply changes",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.apply_title": {
+      "description": "Choose changes for the existing Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.artist_hint": {
+      "description": "Artist suggestions are identity hints. Review Artist attribution in the catalog editor; they are not applied automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.context_copy": {
+      "description": "The source is this saved Album. Original filenames are used when available; historical folder names are not inferred. Artist identity, artwork and visibility are managed in the catalog editor.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.create": {
+      "description": "Review existing Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.create_confirm": {
+      "description": "Create review project",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.create_copy": {
+      "description": "Create a private review of the current saved Album and its tracks. Start Luna separately after reviewing the saved context. Creating this project does not change the catalog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.draft_saved": {
+      "description": "Saved to private review",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.filename_missing": {
+      "description": "Original filename not retained",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.manual_edit": {
+      "description": "Edit manually",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.no_changes": {
+      "description": "The saved draft has no applicable metadata changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.save_draft_first": {
+      "description": "Save the private draft before analyzing, reviewing suggestions or applying changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.save_first": {
+      "description": "Save your catalog edits before creating a review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.saved_value": {
+      "description": "Reviewed value",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.select_field": {
+      "description": "Apply target · field",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string",
+        "target": "string"
+      }
+    },
+    "admin.catalog_review.selected": {
+      "description": "count changes selected",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.source_changed": {
+      "description": "The Album, its tracks or a source file has changed. Open the current Album and create a new review before applying changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.source_unavailable": {
+      "description": "The original Album or a track is no longer ready. This private review remains available, but cannot change the catalog.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.title": {
+      "description": "Existing Album review",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unavailable": {
+      "description": "Catalog reviews are currently unavailable. You can still open the Album to edit it manually.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog.add_credit": {
       "description": "Add credit",
       "delivery": [
@@ -2355,6 +2556,20 @@
       ],
       "variables": {}
     },
+    "admin.published.edit_album": {
+      "description": "Edit published Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.published.edit_artist": {
+      "description": "Edit Artist",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.review.already_matches": {
       "description": "Administrator workbench: review already matches.",
       "delivery": [
@@ -2758,6 +2973,20 @@
       ],
       "variables": {}
     },
+    "admin.workbench.import_source": {
+      "description": "Album imports",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.manage_albums": {
+      "description": "Manage published Albums",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.workbench.mine": {
       "description": "Administrator workbench: workbench mine.",
       "delivery": [
@@ -2800,8 +3029,36 @@
       ],
       "variables": {}
     },
+    "admin.workbench.open_review": {
+      "description": "Open review",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_empty": {
+      "description": "No catalog reviews yet. Open a published Album to begin.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_source": {
+      "description": "Catalog reviews",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.workbench.search": {
       "description": "Administrator workbench: workbench search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.source": {
+      "description": "Project source",
       "delivery": [
         "runtime"
       ],

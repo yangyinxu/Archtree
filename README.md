@@ -1334,6 +1334,35 @@ cost/quality measurements and real S3 proof are separate from mocked tests.
 Daily reservations are persisted in the same transaction as a chunk checkpoint;
 uncertain outcomes and dispatches stopped after reservation remain counted.
 
+Web **Workbench → Manage published Albums** exposes explicit manual editing and
+creation of an existing-Album review. The separate **Catalog reviews** queue
+retains saved projects when the browser closes. Analysis uses retained original
+filenames and saved metadata; absent historical folder/file evidence stays empty.
+No media is uploaded, copied or published by this workflow. Artist attribution,
+artwork and visibility remain separate catalog edits.
+
+Catalog review routes (relative to `/api/admin/v1`):
+
+- `POST /catalog-reviews`: `{operationId, albumId, expectedRevision}` captures a
+  ready Album and up to 100 ready Audio members. Empty Albums are supported;
+  malformed, missing, Video or inconsistent members are explicitly rejected.
+  Creation is controlled by `FINITUDE_ADMIN_CATALOG_ENABLED` and does not start
+  analysis. Original filenames are allowlisted basenames, never storage keys.
+- `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
+  workbench pagination and private readback. `sourceStatus` distinguishes current,
+  changed and unavailable sources. Old `/imports` routes exclude these projects;
+  strict native import DTOs are unchanged.
+- `PATCH /catalog-reviews/:id` and `POST` to `/analyze`, `/adopt` or
+  `/cancel-analysis`: save/review privately with the original UUID and numeric
+  revision. Analysis uses the existing import flag, provider and shared budgets;
+  viewing, editing or creating a project does not dispatch a provider request.
+- `POST /catalog-reviews/:id/apply`: `{operationId, expectedRevision, fields}`
+  selects saved Album `title`/`releaseDate` or Track `title`/`trackNumber` paths.
+  Revisions, membership, readiness and internal filename/media evidence are
+  checked in the same transaction as metadata/order updates and the receipt.
+  Stale sources reject the whole operation. Applied projects become read-only;
+  no upload, duplicate-decision, S3 or publication endpoint exists for them.
+
 The publisher reserves immutable approvals and catalog IDs before copying
 objects. It uses version-bound GET and conditional checksum PUT to canonical
 storage. Canonical destination PUT uses one SDK attempt and a 90-second deadline

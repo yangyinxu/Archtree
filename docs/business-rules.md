@@ -680,6 +680,31 @@ The wire protocol and operational bounds are documented in
   metadata, memberships, and storage references, reject stale snapshots, and
   use the canonical Credit and artwork lifecycle. Track Number changes update
   the assigned Album's automatic order in the same transaction.
+- The Web workbench exposes management of existing Albums and a separate catalog
+  review queue. A completed import links to its confirmed catalog Album and
+  Artist for subsequent edits; it never unlocks or republishes its old approval.
+- Administrators may create a private proofreading project for a ready existing
+  Album with at most 100 ready Audio members. Empty Albums are supported; missing,
+  malformed, mixed Video, or inconsistent memberships require repair before
+  creating a review. The server captures current catalog revisions and original
+  filenames when retained. Missing historical filenames and folder names remain
+  explicitly unknown; an Album title is not presented as a source folder.
+- Existing-Album proofreading shares the durable analysis, grant, concurrency and
+  provider-call limits of imports. Opening a project or editing its private draft
+  never starts paid analysis. Luna suggestions do not change the catalog. An
+  administrator can independently review suggestions and manually edit the
+  private Album title/date and Track titles/numbers, then explicitly select saved
+  fields for a separate catalog confirmation.
+- Applying an existing-Album review validates every captured catalog revision,
+  membership, readiness and filename/media identity. A replacement or external
+  edit prevents applying the stale project, rather than silently rebasing it.
+  Selected metadata changes, automatic Album order and the operation receipt
+  commit atomically; retries use the original intent. Artist identity/Credits,
+  artwork, visibility, membership and stored media are preserved. Artist-name
+  suggestions are identity hints for a separate explicit catalog Credit edit.
+  Applied reviews remain read-only; further corrections use the current catalog
+  editor or a new review. Legacy native import APIs keep catalog reviews separate
+  until those clients support this dedicated workflow.
 - Administrator confirmations bind the item and revision displayed when opened.
   A refresh that changes the draft, publication approval or staged file requires
   a fresh review; confirmation never silently rebases onto a newer target.

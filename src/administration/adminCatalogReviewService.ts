@@ -1,0 +1,206 @@
+import { randomUUID } from 'node:crypto';
+import { ObjectId, type ClientSession } from 'mongodb';
+import { getDb } from '../infrastructure/database';
+import { isAdminCatalogEditingEnabled } from '../services/adminCapabilityService';
+import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { readyArtistLifecycleFilter } from '../services/artistReferenceFenceService';
+import { touchReadyAlbumReferences } from '../services/albumReferenceFenceService';
+import { touchReadyAudioTrackReferences } from '../services/audioTrackReferenceFenceService';
+import { orderedAlbumTrackIds } from '../services/albumTrackLinkService';
+import { withCatalogSearchUpdate } from '../utils/catalogSearch';
+import { adminCatalogEditableFields, adminCatalogItemRevision, readAdminCatalogRecord } from './adminCatalogService';
+import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, cleanText, exact, invalidImport, objectId, parseDraft, record, uuid, type ImportDate, type ImportDraft, type ImportManifest, type ImportWorkbenchFilter } from './adminImportContract';
+import { adminImportDto, adoptAdminProjectSuggestions, analyzeAdminProject, idleAnalysis, importCollection, importDigest, mutateAdminProject, parseAdminProjectMutation, withImportAdmin, type AdminImportDocument, type AdminProjectPolicy, type ProjectReceipt } from './adminImportService';
+import { OpenAiImportAnalysisProvider, type ImportAnalysisProvider } from './adminImportProvider';
+import type { CatalogReviewDetail, CatalogReviewField, CatalogReviewReceipt, CatalogReviewResponse, CatalogReviewSource, CatalogReviewWorkbench } from './adminCatalogReviewContract';
+
+const fail = (status: number, code: string): never => { throw new AdminImportError(status, code); };
+const missing = (): never => fail(404, 'ADMIN_CATALOG_REVIEW_NOT_FOUND');
+const conflict = (): never => fail(409, 'ADMIN_CATALOG_REVIEW_SOURCE_CHANGED');
+const admitted = () => { if (!isAdminCatalogEditingEnabled()) fail(503, 'ADMIN_CATALOG_EDITING_UNAVAILABLE'); };
+const reviewFilter = { purpose: 'catalogReview' as const };
+const reviewId = (id: string) => objectId(id) ? new ObjectId(id) : missing();
+const currentRevision = (value: unknown): value is string => typeof value === 'string' && /^cr_[A-Za-z0-9_-]{43}$/.test(value);
+const publicReceipt = ({ operationId, kind, revision }: ProjectReceipt): CatalogReviewReceipt => ({ operationId, kind: kind as CatalogReviewReceipt['kind'], revision });
+
+/** DTOs deliberately omit upload/publication/duplicate and storage identities from this separate protocol. */
+export async function catalogReviewDto(doc: AdminImportDocument, actor: string, session: ClientSession): Promise<CatalogReviewDetail> {
+    if (doc.purpose !== 'catalogReview' || !doc.catalogSource) return missing();
+    const shared = adminImportDto(doc, actor), sourceStatus = await catalogReviewSourceStatus(doc, session);
+    return {
+        id: shared.id, revision: shared.revision, createdAt: shared.createdAt, updatedAt: shared.updatedAt,
+        startedByMe: shared.startedByMe, sourceStatus, state: doc.catalogApplied ? 'applied' : 'reviewing',
+        source: doc.catalogSource, draft: doc.draft, analysis: shared.analysis, suggestions: shared.suggestions,
+        capabilities: { analysis: !doc.catalogApplied && shared.capabilities.analysis, apply: !doc.catalogApplied && sourceStatus === 'current' && isAdminCatalogEditingEnabled() },
+        applied: doc.catalogApplied ?? null, receipts: doc.receipts.map(publicReceipt)
+    };
+}
+const response = async (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null, session: ClientSession): Promise<CatalogReviewResponse> => ({ item: await catalogReviewDto(doc, actor, session), receipt: receipt ? publicReceipt(receipt) : null });
+const policy: AdminProjectPolicy<CatalogReviewResponse> = { purpose: 'catalogReview', response };
+
+/** Preserve only an actual bounded basename. Device paths and missing historical evidence are never invented. */
+export function catalogReviewOriginalFilename(raw: unknown): string | null {
+    try { const name = cleanText(raw, 255); return /[\\/:]/.test(name) || name === '.' || name === '..' ? null : name; }
+    catch { return null; }
+}
+function membership(doc: any): string[] {
+    if (!Array.isArray(doc.audioTrackIds) || doc.audioTrackIds.length > LIMITS.files || doc.audioTrackIds.some((id: unknown) => !objectId(id)) || new Set(doc.audioTrackIds).size !== doc.audioTrackIds.length) {
+        return fail(409, 'ADMIN_CATALOG_REVIEW_MEMBERSHIP_UNAVAILABLE');
+    }
+    return doc.audioTrackIds;
+}
+async function tracksForAlbum(album: any, session: ClientSession) {
+    const ids = membership(album);
+    const tracks = await getDb()!.collection('audioTracks').find({ _id: { $in: ids.map(id => new ObjectId(id)) }, ...readyAudioStorageFilter }, { session }).limit(LIMITS.files + 1).maxTimeMS(3_000).toArray();
+    const byId = new Map(tracks.map(track => [String(track._id), track]));
+    if (tracks.length !== ids.length || tracks.some(track => String(track.albumId) !== String(album._id) || (track.mediaType !== undefined && track.mediaType !== 'audio'))) return conflict();
+    return ids.map(id => byId.get(id)!);
+}
+
+/** Legacy media replacement can preserve metadata revisions, so naming and object evidence need their own fence. */
+function mediaEvidence(track: any): string {
+    const representation = track.mediaRepresentation;
+    return importDigest({ originalFileName: track.originalFileName ?? null, s3Key: track.s3Key ?? null, mediaType: track.mediaType ?? 'audio',
+        representation: representation ? [representation.objectKey, representation.etag, representation.versionId, representation.byteLength] : null });
+}
+/** Readback distinguishes missing/unready targets from a stale approved snapshot; it never rebases it. */
+async function catalogReviewSourceStatus(doc: AdminImportDocument, session: ClientSession): Promise<CatalogReviewDetail['sourceStatus']> {
+    const source = doc.catalogSource!;
+    const album = await readAdminCatalogRecord('album', source.album.id, session);
+    if (!album) return 'unavailable';
+    if (adminCatalogItemRevision('album', album) !== source.album.revision) return 'changed';
+    let tracks;
+    try { tracks = await tracksForAlbum(album, session); }
+    catch (error) { if (error instanceof AdminImportError) return 'unavailable'; throw error; }
+    if (importDigest(membership(album)) !== importDigest(source.tracks.map(track => track.id))) return 'changed';
+    const byId = new Map(tracks.map(track => [String(track._id), track]));
+    for (const track of source.tracks) {
+        const current = byId.get(track.id);
+        if (!current) return 'unavailable';
+        if (adminCatalogItemRevision('audioTrack', current) !== track.revision || mediaEvidence(current) !== doc.catalogEvidence?.[track.id]) return 'changed';
+    }
+    return 'current';
+}
+
+/** Creation freezes the complete ready membership and each source revision before admitting any paid work. */
+export async function createCatalogReview(actor: string, raw: unknown): Promise<CatalogReviewResponse> {
+    const input = record(raw); exact(input, ['operationId', 'albumId', 'expectedRevision']);
+    if (!uuid(input.operationId) || !objectId(input.albumId) || !currentRevision(input.expectedRevision)) return invalidImport();
+    const _id = new ObjectId(importDigest({ purpose: 'catalogReview', actor, operationId: input.operationId }).slice(0, 24));
+    const hash = importDigest({ kind: 'create', body: input });
+    return withImportAdmin(actor, async session => {
+        const prior = await importCollection().findOne({ _id, ...reviewFilter }, { session });
+        if (prior) { const receipt = prior.receipts[0]; if (receipt.hash !== hash || receipt.actorId !== actor) return fail(409, 'ADMIN_IMPORT_OPERATION_CONFLICT'); return response(prior, actor, receipt, session); }
+        admitted();
+        const album = await readAdminCatalogRecord('album', input.albumId as string, session); if (!album) return missing();
+        if (adminCatalogItemRevision('album', album) !== input.expectedRevision) return conflict();
+        const tracks = await tracksForAlbum(album, session), fields = adminCatalogEditableFields('album', album);
+        const source: CatalogReviewSource = {
+            album: { id: String(album._id), revision: input.expectedRevision as string, title: fields.title as string, releaseDate: fields.releaseDate as ImportDate | null, visibility: album.visibility === undefined || album.visibility === 'public' ? 'public' : 'hidden' },
+            tracks: tracks.map(track => { const fields = adminCatalogEditableFields('audioTrack', track); return { slotId: randomUUID(), id: String(track._id), revision: adminCatalogItemRevision('audioTrack', track), title: fields.title as string, trackNumber: fields.trackNumber as number | null, originalFileName: catalogReviewOriginalFilename(track.originalFileName) }; })
+        };
+        // Empty source context explicitly denotes absent folders/path metadata; a catalog title is not a folder name.
+        const manifest: ImportManifest = { rootLabel: '', files: source.tracks.map(track => ({ slotId: track.slotId, filename: track.originalFileName ?? '', relativePath: '', byteLength: null })) };
+        let artistName = '';
+        const primary = Array.isArray(fields.credits) ? fields.credits.find(credit => credit.subjectType === 'artist' && credit.role === 'primary') : null;
+        if (primary && objectId(primary.subjectId)) {
+            const artist = await getDb()!.collection('artists').findOne({ _id: new ObjectId(primary.subjectId), ...readyArtistLifecycleFilter }, { session, projection: { name: 1 } });
+            if (artist) artistName = adminCatalogEditableFields('artist', artist).name as string;
+        }
+        const draft: ImportDraft = { album: { title: source.album.title, releaseDate: source.album.releaseDate, visibility: source.album.visibility, artistName }, tracks: source.tracks.map(({ slotId, title, trackNumber }) => ({ slotId, title, trackNumber })) };
+        // Both persisted input and provider envelopes retain the shared byte allowances.
+        parseDraft(draft, manifest); if (Buffer.byteLength(JSON.stringify(manifest)) > 24_000) return invalidImport();
+        const now = new Date(), receipt: ProjectReceipt = { operationId: input.operationId as string, kind: 'create', revision: 1, actorId: actor, hash, at: now };
+        const doc: AdminImportDocument = { _id, purpose: 'catalogReview', catalogSource: source, catalogEvidence: Object.fromEntries(tracks.map(track => [String(track._id), mediaEvidence(track)])), actorId: actor, revision: 1, createdAt: now, updatedAt: now, manifest, draft, analysis: idleAnalysis(), analysisHistory: [], attemptsUsed: 0, suggestions: [], decisions: [], receipts: [receipt] };
+        await importCollection().insertOne(doc, { session }); return response(doc, actor, receipt, session);
+    });
+}
+export const getCatalogReview = (actor: string, id: string) => withImportAdmin(actor, async session => {
+    const doc = await importCollection().findOne({ _id: reviewId(id), ...reviewFilter }, { session }); return doc ? response(doc, actor, null, session) : missing();
+});
+export const editCatalogReview = (actor: string, id: string, raw: unknown) => {
+    const body = parseAdminProjectMutation(raw, ['draft']);
+    return mutateAdminProject(actor, id, body, 'edit', async doc => {
+        const draft = parseDraft(body.draft, doc.manifest);
+        if (draft.album.visibility !== doc.catalogSource!.album.visibility) return invalidImport();
+        doc.draft = draft;
+    }, policy);
+};
+export const analyzeCatalogReview = (actor: string, id: string, raw: unknown, provider: ImportAnalysisProvider = new OpenAiImportAnalysisProvider()) => analyzeAdminProject(actor, id, raw, provider, policy);
+export const adoptCatalogReview = (actor: string, id: string, raw: unknown) => adoptAdminProjectSuggestions(actor, id, raw, policy);
+export const cancelCatalogReviewAnalysis = (actor: string, id: string, raw: unknown) => mutateAdminProject(actor, id, parseAdminProjectMutation(raw, []), 'cancel-analysis', async doc => {
+    if (['queued', 'running'].includes(doc.analysis.state)) doc.analysis.state = 'cancelled';
+}, policy);
+
+/** Apply selection is separate from suggestion adoption and excludes identity/association/storage fields. */
+export function parseCatalogReviewFields(raw: unknown): CatalogReviewField[] {
+    if (!Array.isArray(raw) || !raw.length || raw.length > 202) return invalidImport();
+    const seen = new Set<string>();
+    return raw.map(value => {
+        const item = record(value); exact(item, ['scope', 'slotId', 'field']);
+        if (item.scope === 'album' ? item.slotId !== null || !['title', 'releaseDate'].includes(item.field as string) : item.scope !== 'track' || !uuid(item.slotId) || !['title', 'trackNumber'].includes(item.field as string)) return invalidImport();
+        const key = `${item.scope}:${item.slotId}:${item.field}`; if (seen.has(key)) return invalidImport(); seen.add(key);
+        return item as unknown as CatalogReviewField;
+    });
+}
+const storedDate = (date: ImportDate | null) => date ? { year: date.year, ...(date.month === null ? {} : { month: date.month }), ...(date.day === null ? {} : { day: date.day }) } : {};
+export function applyCatalogReview(actor: string, id: string, raw: unknown): Promise<CatalogReviewResponse> {
+    const body = parseAdminProjectMutation(raw, ['fields']), selected = parseCatalogReviewFields(body.fields);
+    return mutateAdminProject(actor, id, body, 'apply', async (doc, session) => {
+        admitted();
+        if (['queued', 'running'].includes(doc.analysis.state) || doc.analysis.chunks.some(chunk => chunk.state === 'inflight')) return fail(409, 'ADMIN_IMPORT_ANALYSIS_ACTIVE');
+        const source = doc.catalogSource!, album = await readAdminCatalogRecord('album', source.album.id, session);
+        if (!album || adminCatalogItemRevision('album', album) !== source.album.revision) return conflict();
+        const tracks = await tracksForAlbum(album, session);
+        if (importDigest(membership(album)) !== importDigest(source.tracks.map(track => track.id))) return conflict();
+        const byId = new Map(tracks.map(track => [String(track._id), track]));
+        for (const track of source.tracks) if (!byId.has(track.id) || adminCatalogItemRevision('audioTrack', byId.get(track.id)) !== track.revision || mediaEvidence(byId.get(track.id)) !== doc.catalogEvidence?.[track.id]) return conflict();
+        const albumPatch: Record<string, unknown> = {}, trackPatches = new Map<string, Record<string, unknown>>();
+        for (const field of selected) {
+            if (field.scope === 'album') albumPatch[field.field] = field.field === 'title' ? cleanText(doc.draft.album.title, 300) : storedDate(doc.draft.album.releaseDate);
+            else {
+                const original = source.tracks.find(track => track.slotId === field.slotId), draft = doc.draft.tracks.find(track => track.slotId === field.slotId);
+                if (!original || !draft) return invalidImport();
+                const patch = trackPatches.get(original.id) ?? {};
+                patch[field.field] = field.field === 'title' ? cleanText(draft.title, 300) : draft.trackNumber;
+                trackPatches.set(original.id, patch);
+            }
+        }
+        // Read-only revision checks are followed by canonical write fences so concurrent deletes/legacy writers conflict.
+        await touchReadyAlbumReferences([source.album.id], session);
+        await touchReadyAudioTrackReferences(source.tracks.map(track => track.id), session);
+        for (const [trackId, patch] of trackPatches) await getDb()!.collection('audioTracks').updateOne({ _id: new ObjectId(trackId), ...readyAudioStorageFilter }, { $set: { ...withCatalogSearchUpdate(patch, 'title'), updatedAt: new Date() }, $inc: { adminRevision: 1, referenceRevision: 1 } }, { session });
+        if (selected.some(field => field.field === 'trackNumber')) albumPatch.audioTrackIds = await orderedAlbumTrackIds(session, source.tracks.map(track => track.id));
+        if (Object.keys(albumPatch).length) await getDb()!.collection('albums').updateOne({ _id: album._id }, { $set: { ...withCatalogSearchUpdate(albumPatch, 'title'), updatedAt: new Date() }, $inc: { adminRevision: 1, referenceRevision: 1 } }, { session });
+        doc.catalogApplied = { operationId: body.operationId, at: new Date().toISOString(), fields: selected };
+    }, policy);
+}
+
+const filters: Record<ImportWorkbenchFilter, Record<string, unknown>> = {
+    all: {}, analyzing: { 'analysis.state': { $in: ['queued', 'running'] }, catalogApplied: { $exists: false } },
+    awaitingReview: { catalogApplied: { $exists: false } }, needsAttention: { 'analysis.state': 'needsAttention', catalogApplied: { $exists: false } }, completed: { catalogApplied: { $exists: true } }
+};
+export async function listCatalogReviews(actor: string, query: Record<string, unknown>): Promise<CatalogReviewWorkbench> {
+    exact(query, ['filter', 'startedByMe', 'q', 'limit', 'cursor']);
+    const filter = query.filter ?? 'all'; if (typeof filter !== 'string' || !Object.hasOwnProperty.call(filters, filter)) return invalidImport();
+    if (query.startedByMe !== undefined && !['true', 'false'].includes(query.startedByMe as string)) return invalidImport();
+    const limit = query.limit === undefined ? 25 : Number(query.limit); if (!Number.isInteger(limit) || limit < 1 || limit > 25 || (query.limit !== undefined && !/^\d{1,2}$/.test(String(query.limit)))) return invalidImport();
+    const q = query.q === undefined ? '' : cleanText(query.q, 100, true), scope = importDigest({ purpose: 'catalogReview', filter, mine: query.startedByMe === 'true', q });
+    const base = { ...reviewFilter, ...(query.startedByMe === 'true' ? { actorId: actor } : {}), ...(q ? { 'draft.album.title': { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } } : {}) };
+    let page = {};
+    if (query.cursor !== undefined) {
+        try {
+            if (typeof query.cursor !== 'string' || query.cursor.length > 500 || !/^[A-Za-z0-9_-]+$/.test(query.cursor)) return invalidImport();
+            const cursor = JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8'));
+            if (!objectId(cursor.id) || typeof cursor.at !== 'string' || !Number.isFinite(Date.parse(cursor.at)) || cursor.scope !== scope) return invalidImport();
+            const at = new Date(cursor.at); page = { $or: [{ createdAt: { $lt: at } }, { createdAt: at, _id: { $lt: new ObjectId(cursor.id) } }] };
+        } catch { return invalidImport(); }
+    }
+    return withImportAdmin(actor, async session => {
+        const counts = {} as CatalogReviewWorkbench['counts'];
+        for (const [name, selector] of Object.entries(filters)) counts[name as ImportWorkbenchFilter] = await importCollection().countDocuments({ $and: [base, selector] }, { session, maxTimeMS: 3_000 });
+        const docs = await importCollection().find({ $and: [base, filters[filter as ImportWorkbenchFilter], page] }, { session }).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).maxTimeMS(3_000).toArray();
+        const more = docs.length > limit; docs.splice(limit); const last = docs[docs.length - 1];
+        return { counts, items: docs.map(doc => { const item = adminImportDto(doc, actor); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, state: doc.catalogApplied ? 'applied' as const : 'reviewing' as const, analysis: item.analysis, albumId: doc.catalogSource!.album.id, title: item.draft.album.title, pendingSuggestions: item.suggestions.filter(value => value.decision === 'pending').length }; }), nextCursor: more && last ? Buffer.from(JSON.stringify({ id: String(last._id), at: last.createdAt.toISOString(), scope })).toString('base64url') : null };
+    });
+}

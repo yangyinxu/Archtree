@@ -3,13 +3,13 @@ import { useAdminText } from './AdminAccess';
 import styles from './adminStyles';
 
 /** Metadata editing is confined to this private draft; Album order remains derived from track numbers. */
-export function ImportDraftEditor({ draft, filenames, disabled, onChange }: { draft: ImportDraft; filenames: ImportDetail['manifest']['files']; disabled: boolean; onChange: (draft: ImportDraft) => void }) {
+export function ImportDraftEditor({ draft, filenames, disabled, onChange, artistReadOnly = false, visibilityReadOnly = false }: { draft: ImportDraft; filenames: ImportDetail['manifest']['files']; disabled: boolean; onChange: (draft: ImportDraft) => void; artistReadOnly?: boolean; visibilityReadOnly?: boolean }) {
   const t = useAdminText();
   const album = (change: Partial<ImportDraft['album']>) => onChange({ ...draft, album: { ...draft.album, ...change } });
   const release = draft.album.releaseDate;
   return <fieldset className={styles.editor} disabled={disabled}>
     <label className={styles.field}>{t('field.title')}<input className={styles.input} value={draft.album.title} maxLength={300} onChange={event => album({ title: event.target.value })} /></label>
-    <label className={styles.field}>{t('field.artistName')}<input className={styles.input} value={draft.album.artistName} maxLength={200} onChange={event => album({ artistName: event.target.value })} /></label>
+    <label className={styles.field}>{t('field.artistName')}<input className={styles.input} value={draft.album.artistName} readOnly={artistReadOnly} maxLength={200} onChange={event => album({ artistName: event.target.value })} /></label>
     <fieldset className={styles.date}><legend>{t('field.releaseDate')}</legend>
       {(['year', 'month', 'day'] as const).map(part => <label className={styles.field} key={part}>{t(`field.${part}`)}<input className={styles.input} type="number" min={1} max={part === 'year' ? 9999 : part === 'month' ? 12 : 31}
         value={release?.[part] ?? ''} disabled={disabled || part !== 'year' && !release || part === 'day' && !release?.month}
@@ -19,7 +19,7 @@ export function ImportDraftEditor({ draft, filenames, disabled, onChange }: { dr
           else if (release) album({ releaseDate: { ...release, [part]: number, ...(part === 'month' && number === null ? { day: null } : {}) } });
         }} /></label>)}
     </fieldset>
-    <label className={styles.field}>{t('field.visibility')}<select className={styles.input} value={draft.album.visibility} onChange={event => album({ visibility: event.target.value as 'public' | 'hidden' })}>
+    <label className={styles.field}>{t('field.visibility')}<select className={styles.input} value={draft.album.visibility} disabled={disabled || visibilityReadOnly} onChange={event => album({ visibility: event.target.value as 'public' | 'hidden' })}>
       <option value="hidden">{t('field.hidden')}</option><option value="public">{t('field.public')}</option>
     </select></label>
     {draft.tracks.map((track, index) => <div className={styles.track} key={track.slotId}>

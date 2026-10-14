@@ -5,7 +5,7 @@ import { ApiError } from '../../api/client';
 import { ModalDialog } from '../../components/ModalDialog';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { AdminNav } from './AdminNav';
-import { adminEndpointRequest } from './adminApi';
+import { adminEndpointRequest } from './adminTransport';
 import { adminWorkspace } from './adminWorkspace';
 import { catalogKinds, catalogList, catalogResponse, catalogMutationResponse, catalogPatch, type CatalogItem, type CatalogKind } from './catalogApi';
 import { useAdminCommand } from './useAdminCommand';
@@ -13,6 +13,7 @@ import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 const CatalogCover = lazy(() => import('./CatalogCover').then(module => ({ default: module.CatalogCover })));
 const CatalogFields = lazy(() => import('./CatalogFields').then(module => ({ default: module.CatalogFields })));
+const CatalogReviewStart = lazy(() => import('./CatalogReviewStart').then(module => ({ default: module.CatalogReviewStart })));
 
 function CatalogInventory() {
   const t = useAdminText(), access = useAdminAccess();
@@ -27,7 +28,10 @@ function CatalogInventory() {
     <form className={styles.toolbar} onSubmit={event => { event.preventDefault(); setSearch(text.trim()); }}><label>{t('catalog.search')}<input className={styles.input} maxLength={100} value={text} onChange={event => setText(event.target.value)} /></label><button className={styles.button}>{t('catalog.search')}</button><button className={styles.button} type="button" onClick={() => void query.refetch()}>{t('common.refresh')}</button></form>
     {kind!=='organization'&&<details className={styles.panel}><summary>{t('cover.recover_known')}</summary><p className={styles.muted}>{t('cover.recover_copy')}</p><form className={styles.toolbar} onSubmit={event=>{event.preventDefault();const id=targetId.trim().toLowerCase();if(/^[a-f0-9]{24}$/.test(id))navigate(`/admin/catalog/${kind}/${id}`);}}><label>{t('cover.target_id')}<input className={styles.input} maxLength={24} value={targetId} onChange={event=>setTargetId(event.target.value)}/></label><button className={styles.button} disabled={!/^[a-f0-9]{24}$/i.test(targetId.trim())}>{t('cover.recover_known')}</button></form></details>}
     {query.isPending && <p role="status">{t('common.loading')}</p>}{query.isError && <p role="alert" className={styles.notice}>{t('common.error')}</p>}
-    <ul className={styles.cards}>{[...new Map((query.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()].map(item => <li className={styles.card} key={item.id}><div className={styles.row}><Link className={styles.itemLink} to={`/admin/catalog/${kind}/${item.id}`}>{'name' in item.fields ? item.fields.name : item.fields.title}</Link><span className={styles.badge}>{t(`field.${item.visibility}`)}</span></div></li>)}</ul>
+    <ul className={styles.cards}>{[...new Map((query.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()].map(item => <li className={styles.card} key={item.id}><div className={styles.row}><Link className={styles.itemLink} to={`/admin/catalog/${kind}/${item.id}`}>{'name' in item.fields ? item.fields.name : item.fields.title}</Link><span className={styles.badge}>{t(`field.${item.visibility}`)}</span></div>
+      <div className={styles.actions}><Link className={styles.link} to={`/admin/catalog/${kind}/${item.id}`}>{t('catalog_review.manual_edit')}</Link>
+        {kind === 'album' && <Suspense fallback={null}><CatalogReviewStart item={item} /></Suspense>}</div>
+    </li>)}</ul>
     {query.isSuccess && query.data.pages[0].items.length === 0 && <p>{t('workbench.no_matches')}</p>}
     {query.hasNextPage && <button className={styles.button} disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{t('workbench.more')}</button>}
   </section>;
@@ -61,6 +65,8 @@ function CatalogEditor({ kind, id }: { kind: CatalogKind; id: string }) {
     {mutation.error && <div className={styles.error} role="alert"><p>{t(`common.${mutation.error}`)}</p>{mutation.intent && <button className={styles.button} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}</div>}
     {item && edit && <>
       <p className={styles.muted}>{t('catalog.private_copy')}</p>
+      {kind === 'album' && <div className={styles.actions}><Suspense fallback={null}><CatalogReviewStart item={item} disabled={locked || conflict || edit.dirty} /></Suspense>
+        {edit.dirty && <p className={styles.muted}>{t('catalog_review.save_first')}</p>}</div>}
       {item.coverUrl && <img alt={t('catalog.cover')} src={`${item.coverUrl}?viewer=${encodeURIComponent(access.viewerId)}`} className={styles.artwork} width={140} height={140} />}
       {item.mediaUrl && <audio ref={media} aria-label={t('catalog.preview')} controls preload="none" src={`${item.mediaUrl}?viewer=${encodeURIComponent(access.viewerId)}`} style={{ maxWidth: '100%' }} />}
       {conflict && <div className={styles.error} role="alert"><p>{t('common.conflict')}</p><details><summary>{t('review.saved_version')}</summary><pre className={styles.rawDraft}>{JSON.stringify(query.data!.item.fields, null, 2)}</pre></details><button className={styles.button} onClick={() => { const next = query.data!.item; setEdit({ base: next, fields: next.fields, visibility: next.visibility, dirty: false }); }}>{t('review.load_saved')}</button></div>}

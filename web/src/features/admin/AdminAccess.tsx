@@ -77,6 +77,8 @@ export const AdminControls = () => {
     if (!next.authorized || next.mode !== 'admin') {
       void client.cancelQueries({ queryKey: ['admin-imports'] });
       client.removeQueries({ queryKey: ['admin-imports'] });
+      void client.cancelQueries({ queryKey: ['admin-catalog-reviews'] });
+      client.removeQueries({ queryKey: ['admin-catalog-reviews'] });
     }
   }), [client]);
   useEffect(() => { if (state.mode !== 'admin' && location.pathname.startsWith('/admin')) {

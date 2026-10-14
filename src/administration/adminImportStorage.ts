@@ -10,7 +10,7 @@ import { validateCoverArtFile, maxCoverArtInputBytes } from '../services/imageSt
 import { maxAudioUploadMb } from '../middleware/audioUpload';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { AdminImportError, exact, importEnabled, objectId, record, uuid, type AdminImportResponse, type ImportEmbeddedTags } from './adminImportContract';
-import { getAdminImport, importCollection, importDigest, mutateAdminImport, withImportAdmin } from './adminImportService';
+import { getAdminImport, importCollection, importPurposeFilter, importDigest, mutateAdminImport, withImportAdmin } from './adminImportService';
 import { importPrivateStorageReady, type ImportAsset } from './adminImportMediaTypes';
 import { adminWorkerSignal } from './adminWorkerLifecycle';
 import { extractImportArtwork } from './adminImportArtwork';
@@ -117,7 +117,7 @@ export async function uploadAdminImportAsset(actor: string, id: string, slotId: 
         doc.media.assets.push({ slotId, operationId: intent.operationId, actorId: actor, bucket: process.env.ADMIN_IMPORT_S3_BUCKET_NAME!.trim(), key: `imports/${id}/${slotId}/${intent.operationId}`, sha256, byteLength: file.size, contentType: file.mimetype, filename: normalizeUtf8Text(file.originalname), state: 'pending', versionId: null, etag: null, updatedAt: new Date(), leaseOwner: null, leaseUntil: null, duration, format, representation, tags, recovery: { ...intent, kind: 'upload', actorId: actor } });
     });
     const asset = await withImportAdmin(actor, async session => {
-        const doc = await importCollection().findOne({ _id: new ObjectId(id) }, { session }); const asset = doc?.media?.assets.find(a => a.slotId === slotId && a.operationId === intent.operationId);
+        const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id) }, { session }); const asset = doc?.media?.assets.find(a => a.slotId === slotId && a.operationId === intent.operationId);
         if (!doc || !asset || asset.sha256 !== sha256) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
         if (asset.state === 'ready') return null;
         if (['deleted', 'deleting', 'cleanupFailed'].includes(asset.state) || (doc.media?.publication && (doc.media.publication.state !== 'cancelled' || doc.media.publication.cleanupPending))) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
@@ -155,12 +155,12 @@ export async function cleanupAdminImportAsset(actor: string, id: string, slotId:
         asset.recovery = { ...intent, kind: 'cleanup', actorId: actor };
         if (doc.media?.selectedCoverSlotId === slotId) doc.media.selectedCoverSlotId = null;
     });
-    const doc = await importCollection().findOne({ _id: new ObjectId(id) }); const asset = doc?.media?.assets.find(asset => asset.slotId === slotId && asset.recovery?.operationId === intent.operationId);
+    const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id) }); const asset = doc?.media?.assets.find(asset => asset.slotId === slotId && asset.recovery?.operationId === intent.operationId);
     if (!asset) { if (doc?.media?.assetHistory?.some(asset => asset.slotId === slotId && asset.recovery?.operationId === intent.operationId && asset.state === 'deleted')) return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt }; throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT'); }
     if (asset.state === 'deleted') return admitted;
     let state: ImportAsset['state'] = 'cleanupFailed';
     const authorize = () => withImportAdmin(actor, async session => {
-        const current = await importCollection().findOne({ _id: new ObjectId(id), 'media.assets': { $elemMatch: {
+        const current = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.assets': { $elemMatch: {
             slotId, operationId: asset.operationId, 'recovery.operationId': intent.operationId, state: { $in: ['deleting', 'cleanupFailed'] }
         } } }, { session });
         if (!current) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
@@ -189,7 +189,7 @@ export function selectAdminImportCover(actor: string, id: string, raw: unknown) 
 export async function previewAdminImportAsset(actor: string, id: string, slotId: string, storage: ImportObjectStorage = defaultImportObjectStorage) {
     const capture = () => withImportAdmin(actor, async session => {
         if (!objectId(id)) throw new AdminImportError(404, 'ADMIN_IMPORT_ASSET_NOT_FOUND');
-        const doc = await importCollection().findOne({ _id: new ObjectId(id) }, { session });
+        const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id) }, { session });
         const asset = doc?.media?.assets.find(asset => asset.slotId === slotId && asset.state === 'ready' && ['image/jpeg', 'image/png', 'image/webp'].includes(asset.contentType));
         if (!asset?.etag || asset.byteLength > maxCoverArtInputBytes) throw new AdminImportError(404, 'ADMIN_IMPORT_ASSET_NOT_FOUND'); return asset;
     });
