@@ -15,16 +15,6 @@
   text-transform: uppercase;
 }
 
-.title {
-  color: var(--color-text);
-  font-family: var(--font-display);
-  font-size: clamp(2.15rem, 4vw, 3.8rem);
-  font-weight: 760;
-  letter-spacing: -0.05em;
-  line-height: 1;
-  max-width: 16ch;
-}
-
 .pageTitle {
   color: var(--color-text);
   font-family: var(--font-display);
@@ -70,8 +60,7 @@
   text-decoration: none;
 }
 
-.primaryLink,
-.buttonPrimary {
+.primaryLink {
   background: var(--color-accent);
   border: 1px solid var(--color-accent);
   color: var(--color-on-accent);
@@ -125,8 +114,7 @@
   letter-spacing: -0.03em;
 }
 
-.sectionHint,
-.muted {
+.sectionHint {
   color: var(--color-text-muted);
 }
 
@@ -180,24 +168,6 @@
   text-align: center;
 }
 
-.panelIcon {
-  align-items: center;
-  background: var(--color-accent-soft);
-  border: 1px solid var(--color-accent-border);
-  border-radius: 50%;
-  color: var(--color-accent-bright);
-  display: flex;
-  height: 3.5rem;
-  justify-content: center;
-  margin-bottom: 1rem;
-  width: 3.5rem;
-}
-
-.panelIcon svg {
-  height: 1.55rem;
-  width: 1.55rem;
-}
-
 .panelTitle {
   color: var(--color-text);
   font-family: var(--font-display);
@@ -238,8 +208,7 @@
   width: 1.2rem;
 }
 
-.searchForm input,
-.field input {
+.searchForm input {
   background: transparent;
   border: 0;
   color: var(--color-text);
@@ -247,13 +216,6 @@
   min-width: 0;
   outline: 0;
   width: 100%;
-}
-
-.field input:focus-visible {
-  border-color: var(--color-focus);
-  box-shadow: 0 0 0 3px var(--color-focus-soft);
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
 }
 
 @media (forced-colors: active) {
@@ -347,66 +309,12 @@
   padding: 0 0.45rem;
 }
 
-.authLayout {
-  align-items: center;
-  display: grid;
-  gap: clamp(2rem, 5vw, 4.5rem);
-  grid-template-columns: minmax(0, 1fr) minmax(19rem, 27rem);
-  margin: 0 auto;
-  max-width: 72rem;
-  min-height: min(34rem, calc(100dvh - 12rem));
-}
-
 .formCard {
   background: var(--color-surface);
   border: 1px solid var(--color-border-panel);
   border-radius: 0.55rem;
   box-shadow: var(--shadow-form-card);
   padding: clamp(1.25rem, 3vw, 2rem);
-}
-
-.formTitle {
-  color: var(--color-text);
-  font-family: var(--font-display);
-  font-size: 1.35rem;
-  letter-spacing: -0.025em;
-  margin-bottom: 1.25rem;
-}
-
-.field {
-  display: grid;
-  gap: 0.4rem;
-  margin-bottom: 1rem;
-}
-
-.field label {
-  color: var(--color-text-muted);
-  font-size: 0.8rem;
-  font-weight: 650;
-}
-
-.optional,
-.fieldHint {
-  color: var(--color-text-subtle);
-  font-size: 0.74rem;
-  font-weight: 500;
-}
-
-.fieldHint {
-  line-height: 1.5;
-  margin-top: 0.15rem;
-}
-
-.field input {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-control);
-  border-radius: 0.3rem;
-  padding: 0 0.8rem;
-}
-
-.formCard .button {
-  margin-top: 0.4rem;
-  width: 100%;
 }
 
 .button {
@@ -433,192 +341,12 @@
   padding: 0.7rem 0.8rem;
 }
 
-.success {
-  background: var(--color-success-soft);
-  border: 1px solid var(--color-success-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-accent-bright);
-  font-size: 0.83rem;
-  margin-bottom: 1rem;
-  padding: 0.7rem 0.8rem;
-}
-
-.assistiveAction {
-  font-size: 0.82rem;
-  margin: -0.35rem 0 1rem;
-}
-
-.inlineLink {
-  color: var(--color-accent-bright);
-  font-weight: 680;
-  text-underline-offset: 0.18em;
-}
-
-.authLinkRow {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 0.8rem;
-  gap: 0.8rem 1rem;
-  justify-content: space-between;
-  margin-top: 1rem;
-}
-
-.authFooter {
-  color: var(--color-text-muted);
-  font-size: 0.8rem;
-  line-height: 1.6;
-  margin-top: 1.2rem;
-  text-align: center;
-}
-
-.privacy {
-  color: var(--color-text-subtle);
-  font-size: 0.74rem;
-  line-height: 1.55;
-  margin-top: 1rem;
-}
-
-.identityRow {
-  align-items: center;
-  display: flex;
-  gap: 0.9rem;
-  margin-bottom: 1.5rem;
-}
-
-.accountContent {
-  max-width: 48rem;
-  width: 100%;
-}
-
-.identityTitle {
-  color: var(--color-text);
-  font-weight: 680;
-}
-
 .identityMeta {
   color: var(--color-text-muted);
   font-size: 0.83rem;
 }
 
-.accountDetails {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-panel);
-  border-radius: 0.5rem;
-  margin: 0 0 1.3rem;
-  min-width: min(100%, 28rem);
-  overflow: hidden;
-  text-align: left;
-}
 
-.accountDetail {
-  display: grid;
-  gap: 0.35rem;
-  grid-template-columns: minmax(7rem, 0.45fr) minmax(0, 1fr);
-  padding: 0.8rem 1rem;
-}
-
-.accountDetail + .accountDetail {
-  border-top: 1px solid var(--color-border);
-}
-
-.accountDetail dt {
-  color: var(--color-text-subtle);
-  font-size: 0.76rem;
-  font-weight: 650;
-}
-
-.accountDetail dd {
-  color: var(--color-text);
-  font-size: 0.84rem;
-  overflow-wrap: anywhere;
-}
-
-.settingsList {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-panel);
-  border-radius: 0.5rem;
-  margin-top: 1.5rem;
-  overflow: hidden;
-  text-align: left;
-}
-
-.settingsLink {
-  align-items: center;
-  color: var(--color-text);
-  display: flex;
-  font-size: 0.88rem;
-  font-weight: 650;
-  justify-content: space-between;
-  min-height: 3rem;
-  padding: 0.65rem 0.9rem;
-  text-decoration: none;
-}
-
-.settingsLink + .settingsLink {
-  border-top: 1px solid var(--color-border);
-}
-
-.settingsLink:hover {
-  background: var(--color-surface-hover);
-}
-
-.backLink {
-  margin-top: 1.2rem;
-}
-
-.sessionList {
-  display: grid;
-  gap: 0.5rem;
-  list-style: none;
-  margin: 2rem 0 0;
-  max-width: 48rem;
-  padding: 0;
-}
-
-.sessionItem {
-  align-items: center;
-  background: var(--color-surface-low);
-  border: 1px solid transparent;
-  border-radius: 0.5rem;
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  min-height: 4.5rem;
-  padding: 0.85rem 1rem;
-}
-
-.sessionName {
-  color: var(--color-text);
-  font-size: 0.95rem;
-}
-
-.sessionMeta {
-  color: var(--color-text-subtle);
-  font-size: 0.76rem;
-  margin-top: 0.25rem;
-}
-
-.currentBadge {
-  background: var(--color-accent-soft);
-  border: 1px solid var(--color-accent-border);
-  border-radius: 999px;
-  color: var(--color-accent-bright);
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 0.45rem 0.7rem;
-}
-
-.accountForm {
-  margin-top: 2rem;
-  max-width: 32rem;
-}
-
-@media (max-width: 900px) {
-  .authLayout {
-    grid-template-columns: 1fr;
-  }
-}
 
 @media (max-width: 640px) {
   .page {
@@ -639,13 +367,15 @@
   .moodCard {
     scroll-snap-align: start;
   }
+}
 
-  .accountDetail {
-    grid-template-columns: 1fr;
-  }
-
-  .sessionItem {
-    align-items: stretch;
-    flex-direction: column;
-  }
+/* The shell view switch is eager; workspace presentation remains in its lazy route. */
+.view { position:relative; display:flex; align-items:center; gap:.35rem; flex-shrink:0}
+.viewButton,.workbenchLink { font-size:.8rem; padding:.45rem .6rem}
+.viewButton { width:7rem; line-height:1.2}
+.workbenchLink { display:flex; align-items:center; justify-content:center; width:2.75rem}
+.workbenchLink span { display:none}
+.workbenchLink svg { width:1.2rem; height:1.2rem}
+.menu { position:absolute; right:0; top:100%; min-width:12rem; display:grid; z-index:60; padding:.5rem; background:var(--color-surface-raised)}
+@media(max-width:767px) { .viewButton { width:6.6rem}
 }

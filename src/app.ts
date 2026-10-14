@@ -18,6 +18,9 @@ import videoRoutes from './routes/videoRoutes';
 import narutoMobileRoutes from './routes/narutoMobileRoutes';
 import { createSocialRouter } from './routes/socialRoutes';
 import { createRoomRouter } from './routes/roomRoutes';
+import { createAdminCapabilitiesRouter } from './routes/adminCapabilitiesRoutes';
+import { createAdminImportRouter } from './routes/adminImportRoutes';
+import { createAdminCatalogRouter } from './routes/adminCatalogRoutes';
 import {
   attachOptionalAuth,
   requireAdmin,
@@ -252,6 +255,11 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/content/manage', requireAuthForWeb, requireAdminForWeb);
   app.use(requireSharedContentAdminBeforeBody);
 
+  // Admin capabilities and import routes authorize before bounded body parsing.
+  app.use('/api/admin/v1', createAdminCapabilitiesRouter());
+  app.use('/api/admin/v1', createAdminImportRouter());
+  app.use('/api/admin/v1', createAdminCatalogRouter());
+
   // Authenticate paid Naruto requests before accepting their bounded JSON bodies.
   app.use('/naruto-mobile/api/v1', narutoMobileRoutes);
 
@@ -278,7 +286,8 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/content', contentRoutes);
   app.use('/feed', feedRoutes);
   app.use('/video', videoRoutes);
-  app.use('/api/localizations/v1', createLocalizationRouter(options.localizationDistPath));
+  app.use('/api/localizations/v1', createLocalizationRouter(options.localizationDistPath, 'v1'));
+  app.use('/api/localizations/v2', createLocalizationRouter(options.localizationDistPath, 'v2'));
   app.use('/api/listener/v1', listenerRoutes);
 
   const listenerDistPath = options.listenerDistPath

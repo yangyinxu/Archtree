@@ -3,7 +3,8 @@ import { getDb } from '../infrastructure/database';
 import { isArtistFollowEnabled } from '../config/artistFollowRollout';
 import type { ArtistFollowDocument, ArtistFollowStatus } from '../models/artistFollow';
 import { withActiveAccount } from './accountReferenceFenceService';
-import { ArtistReferenceUnavailableError, touchReadyArtistReferences } from './artistReferenceFenceService';
+import { ArtistReferenceUnavailableError } from './artistReferenceFenceService';
+import { touchPublicArtistReferences } from './publicCatalogReferenceFenceService';
 
 export class ArtistFollowError extends Error {
     constructor(readonly statusCode: number, readonly code: string, message: string) { super(message); }
@@ -38,7 +39,7 @@ export const followArtist = async (userId: string, artistId: string, hooks: Arti
     if (!isArtistFollowEnabled()) throw new ArtistFollowError(503, 'ARTIST_FOLLOWS_DISABLED', 'Artist Follow is temporarily unavailable.');
     try {
         return await withActiveAccount(userId, async session => {
-            await touchReadyArtistReferences([artistId], session);
+            await touchPublicArtistReferences([artistId], session);
             await hooks.afterArtistFence?.(session);
             const now = new Date();
             const result = await getDb()!.collection<ArtistFollowDocument>('artistFollows').findOneAndUpdate(

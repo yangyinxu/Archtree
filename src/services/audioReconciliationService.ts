@@ -1,6 +1,7 @@
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getDb } from '../infrastructure/database';
 import { getS3 } from '../infrastructure/s3';
+import { loadAdminCanonicalReservations } from './adminCanonicalReservationService';
 import { isAudioObjectKeyForTrack } from '../utils/audioStorageKey';
 import { isVideoObjectKeyForTrack } from '../utils/videoStorageKey';
 import {
@@ -375,7 +376,8 @@ export const reconcileAudioStorage = async () => {
     });
     const tracksByKey = new Map(trackKeyEntries);
     const s3Keys = new Set(s3Objects.map((object) => object.key));
-    const orphanCandidates = s3Objects.filter((object) => !tracksByKey.has(object.key));
+    const reservedKeys = await loadAdminCanonicalReservations(bucket, reconciliationLimit);
+    const orphanCandidates = s3Objects.filter((object) => !tracksByKey.has(object.key) && !reservedKeys.has(object.key));
     const orphanedObjects = await loadOrphanMetadata(bucket, orphanCandidates);
     const missingObjects = tracks
         .filter((track) => activeMediaTypeForTrack(track) === 'audio')

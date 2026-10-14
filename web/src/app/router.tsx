@@ -6,6 +6,7 @@ import { NotFoundPage, RouteErrorPage } from './RouteErrorPage';
 import styles from '../styles/Pages.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 
+const AdminRouter = lazy(() => import('../features/admin/AdminRouter'));
 const AccountPage = lazy(() => import('../features/account/AccountPage').then(({ AccountPage }) => ({ default: AccountPage })));
 const AccountSessionsPage = lazy(() => import('../features/account/AccountSessionsPage').then(({ AccountSessionsPage }) => ({ default: AccountSessionsPage })));
 const ChangePasswordPage = lazy(() => import('../features/account/ChangePasswordPage').then(({ ChangePasswordPage }) => ({ default: ChangePasswordPage })));
@@ -55,6 +56,7 @@ export const appRoutes: RouteObject[] = [
     errorElement: <RouteErrorPage />,
     children: [
       { index: true, element: loadRoute(<HomePage />), errorElement: <RouteErrorPage /> },
+      { path: 'admin/*', element: loadRoute(<AdminRouter />), errorElement: <RouteErrorPage /> },
       { path: 'search', element: loadRoute(<SearchPage />), errorElement: <RouteErrorPage /> },
       { path: 'library', element: loadRoute(<LibraryPage />), errorElement: <RouteErrorPage /> },
       { path: 'social', element: loadRoute(<SocialPage />), errorElement: <RouteErrorPage /> },

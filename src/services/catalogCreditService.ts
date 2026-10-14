@@ -193,7 +193,8 @@ const executeCatalogCreditTransaction = async (
     return result!;
 };
 
-const replaceWithinTransaction = async (
+/** Reuses the canonical Credit/legacy projection lifecycle inside a guarded catalog transaction. */
+export const replaceCatalogCreditsWithinTransaction = async (
     session: ClientSession,
     ownerType: CatalogCreditOwnerType,
     ownerId: string,
@@ -273,7 +274,7 @@ export const replaceCatalogCredits = async (
     expectedCreditRevision?: number
 ) => {
     const ownerId = canonicalOwnerId(rawOwnerId);
-    return executeCatalogCreditTransaction((session) => replaceWithinTransaction(
+    return executeCatalogCreditTransaction((session) => replaceCatalogCreditsWithinTransaction(
         session,
         ownerType,
         ownerId,
@@ -324,7 +325,7 @@ export const addCatalogCredit = async (
                     creditRevision: observedRevision
                 };
             }
-            return replaceWithinTransaction(
+            return replaceCatalogCreditsWithinTransaction(
                 session,
                 ownerType,
                 ownerId,
@@ -390,7 +391,7 @@ export const addSoundtrackCredit = async (
             };
         }
         const nextTrackCredits = duplicate ? existing : [...existing, candidate];
-        const trackResult = await replaceWithinTransaction(
+        const trackResult = await replaceCatalogCreditsWithinTransaction(
             session,
             'audioTrack',
             audioTrackId,
@@ -415,7 +416,7 @@ export const addSoundtrackCredit = async (
         const alreadyPrimary = albumCredits.some((item) => item.subjectType === 'artist'
             && item.subjectId === candidate.subjectId && item.role === 'primary');
         if (!alreadyPrimary) {
-            await replaceWithinTransaction(
+            await replaceCatalogCreditsWithinTransaction(
                 session,
                 'album',
                 albumId,
@@ -487,7 +488,7 @@ export const removeAlbumPrimaryArtistCredit = async (
                     creditRevision: observedRevision
                 };
             }
-            return replaceWithinTransaction(
+            return replaceCatalogCreditsWithinTransaction(
                 session,
                 'album',
                 albumId,
@@ -573,7 +574,7 @@ export const replaceArtistPrimaryAlbumCredits = async (
                     : retained;
                 if (JSON.stringify(desired) === JSON.stringify(existing)
                     && Array.isArray(owner.credits)) continue;
-                await replaceWithinTransaction(
+                await replaceCatalogCreditsWithinTransaction(
                     session,
                     'album',
                     albumId,
@@ -614,7 +615,7 @@ export const removeCatalogCredit = async (
             if (!owner) throw new CatalogCreditConflictError('The Credit owner is unavailable.');
             const existing = Array.isArray(owner.credits) ? normalizeCatalogCredits(owner.credits) : [];
             const retained = existing.filter((credit) => credit.creditId !== creditId);
-            return replaceWithinTransaction(
+            return replaceCatalogCreditsWithinTransaction(
                 session,
                 ownerType,
                 ownerId,
@@ -646,7 +647,7 @@ export const reorderCatalogCredits = async (
                 || orderedCreditIds.some((id) => !byId.has(id))) {
                 throw new CatalogCreditValidationError('Reorder must contain every current Credit exactly once.');
             }
-            return replaceWithinTransaction(
+            return replaceCatalogCreditsWithinTransaction(
                 session,
                 ownerType,
                 ownerId,

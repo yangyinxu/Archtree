@@ -28,7 +28,8 @@ import { isArtistFollowEnabled, supportsArtistFollowHome } from '../config/artis
 import { socialRollout } from '../config/socialRollout';
 
 const setPublicCatalogCache = (res: Response) => {
-    res.setHeader('Cache-Control', 'public, max-age=60');
+    // Visibility can change without changing an asset URL or a viewer's account.
+    res.setHeader('Cache-Control', 'private, no-store');
 };
 
 /** Exposes only rollout-safe listener feature flags used to hide unavailable UI. */

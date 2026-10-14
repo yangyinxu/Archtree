@@ -906,6 +906,1914 @@
       ],
       "variables": {}
     },
+    "admin.action.analyze": {
+      "description": "Starts naming-context analysis after approval.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.apply": {
+      "description": "Adopts only the selected compatible suggestions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.cancel_approval": {
+      "description": "Cancels the unconfirmed publication approval.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.choose_cover": {
+      "description": "Opens the ready private cover selection workflow.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.cleanup": {
+      "description": "Removes a private staged file with lifecycle cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.confirm": {
+      "description": "Confirms the frozen target and action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.details": {
+      "description": "Expands secondary context or technical details.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.edit": {
+      "description": "Returns to the saved draft editing section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.find_matches": {
+      "description": "Checks for matching catalog identities without automatic merging.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.keep": {
+      "description": "Rejects the suggestion while retaining the saved value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.keep_reviewing": {
+      "description": "Dismisses a cancellation confirmation without cancelling the approval.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.preview": {
+      "description": "Opens the private preview without changing saved catalog content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.publish": {
+      "description": "Publishes the explicitly reviewed Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.reanalyze": {
+      "description": "Requests another allowed analysis generation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.recover": {
+      "description": "Resumes the exact cancelled lifecycle cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.remove_cover": {
+      "description": "Explicitly removes the saved cover reference through its existing lifecycle.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.resume": {
+      "description": "Resumes the original unconfirmed lifecycle operation without labelling it completed or cancelled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.save": {
+      "description": "Compact save action.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.save_decisions": {
+      "description": "Saves explicit duplicate resolution decisions to the private draft.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.action.upload": {
+      "description": "Opens the original-file picker.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.confirm": {
+      "description": "Send the selected filenames and folder context to Luna for analysis? This may incur a provider charge.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.reanalyze": {
+      "description": "Administrator workbench: analysis reanalyze.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.start": {
+      "description": "Administrator workbench: analysis start.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.stop": {
+      "description": "Administrator workbench: analysis stop.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.unavailable": {
+      "description": "Administrator workbench: analysis unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.asset.cleanup_failed": {
+      "description": "Cleanup needs attention",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.asset.deleted": {
+      "description": "Removed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.asset.deleting": {
+      "description": "Removing file",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.asset.failed": {
+      "description": "Upload failed",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.asset.not_started": {
+      "description": "Not uploaded",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.asset.pending": {
+      "description": "Upload pending",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.asset.ready": {
+      "description": "Ready",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.asset.unknown": {
+      "description": "Upload outcome unknown",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.add_credit": {
+      "description": "Add credit",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album": {
+      "description": "Albums",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.artist": {
+      "description": "Artists",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.attribution": {
+      "description": "Attribution",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.audio_track": {
+      "description": "Tracks",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.automatic_order": {
+      "description": "Track numbers determine Album order automatically. Saving a number updates the linked Album order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.carousel": {
+      "description": "Carousel",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.confirm": {
+      "description": "Confirm catalog changes",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.confirm_copy": {
+      "description": "These changes update existing catalog content. Review the edited fields and visibility before saving.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.confirm_placement": {
+      "description": "Change this placement’s visibility?",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.confirm_placement_copy": {
+      "description": "Only this placement changes. Its referenced content and other placements are preserved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.content_missing": {
+      "description": "Confirmed missing catalog owner; editor is cleared while cover operation recovery remains available.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.cover": {
+      "description": "Catalog artwork preview",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.cover_cleanup_pending": {
+      "description": "The cover change is confirmed; old-file cleanup is still pending.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.cover_source": {
+      "description": "Choose a ready private cover from an import",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.credits": {
+      "description": "Credits",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.documented": {
+      "description": "Documented",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.edit": {
+      "description": "Edit catalog content",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.grid": {
+      "description": "Grid",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.hide": {
+      "description": "Hide this placement",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.home": {
+      "description": "Home",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.library": {
+      "description": "Library",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.list": {
+      "description": "List",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.occurrence_copy": {
+      "description": "Visibility applies only to this Page item placement. It does not change the reusable Carousel, Grid, or List definition.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.organization": {
+      "description": "Organizations",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.pages": {
+      "description": "Page items",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.parent_hidden": {
+      "description": "This track remains hidden because its parent Album is hidden or unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.placement_missing": {
+      "description": "Referenced content is missing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.placement_name_missing": {
+      "description": "Unnamed placement",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.placement_unsupported": {
+      "description": "Unsupported reference",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.preview": {
+      "description": "Private audio preview",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.private_copy": {
+      "description": "This is a protected administrator view. Hidden content is not available in User view.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.remove_credit": {
+      "description": "Remove credit",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.role": {
+      "description": "Role",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.save": {
+      "description": "Save catalog changes",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.saved": {
+      "description": "Confirmed administrator catalog mutation feedback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.search": {
+      "description": "Search catalog",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.show": {
+      "description": "Make this placement public",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.source_dynamic": {
+      "description": "Dynamic",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.source_manual": {
+      "description": "Manual",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.subject": {
+      "description": "Credit type",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.title": {
+      "description": "Catalog",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.track": {
+      "description": "Tracks",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.unknown": {
+      "description": "Unknown",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.unspecified": {
+      "description": "Unspecified",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.visibility_change": {
+      "description": "{current} → {next}",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "current": "string",
+        "next": "string"
+      }
+    },
+    "admin.catalog.visibility_copy": {
+      "description": "Public content is available to listeners. Hidden content is visible only to administrators. Previously downloaded files cannot be recalled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.back": {
+      "description": "Administrator workbench: common back.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.cancel": {
+      "description": "Cancel",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.conflict": {
+      "description": "Administrator workbench: common conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.error": {
+      "description": "Administrator workbench: common error.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.last_updated": {
+      "description": "Administrator workbench: common last updated.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "date": "string"
+      }
+    },
+    "admin.common.loading": {
+      "description": "Administrator workbench: common loading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.offline": {
+      "description": "Administrator workbench: common offline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.permission_lost": {
+      "description": "Administrator permission is unavailable. Private data has been cleared.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.refresh": {
+      "description": "Administrator workbench: common refresh.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.retry": {
+      "description": "Administrator workbench: common retry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.retry_operation": {
+      "description": "Administrator workbench: common retry operation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.saved": {
+      "description": "Administrator workbench: common saved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.saving": {
+      "description": "Administrator workbench: common saving.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.unknown": {
+      "description": "Administrator workbench: common unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.unsaved": {
+      "description": "Administrator workbench: common unsaved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.untitled": {
+      "description": "Administrator workbench: common untitled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.cancel_confirm": {
+      "description": "Administrator cover cancellation and cleanup feedback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.cancel_confirm_copy": {
+      "description": "Administrator cover cancellation and cleanup feedback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.cancel_operation": {
+      "description": "Administrator cover cancellation and cleanup feedback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.cancelled": {
+      "description": "Administrator cover cancellation and cleanup feedback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.cancelled_cleanup": {
+      "description": "Administrator cover cancellation and cleanup feedback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.choose": {
+      "description": "Choose from import projects",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.cleanup_pending": {
+      "description": "The cover change is confirmed. Previous image cleanup still needs attention.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.clear": {
+      "description": "Remove catalog cover",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.complete": {
+      "description": "The catalog cover change is confirmed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.confirm": {
+      "description": "Confirm catalog cover change",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.confirm_copy": {
+      "description": "This changes the existing catalog cover. Old storage cleanup may finish separately; a lost response must be reconciled using the original operation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.copy": {
+      "description": "Choose a ready private image from an import project. Changing this cover is separate from publishing that Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.no_candidates": {
+      "description": "This project has no ready private images. Upload or extract a cover in its workbench first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.pending": {
+      "description": "The cover operation is not yet complete.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.reconcile": {
+      "description": "Reconcile original cover operation",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.recover_copy": {
+      "description": "Known catalog target cover recovery navigation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.recover_known": {
+      "description": "Known catalog target cover recovery navigation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.replace": {
+      "description": "Replace catalog cover",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.target_id": {
+      "description": "Known catalog target cover recovery navigation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.title": {
+      "description": "Catalog cover",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.use": {
+      "description": "Use this image",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.album": {
+      "description": "Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.artist": {
+      "description": "Artist",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.check": {
+      "description": "Find name matches",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.copy": {
+      "description": "These are name matches, not verified duplicates. Same-name Artists and different editions may be distinct. Decisions only update this draft; nothing is merged, deleted, or made public.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.decision": {
+      "description": "Decision",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.distinct": {
+      "description": "Create as distinct",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.name": {
+      "description": "Name match",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.reuse": {
+      "description": "Reuse existing",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.save": {
+      "description": "Save duplicate decisions",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.sha256": {
+      "description": "Identical verified bytes",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.skip": {
+      "description": "Skip this track",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.title": {
+      "description": "Check existing content",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.track": {
+      "description": "Track",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.undecided": {
+      "description": "Review later",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.artist_name": {
+      "description": "Administrator workbench: field artistName.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.bio": {
+      "description": "Biography",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.birth_date": {
+      "description": "Birth date",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.day": {
+      "description": "Administrator workbench: field day.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.description": {
+      "description": "Description",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.hidden": {
+      "description": "Administrator workbench: field hidden.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.month": {
+      "description": "Administrator workbench: field month.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.name": {
+      "description": "Name",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.organization_type": {
+      "description": "Organization type",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.public": {
+      "description": "Administrator workbench: field public.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.release_date": {
+      "description": "Administrator workbench: field releaseDate.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.title": {
+      "description": "Administrator workbench: field title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.track_number": {
+      "description": "Administrator workbench: field trackNumber.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.visibility": {
+      "description": "Administrator workbench: field visibility.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.year": {
+      "description": "Administrator workbench: field year.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.create": {
+      "description": "Administrator workbench: import create.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.file_count": {
+      "description": "Administrator workbench: import file count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.import.files": {
+      "description": "Administrator workbench: import files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.folder": {
+      "description": "Administrator workbench: import folder.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.intro": {
+      "description": "Administrator workbench: import intro.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.invalid_files": {
+      "description": "Administrator workbench: import invalid files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.manifest_only": {
+      "description": "This step saves file and folder names. Select original files again in the saved project to upload them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.no_upload": {
+      "description": "Administrator workbench: import no upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.root": {
+      "description": "Administrator workbench: import root.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.root_help": {
+      "description": "Administrator workbench: import root help.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.issue.budget_exhausted": {
+      "description": "This project reached its analysis limit. Continue reviewing or editing the saved draft.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.issue.grant_expired": {
+      "description": "Analysis permission expired. Review its confirmed status before continuing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.issue.permission_lost": {
+      "description": "Analysis stopped because its initiating administrator no longer has permission.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.issue.provider_invalid_response": {
+      "description": "The analysis could not be validated. No suggestions from that response were applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.issue.provider_outcome_unknown": {
+      "description": "The provider outcome is unknown. Another paid analysis is blocked until the outcome is reconciled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.issue.provider_rejected": {
+      "description": "The analysis request was declined. Review the draft before requesting another analysis.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.issue.provider_unavailable": {
+      "description": "Analysis is unavailable. The saved draft remains editable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.layout.artwork": {
+      "description": "Compact catalog artwork section name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.layout.catalog_details": {
+      "description": "Existing catalog metadata section heading for Artists, Albums, MediaTracks and Organizations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.layout.cleanup_pending": {
+      "description": "Cancelled publication still requires storage cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.layout.evidence": {
+      "description": "Expandable suggestion evidence label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.layout.metadata": {
+      "description": "Album metadata section heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.layout.selected_cover": {
+      "description": "Selected Album cover summary.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.choose_cover": {
+      "description": "Choose Album cover",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.confirm_copy": {
+      "description": "This action affects only this private import. Existing catalog files are unchanged.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.confirm_publish": {
+      "description": "Publish this reviewed Album?",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.confirm_publish_copy": {
+      "description": "This creates the reviewed Album using your saved metadata, duplicate decisions, selected cover and visibility. A request being accepted is not confirmation of publication.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.confirm_remove": {
+      "description": "Remove this staged file?",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.confirm_upload": {
+      "description": "Confirm private upload",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.copy": {
+      "description": "Select the original file for each row. Uploads remain private until you explicitly publish the reviewed Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.cover_candidate": {
+      "description": "Private cover candidate",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.invalid": {
+      "description": "Choose the original file with the same filename and size.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.manual_cover": {
+      "description": "Manually selected cover",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.no_cover": {
+      "description": "No cover selected",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.other_owner": {
+      "description": "This upload belongs to another administrator’s operation. They can retry it; you can explicitly remove the staged file before starting a new upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.publish": {
+      "description": "Publish reviewed Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.published": {
+      "description": "The Album publication is confirmed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.reconcile": {
+      "description": "Reconcile publication",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.remove": {
+      "description": "Remove staged file",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.select_file": {
+      "description": "Select original file",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.tags": {
+      "description": "Embedded metadata (reference only)",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.title": {
+      "description": "Files and publication",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.upload": {
+      "description": "Upload selected file",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.organization.archive": {
+      "description": "Archive",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.organization.broadcaster": {
+      "description": "Broadcaster",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.organization.distributor": {
+      "description": "Distributor",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.organization.label": {
+      "description": "Label",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.organization.other": {
+      "description": "Other",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.organization.publisher": {
+      "description": "Publisher",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.organization.studio": {
+      "description": "Studio",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.cancel": {
+      "description": "Cancel unconfirmed publication",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.cancel_confirm": {
+      "description": "Cancel this unconfirmed publication?",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.cancel_confirm_copy": {
+      "description": "Cancel this approval and clean up its unused copied files. Existing catalog content stays as it is. Review the draft again before a new publication approval.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.cancelled": {
+      "description": "The publication approval is cancelled. Review the draft before approving publication again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.cancelled_cleanup": {
+      "description": "The publication approval is cancelled. You can review the draft while unused copied files await confirmed cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.confirm": {
+      "description": "Confirm publication",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.publish": {
+      "description": "Publish reviewed draft",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.reconcile_cleanup": {
+      "description": "Reconcile cancelled publication cleanup",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.resume": {
+      "description": "Resume confirmed publication",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.unavailable": {
+      "description": "Publication is unavailable for this import; review and cleanup remain available.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.already_matches": {
+      "description": "Administrator workbench: review already matches.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.apply": {
+      "description": "Administrator workbench: review apply.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.baseline": {
+      "description": "Administrator workbench: review baseline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.changed": {
+      "description": "Compact conflict status; detailed baseline guard explanation is secondary.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.conflict": {
+      "description": "Administrator workbench: review conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.current": {
+      "description": "Administrator workbench: review current.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.draft_only": {
+      "description": "Administrator workbench: review draft only.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.empty": {
+      "description": "Administrator workbench: review empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.keep_remaining": {
+      "description": "Administrator workbench: review keep remaining.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.load_saved": {
+      "description": "Discard local edits and load saved version",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.reject": {
+      "description": "Administrator workbench: review reject.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.save": {
+      "description": "Administrator workbench: review save.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.saved_version": {
+      "description": "Latest saved version",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.select": {
+      "description": "Accessible label for a suggestion selection control.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.selected": {
+      "description": "Administrator workbench: review selected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.review.source": {
+      "description": "Administrator workbench: review source.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "source": "string"
+      }
+    },
+    "admin.review.suggested": {
+      "description": "Administrator workbench: review suggested.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.review.title": {
+      "description": "Administrator workbench: review title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.route.title.import": {
+      "description": "Album import",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.section.draft": {
+      "description": "Import draft section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.section.files": {
+      "description": "Private import file management section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.section.publication": {
+      "description": "Publication and recovery section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.section.review": {
+      "description": "Import suggestion and duplicate review section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.source.context": {
+      "description": "Naming context",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.source.filename": {
+      "description": "Filename",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.source.folder": {
+      "description": "Folder",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.stage.analysis": {
+      "description": "Administrator workbench: stage analysis.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.stage.publication": {
+      "description": "Administrator workbench: stage publication.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.stage.review": {
+      "description": "Administrator workbench: stage review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.stage.upload": {
+      "description": "Administrator workbench: stage upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.approved": {
+      "description": "Administrator workbench: state approved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.cancelled": {
+      "description": "Administrator workbench: state cancelled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.complete": {
+      "description": "Administrator workbench: state complete.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.completed": {
+      "description": "Administrator workbench: state completed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.failed": {
+      "description": "Administrator workbench: state failed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.needs_review": {
+      "description": "Administrator workbench: state needsReview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.not_available": {
+      "description": "Administrator workbench: state notAvailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.not_started": {
+      "description": "Administrator workbench: state notStarted.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.preparing": {
+      "description": "Publication in progress",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.queued": {
+      "description": "Administrator workbench: state queued.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.running": {
+      "description": "Administrator workbench: state running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.state.unknown": {
+      "description": "Administrator workbench: state unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.cleanup": {
+      "description": "Remove staged file",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.retry": {
+      "description": "Retry the same upload",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.select": {
+      "description": "Select matching files",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.upload": {
+      "description": "Upload",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.view.admin": {
+      "description": "Administrator workbench: view admin.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.view.current_admin": {
+      "description": "Administrator workbench: view current admin.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.view.current_user": {
+      "description": "Administrator workbench: view current user.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.view.required": {
+      "description": "Administrator workbench: view required.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.view.switch_admin": {
+      "description": "Administrator workbench: view switch admin.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.view.user": {
+      "description": "Administrator workbench: view user.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.all": {
+      "description": "Administrator workbench: workbench all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.analyzing": {
+      "description": "Administrator workbench: workbench analyzing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.awaiting_review": {
+      "description": "Administrator workbench: workbench awaitingReview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.completed": {
+      "description": "Administrator workbench: workbench completed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.empty": {
+      "description": "Administrator workbench: workbench empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.mine": {
+      "description": "Administrator workbench: workbench mine.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.more": {
+      "description": "Administrator workbench: workbench more.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.needs_attention": {
+      "description": "Administrator workbench: workbench needsAttention.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.new": {
+      "description": "Administrator workbench: workbench new.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.no_matches": {
+      "description": "Administrator workbench: workbench no matches.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.open": {
+      "description": "Administrator workbench: workbench open.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.search": {
+      "description": "Administrator workbench: workbench search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.title": {
+      "description": "Administrator workbench: workbench title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "artist.follow": {
       "description": "Private Artist Follow action or contextual Home release explanation.",
       "delivery": [

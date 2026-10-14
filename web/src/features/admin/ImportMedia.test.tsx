@@ -1,0 +1,231 @@
+import { createRequire } from 'node:module';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
+import { captureAccountOperation } from '../../api/accountEpoch';
+import { adminWorkspace } from './adminWorkspace';
+import { ImportMedia } from './ImportMedia';
+import { AdminMutation } from './useAdminMutation';
+import { detail, json, session, slotId, viewer } from './adminFixtures.testSupport';
+const readBlob = (blob: Blob) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsText(blob); });
+function mount(item = detail(), operation = new AdminMutation(), view?: 'files' | 'publication') { const client = new QueryClient(); client.setQueryData(['browser-session'], session); const element = (value: typeof item) => <QueryClientProvider client={client}><MemoryRouter><ImportMedia item={value} operation={operation} disabled={false} view={view} /></MemoryRouter></QueryClientProvider>; return { ...render(element(item)), element, operation }; }
+beforeEach(() => { adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin'); });
+afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
+test('the Files section identifies its own task and leaves publication actions in Publish', () => {
+  const item = detail(); item.publication = 'notStarted'; item.capabilities.publish = true;
+  mount(item, new AdminMutation(), 'files');
+  expect(screen.getByRole('heading', { name: 'Files' })).toBeVisible();
+  expect(screen.getAllByLabelText('Select original file')).toHaveLength(3);
+  expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
+});
+test('an upload receipt with unknown storage outcome retains identical multipart bytes and original key until ready', async () => {
+  const requests: RequestInit[] = []; const item = detail();
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => { requests.push(init); const operationId = new Headers(init.headers).get('Idempotency-Key')!; return json({ item: { ...item, assets: [{ slotId, state: requests.length === 1 ? 'unknown' : 'ready', byteLength: 3, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: { operationId, expectedRevision: 1, kind: 'upload', startedByMe: true } }] }, receipt: { operationId, kind: 'upload', revision: 2 } }); }));
+  const operation = new AdminMutation(); operation.asset(`/item/assets/${slotId}`, 1, new File(['abc'], '音乐.mp3', { type: 'untrusted/type' }));
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  const original = operation.getSnapshot().intent!; const pending = operation.getSnapshot().result!.item;
+  pending.receipts = [operation.getSnapshot().result!.receipt!]; operation.reconcile(pending); expect(operation.getSnapshot().intent).toBe(original);
+  operation.reconcile({ ...pending, assets: [{ ...pending.assets[0], state: 'ready', recovery: { ...pending.assets[0].recovery!, operationId: '40000000-0000-4000-8000-000000000004' } }] }); expect(operation.getSnapshot().intent).toBe(original);
+  const multipart = await readBlob(requests[0].body as Blob); expect(multipart).toContain('Content-Type: audio/mpeg'); expect(multipart).toContain("filename*=UTF-8''%E9%9F%B3%E4%B9%90.mp3"); expect(multipart).toContain('\r\n\r\nabc\r\n');
+  const busboy = createRequire(import.meta.url)('busboy')({ headers: { 'content-type': new Headers(requests[0].headers).get('Content-Type') } });
+  const parsed = new Promise<{filename:string; mimeType:string}>(resolve => { busboy.on('file', (_field: string, stream: {resume:()=>void}, info: {filename:string; mimeType:string}) => { stream.resume(); resolve(info); }); });
+  busboy.end(Buffer.from(multipart)); expect(await parsed).toMatchObject({ filename: '音乐.mp3', mimeType: 'audio/mpeg' });
+  operation.retry(); await vi.waitFor(() => expect(operation.getSnapshot().intent).toBeNull());
+  expect(requests[0].body).toBe(requests[1].body); expect(new Headers(requests[0].headers).get('Idempotency-Key')).toBe(new Headers(requests[1].headers).get('Idempotency-Key')); expect(new Headers(requests[1].headers).get('If-Match')).toBe('1');
+});
+test('file mismatch does not dispatch and upload requires an explicit confirmation', async () => {
+  const item = detail(); item.capabilities.upload = true; item.publication = 'notStarted'; const operation = new AdminMutation(); const upload = vi.spyOn(operation, 'asset').mockImplementation(() => {}); mount(item, operation);
+  const picker = document.querySelector('input[type=file]')!;
+  fireEvent.change(picker, { target: { files: [new File(['x'], 'wrong.mp3')] } }); expect(screen.getByRole('alert')).toBeVisible(); expect(upload).not.toHaveBeenCalled();
+  const file = new File(['a'.repeat(100)], item.manifest.files[0].filename);
+  fireEvent.change(picker, { target: { files: [file] } }); expect(upload).not.toHaveBeenCalled(); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Choose file' })); expect(upload).toHaveBeenCalledWith(`/bbbbbbbbbbbbbbbbbbbbbbbb/assets/${slotId}`, 1, file, undefined);
+});
+test('202 publication admission is not completion and source cleanup remains possible after confirmed publication', async () => {
+  const item = detail(); item.capabilities.publish = true; item.publication = 'notStarted'; const operation = new AdminMutation(); const run = vi.spyOn(operation, 'run').mockImplementation(() => {}); const view = mount(item, operation);
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); expect(run).not.toHaveBeenCalled(); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' })); expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 1 });
+  act(() => view.rerender(view.element({ ...item, publication: 'preparing' }))); expect(screen.queryByText('The Album publication is confirmed.')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
+  const complete = { ...item, publication: 'complete' as const, published: { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: ['333333333333333333333333'] }, assets: [{ slotId, state: 'ready' as const, byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }] };
+  act(() => view.rerender(view.element(complete))); expect(screen.getByText('The Album publication is confirmed.')).toBeVisible(); expect(screen.getByRole('button', { name: 'Remove file' })).toBeEnabled();
+});
+test('embedded artwork requires explicit selection and unavailable upload never dispatches', () => {
+  const item = detail(); item.assets = [{ slotId: `embedded-${slotId}`, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }]; const operation = new AdminMutation(); const run = vi.spyOn(operation, 'run').mockImplementation(() => {}); mount(item, operation);
+  expect(run).not.toHaveBeenCalled(); expect(document.querySelector('input[type=file]')).toBeDisabled(); expect(screen.getByRole('radio', { name: 'No cover selected' })).toBeChecked(); fireEvent.click(screen.getByRole('radio', { name: /01 First.mp3/ })); expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/select-cover', 'POST', { expectedRevision: 1, slotId: `embedded-${slotId}` });
+});
+
+test('cross-device upload recovery uses the admitted key and revision, never another administrator receipt', async () => {
+  const fetch = vi.fn(async () => { throw new TypeError('offline'); }); vi.stubGlobal('fetch', fetch);
+  const recovery = { operationId: '30000000-0000-4000-8000-000000000003', expectedRevision: 2, kind: 'upload' as const, startedByMe: true };
+  const file = new File(['abc'], 'song.mp3'); const operation = new AdminMutation(); operation.asset(`/item/assets/${slotId}`, 99, file, { ...recovery, startedByMe: false }); expect(fetch).not.toHaveBeenCalled();
+  operation.asset(`/item/assets/${slotId}`, 99, file, recovery); await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  expect(operation.getSnapshot().intent?.headers).toMatchObject({ 'Idempotency-Key': recovery.operationId, 'If-Match': '2' });
+});
+
+test('another current administrator retries staging cleanup with the original operation and revision', async () => {
+  const item = detail(); item.publication = 'notStarted';
+  const recovery = { operationId: '30000000-0000-4000-8000-000000000003', expectedRevision: 2, kind: 'cleanup' as const, startedByMe: false };
+  item.assets = [{ slotId, state: 'cleanupFailed', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery }];
+  const requests: RequestInit[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path, init: RequestInit) => { requests.push(init); throw new TypeError('offline'); }));
+  const operation = new AdminMutation(); mount(item, operation);
+  fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove file' }));
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  expect(requests[0].method).toBe('DELETE');
+  expect(new Headers(requests[0].headers).get('Idempotency-Key')).toBe(recovery.operationId);
+  expect(new Headers(requests[0].headers).get('If-Match')).toBe('2');
+  operation.retry();
+  await vi.waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[1].headers).toEqual(requests[0].headers);
+});
+
+test('cancelling publication confirms the project and captures its current revision and original approval', () => {
+  const item = detail(), originalOperationId = '30000000-0000-4000-8000-000000000003';
+  item.publication = 'needsAttention'; item.revision = 7;
+  item.publicationRecovery = { operationId: originalOperationId, cleanupPending: false, startedByMe: false };
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {});
+  mount(item, operation);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel approval' }));
+  expect(run).not.toHaveBeenCalled();
+  const dialog = within(screen.getByRole('dialog'));
+  expect(dialog.getByText('Synthetic Album')).toBeVisible();
+  fireEvent.click(dialog.getByRole('button', { name: 'Cancel approval' }));
+  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/cancel-publication', 'POST', { expectedRevision: 7, publicationOperationId: originalOperationId });
+});
+
+test('cancelled cleanup uses the original approval and blocks media changes until exact cleanup is confirmed', () => {
+  const item = detail(), originalOperationId = '30000000-0000-4000-8000-000000000003';
+  item.publication = 'cancelled'; item.capabilities.upload = true; item.capabilities.publish = true;
+  item.publicationRecovery = { operationId: originalOperationId, cleanupPending: true, startedByMe: false };
+  item.assets = [{ slotId, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }];
+  const operation = new AdminMutation(), resume = vi.spyOn(operation, 'resume').mockImplementation(() => {});
+  const view = mount(item, operation);
+  expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Remove file' })).toBeDisabled();
+  expect([...document.querySelectorAll('input[type=file]')].every(input => (input as HTMLInputElement).disabled)).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry cleanup' }));
+  expect(resume).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/resume-publication', originalOperationId);
+  act(() => view.rerender(view.element({ ...item, publicationRecovery: { ...item.publicationRecovery!, cleanupPending: false } })));
+  expect(screen.getByRole('button', { name: 'Publish Album' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Remove file' })).toBeEnabled();
+  expect(document.querySelectorAll('input[type=file]')[1]).toBeEnabled();
+});
+
+test('a completed publication cannot be cancelled', () => {
+  const item = detail(); item.publication = 'complete';
+  item.publicationRecovery = { operationId: '30000000-0000-4000-8000-000000000003', cleanupPending: false, startedByMe: true };
+  mount(item);
+  expect(screen.queryByRole('button', { name: 'Cancel approval' })).not.toBeInTheDocument();
+});
+
+test('an exhausted publication allowance explains availability while staged cleanup remains usable', () => {
+  const item = detail(); item.publication = 'cancelled'; item.capabilities = { analysis: true, upload: true, publish: false };
+  item.publicationRecovery = { operationId: '30000000-0000-4000-8000-000000000003', cleanupPending: false, startedByMe: true };
+  item.assets = [{ slotId, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }];
+  mount(item);
+  expect(screen.getByRole('button', { name: 'Publish Album' })).toBeDisabled();
+  expect(screen.getByText('Publication is unavailable for this import. You can continue reviewing and cleaning up files.')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Remove file' })).toBeEnabled();
+});
+
+test('embedded artwork removal confirms its own slot without selecting that cover', () => {
+  const item = detail(), embeddedSlot = `embedded-${slotId}`; item.publication = 'complete';
+  item.assets = [{ slotId: embeddedSlot, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }];
+  const operation = new AdminMutation(), asset = vi.spyOn(operation, 'asset').mockImplementation(() => {}), run = vi.spyOn(operation, 'run').mockImplementation(() => {});
+  mount(item, operation);
+  const row = screen.getByText('Private cover candidate · 01 First.mp3').closest('li')!;
+  const remove = within(row).getByRole('button', { name: 'Remove file' });
+  expect(remove.closest('label')).toBeNull(); fireEvent.click(remove);
+  expect(asset).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled();
+  const dialog = within(screen.getByRole('dialog'));
+  expect(dialog.getByText('Private cover candidate · 01 First.mp3')).toBeVisible();
+  fireEvent.click(dialog.getByRole('button', { name: 'Remove file' }));
+  expect(asset).toHaveBeenCalledWith(`/bbbbbbbbbbbbbbbbbbbbbbbb/assets/${embeddedSlot}`, 1, undefined, undefined);
+  expect(run).not.toHaveBeenCalled();
+});
+
+test.each(['cleanupFailed', 'deleting'] as const)('an embedded image in %s remains reachable for exact cross-admin cleanup', async state => {
+  const item = detail(), embeddedSlot = `embedded-${slotId}`; item.publication = 'notStarted';
+  const recovery = { operationId: '30000000-0000-4000-8000-000000000003', expectedRevision: 2, kind: 'cleanup' as const, startedByMe: false };
+  item.assets = [{ slotId: embeddedSlot, state, byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery }];
+  const requests: Array<{ path: string; init: RequestInit }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => { requests.push({ path, init }); throw new TypeError('offline'); }));
+  const operation = new AdminMutation(); mount(item, operation);
+  const row = screen.getByText('Private cover candidate · 01 First.mp3').closest('li')!;
+  fireEvent.click(within(row).getByRole('button', { name: 'Remove file' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove file' }));
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  expect(requests[0].path).toBe(`/api/admin/v1/imports/bbbbbbbbbbbbbbbbbbbbbbbb/assets/${embeddedSlot}`);
+  expect(requests[0].init.method).toBe('DELETE');
+  expect(new Headers(requests[0].init.headers).get('Idempotency-Key')).toBe(recovery.operationId);
+  expect(new Headers(requests[0].init.headers).get('If-Match')).toBe('2');
+});
+
+test('publication confirmation keeps its reviewed name and revision until the administrator explicitly reopens it', () => {
+  const item = detail(); item.publication = 'notStarted'; item.capabilities.publish = true; item.draft.album.title = 'Originally reviewed Album';
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {}), view = mount(item, operation);
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  const newer = { ...item, revision: 2, draft: { ...item.draft, album: { ...item.draft.album, title: 'Changed Album' } } };
+  act(() => view.rerender(view.element(newer)));
+  const dialog = within(screen.getByRole('dialog'));
+  expect(dialog.getByText('Originally reviewed Album')).toBeVisible();
+  expect(dialog.getByRole('button', { name: 'Publish Album' })).toBeDisabled();
+  fireEvent.click(dialog.getByRole('button', { name: 'Publish Album' })); expect(run).not.toHaveBeenCalled();
+  fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  expect(within(screen.getByRole('dialog')).getByText('Changed Album')).toBeVisible();
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' }));
+  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 2 });
+});
+
+test.each([1, 2])('cancellation does not rebase onto a replacement approval at current revision %s', revision => {
+  const item = detail(), originalOperationId = '30000000-0000-4000-8000-000000000003', replacementOperationId = '40000000-0000-4000-8000-000000000004';
+  item.publication = 'needsAttention'; item.draft.album.title = 'Original approval Album';
+  item.publicationRecovery = { operationId: originalOperationId, cleanupPending: false, startedByMe: true };
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {}), view = mount(item, operation);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel approval' }));
+  const newer = { ...item, revision, draft: { ...item.draft, album: { ...item.draft.album, title: 'Replacement approval Album' } }, publicationRecovery: { ...item.publicationRecovery, operationId: replacementOperationId } };
+  act(() => view.rerender(view.element(newer)));
+  const dialog = within(screen.getByRole('dialog'));
+  expect(dialog.getByText('Original approval Album')).toBeVisible();
+  expect(dialog.getByRole('button', { name: 'Cancel approval' })).toBeDisabled();
+  fireEvent.click(dialog.getByRole('button', { name: 'Cancel approval' })); expect(run).not.toHaveBeenCalled();
+  fireEvent.click(dialog.getByRole('button', { name: 'Keep reviewing' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel approval' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel approval' }));
+  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/cancel-publication', 'POST', { expectedRevision: revision, publicationOperationId: replacementOperationId });
+});
+
+test('removal cannot adopt a replacement asset or its recovery intent while its dialog is open', () => {
+  const item = detail(); item.publication = 'notStarted';
+  item.assets = [{ slotId, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }];
+  const operation = new AdminMutation(), asset = vi.spyOn(operation, 'asset').mockImplementation(() => {}), view = mount(item, operation);
+  fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+  const recovery = { operationId: '40000000-0000-4000-8000-000000000004', expectedRevision: 2, kind: 'cleanup' as const, startedByMe: false };
+  const newer = { ...item, assets: [{ ...item.assets[0], state: 'cleanupFailed' as const, sha256: 'b'.repeat(64), recovery }] };
+  act(() => view.rerender(view.element(newer)));
+  const dialog = within(screen.getByRole('dialog'));
+  expect(dialog.getByText('Synthetic Album/01 First.mp3')).toBeVisible();
+  expect(dialog.getByRole('button', { name: 'Remove file' })).toBeDisabled();
+  fireEvent.click(dialog.getByRole('button', { name: 'Remove file' })); expect(asset).not.toHaveBeenCalled();
+  fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove file' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove file' }));
+  expect(asset).toHaveBeenCalledWith(`/bbbbbbbbbbbbbbbbbbbbbbbb/assets/${slotId}`, 1, undefined, recovery);
+});
+
+test('upload approval preserves its selected File and requires reselection after the project revision changes', () => {
+  const item = detail(); item.publication = 'notStarted'; item.capabilities.upload = true;
+  const file = new File(['a'.repeat(100)], item.manifest.files[0].filename);
+  const operation = new AdminMutation(), asset = vi.spyOn(operation, 'asset').mockImplementation(() => {}), view = mount(item, operation);
+  const picker = document.querySelector('input[type=file]')!;
+  fireEvent.change(picker, { target: { files: [file] } });
+  act(() => view.rerender(view.element({ ...item, revision: 2 })));
+  const dialog = within(screen.getByRole('dialog'));
+  expect(dialog.getByText(file.name)).toBeVisible();
+  expect(dialog.getByRole('button', { name: 'Choose file' })).toBeDisabled();
+  fireEvent.click(dialog.getByRole('button', { name: 'Choose file' })); expect(asset).not.toHaveBeenCalled();
+  fireEvent.click(dialog.getByRole('button', { name: 'Cancel' }));
+  fireEvent.change(picker, { target: { files: [file] } });
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Choose file' }));
+  expect(asset).toHaveBeenCalledWith(`/bbbbbbbbbbbbbbbbbbbbbbbb/assets/${slotId}`, 2, file, undefined);
+});

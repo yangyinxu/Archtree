@@ -26,6 +26,12 @@ const titleKeyFor = (pathname: string): MessageKey => {
   if (pathname === '/account/sessions') return 'route.title.sessions';
   if (pathname === '/account/password') return 'route.title.password_settings';
   if (pathname === '/account') return 'route.title.account';
+  if (pathname === '/admin/catalog') return 'admin.catalog.title';
+  if (/^\/admin\/catalog\/(album|artist|audioTrack|organization)\/[a-f0-9]{24}$/.test(pathname)) return 'admin.catalog.edit';
+  if (pathname === '/admin/pages') return 'admin.catalog.pages';
+  if (pathname === '/admin/imports/new') return 'admin.workbench.new';
+  if (/^\/admin\/imports\/[a-f0-9]{24}$/.test(pathname)) return 'admin.route.title.import';
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin.workbench.title';
   return 'route.title.not_found';
 };
 

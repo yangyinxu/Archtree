@@ -153,7 +153,7 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
       await route.continue();
       return;
     }
-    if (call.method === 'GET' && call.pathname.startsWith('/api/localizations/v1/')) {
+    if (call.method === 'GET' && call.pathname.startsWith('/api/localizations/v2/')) {
       // Exercise the real public, cacheable localization delivery contract.
       await route.continue();
       return;
@@ -179,6 +179,10 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
     if (call.method === 'GET' && call.pathname === '/api/listener/v1/capabilities') {
       // Goldens and keyboard order cover a social-enabled deployment; rollout specs override this explicitly.
       await jsonResponse(route, 200, { playlists: true, social: { enabled: true, rooms: true } });
+      return;
+    }
+    if (call.method === 'GET' && call.pathname === '/api/listener/v1/personalization-capabilities') {
+      await jsonResponse(route, 200, { contractVersion: 1, deterministicDiscovery: false, artistFollows: false });
       return;
     }
     if (call.method === 'GET' && call.pathname === '/api/listener/v1/home') {

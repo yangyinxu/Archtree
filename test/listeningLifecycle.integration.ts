@@ -84,6 +84,15 @@ const begin = async (who: Person) => {
 const status = (viewer: Person, publisher: Person, target = api) => target.listeningStatuses(viewer.actor, [publisher.profile.socialId]);
 const isError = (code: string) => (error: unknown) => error instanceof SocialError && error.code === code;
 
+test('hidden source inheritance removes peer status and rejects a new playing report', async () => {
+    const { a, b } = await pair(); const { publisher, value } = await begin(a);
+    const album = new ObjectId();
+    await db().collection('albums').insertOne({ _id: album, title: 'Hidden synthetic Album', lifecycleStatus: 'ready', visibility: 'hidden' });
+    await db().collection('audioTracks').updateOne({ _id: new ObjectId(tracks[0]) }, { $set: { albumId: album.toHexString() } });
+    assert.deepEqual(await status(b, a), []);
+    assert.equal((await api.reportListening(a.actor, playing(publisher, { ...value, positionMs: 1500 }))).accepted, false);
+});
+
 test('default-off ordinary Audio publication is private, minimal and silent until an actual report, with no generic invalidation', async () => {
     const { a, b } = await pair(); const outsider = await person('outsider');
     assert.deepEqual(await api.ownListening(a.actor), { enabled: false, revision: 0, publisherRevision: 0, serverTimeMs: now });

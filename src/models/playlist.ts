@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ClientSession, ObjectId } from 'mongodb';
 
 import { getDatabaseClient, getDb } from '../infrastructure/database';
-import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { touchPublicAudioTrackReferences } from '../services/publicCatalogReferenceFenceService';
+import { AudioTrackReferenceUnavailableError } from '../services/audioTrackReferenceFenceService';
 
 export const PLAYLIST_COLLECTION = 'playlists';
 export const ACCOUNT_MUTATION_COLLECTION = 'accountMutations';
@@ -692,20 +693,13 @@ export class Playlist {
                     );
                 }
 
-                const trackFence = await getDb()!.collection('audioTracks').updateOne(
-                    {
-                        _id: ObjectId.createFromHexString(audioTrackId),
-                        ...readyAudioStorageFilter
-                    },
-                    { $inc: { playlistReferenceRevision: 1 } },
-                    { session }
-                );
-                if (trackFence.matchedCount !== 1) {
-                    throw new PlaylistError(
-                        404,
-                        'audio_track_not_found',
-                        'A ready MediaTrack was not found.'
-                    );
+                try {
+                    await touchPublicAudioTrackReferences([audioTrackId], session);
+                    await getDb()!.collection('audioTracks').updateOne({ _id: new ObjectId(audioTrackId) },
+                        { $inc: { playlistReferenceRevision: 1 } }, { session });
+                } catch (error) {
+                    if (!(error instanceof AudioTrackReferenceUnavailableError)) throw error;
+                    throw new PlaylistError(404, 'audio_track_not_found', 'A ready MediaTrack was not found.');
                 }
 
                 const nextItems = [...currentItems];

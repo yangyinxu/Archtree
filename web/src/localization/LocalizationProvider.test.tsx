@@ -48,7 +48,7 @@ test('downloads, activates, persists, and restores a selected language', async (
   );
   expect(screen.getByTestId('localized-home')).toHaveTextContent('Home');
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-    '/api/localizations/v1/manifest',
+    '/api/localizations/v2/manifest',
     expect.any(Object)
   ));
 

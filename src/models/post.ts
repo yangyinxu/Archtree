@@ -1,7 +1,9 @@
+import type { CatalogVisibility } from '../services/catalogVisibilityService';
 import mongoDb, { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 
 class Post {
+    visibility: CatalogVisibility = 'public';
     constructor(
         public title: string,
         public description: string,

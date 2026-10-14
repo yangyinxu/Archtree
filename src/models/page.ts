@@ -1,3 +1,4 @@
+import type { CatalogVisibility } from '../services/catalogVisibilityService';
 import { getDatabaseClient, getDb } from '../infrastructure/database';
 import {
     touchActiveAccount,
@@ -20,6 +21,7 @@ export type PageSlug = 'home' | 'library';
 
 export interface CarouselPageItemRef {
     itemId?: string;
+    visibility?: CatalogVisibility;
     itemType: 'carousel';
     carouselId: string;
     order: number;
@@ -27,6 +29,7 @@ export interface CarouselPageItemRef {
 
 export interface CollectionPageItemRef {
     itemId?: string;
+    visibility?: CatalogVisibility;
     itemType: 'grid' | 'list';
     collectionId: string;
     order: number;
@@ -231,6 +234,7 @@ export class Page {
                 : nextItems.length;
             nextItems.splice(insertAt, 0, {
                 itemId: newPageItemId(),
+                visibility: 'public',
                 itemType: 'carousel',
                 carouselId,
                 order: insertAt
@@ -254,6 +258,7 @@ export class Page {
                 : nextItems.length;
             nextItems.splice(insertAt, 0, {
                 itemId: newPageItemId(),
+                visibility: 'public',
                 itemType,
                 collectionId: collectionRefId,
                 order: insertAt

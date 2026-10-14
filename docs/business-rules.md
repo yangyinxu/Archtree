@@ -641,9 +641,48 @@ The wire protocol and operational bounds are documented in
   Administrator promotion is a controlled operational database action; there
   is no public role-promotion endpoint.
 - Signed-out visitors, users, and admins can browse every database-confirmed
-  ready or published Artist, Album, MediaTrack, configured public page item,
+  ready or published **public** Artist, Album, MediaTrack, configured Page item,
   Feed Post, stream, and public catalog artwork. Public visibility does not
   depend on the viewer role or the record's `createdBy` value.
+- Catalog content and individual Page item placements have `public` or `hidden`
+  visibility. Missing legacy values are public; malformed values fail closed.
+  Hidden content is accessible only through current-administrator private
+  management and preview routes. Knowing an ID or public URL does not grant
+  access. Listener routes enforce the same rule for admins in User view.
+- Hiding one Page placement does not hide its reusable Carousel, Grid, or List,
+  another placement, or the referenced content. Hiding an Album makes assigned
+  MediaTracks effectively hidden without changing their own stored visibility.
+  An assigned MediaTrack whose parent Album cannot be confirmed ready/public
+  is unavailable to listeners. Hidden Artist and Organization identities are
+  redacted from public Credits; their visibility alone does not hide shared works.
+- Discovery, details, Library, Playlist artwork, recent activity, Follow releases,
+  Rooms, social shares, media, and artwork revalidate current public access.
+  Private Playlists retain unavailable members without former title, artwork,
+  creator, or playable links. Hidden targets cannot gain new listener references.
+  Already-open online media delivery stops within one second after a confirmed
+  access loss or an unresponsive authorization check. Previously delivered or
+  downloaded bytes cannot be recalled.
+- Visibility changes require explicit admin confirmation of the affected
+  entity/placement and the current revision. Page placement review identifies
+  its configured name, type and source mode, reports missing or unsupported
+  references, and confirms the current and proposed visibility of that exact
+  placement. Renaming or changing its source invalidates a previous approval.
+  They cannot be enabled until
+  direct S3/CDN delivery and historical public URL policy are verified. Public
+  and private application responses never redirect to hidden object locations.
+- Admins switch between Admin and User views without signing out or rebuilding
+  listening state. User view is the default; leaving Admin view hides private
+  presentation, cancels private reads and stops previews. Unsaved drafts and
+  unknown operation intents may remain only in account-fenced memory and resume
+  after current capabilities are verified. Account or role loss clears them.
+  View selection is presentation, not authorization.
+- Existing catalog edits are separate from import review. They preserve unrelated
+  metadata, memberships, and storage references, reject stale snapshots, and
+  use the canonical Credit and artwork lifecycle. Track Number changes update
+  the assigned Album's automatic order in the same transaction.
+- Administrator confirmations bind the item and revision displayed when opened.
+  A refresh that changes the draft, publication approval or staged file requires
+  a fresh review; confirmation never silently rebases onto a newer target.
 - Pending, failed, deleting, orphaned, or otherwise non-ready lifecycle data is
   not public. Private account data, including avatars, saves, activity,
   sessions, and account metadata, is not part of the public catalog.
@@ -1182,6 +1221,79 @@ The wire protocol and operational bounds are documented in
   its MediaTrack or Album, and unsaving content does not remove its download.
 - A local audio asset may be owned by multiple device-local download entries.
   Removing one entry must not delete an asset still owned by another entry.
+
+## Administrator Album Imports
+
+- Imports are private, durable administrator projects. The shared workbench
+  provides analyzing, awaiting review, needs attention, and completed views with
+  independent upload, analysis, review, and publication state. All current admins
+  may resume saved projects; ordinary users cannot read their titles or assets.
+- The import editor separates Draft, Review, Files and Publish. Switching between
+  these sections retains the current account's unsaved fields, selected
+  suggestions and local file choices; navigation alone does not save, analyze,
+  upload or publish. Source evidence and technical details remain available
+  without obscuring the current values, file identities or next explicit action.
+- File names and relative containing-folder names are untrusted context. Absolute
+  device paths are not sent to analysis. Source bytes remain in S3; the database
+  retains bounded metadata, hashes, object identities, drafts, jobs and receipts.
+  Private staged uploads do not create playable catalog MediaTracks.
+- Luna proposes supported values with source evidence. Unknown facts stay empty
+  and partial release dates retain their precision. Analysis never publishes,
+  edits existing catalog records, or silently overwrites manual draft changes.
+  Administrators see baseline/current/proposed values and can accept or reject
+  individual suggestions. Adoption changes only the saved private draft.
+- Accepted analysis runs on the server after a browser closes or changes page.
+  Reopening observes existing status and results; it does not start another
+  paid generation. Local file transfer may require reselection of incomplete
+  files. Explicit Stop analysis is separate from leaving the page.
+- Analysis uses finite per-project and global concurrency/call budgets, durable
+  checkpoints and expiring administrator grants. Permission loss prevents new
+  steps. An ambiguous potentially paid provider outcome is retained and blocks
+  automatic paid replay; administrators may continue manual review.
+  The deployment-wide daily allowance resets at UTC midnight; budget exhaustion
+  becomes needs attention without dispatching another provider request.
+- Name matches and identical bytes are candidates, not proof of Artist identity,
+  Album edition, or recording identity. Administrators explicitly choose reuse,
+  skip, append missing members, or create a distinct entry. No automatic merge,
+  deletion, media replacement, or reassignment of a Track to a different Album
+  is permitted. Unhashed historical assets remain unverified.
+- Publication is a separate explicit approval of the reviewed draft and duplicate
+  decisions. It freezes the approval snapshot, rechecks current role, revisions,
+  memberships, visibility and asset readiness, and reports confirmed per-item
+  outcomes. New objects and catalog records remain traceable through every
+  upload/copy, partial failure, retry, cleanup and reconciliation step. Unknown
+  outcomes never discard the sole lifecycle evidence or mint new identities
+  silently. Successful catalog publication and its receipt commit together.
+- A current administrator may explicitly cancel an unconfirmed import publication
+  after its active worker lease ends, including when the original approval has
+  expired or its initiating administrator lost permission. Cancellation binds
+  the original approval, never changes existing catalog content and cannot undo
+  a completed publication. Unused copied files remain traceable until exact
+  cleanup is confirmed; unknown outcomes are not treated as successful cleanup.
+  Administrators may edit and review the private draft during cancelled cleanup,
+  while source changes, analysis and a new publication approval remain blocked.
+  Confirmed cleanup permits a newly reviewed approval with independent identities
+  and retains the cancelled approval's recovery history. Each import admits at
+  most sixteen publication approvals; reaching that bound does not prevent
+  reviewing the private draft or cancelling and cleaning existing work.
+- Required cleanup and cancellation remain available when the ordinary editing
+  allowance is exhausted. Repeated recovery uses the original intent and cannot
+  silently restart a destructive step or lose lifecycle evidence.
+- Publishing an import that reuses an existing Artist or Album does not overwrite
+  that entity's metadata, artwork, Credits or visibility. Such corrections require
+  a separate existing-catalog edit. Appending preserves all current members and
+  only adds approved missing members. A hidden Album continues to hide its Tracks
+  until its own visibility changes; a newly created hidden Artist is not exposed
+  by publishing a private import.
+- An unconfirmed existing-catalog cover approval may be explicitly cancelled by
+  a current administrator after its active worker lease ends. Cancellation leaves
+  the saved cover unchanged and retains the unused object's identity and source
+  pin until cleanup is confirmed. It permits a new reviewed approval without
+  silently rebasing the old one. Attached cover changes require a separate clear
+  or replacement; cancellation cannot undo them.
+- Expiring grants prevent new copy/attachment/publication steps. Cleanup of a
+  confirmed detached or explicitly cancelled object remains recoverable after
+  grant expiry, with current administrator checks and exact storage identity.
 
 ## Page Items
 

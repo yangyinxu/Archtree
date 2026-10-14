@@ -1,3 +1,5 @@
+import { preserveCatalogVisibilityUpdate } from '../services/catalogVisibilityService';
+import type { CatalogVisibility } from '../services/catalogVisibilityService';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import { SimpleDate } from '../models/simpleDate';
@@ -19,6 +21,7 @@ export {
 
 /** Catalog Album record with compatibility persistence entry points. */
 export class Album {
+    visibility: CatalogVisibility = 'public';
     _id?: ObjectId;
     title: string;
     coverArtUrl: string;
@@ -126,7 +129,7 @@ export class Album {
     static updateById(albumId: string, update: Record<string, unknown>) {
         const db = getDb();
         const albumObjectId = ObjectId.createFromHexString(albumId);
-        const normalizedUpdate = withCatalogSearchUpdate(update, 'title');
+        const normalizedUpdate = withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(update), 'title');
         const mutate = async (session?: import('mongodb').ClientSession) => {
             const result = await db!
                 .collection('albums')
@@ -155,7 +158,7 @@ export class Album {
         expectedImageId: string | undefined | null,
         update: Record<string, unknown>
     ) {
-        const normalizedUpdate = withCatalogSearchUpdate(update, 'title');
+        const normalizedUpdate = withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(update), 'title');
         if (Object.prototype.hasOwnProperty.call(normalizedUpdate, 'audioTrackIds')) {
             if (!Array.isArray(normalizedUpdate.audioTrackIds)) {
                 throw new Error('audioTrackIds must be an array.');

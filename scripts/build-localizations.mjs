@@ -13,7 +13,8 @@ const supportedDeliveryTargets = new Set([
 ]);
 const supportedVariableTypes = new Set(['string', 'number', 'date', 'time']);
 const maxLocaleBytes = 256 * 1024;
-const maxMessageKeys = 1_000;
+const maxMessageKeys = 2_000;
+const maxLegacyMessageKeys = 1_000;
 const maxMessageKeyLength = 160;
 const maxMessageLength = 4_000;
 const maxLocaleNameLength = 100;
@@ -289,18 +290,27 @@ export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
   }
 
   if (!bundles.has('en-US')) throw new Error('The required en-US fallback locale is missing.');
+  const manifestFor = (representations) => ({
+    schemaVersion: 1,
+    defaultLocale: 'en-US',
+    locales: [...representations.values()].map(({ locale, revision }) => ({
+      locale, nativeName: localeMetadata[locale].nativeName,
+      englishName: localeMetadata[locale].englishName, revision
+    }))
+  });
+  // Old native readers reject an entire bundle above 1000 messages. Keep their
+  // reviewed listener namespace available while new clients use the v2 route.
+  const legacyBundles = new Map([...bundles].map(([locale, bundle]) => {
+    const messages = Object.fromEntries(Object.entries(bundle.messages)
+      .filter(([key]) => !key.startsWith('admin.')));
+    if (!Object.keys(messages).length || Object.keys(messages).length > maxLegacyMessageKeys) {
+      throw new Error('The v1 listener localization namespace must contain 1–1000 messages.');
+    }
+    return [locale, { ...bundle, messages, revision: revisionFor(messages) }];
+  }));
   return {
-    manifest: {
-      schemaVersion: 1,
-      defaultLocale: 'en-US',
-      locales: [...bundles.values()].map(({ locale, revision }) => ({
-        locale,
-        nativeName: localeMetadata[locale].nativeName,
-        englishName: localeMetadata[locale].englishName,
-        revision
-      }))
-    },
-    bundles
+    manifest: manifestFor(bundles), bundles,
+    legacy: { manifest: manifestFor(legacyBundles), bundles: legacyBundles }
   };
 };
 
@@ -316,8 +326,11 @@ const expectedGeneratedFiles = (artifacts, root) => {
   return new Map([
     [path.join(generatedRoot, 'manifest.json'), canonicalJson(artifacts.manifest)],
     ...[...artifacts.bundles].map(([locale, bundle]) => [
-      path.join(generatedRoot, 'bundles', `${locale}.json`),
-      canonicalJson(bundle)
+      path.join(generatedRoot, 'bundles', `${locale}.json`), canonicalJson(bundle)
+    ]),
+    [path.join(generatedRoot, 'legacy', 'manifest.json'), canonicalJson(artifacts.legacy.manifest)],
+    ...[...artifacts.legacy.bundles].map(([locale, bundle]) => [
+      path.join(generatedRoot, 'legacy', 'bundles', `${locale}.json`), canonicalJson(bundle)
     ])
   ]);
 };
@@ -328,10 +341,11 @@ export const writeLocalizationArtifacts = async (root = repositoryRoot) => {
   const expectedFiles = expectedGeneratedFiles(artifacts, root);
   for (const [filePath, contents] of expectedFiles) await atomicWrite(filePath, contents);
 
-  const bundleRoot = path.join(root, 'localization', 'generated', 'bundles');
-  for (const filename of await readdir(bundleRoot)) {
-    const filePath = path.join(bundleRoot, filename);
-    if (filename.endsWith('.json') && !expectedFiles.has(filePath)) await unlink(filePath);
+  for (const bundleRoot of [path.join(root, 'localization', 'generated', 'bundles'), path.join(root, 'localization', 'generated', 'legacy', 'bundles')]) {
+    for (const filename of await readdir(bundleRoot)) {
+      const filePath = path.join(bundleRoot, filename);
+      if (filename.endsWith('.json') && !expectedFiles.has(filePath)) await unlink(filePath);
+    }
   }
   return artifacts;
 };
@@ -351,11 +365,12 @@ export const checkLocalizationArtifacts = async (root = repositoryRoot) => {
       throw new Error(`Generated localization artifact is stale: ${path.relative(root, filePath)}`);
     }
   }
-  const bundleRoot = path.join(root, 'localization', 'generated', 'bundles');
-  for (const filename of await readdir(bundleRoot)) {
-    const filePath = path.join(bundleRoot, filename);
-    if (filename.endsWith('.json') && !expectedFiles.has(filePath)) {
-      throw new Error(`Generated localization artifact is stale: ${path.relative(root, filePath)}`);
+  for (const bundleRoot of [path.join(root, 'localization', 'generated', 'bundles'), path.join(root, 'localization', 'generated', 'legacy', 'bundles')]) {
+    for (const filename of await readdir(bundleRoot)) {
+      const filePath = path.join(bundleRoot, filename);
+      if (filename.endsWith('.json') && !expectedFiles.has(filePath)) {
+        throw new Error(`Generated localization artifact is stale: ${path.relative(root, filePath)}`);
+      }
     }
   }
   return artifacts;

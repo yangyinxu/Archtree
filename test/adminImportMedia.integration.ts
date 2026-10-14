@@ -1,0 +1,459 @@
+import assert from 'node:assert/strict';
+import sharp from 'sharp';
+import { randomUUID } from 'node:crypto';
+import { before, beforeEach, after, test } from 'node:test';
+import { ObjectId } from 'mongodb';
+import { getDb } from '../src/infrastructure/database';
+import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
+import { AdminImportError } from '../src/administration/adminImportContract';
+import { createAdminImport, editAdminImport, getAdminImport, decideAdminImportDuplicates, initializeAdminImportStorage, adminImportDuplicateCandidates, analyzeAdminImport } from '../src/administration/adminImportService';
+import { cleanupAdminImportAsset, uploadAdminImportAsset, selectAdminImportCover, previewAdminImportAsset, importAssetTarget, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../src/administration/adminImportStorage';
+import { publishAdminImport, resumeAdminImportPublication, runAdminImportPublicationOnce, cancelAdminImportPublication } from '../src/administration/adminImportPublisher';
+import { loadAdminCanonicalReservations } from '../src/services/adminCanonicalReservationService';
+
+let harness: MongoReplicaSetHarness; const actor = new ObjectId(), other = new ObjectId();
+const mutation = (expectedRevision: number) => ({ operationId: randomUUID(), expectedRevision });
+const code = (expected: string) => (error: unknown) => error instanceof AdminImportError && error.code === expected;
+const wav = () => { const value = Buffer.alloc(16044); value.write('RIFF', 0); value.writeUInt32LE(16036, 4); value.write('WAVEfmt ', 8); value.writeUInt32LE(16, 16); value.writeUInt16LE(1, 20); value.writeUInt16LE(1, 22); value.writeUInt32LE(8000, 24); value.writeUInt32LE(16000, 28); value.writeUInt16LE(2, 32); value.writeUInt16LE(16, 34); value.write('data', 36); value.writeUInt32LE(16000, 40); return value; };
+const file = (): Express.Multer.File => ({ fieldname: 'file', originalname: '01 - Synthetic.wav', mimetype: 'audio/wav', size: wav().length, buffer: wav(), encoding: '7bit' } as Express.Multer.File);
+class Storage implements ImportObjectStorage {
+    objects = new Map<string, { target: ImportObjectTarget; identity: ImportObjectIdentity; bytes?: Buffer }>(); puts = 0; copies = 0; deletes = 0; failHead = false; failPutAfter = false; failCopyAfter = false; failCopyBefore = false; failDelete = false; failDeleteAfter = false; afterCopy?: () => Promise<void>;
+    async head(target: ImportObjectTarget) { if (this.failHead) throw new Error('private storage failure'); const stored = this.objects.get(target.bucket + '/' + target.key); if (!stored) return null; assert.deepEqual(stored.target, target); return stored.identity; }
+    async put(target: ImportObjectTarget, file: Express.Multer.File) { this.puts++; const identity = { etag: '"stage-etag"', versionId: 'stage-version' }; this.objects.set(target.bucket + '/' + target.key, { target, identity, bytes: file.buffer }); if (this.failPutAfter) throw new Error('response lost'); return identity; }
+    async copy(_source: ImportObjectTarget & ImportObjectIdentity, target: ImportObjectTarget) { this.copies++; if (this.failCopyBefore) throw new Error('outcome unknown'); const identity = { etag: '"canonical-etag"', versionId: 'canonical-version' }; this.objects.set(target.bucket + '/' + target.key, { target, identity }); await this.afterCopy?.(); if (this.failCopyAfter) throw new Error('response lost'); return identity; }
+    async read(target: ImportObjectTarget & ImportObjectIdentity) { return this.objects.get(target.bucket + '/' + target.key)!.bytes!; }
+    async delete(target: ImportObjectTarget & ImportObjectIdentity) { this.deletes++; if (this.failDelete) throw new Error('cleanup failed'); this.objects.delete(target.bucket + '/' + target.key); if (this.failDeleteAfter) throw new Error('cleanup acknowledgement lost'); }
+}
+before(async () => { harness = await startMongoReplicaSet('archtree-admin-import-media-test'); });
+beforeEach(async () => {
+    process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true'; process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'true'; process.env.ADMIN_IMPORT_S3_BUCKET_NAME = 'synthetic-private-imports'; process.env.S3_BUCKET_NAME = 'synthetic-catalog';
+    for (const name of ['users', 'adminAlbumImports', 'adminImportAnalysisSlots', 'artists', 'albums', 'audioTracks', 'imageAssets']) await getDb()!.collection(name).deleteMany({});
+    await getDb()!.collection('users').insertMany([{ _id: actor, email: 'media-import@example.test', role: 'admin' }, { _id: other, email: 'media-import-other@example.test', role: 'admin' }]); await initializeAdminImportStorage(getDb()!);
+});
+after(async () => { await harness?.stop(); for (const name of ['FINITUDE_ADMIN_IMPORTS_ENABLED', 'FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY', 'ADMIN_IMPORT_S3_BUCKET_NAME', 'S3_BUCKET_NAME', 'FINITUDE_ADMIN_CATALOG_ENABLED', 'FINITUDE_ADMIN_VISIBILITY_ENABLED', 'FINITUDE_HIDDEN_DELIVERY_ENFORCED']) delete process.env[name]; });
+const create = async () => { const slotId = randomUUID(); return createAdminImport(actor.toHexString(), { operationId: randomUUID(), manifest: { rootLabel: 'Synthetic Album', files: [{ slotId, filename: file().originalname, relativePath: file().originalname, byteLength: file().size }] } }); };
+async function prepared(storage: Storage, visibility: 'public' | 'hidden' = 'public') {
+    const created = await create(); const slotId = created.item.manifest.files[0].slotId; const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, mutation(1), file(), storage);
+    const draft = uploaded.item.draft; draft.album = { title: 'Synthetic Album', artistName: 'Synthetic Artist', releaseDate: { year: 2026, month: 10, day: null }, visibility }; draft.tracks[0].title = 'Synthetic Recording'; draft.tracks[0].trackNumber = 4;
+    const edited = await editAdminImport(actor.toHexString(), created.item.id, { ...mutation(uploaded.item.revision), draft });
+    return decideAdminImportDuplicates(actor.toHexString(), created.item.id, { ...mutation(edited.item.revision), decisions: [{ scope: 'artist', slotId: null, action: 'create-distinct', candidateId: null, candidateRevision: null }, { scope: 'album', slotId: null, action: 'create-distinct', candidateId: null, candidateRevision: null }, { scope: 'track', slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }] });
+}
+test('private storage requires separate configured bucket, and real byte metadata precedes durable PUT', async () => {
+    const created = await create(), storage = new Storage(); const slotId = created.item.manifest.files[0].slotId;
+    process.env.ADMIN_IMPORT_S3_BUCKET_NAME = process.env.S3_BUCKET_NAME;
+    await assert.rejects(uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, mutation(1), file(), storage), code('ADMIN_IMPORT_STORAGE_UNAVAILABLE')); assert.equal(storage.puts, 0);
+    process.env.ADMIN_IMPORT_S3_BUCKET_NAME = 'synthetic-private-imports'; const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, mutation(1), file(), storage);
+    assert.equal(uploaded.item.upload.ready, 1); assert.equal(uploaded.item.assets[0].sha256.length, 64); assert.equal(uploaded.item.assets[0].state, 'ready'); assert.equal(JSON.stringify(uploaded).includes('synthetic-private-imports'), false);
+    assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 0); assert.equal(await getDb()!.collection('albums').countDocuments(), 0);
+    const persisted = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(created.item.id) }); assert.equal(persisted!.media.assets[0].representation.byteLength, file().size); assert.match(persisted!.media.assets[0].key, /^imports\//);
+});
+test('upload lost response recovers exact bytes without a second PUT; same key changed payload is refused', async () => {
+    const created = await create(), storage = new Storage(), intent = mutation(1); storage.failPutAfter = true; const slotId = created.item.manifest.files[0].slotId;
+    const first = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, intent, file(), storage); assert.equal(first.item.assets[0].state, 'ready');
+    await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, intent, file(), storage); assert.equal(storage.puts, 1);
+    const changed = file(); changed.buffer[100] = 20;
+    await assert.rejects(uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, intent, changed, storage), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+});
+test('failed cleanup retains exact storage evidence and same intent retry completes it', async () => {
+    const created = await create(), storage = new Storage(), slotId = created.item.manifest.files[0].slotId; const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, mutation(1), file(), storage); const intent = mutation(uploaded.item.revision);
+    storage.failDelete = true; const failed = await cleanupAdminImportAsset(actor.toHexString(), created.item.id, slotId, intent, storage); assert.equal(failed.item.assets[0].state, 'cleanupFailed'); assert.equal(storage.objects.size, 1);
+    storage.failDelete = false; const done = await cleanupAdminImportAsset(actor.toHexString(), created.item.id, slotId, intent, storage); assert.equal(done.item.assets[0].state, 'deleted'); assert.equal(storage.objects.size, 0); assert.equal(done.item.assets.length, 1);
+});
+test('explicit publish allocates fixed IDs then commits complete catalog graph after copy checkpoint', async () => {
+    const storage = new Storage(), project = await prepared(storage); const intent = mutation(project.item.revision); const admitted = await publishAdminImport(actor.toHexString(), project.item.id, intent);
+    assert.equal(admitted.item.publication, 'preparing'); assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 0);
+    storage.afterCopy = async () => { assert.equal(await getDb()!.collection('albums').countDocuments(), 0); };
+    await runAdminImportPublicationOnce(storage); const done = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete'); assert.equal(done.item.published!.trackIds.length, 1); assert.equal(storage.copies, 1);
+    const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.item.published!.albumId) }), track = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(done.item.published!.trackIds[0]) });
+    assert.equal(track!.albumId, album!._id.toHexString()); assert.deepEqual(album!.audioTrackIds, [track!._id.toHexString()]); assert.equal(track!.trackNumber, 4); assert.equal(track!.format.type, 'WAV'); assert.equal(track!.mediaRepresentation.versionId, 'canonical-version'); assert.equal(track!.credits[0].subjectId, done.item.published!.artistId);
+    const replay = await publishAdminImport(actor.toHexString(), project.item.id, intent); assert.equal(replay.item.published!.albumId, done.item.published!.albumId); assert.equal(await runAdminImportPublicationOnce(storage), false);
+});
+test('unknown copied acknowledgement is reconciled at original target with no second object or graph', async () => {
+    const storage = new Storage(), project = await prepared(storage); const intent = mutation(project.item.revision); await publishAdminImport(actor.toHexString(), project.item.id, intent); storage.failCopyAfter = true;
+    await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'complete'); assert.equal(storage.copies, 1);
+    await resumeAdminImportPublication(actor.toHexString(), project.item.id, intent.operationId, storage); assert.equal(storage.copies, 1); assert.equal(await getDb()!.collection('albums').countDocuments(), 1);
+});
+test('unconfirmed copy retains fixed identities and cannot be silently resent by retry or worker restart', async () => {
+    const storage = new Storage(), project = await prepared(storage); const intent = mutation(project.item.revision); await publishAdminImport(actor.toHexString(), project.item.id, intent); storage.failCopyBefore = true;
+    await runAdminImportPublicationOnce(storage); const first = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }); assert.equal(first!.media.publication.state, 'needsAttention'); assert.equal(first!.media.publication.tracks[0].state, 'unknown');
+    storage.failCopyBefore = false; await resumeAdminImportPublication(actor.toHexString(), project.item.id, intent.operationId, storage); assert.equal(storage.copies, 1); assert.equal(await getDb()!.collection('albums').countDocuments(), 0); const second = await getDb()!.collection('adminAlbumImports').findOne({ _id: first!._id }); assert.equal(second!.media.publication.albumId, first!.media.publication.albumId);
+});
+test('role loss after copied bytes prevents publication and keeps copy evidence for admin recovery', async () => {
+    const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    storage.afterCopy = async () => { await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); };
+    await runAdminImportPublicationOnce(storage); assert.equal(await getDb()!.collection('albums').countDocuments(), 0); const retained = await getAdminImport(other.toHexString(), project.item.id); assert.equal(retained.item.publication, 'needsAttention'); assert.equal(storage.objects.size, 2);
+});
+test('hidden publication fails closed until verified delivery gate, then parent hides independently public tracks', async () => {
+    const storage = new Storage(), project = await prepared(storage, 'hidden'); await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)), code('ADMIN_IMPORT_HIDDEN_DELIVERY_NOT_READY'));
+    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED = 'true'; process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'true';
+    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage); const done = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete');
+    const [artist, album, track] = await Promise.all(['artists', 'albums', 'audioTracks'].map(name => getDb()!.collection(name).findOne({}))); assert.equal(artist!.visibility, 'hidden'); assert.equal(album!.visibility, 'hidden'); assert.equal(track!.visibility, 'public');
+});
+
+test('confirmed cleanup permits replacement while old cleanup replay cannot delete the new object', async () => {
+    const created = await create(), storage = new Storage(), slot = created.item.manifest.files[0].slotId;
+    const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slot, mutation(1), file(), storage), cleanup = mutation(uploaded.item.revision);
+    const deleted = await cleanupAdminImportAsset(actor.toHexString(), created.item.id, slot, cleanup, storage);
+    const replacement = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slot, mutation(deleted.item.revision), file(), storage);
+    assert.equal(replacement.item.assets[0].recovery.kind, 'upload'); assert.equal(replacement.item.assets[0].recovery.startedByMe, true);
+    await cleanupAdminImportAsset(actor.toHexString(), created.item.id, slot, cleanup, storage); assert.equal(storage.objects.size, 1);
+    const persisted = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(created.item.id) }); assert.equal(persisted!.media.assetHistory.length, 1); assert.equal(persisted!.media.assetHistory[0].state, 'deleted');
+});
+test('manual artwork has private exact-version preview and explicit selection; deleted candidates cannot preview', async () => {
+    const created = await create(), storage = new Storage(), png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#fa8' } }).png().toBuffer();
+    const cover = { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' };
+    const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, 'cover', mutation(1), cover, storage); assert.equal(uploaded.item.selectedCoverSlotId, null); assert.equal(uploaded.item.upload.ready, 0);
+    assert.deepEqual((await previewAdminImportAsset(actor.toHexString(), created.item.id, 'cover', storage)).bytes, png);
+    const cleared = await selectAdminImportCover(actor.toHexString(), created.item.id, { ...mutation(uploaded.item.revision), slotId: null }); assert.equal(cleared.item.selectedCoverSlotId, null);
+    const chosen = await selectAdminImportCover(actor.toHexString(), created.item.id, { ...mutation(cleared.item.revision), slotId: 'cover' });
+    const deleted = await cleanupAdminImportAsset(actor.toHexString(), created.item.id, 'cover', mutation(chosen.item.revision), storage); assert.equal(deleted.item.selectedCoverSlotId, null);
+    await assert.rejects(previewAdminImportAsset(actor.toHexString(), created.item.id, 'cover', storage), code('ADMIN_IMPORT_ASSET_NOT_FOUND'));
+});
+test('private artwork rechecks role after bytes arrive, withholding late response after revocation', async () => {
+    const created = await create(), storage = new Storage(), png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#fa8' } }).png().toBuffer();
+    await uploadAdminImportAsset(actor.toHexString(), created.item.id, 'cover', mutation(1), { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' }, storage);
+    storage.read = async () => { await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); return png; };
+    await assert.rejects(previewAdminImportAsset(actor.toHexString(), created.item.id, 'cover', storage), code('ADMIN_IMPORT_ADMIN_REQUIRED'));
+});
+async function existingProject(storage: Storage) { const original = await prepared(storage); await publishAdminImport(actor.toHexString(), original.item.id, mutation(original.item.revision)); await runAdminImportPublicationOnce(storage); return (await getAdminImport(actor.toHexString(), original.item.id)).item.published!; }
+async function appendProject(storage: Storage, existing: { albumId: string; artistId: string; trackIds: string[] }, reuseTrack = false) {
+    const project = await prepared(storage), candidates = (await adminImportDuplicateCandidates(actor.toHexString(), project.item.id)).items;
+    const decision = (scope: 'artist' | 'album' | 'track', id: string, slotId: string | null = null) => ({ scope, slotId, action: 'reuse', candidateId: id, candidateRevision: candidates.find(item => item.kind === scope && item.id === id)!.revision });
+    return decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), decisions: [decision('artist', existing.artistId), decision('album', existing.albumId), reuseTrack ? decision('track', existing.trackIds[0], project.item.manifest.files[0].slotId) : { scope: 'track', slotId: project.item.manifest.files[0].slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }] });
+}
+test('append adds only new members, preserves existing metadata and protected old tracks, and same-album reuse is no replacement', async () => {
+    const storage = new Storage(), existing = await existingProject(storage);
+    await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { description: 'Preserved edition', coverArtUrl: '/existing-cover' } });
+    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage);
+    const result = (await getAdminImport(actor.toHexString(), project.item.id)).item; assert.equal(result.publication, 'complete'); assert.equal(result.published!.albumId, existing.albumId);
+    const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(existing.albumId) }); assert.equal(album!.description, 'Preserved edition'); assert.equal(album!.coverArtUrl, '/existing-cover'); assert.equal(album!.audioTrackIds.length, 2); assert.ok(album!.audioTrackIds.includes(existing.trackIds[0])); assert.equal(await getDb()!.collection('albums').countDocuments(), 1);
+    const reused = await appendProject(storage, existing, true), priorCopies = storage.copies;
+    await publishAdminImport(actor.toHexString(), reused.item.id, mutation(reused.item.revision)); await runAdminImportPublicationOnce(storage);
+    assert.equal((await getAdminImport(actor.toHexString(), reused.item.id)).item.publication, 'complete'); assert.equal(storage.copies, priorCopies); assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 2);
+});
+test('append revalidates reviewed Album after storage copy and refuses concurrent catalog edits', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    storage.afterCopy = async () => { await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { title: 'Changed by another admin' } }); };
+    await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'needsAttention'); assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 1);
+});
+test('verified byte candidates bind SHA to current object version and identify only matching manifest slots', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), project = await prepared(storage);
+    await getDb()!.collection('audioTracks').updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { title: 'Different recording label' } });
+    const candidate = (await adminImportDuplicateCandidates(actor.toHexString(), project.item.id)).items.find(item => item.id === existing.trackIds[0]); assert.equal(candidate!.match, 'sha256'); assert.deepEqual(candidate!.matchedSlotIds, [project.item.manifest.files[0].slotId]);
+    await getDb()!.collection('audioTracks').updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { 'mediaRepresentation.versionId': 'replacement' } });
+    assert.equal((await adminImportDuplicateCandidates(actor.toHexString(), project.item.id)).items.some(item => item.id === existing.trackIds[0]), false);
+});
+test('append rejects hidden draft into public target without changing draft visibility', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing);
+    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED = 'true'; process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'true';
+    const draft = structuredClone(project.item.draft); draft.album.visibility = 'hidden'; const edited = await editAdminImport(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), draft });
+    await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, mutation(edited.item.revision)), code('ADMIN_IMPORT_DUPLICATE_STALE')); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.draft.album.visibility, 'hidden');
+});
+test('legacy ready defaults tolerate reference touches, and hidden Artist Album can be appended privately', async () => {
+    const storage = new Storage(), existing = await existingProject(storage);
+    await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $unset: { lifecycleStatus: '', visibility: '' } });
+    await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $unset: { lifecycleStatus: '', visibility: '' } });
+    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $set: { lifecycleStatus: 'ready', visibility: 'public' }, $inc: { referenceRevision: 1 } });
+    await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'complete');
+    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED = 'true'; process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'true';
+    await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $set: { visibility: 'hidden' } }); await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { visibility: 'hidden' } });
+    const hidden = await appendProject(storage, existing); const draft = structuredClone(hidden.item.draft); draft.album.visibility = 'hidden';
+    const edited = await editAdminImport(actor.toHexString(), hidden.item.id, { ...mutation(hidden.item.revision), draft });
+    await publishAdminImport(actor.toHexString(), hidden.item.id, mutation(edited.item.revision)); await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), hidden.item.id)).item.publication, 'complete');
+    assert.equal((await getDb()!.collection('artists').findOne({ _id: new ObjectId(existing.artistId) }))!.visibility, 'hidden');
+});
+test('embedded cover becomes a private unselected candidate, while its tags never overwrite the saved draft', async () => {
+    const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#fa8' } }).png().toBuffer();
+    const apic = Buffer.concat([Buffer.from([3]), Buffer.from('image/png\0'), Buffer.from([3, 0]), png]), frame = Buffer.alloc(10); frame.write('APIC'); frame.writeUInt32BE(apic.length, 4);
+    const tags = Buffer.concat([frame, apic]), id3 = Buffer.from([73, 68, 51, 3, 0, 0, 0, 0, 0, 0]); for (let i = 0; i < 4; i++) id3[9 - i] = (tags.length >>> (i * 7)) & 127;
+    const chunk = Buffer.alloc(8); chunk.write('id3 '); chunk.writeUInt32LE(id3.length + tags.length, 4);
+    const bytes = Buffer.concat([wav(), chunk, id3, tags, ...((id3.length + tags.length) % 2 ? [Buffer.alloc(1)] : [])]); bytes.writeUInt32LE(bytes.length - 8, 4);
+    const audio = { ...file(), buffer: bytes, size: bytes.length }, slotId = randomUUID(), storage = new Storage();
+    const created = await createAdminImport(actor.toHexString(), { operationId: randomUUID(), manifest: { rootLabel: 'Embedded source', files: [{ slotId, filename: audio.originalname, relativePath: audio.originalname, byteLength: bytes.length }] } });
+    const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, mutation(1), audio, storage);
+    assert.equal(uploaded.item.assets.length, 2); assert.equal(uploaded.item.assets[1].slotId, `embedded-${slotId}`); assert.equal(uploaded.item.selectedCoverSlotId, null); assert.equal(uploaded.item.upload.ready, 1); assert.equal(uploaded.item.draft.album.title, ''); assert.equal(storage.puts, 2);
+    const chosen = await selectAdminImportCover(actor.toHexString(), created.item.id, { ...mutation(uploaded.item.revision), slotId: `embedded-${slotId}` }); assert.equal(chosen.item.selectedCoverSlotId, `embedded-${slotId}`);
+});
+test('shutdown after one bounded copy checkpoints it and admits no next cover copy or final publication', async () => {
+    const storage = new Storage(), project = await prepared(storage), png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#f80' } }).png().toBuffer();
+    const uploaded = await uploadAdminImportAsset(actor.toHexString(), project.item.id, 'cover', mutation(project.item.revision), { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' }, storage);
+    const selected = await selectAdminImportCover(actor.toHexString(), project.item.id, { ...mutation(uploaded.item.revision), slotId: 'cover' }); const intent = mutation(selected.item.revision); await publishAdminImport(actor.toHexString(), project.item.id, intent); const controller = new AbortController(); storage.afterCopy = async () => { controller.abort(); };
+    await runAdminImportPublicationOnce(storage, undefined, controller.signal); assert.equal(storage.copies, 1); assert.equal(await getDb()!.collection('albums').countDocuments(), 0);
+    const stopped = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(stopped.item.publication, 'needsAttention');
+    storage.afterCopy = undefined; await resumeAdminImportPublication(actor.toHexString(), project.item.id, intent.operationId, storage); const resumed = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(resumed.item.publication, 'complete'); assert.equal(storage.copies, 2); assert.equal(await getDb()!.collection('imageAssets').countDocuments(), 1);
+});
+
+test('publication grant expiry after a copy retains its checkpoint and stops later copies and final catalog commit', async () => {
+    for (const withCover of [false, true]) {
+        const storage = new Storage(); let project = await prepared(storage);
+        if (withCover) {
+            const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#f80' } }).png().toBuffer();
+            const uploaded = await uploadAdminImportAsset(actor.toHexString(), project.item.id, 'cover', mutation(project.item.revision),
+                { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' }, storage);
+            project = await selectAdminImportCover(actor.toHexString(), project.item.id, { ...mutation(uploaded.item.revision), slotId: 'cover' });
+        }
+        const intent = mutation(project.item.revision); await publishAdminImport(actor.toHexString(), project.item.id, intent);
+        storage.afterCopy = async () => { await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) },
+            { $set: { 'media.publication.grantExpiresAt': new Date(0) } }); };
+        await runAdminImportPublicationOnce(storage, project.item.id);
+        const retained = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) });
+        assert.equal(storage.copies, 1); assert.equal(retained!.media.publication.state, 'needsAttention');
+        assert.equal(retained!.media.publication.tracks[0].state, 'ready'); assert.equal(retained!.media.publication.tracks[0].versionId, 'canonical-version');
+        if (withCover) assert.equal(retained!.media.publication.cover.state, 'pending');
+        assert.equal(await getDb()!.collection('albums').countDocuments(), 0); assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 0);
+        await resumeAdminImportPublication(actor.toHexString(), project.item.id, intent.operationId, storage);
+        assert.equal(storage.copies, 1); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'needsAttention');
+    }
+});
+test('publication rechecks grant between destination HEAD and new copy dispatch', async () => {
+    const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    const originalHead = storage.head.bind(storage);
+    storage.head = async target => {
+        const result = await originalHead(target);
+        if (target.bucket === 'synthetic-catalog') await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) },
+            { $set: { 'media.publication.grantExpiresAt': new Date(0) } });
+        return result;
+    };
+    await runAdminImportPublicationOnce(storage, project.item.id);
+    const retained = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) });
+    assert.equal(storage.copies, 0); assert.equal(retained!.media.publication.tracks[0].state, 'pending');
+    assert.equal(retained!.media.publication.state, 'needsAttention'); assert.equal(await getDb()!.collection('albums').countDocuments(), 0);
+});
+
+const cancelPublication = (item: { revision: number; publicationRecovery: { operationId: string } | null }) => ({ ...mutation(item.revision), publicationOperationId: item.publicationRecovery!.operationId });
+
+test('expired publication is explicitly cancelled, cleaned and reapproved without losing the previous identities', async () => {
+    const storage = new Storage(), project = await prepared(storage), approval = mutation(project.item.revision);
+    await publishAdminImport(actor.toHexString(), project.item.id, approval);
+    storage.afterCopy = async () => { await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.grantExpiresAt': new Date(0) } }); };
+    await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined;
+    const stalled = await getAdminImport(other.toHexString(), project.item.id), cancellation = cancelPublication(stalled.item);
+    const cancelled = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancellation, storage);
+    assert.equal(cancelled.item.publication, 'cancelled'); assert.equal(cancelled.receipt!.kind, 'cancel-publication');
+    assert.equal(cancelled.item.publicationRecovery!.cleanupPending, false); assert.equal(storage.objects.size, 1);
+    assert.equal((await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }))!.media.publication.tracks[0].cleanupComplete, true);
+    const draft = structuredClone(cancelled.item.draft); draft.album.title = 'New reviewed approval';
+    const edited = await editAdminImport(other.toHexString(), project.item.id, { ...mutation(cancelled.item.revision), draft });
+    const next = await publishAdminImport(other.toHexString(), project.item.id, mutation(edited.item.revision));
+    assert.notEqual(next.item.publicationRecovery!.operationId, approval.operationId);
+    await runAdminImportPublicationOnce(storage, project.item.id);
+    const done = await getAdminImport(other.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete');
+    const stored = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) });
+    assert.equal(stored!.media.publicationHistory.length, 1); assert.equal(stored!.media.publicationHistory[0].operationId, approval.operationId);
+    assert.equal(stored!.media.publicationHistory[0].cleanupPending, false);
+    const deletes = storage.deletes;
+    const replay = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancellation, storage);
+    assert.equal(replay.receipt!.operationId, cancellation.operationId); assert.equal(replay.item.publication, 'complete');
+    await resumeAdminImportPublication(other.toHexString(), project.item.id, approval.operationId, storage);
+    assert.equal(storage.deletes, deletes); assert.equal(storage.copies, 2); assert.equal(storage.objects.size, 2);
+});
+
+test('concurrent reused Artist correction returns to manual review and a newly reviewed candidate may publish', async () => {
+    const storage = new Storage(), project = await prepared(storage), existingArtist = new ObjectId();
+    await getDb()!.collection('artists').insertOne({ _id: existingArtist, name: 'Synthetic Artist', bio: '', birthDate: {}, albumIds: [], lifecycleStatus: 'ready' });
+    const candidates = await adminImportDuplicateCandidates(actor.toHexString(), project.item.id), candidate = candidates.items.find(item => item.kind === 'artist')!;
+    const decisions = project.item.decisions.map(decision => decision.scope === 'artist' ? { ...decision, action: 'reuse', candidateId: candidate.id, candidateRevision: candidate.revision } : decision);
+    const reviewed = await decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), decisions });
+    await publishAdminImport(actor.toHexString(), project.item.id, mutation(reviewed.item.revision));
+    storage.afterCopy = async () => { await getDb()!.collection('artists').updateOne({ _id: existingArtist }, { $set: { name: 'Corrected Artist' } }); };
+    await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined;
+    const stalled = await getAdminImport(actor.toHexString(), project.item.id);
+    assert.equal(stalled.item.publication, 'needsAttention'); assert.equal(await getDb()!.collection('albums').countDocuments(), 0);
+    const cancelled = await cancelAdminImportPublication(actor.toHexString(), project.item.id, cancelPublication(stalled.item), storage);
+    const draft = structuredClone(cancelled.item.draft); draft.album.artistName = 'Corrected Artist';
+    const edited = await editAdminImport(actor.toHexString(), project.item.id, { ...mutation(cancelled.item.revision), draft });
+    const latest = (await adminImportDuplicateCandidates(actor.toHexString(), project.item.id)).items.find(item => item.kind === 'artist')!;
+    const corrected = await decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(edited.item.revision), decisions: decisions.map(decision => decision.scope === 'artist' ? { ...decision, candidateRevision: latest.revision } : decision) });
+    await publishAdminImport(actor.toHexString(), project.item.id, mutation(corrected.item.revision)); await runAdminImportPublicationOnce(storage, project.item.id);
+    assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'complete');
+    assert.equal(await getDb()!.collection('artists').countDocuments(), 1); assert.equal(storage.copies, 2);
+});
+
+test('current administrator can cancel and clean after the initiating admin loses permission and flags roll back', async () => {
+    const storage = new Storage(), project = await prepared(storage);
+    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    storage.afterCopy = async () => { await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); };
+    await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined;
+    process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'false'; process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'false';
+    const stalled = await getAdminImport(other.toHexString(), project.item.id), cancellation = cancelPublication(stalled.item);
+    await assert.rejects(cancelAdminImportPublication(actor.toHexString(), project.item.id, cancellation, storage), code('ADMIN_IMPORT_ADMIN_REQUIRED'));
+    const cancelled = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancellation, storage);
+    assert.equal(cancelled.item.publicationRecovery!.cleanupPending, false); assert.equal(storage.objects.size, 1);
+    const cleaned = await cleanupAdminImportAsset(other.toHexString(), project.item.id, cancelled.item.manifest.files[0].slotId, mutation(cancelled.item.revision), storage);
+    assert.equal(cleaned.item.assets[0].state, 'deleted'); assert.equal(storage.objects.size, 0);
+});
+
+test('unknown sent copy retains cancelled source pins until the exact late object can be cleaned by any current admin', async () => {
+    const storage = new Storage(), project = await prepared(storage), approval = mutation(project.item.revision);
+    await publishAdminImport(actor.toHexString(), project.item.id, approval); storage.failCopyBefore = true;
+    await runAdminImportPublicationOnce(storage, project.item.id);
+    const stalled = await getAdminImport(actor.toHexString(), project.item.id), cancellation = cancelPublication(stalled.item);
+    let cancelled = await cancelAdminImportPublication(actor.toHexString(), project.item.id, cancellation, storage);
+    assert.equal(cancelled.item.publicationRecovery!.cleanupPending, true); assert.equal(storage.copies, 1);
+    const record = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }), publication = record!.media.publication;
+    assert.deepEqual(await loadAdminCanonicalReservations('synthetic-catalog'), new Set([publication.tracks[0].key]));
+    const draft = structuredClone(cancelled.item.draft); draft.album.title = 'Reviewed while cleanup waits';
+    cancelled = await editAdminImport(actor.toHexString(), project.item.id, { ...mutation(cancelled.item.revision), draft });
+    cancelled = await decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(cancelled.item.revision), decisions: cancelled.item.decisions });
+    for (const work of [
+        () => publishAdminImport(actor.toHexString(), project.item.id, mutation(cancelled.item.revision)),
+        () => analyzeAdminImport(actor.toHexString(), project.item.id, mutation(cancelled.item.revision), { configured: () => true, analyze: async () => [] }),
+        () => selectAdminImportCover(actor.toHexString(), project.item.id, { ...mutation(cancelled.item.revision), slotId: null }),
+        () => cleanupAdminImportAsset(actor.toHexString(), project.item.id, cancelled.item.manifest.files[0].slotId, mutation(cancelled.item.revision), storage)
+    ]) await assert.rejects(work(), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
+    const source = record!.media.assets[0], destination = { ...importAssetTarget(project.item.id, source), bucket: publication.bucket, key: publication.tracks[0].key, operationId: approval.operationId };
+    storage.objects.set(destination.bucket + '/' + destination.key, { target: destination, identity: { etag: '"late-copy"', versionId: 'late-version' } });
+    await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } });
+    const recovered = await resumeAdminImportPublication(other.toHexString(), project.item.id, approval.operationId, storage);
+    assert.equal(recovered.item.publication, 'cancelled'); assert.equal(recovered.item.publicationRecovery!.cleanupPending, false);
+    assert.equal(storage.copies, 1); assert.equal(storage.objects.size, 1); assert.deepEqual(await loadAdminCanonicalReservations('synthetic-catalog'), new Set());
+    assert.equal(await getDb()!.collection('albums').countDocuments(), 0);
+});
+
+test('cancelled cleanup reconciles failed or lost DELETE responses without copying or deleting another object', async () => {
+    const storage = new Storage(), project = await prepared(storage);
+    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    storage.afterCopy = async () => { await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.grantExpiresAt': new Date(0) } }); };
+    await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined; storage.failDelete = true;
+    const stalled = await getAdminImport(actor.toHexString(), project.item.id), cancellation = cancelPublication(stalled.item);
+    const failed = await cancelAdminImportPublication(actor.toHexString(), project.item.id, cancellation, storage);
+    assert.equal(failed.item.publicationRecovery!.cleanupPending, true); assert.equal(storage.objects.size, 2);
+    storage.failDelete = false; storage.failDeleteAfter = true;
+    const unknown = await cancelAdminImportPublication(actor.toHexString(), project.item.id, cancellation, storage);
+    assert.equal(unknown.item.publicationRecovery!.cleanupPending, true); assert.equal(storage.objects.size, 1);
+    const recovered = await resumeAdminImportPublication(other.toHexString(), project.item.id, stalled.item.publicationRecovery!.operationId, storage);
+    assert.equal(recovered.item.publicationRecovery!.cleanupPending, false); assert.equal(storage.deletes, 2); assert.equal(storage.copies, 1);
+    assert.equal((await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }))!.recoveryReceipts.length, 1);
+});
+
+test('publication cancellation rejects stale revisions, another approval, UUID collisions, active leases and committed graphs', async () => {
+    const storage = new Storage(), project = await prepared(storage);
+    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    let current = await getAdminImport(actor.toHexString(), project.item.id), cancellation = cancelPublication(current.item);
+    await assert.rejects(cancelAdminImportPublication(actor.toHexString(), project.item.id, { ...cancellation, expectedRevision: current.item.revision - 1 }, storage), code('ADMIN_IMPORT_REVISION_CONFLICT'));
+    await assert.rejects(cancelAdminImportPublication(actor.toHexString(), project.item.id, { ...cancellation, publicationOperationId: randomUUID() }, storage), code('ADMIN_IMPORT_PUBLICATION_CONFLICT'));
+    await assert.rejects(cancelAdminImportPublication(actor.toHexString(), project.item.id, { ...cancellation, operationId: project.item.receipts[0].operationId }, storage), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.leaseUntil': new Date(Date.now() + 60_000) } });
+    await assert.rejects(cancelAdminImportPublication(actor.toHexString(), project.item.id, cancellation, storage), code('ADMIN_IMPORT_PUBLICATION_ACTIVE'));
+    await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.leaseUntil': null } });
+    await runAdminImportPublicationOnce(storage, project.item.id);
+    current = await getAdminImport(actor.toHexString(), project.item.id); cancellation = cancelPublication(current.item);
+    await assert.rejects(cancelAdminImportPublication(actor.toHexString(), project.item.id, cancellation, storage), code('ADMIN_IMPORT_PUBLICATION_COMPLETE'));
+    assert.equal(storage.objects.size, 2); assert.equal(await getDb()!.collection('albums').countDocuments(), 1);
+});
+
+test('all 200 staged objects from supported 100 tagged files can be cleaned at the ordinary receipt limit', async () => {
+    const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#fa8' } }).png().toBuffer();
+    const apic = Buffer.concat([Buffer.from([3]), Buffer.from('image/png\0'), Buffer.from([3, 0]), png]), frame = Buffer.alloc(10); frame.write('APIC'); frame.writeUInt32BE(apic.length, 4);
+    const tags = Buffer.concat([frame, apic]), id3 = Buffer.from([73, 68, 51, 3, 0, 0, 0, 0, 0, 0]); for (let i = 0; i < 4; i++) id3[9 - i] = (tags.length >>> (i * 7)) & 127;
+    const chunk = Buffer.alloc(8); chunk.write('id3 '); chunk.writeUInt32LE(id3.length + tags.length, 4);
+    const bytes = Buffer.concat([wav(), chunk, id3, tags, ...((id3.length + tags.length) % 2 ? [Buffer.alloc(1)] : [])]); bytes.writeUInt32LE(bytes.length - 8, 4);
+    const storage = new Storage(), manifest = { rootLabel: '100 tagged files', files: Array.from({ length: 100 }, (_, i) => ({ slotId: randomUUID(), filename: `Track ${i}.wav`, relativePath: `Track ${i}.wav`, byteLength: bytes.length })) };
+    let project = await createAdminImport(actor.toHexString(), { operationId: randomUUID(), manifest });
+    for (const source of manifest.files) project = await uploadAdminImportAsset(actor.toHexString(), project.item.id, source.slotId, mutation(project.item.revision), { ...file(), buffer: bytes, size: bytes.length, originalname: source.filename }, storage);
+    assert.equal(project.item.assets.length, 200); assert.equal(project.item.receipts.length, 201); assert.equal(storage.objects.size, 200);
+    for (let i = 0; i < 55; i++) project = await editAdminImport(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), draft: project.item.draft });
+    const firstCleanup = mutation(project.item.revision), firstSlot = project.item.assets[0].slotId;
+    for (const [index, asset] of project.item.assets.entries()) project = await cleanupAdminImportAsset(actor.toHexString(), project.item.id, asset.slotId, index === 0 ? firstCleanup : mutation(project.item.revision), storage);
+    assert.equal(storage.objects.size, 0); assert.equal(storage.deletes, 200); assert.equal(project.item.assets.every(asset => asset.state === 'deleted'), true);
+    assert.equal(project.item.receipts.length, 256);
+    const stored = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) });
+    assert.equal(stored!.receipts.length, 256); assert.equal(stored!.recoveryReceipts.length, 200);
+    const replay = await cleanupAdminImportAsset(other.toHexString(), project.item.id, firstSlot, firstCleanup, storage);
+    assert.equal(replay.receipt!.operationId, firstCleanup.operationId); assert.equal(storage.deletes, 200);
+    await assert.rejects(cleanupAdminImportAsset(other.toHexString(), project.item.id, firstSlot, mutation(replay.item.revision), storage), code('ADMIN_IMPORT_ASSET_CLEANUP_EXISTS'));
+    await assert.rejects(editAdminImport(actor.toHexString(), project.item.id, { ...firstCleanup, draft: project.item.draft }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+});
+
+test('staged cleanup takeover reuses the exact original UUID and revision after the first administrator loses role', async () => {
+    const storage = new Storage(), project = await prepared(storage), slotId = project.item.manifest.files[0].slotId, intent = mutation(project.item.revision);
+    storage.failDelete = true;
+    const failed = await cleanupAdminImportAsset(actor.toHexString(), project.item.id, slotId, intent, storage);
+    assert.equal(failed.item.assets[0].state, 'cleanupFailed');
+    await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); storage.failDelete = false;
+    await assert.rejects(cleanupAdminImportAsset(other.toHexString(), project.item.id, slotId, { ...intent, expectedRevision: intent.expectedRevision + 1 }, storage), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    const recovered = await cleanupAdminImportAsset(other.toHexString(), project.item.id, slotId, intent, storage);
+    assert.equal(recovered.item.assets[0].state, 'deleted'); assert.equal(recovered.receipt!.operationId, intent.operationId); assert.equal(storage.objects.size, 0);
+    assert.equal((await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }))!.recoveryReceipts.length, 1);
+});
+
+test('publication cancellation and staged cleanup remain admissible when ordinary writes have exhausted receipts', async () => {
+    const storage = new Storage(); let project = await prepared(storage);
+    while (project.item.receipts.length < 255) project = await editAdminImport(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), draft: project.item.draft });
+    const approved = await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    assert.equal(approved.item.receipts.length, 256);
+    const cancelled = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancelPublication(approved.item), storage);
+    assert.equal(cancelled.item.publicationRecovery!.cleanupPending, false); assert.equal(storage.copies, 0);
+    const cleaned = await cleanupAdminImportAsset(other.toHexString(), project.item.id, cancelled.item.manifest.files[0].slotId, mutation(cancelled.item.revision), storage);
+    assert.equal(cleaned.item.assets[0].state, 'deleted'); assert.equal(storage.objects.size, 0);
+    const stored = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) });
+    assert.equal(stored!.receipts.length, 256); assert.equal(stored!.recoveryReceipts.length, 2);
+});
+
+test('an expired-lease worker cannot checkpoint or publish its late result after cancellation and a new approval', async () => {
+    const storage = new Storage(), project = await prepared(storage), approval = mutation(project.item.revision);
+    await publishAdminImport(actor.toHexString(), project.item.id, approval);
+    let copied!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { copied = resolve; }), waiting = new Promise<void>(resolve => { release = resolve; });
+    storage.afterCopy = async () => { copied(); await waiting; };
+    const staleWorker = runAdminImportPublicationOnce(storage, project.item.id);
+    await entered;
+    try {
+        await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.leaseUntil': new Date(0) } });
+        const current = await getAdminImport(other.toHexString(), project.item.id);
+        const cancelled = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancelPublication(current.item), storage);
+        assert.equal(cancelled.item.publicationRecovery!.cleanupPending, false); assert.equal(storage.objects.size, 1);
+        const next = await publishAdminImport(other.toHexString(), project.item.id, mutation(cancelled.item.revision));
+        storage.afterCopy = undefined; release(); await staleWorker;
+        const retained = await getAdminImport(other.toHexString(), project.item.id);
+        assert.equal(retained.item.publication, 'preparing'); assert.equal(retained.item.publicationRecovery!.operationId, next.item.publicationRecovery!.operationId);
+        assert.equal(await getDb()!.collection('albums').countDocuments(), 0);
+        await runAdminImportPublicationOnce(storage, project.item.id);
+        assert.equal((await getAdminImport(other.toHexString(), project.item.id)).item.publication, 'complete'); assert.equal(storage.objects.size, 2);
+    } finally { storage.afterCopy = undefined; release(); await staleWorker; }
+});
+
+test('cancelled cleanup retains a replaced canonical version without deleting an unapproved identity', async () => {
+    const storage = new Storage(), project = await prepared(storage);
+    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    storage.afterCopy = async () => { await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.grantExpiresAt': new Date(0) } }); };
+    await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined;
+    const stored = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }), publication = stored!.media.publication;
+    const key = publication.bucket + '/' + publication.tracks[0].key;
+    storage.objects.get(key)!.identity = { etag: '"unapproved-change"', versionId: 'unapproved-version' };
+    const current = await getAdminImport(actor.toHexString(), project.item.id);
+    const cancelled = await cancelAdminImportPublication(actor.toHexString(), project.item.id, cancelPublication(current.item), storage);
+    assert.equal(cancelled.item.publicationRecovery!.cleanupPending, true); assert.equal(storage.deletes, 0); assert.equal(storage.objects.size, 2);
+    assert.deepEqual(await loadAdminCanonicalReservations('synthetic-catalog'), new Set([publication.tracks[0].key]));
+});
+
+test('sixteen approvals preserve bounded history and reject the seventeenth before new identity admission while recovery remains available', async () => {
+    for (const finalState of ['cancelled', 'complete']) {
+        const storage = new Storage(); let project = await prepared(storage), lastApproval = mutation(project.item.revision);
+        for (let index = 0; index < 16; index++) {
+            lastApproval = mutation(project.item.revision);
+            project = await publishAdminImport(actor.toHexString(), project.item.id, lastApproval);
+            assert.equal(project.item.capabilities.publish, index < 15);
+            if (index < 15 || finalState === 'cancelled') project = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancelPublication(project.item), storage);
+        }
+        if (finalState === 'complete') { await runAdminImportPublicationOnce(storage, project.item.id); project = await getAdminImport(actor.toHexString(), project.item.id); }
+        assert.equal(project.item.publication, finalState); assert.equal(project.item.capabilities.publish, false);
+        const before = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) });
+        assert.equal(before!.media.publicationHistory.length, 15);
+        if (finalState === 'cancelled') {
+            await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)), code('ADMIN_IMPORT_PUBLICATION_APPROVAL_LIMIT'));
+            const after = await getDb()!.collection('adminAlbumImports').findOne({ _id: before!._id });
+            assert.deepEqual(after!.media, before!.media); assert.equal(after!.receipts.length, before!.receipts.length); assert.equal(after!.revision, before!.revision);
+        }
+        const copies = storage.copies;
+        const replay = await publishAdminImport(actor.toHexString(), project.item.id, lastApproval);
+        assert.equal(replay.receipt!.operationId, lastApproval.operationId);
+        await resumeAdminImportPublication(other.toHexString(), project.item.id, lastApproval.operationId, storage);
+        assert.equal(storage.copies, copies);
+        const current = await getAdminImport(other.toHexString(), project.item.id);
+        const cleaned = await cleanupAdminImportAsset(other.toHexString(), project.item.id, current.item.manifest.files[0].slotId, mutation(current.item.revision), storage);
+        assert.equal(cleaned.item.assets[0].state, 'deleted');
+        assert.equal(storage.objects.size, finalState === 'complete' ? 1 : 0);
+    }
+});

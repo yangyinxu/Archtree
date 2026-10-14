@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { EventEmitter, getEventListeners } from 'node:events';
+import { PassThrough, Readable, Writable } from 'node:stream';
+import type { Request, Response } from 'express';
 
 import {
     attachmentContentDisposition,
+    createMediaAbortContext,
+    createMediaDeliveryMetricsRegistry,
+    pipeMediaStream,
     parseSingleByteRange,
     shouldHonorRange
 } from '../src/services/mediaDeliveryService';
@@ -47,4 +53,155 @@ test('attachmentContentDisposition supplies a stable fallback filename', () => {
         attachmentContentDisposition(undefined, 'track-id'),
         'attachment; filename="track-id.mp3"; filename*=UTF-8\'\'track-id.mp3'
     );
+});
+
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const streamFixture = (backpressure = false) => {
+    const req = new EventEmitter() as Request;
+    const chunks: Buffer[] = [];
+    const headers = new Map<string, unknown>();
+    const metrics = createMediaDeliveryMetricsRegistry();
+    const res = new Writable({
+        highWaterMark: 1,
+        write(chunk, _encoding, callback) {
+            chunks.push(Buffer.from(chunk));
+            if (!backpressure) callback();
+        }
+    }) as unknown as Response;
+    res.locals = { mediaDelivery: { resourceClass: 'playback', metrics } };
+    res.status = function (status) { this.statusCode = status; return this; };
+    res.setHeader = function (key, value) { headers.set(key, value); return this; };
+    const source = new PassThrough({ highWaterMark: 1 });
+    const context = createMediaAbortContext(req, res);
+    return { req, res, source, context, chunks, headers, metrics };
+};
+
+for (const backpressure of [false, true]) {
+    test(`authorization revokes ${backpressure ? 'backpressured' : 'idle'} media without another source chunk`, async () => {
+        const f = streamFixture(backpressure);
+        let calls = 0;
+        let headersPrepared = false;
+        const started = Date.now();
+        const pending = pipeMediaStream(f.req, f.res, f.source, f.context, {
+            authorize: async () => ++calls === 1,
+            onAuthorized: () => { headersPrepared = true; }
+        });
+        if (backpressure) f.source.write('first');
+        await pending;
+        assert.equal(headersPrepared, true);
+        assert.equal(calls, 2);
+        assert.ok(Date.now() - started < 1_600);
+        assert.equal(f.source.destroyed, true);
+        assert.equal(f.res.destroyed, true);
+        assert.equal(f.context.aborted, true);
+        assert.equal(f.req.listenerCount('aborted'), 0);
+        assert.equal(getEventListeners(f.context.signal, 'abort').length, 0);
+        assert.equal(f.metrics.snapshot().abortedStreams, 1);
+        await delay(550);
+        assert.equal(calls, 2, 'revoked streams leave no running poll');
+    });
+}
+
+test('post-GET rejection suppresses headers and every byte, even from an already buffered source', async () => {
+    const f = streamFixture();
+    f.source.end('private');
+    let prepared = false;
+    await pipeMediaStream(f.req, f.res, f.source, f.context, {
+        authorize: async () => false,
+        onAuthorized: () => { prepared = true; }
+    });
+    assert.equal(prepared, false);
+    assert.equal(f.res.statusCode, 404);
+    assert.equal(f.headers.get('Cache-Control'), 'private, no-store');
+    assert.equal(f.chunks.length, 0);
+    assert.equal(f.source.destroyed, true);
+});
+
+test('failed and stalled authorization fail closed before headers', async () => {
+    for (const authorize of [
+        async () => { throw new Error('database unavailable'); },
+        () => new Promise<boolean>(() => undefined)
+    ]) {
+        const f = streamFixture();
+        const started = Date.now();
+        await pipeMediaStream(f.req, f.res, f.source, f.context, { authorize });
+        assert.equal(f.res.statusCode, 404);
+        assert.equal(f.source.destroyed, true);
+        assert.equal(f.chunks.length, 0);
+        assert.ok(Date.now() - started < 1_100);
+        assert.equal(getEventListeners(f.context.signal, 'abort').length, 0);
+    }
+});
+
+test('a stalled periodic authorization revokes the live stream within the poll and deadline bound', async () => {
+    const f = streamFixture();
+    let calls = 0;
+    const started = Date.now();
+    await pipeMediaStream(f.req, f.res, f.source, f.context, {
+        authorize: () => ++calls === 1 ? Promise.resolve(true) : new Promise<boolean>(() => undefined)
+    });
+    assert.equal(calls, 2);
+    assert.equal(f.source.destroyed, true);
+    assert.equal(f.context.aborted, true);
+    assert.ok(Date.now() - started < 1_600);
+    assert.equal(getEventListeners(f.context.signal, 'abort').length, 0);
+});
+
+test('successful completion cancels polling and cannot be altered by a late authorization response', async () => {
+    const f = streamFixture();
+    let calls = 0;
+    let settle!: (allowed: boolean) => void;
+    const pending = pipeMediaStream(f.req, f.res, f.source, f.context, {
+        authorize: () => ++calls === 1 ? Promise.resolve(true) : new Promise(resolve => { settle = resolve; })
+    });
+    await delay(550);
+    assert.equal(calls, 2);
+    f.source.end('public');
+    await pending;
+    settle(false);
+    await delay(550);
+    assert.equal(calls, 2);
+    assert.equal(f.context.aborted, false);
+    assert.equal(f.metrics.snapshot().completedStreams, 1);
+    assert.equal(f.metrics.snapshot().abortedStreams, 0);
+    assert.equal(f.req.listenerCount('aborted'), 0);
+    assert.equal(getEventListeners(f.context.signal, 'abort').length, 0);
+    assert.equal(Buffer.concat(f.chunks).toString(), 'public');
+});
+
+test('client disconnect interrupts pending admission and removes its deadline and event hooks', async () => {
+    const f = streamFixture();
+    const pending = pipeMediaStream(f.req, f.res, f.source, f.context, {
+        authorize: () => new Promise<boolean>(() => undefined)
+    });
+    f.res.destroy();
+    await pending;
+    assert.equal(f.source.destroyed, true);
+    assert.equal(f.context.aborted, true);
+    assert.equal(f.req.listenerCount('aborted'), 0);
+    assert.equal(getEventListeners(f.context.signal, 'abort').length, 0);
+});
+
+test('source failures during authorization and header preparation errors release the paused source', async () => {
+    const failedSource = streamFixture();
+    let resolveAuthorization!: (value: boolean) => void;
+    const pending = pipeMediaStream(failedSource.req, failedSource.res, failedSource.source, failedSource.context, {
+        authorize: () => new Promise(resolve => { resolveAuthorization = resolve; })
+    });
+    await delay(0);
+    failedSource.source.destroy(new Error('source failed before admission'));
+    await delay(0);
+    resolveAuthorization(true);
+    await assert.rejects(pending, /source failed before admission/);
+    assert.equal(failedSource.source.destroyed, true);
+    assert.equal(failedSource.req.listenerCount('aborted'), 0);
+
+    const failedHeaders = streamFixture();
+    await assert.rejects(pipeMediaStream(failedHeaders.req, failedHeaders.res, failedHeaders.source, failedHeaders.context, {
+        authorize: async () => true,
+        onAuthorized: () => { throw new Error('headers failed'); }
+    }), /headers failed/);
+    assert.equal(failedHeaders.source.destroyed, true);
+    assert.equal(failedHeaders.req.listenerCount('aborted'), 0);
 });

@@ -15,7 +15,16 @@ export const syntheticServerTestEnvironment = Object.freeze({
   AWS_REGION: 'us-east-1',
   S3_BUCKET_NAME: 'archtree-lorem-ipsum-test',
   AWS_ENDPOINT_URL: 'http://127.0.0.1:9',
-  AWS_EC2_METADATA_DISABLED: 'true'
+  AWS_EC2_METADATA_DISABLED: 'true',
+  OPENAI_API_KEY: '',
+  OPENAI_ORG_ID: '',
+  OPENAI_PROJECT_ID: '',
+  FINITUDE_ADMIN_IMPORTS_ENABLED: 'false',
+  FINITUDE_ADMIN_CATALOG_ENABLED: 'false',
+  FINITUDE_ADMIN_VISIBILITY_ENABLED: 'false',
+  FINITUDE_HIDDEN_DELIVERY_ENFORCED: 'false',
+  FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY: 'false',
+  ADMIN_IMPORT_S3_BUCKET_NAME: 'archtree-lorem-ipsum-private-import-test'
 });
 
 /**

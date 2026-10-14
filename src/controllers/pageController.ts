@@ -1,3 +1,4 @@
+import { findPublicAudioTracks, readyPublicAlbumFilter, publicCatalogVisibilityFilter, isPublicCatalogVisibility } from '../services/catalogVisibilityService';
 import { supportsArtistFollowHome } from '../config/artistFollowRollout';
 import { NextFunction, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
@@ -22,7 +23,6 @@ import {
 } from '../services/publicCatalogService';
 import { toPublicExpandedPage, toPublicPage } from '../services/publicPageService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
-import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
 import { deleteCarouselAndPageReferences } from '../services/pageReferenceLifecycleService';
 import { ManualCompositionConflictError } from '../services/manualCompositionService';
 
@@ -226,7 +226,7 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         }
 
         const orderedItems = Array.isArray(page.items)
-            ? [...page.items]
+            ? [...page.items].filter(isPublicCatalogVisibility)
                 .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0))
                 .slice(0, 100)
             : [];
@@ -273,17 +273,18 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             albumIds.length > 0
                 ? db.collection('albums').find({
                     _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) },
-                    ...readyAlbumLifecycleFilter
+                    ...readyPublicAlbumFilter
                 }).maxTimeMS(3_000).toArray()
                 : [],
             audioTrackIds.length > 0
-                ? db.collection('audioTracks').find({
+                ? findPublicAudioTracks({
                     ...readyPublicAudioFilter,
                     _id: { $in: audioTrackIds.map((id) => ObjectId.createFromHexString(id)) }
                 }).maxTimeMS(3_000).toArray()
                 : [],
             postIds.length > 0
                 ? db.collection('posts').find({
+                    ...publicCatalogVisibilityFilter,
                     _id: { $in: postIds.map((id) => ObjectId.createFromHexString(id)) }
                 }).project({
                     _id: 1,
@@ -304,7 +305,7 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         const linkedAlbums = missingLinkedAlbumIds.length > 0
             ? await db.collection('albums').find({
                 _id: { $in: missingLinkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) },
-                ...readyAlbumLifecycleFilter
+                ...readyPublicAlbumFilter
             }).maxTimeMS(3_000).toArray()
             : [];
         const includedAlbums = [...albums, ...linkedAlbums];

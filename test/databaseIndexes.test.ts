@@ -25,7 +25,7 @@ const databaseDouble = () => {
       if (name === failCreate) throw new Error('private-email@example.test');
       const indexes = metadata.get(name) ?? [];
       if (!indexes.some(index => JSON.stringify(index.key) === JSON.stringify(key))) {
-        indexes.push({ key, unique: options.unique });
+        indexes.push({ key: structuredClone(key), ...structuredClone(options) });
         metadata.set(name, indexes);
       }
     },
@@ -154,6 +154,14 @@ test('nonunique, sparse, partial, and incompatible collation constraints fail ve
     Object.assign(fake.metadata.get('users')![0], altered);
     await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), DatabaseIndexInitializationError);
   }
+});
+
+test('the cover cancellation receipt index requires both declared string predicates', async () => {
+  const fake = databaseDouble(); await initializeDatabaseIndexes(fake.db);
+  const index = fake.metadata.get('adminCatalogCoverOperations')!.find(index => 'cancellation.actor' in index.key)!;
+  await verifyRequiredDatabaseIndexes(fake.db);
+  index.partialFilterExpression = { 'cancellation.actor': { $type: 'string' } };
+  await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /cancellation.actor,cancellation.operationId/);
 });
 
 test('a dropped required index makes a previously initialized database unready', async () => {

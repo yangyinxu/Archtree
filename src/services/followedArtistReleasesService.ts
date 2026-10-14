@@ -1,9 +1,7 @@
 import type { Document } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import { isArtistFollowEnabled } from '../config/artistFollowRollout';
-import { readyArtistLifecycleFilter } from './artistReferenceFenceService';
-import { readyAlbumLifecycleFilter } from './albumReferenceFenceService';
-import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { readyPublicAlbumFilter, readyPublicArtistFilter, readyPublicTrackVisibilityFilter, publicAudioVisibilityPipeline } from './catalogVisibilityService';
 
 /** Contextual Home explanation; never a field on a public catalog summary. */
 export interface FollowedArtistReason {
@@ -95,7 +93,7 @@ const reasonStages = (userId: string, roles: readonly string[]): Document[] => [
     { $match: { '_follow.0': { $exists: true } } },
     { $set: { _artistObjectId: objectId('$_followCredits.subjectId') } },
     { $lookup: { from: 'artists', localField: '_artistObjectId', foreignField: '_id', pipeline: [
-        { $match: { ...readyArtistLifecycleFilter, $expr: { $eq: [{ $type: '$name' }, 'string'] } } },
+        { $match: { ...readyPublicArtistFilter, $expr: { $eq: [{ $type: '$name' }, 'string'] } } },
         { $project: { name: { $trim: { input: '$name' } } } }, { $match: { name: { $ne: '' } } }
     ], as: '_reasonArtist' } },
     { $unwind: '$_reasonArtist' },
@@ -117,7 +115,7 @@ const playableAlbumStages = (): Document[] => [
     { $set: { _canonicalTrackIds: { $map: { input: safeArray('$audioTrackIds'), as: 'id', in: objectId('$$id') } } } },
     { $lookup: { from: 'audioTracks', localField: '_canonicalTrackIds', foreignField: '_id',
         let: { albumId: { $toString: '$_id' } }, pipeline: [
-            { $match: readyAudioStorageFilter },
+            { $match: readyPublicTrackVisibilityFilter },
             { $match: { $expr: { $eq: ['$albumId', '$$albumId'] } } },
             { $limit: 1 }, { $project: { _id: 1 } }
         ], as: '_playable' } },
@@ -133,7 +131,7 @@ export const resolveFollowedArtistReleases = async (
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) return [];
     const { start, end } = followedReleaseWindow(now);
     const albumQualification = [
-        { $match: readyAlbumLifecycleFilter }, ...dateStages(start, end),
+        { $match: readyPublicAlbumFilter }, ...dateStages(start, end),
         ...playableAlbumStages(), ...reasonStages(userId, ['primary', 'featured'])
     ];
     const finish = (contentType: 'album' | 'audioTrack'): Document[] => [
@@ -147,7 +145,7 @@ export const resolveFollowedArtistReleases = async (
     const [albums, tracks] = await Promise.all([
         db.collection('albums').aggregate([...albumQualification, ...finish('album')], queryOptions).toArray(),
         db.collection('audioTracks').aggregate([
-            { $match: readyAudioStorageFilter }, ...dateStages(start, end),
+            ...publicAudioVisibilityPipeline(), ...dateStages(start, end),
             ...reasonStages(userId, ['primary', 'featured', 'performer']),
             { $set: { _albumObjectId: objectId('$albumId') } },
             { $lookup: { from: 'albums', localField: '_albumObjectId', foreignField: '_id',

@@ -1,3 +1,4 @@
+import { isPublicCatalogVisibility } from './catalogVisibilityService';
 import { pageItemIdentity } from '../utils/pageItemIdentity';
 
 export interface PublicContentVisibility {
@@ -28,7 +29,7 @@ const sortedItems = (items: unknown, limit: number) => (
 export const toPublicPage = (page: any) => ({
     slug: String(page?.slug ?? ''),
     title: String(page?.title ?? '').trim(),
-    items: sortedItems(page?.items, maximumPageItems).flatMap((item: any): Array<Record<string, unknown>> => {
+    items: sortedItems(Array.isArray(page?.items) ? page.items.filter(isPublicCatalogVisibility) : [], maximumPageItems).flatMap((item: any): Array<Record<string, unknown>> => {
         const itemId = pageItemIdentity(item);
         if (!itemId) return [];
         if (item?.itemType === 'carousel') {

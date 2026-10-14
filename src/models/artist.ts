@@ -1,3 +1,5 @@
+import { preserveCatalogVisibilityUpdate } from '../services/catalogVisibilityService';
+import type { CatalogVisibility } from '../services/catalogVisibilityService';
 import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import { SimpleDate } from '../models/simpleDate';
@@ -26,6 +28,7 @@ const withoutLegacyTrackIds = (artist: any) => {
 
 /** Catalog Artist record with compatibility persistence entry points. */
 export class Artist {
+    visibility: CatalogVisibility = 'public';
     _id?: ObjectId;
     name: string;
     birthDate: SimpleDate;
@@ -133,7 +136,7 @@ export class Artist {
     static async updateById(artistId: string, update: Record<string, unknown>) {
         const db = getDb();
         const artistObjectId = ObjectId.createFromHexString(artistId);
-        const normalizedUpdate = withCatalogSearchUpdate(update, 'name');
+        const normalizedUpdate = withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(update), 'name');
         const mutate = async (session?: ClientSession) => {
             const result = await db!
                 .collection('artists')
@@ -171,7 +174,7 @@ export class Artist {
                 _id: ObjectId.createFromHexString(artistId),
                 $and: [readyArtistLifecycleFilter, expectedReference]
             },
-            { $set: withCatalogSearchUpdate(update, 'name') }
+            { $set: withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(update), 'name') }
         );
     }
 

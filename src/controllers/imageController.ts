@@ -34,8 +34,8 @@ export const getImage = async (req: Request, res: Response, next: NextFunction) 
             res.setHeader('Cache-Control', 'private, no-store');
             return res.status(404).json({ message: 'Image not found.' });
         }
-        res.setHeader('Cache-Control', catalogArtworkCacheControl);
         if (result.notModified) {
+            res.setHeader('Cache-Control', catalogArtworkCacheControl);
             if (result.etag) res.setHeader('ETag', result.etag);
             return res.status(304).end();
         }
@@ -45,16 +45,17 @@ export const getImage = async (req: Request, res: Response, next: NextFunction) 
             throw new Error('S3 image body is not a readable stream.');
         }
 
-        res.setHeader('Content-Type', String(result.asset.contentType));
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.setHeader('X-Accel-Buffering', 'no');
-        if (result.object.ETag) {
-            res.setHeader('ETag', result.object.ETag);
-        }
-        if (result.object.ContentLength !== undefined) {
-            res.setHeader('Content-Length', result.object.ContentLength);
-        }
-        await pipeMediaStream(req, res, stream, context);
+        await pipeMediaStream(req, res, stream, context, {
+            authorize: result.authorize,
+            onAuthorized: () => {
+                res.setHeader('Cache-Control', catalogArtworkCacheControl);
+                res.setHeader('Content-Type', String(result.asset.contentType));
+                res.setHeader('X-Content-Type-Options', 'nosniff');
+                res.setHeader('X-Accel-Buffering', 'no');
+                if (result.object.ETag) res.setHeader('ETag', result.object.ETag);
+                if (result.object.ContentLength !== undefined) res.setHeader('Content-Length', result.object.ContentLength);
+            }
+        });
         return;
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;

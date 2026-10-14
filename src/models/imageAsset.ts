@@ -52,9 +52,9 @@ export class ImageAsset {
         );
     }
 
-    static findById(imageId: string) {
+    static findById(imageId: string, maxTimeMS = 3_000) {
         const imageObjectId = ObjectId.createFromHexString(imageId);
-        return getDb()!.collection(collectionId).findOne({ _id: imageObjectId });
+        return getDb()!.collection(collectionId).findOne({ _id: imageObjectId }, { maxTimeMS });
     }
 
     static updateById(imageId: string, update: Record<string, unknown>) {

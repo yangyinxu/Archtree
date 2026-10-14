@@ -30,7 +30,7 @@ const parseBoundedResponse = async (response: Response, maximumBytes: number) =>
 /** Conditionally refreshes the public locale manifest while retaining a valid cache. */
 export const fetchLocalizationManifest = async (): Promise<LocalizationManifest> => {
   const cached = readCachedManifest();
-  const response = await fetch('/api/localizations/v1/manifest', {
+  const response = await fetch('/api/localizations/v2/manifest', {
     headers: cached ? { 'If-None-Match': cached.etag } : undefined
   });
   if (response.status === 304) {
@@ -62,7 +62,7 @@ export const loadLocalizationBundle = async (
 
   const cached = readCachedBundle(locale);
   if (cached?.bundle.revision === expected.revision) return cached.bundle;
-  const response = await fetch(`/api/localizations/v1/bundles/${encodeURIComponent(locale)}`, {
+  const response = await fetch(`/api/localizations/v2/bundles/${encodeURIComponent(locale)}`, {
     headers: cached ? { 'If-None-Match': cached.etag } : undefined
   });
   if (response.status === 304) {

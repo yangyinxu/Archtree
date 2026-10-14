@@ -1,3 +1,5 @@
+import { isPublicCatalogVisibility, findPublicAudioTrackById, publicCatalogVisibilityFilter } from './catalogVisibilityService';
+import { mediaAuthorizationTimeoutMs } from './mediaDeliveryService';
 import { abortError, scheduleCoverArtVariant, type CoverArtVariantScheduler } from './coverArtVariantScheduler';
 export { createCoverArtVariantScheduler, createConfiguredCoverArtVariantScheduler } from './coverArtVariantScheduler';
 export type { CoverArtVariantScheduler } from './coverArtVariantScheduler';
@@ -350,8 +352,8 @@ type PublicCoverArtAsset = Record<string, unknown> & {
 };
 
 type CoverArtLookupDependencies = {
-    findAsset?: (assetId: string) => Promise<unknown>;
-    findOwner?: (asset: PublicCoverArtAsset) => Promise<unknown>;
+    findAsset?: (assetId: string, maxTimeMS?: number) => Promise<unknown>;
+    findOwner?: (asset: PublicCoverArtAsset, maxTimeMS?: number) => Promise<unknown>;
 };
 
 type CoverArtObjectDependencies = CoverArtLookupDependencies & {
@@ -451,20 +453,23 @@ const etagMatches = (ifNoneMatch: string | undefined, currentEtag: string) => {
     });
 };
 
-const findPublicCoverArtOwner = async (asset: PublicCoverArtAsset) => {
+const findPublicCoverArtOwner = async (asset: PublicCoverArtAsset, maxTimeMS = 3_000) => {
     const ownerType = asset.ownerType as keyof typeof publicOwnerCollections;
     const ownerId = String(asset.ownerId ?? '');
     if (!/^[0-9a-f]{24}$/i.test(ownerId)) return null;
+    if (ownerType === 'audioTrack') return findPublicAudioTrackById(ownerId, undefined, maxTimeMS);
     const lifecycleFilter = ownerType === 'artist'
         ? readyArtistLifecycleFilter
         : ownerType === 'album'
             ? readyAlbumLifecycleFilter
             : readyAudioStorageFilter;
     return getDb()!.collection(publicOwnerCollections[ownerType]).findOne(
-        { _id: ObjectId.createFromHexString(ownerId), ...lifecycleFilter },
+        { _id: ObjectId.createFromHexString(ownerId), $and: [lifecycleFilter, publicCatalogVisibilityFilter] },
         {
+            maxTimeMS,
             projection: {
                 coverArtId: 1,
+                visibility: 1,
                 lifecycleStatus: 1,
                 uploadStatus: 1,
                 s3Key: 1,
@@ -483,6 +488,7 @@ export const isPublicCoverArtOwnerReady = (
     asset: PublicCoverArtAsset,
     owner: Record<string, unknown>
 ) => {
+    if (!isPublicCatalogVisibility(owner)) return false;
     if (asset.ownerType === 'artist') {
         return owner.lifecycleStatus === undefined || owner.lifecycleStatus === 'ready';
     }
@@ -500,15 +506,16 @@ export const isPublicCoverArtOwnerReady = (
 /** Resolves only an attached, ready catalog asset; detached assets are never public. */
 export const resolvePublicCoverArtAsset = async (
     imageId: string,
-    dependencies: CoverArtLookupDependencies = {}
+    dependencies: CoverArtLookupDependencies = {},
+    maxTimeMS = 3_000
 ): Promise<PublicCoverArtAsset | null> => {
     const findAsset = dependencies.findAsset ?? ImageAsset.findById.bind(ImageAsset);
-    const asset = await findAsset(imageId);
+    const asset = await findAsset(imageId, maxTimeMS);
     if (!isPublicCoverArtAsset(asset)) return null;
     if (!isCoverArtObjectKeyForImage(asset.s3Key, imageId)) return null;
 
     const findOwner = dependencies.findOwner ?? findPublicCoverArtOwner;
-    const owner = await findOwner(asset);
+    const owner = await findOwner(asset, maxTimeMS);
     if (!owner || typeof owner !== 'object' || Array.isArray(owner)) return null;
     if (!isPublicCoverArtOwnerReady(asset, owner as Record<string, unknown>)) return null;
     const attachedImageId = String((owner as Record<string, unknown>).coverArtId ?? '');
@@ -1145,6 +1152,15 @@ export const getCoverArtObject = async (
 ) => {
     const asset = await resolvePublicCoverArtAsset(imageId, dependencies);
     if (!asset) return null;
+    const authorize = async () => {
+        const latest = await resolvePublicCoverArtAsset(imageId, dependencies, mediaAuthorizationTimeoutMs);
+        const expectedIdentity = asset.storageIdentity as ImageAssetRecord['storageIdentity'];
+        const currentIdentity = latest?.storageIdentity as ImageAssetRecord['storageIdentity'];
+        return Boolean(latest && latest.s3Key === asset.s3Key
+            && latest.ownerType === asset.ownerType && String(latest.ownerId) === String(asset.ownerId)
+            && currentIdentity?.etag === expectedIdentity?.etag
+            && currentIdentity?.versionId === expectedIdentity?.versionId);
+    };
 
     try {
         const object = await (dependencies.getObject
@@ -1160,9 +1176,14 @@ export const getCoverArtObject = async (
                 ...(asset.storageIdentity ? { VersionId: (asset.storageIdentity as any).versionId ?? 'null' } : {}),
                 IfNoneMatch: options.ifNoneMatch
             }), { abortSignal: options.abortSignal }));
-        return { asset, object, notModified: false as const };
+        if (!await authorize()) {
+            (object.Body as unknown as Readable | undefined)?.destroy?.();
+            return null;
+        }
+        return { asset, object, authorize, notModified: false as const };
     } catch (error: any) {
         if (error?.$metadata?.httpStatusCode === 304) {
+            if (!await authorize()) return null;
             const responseEtagValue = error?.$response?.headers?.etag;
             const responseEtag = String(
                 Array.isArray(responseEtagValue) ? responseEtagValue[0] : responseEtagValue ?? ''
@@ -1281,6 +1302,7 @@ export const getCoverArtVariant = async (
         const transform = dependencies.transform ?? transformCoverArtVariant;
         const body = await transform(input, width);
         if (options.abortSignal?.aborted) throw abortError();
+        if (!await resolvePublicCoverArtAsset(imageId, dependencies)) return null;
         return { asset, body, etag, notModified: false };
     });
 };

@@ -1,0 +1,293 @@
+import { expect, test, type Page } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+import { capabilities, detail, projectId, session, slotId, viewer } from '../src/features/admin/adminFixtures.testSupport';
+
+async function setup(page: Page, admin = true, media = false) {
+  let item = detail(); const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
+  let uploadAttempts = 0; let publicationReads = 0;
+  if (media) { item.capabilities = { analysis: true, upload: true, publish: true }; item.upload.available = true; item.publication = 'notStarted'; item.draft.album.title = 'Reviewed Album'; item.draft.album.artistName = 'Synthetic artist'; item.draft.tracks.forEach((track, index) => { track.title = `Song ${index + 1}`; track.trackNumber = index + 1; }); }
+  const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
+  await page.route('**/auth/browser/session', route => route.fulfill({ json: { user: { ...session.user, role: admin ? 'admin' : 'user' } } }));
+  await page.route('**/api/listener/v1/capabilities', route => route.fulfill({ json: { playlists: false } }));
+  await page.route('**/api/listener/v1/personalization-capabilities', route => route.fulfill({ json: { contractVersion: 1, deterministicDiscovery: false, artistFollows: false } }));
+  await page.route('**/api/listener/v1/home', route => route.fulfill({ json: { title: 'Synthetic Home', sections: [] }, headers }));
+  await page.route('**/content/me/playlists?limit=50', route => route.fulfill({ json: { items: [], nextCursor: null }, headers }));
+  await page.route('**/api/admin/v1/**', async route => {
+    expect(route.request().headers()['x-finitude-account-viewer']).toBe(viewer);
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('capabilities')) return route.fulfill({ json: { ...capabilities, catalog: { editing: true, visibility: true } }, headers });
+    if (route.request().method() === 'POST' && path.includes('/assets/')) {
+      const request = route.request(); uploadAttempts++; const operationId = request.headers()['idempotency-key']; writes.push({ path, body: { operationId, revision: request.headers()['if-match'], bytes: request.postDataBuffer()?.toString('base64') } });
+      item.assets = [{ slotId, state: uploadAttempts === 1 ? 'unknown' : 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: { operationId, expectedRevision: 1, kind: 'upload', startedByMe: true } }]; item.revision++;
+      return route.fulfill({ json: { item, receipt: { operationId, kind: 'upload', revision: 2 } }, headers });
+    }
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON(); writes.push({ path, body });
+      if (path.endsWith('/publish')) { item.publication = 'preparing'; item.revision++; return route.fulfill({ status: 202, json: { item, receipt: { operationId: body.operationId, kind: 'publish', revision: item.revision } }, headers }); }
+      if (path.endsWith('/adopt')) {
+        expect(body.selectedIds).toEqual([item.suggestions[0].id]);
+        item.draft.album.title = String(item.suggestions[0].value); item.suggestions[0].decision = 'accepted'; item.revision++;
+        return route.fulfill({ json: { item, receipt: { operationId: body.operationId, kind: 'adopt', revision: item.revision } }, headers });
+      }
+      return route.fulfill({ json: { item, receipt: { operationId: body.operationId, kind: 'create', revision: item.revision } }, status: 201, headers });
+    }
+    if (path === '/api/admin/v1/imports') {
+      const { manifest, draft, suggestions, decisions: _decisions, capabilities: _capabilities, receipts: _receipts, assets: _assets, published: _published, publicationRecovery: _recovery, selectedCoverSlotId: _selectedCover, ...common } = item;
+      return route.fulfill({ json: { items: [{ ...common, title: draft.album.title, rootLabel: manifest.rootLabel, artistName: draft.album.artistName, visibility: draft.album.visibility, pendingSuggestions: suggestions.filter(s => s.decision === 'pending').length }], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null }, headers });
+    }
+    if (item.publication === 'preparing' && ++publicationReads > 1) { item.publication = 'complete'; item.published = { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: ['333333333333333333333333'] }; item.revision++; }
+    return route.fulfill({ json: { item, receipt: null }, headers });
+  });
+  return writes;
+}
+
+test('admin explicitly opens workbench, adopts only selected suggestion, and User view hides private project', async ({ page }) => {
+  const writes = await setup(page); await page.goto('/finitude/admin/imports');
+  await expect(page.getByRole('button', { name: 'Current view: User' })).toBeVisible();
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await page.getByRole('link', { name: 'Synthetic Album', exact: true }).click();
+  await page.getByRole('tab', { name: 'Review', exact: true }).click();
+  await expect(page.getByText('Suggested Album', { exact: true })).toBeVisible();
+  await page.getByRole('checkbox', { name: 'Title', exact: true }).check();
+  await page.getByRole('button', { name: 'Apply selected' }).click();
+  await expect(page.getByRole('heading', { name: 'Suggested Album', exact: true })).toBeVisible();
+  expect(writes).toHaveLength(1); expect(writes[0].path).toBe(`/api/admin/v1/imports/${projectId}/adopt`);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  const control = await page.getByRole('button', { name: 'Current view: Admin' }).boundingBox(); const header = await page.locator('header').first().boundingBox(); expect(control!.y + control!.height).toBeLessThanOrEqual(header!.y + header!.height);
+  await page.getByRole('heading', { name: 'Suggested Album', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: '/tmp/finitude-admin-workbench-review.png', fullPage: true });
+  await page.getByRole('button', { name: 'Current view: Admin' }).click();
+  await page.getByRole('button', { name: 'User', exact: true }).click();
+  await expect(page).toHaveURL(/\/finitude\/?$/);
+  await expect(page.getByRole('heading', { name: 'Suggested Album' })).toHaveCount(0);
+});
+
+test('cancelled cover cleanup remains reachable when the owner disappears, without restoring private metadata', async ({ page }) => {
+  await setup(page);
+  const id='111111111111111111111111', original='30000000-0000-4000-8000-000000000003';
+  const item={kind:'artist',id,revision:`cr_${'a'.repeat(43)}`,visibility:'public',effectiveVisibility:'public',coverUrl:null,mediaUrl:null,capabilities:{editing:true,visibility:true},fields:{name:'Private synthetic artist',bio:'',birthDate:null}};
+  let cancelled=false, cleanupPending=true;
+  const writes:Array<{path:string;body:Record<string,unknown>}>=[],headers={'X-Finitude-Account-Viewer':viewer};
+  await page.route('**/api/admin/v1/catalog/**',async route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(/^\/api\/admin\/v1\/catalog\/(artist|album)$/.test(path))return route.fulfill({json:{items:[],nextCursor:null},headers});
+    if(path.endsWith('/cover-operations'))return route.fulfill({json:{items:[{operationId:original,startedByMe:false,state:cancelled?'cancelled':'needsAttention',cleanupPending:cancelled&&cleanupPending}]},headers});
+    if(route.request().method()==='POST'){
+      const body=route.request().postDataJSON();writes.push({path,body});
+      if(path.endsWith('/cancel')){cancelled=true;return route.fulfill({json:{item:null,receipt:{operationId:body.operationId},coverOperation:{state:'cancelled',cleanupPending:true}},headers});}
+      expect(path.endsWith(`/${original}/reconcile`)).toBe(true);cleanupPending=false;
+      return route.fulfill({json:{item:null,receipt:{operationId:original},coverOperation:{state:'cancelled',cleanupPending:false}},headers});
+    }
+    return route.fulfill({status:cancelled?404:200,json:cancelled?{code:'ADMIN_CATALOG_NOT_FOUND'}:{item},headers});
+  });
+  await page.goto(`/finitude/admin/catalog/artist/${id}`);await page.getByRole('button',{name:'Switch to Admin view'}).click();
+  await page.getByRole('button',{name:'Cancel approval'}).click();expect(writes).toHaveLength(0);
+  await page.getByRole('dialog').getByRole('button',{name:'Cancel approval'}).click();
+  await expect(page.getByRole('textbox',{name:'Name',exact:true})).toHaveCount(0);
+  await expect(page.getByText('The cover change is cancelled. Unused image cleanup still needs attention.').first()).toBeVisible();
+  expect(writes[0].body.expectedRevision).toBe(item.revision);expect(writes[0].body.operationId).not.toBe(original);
+  await page.goto('/finitude/admin/catalog');
+  await page.getByRole('button',{name:'Switch to Admin view'}).click();
+  await page.getByRole('button',{name:'Artists',exact:true}).click();
+  await page.locator('summary').filter({hasText:'Recover cover operations for an item'}).click();
+  await page.getByRole('textbox',{name:'Known catalog item ID'}).fill(id);
+  await page.getByRole('button',{name:'Recover cover operations for an item'}).click();
+  await expect(page.getByRole('button',{name:'Resume operation'})).toHaveCount(0);
+  await page.getByRole('button',{name:'Retry cleanup'}).click();
+  await expect(page.getByText('The unconfirmed cover change is cancelled.')).toBeVisible();
+  expect(writes[1].body).toEqual({});expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+});
+
+test('reopening a visited catalog owner after a confirmed deletion drops its old buffer and cancels with a null revision', async ({ page }) => {
+  await setup(page);
+  const id = '111111111111111111111111', originalOperationId = '30000000-0000-4000-8000-000000000003';
+  const item = { kind: 'artist', id, revision: `cr_${'a'.repeat(43)}`, visibility: 'public', effectiveVisibility: 'public', coverUrl: null, mediaUrl: null, capabilities: { editing: true, visibility: true }, fields: { name: 'Former private artist', bio: '', birthDate: null } };
+  const headers = { 'X-Finitude-Account-Viewer': viewer }, writes: Array<{ path: string; body: Record<string, unknown> }> = [];
+  let missing = false, cancelled = false;
+  await page.route('**/api/admin/v1/catalog/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/cover-operations')) return route.fulfill({ json: { items: [{ operationId: originalOperationId, startedByMe: false, state: cancelled ? 'cancelled' : 'needsAttention', cleanupPending: false }] }, headers });
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON(); writes.push({ path, body });
+      expect(path).toBe(`/api/admin/v1/catalog/artist/${id}/cover-operations/${originalOperationId}/cancel`);
+      expect(body.expectedRevision).toBeNull(); cancelled = true;
+      return route.fulfill({ json: { item: null, receipt: { operationId: body.operationId }, coverOperation: { state: 'cancelled', cleanupPending: false } }, headers });
+    }
+    return route.fulfill({ status: missing ? 404 : 200, json: missing ? { code: 'ADMIN_CATALOG_NOT_FOUND' } : { item }, headers });
+  });
+  await page.goto(`/finitude/admin/catalog/artist/${id}`);
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Former private artist');
+  await expect(page).toHaveTitle('Edit catalog content · Finitude');
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Unsaved deleted artist');
+  await page.getByRole('navigation', { name: 'Workbench', exact: true }).getByRole('link', { name: 'Workbench', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+  missing = true;
+  await page.goBack();
+  await expect(page.getByRole('alert')).toHaveText('This content no longer exists. You can still recover its unfinished cover operation.');
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Edit catalog content page', { exact: true })).toBeAttached();
+  await page.getByRole('button', { name: 'Cancel approval' }).click();
+  expect(writes).toHaveLength(0);
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel approval' }).click();
+  await expect(page.getByText('The unconfirmed cover change is cancelled.')).toBeVisible();
+  expect(writes).toHaveLength(1);
+  expect(writes[0].body.operationId).not.toBe(originalOperationId);
+  expect(writes[0].body.expectedRevision).toBeNull();
+});
+
+test('an unconfirmed publication can be cancelled and reviewed while exact cleanup keeps a new approval locked', async ({ page }) => {
+  await setup(page);
+  let item = detail(); const originalOperationId = '30000000-0000-4000-8000-000000000003';
+  item.revision = 7; item.publication = 'needsAttention';
+  item.capabilities = { analysis: true, upload: true, publish: true };
+  item.publicationRecovery = { operationId: originalOperationId, cleanupPending: false, startedByMe: false };
+  item.draft.album.title = 'Failed publication draft'; item.draft.album.artistName = 'Synthetic artist';
+  item.assets = item.draft.tracks.map(track => ({ slotId: track.slotId, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }));
+  item.upload = { ready: 2, total: 2, available: true };
+  item.receipts = [{ operationId: originalOperationId, kind: 'publish', revision: 7 }];
+  const writes: Array<{ path: string; body: Record<string, unknown> }> = [], headers = { 'X-Finitude-Account-Viewer': viewer };
+  await page.route(`**/api/admin/v1/imports/${projectId}**`, async route => {
+    const path = new URL(route.request().url()).pathname, method = route.request().method();
+    if (method === 'GET') return route.fulfill({ json: { item, receipt: null }, headers });
+    const body = route.request().postDataJSON(); writes.push({ path, body });
+    let kind: 'cancel-publication' | 'edit' | 'publish' = 'publish';
+    if (path.endsWith('/cancel-publication')) {
+      expect(body.expectedRevision).toBe(7); expect(body.publicationOperationId).toBe(originalOperationId);
+      expect(body.operationId).not.toBe(originalOperationId);
+      item = { ...item, publication: 'cancelled', publicationRecovery: { operationId: originalOperationId, cleanupPending: true, startedByMe: false } };
+      kind = 'cancel-publication';
+    } else if (method === 'PATCH') {
+      expect(body.expectedRevision).toBe(item.revision);
+      item = { ...item, draft: body.draft }; kind = 'edit';
+    } else if (path.endsWith('/resume-publication')) {
+      expect(body).toEqual({ operationId: originalOperationId });
+      item = { ...item, publicationRecovery: { ...item.publicationRecovery!, cleanupPending: false } };
+    } else {
+      expect(path.endsWith('/publish')).toBe(true); expect(body.operationId).not.toBe(originalOperationId);
+      item = { ...item, publication: 'preparing', publicationRecovery: { operationId: body.operationId, cleanupPending: false, startedByMe: true } };
+    }
+    item.revision++;
+    const receipt = item.receipts.find(receipt => receipt.operationId === body.operationId) ?? { operationId: body.operationId, kind, revision: item.revision };
+    if (!item.receipts.some(saved => saved.operationId === receipt.operationId)) item.receipts.push(receipt);
+    return route.fulfill({ json: { item, receipt }, headers, status: path.endsWith('/publish') ? 202 : 200 });
+  });
+  await page.goto(`/finitude/admin/imports/${projectId}`);
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page).toHaveTitle('Album import · Finitude');
+  await expect(page.getByText('Album import page', { exact: true })).toBeAttached();
+  await page.getByRole('tab', { name: 'Publish', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel approval' }).click();
+  await expect(page.getByRole('dialog').getByText('Failed publication draft', { exact: true })).toBeVisible();
+  expect(writes).toHaveLength(0);
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel approval' }).click();
+  await expect(page.getByText('Approval cancelled. Keep reviewing while file cleanup is pending.')).toBeVisible();
+  await page.getByRole('tab', { name: 'Draft', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Analyze again' })).toBeDisabled();
+  await page.getByRole('tab', { name: 'Review', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: '1 · Track number', exact: true })).toBeEnabled();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Publish Album' })).toHaveCount(0);
+  for (const button of await page.getByRole('button', { name: 'Remove file' }).all()) await expect(button).toBeDisabled();
+  await expect(page.locator('input[type=file]').last()).toBeDisabled();
+  await page.getByRole('tab', { name: 'Draft', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Manually reviewed draft');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
+  expect(writes[1].body.draft).toMatchObject({ album: { title: 'Manually reviewed draft' } });
+  await page.getByRole('tab', { name: 'Publish', exact: true }).click();
+  await page.getByRole('button', { name: 'Retry cleanup' }).click();
+  await expect(page.getByText('Approval cancelled. Review the draft before publishing again.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Publish Album' })).toBeEnabled();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await expect(page.locator('input[type=file]').last()).toBeEnabled();
+  await page.getByRole('tab', { name: 'Publish', exact: true }).click();
+  expect(writes[2].body).toEqual({ operationId: originalOperationId });
+  await page.getByRole('button', { name: 'Publish Album' }).click();
+  expect(writes).toHaveLength(3);
+  await page.getByRole('dialog').getByRole('button', { name: 'Publish Album' }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Publish', exact: true }).getByText('Publication in progress', { exact: true })).toBeVisible();
+  await expect(page.getByRole('definition').filter({ hasText: 'Publication in progress' })).toBeVisible();
+  expect(writes).toHaveLength(4);
+  expect(writes[3].body.expectedRevision).toBe(10);
+});
+
+test('ordinary account has no admin switch and requests no admin data', async ({ page }) => {
+  await setup(page, false); let calls = 0; page.on('request', request => { if (request.url().includes('/api/admin/')) calls++; });
+  await page.goto('/finitude/admin/imports');
+  await expect(page.getByText('Switch to Admin view to open the workbench. Current administrator access is required.')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Current view:/ })).toHaveCount(0); expect(calls).toBe(0);
+});
+
+test('mobile administrator control and workbench remain accessible without horizontal overflow', async ({ page }) => {
+  await setup(page); await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/finitude/admin/imports'); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({ path: '/tmp/finitude-admin-workbench-mobile.png', fullPage: true });
+});
+
+
+test('private upload retries the same multipart operation and publication waits for confirmed completion', async ({ page }) => {
+  const writes = await setup(page, true, true); await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  await page.locator('input[type=file]').first().setInputFiles({ name: '01 First.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('a'.repeat(100)) });
+  expect(writes).toHaveLength(0); await page.getByRole('button', { name: 'Choose file' }).click();
+  await expect(page.getByText('Upload outcome unknown', { exact: true })).toBeVisible(); await page.getByRole('button', { name: 'Retry original operation' }).click();
+  await expect(page.getByText('Ready', { exact: true })).toBeVisible(); expect(writes).toHaveLength(2); expect(writes[0]).toEqual(writes[1]);
+  await page.getByRole('tab', { name: 'Publish', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish Album', exact: true }).click(); await page.getByRole('dialog').getByRole('button', { name: 'Publish Album' }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Publish', exact: true }).getByText('Publication in progress', { exact: true })).toBeVisible();
+  await expect(page.getByRole('definition').filter({ hasText: 'Publication in progress' })).toBeVisible(); await expect(page.getByText('The Album publication is confirmed.')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Refresh status' }).click(); await expect(page.getByText('The Album publication is confirmed.')).toBeVisible();
+});
+
+test('existing catalog edits and Page placement visibility require separate explicit approvals', async ({ page }) => {
+  await setup(page); const writes: Array<{path:string;body:Record<string,unknown>}> = [];
+  let item = { kind: 'artist', id: '111111111111111111111111', revision: `cr_${'a'.repeat(43)}`, visibility: 'public', effectiveVisibility: 'public', coverUrl: '/api/admin/v1/catalog/artist/111111111111111111111111/artwork' as string | null, mediaUrl: null, capabilities: { editing: true, visibility: true }, fields: { name: 'Synthetic artist', bio: '', birthDate: null } };
+  let pageDTO = { slug: 'home', title: 'Home', revision: `cr_${'a'.repeat(43)}`, items: [{ itemId: '222222222222222222222222', itemType: 'carousel', referenceId: '333333333333333333333333', order: 0, visibility: 'public', name: 'Featured releases', sourceMode: 'manual', referenceStatus: 'ready' }] };
+  const headers = { 'X-Finitude-Account-Viewer': viewer };
+  await page.route('**/api/admin/v1/catalog/**', async route => { if (new URL(route.request().url()).pathname.endsWith('/cover-operations')) return route.fulfill({json:{items:[]},headers}); if (route.request().method() === 'DELETE') { const body = route.request().postDataJSON(); writes.push({path:new URL(route.request().url()).pathname,body}); item = {...item,coverUrl:null,revision:`cr_${'c'.repeat(43)}`}; return route.fulfill({json:{item,receipt:{operationId:body.operationId},coverOperation:{state:'complete',cleanupPending:true}},headers}); } if (route.request().method() === 'PATCH') { const body = route.request().postDataJSON(); writes.push({path: new URL(route.request().url()).pathname,body}); item = { ...item, revision: `cr_${'b'.repeat(43)}`, fields: { ...item.fields, ...body.fields } }; return route.fulfill({json:{item,receipt:{operationId:body.operationId}},headers}); } return route.fulfill({json:{item},headers}); });
+  await page.route('**/api/admin/v1/pages/**', async route => { if (route.request().method() === 'PATCH') { const body = route.request().postDataJSON(); writes.push({path:new URL(route.request().url()).pathname,body}); pageDTO = { ...pageDTO, revision:`cr_${'b'.repeat(43)}`,items:[{...pageDTO.items[0],visibility:body.visibility}] }; return route.fulfill({json:{page:pageDTO,receipt:{operationId:body.operationId}},headers}); } return route.fulfill({json:{page:pageDTO},headers}); });
+  await page.goto('/finitude/admin/catalog/artist/111111111111111111111111'); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Edited synthetic artist'); await page.getByRole('button', { name: 'Save' }).click(); expect(writes).toHaveLength(0); await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click(); await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled(); expect(writes[0].body.fields).toEqual({name:'Edited synthetic artist'});
+  await page.getByRole('button', {name:'Remove catalog cover'}).click(); expect(writes).toHaveLength(1); await page.getByRole('dialog').getByRole('button', {name:'Remove catalog cover'}).click(); await expect(page.getByText('The cover change is confirmed. Previous image cleanup still needs attention.')).toBeVisible(); expect(writes).toHaveLength(2);
+  await page.getByRole('link', { name: 'Page items', exact: true }).click();
+  await expect(page).toHaveTitle('Page items · Finitude');
+  await expect(page.getByRole('heading', { name: '1 · Featured releases' })).toBeVisible();
+  await expect(page.getByText('Carousel', { exact: true })).toBeVisible();
+  await expect(page.getByText('Manual', { exact: true })).toBeVisible();
+  await expect(page.getByText('333333333333333333333333', { exact: true })).not.toBeVisible();
+  await page.getByRole('button', {name:'Hide this placement'}).click(); expect(writes).toHaveLength(2);
+  await expect(page.getByRole('dialog').getByText('1 · Featured releases')).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('Public → Hidden')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', {name:'Hide this placement'}).click(); await expect(page.getByRole('button', {name:'Make this placement public'})).toBeVisible(); expect(writes[2].path).toBe('/api/admin/v1/pages/home/items/222222222222222222222222');
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+});
+
+
+test('administrator placement layout reflows at 390px and a 200 percent equivalent viewport', async ({ page }) => {
+  await setup(page);
+  const pageDTO = { slug: 'home', title: 'Home', revision: `cr_${'a'.repeat(43)}`, items: [{ itemId: '222222222222222222222222', itemType: 'carousel', referenceId: '333333333333333333333333', order: 0, visibility: 'public', name: 'Featured releases and carefully selected recordings for late evenings', sourceMode: 'dynamic', referenceStatus: 'ready' }] };
+  await page.route('**/api/admin/v1/pages/**', route => route.fulfill({ json: { page: pageDTO }, headers: { 'X-Finitude-Account-Viewer': viewer } }));
+  await page.goto('/finitude/admin/pages'); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  // Halving a desktop layout viewport exercises the reflow used by 200 percent browser zoom.
+  for (const width of [390, 640]) {
+    await page.setViewportSize({ width, height: 844 });
+    const title = page.getByRole('heading', { name: '1 · Featured releases and carefully selected recordings for late evenings' });
+    await expect(title).toBeVisible();
+    const bounds = await title.boundingBox(); expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    await page.getByRole('button', { name: 'Hide this placement' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Change visibility?' });
+    await expect(dialog).toHaveAttribute('aria-describedby', /.+/);
+    const target = await dialog.getByText('1 · Featured releases and carefully selected recordings for late evenings', { exact: true }).boundingBox();
+    const cancel = dialog.getByRole('button', { name: 'Cancel', exact: true }), confirm = dialog.getByRole('button', { name: 'Hide this placement' });
+    const cancelBounds = await cancel.boundingBox(), confirmBounds = await confirm.boundingBox();
+    expect(target!.x).toBeGreaterThanOrEqual(0); expect(target!.x + target!.width).toBeLessThanOrEqual(width);
+    expect(cancelBounds!.y).toBeGreaterThan(target!.y + target!.height); expect(confirmBounds!.x).toBeGreaterThanOrEqual(cancelBounds!.x + cancelBounds!.width);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0); await expect(page.getByRole('button', { name: 'Hide this placement' })).toBeFocused();
+  }
+});

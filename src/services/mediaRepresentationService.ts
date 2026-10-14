@@ -6,6 +6,9 @@ import { inspectRoomAudioFile, RoomAudioInspectionError } from './roomAudioInspe
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../utils/mediaStorageKey';
 import { normalizeUtf8Text } from '../utils/textEncoding';
+import { findPublicAudioTrackById, isPublicCatalogVisibility, publicCatalogVisibilityFilter, publicAudioAccessPipeline, publicAudioVisibilityPipeline } from './catalogVisibilityService';
+import { touchPublicAudioTrackReferences } from './publicCatalogReferenceFenceService';
+import { AudioTrackReferenceUnavailableError } from './audioTrackReferenceFenceService';
 
 export const isMediaRepresentationRevision = (value: unknown): value is string => (
     typeof value === 'string' && /^mr_[0-9a-f]{32}$/.test(value)
@@ -60,7 +63,7 @@ export const storedMediaRepresentationForTrack = (track: any): MediaRepresentati
 export const roomAudioRepresentationForTrack = (track: any): RoomAudioRepresentation | null => {
     const id = String(track?._id ?? '');
     const value = storedMediaRepresentationForTrack(track);
-    if (!/^[0-9a-f]{24}$/.test(id) || track.uploadStatus !== 'ready'
+    if (!/^[0-9a-f]{24}$/.test(id) || !isPublicCatalogVisibility(track) || track.uploadStatus !== 'ready'
         || (track.publicationStatus != null && track.publicationStatus !== 'ready')
         || activeMediaTypeForTrack(track) !== 'audio' || !value
         || value.seekable !== true || !['wav-pcm', 'mp3', 'm4a-aac'].includes(value.format)
@@ -83,11 +86,22 @@ export const resolveRoomAudioRepresentation = async (
     session?: ClientSession
 ): Promise<RoomAudioRepresentation | null> => {
     if (!/^[0-9a-f]{24}$/.test(mediaTrackId)) return null;
-    const track = await getDb()!.collection('audioTracks').findOne({
-        _id: ObjectId.createFromHexString(mediaTrackId), ...readyAudioStorageFilter
-    }, { session });
+    const track = await findPublicAudioTrackById(mediaTrackId, session);
     return roomAudioRepresentationForTrack(track);
 };
+
+export type RoomMediaAccess = { media: RoomAudioRepresentation | null; canRead: boolean };
+/** One bounded queue query preserves public unavailable occurrences and excludes hidden parent Albums. */
+export async function readRoomMediaAccess(ids: string[], session: ClientSession): Promise<Map<string, RoomMediaAccess>> {
+    const unique = [...new Set(ids.filter(id => /^[0-9a-f]{24}$/.test(id)))];
+    if (!unique.length) return new Map();
+    const [rows] = await getDb()!.collection('audioTracks').aggregate([
+        { $match: { _id: { $in: unique.map(id => new ObjectId(id)) } } },
+        { $facet: { available: publicAudioVisibilityPipeline(), visible: [...publicAudioAccessPipeline(), { $project: { _id: 1 } }] } }
+    ], { session, maxTimeMS: 3_000 }).toArray();
+    const available = new Map((rows?.available ?? []).map((track: any) => [String(track._id), roomAudioRepresentationForTrack(track)]));
+    return new Map((rows?.visible ?? []).map((track: any) => [String(track._id), { media: available.get(String(track._id)) ?? null, canRead: true }]));
+}
 
 /** Writes the same track as replacement/deletion, making room admission serialize with its lifecycle. */
 export const touchRoomAudioRepresentation = async (
@@ -96,9 +110,11 @@ export const touchRoomAudioRepresentation = async (
     session: ClientSession
 ): Promise<RoomAudioRepresentation | null> => {
     if (!/^[0-9a-f]{24}$/.test(mediaTrackId) || !isMediaRepresentationRevision(expectedRevision)) return null;
+    try { await touchPublicAudioTrackReferences([mediaTrackId], session); }
+    catch (error) { if (error instanceof AudioTrackReferenceUnavailableError) return null; throw error; }
     const result = await getDb()!.collection('audioTracks').findOneAndUpdate({
         _id: ObjectId.createFromHexString(mediaTrackId),
-        ...readyAudioStorageFilter,
+        $and: [readyAudioStorageFilter, publicCatalogVisibilityFilter],
         'mediaRepresentation.revision': expectedRevision
     }, { $inc: { contentReferenceRevision: 1 } }, { session, returnDocument: 'after' });
     return roomAudioRepresentationForTrack(result.value);

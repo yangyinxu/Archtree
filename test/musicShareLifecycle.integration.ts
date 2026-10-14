@@ -64,6 +64,17 @@ const transaction = async (work: (session: ClientSession) => Promise<unknown>) =
     const session = getDatabaseClient().startSession(); try { await session.withTransaction(() => work(session)); } finally { await session.endSession(); }
 };
 
+test('hidden Album inheritance rejects new shares and redacts previously shared metadata', async () => {
+    const { a, b } = await pair(); await send(a, b);
+    await db().collection('audioTracks').updateOne({ _id: new ObjectId(trackIds[0]) }, { $set: { albumId: albumIds[0] } });
+    await db().collection('albums').updateOne({ _id: new ObjectId(albumIds[0]) }, { $set: { visibility: 'hidden' } });
+    const existing = (await list(b)).items[0]; assert.equal(existing.content, null);
+    assert.equal(JSON.stringify(existing).includes('Public track 0'), false);
+    const fresh = await send(a, b, albumIds[0], 'album'); assert.equal(fresh.code, 'music_unavailable');
+    await db().collection('socialMusicShares').deleteMany({});
+    assert.equal((await send(a, b)).code, 'music_unavailable');
+});
+
 test('direct track and album shares use private current cards, status-only receipts and duplicate suppression', async () => {
     const { a, b } = await pair(); const outsider = await person('outsider');
     const before = [await outbox(a), await outbox(b)]; const intent = await sendIntent(a, b);

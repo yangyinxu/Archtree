@@ -187,7 +187,46 @@ changes without exposing a partially edited public state.
 The lifecycle map, first-slice DTO, authorization, evidence, concurrency, tests,
 future changeset model, rollout, and rollback are recorded in
 [`plans/content-manager-prepublish-validation-preview-spike.md`](plans/content-manager-prepublish-validation-preview-spike.md).
-Implementation and canonical rule changes are not started.
+Implementation and canonical rule changes are in progress. Production enablement follows the storage and delivery acceptance gates.
+
+## Selected — AI-Assisted Album Import and Finitude Administration
+
+Prepare new Albums from uploaded music, filenames, relative folder names, and
+embedded tags. GPT-6 Luna proposes missing metadata with sources and conflicts;
+administrators review private drafts and publish from Finitude. Shared admin
+editing also supports corrections to existing Artist, Album, and track metadata.
+Administrators switch between Admin and User views using a separate upper-right
+current-view control; User view hides administrative features while preserving
+the same account and listening state.
+Admin controls also set public/hidden visibility for each Page item placement,
+Artist, Organization, Album, and MediaTrack. The same read restriction covers
+hidden Feed Posts. Hidden content is readable
+only through authenticated administrator management/preview routes; ordinary
+details, discovery, media, artwork, and relationship projections enforce the
+restriction. Existing offline copies require a separately defined boundary.
+Import review also checks existing files, Artists, and Album editions, offering
+explicit reuse, skip, append-missing, or distinct-entry decisions. Matching names
+or AI suggestions never automatically merge records or move tracks between Albums.
+Accepted Luna analysis runs as durable server work; closing or switching the
+originating page does not cancel it. Reopening reads retained status/results and
+drafts without restarting paid analysis or automatically publishing content.
+A fixed administrator workbench lists analyzing, awaiting-review, needs-attention,
+and completed projects, with independent upload/AI/review/publication states and
+protected server counts. Administrators can resume saved work across devices.
+Review provides a field/group diff with current values, sourced suggestions, and
+conflicts. Administrators adopt selected changes only into the private draft;
+publication uses the reviewed result and requires separate confirmation.
+
+The first implementation is available in Web, iOS, and Android behind independently
+disabled admission flags. Configuration and routes are documented in the
+[administrator workbench README](../README.md#finitude-administrator-workbench);
+shared behavior is defined in [business rules](business-rules.md#administrator-album-imports).
+The provider uses supplied names, folders and bounded embedded tags; embedded or
+manually uploaded artwork is explicitly selected. Source-verified external release
+and cover lookup, acoustic fingerprinting, and background file transfer remain
+separate future contracts. Production enablement follows real storage/delivery
+checks, representative provider cost/quality measurements, and physical-device
+acceptance. No production enablement is implied by local automated tests.
 
 ## P2 — Follow Artists and New Releases
 

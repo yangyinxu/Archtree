@@ -12,7 +12,8 @@ import { SocialError } from '../src/contracts/socialV1';
 import { getDb } from '../src/infrastructure/database';
 import { resetRateLimitWindowsForTests } from '../src/middleware/requestProtectionMiddleware';
 import { createSession } from '../src/services/authSessionService';
-import { resolveRoomAudioRepresentation } from '../src/services/mediaRepresentationService';
+import { resolveRoomAudioRepresentation, readRoomMediaAccess } from '../src/services/mediaRepresentationService';
+import { getDatabaseClient } from '../src/infrastructure/database';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from './support/mongoReplicaSet';
 
 let harness: MongoReplicaSetHarness;
@@ -38,7 +39,7 @@ before(async () => {
 beforeEach(async () => {
     now = Date.now(); resetRateLimitWindowsForTests();
     for (const name of ['users', 'authSessions', 'socialProfiles', 'socialHandles', 'socialBudgets', 'socialMutations',
-        'socialOutbox', 'audioTracks', 'socialRooms']) await db().collection(name).deleteMany({});
+        'socialOutbox', 'audioTracks', 'albums', 'socialRooms', 'socialRoomParticipation', 'socialRoomOutbox']) await db().collection(name).deleteMany({});
 });
 after(async () => {
     await new Promise<void>((resolve, reject) => server?.close(error => error ? reject(error) : resolve()));
@@ -51,6 +52,22 @@ const media = (index: number, title = `Melody ${index}`) => ({ _id: new ObjectId
     s3Key: id(index), mediaType: 'audio', uploadStatus: 'ready', publicationStatus: 'ready',
     mediaRepresentation: { revision: `mr_${index.toString(16).padStart(32, '0')}`, objectKey: id(index), byteLength: 320_044,
         durationMs: 10_000, seekable: true, format: 'wav-pcm', etag: '"synthetic-etag"', versionId: null } });
+test('queue batch preserves unavailable public occurrences while hiding own and parent visibility', async () => {
+    const hiddenAlbum = new ObjectId(), pendingAlbum = new ObjectId();
+    await db().collection('albums').insertMany([{ _id: hiddenAlbum, visibility: 'hidden', lifecycleStatus: 'ready' }, { _id: pendingAlbum, lifecycleStatus: 'deleting' }]);
+    await db().collection('audioTracks').insertMany([
+        media(1), { ...media(2), uploadStatus: 'deleting' }, { ...media(3), visibility: 'hidden' },
+        { ...media(4), albumId: hiddenAlbum.toHexString() }, { ...media(5), albumId: pendingAlbum.toHexString() }
+    ]);
+    const session = getDatabaseClient().startSession();
+    try {
+        const batch = await readRoomMediaAccess([1, 2, 3, 4, 5].map(id), session);
+        assert.equal(batch.get(id(1))?.media?.mediaTrackId, id(1));
+        assert.deepEqual(batch.get(id(2)), { media: null, canRead: true });
+        assert.equal(batch.has(id(3)), false); assert.equal(batch.has(id(4)), false);
+        assert.deepEqual(batch.get(id(5)), { media: null, canRead: true });
+    } finally { await session.endSession(); }
+});
 const account = async (active = true) => {
     const _id = new ObjectId(), user = { _id, email: `${_id}@example.test`, role: 'user', password: 'synthetic-unused-password', emailVerified: true };
     await db().collection('users').insertOne(user);
@@ -68,6 +85,23 @@ const request = (who: Account | null, path: string, headers: Record<string, stri
     headers: { ...(who ? { Authorization: `Bearer ${who.token}`, 'X-Finitude-Room-Client': who.actor.clientId } : {}), ...headers }
 });
 const json = async <T>(response: Response): Promise<T> => { assert.equal(response.status, 200); return response.json() as Promise<T>; };
+
+test('hiding a parent excludes discovery and every paused queue occurrence before and after sweep', async () => {
+    const who = await account(), album = new ObjectId();
+    await db().collection('albums').insertOne({ _id: album, title: 'Synthetic parent', lifecycleStatus: 'ready' });
+    await db().collection('audioTracks').insertMany([1, 2].map(index => ({ ...media(index), albumId: album.toHexString() })));
+    const api = createRoomService({ enabled: () => true, now: () => now, secret: () => secret,
+        assertAuthority: async () => 1, inspectAuthority: async () => 1 });
+    const social = createSocialService({ enabled: () => true, secret: () => secret }); const scope = await social.issueScope(who.actor);
+    const created = await api.mutate(who.actor, { action: 'create', scopeToken: scope.scopeToken, commandId: randomUUID(), mediaTrackIds: [id(1), id(2)] });
+    assert.equal(created.outcome, 'applied'); assert.equal((await api.currentRoom(who.actor))?.queue.length, 2);
+    await db().collection('albums').updateOne({ _id: album }, { $set: { visibility: 'hidden' } });
+    assert.deepEqual((await api.searchMedia(who.actor, {})).items, []);
+    const state = await api.currentRoom(who.actor); assert.ok(state);
+    assert.deepEqual(state.queue, []); assert.equal(state.timeline, null); assert.equal(state.preparation, null);
+    assert.equal(JSON.stringify(state).includes('Melody'), false);
+    await api.sweep(); const after = await api.currentRoom(who.actor); assert.deepEqual(after?.queue, []); assert.equal(after?.timeline, null);
+});
 
 test('room media search reaches every older eligible page without duplicate or skipped entries', async () => {
     const who = await account(), api = service();

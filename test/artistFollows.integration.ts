@@ -190,7 +190,8 @@ test('Album must contain a ready canonical track; pending, detached, nonready an
     await db.collection('albums').updateOne({ _id: oid(expandedGolden.included.albums[0]._id) }, { $set: { audioTrackIds: [] } });
     await db.collection('albums').updateOne({ _id: oid(expandedGolden.included.albums[1]._id) }, { $set: { lifecycleStatus: 'deleting' } });
     const items = await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now);
-    assert.equal(items.length, 4); assert.equal(items.every(row => row.contentType === 'audioTrack'), true);
+    assert.equal(items.length, 3); assert.equal(items.every(row => row.contentType === 'audioTrack'), true);
+    assert.equal(items.some(row => row.contentId === golden.albumFamilyTrackIds[1]), false, 'A track assigned to an unavailable Album fails closed.');
     await db.collection('audioTracks').updateMany({}, { $set: { publicationStatus: 'pending' } });
     assert.deepEqual(await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now), []);
 });

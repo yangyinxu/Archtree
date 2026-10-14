@@ -1,3 +1,4 @@
+import { isPublicCatalogVisibility } from '../services/catalogVisibilityService';
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { NextFunction, Request, Response } from 'express';
 import { Readable } from 'node:stream';
@@ -9,6 +10,7 @@ import { getRequestAbortSignal } from '../middleware/requestProtectionMiddleware
 import { AudioTrack } from '../models/audioTrack';
 import {
     createMediaAbortContext,
+    mediaAuthorizationTimeoutMs,
     parseSingleByteRange,
     pipeMediaStream,
     shouldHonorRange
@@ -33,7 +35,7 @@ const s3ErrorStatus = (error: any) => {
 };
 
 export interface SoundtrackVideoResolverDependencies {
-    findReadyTrack: (audioTrackId: string) => Promise<any | null>;
+    findReadyTrack: (audioTrackId: string, maxTimeMS?: number) => Promise<any | null>;
     headObject: (
         params: { Bucket: string; Key: string },
         abortSignal: AbortSignal
@@ -41,7 +43,7 @@ export interface SoundtrackVideoResolverDependencies {
 }
 
 const defaultResolverDependencies: SoundtrackVideoResolverDependencies = {
-    findReadyTrack: audioTrackId => AudioTrack.findReadyPublicById(audioTrackId),
+    findReadyTrack: (audioTrackId, maxTimeMS) => AudioTrack.findReadyPublicById(audioTrackId, maxTimeMS),
     headObject: (params, abortSignal) => getS3().send(
         new HeadObjectCommand(params),
         { abortSignal }
@@ -58,13 +60,21 @@ export const resolveReadyVideoAsset = async (
     const normalizedId = String(audioTrackId ?? '').trim().toLowerCase();
     if (!/^[0-9a-f]{24}$/.test(normalizedId)) return { status: 'notFound' as const };
     const track: any = await dependencies.findReadyTrack(normalizedId);
-    if (!track) return { status: 'notFound' as const };
+    if (!track || !isPublicCatalogVisibility(track)) return { status: 'notFound' as const };
     const s3Key = readyVideoObjectKey(track);
     if (!s3Key) return { status: 'notFound' as const };
     const params = { Bucket: process.env.S3_BUCKET_NAME!, Key: s3Key };
     const metadata = await dependencies.headObject(params, abortSignal);
     if (!metadata.ContentLength) return { status: 'notFound' as const };
-    return { status: 'ready' as const, track, params, metadata };
+    const current = await dependencies.findReadyTrack(normalizedId);
+    if (!current || !isPublicCatalogVisibility(current) || readyVideoObjectKey(current) !== s3Key) {
+        return { status: 'notFound' as const };
+    }
+    const authorize = async () => {
+        const latest = await dependencies.findReadyTrack(normalizedId, mediaAuthorizationTimeoutMs);
+        return Boolean(latest && isPublicCatalogVisibility(latest) && readyVideoObjectKey(latest) === s3Key);
+    };
+    return { status: 'ready' as const, track, params, metadata, authorize };
 };
 
 const setVideoHeaders = (
@@ -75,7 +85,7 @@ const setVideoHeaders = (
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Content-Length', contentLength);
-    res.setHeader('Cache-Control', 'no-transform');
+    res.setHeader('Cache-Control', 'private, no-store, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
     if (asset.metadata.ETag) res.setHeader('ETag', asset.metadata.ETag);
 };
@@ -148,16 +158,6 @@ export const streamSoundtrackVideo = async (
             return res.status(416).end();
         }
         const { start, end } = byteResponse;
-        res.status(byteResponse.status);
-        if (byteResponse.status === 206) {
-            res.setHeader('Content-Range', byteResponse.contentRange);
-        }
-
-        setVideoHeaders(res, asset, end - start + 1);
-        res.setHeader(
-            'Content-Disposition',
-            `inline; filename="${String(asset.track._id)}.mp4"`
-        );
         const object = await getS3().send(new GetObjectCommand({
             ...asset.params,
             Range: byteResponse.status === 206 ? `bytes=${start}-${end}` : undefined
@@ -166,7 +166,15 @@ export const streamSoundtrackVideo = async (
         if (!stream || typeof stream.pipe !== 'function') {
             throw new Error('S3 video body is not a readable stream.');
         }
-        await pipeMediaStream(req, res, stream, context);
+        await pipeMediaStream(req, res, stream, context, {
+            authorize: asset.authorize,
+            onAuthorized: () => {
+                res.status(byteResponse.status);
+                if (byteResponse.status === 206) res.setHeader('Content-Range', byteResponse.contentRange);
+                setVideoHeaders(res, asset, end - start + 1);
+                res.setHeader('Content-Disposition', `inline; filename="${String(asset.track._id)}.mp4"`);
+            }
+        });
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
         logCatalogFailure(res, 'media_stream_failed', error);
