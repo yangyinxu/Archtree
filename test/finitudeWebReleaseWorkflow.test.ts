@@ -124,6 +124,23 @@ test('browser evidence is retained even when a browser gate fails', async () => 
 /** Splits one job block into its steps; each step starts with `- name:` at six spaces. */
 const stepBlocks = (job: string) => job.split(/^ {6}- name: /m).slice(1).map(step => ({ name: step.split('\n')[0], body: step }));
 
+test('native playback startup fails early without replacing the complete browser gate', async () => {
+  const jobs = jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n'));
+  const steps = stepBlocks(jobs.get('browser-e2e')!);
+  const preflight = steps.find(step => step.name === 'Verify native playback startup before the complete browser matrix');
+  const gate = steps.find(step => /^ {8}id: browser$/m.test(step.body));
+  assert.ok(preflight && gate);
+  assert.ok(steps.indexOf(preflight) < steps.indexOf(gate));
+  assert.match(preflight.body, /room-playback-feasibility\.spec\.ts --grep='real scheduled start' --retries=0/);
+  assert.match(preflight.body, /--output=test-results\/room-playback-preflight/);
+  assert.match(preflight.body, /PULSE_LATENCY_MSEC: '100'/);
+  assert.doesNotMatch(preflight.body, /continue-on-error|^ {8}if:|--project/m);
+  assert.ok(gate.body.includes('run: npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none\n'));
+  assert.doesNotMatch(gate.body, /continue-on-error|^ {8}if:|--grep|--project/m);
+  assert.match(steps.find(step => step.body.includes('name: finitude-web-browser-evidence'))!.body,
+    /^ {12}web\/test-results$/m);
+});
+
 test('every social browser project participates in one blocking release outcome', async () => {
   const jobs = jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n'));
   const social = jobs.get('social-e2e')!;

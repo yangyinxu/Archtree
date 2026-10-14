@@ -277,6 +277,11 @@ jobs:
           pactl set-default-sink archtree_ci
           pactl list short sinks
 
+      - name: Verify native playback startup before the complete browser matrix
+        env:
+          PULSE_LATENCY_MSEC: '100'
+        run: npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts --grep='real scheduled start' --retries=0 --update-snapshots=none --output=test-results/room-playback-preflight
+
       - name: Run production-bundle browser and accessibility tests
         id: browser
         env:

@@ -7,6 +7,11 @@ import { createRoomPlaybackController } from '../../src/player/roomPlayback';
 const createHarness = () => {
   const intents: RoomPlaybackIntent[] = [];
   const observations: RoomPlaybackObservation[] = [];
+  // Preserve bounded native decoder evidence even if a browser stalls before a Playwright assertion completes.
+  const mediaEvents: { event: string; trusted: boolean; monotonicMs: number; currentTime: number;
+    duration: number; paused: boolean; seeking: boolean; readyState: number; networkState: number;
+    ended: boolean; rate: number; error: number | null; buffered: number[][]; seekable: number[][] }[] = [];
+  const ranges = (value: TimeRanges) => Array.from({ length: Math.min(value.length, 4) }, (_, index) => [value.start(index), value.end(index)]);
   let loads = 0;
   let plays = 0;
   let creations = 0;
@@ -20,6 +25,16 @@ const createHarness = () => {
       const media = document.createElement('video');
       media.playsInline = true;
       media.controls = false;
+      for (const event of ['loadstart', 'loadedmetadata', 'durationchange', 'canplay', 'play', 'playing', 'pause',
+        'timeupdate', 'seeking', 'seeked', 'waiting', 'stalled', 'ratechange', 'ended', 'error']) {
+        media.addEventListener(event, (value) => {
+          mediaEvents.push({ event, trusted: value.isTrusted, monotonicMs: performance.now(), currentTime: media.currentTime,
+            duration: media.duration, paused: media.paused, seeking: media.seeking, readyState: media.readyState,
+            networkState: media.networkState, ended: media.ended, rate: media.playbackRate, error: media.error?.code ?? null,
+            buffered: ranges(media.buffered), seekable: ranges(media.seekable) });
+          if (mediaEvents.length > 200) mediaEvents.shift();
+        });
+      }
       const load = media.load.bind(media);
       const play = media.play.bind(media);
       media.load = () => { loads += 1; load(); };
@@ -58,7 +73,10 @@ const createHarness = () => {
         snapshot: store.getSnapshot(), intents: [...intents], observations: [...observations],
         loads, plays, creations, mediaCount: document.querySelectorAll('video').length,
         paused: media?.paused, currentTime: media?.currentTime,
-        rate: media?.playbackRate, readyState: media?.readyState, seeking: media?.seeking
+        rate: media?.playbackRate, readyState: media?.readyState, seeking: media?.seeking,
+        networkState: media?.networkState, ended: media?.ended, error: media?.error?.code ?? null,
+        buffered: media ? ranges(media.buffered) : [], seekable: media ? ranges(media.seekable) : [],
+        mediaEvents: [...mediaEvents]
       };
     },
     next: () => store.next(),

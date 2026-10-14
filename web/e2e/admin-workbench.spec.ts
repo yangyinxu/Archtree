@@ -11,6 +11,43 @@ function publicationControl() {
   return { admission, completion, admit, complete };
 }
 
+/** Preserve native input and navigation evidence without querying a possibly stalled page after failure. */
+async function coverRecoveryDiagnostics(page: Page) {
+  const events: unknown[] = [], prefix = '[cover-recovery-input]';
+  const record = (event: unknown) => { events.push(event); if (events.length > 60) events.shift(); };
+  const consoleEvent = (message: import('@playwright/test').ConsoleMessage) => {
+    if (!message.text().startsWith(prefix)) return;
+    try { record(JSON.parse(message.text().slice(prefix.length))); } catch { /* Ignore unrelated console text. */ }
+  };
+  const navigated = (frame: import('@playwright/test').Frame) => { if (frame === page.mainFrame()) record({ type: 'navigation', path: new URL(frame.url()).pathname }); };
+  const requested = (request: import('@playwright/test').Request) => {
+    const path = new URL(request.url()).pathname;
+    if (/^\/api\/admin\/v1\/catalog\/(artist|album)(\/|$)/.test(path)) record({ type: 'request', method: request.method(), path });
+  };
+  const crashed = () => record({ type: 'crash' }), closed = () => record({ type: 'close' });
+  page.on('console', consoleEvent); page.on('framenavigated', navigated); page.on('request', requested); page.on('crash', crashed); page.on('close', closed);
+  await page.addInitScript(({ prefix }) => {
+    const describe = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return null;
+      const details = target.closest('details');
+      if (details?.querySelector('summary')?.textContent !== 'Recover cover operations for an item') return null;
+      return { tag: target.tagName, valueLength: target instanceof HTMLInputElement ? target.value.length : undefined,
+        disabled: target instanceof HTMLButtonElement ? target.disabled : undefined, open: details.open };
+    };
+    for (const type of ['pointermove', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'focusin', 'focusout', 'submit']) {
+      document.addEventListener(type, event => {
+        const target = describe(event.target);
+        if (target) console.debug(prefix + JSON.stringify({ type, trusted: event.isTrusted, target,
+          active: describe(document.activeElement), path: location.pathname, time: performance.now() }));
+      }, true);
+    }
+  }, { prefix });
+  return {
+    snapshot: () => ({ path: new URL(page.url()).pathname, closed: page.isClosed(), events }),
+    dispose: () => { page.off('console', consoleEvent); page.off('framenavigated', navigated); page.off('request', requested); page.off('crash', crashed); page.off('close', closed); }
+  };
+}
+
 async function setup(page: Page, admin = true, media = false, publication?: PublicationControl) {
   let item = detail(); const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   let uploadAttempts = 0; let publicationReads = 0;
@@ -77,7 +114,9 @@ test('admin explicitly opens workbench, adopts only selected suggestion, and Use
   await expect(page.getByRole('heading', { name: 'Suggested Album' })).toHaveCount(0);
 });
 
-test('cancelled cover cleanup remains reachable when the owner disappears, without restoring private metadata', async ({ page }) => {
+test('cancelled cover cleanup remains reachable when the owner disappears, without restoring private metadata', async ({ page }, testInfo) => {
+  const diagnostics = await coverRecoveryDiagnostics(page);
+  try {
   await setup(page);
   const id='111111111111111111111111', original='30000000-0000-4000-8000-000000000003';
   const item={kind:'artist',id,revision:`cr_${'a'.repeat(43)}`,visibility:'public',effectiveVisibility:'public',coverUrl:null,mediaUrl:null,capabilities:{editing:true,visibility:true},fields:{name:'Private synthetic artist',bio:'',birthDate:null}};
@@ -111,6 +150,10 @@ test('cancelled cover cleanup remains reachable when the owner disappears, witho
   await page.getByRole('button',{name:'Retry cleanup'}).click();
   await expect(page.getByText('The unconfirmed cover change is cancelled.')).toBeVisible();
   expect(writes[1].body).toEqual({});expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+  } catch (error) {
+    await testInfo.attach('cover-recovery-input', { contentType: 'application/json', body: JSON.stringify(diagnostics.snapshot(), null, 2) });
+    throw error;
+  } finally { diagnostics.dispose(); }
 });
 
 test('reopening a visited catalog owner after a confirmed deletion drops its old buffer and cancels with a null revision', async ({ page }) => {

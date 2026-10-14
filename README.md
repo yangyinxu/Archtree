@@ -1131,8 +1131,11 @@ These gates are parallel jobs, each with its own timeout of 30 minutes or less:
 build that `build` shares as the short-lived `finitude-web-release-build`
 artifact. The social job first runs the unchanged WebKit compressed-audio scenario
 with its own fixture processes and evidence directory, then runs the complete
-social matrix. Both invocations remain blocking and retain their evidence even
-on failure. `release-artifact` needs all four jobs, so it is skipped unless every
+social matrix. The ordinary browser job first verifies native scheduled startup,
+pause/resume, rate correction, and natural completion in all three engines with
+zero retries and a separate evidence directory, then runs its complete matrix.
+Both jobs retain preflight and full-matrix evidence, and every invocation is
+blocking. `release-artifact` needs all four jobs, so it is skipped unless every
 gate succeeds. It stages those same build bytes without rebuilding and binds each
 gate step's outcome into the provenance. A run normally finishes in about 20–25
 minutes, inside the promoter's wait. If branch protection is added, require every

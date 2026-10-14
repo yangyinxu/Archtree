@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { build } from 'vite';
 import { fileURLToPath } from 'node:url';
+import { writeFile } from 'node:fs/promises';
 import { createTestTone } from './fixtures/audio';
 import { fulfillMedia } from './support/apiRoutes';
 import type {} from './support/roomPlaybackHarness';
@@ -38,6 +39,16 @@ test.beforeEach(async ({ page }) => {
   }));
   await page.goto('/__room-probe');
   await page.waitForFunction(() => Boolean(window.roomProbe));
+});
+
+test.afterEach(async ({ page }, testInfo) => {
+  if (page.isClosed()) return;
+  const state = await page.evaluate(() => window.roomProbe?.state()).catch(() => undefined);
+  if (state) {
+    const path = testInfo.outputPath('room-playback-evidence.json');
+    await writeFile(path, JSON.stringify(state, null, 2));
+    await testInfo.attach('room-playback-evidence', { contentType: 'application/json', path });
+  }
 });
 
 test('real audio prepares and seeks without feedback; shared trace keeps one media element', async ({ page }) => {
@@ -86,6 +97,7 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
     const resetWindow = () => { baseline = media.currentTime; startedAt = performance.now(); };
     const observeSeek = (event: Event) => { if (event.isTrusted) resetWindow(); };
     const cleanup = () => {
+      clearTimeout(deadline);
       media.removeEventListener('timeupdate', observe);
       media.removeEventListener('seeking', observeSeek);
       media.removeEventListener('seeked', observeSeek);
@@ -93,6 +105,12 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
       media.removeEventListener('error', failed);
     };
     const failed = () => { cleanup(); reject(new Error('Native playback stopped before credible progress.')); };
+    const deadline = setTimeout(() => {
+      cleanup(); reject(new Error(`Native playback did not establish credible progress: ${JSON.stringify({
+        baseline, startedAt, currentTime: media.currentTime, readyState: media.readyState,
+        paused: media.paused, seeking: media.seeking, ended: media.ended, error: media.error?.code ?? null
+      })}; see room-playback-evidence.json.`));
+    }, 7_000);
     const observe = (event: Event) => {
       const advancedSeconds = media.currentTime - baseline, elapsedSeconds = (performance.now() - startedAt) / 1000;
       if (!event.isTrusted) return;
@@ -107,6 +125,7 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
     media.addEventListener('seeked', observeSeek);
     media.addEventListener('ended', failed);
     media.addEventListener('error', failed);
+    if (media.ended || media.error) failed();
   }));
   expect(progress.advancedSeconds).toBeGreaterThan(0.02);
   expect(progress.elapsedSeconds).toBeGreaterThan(0);
