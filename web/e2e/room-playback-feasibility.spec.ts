@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { createPcmWav } from '../../test/support/pcmWav';
 import { createTestTone } from './fixtures/audio';
 import type {} from './support/roomPlaybackHarness';
 
@@ -14,6 +16,105 @@ let requestSequence = 0, caseRequestStart = 0;
 let toneSha256 = '';
 const transport: { sequence: number; method: string; pathname: string; range: string | null; status: number;
   contentLength: number; contentRange: string | null; finished: boolean }[] = [];
+
+/** Temporary Linux-only decoder comparison; unmuted cases require the CI's verified null output sink. */
+const compareNativePlayback = async (page: Page) => {
+  const options = { encoding: 'utf8' as const, timeout: 2_000, maxBuffer: 8_192 };
+  expect(execFileSync('pactl', ['get-default-sink'], options).trim()).toBe('archtree_ci');
+  const sinks = execFileSync('pactl', ['list', 'short', 'sinks'], options).trim().split(/\r?\n/)
+    .map(line => line.trim().split(/\s+/));
+  expect(sinks.some(columns => columns[1] === 'archtree_ci' && columns[2] === 'module-null-sink.c')).toBe(true);
+  const results = [];
+  const variants = [
+    { sampleRate: 8000, muted: true, hidden: true, gesture: false },
+    { sampleRate: 8000, muted: false, hidden: true, gesture: false },
+    { sampleRate: 8000, muted: true, hidden: false, gesture: false },
+    { sampleRate: 8000, muted: false, hidden: false, gesture: false },
+    { sampleRate: 16000, muted: true, hidden: true, gesture: false },
+    { sampleRate: 16000, muted: false, hidden: true, gesture: false },
+    { sampleRate: 8000, muted: false, hidden: true, gesture: true }
+  ];
+  for (const variant of variants) {
+    const observation = page.evaluate(variant => new Promise((resolve) => {
+      const host = document.createElement('div'), media = document.createElement('video');
+      host.hidden = variant.hidden;
+      media.playsInline = true;
+      media.muted = variant.muted;
+      media.preload = 'auto';
+      media.style.cssText = 'width:240px;height:80px';
+      host.appendChild(media);
+      document.body.appendChild(host);
+      const startedAt = performance.now();
+      const events: { event: string; trusted: boolean; elapsedMs: number; currentTime: number;
+        duration: number | null; readyState: number; paused: boolean; seeking: boolean; ended: boolean; error: number | null }[] = [];
+      const button = variant.gesture ? document.createElement('button') : undefined;
+      if (button) {
+        button.textContent = 'Start native hidden audio';
+        button.disabled = true;
+        document.body.appendChild(button);
+      }
+      let finished = false, attemptedPlay = false, playResult = 'not_attempted', rejectionName: string | null = null;
+      let gestureTrusted = false;
+      let maxTime = 0, trustedAdvancingUpdates = 0;
+      const read = () => ({ currentTime: media.currentTime,
+        duration: media.readyState >= 1 && Number.isFinite(media.duration) ? media.duration : null,
+        readyState: media.readyState, paused: media.paused, seeking: media.seeking, ended: media.ended,
+        error: media.error?.code ?? null });
+      const finish = (outcome: string) => {
+        if (finished) return;
+        finished = true;
+        const state = read();
+        clearTimeout(deadline);
+        for (const event of names) media.removeEventListener(event, observe);
+        button?.removeEventListener('click', startFromGesture);
+        button?.remove();
+        media.pause();
+        media.removeAttribute('src');
+        media.load();
+        host.remove();
+        resolve({ ...variant, outcome, playResult, rejectionName, gestureTrusted, maxTime, trustedAdvancingUpdates, state, events });
+      };
+      const startPlayback = () => {
+        if (attemptedPlay || finished) return;
+        attemptedPlay = true;
+        playResult = 'pending';
+        void media.play().then(() => { if (!finished) playResult = 'resolved'; }, (error: unknown) => {
+          if (finished) return;
+          playResult = 'rejected';
+          rejectionName = error instanceof DOMException ? error.name : 'UnknownError';
+          finish('play_rejected');
+        });
+      };
+      const startFromGesture = (event: Event) => {
+        gestureTrusted = event.isTrusted;
+        if (event.isTrusted) startPlayback();
+      };
+      button?.addEventListener('click', startFromGesture);
+      const names = ['loadedmetadata', 'canplay', 'play', 'playing', 'timeupdate', 'pause', 'ended', 'waiting', 'stalled', 'error'];
+      const observe = (event: Event) => {
+        const state = read();
+        if (events.length < 40) events.push({ event: event.type, trusted: event.isTrusted,
+          elapsedMs: performance.now() - startedAt, ...state });
+        if (event.isTrusted && event.type === 'timeupdate' && !state.paused && !state.seeking
+          && state.readyState >= 3 && state.currentTime > maxTime) trustedAdvancingUpdates += 1;
+        maxTime = Math.max(maxTime, state.currentTime);
+        if (event.type === 'error' || event.type === 'ended') { finish(event.type); return; }
+        if (event.type !== 'loadedmetadata' || attemptedPlay) return;
+        if (button) button.disabled = false;
+        else startPlayback();
+      };
+      const deadline = setTimeout(() => finish('timeout'), 1_000);
+      for (const event of names) media.addEventListener(event, observe);
+      media.src = variant.sampleRate === 8000 ? '/__room-tone/a.wav' : '/__room-tone/pcm16k.wav';
+      media.load();
+      }), variant);
+    if (variant.gesture) {
+      await page.getByRole('button', { name: 'Start native hidden audio', exact: true }).click({ timeout: 1_000 }).catch(() => undefined);
+    }
+    results.push(await observation);
+  }
+  return results;
+};
 
 /** Native Play can precede decoder progress; prove a continuous clock window before testing playback transitions. */
 const expectCredibleProgress = async (page: Page) => {
@@ -68,7 +169,8 @@ const startProbeServer = async () => {
     ['/__room-probe', { body: Buffer.from('<!doctype html><html><body><script src="/__room-probe.js"></script></body></html>'), type: 'text/html; charset=utf-8' }],
     ['/__room-probe.js', { body: Buffer.from(harnessBundle), type: 'text/javascript; charset=utf-8' }],
     ['/__room-tone/a.wav', { body: tone, type: 'audio/wav' }],
-    ['/__room-tone/b.wav', { body: tone, type: 'audio/wav' }]
+    ['/__room-tone/b.wav', { body: tone, type: 'audio/wav' }],
+    ['/__room-tone/pcm16k.wav', { body: createPcmWav(2000), type: 'audio/wav' }]
   ]);
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
@@ -157,8 +259,19 @@ test.beforeAll(async () => {
   await startProbeServer();
 });
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, browserName }, testInfo) => {
   caseRequestStart = requestSequence;
+  if (process.platform === 'linux' && process.env.CI && browserName === 'webkit') {
+    // Keep the diagnostic's trusted gesture and temporary media outside the original probe document.
+    const diagnosticPage = await page.context().newPage();
+    try {
+      await diagnosticPage.goto(`${probeOrigin}/__room-probe`);
+      const matrix = await compareNativePlayback(diagnosticPage);
+      const path = testInfo.outputPath('room-playback-native-comparison.json');
+      await writeFile(path, JSON.stringify({ isolatedSink: 'archtree_ci', fixtureSeconds: 2, matrix }, null, 2));
+      await testInfo.attach('room-playback-native-comparison', { contentType: 'application/json', path });
+    } finally { await diagnosticPage.close(); }
+  }
   await page.goto(`${probeOrigin}/__room-probe`);
   await page.waitForFunction(() => Boolean(window.roomProbe));
 });
