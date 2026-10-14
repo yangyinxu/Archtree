@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { createTestTone } from './fixtures/audio';
 import type {} from './support/roomPlaybackHarness';
 
@@ -12,12 +13,24 @@ let probeServer: Server | undefined;
 let probeOrigin = '';
 let requestSequence = 0, caseRequestStart = 0;
 let caseFormat: 'wav' | 'mp3' = 'wav';
+const isolatedAudioRequested = process.platform === 'linux' && ['true', '1'].includes(process.env.CI ?? '')
+  && process.env.FINITUDE_E2E_ISOLATED_AUDIO === '1';
+let isolatedAudioVerified = false;
 const fixtures = {
   wav: { format: 'wav', durationSeconds: 2, sampleRate: 8_000, bytes: 0, sha256: '' },
   mp3: { format: 'mp3', durationSeconds: 120, sampleRate: 44_100, bytes: 0, sha256: '' }
 };
 const transport: { sequence: number; method: string; pathname: string; range: string | null; status: number;
   contentLength: number; contentRange: string | null; finished: boolean }[] = [];
+
+/** Unmute only through the fixture's trusted button, after the CI output device has been verified. */
+const enableIsolatedAudio = async (page: Page) => {
+  const button = page.getByRole('button', { name: 'Enable isolated test audio', exact: true });
+  if (isolatedAudioVerified) await button.click();
+  else await expect(button).toHaveCount(0);
+  expect(await page.locator('video').evaluate(media => (media as HTMLVideoElement).muted)).toBe(!isolatedAudioVerified);
+  expect(await page.evaluate(() => window.roomProbe.state().snapshot.muted)).toBe(!isolatedAudioVerified);
+};
 
 /** Native Play can precede decoder progress; prove a continuous clock window before testing playback transitions. */
 const expectCredibleProgress = async (page: Page) => {
@@ -177,6 +190,17 @@ const startProbeServer = async () => {
 };
 
 test.beforeAll(async () => {
+  if (isolatedAudioRequested) {
+    const options = { encoding: 'utf8' as const, timeout: 2_000, maxBuffer: 8_192 };
+    const defaultSink = execFileSync('pactl', ['get-default-sink'], options).trim();
+    const sinks = execFileSync('pactl', ['list', 'short', 'sinks'], options).trim().split(/\r?\n/)
+      .map(line => line.trim().split(/\s+/));
+    if (defaultSink !== 'archtree_ci'
+      || !sinks.some(columns => columns[1] === 'archtree_ci' && columns[2] === 'module-null-sink.c')) {
+      throw new Error('Isolated test audio requires the archtree_ci PulseAudio null sink as the default output.');
+    }
+    isolatedAudioVerified = true;
+  }
   const output = await build({
     configFile: false,
     publicDir: false,
@@ -200,7 +224,10 @@ test.beforeAll(async () => {
 test.beforeEach(async ({ page }, testInfo) => {
   caseRequestStart = requestSequence;
   caseFormat = testInfo.title.startsWith('real scheduled start') ? 'mp3' : 'wav';
-  await page.goto(`${probeOrigin}/__room-probe${caseFormat === 'mp3' ? '?format=mp3' : ''}`);
+  const url = new URL('/__room-probe', probeOrigin);
+  if (caseFormat === 'mp3') url.searchParams.set('format', 'mp3');
+  if (isolatedAudioVerified) url.searchParams.set('isolatedAudio', '1');
+  await page.goto(url.href);
   await page.waitForFunction(() => Boolean(window.roomProbe));
 });
 
@@ -212,6 +239,7 @@ test.afterEach(async ({ page }, testInfo) => {
     const nativeDurationSeconds = state.duration
       ?? state.mediaEvents.filter(event => event.event === 'loadedmetadata').at(-1)?.duration ?? null;
     await writeFile(path, JSON.stringify({ ...state, fixture: { ...fixtures[caseFormat], nativeDurationSeconds },
+      isolatedAudio: { enabled: isolatedAudioVerified, sink: isolatedAudioVerified ? 'archtree_ci' : null },
       transport: transport.filter(item => item.sequence > caseRequestStart) }, null, 2));
     await testInfo.attach('room-playback-evidence', { contentType: 'application/json', path });
   }
@@ -231,6 +259,7 @@ test.afterAll(async ({}, testInfo) => {
 
 test('real audio prepares and seeks without feedback; shared trace keeps one media element', async ({ page }) => {
   await page.evaluate(() => window.roomProbe.apply(0));
+  await enableIsolatedAudio(page);
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().observations.some((item) => item.type === 'ready'))).toBe(true);
   await page.evaluate(() => window.roomProbe.apply(1));
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().observations.some((item) => item.type === 'ready' && item.entryId === 'entry-b'))).toBe(true);
@@ -255,6 +284,7 @@ test('real audio prepares and seeks without feedback; shared trace keeps one med
 
 test('real scheduled start, local pause, rate correction and natural end cannot echo commands', async ({ page }) => {
   await page.evaluate(() => window.roomProbe.apply(0));
+  await enableIsolatedAudio(page);
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().readyState)).toBeGreaterThanOrEqual(3);
   await expect.poll(() => page.evaluate((durationSeconds) => {
     const state = window.roomProbe.state();

@@ -1155,11 +1155,17 @@ Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinar
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
 Only the two ordinary Linux browser test commands set
-`WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`. The probe keeps its media muted
-to isolate hardware output; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L3728-L3767)
+`FINITUDE_E2E_ISOLATED_AUDIO=1`. Before exposing an audio-enable button, the probe
+requires Linux CI and verifies through `pactl` that the default `archtree_ci` output
+uses `module-null-sink.c`; a missing or different output fails setup. Each scenario
+creates its initially muted media, then clicks **Enable isolated test audio** with
+a real browser gesture. The button only calls the existing mute control. Local
+Windows runs keep the media muted and expose no button.
+The same two commands retain
+`WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L3728-L3767)
 disables WPE's viewport power-saving pause for hidden muted video elements,
 including audio-only sources. Media clocks, readiness, seeks, rates, and end events
-remain native. The independent social gate does not set the switch and continues
+remain native. The independent social gate sets neither switch and continues
 to verify real audio and background playback under the default browser policy.
 Both jobs retain preflight and full-matrix evidence, and every invocation is
 blocking. `release-artifact` needs all four jobs, so it is skipped unless every

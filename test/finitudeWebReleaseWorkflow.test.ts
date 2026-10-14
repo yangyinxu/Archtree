@@ -146,15 +146,16 @@ test('ordinary browser audio isolation does not change the native social environ
   const workflow = (await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n');
   const jobs = jobBlocks(workflow);
   const browser = jobs.get('browser-e2e')!;
-  const flag = "WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS: '1'";
-  const steps = stepBlocks(browser).filter(step => step.body.includes(flag));
-  assert.equal(steps.length, 2);
-  assert.ok(steps.some(step => step.name === 'Verify native playback startup before the complete browser matrix'));
-  assert.ok(steps.some(step => /^ {8}id: browser$/m.test(step.body)));
-  assert.equal(browser.split(flag).length - 1, 2, 'The switch belongs only to the two ordinary browser invocations.');
-  assert.equal(workflow.split('WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS').length - 1, 2,
-    'No global environment or other job may inherit the ordinary browser switch.');
-  assert.doesNotMatch(jobs.get('social-e2e')!, /WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS/);
+  for (const name of ['WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS', 'FINITUDE_E2E_ISOLATED_AUDIO']) {
+    const flag = `${name}: '1'`;
+    const steps = stepBlocks(browser).filter(step => step.body.includes(flag));
+    assert.equal(steps.length, 2);
+    assert.ok(steps.some(step => step.name === 'Verify native playback startup before the complete browser matrix'));
+    assert.ok(steps.some(step => /^ {8}id: browser$/m.test(step.body)));
+    assert.equal(browser.split(flag).length - 1, 2, 'The switch belongs only to the two ordinary browser invocations.');
+    assert.equal(workflow.split(name).length - 1, 2, 'No global environment or other job may inherit the ordinary browser switch.');
+    assert.ok(!jobs.get('social-e2e')!.includes(name));
+  }
 });
 
 test('every social browser project participates in one blocking release outcome', async () => {

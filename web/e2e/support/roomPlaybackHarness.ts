@@ -48,11 +48,19 @@ const createHarness = () => {
       return media;
     }
   });
+  const parameters = new URL(location.href).searchParams;
+  const isolatedAudioButton = parameters.get('isolatedAudio') === '1' ? document.createElement('button') : undefined;
+  if (isolatedAudioButton) {
+    isolatedAudioButton.type = 'button';
+    isolatedAudioButton.textContent = 'Enable isolated test audio';
+    isolatedAudioButton.onclick = event => { if (event.isTrusted) store.setMuted(false); };
+    document.body.appendChild(isolatedAudioButton);
+  }
   const room = store.attachRoomPlayback({
     onIntent: (value) => intents.push(value),
     onObservation: (value) => observations.push(value)
   });
-  const format = new URL(location.href).searchParams.get('format') === 'mp3' ? 'mp3' : 'wav';
+  const format = parameters.get('format') === 'mp3' ? 'mp3' : 'wav';
   const queue = ['a', 'b'].map((name, index) => ({
     id: `00000000000000000000000${index + 1}`, title: name,
     artworkUrl: '', artistNames: [], mediaType: 'audio' as const,
@@ -97,7 +105,7 @@ const createHarness = () => {
       if (media) media.currentTime = positionSeconds;
     },
     detach: () => room.detach(),
-    destroy: () => store.destroy()
+    destroy() { isolatedAudioButton?.remove(); store.destroy(); }
   };
 };
 
