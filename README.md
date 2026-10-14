@@ -1144,6 +1144,13 @@ after resuming; a native `playing` event alone does not prove advancing playback
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
+Only the two ordinary Linux browser test commands set
+`WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`. The probe keeps its media muted
+to isolate hardware output; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L3728-L3767)
+disables WPE's viewport power-saving pause for hidden muted video elements,
+including audio-only sources. Media clocks, readiness, seeks, rates, and end events
+remain native. The independent social gate does not set the switch and continues
+to verify real audio and background playback under the default browser policy.
 Both jobs retain preflight and full-matrix evidence, and every invocation is
 blocking. `release-artifact` needs all four jobs, so it is skipped unless every
 gate succeeds. It stages those same build bytes without rebuilding and binds each
