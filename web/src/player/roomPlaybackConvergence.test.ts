@@ -268,7 +268,8 @@ test('a new occurrence receives its own bounded compensation opportunity', async
   const { room, state, seek, seeked, advance } = await setup();
   room.correct(21); seeked(); await advance(1000); await advance(100, 0.1);
   await room.apply({ ...state, revision: 2, playbackEpoch: 2, positionSeconds: 40, anchorMonotonicMs: 10000 + performance.now() });
-  seeked();
+  seeked(); // Complete the old correction before the new occurrence dispatches its preparation seek.
+  seeked(); // Only this completion makes the new occurrence ready for drift correction.
   const count = seek.mock.calls.length;
   room.correct(41); seeked(); await advance(1000); await advance(100, 0.1);
   expect(seek).toHaveBeenCalledTimes(count + 2);

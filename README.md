@@ -456,6 +456,9 @@ the [production acceptance record](docs/deployment/finitude-web-rollout-runbook.
 
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
+An explicit resync during a native seek keeps its pending intent until that seek
+finishes, then recomputes the position from the current authoritative anchor.
+It cannot overlap native seeks or report the superseded position as ready.
 It corrects startup drift after credible media-clock advancement. Small-drift
 heartbeats retain their clock reference but defer rate changes until that first
 progress, avoiding a decoder flush before playback begins; larger drift can still

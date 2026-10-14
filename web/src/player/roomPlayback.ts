@@ -360,6 +360,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
     if (!state || !target || !matchesSource(target) || seekFailed || target.error) return;
     // The 1s retry lands well inside the server's 3s preparation window, so the device can still join the cohort.
     if (!hasMetadata(target)) { scheduleSourceReload(target, missingDuration); return; }
+    // Replacing an effect cannot cancel the element's native seek; its completion will use the latest authority.
+    if (target.seeking) return;
     if (needsSeek) {
       needsSeek = false;
       seekPending = true;
@@ -713,7 +715,8 @@ export const createRoomPlaybackController = (port: RoomPlaybackPort, options: Ro
             postSeek.baselineAt = now();
           }
         }
-        report('seek-complete');
+        // A replaced effect still needs its own target; the old native completion cannot confirm it.
+        if (!needsSeek) report('seek-complete');
       }
       // A duration may arrive after loadedmetadata/canplay; it must still be able to report readiness.
       if (['loadedmetadata', 'canplay', 'durationchange', 'seeked'].includes(event)) void reconcile();
