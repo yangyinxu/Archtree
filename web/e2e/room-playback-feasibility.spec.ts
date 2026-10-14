@@ -14,6 +14,7 @@ let requestSequence = 0, caseRequestStart = 0;
 let toneSha256 = '';
 let toneBytes = 0;
 const toneDurationSeconds = 15;
+const toneSampleRate = 48_000;
 const transport: { sequence: number; method: string; pathname: string; range: string | null; status: number;
   contentLength: number; contentRange: string | null; finished: boolean }[] = [];
 
@@ -79,8 +80,8 @@ const expectCredibleProgress = async (page: Page) => {
 
 /** Uses native loopback HTTP for both the probe and media; intercepted responses are not a real decoder transport. */
 const startProbeServer = async () => {
-  // Keep the stock PCM long enough for real startup and controller convergence before testing rate/end transitions.
-  const tone = createTestTone();
+  // Standard-rate PCM avoids low-rate output buffering while leaving time for real controller convergence.
+  const tone = createTestTone(toneSampleRate);
   expect((tone.length - 44) / tone.readUInt32LE(28)).toBe(toneDurationSeconds);
   toneBytes = tone.length;
   toneSha256 = createHash('sha256').update(tone).digest('hex');
@@ -188,7 +189,8 @@ test.afterEach(async ({ page }, testInfo) => {
   const state = await page.evaluate(() => window.roomProbe?.state()).catch(() => undefined);
   if (state) {
     const path = testInfo.outputPath('room-playback-evidence.json');
-    await writeFile(path, JSON.stringify({ ...state, fixture: { durationSeconds: toneDurationSeconds, bytes: toneBytes, sha256: toneSha256 },
+    await writeFile(path, JSON.stringify({ ...state, fixture: { durationSeconds: toneDurationSeconds,
+      sampleRate: toneSampleRate, bytes: toneBytes, sha256: toneSha256 },
       transport: transport.filter(item => item.sequence > caseRequestStart) }, null, 2));
     await testInfo.attach('room-playback-evidence', { contentType: 'application/json', path });
   }

@@ -158,9 +158,9 @@ const testVideoBase64 = [
   'wAAYABhYL/QACAAA+4I5ZRxTu2ucu4uzgQC3hveBAfGBwbuNs4InbbeH94EB8YIcug==',
 ].join('');
 
-/** Produces a small PCM WAV that every Playwright browser can decode deterministically. */
-export const createTestTone = () => {
-  const sampleCount = sampleRate * durationSeconds;
+/** Produces deterministic PCM; native clock probes can select a standard output sample rate. */
+export const createTestTone = (toneSampleRate = sampleRate) => {
+  const sampleCount = toneSampleRate * durationSeconds;
   const dataLength = sampleCount * channelCount * bytesPerSample;
   const output = Buffer.alloc(44 + dataLength);
 
@@ -171,15 +171,15 @@ export const createTestTone = () => {
   output.writeUInt32LE(16, 16);
   output.writeUInt16LE(1, 20);
   output.writeUInt16LE(channelCount, 22);
-  output.writeUInt32LE(sampleRate, 24);
-  output.writeUInt32LE(sampleRate * channelCount * bytesPerSample, 28);
+  output.writeUInt32LE(toneSampleRate, 24);
+  output.writeUInt32LE(toneSampleRate * channelCount * bytesPerSample, 28);
   output.writeUInt16LE(channelCount * bytesPerSample, 32);
   output.writeUInt16LE(bytesPerSample * 8, 34);
   output.write('data', 36);
   output.writeUInt32LE(dataLength, 40);
 
   for (let index = 0; index < sampleCount; index += 1) {
-    const sample = Math.sin((2 * Math.PI * 220 * index) / sampleRate) * 0.08;
+    const sample = Math.sin((2 * Math.PI * 220 * index) / toneSampleRate) * 0.08;
     output.writeInt16LE(Math.round(sample * 32_767), 44 + index * bytesPerSample);
   }
 

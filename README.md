@@ -1134,7 +1134,7 @@ with its own fixture processes and evidence directory, then runs the complete
 social matrix. The ordinary browser job first verifies native scheduled startup,
 pause/resume, rate correction, and natural completion in all three engines with
 zero retries and a separate evidence directory, then runs its complete matrix.
-Its synthetic fifteen-second WAV leaves room for native startup and controller
+Its synthetic fifteen-second 48 kHz PCM WAV leaves room for native startup and controller
 convergence before the rate/end transitions, and uses real loopback HTTP with verified HEAD and
 Range responses; evidence includes native metadata, events, and transport outcomes.
 Diagnostics inspect native ranges only after finite metadata is available, since
