@@ -1162,7 +1162,7 @@ creates its initially muted media, then clicks **Enable isolated test audio** wi
 a real browser gesture. The button only calls the existing mute control. Local
 Windows runs keep the media muted and expose no button.
 The same two commands retain
-`WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L3728-L3767)
+`WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L4101-L4144)
 disables WPE's viewport power-saving pause for hidden muted video elements,
 including audio-only sources. Media clocks, readiness, seeks, rates, and end events
 remain native. The independent social gate sets neither switch and continues
