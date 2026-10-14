@@ -5,6 +5,7 @@ import { writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
 import { createTestTone } from './fixtures/audio';
+import { createPcmWav } from '../../test/support/pcmWav';
 import type {} from './support/roomPlaybackHarness';
 
 let harnessBundle = '';
@@ -25,7 +26,8 @@ const startProbeServer = async () => {
     ['/__room-probe', { body: Buffer.from('<!doctype html><html><body><script src="/__room-probe.js"></script></body></html>'), type: 'text/html; charset=utf-8' }],
     ['/__room-probe.js', { body: Buffer.from(harnessBundle), type: 'text/javascript; charset=utf-8' }],
     ['/__room-tone/a.wav', { body: tone, type: 'audio/wav' }],
-    ['/__room-tone/b.wav', { body: tone, type: 'audio/wav' }]
+    ['/__room-tone/b.wav', { body: tone, type: 'audio/wav' }],
+    ['/__room-tone/metadata-16k.wav', { body: createPcmWav(2000), type: 'audio/wav' }]
   ]);
   const server = createServer((request, response) => {
     const pathname = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
@@ -114,10 +116,61 @@ test.beforeAll(async () => {
   await startProbeServer();
 });
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, browserName }, testInfo) => {
   caseRequestStart = requestSequence;
   await page.goto(`${probeOrigin}/__room-probe`);
   await page.waitForFunction(() => Boolean(window.roomProbe));
+  if (browserName === 'webkit') {
+    // Observe native metadata independently of the store, without ever requesting playback or changing the real test.
+    const comparison = await page.evaluate(async () => {
+      const initialMediaCount = document.querySelectorAll('video').length;
+      const results = [];
+      const readRanges = (ranges: TimeRanges) => Array.from({ length: Math.min(ranges.length, 4) }, (_, index) => [ranges.start(index), ranges.end(index)]);
+      for (const sampleRate of [8000, 16000]) for (const muted of [true, false]) {
+        const result = await new Promise<{ sampleRate: number; muted: boolean; result: string; trusted: boolean | null;
+          duration: number | null; readyState: number; paused: boolean; error: number | null;
+          buffered: number[][]; seekable: number[][]; elapsedMs: number }>(resolve => {
+          const host = document.createElement('div'), media = document.createElement('video');
+          host.hidden = true;
+          host.append(media);
+          document.body.append(host);
+          media.preload = 'auto';
+          media.playsInline = true;
+          media.muted = muted;
+          const startedAt = performance.now();
+          let finished = false;
+          const complete = (result: string, event?: Event) => {
+            if (finished) return;
+            finished = true;
+            const value = { sampleRate, muted, result, trusted: event?.isTrusted ?? null,
+              duration: Number.isFinite(media.duration) ? media.duration : null, readyState: media.readyState,
+              paused: media.paused, error: media.error?.code ?? null, buffered: readRanges(media.buffered),
+              seekable: readRanges(media.seekable), elapsedMs: performance.now() - startedAt };
+            clearTimeout(deadline);
+            media.removeEventListener('loadedmetadata', metadata);
+            media.removeEventListener('error', failed);
+            try { media.removeAttribute('src'); media.load(); } catch { /* Diagnostic cleanup must still remove its node. */ }
+            host.remove();
+            resolve(value);
+          };
+          const metadata = (event: Event) => complete('loadedmetadata', event);
+          const failed = (event: Event) => complete('error', event);
+          const deadline = setTimeout(() => complete('timeout'), 1500);
+          media.addEventListener('loadedmetadata', metadata);
+          media.addEventListener('error', failed);
+          try {
+            media.src = sampleRate === 8000 ? '/__room-tone/a.wav' : '/__room-tone/metadata-16k.wav';
+            media.load();
+          } catch { complete('load-failed'); }
+        });
+        results.push(result);
+      }
+      return { initialMediaCount, finalMediaCount: document.querySelectorAll('video').length, results };
+    });
+    const path = testInfo.outputPath('room-playback-metadata-comparison.json');
+    await writeFile(path, JSON.stringify(comparison, null, 2));
+    await testInfo.attach('room-playback-metadata-comparison', { contentType: 'application/json', path });
+  }
 });
 
 test.afterEach(async ({ page }, testInfo) => {
