@@ -4,8 +4,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type FormEvent,
-  type KeyboardEvent,
   type MouseEvent
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -13,8 +11,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { listenerCapabilitiesQuery } from '../api/listenerCapabilities';
 import { Icon, type IconName } from '../components/Icon';
-import { SearchQueryProvider, useSearchQuery } from '../features/search/SearchQueryProvider';
-import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
+import { SearchQueryProvider } from '../features/search/SearchQueryProvider';
 import { useSocialAvailability } from '../features/social/socialAvailability';
 import { RouteAnnouncer } from './RouteAnnouncer';
 import { useLocalization } from '../localization/LocalizationProvider';
@@ -29,6 +26,7 @@ const destinations: Array<{ labelKey: MessageKey; path: string; icon: IconName }
   { labelKey: 'social.nav', path: '/social', icon: 'account' }
 ];
 
+const TopSearch = lazy(() => import('./TopSearch'));
 const PlaylistSidebar = lazy(() => import('../features/playlists/PlaylistSidebar'));
 const LanguageSelector = lazy(() => import('../localization/LanguageSelector').then((module) => ({
   default: module.LanguageSelector
@@ -47,6 +45,7 @@ const GlobalRoomInvitations = lazy(() => import('../features/social/GlobalRoomIn
   default: module.GlobalRoomInvitations
 })));
 const AccountEntry = lazy(() => import('./AccountEntry').then(module => ({ default: module.AccountEntry })));
+const AdminControls = lazy(() => import('../features/admin/AdminAccess').then(module => ({ default: module.AdminControls })));
 
 /** Activates the shell skip link without changing the routed URL. */
 const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -83,67 +82,6 @@ const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => {
         );
       })}
     </nav>
-  );
-};
-
-const TopSearch = () => {
-  const input = useRef<HTMLInputElement>(null);
-  const { recordSubmittedQuery } = useSearchHistoryRecorder();
-  const {
-    commitDraft,
-    draftQuery,
-    finishComposition,
-    isComposing,
-    startComposition,
-    updateDraft
-  } = useSearchQuery();
-  const { t } = useLocalization();
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (isComposing) return;
-    const normalized = commitDraft();
-    if (normalized) recordSubmittedQuery(normalized);
-  };
-
-  const preventCompositionSubmit = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) {
-      event.preventDefault();
-    }
-  };
-
-  const expandCompactSearch = (event: MouseEvent<HTMLButtonElement>) => {
-    if (window.matchMedia?.('(max-width: 479px)').matches && document.activeElement !== input.current) {
-      event.preventDefault();
-      input.current?.focus();
-    }
-  };
-
-  return (
-    <form className={styles.search} role="search" aria-label={t('shell.search.global_label')} onSubmit={submit}>
-      <button
-        className={styles.searchSubmit}
-        onClick={expandCompactSearch}
-        type="submit"
-        aria-label={t('shell.search.submit_label')}
-      >
-        <Icon name="search" />
-      </button>
-      <label className="visually-hidden" htmlFor="shell-search">{t('shell.search.field_label')}</label>
-      <input
-        enterKeyHint="search"
-        id="shell-search"
-        name="q"
-        onChange={(event) => updateDraft(event.currentTarget.value)}
-        onCompositionEnd={(event) => finishComposition(event.currentTarget.value)}
-        onCompositionStart={startComposition}
-        onKeyDown={preventCompositionSubmit}
-        placeholder={t('shell.search.placeholder')}
-        ref={input}
-        type="search"
-        value={draftQuery}
-      />
-    </form>
   );
 };
 
@@ -199,13 +137,14 @@ const AppShellContent = () => {
               <Icon name="arrow-right" />
             </button>
           </div>
-          <TopSearch />
+          <Suspense fallback={<div className={styles.search} aria-hidden="true" />}><TopSearch /></Suspense>
         </div>
 
         <Suspense fallback={null}>
           <LanguageSelector placement="mobile" />
         </Suspense>
         <div className={styles.accountActions}>
+          <Suspense fallback={null}><AdminControls /></Suspense>
           {capabilities.data?.social?.enabled && <Suspense fallback={null}><GlobalRoomInvitations /></Suspense>}
           <Suspense fallback={<span className={styles.accountLoading} aria-hidden="true" />}><AccountEntry /></Suspense>
         </div>

@@ -1,10 +1,9 @@
 # Finitude Playlists Rollout Plan
 
 The shared Playlist implementation is complete in Archtree/Web and iOS. The
-Android local candidate now includes authenticated owner fencing, UI, shared
-playback, and actual-start activity; local-Audio resolution remains incomplete.
-This plan tracks only that final integration and the rollout boundary;
-canonical Playlist behavior remains in `docs/business-rules.md`.
+Android client now includes authenticated owner fencing, UI, shared playback,
+actual-start activity and completed local-Audio resolution. This plan tracks
+the native delivery and rollout boundary; canonical Playlist behavior remains in `docs/business-rules.md`.
 
 ## Stage 1 — Reconcile implementation candidates
 
@@ -22,20 +21,22 @@ Status: Complete
   coordinator records the exact initial Playlist MediaTrack once without
   counting Previous, Next, automatic advancement, restored playback, or failed
   starts.
-- Android still lacks completed local-Audio resolution. That boundary, the
-  disabled Archtree production capability, and unpublished native commits
-  prevent a deployed-feature claim.
+- Android resolves validated completed device Audio in the ordinary shared
+  queue, while Video and Room sources retain their separate boundaries. Native
+  implementation and publication do not establish production enablement.
 
 ## Stage 2 — Publish the native client candidates
 
-Status: Blocked
+Status: Complete
 
-- The verified iOS and Android commits currently exist only on their local
-  `develop` branches and have not been pushed.
-- Publish them through each repository's normal integration path without
-  combining unrelated work or claiming skipped physical-device evidence.
-- This stage remains blocked until repository publication is explicitly in
-  scope; local implementation work can continue independently.
+- Native account and download candidates were verified and published to each
+  repository's `develop` branch on 2026-10-13: Android `6706258` and iOS
+  `c9cb492`. Unrelated local changes were preserved.
+- Android passed 512 JVM tests, lint with zero errors, APK builds and 66
+  independent isolated-emulator tests. iOS passed the final 393-unit suite,
+  the full 29-UI suite, quality checks and a Simulator build.
+- These candidates remain distinct from staging/production enablement and
+  physical-device acceptance below.
 
 ## Stage 3 — Verify staging readiness
 
@@ -55,8 +56,8 @@ Status: Blocked
 
 Status: Blocked
 
-- Production currently reports `playlists: false`; implementation presence is
-  not production availability.
+- The last recorded production acceptance reported `playlists: false`;
+  implementation presence is not production availability.
 - Enable only the exact staging-tested artifact after the Stage 3 evidence is
   complete, then monitor health, error rate, latency, receipt cleanup, and
   client compatibility through the agreed observation window.

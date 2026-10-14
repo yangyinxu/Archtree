@@ -5,6 +5,19 @@ export interface SessionDeviceDescription {
     deviceType: SessionDeviceType;
 }
 
+/** Preserves legacy iOS categories while distinguishing explicit Android app categories. */
+export const describeDeclaredSessionDevice = (
+    category?: string
+): { deviceName: string; deviceType: 'phone' | 'tablet' } | undefined => {
+    switch (String(category ?? '').toLowerCase()) {
+        case 'phone': return { deviceName: 'iPhone', deviceType: 'phone' };
+        case 'tablet': return { deviceName: 'iPad', deviceType: 'tablet' };
+        case 'android-phone': return { deviceName: 'Android phone', deviceType: 'phone' };
+        case 'android-tablet': return { deviceName: 'Android tablet', deviceType: 'tablet' };
+        default: return undefined;
+    }
+};
+
 /** Converts bounded User-Agent metadata into labels suitable for account UI. */
 export const describeSessionDevice = (
     userAgent?: string

@@ -340,7 +340,7 @@ test('Listener Grid/List cursor pages are bounded, lifecycle-safe, and strictly 
     );
     const firstGrid: any = await firstGridResponse.json();
     assert.equal(firstGridResponse.status, 200);
-    assert.equal(firstGridResponse.headers.get('cache-control'), 'public, max-age=60');
+    assert.equal(firstGridResponse.headers.get('cache-control'), 'private, no-store');
     assert.equal(firstGrid.limit, 1);
     assert.equal(firstGrid.pageItem.id, ids.gridItem.toHexString());
     assert.deepEqual(firstGrid.items, [{
@@ -686,7 +686,7 @@ test('Home collection pages return 401 for a presented Bearer token that fails v
 
     const anonymous = await request(pathname);
     assert.equal(anonymous.status, 200);
-    assert.equal(anonymous.headers.get('cache-control'), 'public, max-age=60');
+    assert.equal(anonymous.headers.get('cache-control'), 'private, no-store');
 
     const validToken = accessToken(ids.userOne, ids.sessionOne, 'listener-one@example.test');
     for (const viewerUserId of [ids.userOne, ids.userTwo, undefined]) {

@@ -85,12 +85,21 @@ export const contentSummarySchema = z.discriminatedUnion('contentType', [
 ]);
 
 export const sectionPresentationSchema = z.enum(['carousel', 'grid', 'list']);
+/** Explanations belong to a Home placement, never a shared public Catalog summary. */
+export const followedArtistReasonSchema = z.object({
+  code: z.literal('followedArtist'),
+  artist: z.object({ id: z.string().regex(/^[a-f0-9]{24}$/), name: z.string().trim().min(1) }).strict()
+}).strict();
+export const homeContentSummarySchema = z.discriminatedUnion('contentType', [
+  albumSummarySchema.extend({ reason: followedArtistReasonSchema.optional() }),
+  audioTrackSummarySchema.extend({ reason: followedArtistReasonSchema.optional() })
+]);
 export const homeSectionSchema = z
   .object({
     id: contentIdSchema,
     title: z.string(),
     presentation: sectionPresentationSchema,
-    items: z.array(z.discriminatedUnion('contentType', [albumSummarySchema, audioTrackSummarySchema]))
+    items: z.array(homeContentSummarySchema)
   })
   .strip();
 
@@ -232,6 +241,8 @@ export type AudioTrackSummary = z.infer<typeof audioTrackSummarySchema>;
 export type ContentSummary = z.infer<typeof contentSummarySchema>;
 export type SectionPresentation = z.infer<typeof sectionPresentationSchema>;
 export type HomeSection = z.infer<typeof homeSectionSchema>;
+export type HomeContentSummary = z.infer<typeof homeContentSummarySchema>;
+export type FollowedArtistReason = z.infer<typeof followedArtistReasonSchema>;
 export type ListenerHome = z.infer<typeof listenerHomeSchema>;
 export type ListenerSearch = z.infer<typeof listenerSearchSchema>;
 export type ListenerAlbum = z.infer<typeof listenerAlbumSchema>;

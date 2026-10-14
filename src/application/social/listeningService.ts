@@ -8,7 +8,9 @@ import { getDb } from '../../infrastructure/database';
 import type { ListeningPublicationDocument, ListeningStateDocument } from '../../repositories/social/listeningDocuments';
 import type { RoomDocument } from '../../repositories/social/roomDocuments';
 import type { SocialBudgetDocument, SocialProfileDocument, SocialRelationshipDocument } from '../../repositories/social/socialDocuments';
-import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
+import { findPublicAudioTrackById } from '../../services/catalogVisibilityService';
+import { touchPublicAudioTrackReferences } from '../../services/publicCatalogReferenceFenceService';
+import { AudioTrackReferenceUnavailableError } from '../../services/audioTrackReferenceFenceService';
 import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
 import { getJwtSecret } from '../../services/authSessionService';
 import { nextListeningRevision, retireListeningPublication } from './listeningLifecycle';
@@ -41,10 +43,11 @@ export const createListeningService = (options: { now: () => number; enabled: ()
      * excluded because room-audio analysis rewrites it for the same bytes. Room checks use `revision` instead.
      */
     const source = async (mediaTrackId: string, session: ClientSession, touch = false) => {
-        const filter = { _id: new ObjectId(mediaTrackId), ...readyAudioStorageFilter };
-        const track = touch ? (await db().collection('audioTracks').findOneAndUpdate(filter,
-            { $inc: { contentReferenceRevision: 1 } }, { session, returnDocument: 'after' })).value
-            : await db().collection('audioTracks').findOne(filter, { session });
+        if (touch) {
+            try { await touchPublicAudioTrackReferences([mediaTrackId], session); }
+            catch (error) { if (error instanceof AudioTrackReferenceUnavailableError) return null; throw error; }
+        }
+        const track = await findPublicAudioTrackById(mediaTrackId, session);
         if (!track || activeMediaTypeForTrack(track) !== 'audio') return null;
         const key = activeMediaObjectKeyForTrack(track); if (!key) return null;
         const fingerprint = createHash('sha256').update(JSON.stringify(['listening-source-v2', key])).digest('hex');

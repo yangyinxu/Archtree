@@ -186,7 +186,7 @@ test('an A tab cannot consume or mutate B data and both tabs reconcile to B', as
       await route.fulfill({ status: 204 });
       return;
     }
-    if (path.startsWith('/api/localizations/v1/')) {
+    if (path.startsWith('/api/localizations/v2/')) {
       await route.continue();
       return;
     }

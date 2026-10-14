@@ -526,8 +526,7 @@ test('legacy and ready Albums remain public while non-ready Albums disappear', a
         new Set(listenerSearch.albums.map((album) => album.id)),
         new Set([legacyId.toHexString(), readyId.toHexString()])
     );
-    const [publicTrack] = await listPublicAudioTracks(20, 0);
-    assert.equal(publicTrack.albumId, null);
+    assert.deepEqual(await listPublicAudioTracks(20, 0), []);
 });
 
 test('only a pre-lifecycle empty Album receives public and listener reverse-link fallback', async () => {

@@ -1,12 +1,11 @@
+import { findPublicAudioTracks, findPublicAudioAccessRecords, publicAudioAccessPipeline, readyPublicAlbumFilter, readyPublicArtistFilter, findPublicAudioTrackById } from '../services/catalogVisibilityService';
+import { touchReadyAlbumReferences } from '../services/albumReferenceFenceService';
 import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 import { normalizeAudioTrackText } from './audioTrack';
 import { withDerivedCoverArtUrl, withDisplayCoverArtUrl } from '../utils/coverArt';
-import { readyArtistLifecycleFilter } from '../services/artistReferenceFenceService';
-import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
 import { resolvePublicCatalogBylines } from '../services/publicCatalogService';
 import { withReadyCatalogItemReferences } from '../services/catalogItemReferenceFenceService';
-import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { touchActiveAccount, withActiveAccount } from '../services/accountReferenceFenceService';
 import { escapeRegex } from '../utils/search';
 
@@ -49,25 +48,28 @@ export const normalizeLibraryContentId = (value: string) => {
     }
 };
 
-const backingCollection = (contentType: LibraryContentType) =>
-    contentType === 'album' ? 'albums' : 'audioTracks';
-
 export class UserLibrary {
-    static async contentExists(contentType: LibraryContentType, contentId: string) {
+    /** Reads ordinary access in the same transaction used to fence a new personal reference. */
+    private static async publicContent(contentType: LibraryContentType, contentId: string, session?: ClientSession) {
         const normalized = normalizeLibraryContentId(contentId);
-        if (!normalized) return false;
-        const objectId = ObjectId.createFromHexString(normalized);
-        return Boolean(await getDb()!
-            .collection(backingCollection(contentType))
-            .find({
-                _id: objectId,
-                ...(contentType === 'album'
-                    ? readyAlbumLifecycleFilter
-                    : readyAudioStorageFilter)
-            })
-            .project({ _id: 1 })
-            .maxTimeMS(3_000)
-            .next());
+        if (!normalized) return null;
+        if (contentType === 'audioTrack') return findPublicAudioTrackById(normalized, session);
+        return getDb()!.collection('albums').findOne({
+            _id: new ObjectId(normalized), ...readyPublicAlbumFilter
+        }, { projection: { _id: 1 }, maxTimeMS: 3_000, ...(session ? { session } : {}) });
+    }
+
+    static async contentExists(contentType: LibraryContentType, contentId: string) {
+        return Boolean(await this.publicContent(contentType, contentId));
+    }
+
+    /** The Track touch fences its own visibility; touching its Album also fences inherited access changes. */
+    private static async requirePublicReference(contentType: LibraryContentType, contentId: string, session: ClientSession) {
+        const content = await this.publicContent(contentType, contentId, session);
+        if (!content) throw Object.assign(new Error('Content was not found.'), { statusCode: 404 });
+        if (contentType === 'audioTrack' && content.albumId) {
+            await touchReadyAlbumReferences([content.albumId], session);
+        }
     }
 
     /**
@@ -81,6 +83,7 @@ export class UserLibrary {
             async (session, [reference]) => {
                 await touchActiveAccount(userId, session);
                 const normalizedContentId = String(reference.contentId);
+                await this.requirePublicReference(contentType, normalizedContentId, session);
                 // Read inside the account-fenced transaction so a racing clear or play
                 // serializes with this seed instead of reintroducing a cleared play time.
                 const lastPlayedAt = await this.recentlyPlayedAt(
@@ -167,6 +170,7 @@ export class UserLibrary {
             async (session, [reference]) => {
                 await touchActiveAccount(userId, session);
                 const normalizedContentId = String(reference.contentId);
+                await this.requirePublicReference(contentType, normalizedContentId, session);
                 // Only saved items belong to the server Library. Recent playback history
                 // still records unsaved items through the existing bounded activity list,
                 // which save() reads to seed the play time if the item is saved later.
@@ -202,30 +206,30 @@ export class UserLibrary {
             { $match: match },
             { $addFields: { librarySortAt: sortExpression } }
         ];
-        // Search the complete saved set before pagination; never search only a loaded page.
+        // Apply ordinary access before both title matching and pagination. Membership remains persisted.
         const query = options.query?.trim().slice(0, 100);
-        if (query) {
-            pipeline.push(
-                { $addFields: { searchContentId: { $convert: {
-                    input: '$contentId', to: 'objectId', onError: null, onNull: null
-                } } } },
-                ...(['album', 'audioTrack'] as const).map((type) => ({ $lookup: {
-                    from: type === 'album' ? 'albums' : 'audioTracks',
-                    let: { id: '$searchContentId', type: '$contentType' },
-                    pipeline: [
-                        { $match: { $expr: { $and: [
-                            { $eq: ['$_id', '$$id'] }, { $eq: ['$$type', type] }
-                        ] }, title: { $regex: escapeRegex(query), $options: 'i' } } },
-                        { $project: { _id: 1 } }
-                    ],
-                    as: type === 'album' ? 'matchingAlbum' : 'matchingTrack'
-                } })),
-                { $match: { $or: [
-                    { 'matchingAlbum.0': { $exists: true } },
-                    { 'matchingTrack.0': { $exists: true } }
-                ] } }
-            );
-        }
+        pipeline.push(
+            { $addFields: { searchContentId: { $convert: {
+                input: '$contentId', to: 'objectId', onError: null, onNull: null
+            } } } },
+            ...(['album', 'audioTrack'] as const).map((type) => ({ $lookup: {
+                from: type === 'album' ? 'albums' : 'audioTracks',
+                let: { id: '$searchContentId', type: '$contentType' },
+                pipeline: [
+                    { $match: { $expr: { $and: [
+                        { $eq: ['$_id', '$$id'] }, { $eq: ['$$type', type] }
+                    ] } } },
+                    ...(type === 'audioTrack' ? publicAudioAccessPipeline() : [{ $match: readyPublicAlbumFilter }]),
+                    ...(query ? [{ $match: { title: { $regex: escapeRegex(query), $options: 'i' } } }] : []),
+                    { $project: { _id: 1 } }
+                ],
+                as: type === 'album' ? 'matchingAlbum' : 'matchingTrack'
+            } })),
+            { $match: { $or: [
+                { 'matchingAlbum.0': { $exists: true } },
+                { 'matchingTrack.0': { $exists: true } }
+            ] } }
+        );
         if (cursor) {
             const cursorId = ObjectId.createFromHexString(cursor.id);
             pipeline.push(cursor.sortAt
@@ -269,24 +273,28 @@ export class UserLibrary {
             albumIds.length > 0
                 ? db.collection('albums').find({
                     _id: { $in: albumIds },
-                    ...readyAlbumLifecycleFilter
+                    ...readyPublicAlbumFilter
                 }).maxTimeMS(3_000).toArray()
                 : [],
             trackIds.length > 0
-                ? db.collection('audioTracks').find({
+                ? findPublicAudioAccessRecords({
                     // Existing saves remain visible when their audio becomes
                     // unavailable; the listener projection disables playback.
                     _id: { $in: trackIds }
                 }).maxTimeMS(3_000).toArray()
                 : []
         ]);
+        const readyTracks = trackIds.length > 0
+            ? await findPublicAudioTracks({ _id: { $in: trackIds } }).project({ _id: 1 }).toArray()
+            : [];
+        const playableTrackIds = new Set(readyTracks.map(track => String(track._id)));
         const linkedAlbumIds = tracks
             .map((track: any) => String(track.albumId ?? ''))
             .filter((id) => ObjectId.isValid(id));
         const linkedAlbums = linkedAlbumIds.length > 0
             ? await db.collection('albums').find({
                 _id: { $in: linkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) },
-                ...readyAlbumLifecycleFilter
+                ...readyPublicAlbumFilter
             }).maxTimeMS(3_000).toArray()
             : [];
         const trackArtistIds = tracks.flatMap((track: any) =>
@@ -305,7 +313,7 @@ export class UserLibrary {
         }
         const artists = artistQueries.length > 0
             ? await db.collection('artists')
-                .find({ $and: [readyArtistLifecycleFilter, { $or: artistQueries }] })
+                .find({ $and: [readyPublicArtistFilter, { $or: artistQueries }] })
                 .maxTimeMS(3_000)
                 .toArray()
             : [];
@@ -355,6 +363,7 @@ export class UserLibrary {
                 audioTrack: withDisplayCoverArtUrl(
                     {
                         ...normalizeAudioTrackText(track),
+                        catalogAvailable: playableTrackIds.has(String(track._id)),
                         albumId: linkedAlbum ? track.albumId : null
                     },
                     linkedAlbum

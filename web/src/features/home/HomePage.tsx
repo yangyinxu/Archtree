@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { lazy, Suspense } from 'react';
 
 import { listenerHomeQuery } from '../../api/listener';
 import {
@@ -7,54 +7,13 @@ import {
   browserSessionResolvingQuery
 } from '../../api/session';
 import { PageSection } from '../../components/PageSection';
-import { PaginatedPageSection } from '../../components/PaginatedPageSection';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
-import { useSearchQuery } from '../search/SearchQueryProvider';
-import { useSearchHistoryRecorder } from '../search/useSearchHistoryRecorder';
 import styles from '../../styles/Pages.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
-import type { MessageKey } from '../../localization/contract';
 
-const moods: Array<{ titleKey: MessageKey; metaKey: MessageKey; query: string }> = [
-  { titleKey: 'home.moods.quiet_focus.title', metaKey: 'home.moods.quiet_focus.meta', query: 'ambient' },
-  { titleKey: 'home.moods.after_dark.title', metaKey: 'home.moods.after_dark.meta', query: 'night' },
-  { titleKey: 'home.moods.slow_mornings.title', metaKey: 'home.moods.slow_mornings.meta', query: 'morning' }
-];
-
-const MoodFallback = () => {
-  const { cancelPendingPreview } = useSearchQuery();
-  const { recordSubmittedQuery } = useSearchHistoryRecorder();
-  const { t } = useLocalization();
-
-  return (
-    <section className={styles.section} aria-labelledby="moods-title">
-      <div className={styles.sectionHeader}>
-        <div>
-          <p className={styles.eyebrow}>{t('home.moods.eyebrow')}</p>
-          <h2 className={styles.sectionTitle} id="moods-title">{t('home.moods.title')}</h2>
-        </div>
-        <p className={styles.sectionHint}>{t('home.moods.hint')}</p>
-      </div>
-      <div className={styles.cardGrid}>
-        {moods.map((mood) => (
-          <Link
-            className={styles.moodCard}
-            key={mood.query}
-            onClick={() => {
-              cancelPendingPreview();
-              recordSubmittedQuery(mood.query);
-            }}
-            state={null}
-            to={`/search?q=${encodeURIComponent(mood.query)}`}
-          >
-            <p className={styles.cardTitle}>{t(mood.titleKey)}</p>
-            <p className={styles.cardMeta}>{t(mood.metaKey)}</p>
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-};
+const MoodFallback = lazy(() => import('./HomeMoodFallback'));
+const PaginatedPageSection = lazy(() => import('../../components/PaginatedPageSection')
+  .then((module) => ({ default: module.PaginatedPageSection })));
 
 /** Renders the configured listener Home while retaining a useful public fallback. */
 export const HomePage = () => {
@@ -67,7 +26,9 @@ export const HomePage = () => {
     enabled: session.isSuccess && !resolving.data
   });
   const homeTitle = home.data?.title.trim() || t('home.default_title');
-  const hasConfiguredSections = home.isSuccess && home.data.sections.length > 0;
+  // Anonymous requests never render a cached private explanation.
+  const sections = home.data?.sections.filter((section) => viewerId || !section.items.some((item) => item.reason)) ?? [];
+  const hasConfiguredSections = sections.length > 0;
 
   return (
     <div className={styles.page}>
@@ -83,7 +44,7 @@ export const HomePage = () => {
             <h2 className={styles.panelTitle}>{t('home.loading.title')}</h2>
           </div>
         </section>
-      ) : session.isError || home.isError ? (
+      ) : session.isError || home.isError && !home.data ? (
         <section className={styles.panel} aria-live="polite">
           <div>
             <h2 className={styles.panelTitle}>{t('home.error.title')}</h2>
@@ -93,9 +54,10 @@ export const HomePage = () => {
             </div>
           </div>
         </section>
-      ) : home.data.sections.length > 0 ? (
-        <div className={`${styles.sectionStack} ${styles.sectionStackReady}`} aria-label={home.data.title || t('home.collections.label')}>
-          {home.data.sections.map((section) => (
+      ) : sections.length > 0 ? (
+        <div className={`${styles.sectionStack} ${styles.sectionStackReady}`} aria-label={home.data?.title || t('home.collections.label')}>
+          {home.isError && <p role="alert">{t('home.error.copy')} <button type="button" onClick={() => { void home.refetch(); }}>{t('common.action.try_again')}</button></p>}
+          {sections.map((section) => (
             section.presentation === 'carousel' ? (
               <PageSection
                 {...section}
@@ -103,18 +65,19 @@ export const HomePage = () => {
                 onPlay={(track) => { void launchStandalonePlayback(track, viewerId); }}
               />
             ) : (
+              <Suspense key={section.id} fallback={<PageSection {...section} onPlay={(track) => { void launchStandalonePlayback(track, viewerId); }} />}>
               <PaginatedPageSection
-                key={section.id}
                 onPlay={(track) => { void launchStandalonePlayback(track, viewerId); }}
                 pageSlug="home"
                 section={section}
                 viewerKey={viewerId}
               />
+              </Suspense>
             )
           ))}
         </div>
       ) : (
-        <MoodFallback />
+        <Suspense fallback={<p aria-busy="true">{t('home.loading.label')}</p>}><MoodFallback /></Suspense>
       )}
     </div>
   );

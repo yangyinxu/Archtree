@@ -1,3 +1,4 @@
+import { preserveCatalogVisibilityUpdate, findPublicAudioTrackById, type CatalogVisibility } from '../services/catalogVisibilityService';
 import { getDb } from '../infrastructure/database';
 import { ObjectId } from 'mongodb';
 import { SimpleDate } from './simpleDate';
@@ -14,14 +15,12 @@ import { withDerivedCoverArtUrl } from '../utils/coverArt';
 import { catalogSearchFilter, catalogSearchProjection, withCatalogSearchUpdate } from '../utils/catalogSearch';
 import { withReadyArtistReferences } from '../services/artistReferenceFenceService';
 import { touchReadyAlbumReferences } from '../services/albumReferenceFenceService';
-import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { touchActiveAccount } from '../services/accountReferenceFenceService';
 import { updateReadyAudioTrackAndAlbum } from '../services/albumTrackLinkService';
 import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
 import type { SoundtrackVideoAsset } from './soundtrackVideoAsset';
 import type { MediaRepresentation } from './mediaRepresentation';
 import {
-    activeMediaObjectKeyForTrack,
     type MediaType
 } from '../utils/mediaStorageKey';
 
@@ -59,7 +58,7 @@ export const normalizeAudioTrackText = (track: any) => {
 
 /** Normalizes mutable text before either a single-record or relationship transaction. */
 const normalizedAudioTrackUpdate = (update: Record<string, unknown>) => {
-    const normalizedUpdate = { ...update };
+    const normalizedUpdate = { ...preserveCatalogVisibilityUpdate(update) };
     if (typeof normalizedUpdate.title === 'string') {
         normalizedUpdate.title = normalizeUtf8Text(normalizedUpdate.title);
     }
@@ -70,6 +69,7 @@ const normalizedAudioTrackUpdate = (update: Record<string, unknown>) => {
 };
 
 export class AudioTrack {
+    visibility: CatalogVisibility = 'public';
     _id?: ObjectId;
     title: string;
     artistIds: [string];
@@ -206,18 +206,10 @@ export class AudioTrack {
     }
 
     /** Resolves only a published, identity-bound ready MediaTrack for public media delivery. */
-    static findReadyPublicById(audioTrackId: string) {
+    static findReadyPublicById(audioTrackId: string, maxTimeMS = 3_000) {
         const normalizedAudioTrackId = String(audioTrackId ?? '').trim().toLowerCase();
         if (!/^[0-9a-f]{24}$/.test(normalizedAudioTrackId)) return Promise.resolve(null);
-        const audioTrackObjectId = ObjectId.createFromHexString(normalizedAudioTrackId);
-        return getDb()!
-            .collection(collectionId)
-            .find({ _id: audioTrackObjectId, ...readyAudioStorageFilter })
-            .next()
-            .then((track) => {
-                if (!track || !activeMediaObjectKeyForTrack(track)) return null;
-                return normalizeAudioTrackText(track);
-            });
+        return findPublicAudioTrackById(normalizedAudioTrackId, undefined, maxTimeMS).then(normalizeAudioTrackText);
     }
 
     /** Returns a stable global MediaTrack page, including admin-visible lifecycle states. */

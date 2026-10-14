@@ -1,0 +1,127 @@
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+import {validateNarutoExtensionArchive} from './lib/naruto-extension-archive.mjs';
+
+const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
+const marker = '.archtree-naruto-build';
+
+/** Resolves the output's parent physically before replacing any owned generated directory. */
+export const assertNarutoOutputParent = async (parent, workspaceRoot) => {
+  const current = await lstat(parent), realRoot = await realpath(workspaceRoot);
+  if (!current.isDirectory() || current.isSymbolicLink()
+    || await realpath(parent) !== path.join(realRoot, 'naruto-web')) throw new Error('Naruto output escapes the workspace.');
+};
+
+/** Checks every hosted asset against Vite's manifest and its exact bounded file layout. */
+export const validateNarutoWebDistribution = async (sourceDist, includeProvenance = false) => {
+  const files = [];
+  const visit = async (directory, prefix = '') => {
+    for (const entry of await readdir(directory, {withFileTypes: true})) {
+      const name = `${prefix}${entry.name}`;
+      if (entry.isSymbolicLink()) throw new Error('Naruto distribution cannot contain symbolic links.');
+      if (entry.isDirectory()) {
+        if (name !== '.vite' && name !== 'assets' && !name.startsWith('assets/')) throw new Error('Unexpected Naruto distribution directory.');
+        await visit(path.join(directory, entry.name), `${name}/`);
+      } else if (entry.isFile() && (name === 'index.html' || name === '.vite/manifest.json'
+        || name === 'naruto-mobile-chrome-extension.zip' || /^assets\/[A-Za-z0-9._/-]+$/.test(name))) files.push(name);
+      else if (includeProvenance && entry.isFile() && [marker, 'release-source.json'].includes(name)) continue;
+      else throw new Error('Unexpected Naruto distribution file.');
+    }
+  };
+  await visit(sourceDist);
+  for (const required of ['index.html', '.vite/manifest.json', 'naruto-mobile-chrome-extension.zip']) {
+    if (!files.includes(required)) throw new Error(`Build is missing ${required}.`);
+  }
+  const html = await readFile(path.join(sourceDist, 'index.html'), 'utf8');
+  if (!html.includes('/naruto/assets/')) throw new Error('Naruto build must use the /naruto/ base path.');
+  const manifest = JSON.parse(await readFile(path.join(sourceDist, '.vite', 'manifest.json'), 'utf8'));
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || manifest['index.html']?.isEntry !== true) throw new Error('Invalid Naruto Vite manifest.');
+  const assets = new Set();
+  for (const entry of Object.values(manifest)) {
+    if (!entry || typeof entry !== 'object' || typeof entry.file !== 'string') throw new Error('Invalid Naruto manifest entry.');
+    for (const asset of [entry.file, ...(entry.css ?? []), ...(entry.assets ?? [])]) {
+      if (typeof asset !== 'string' || !/^assets\/[A-Za-z0-9_-]+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(asset) || !files.includes(asset)) throw new Error('Invalid or missing Naruto manifest asset.');
+      assets.add(asset);
+    }
+  }
+  if (files.filter(file => file.startsWith('assets/')).some(file => !assets.has(file))) throw new Error('Unmanifested Naruto asset.');
+  const zip = await readFile(path.join(sourceDist, 'naruto-mobile-chrome-extension.zip'));
+  validateNarutoExtensionArchive(zip);
+  const digest = createHash('sha256');
+  for (const filename of files.sort()) digest.update(filename).update('\0').update(await readFile(path.join(sourceDist, filename)));
+  const distributionSha256 = digest.digest('hex');
+  if (includeProvenance) {
+    const provenance = JSON.parse(await readFile(path.join(sourceDist, 'release-source.json'), 'utf8'));
+    if (provenance.schemaVersion !== 1 || provenance.protocolVersion !== 1 || provenance.basePath !== '/naruto/'
+      || provenance.distributionSha256 !== distributionSha256 || typeof provenance.sourceDirty !== 'boolean'
+      || typeof provenance.sourceCommit !== 'string' || (provenance.sourceCommit && !/^[0-9a-f]{40}$/.test(provenance.sourceCommit))
+      || await readFile(path.join(sourceDist, marker), 'utf8') !== 'v1\n') throw new Error('Naruto distribution provenance does not match the build.');
+  }
+  return {files, distributionSha256};
+};
+
+/** Copies only a verified hosted distribution, never desktop data or configuration. */
+export const prepareNarutoWeb = async ({sourceRoot = path.resolve(repositoryRoot, '..', 'naruto-mobile'), build = true} = {}) => {
+  const resolvedSource = path.resolve(sourceRoot);
+  const sourcePackage = JSON.parse(await readFile(path.join(resolvedSource, 'package.json'), 'utf8'));
+  if (sourcePackage.name !== 'naruto-mobile-research') throw new Error('Expected the naruto-mobile source repository.');
+  if (build) {
+    if (!process.env.npm_execpath) throw new Error('Run this helper with npm run prepare:naruto-web.');
+    execFileSync(process.execPath, [process.env.npm_execpath, 'run', 'build:hosted'], {cwd: resolvedSource, stdio: 'inherit', windowsHide: true});
+  }
+  const sourceDist = path.join(resolvedSource, 'web', 'hosted-dist');
+  const {files, distributionSha256} = await validateNarutoWebDistribution(sourceDist);
+  let commit = '', dirty = true;
+  try {
+    commit = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: resolvedSource, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']}).trim();
+    dirty = Boolean(execFileSync('git', ['status', '--porcelain'], {cwd: resolvedSource, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']}).trim());
+  } catch { /* The distribution digest still identifies exported source builds. */ }
+  const target = path.resolve(repositoryRoot, 'naruto-web', 'dist');
+  const expected = path.join(path.resolve(repositoryRoot), 'naruto-web', 'dist');
+  if (target !== expected) throw new Error('Unexpected Naruto output path.');
+  const parent = path.dirname(target);
+  let parentStats;
+  try {parentStats = await lstat(parent);} catch (error) {if (error.code !== 'ENOENT') throw error;}
+  if (parentStats && (!parentStats.isDirectory() || parentStats.isSymbolicLink())) throw new Error('Naruto output parent must be a real workspace directory.');
+  await mkdir(parent, {recursive: true});
+  const assertOwnedParent = () => assertNarutoOutputParent(parent, repositoryRoot);
+  await assertOwnedParent();
+  let metadata;
+  try { metadata = await lstat(target); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (metadata) {
+    let owned = false;
+    try { owned = await readFile(path.join(target, marker), 'utf8') === 'v1\n'; } catch { /* An existing unmarked directory is never replaced. */ }
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || !owned) throw new Error('Refusing to replace an unowned Naruto distribution.');
+  }
+  const temporary = `${target}.tmp-${process.pid}`;
+  if (path.dirname(temporary) !== path.dirname(target)) throw new Error('Unexpected staging path.');
+  await assertOwnedParent();
+  await mkdir(temporary);
+  try {
+    for (const filename of files) {
+      const destination = path.join(temporary, filename);
+      await mkdir(path.dirname(destination), {recursive: true});
+      await cp(path.join(sourceDist, filename), destination, {errorOnExist: true});
+    }
+    const provenance = {schemaVersion: 1, protocolVersion: 1, basePath: '/naruto/', sourceCommit: commit, sourceDirty: dirty, distributionSha256};
+    await writeFile(path.join(temporary, 'release-source.json'), `${JSON.stringify(provenance, null, 2)}\n`);
+    await writeFile(path.join(temporary, marker), 'v1\n');
+    await assertOwnedParent();
+    await rm(target, {recursive: true, force: true});
+    await rename(temporary, target);
+    return {directory: target, ...provenance};
+  } catch (error) {
+    await assertOwnedParent();
+    await rm(temporary, {recursive: true, force: true});
+    throw error;
+  }
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  if (process.argv.length > 3) throw new Error('Expected at most one naruto-mobile source directory.');
+  prepareNarutoWeb({sourceRoot: process.argv[2]}).then(result => console.log(`Prepared Naruto Web (${result.distributionSha256}) at ${result.directory}`))
+    .catch(error => {console.error(error.message); process.exitCode = 1;});
+}

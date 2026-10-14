@@ -1,0 +1,103 @@
+import { z } from 'zod';
+import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
+import { adminWorkspace } from './adminWorkspace';
+import { adminRequest, detailSchema, responseSchema } from './adminApi';
+import { AdminMutation } from './useAdminMutation';
+import { deferred, detail, json, viewer } from './adminFixtures.testSupport';
+
+beforeEach(() => { adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin'); });
+afterEach(() => { vi.unstubAllGlobals(); adminWorkspace.reset(); });
+
+test('strict private projection rejects unexpected fields, duplicate slots, wrong generation and forged paths', () => {
+  const item = detail(); expect(detailSchema.safeParse(item).success).toBe(true);
+  expect(detailSchema.safeParse({ ...item, rawMongo: {} }).success).toBe(false);
+  expect(detailSchema.safeParse({ ...item, draft: { ...item.draft, tracks: [item.draft.tracks[0], item.draft.tracks[0]] } }).success).toBe(false);
+  expect(detailSchema.safeParse({ ...item, suggestions: [{ ...item.suggestions[0], generation: 2 }] }).success).toBe(false);
+  expect(detailSchema.safeParse({ ...item, suggestions: [{ ...item.suggestions[0], field: 'visibility' }] }).success).toBe(false);
+  expect(detailSchema.safeParse({ ...item, publication: 'cancelled' }).success).toBe(false);
+  expect(detailSchema.safeParse({ ...item, publicationRecovery: { operationId: '30000000-0000-4000-8000-000000000003', cleanupPending: true, startedByMe: true } }).success).toBe(false);
+});
+
+test('User view issues no private request and a late read cannot populate its view', async () => {
+  const result = deferred<Response>(); const fetch = vi.fn(() => result.promise); vi.stubGlobal('fetch', fetch);
+  const read = adminRequest('/item', responseSchema);
+  adminWorkspace.select('user'); result.resolve(json({ item: detail(), receipt: null }));
+  await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+  await expect(adminRequest('/item', responseSchema)).rejects.toThrow(); expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test('permission revocation invalidates older capability receipts as well as retained buffers', async () => {
+  const authority = adminWorkspace.getSnapshot().authority;
+  const guard = captureAccountOperation(viewer);
+  adminWorkspace.retain('private', 'draft', guard);
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'forbidden' }, 403)));
+  await expect(adminRequest('/item', z.object({}))).rejects.toMatchObject({ status: 403 });
+  adminWorkspace.authorize(guard, true, true, authority);
+  expect(adminWorkspace.getSnapshot().authorized).toBe(false);
+  expect(adminWorkspace.buffer('private')).toBeUndefined();
+});
+
+test('lost mutation response retains exact body and key; duplicate clicks cannot start another request', async () => {
+  const first = deferred<Response>(); const bodies: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path, init: RequestInit) => {
+    bodies.push(String(init.body));
+    if (bodies.length === 1) return first.promise;
+    const operationId = JSON.parse(String(init.body)).operationId;
+    return json({ item: detail(), receipt: { operationId, kind: 'analyze', revision: 1 } });
+  }));
+  const operation = new AdminMutation();
+  operation.run('/item/analyze', 'POST', { expectedRevision: 1 });
+  operation.run('/item/analyze', 'POST', { expectedRevision: 1 });
+  first.resolve(new Response('unreadable', { headers: { 'X-Finitude-Account-Viewer': viewer } }));
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  operation.retry(); await vi.waitFor(() => expect(operation.getSnapshot().result?.receipt).toBeTruthy());
+  expect(bodies).toHaveLength(2); expect(bodies[1]).toBe(bodies[0]);
+});
+
+test('admitted mutation completes into retained state in User view, but not after A-B-A', async () => {
+  const requests = [deferred<Response>(), deferred<Response>()]; let index = 0;
+  vi.stubGlobal('fetch', vi.fn((_path, init: RequestInit) => {
+    const request = requests[index++]; const operationId = JSON.parse(String(init.body)).operationId;
+    return request.promise.then(() => json({ item: detail(), receipt: { operationId, kind: 'edit', revision: 1 } }));
+  }));
+  const operation = new AdminMutation(); operation.run('/item', 'PATCH', { expectedRevision: 1 });
+  adminWorkspace.select('user'); requests[0].resolve(json({}));
+  await vi.waitFor(() => expect(operation.getSnapshot().result).not.toBeNull());
+  adminWorkspace.select('admin'); const old = new AdminMutation(); old.run('/item', 'PATCH', {});
+  advanceAccountEpoch(); adminWorkspace.authorize(captureAccountOperation('b'), true, true);
+  advanceAccountEpoch(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin');
+  requests[1].resolve(json({})); await new Promise(resolve => setTimeout(resolve, 10));
+  expect(old.getSnapshot().result).toBeNull();
+});
+
+test('confirmed revision conflict permits corrected intent; unknown response can reconcile with server receipt', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'ADMIN_IMPORT_REVISION_CONFLICT' }, 409)));
+  const operation = new AdminMutation(); operation.run('/item', 'PATCH', { expectedRevision: 1 });
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('conflict'));
+  expect(operation.getSnapshot().intent).toBeNull();
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
+  operation.run('/item', 'PATCH', { expectedRevision: 2 });
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  const item = detail(); item.receipts = [{ operationId: operation.getSnapshot().intent!.operationId, revision: 2, kind: 'edit' }];
+  operation.reconcile(item); expect(operation.getSnapshot().intent).toBeNull(); expect(operation.getSnapshot().result?.item).toEqual(item);
+});
+
+test('an unknown publication cancellation retries its immutable intent and retains the original publication approval', async () => {
+  const bodies: string[] = [], originalOperationId = '30000000-0000-4000-8000-000000000003';
+  vi.stubGlobal('fetch', vi.fn(async (_path, init: RequestInit) => {
+    bodies.push(String(init.body));
+    if (bodies.length === 1) throw new TypeError('offline');
+    const operationId = JSON.parse(String(init.body)).operationId;
+    return json({ item: { ...detail(), publication: 'cancelled', publicationRecovery: { operationId: originalOperationId, cleanupPending: true, startedByMe: true } }, receipt: { operationId, kind: 'cancel-publication', revision: 2 } });
+  }));
+  const operation = new AdminMutation();
+  operation.run('/item/cancel-publication', 'POST', { expectedRevision: 1, publicationOperationId: originalOperationId });
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  const cancelOperationId = operation.getSnapshot().intent!.operationId;
+  expect(cancelOperationId).not.toBe(originalOperationId);
+  operation.retry();
+  await vi.waitFor(() => expect(operation.getSnapshot().intent).toBeNull());
+  expect(bodies[0]).toBe(bodies[1]);
+  expect(JSON.parse(bodies[1])).toMatchObject({ operationId: cancelOperationId, publicationOperationId: originalOperationId, expectedRevision: 1 });
+  expect(operation.getSnapshot().result?.item.publicationRecovery).toMatchObject({ operationId: originalOperationId, cleanupPending: true });
+});

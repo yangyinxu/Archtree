@@ -276,6 +276,7 @@ export const createMediaAbortContext = (req: Request, res: Response) => {
 
     return {
         signal: controller.signal,
+        abort,
         get aborted() {
             return aborted;
         },
@@ -292,18 +293,81 @@ export const createMediaAbortContext = (req: Request, res: Response) => {
     };
 };
 
+// Fixed bounds keep hidden or replaced media from remaining live on stalled/backpressured connections.
+export const mediaAuthorizationTimeoutMs = 500;
+const mediaAuthorizationIntervalMs = 500;
+
+/** Revalidates effective catalog access without allowing a stalled database read to extend permission. */
+const authorizeWithinDeadline = (authorize: () => Promise<boolean>, signal: AbortSignal) =>
+    new Promise<boolean>((resolve) => {
+        let settled = false;
+        const finish = (allowed: boolean) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            signal.removeEventListener('abort', onAbort);
+            resolve(allowed);
+        };
+        const onAbort = () => finish(false);
+        const timeout = setTimeout(() => finish(false), mediaAuthorizationTimeoutMs);
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) return finish(false);
+        Promise.resolve().then(authorize).then(allowed => finish(allowed === true), () => finish(false));
+    });
+
+export interface MediaStreamAuthorization {
+    authorize: () => Promise<boolean>;
+    /** Headers must be prepared only after the post-GET authorization succeeds. */
+    onAuthorized?: () => void;
+}
+
+/** Pipes one admitted source and optionally revokes it when its current public authorization disappears. */
 export const pipeMediaStream = async (
     req: Request,
     res: Response,
     stream: Readable,
-    context: ReturnType<typeof createMediaAbortContext>
+    context: ReturnType<typeof createMediaAbortContext>,
+    authorization?: MediaStreamAuthorization
 ) => {
     const delivery = metricsForResponse(res);
     context.attachSource(stream);
+    const authorizationAbort = new AbortController();
+    const authorizationSignal = AbortSignal.any([context.signal, authorizationAbort.signal]);
+    let monitor: ReturnType<typeof setInterval> | undefined;
+    let stopped = false;
+    let checking = false;
+    // The S3 source may fail while it is paused awaiting authorization, before pipeline owns its errors.
+    let sourceError: Error | undefined;
+    const onSourceError = (error: Error) => { sourceError = error; };
+    stream.on('error', onSourceError);
     try {
+        if (authorization) {
+            if (!await authorizeWithinDeadline(authorization.authorize, authorizationSignal)) {
+                context.abort();
+                delivery.metrics.markStreamAborted(delivery.resourceClass);
+                if (!res.destroyed) {
+                    res.setHeader('Cache-Control', 'private, no-store');
+                    res.status(404).end();
+                }
+                return;
+            }
+            if (sourceError) throw sourceError;
+            authorization.onAuthorized?.();
+            monitor = setInterval(() => {
+                if (stopped || checking || context.aborted || res.writableEnded || res.destroyed) return;
+                checking = true;
+                void authorizeWithinDeadline(authorization.authorize, authorizationSignal).then(allowed => {
+                    checking = false;
+                    if (stopped || allowed || res.writableEnded || res.destroyed) return;
+                    context.abort();
+                    res.destroy();
+                });
+            }, mediaAuthorizationIntervalMs);
+        }
         await pipeline(stream, res);
         delivery.metrics.markStreamCompleted(delivery.resourceClass);
     } catch (error) {
+        stream.destroy();
         if (context.aborted || req.aborted) {
             delivery.metrics.markStreamAborted(delivery.resourceClass);
             return;
@@ -311,6 +375,10 @@ export const pipeMediaStream = async (
         delivery.metrics.markStreamFailed(delivery.resourceClass);
         throw error;
     } finally {
+        stopped = true;
+        if (monitor) clearInterval(monitor);
+        authorizationAbort.abort();
+        stream.off('error', onSourceError);
         context.cleanup();
     }
 };

@@ -1,12 +1,11 @@
 import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
+import { resolveFollowedArtistReleases, type FollowedArtistReleaseRef } from '../services/followedArtistReleasesService';
 import { ActivitySource, UserLibrary } from './userLibrary';
 import {
-    readyArtistLifecycleFilter,
     withReadyArtistReferences
 } from '../services/artistReferenceFenceService';
-import { readyAudioStorageFilter } from '../utils/audioStorageKey';
-import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
+import { readyPublicArtistFilter, readyPublicAlbumFilter, findPublicAudioTracks, publicAudioVisibilityPipeline } from '../services/catalogVisibilityService';
 import {
     withReadyCatalogItemReferences
 } from '../services/catalogItemReferenceFenceService';
@@ -20,7 +19,6 @@ import { mutateManualComposition, type ManualCompositionHooks } from '../service
 
 const collectionId = 'carousels';
 const maximumManualCarouselItems = 500;
-const readyAudioFilter = readyAudioStorageFilter;
 const toObjectId = (value: string) => {
     try {
         return ObjectId.createFromHexString(value);
@@ -44,7 +42,7 @@ export interface ArtistCarouselConfig {
 }
 
 export interface PersonalizedCarouselConfig {
-    source: ActivitySource;
+    source: ActivitySource | 'followedArtistReleases';
     limit: number;
 }
 
@@ -164,7 +162,7 @@ export class Carousel {
             .then((carousels) => this.resolveCarousels(carousels, viewerUserId));
     }
 
-    static fetchByIds(carouselIds: string[], viewerUserId?: string) {
+    static fetchByIds(carouselIds: string[], viewerUserId?: string, personalizationV1 = false) {
         const db = getDb();
         const objectIds = carouselIds
             .filter(Boolean)
@@ -178,10 +176,10 @@ export class Carousel {
             .collection(collectionId)
             .find({ _id: { $in: objectIds } })
             .toArray()
-            .then((carousels) => this.resolveCarousels(carousels, viewerUserId));
+            .then((carousels) => this.resolveCarousels(carousels, viewerUserId, personalizationV1));
     }
 
-    static async resolveCarousel(carousel: any, viewerUserId?: string) {
+    static async resolveCarousel(carousel: any, viewerUserId?: string, personalizationV1 = false, followedReleases?: FollowedArtistReleaseRef[]) {
         const mode: CarouselMode = carousel?.mode === 'artist'
             ? 'artist'
             : carousel?.mode === 'personalized' ? 'personalized' : 'manual';
@@ -199,6 +197,10 @@ export class Carousel {
 
         if (mode === 'personalized') {
             const config = carousel?.personalizedConfig as PersonalizedCarouselConfig | undefined;
+            if (config?.source === 'followedArtistReleases') {
+                return { ...carousel, mode, items: Number.isSafeInteger(config.limit) && config.limit >= 1 && config.limit <= 20
+                    ? (followedReleases ?? await resolveFollowedArtistReleases(viewerUserId, 20, personalizationV1)).slice(0, config.limit) : [] };
+            }
             if (!viewerUserId || !config || (config.source !== 'recentlySaved' && config.source !== 'recentlyPlayed')) {
                 return { ...carousel, mode, items: [] };
             }
@@ -217,13 +219,12 @@ export class Carousel {
                 albumIds.length > 0
                     ? db.collection('albums').find({
                         _id: { $in: albumIds },
-                        ...readyAlbumLifecycleFilter
+                        ...readyPublicAlbumFilter
                     })
                         .project({ _id: 1 }).maxTimeMS(3_000).toArray()
                     : [],
                 audioTrackIds.length > 0
-                    ? db.collection('audioTracks').find({
-                        ...readyAudioFilter,
+                    ? findPublicAudioTracks({
                         _id: { $in: audioTrackIds }
                     })
                         .project({ _id: 1 }).maxTimeMS(3_000).toArray()
@@ -253,10 +254,11 @@ export class Carousel {
         const db = getDb();
         const artist: any = await db!
             .collection('artists')
-            .find({ _id: artistObjectId, ...readyArtistLifecycleFilter })
+            .find({ _id: artistObjectId, ...readyPublicArtistFilter })
             .next();
         if (!artist) {
-            return { ...carousel, mode, items: [] };
+            const { artistConfig: _privateConfig, ...publicCarousel } = carousel;
+            return { ...publicCarousel, mode, items: [] };
         }
 
         const itemLimit = Math.max(1, Math.min(Number(config.limit ?? 20), 100));
@@ -278,14 +280,14 @@ export class Carousel {
             const scope = config.scope ?? 'discography';
             // Group in Mongo so prolific Artists do not lose releases behind a track-count cutoff.
             const relatedAlbums = await db!.collection('audioTracks').aggregate<{ _id: unknown }>([
-                { $match: { $and: [readyAudioFilter, { $or: [
+                ...publicAudioVisibilityPipeline({ $or: [
                     { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
                     { artistIds: { $in: artistValues } }
-                ] }] } },
+                ] }),
                 { $group: { _id: '$albumId' } }
             ], { maxTimeMS: 3_000 }).toArray();
             const relatedAlbumIds = relatedAlbums.map(album => toObjectId(String(album._id))).filter(Boolean);
-            const cursor = db!.collection('albums').find({ $and: [readyAlbumLifecycleFilter, { $or: [
+            const cursor = db!.collection('albums').find({ $and: [readyPublicAlbumFilter, { $or: [
                 { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
                 { _id: { $in: [...legacyDiscographyIds, ...relatedAlbumIds] } }
             ] }] }).sort(sort).batchSize(100).maxTimeMS(3_000);
@@ -295,13 +297,13 @@ export class Carousel {
                     const candidates = [];
                     while (candidates.length < 50 && await cursor.hasNext()) candidates.push((await cursor.next())!);
                     const albumValues = candidates.flatMap(album => [album._id, String(album._id), String(album._id).toUpperCase()]);
-                    const tracks = await db!.collection('audioTracks').find({ $and: [readyAudioFilter, {
+                    const tracks = await findPublicAudioTracks({
                         albumId: { $in: albumValues },
                         $or: [
                             { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
                             { artistIds: { $in: artistValues } }
                         ]
-                    }] }).project({ albumId: 1, credits: 1, attributionStatus: 1, artistIds: 1 })
+                    }).project({ albumId: 1, credits: 1, attributionStatus: 1, artistIds: 1 })
                         .maxTimeMS(3_000).toArray();
                     const tracksByAlbum = new Map<string, typeof tracks>();
                     for (const track of tracks) {
@@ -331,12 +333,7 @@ export class Carousel {
                 subjectId: config.artistId,
                 ...(roles ? { role: { $in: roles } } : {})
             };
-            content = await db!
-                .collection('audioTracks')
-                .find({
-                    $and: [
-                        readyAudioFilter,
-                        { $or: [
+            content = await findPublicAudioTracks({ $or: [
                             { credits: { $elemMatch: creditMatch } },
                             ...((scope === 'allRelated' || scope === 'appearsOn')
                                 ? [{ artistIds: { $in: [config.artistId, artistObjectId] } }]
@@ -346,8 +343,7 @@ export class Carousel {
                                         artistIds: { $in: [config.artistId, artistObjectId] }
                                     }]
                                     : [])
-                        ] }
-                    ]
+                        ]
                 })
                 .sort(sort)
                 .limit(itemLimit)
@@ -364,11 +360,13 @@ export class Carousel {
         return { ...carousel, mode, items };
     }
 
-    static async resolveCarousels(carousels: any[], viewerUserId?: string) {
+    static async resolveCarousels(carousels: any[], viewerUserId?: string, personalizationV1 = false) {
+        const followedReleases = carousels.some(carousel => carousel.mode === 'personalized' && carousel.personalizedConfig?.source === 'followedArtistReleases')
+            ? await resolveFollowedArtistReleases(viewerUserId, 20, personalizationV1) : [];
         const resolved: any[] = [];
         for (let index = 0; index < carousels.length; index += 10) {
             resolved.push(...await Promise.all(
-                carousels.slice(index, index + 10).map((carousel) => this.resolveCarousel(carousel, viewerUserId))
+                carousels.slice(index, index + 10).map((carousel) => this.resolveCarousel(carousel, viewerUserId, personalizationV1, followedReleases))
             ));
         }
         return resolved;

@@ -1,3 +1,4 @@
+import { findPublicAudioTracks, readyPublicAlbumFilter, readyPublicArtistFilter, isPublicCatalogVisibility } from './catalogVisibilityService';
 import { ObjectId } from 'mongodb';
 
 import { getDb } from '../infrastructure/database';
@@ -17,8 +18,6 @@ import { resolvedCoverArtUrl } from '../utils/coverArt';
 import { normalizeUtf8Text } from '../utils/textEncoding';
 import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { activeMediaTypeForTrack } from '../utils/mediaStorageKey';
-import { readyArtistLifecycleFilter } from './artistReferenceFenceService';
-import { readyAlbumLifecycleFilter } from './albumReferenceFenceService';
 
 export interface PlaylistItemV1 {
     itemId: string;
@@ -118,9 +117,7 @@ export interface PlaylistArtworkProjectionDependencies {
     findAlbums?: (albumIds: string[]) => Promise<any[]>;
 }
 
-const findReadyArtworkTracks = (audioTrackIds: string[]) => getDb()!
-    .collection('audioTracks')
-    .find({
+const findReadyArtworkTracks = (audioTrackIds: string[]) => findPublicAudioTracks({
         ...readyAudioFilter,
         _id: { $in: audioTrackIds.map((id) => ObjectId.createFromHexString(id)) }
     })
@@ -132,7 +129,7 @@ const findArtworkAlbums = (albumIds: string[]) => getDb()!
     .collection('albums')
     .find({
         _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) },
-        ...readyAlbumLifecycleFilter
+        ...readyPublicAlbumFilter
     })
     .project(artworkAlbumProjection)
     .maxTimeMS(queryTimeoutMs)
@@ -156,15 +153,12 @@ export const toPlaylistPage = async (
     const tracks = audioTrackIds.length > 0
         ? await (dependencies.findReadyTracks ?? findReadyArtworkTracks)(audioTrackIds)
         : [];
-    const tracksById = documentsById(tracks);
-    const albumIds = uniqueObjectIds(tracks.flatMap((track) => {
-        if (safeArtworkUrl(track)) return [];
-        return [track.albumId];
-    }));
+    const tracksById = documentsById(tracks.filter(isPublicCatalogVisibility));
+    const albumIds = uniqueObjectIds(tracks.map(track => track.albumId));
     const albums = albumIds.length > 0
         ? await (dependencies.findAlbums ?? findArtworkAlbums)(albumIds)
         : [];
-    const albumsById = documentsById(albums);
+    const albumsById = documentsById(albums.filter(isPublicCatalogVisibility));
 
     return {
         items: records.map((record, index) => {
@@ -172,6 +166,7 @@ export const toPlaylistPage = async (
                 .map((audioTrackId) => {
                     const track = tracksById.get(audioTrackId);
                     const albumId = normalizePlaylistObjectId(track?.albumId);
+                    if (albumId && !albumsById.has(albumId)) return '';
                     return safeArtworkUrl(track, albumId ? albumsById.get(albumId) : null);
                 })
                 .find(Boolean) ?? '';
@@ -196,8 +191,7 @@ export const toPlaylistDetail = async (playlist: PlaylistDocument): Promise<Play
     const audioTrackIds = uniqueObjectIds(items.map((item) => item.audioTrackId));
     const db = getDb()!;
     const tracks = audioTrackIds.length > 0
-        ? await db.collection('audioTracks')
-            .find({
+        ? await findPublicAudioTracks({
                 ...readyAudioFilter,
                 _id: { $in: audioTrackIds.map((id) => ObjectId.createFromHexString(id)) }
             })
@@ -214,7 +208,7 @@ export const toPlaylistDetail = async (playlist: PlaylistDocument): Promise<Play
             ? db.collection('albums')
                 .find({
                     _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) },
-                    ...readyAlbumLifecycleFilter
+                    ...readyPublicAlbumFilter
                 })
                 .project(albumProjection)
                 .maxTimeMS(queryTimeoutMs)
@@ -224,15 +218,15 @@ export const toPlaylistDetail = async (playlist: PlaylistDocument): Promise<Play
             ? db.collection('artists')
                 .find({
                     _id: { $in: artistIds.map((id) => ObjectId.createFromHexString(id)) },
-                    ...readyArtistLifecycleFilter
+                    ...readyPublicArtistFilter
                 })
                 .project(artistProjection)
                 .maxTimeMS(queryTimeoutMs)
                 .toArray()
             : []
     ]);
-    const tracksById = documentsById(tracks);
-    const albumsById = documentsById(albums);
+    const tracksById = documentsById(tracks.filter(isPublicCatalogVisibility));
+    const albumsById = documentsById(albums.filter(isPublicCatalogVisibility));
     const artistsById = documentsById(artists);
 
     const projectedItems = items.map((item) => {

@@ -18,6 +18,7 @@ const router: Router = express.Router();
 
 // Size, origin, rate, and concurrency guards run in app.ts before the shared JSON parser.
 router.post('/telemetry', ingestListenerTelemetry);
+router.get('/personalization-capabilities', publicReadRateLimit, asyncHandler(listenerController.personalizationCapabilities));
 router.get('/capabilities', publicReadRateLimit, asyncHandler(listenerController.capabilities));
 router.get(
     '/home',

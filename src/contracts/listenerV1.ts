@@ -76,12 +76,17 @@ export interface ListenerCatalogCredit {
 export type ListenerPlayableSummary = ListenerAlbumSummary | ListenerAudioTrackSummary;
 export type ListenerPresentation = 'carousel' | 'grid' | 'list';
 
+/** Home-only context; ordinary public catalog summaries never acquire a private reason. */
+export type ListenerHomeItem = ListenerPlayableSummary & {
+    reason?: { code: 'followedArtist'; artist: { id: string; name: string } };
+};
+
 /** One configured presentation preserving its ordered, ready content. */
 export interface ListenerHomeSection {
     id: string;
     title: string;
     presentation: ListenerPresentation;
-    items: ListenerPlayableSummary[];
+    items: ListenerHomeItem[];
 }
 
 export type ListenerPageSlug = 'home' | 'library';

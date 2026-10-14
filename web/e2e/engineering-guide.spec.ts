@@ -55,6 +55,8 @@ test('guide navigation supports deep links, refresh, back, anchors and keyboard 
 
 for (const width of [320, 768, 1440]) {
   test(`guide remains readable and accessible at ${width}px`, async ({ page }) => {
+    // Four full-document axe runs share this test's timeout, including parallel-suite CPU contention.
+    test.setTimeout(60_000);
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     for (const slug of ['', '/start', '/architecture', '/flows/read-album']) {

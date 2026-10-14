@@ -11,6 +11,9 @@ import { resolveSocialCapacity } from './config/socialCapacity';
 import { socialRollout } from './config/socialRollout';
 import { createOperationalSummary } from './services/operationalSummaryService';
 import { writeOperationalLog } from './infrastructure/operationalLog';
+import { startAdminImportWorker } from './administration/adminImportService';
+import { startAdminImportPublisher } from './administration/adminImportPublisher';
+import { startAdminCatalogCoverWorker } from './administration/adminCatalogCoverService';
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -28,17 +31,23 @@ export interface ServerDependencies {
   installRoomWindDown?: typeof installRoomWindDown;
   /** Starts the periodic `ops_summary` line and returns its stop function. */
   startOperationalSummary?: () => () => void;
+  startAdminImportWorker?: () => () => Promise<void>;
+  startAdminImportPublisher?: () => () => Promise<void>;
+  startAdminCatalogCoverWorker?: () => () => Promise<void>;
 }
 
 /** Resolves only after listening, and releases infrastructure on every startup failure. */
 export const startServer = async (dependencies: ServerDependencies = {}): Promise<Server> => {
   const disconnectDatabase = dependencies.closeDatabase ?? disconnectFromDatabase;
   let rooms: { stop: () => void; release: () => Promise<void> } | undefined;
+  let stopCovers: (() => Promise<void>) | undefined;
+  let stopPublisher: (() => Promise<void>) | undefined;
+  let stopImports: (() => Promise<void>) | undefined;
   let stopSummary: (() => void) | undefined;
   const closeDatabase = async () => {
     stopSummary?.();
     rooms?.stop();
-    try { await rooms?.release(); } finally { await disconnectDatabase(); }
+    try { await Promise.allSettled([stopImports?.(), stopPublisher?.(), stopCovers?.()]); await rooms?.release(); } finally { await disconnectDatabase(); }
   };
   const lifecycle = new ServerLifecycle();
   const server = new Server();
@@ -82,6 +91,12 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
       server.once('listening', listening);
       server.listen(port);
     });
+    // Background work shares the HTTP grace deadline and stops admitting steps at drain.
+    const track = (operation: () => Promise<unknown>) => lifecycle.track(operation);
+    stopImports = (dependencies.startAdminImportWorker ?? (() => startAdminImportWorker(undefined, undefined, track)))();
+    stopPublisher = (dependencies.startAdminImportPublisher ?? (() => startAdminImportPublisher(undefined, undefined, track)))();
+    stopCovers = (dependencies.startAdminCatalogCoverWorker ?? (() => startAdminCatalogCoverWorker(undefined, track)))();
+    lifecycle.onDrain(() => { void stopImports?.(); void stopPublisher?.(); void stopCovers?.(); });
     console.log(JSON.stringify({ category: 'server_listening', accessTokenSeconds: accessTokenDurationSeconds() }));
     stopSummary = (dependencies.startOperationalSummary ?? (() => createOperationalSummary().start()))();
     const stopped = dependencies.stopped ?? (outcome => {
@@ -93,7 +108,7 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
       Math.min(120_000, positiveInteger(process.env.SERVER_SHUTDOWN_GRACE_MS, 30_000)),
       cleanupMs(), stopped
     );
-    server.once('close', () => { if (!lifecycle.draining) disposeShutdown(); });
+    server.once('close', () => { if (!lifecycle.draining) { disposeShutdown(); stopSummary?.(); void stopImports?.(); void stopPublisher?.(); void stopCovers?.(); } });
     server.once('error', () => {
       void lifecycle.stop(server, closeDatabase, 1_000, cleanupMs()).then(stopped);
     });

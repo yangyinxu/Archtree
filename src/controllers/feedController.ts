@@ -1,3 +1,4 @@
+import { publicCatalogVisibilityFilter } from '../services/catalogVisibilityService';
 import { NextFunction, Request, Response } from 'express';
 import { validationResult } from 'express-validator';
 import { ObjectId } from 'mongodb';
@@ -15,7 +16,8 @@ export const getPost = async (req: Request, res: Response, next: NextFunction) =
             return res.status(400).json({ error: 'Invalid postId' });
         }
         const post = await getDb()!.collection('posts').findOne({
-            _id: ObjectId.createFromHexString(rawPostId)
+            _id: ObjectId.createFromHexString(rawPostId),
+            ...publicCatalogVisibilityFilter
         });
         return res.status(post ? 200 : 404).json({
             post: post ? toPublicFeedPost(post) : null
@@ -31,7 +33,7 @@ export const getPosts = async (req: Request, res: Response, next: NextFunction) 
         const offset = boundedOffset(req.query.offset);
         const posts = await getDb()!
             .collection('posts')
-            .find()
+            .find(publicCatalogVisibilityFilter)
             .sort({ createdAt: -1, _id: -1 })
             .skip(offset)
             .limit(limit)

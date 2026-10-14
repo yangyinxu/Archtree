@@ -85,7 +85,7 @@ export const sortTrackIdsByEmbeddedTrackNumber = (
 };
 
 /** Loads persisted Track Numbers inside the relationship transaction before ordering. */
-const orderedTrackIds = async (session: ClientSession, audioTrackIds: readonly string[]) => {
+export const orderedAlbumTrackIds = async (session: ClientSession, audioTrackIds: readonly string[]) => {
     if (audioTrackIds.length === 0) return [];
     const tracks = await getDb()!.collection('audioTracks').find(
         {
@@ -238,7 +238,7 @@ const replaceCanonicalAlbumMembership = async (
             }
             return existing;
         })();
-        const targetAudioTrackIds = await orderedTrackIds(
+        const targetAudioTrackIds = await orderedAlbumTrackIds(
             session,
             exactTargetMembership ?? appendedAudioTrackIds
         );
@@ -334,7 +334,7 @@ export const assignReadyAudioTracksToNewAlbum = async (
 ) => {
     const normalizedAlbumId = normalizeAlbumId(albumId, false);
     const normalizedAudioTrackIds = normalizeTrackIds(audioTrackIds, true);
-    const orderedAudioTrackIds = await orderedTrackIds(session, normalizedAudioTrackIds);
+    const orderedAudioTrackIds = await orderedAlbumTrackIds(session, normalizedAudioTrackIds);
     await replaceCanonicalAlbumMembership(
         session,
         orderedAudioTrackIds,
@@ -373,7 +373,7 @@ export const replaceReadyAlbumAudioTracks = async (
                 // Desired and retained rows must be published/ready. Removed
                 // dangling rows are conditionally cleared without a readiness fence.
                 await touchReadyAudioTrackReferences(desiredAudioTrackIds, session);
-                canonicalAudioTrackIds = await orderedTrackIds(session, desiredAudioTrackIds);
+                canonicalAudioTrackIds = await orderedAlbumTrackIds(session, desiredAudioTrackIds);
                 await getDb()!.collection('audioTracks').updateMany(
                     {
                         albumId: { $in: storageReferenceValues([readyAlbumId]) },

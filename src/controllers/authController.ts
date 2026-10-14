@@ -95,10 +95,12 @@ export const safeWebReturnTo = (value: unknown) => {
       || destination.pathname.startsWith('/listen/');
     const engineeringDestination = destination.pathname.length <= 174
       && /^\/engineering(?:\/[a-z0-9]+(?:-[a-z0-9]+)*){0,4}\/?$/.test(destination.pathname);
+    const narutoDestination = destination.pathname === '/naruto' || destination.pathname === '/naruto/';
     if (!contentManagerDestination
       && !listenerDestination
       && !legacyListenerDestination
       && !engineeringDestination
+      && !narutoDestination
       && destination.pathname !== '/') {
       return '/';
     }

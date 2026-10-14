@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import { buildLocalizationArtifacts, checkLocalizationArtifacts, writeLocalizationArtifacts } from '../scripts/build-localizations.mjs';
 import { syncPackagedNativeLocalizations } from '../scripts/sync-native-localizations.mjs';
+import { LocalizationService } from '../src/services/localizationService';
 
 const canonicalJson = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 const catalog = {
@@ -50,6 +51,36 @@ const createFixture = async (
   await writeFile(path.join(locales, 'zh-Hans.json'), canonicalJson(zhMessages));
   return root;
 };
+
+test('expanded admin bundles preserve the v1 listener namespace and its revision', async () => {
+  const root = await createFixture({ 'common.count': '{count} 项', 'common.greeting': '你好，{name}' });
+  try {
+    const messages = Object.fromEntries(Array.from({ length: 1001 }, (_, i) => [
+      i < 991 ? `listener.item_${String(i).padStart(4, '0')}` : `admin.item_${String(i).padStart(4, '0')}`,
+      { description: 'Synthetic message', delivery: ['runtime'], variables: {} }
+    ]).sort(([a], [b]) => String(a).localeCompare(String(b))));
+    await writeFile(path.join(root, 'localization', 'catalog.json'), canonicalJson({ ...catalog, messages }));
+    for (const locale of ['en-US', 'zh-Hans']) {
+      await writeFile(path.join(root, 'localization', 'locales', `${locale}.json`),
+        canonicalJson(Object.fromEntries(Object.keys(messages).map(key => [key, 'Synthetic text']))));
+    }
+    const artifacts = await writeLocalizationArtifacts(root);
+    assert.equal(Object.keys(artifacts.bundles.get('en-US')!.messages).length, 1001);
+    assert.equal(Object.keys(artifacts.legacy.bundles.get('en-US')!.messages).length, 991);
+    const generated = path.join(root, 'localization', 'generated');
+    const legacy = JSON.parse(new LocalizationService(generated, 'v1').getBundle('en-US')!.body.toString());
+    const current = JSON.parse(new LocalizationService(generated, 'v2').getBundle('en-US')!.body.toString());
+    assert.ok(Object.keys(legacy.messages).every(key => !key.startsWith('admin.')));
+    assert.notEqual(legacy.revision, current.revision);
+    await checkLocalizationArtifacts(root);
+    const stale = path.join(generated, 'legacy', 'bundles', 'obsolete.json');
+    await writeFile(stale, '{}');
+    await assert.rejects(checkLocalizationArtifacts(root), /stale/);
+    await writeLocalizationArtifacts(root);
+    await assert.rejects(readFile(stale), { code: 'ENOENT' });
+    await checkLocalizationArtifacts(root);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test('localization build accepts only aligned, valid locale contracts', async () => {
   const root = await createFixture({

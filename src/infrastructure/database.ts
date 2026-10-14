@@ -1,6 +1,7 @@
 import * as mongoDb from 'mongodb';
 import { initializeDatabaseIndexes, verifyRequiredDatabaseIndexes } from './databaseIndexes';
 import { initializeAvatarMutationRecovery } from '../services/avatarMutationService';
+import { initializeAdminImportStorage } from '../administration/adminImportService';
 import { verifyDatabaseTransactionTopology } from './databaseTopology';
 import { MissingStartupConfigurationError, recordStartupFailureStage, type StartupStage } from './startupDiagnostics';
 
@@ -43,6 +44,7 @@ export const connectToDatabase = async (options: { initializeIndexes?: boolean; 
     else {
       await initializeDatabaseIndexes(connectedDatabase);
       await initializeAvatarMutationRecovery(connectedDatabase);
+      await initializeAdminImportStorage(connectedDatabase);
     }
     databaseClient = client;
     database = connectedDatabase;

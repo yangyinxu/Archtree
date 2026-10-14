@@ -641,9 +641,48 @@ The wire protocol and operational bounds are documented in
   Administrator promotion is a controlled operational database action; there
   is no public role-promotion endpoint.
 - Signed-out visitors, users, and admins can browse every database-confirmed
-  ready or published Artist, Album, MediaTrack, configured public page item,
+  ready or published **public** Artist, Album, MediaTrack, configured Page item,
   Feed Post, stream, and public catalog artwork. Public visibility does not
   depend on the viewer role or the record's `createdBy` value.
+- Catalog content and individual Page item placements have `public` or `hidden`
+  visibility. Missing legacy values are public; malformed values fail closed.
+  Hidden content is accessible only through current-administrator private
+  management and preview routes. Knowing an ID or public URL does not grant
+  access. Listener routes enforce the same rule for admins in User view.
+- Hiding one Page placement does not hide its reusable Carousel, Grid, or List,
+  another placement, or the referenced content. Hiding an Album makes assigned
+  MediaTracks effectively hidden without changing their own stored visibility.
+  An assigned MediaTrack whose parent Album cannot be confirmed ready/public
+  is unavailable to listeners. Hidden Artist and Organization identities are
+  redacted from public Credits; their visibility alone does not hide shared works.
+- Discovery, details, Library, Playlist artwork, recent activity, Follow releases,
+  Rooms, social shares, media, and artwork revalidate current public access.
+  Private Playlists retain unavailable members without former title, artwork,
+  creator, or playable links. Hidden targets cannot gain new listener references.
+  Already-open online media delivery stops within one second after a confirmed
+  access loss or an unresponsive authorization check. Previously delivered or
+  downloaded bytes cannot be recalled.
+- Visibility changes require explicit admin confirmation of the affected
+  entity/placement and the current revision. Page placement review identifies
+  its configured name, type and source mode, reports missing or unsupported
+  references, and confirms the current and proposed visibility of that exact
+  placement. Renaming or changing its source invalidates a previous approval.
+  They cannot be enabled until
+  direct S3/CDN delivery and historical public URL policy are verified. Public
+  and private application responses never redirect to hidden object locations.
+- Admins switch between Admin and User views without signing out or rebuilding
+  listening state. User view is the default; leaving Admin view hides private
+  presentation, cancels private reads and stops previews. Unsaved drafts and
+  unknown operation intents may remain only in account-fenced memory and resume
+  after current capabilities are verified. Account or role loss clears them.
+  View selection is presentation, not authorization.
+- Existing catalog edits are separate from import review. They preserve unrelated
+  metadata, memberships, and storage references, reject stale snapshots, and
+  use the canonical Credit and artwork lifecycle. Track Number changes update
+  the assigned Album's automatic order in the same transaction.
+- Administrator confirmations bind the item and revision displayed when opened.
+  A refresh that changes the draft, publication approval or staged file requires
+  a fresh review; confirmation never silently rebases onto a newer target.
 - Pending, failed, deleting, orphaned, or otherwise non-ready lifecycle data is
   not public. Private account data, including avatars, saves, activity,
   sessions, and account metadata, is not part of the public catalog.
@@ -813,10 +852,11 @@ The wire protocol and operational bounds are documented in
 
 ## Personalized Carousels
 
-- Personalized carousels have one of two sources:
+- Personalized carousels have one of three sources:
   - Recently Saved
   - Recently Played
-- Albums and MediaTracks are mixed in both carousel sources.
+  - New from artists you follow
+- Albums and MediaTracks are mixed in all three carousel sources.
 - Content Manager does not offer Album-only or MediaTrack-only filters for
   personalized carousels.
 - Content Manager configures only the carousel name, source, and item limit.
@@ -824,6 +864,60 @@ The wire protocol and operational bounds are documented in
   moved between carousels.
 - Activity is stored by appending new entries to the end of its history, while
   carousels display the newest activity first.
+
+## Artist Follows and New Releases
+
+- Following an Artist is private, authenticated account state. It does not
+  save the Artist to Library, affect discovery ranking, expose follower counts,
+  or send email or push notifications.
+- Follow and Unfollow are server-confirmed, naturally idempotent actions.
+  Repeating Follow preserves the original follow time; repeating Unfollow
+  confirms the unfollowed state. Follow requires a ready Artist; Unfollow
+  remains possible when that Artist is unavailable.
+- Follow updates transact with the active account and ready Artist. Artist
+  deletion prevents new follows and removes every follow relationship before
+  final metadata deletion, retaining lifecycle evidence after partial failure.
+  Artist artwork cleanup retains its existing database/S3 lifecycle.
+- Account deletion removes all follows transactionally. Follow ownership does
+  not count as shared Catalog provenance.
+- Artist pages offer Follow when the deployment reports this feature enabled.
+  A signed-out listener sees the action and receives the existing sign-in
+  required alert when selecting it; selecting it does not open sign-in.
+  An unresolved or failed status is not presented as unfollowed. During a
+  request the action is disabled, and failure preserves confirmed state with
+  an explicit retry.
+- Successful Follow or Unfollow refreshes that account's Home. Account exit,
+  deletion, switch, or identity mismatch immediately removes private follow
+  state and generated sections and invalidates pending responses. Clients
+  retain no durable private follow cache or offline mutation queue.
+- New from artists you follow uses only that listener's follows and the ready
+  public Catalog. Content Manager chooses its name, Home position,
+  and limit of 1–20 items using the existing configured Carousel order. Clients do
+  not insert an unconfigured section.
+- Eligible releases have a complete valid UTC calendar release date, from today
+  through 89 days before today inclusive. Partial, invalid, and future dates
+  are excluded. Upload, publication, and follow times do not define eligibility.
+- A ready Album qualifies when it has at least one ready canonical MediaTrack
+  and its own canonical Artist Credit names a followed ready Artist with role
+  primary or featured. A ready MediaTrack qualifies through its own canonical
+  Artist Credit with role primary, featured, or performer. Legacy unspecified,
+  composer, producer, and remixer Credits do not qualify.
+- A qualifying Album represents its qualifying linked MediaTracks. A qualifying
+  MediaTrack remains when its Album does not independently qualify. Results
+  sort by complete release date descending, Album before MediaTrack, then
+  lowercase canonical content ID ascending.
+- Each generated item explains the followed Artist using a ready public Artist
+  ID and name. When several Artists qualify, choose primary before featured
+  before performer, then Credit order, then Artist ID. The explanation is
+  contextual Home data and does not change ordinary public content summaries.
+- Following immediately makes all qualifying releases in the 90-day window
+  eligible; there is no read/unread state or persisted release feed. Empty,
+  signed-out, disabled, and unsupported-client sections are omitted while
+  preserving the relative order of the other configured Home sections.
+- Rollout is independent of discovery and defaults off. Disabling the feature
+  hides its UI and generated Home source but preserves follow records, status
+  reads, Unfollow, and deletion cleanup. Clients negotiate this Home contract
+  explicitly so older clients continue receiving their existing sections.
 
 ## Recent-Activity Limits
 
@@ -1127,6 +1221,79 @@ The wire protocol and operational bounds are documented in
   its MediaTrack or Album, and unsaving content does not remove its download.
 - A local audio asset may be owned by multiple device-local download entries.
   Removing one entry must not delete an asset still owned by another entry.
+
+## Administrator Album Imports
+
+- Imports are private, durable administrator projects. The shared workbench
+  provides analyzing, awaiting review, needs attention, and completed views with
+  independent upload, analysis, review, and publication state. All current admins
+  may resume saved projects; ordinary users cannot read their titles or assets.
+- The import editor separates Draft, Review, Files and Publish. Switching between
+  these sections retains the current account's unsaved fields, selected
+  suggestions and local file choices; navigation alone does not save, analyze,
+  upload or publish. Source evidence and technical details remain available
+  without obscuring the current values, file identities or next explicit action.
+- File names and relative containing-folder names are untrusted context. Absolute
+  device paths are not sent to analysis. Source bytes remain in S3; the database
+  retains bounded metadata, hashes, object identities, drafts, jobs and receipts.
+  Private staged uploads do not create playable catalog MediaTracks.
+- Luna proposes supported values with source evidence. Unknown facts stay empty
+  and partial release dates retain their precision. Analysis never publishes,
+  edits existing catalog records, or silently overwrites manual draft changes.
+  Administrators see baseline/current/proposed values and can accept or reject
+  individual suggestions. Adoption changes only the saved private draft.
+- Accepted analysis runs on the server after a browser closes or changes page.
+  Reopening observes existing status and results; it does not start another
+  paid generation. Local file transfer may require reselection of incomplete
+  files. Explicit Stop analysis is separate from leaving the page.
+- Analysis uses finite per-project and global concurrency/call budgets, durable
+  checkpoints and expiring administrator grants. Permission loss prevents new
+  steps. An ambiguous potentially paid provider outcome is retained and blocks
+  automatic paid replay; administrators may continue manual review.
+  The deployment-wide daily allowance resets at UTC midnight; budget exhaustion
+  becomes needs attention without dispatching another provider request.
+- Name matches and identical bytes are candidates, not proof of Artist identity,
+  Album edition, or recording identity. Administrators explicitly choose reuse,
+  skip, append missing members, or create a distinct entry. No automatic merge,
+  deletion, media replacement, or reassignment of a Track to a different Album
+  is permitted. Unhashed historical assets remain unverified.
+- Publication is a separate explicit approval of the reviewed draft and duplicate
+  decisions. It freezes the approval snapshot, rechecks current role, revisions,
+  memberships, visibility and asset readiness, and reports confirmed per-item
+  outcomes. New objects and catalog records remain traceable through every
+  upload/copy, partial failure, retry, cleanup and reconciliation step. Unknown
+  outcomes never discard the sole lifecycle evidence or mint new identities
+  silently. Successful catalog publication and its receipt commit together.
+- A current administrator may explicitly cancel an unconfirmed import publication
+  after its active worker lease ends, including when the original approval has
+  expired or its initiating administrator lost permission. Cancellation binds
+  the original approval, never changes existing catalog content and cannot undo
+  a completed publication. Unused copied files remain traceable until exact
+  cleanup is confirmed; unknown outcomes are not treated as successful cleanup.
+  Administrators may edit and review the private draft during cancelled cleanup,
+  while source changes, analysis and a new publication approval remain blocked.
+  Confirmed cleanup permits a newly reviewed approval with independent identities
+  and retains the cancelled approval's recovery history. Each import admits at
+  most sixteen publication approvals; reaching that bound does not prevent
+  reviewing the private draft or cancelling and cleaning existing work.
+- Required cleanup and cancellation remain available when the ordinary editing
+  allowance is exhausted. Repeated recovery uses the original intent and cannot
+  silently restart a destructive step or lose lifecycle evidence.
+- Publishing an import that reuses an existing Artist or Album does not overwrite
+  that entity's metadata, artwork, Credits or visibility. Such corrections require
+  a separate existing-catalog edit. Appending preserves all current members and
+  only adds approved missing members. A hidden Album continues to hide its Tracks
+  until its own visibility changes; a newly created hidden Artist is not exposed
+  by publishing a private import.
+- An unconfirmed existing-catalog cover approval may be explicitly cancelled by
+  a current administrator after its active worker lease ends. Cancellation leaves
+  the saved cover unchanged and retains the unused object's identity and source
+  pin until cleanup is confirmed. It permits a new reviewed approval without
+  silently rebasing the old one. Attached cover changes require a separate clear
+  or replacement; cancellation cannot undo them.
+- Expiring grants prevent new copy/attachment/publication steps. Cleanup of a
+  confirmed detached or explicitly cancelled object remains recoverable after
+  grant expiry, with current administrator checks and exact storage identity.
 
 ## Page Items
 
@@ -1476,8 +1643,52 @@ The wire protocol and operational bounds are documented in
 ## Naruto Mobile private analysis proxy
 
 - Naruto Mobile collection, Chrome access, raw records, cache, and reports remain
-  on the user's Windows computer. Archtree receives only the bounded,
+  on the user's computer. Archtree receives only the bounded,
   de-identified classification fields required by the versioned protocol.
+- The hosted Naruto Web entry uses a Chrome extension for collection in the
+  user's own signed-in browser. The server does not run Chrome, collect Bilibili
+  cookies, or store raw collection data, local tasks, caches, or reports.
+- Naruto Web requires no EXE. The existing Windows EXE remains available with
+  its existing collection, analysis, and export behavior.
+- Browser-local tasks retain recoverable progress when the Web page closes.
+  Reopening the page restores the last committed browser-local checkpoint and
+  offers an explicit resume; interrupted analysis reuses saved results without
+  silently discarding collected records. Users can
+  explicitly export local data and reports in desktop-compatible formats.
+  Browser site-data removal deletes those local records, so the Web explains
+  this boundary and offers investigation ZIP backups.
+- Transient browser analysis transport failures use bounded retries while
+  preserving completed local results. Exhausted detail retries leave the
+  investigation recoverable and offer explicit resume from saved results.
+  Cancellation and account transitions never retry work under another account.
+- The browser collector scrolls to trigger public comment loading and waits for
+  lazily mounted comments. An unreadable or still-loading comment area remains
+  pending for explicit retry; it must not silently become a completed title-only
+  source. A rendered explicit empty state may complete the source, including a
+  visible zero-comment count paired with a loaded end-of-comments state. An end
+  marker alone is insufficient. On the first
+  explicit resume after this recovery change, an older live investigation retries
+  saved sources with only creator/title evidence once, preserving every saved
+  record, pending source, deduplication identity, and elapsed collection time.
+- Browser collection and login checks open their tool tabs in a separate, newly
+  created normal Chrome window without requesting focus. Each collection uses
+  one such window for its parallel tabs and creates its own tab group named
+  `火影调查` inside it. The user's existing window, active tab, and groups are
+  not adopted, moved, or selected by the collector.
+- When background comments remain unreadable, the browser collector may activate
+  its own investigation tab inside the separate collection window for one
+  bounded retry. These retries run one at a time and never request window focus.
+  It restores the previous selection inside that window only if the user has
+  not changed it. Paused or expired work does not start queued retries.
+- The browser collector never adopts other groups or pre-existing user tabs.
+  Pause, completion, and recovery manage only individually owned tabs whose
+  navigation is still owned; user-added or repurposed tabs remain open.
+  An empty collection window closes naturally after its last owned tab closes;
+  a window containing user-added or repurposed tabs stays open. Closing the
+  collection window interrupts collection without falling back to a user window.
+  A platform-added tracking query or trailing slash on the same canonical
+  content does not relinquish ownership. Another content identity or changed
+  tab-group/window placement does.
 - The proxy is not an OpenAI-compatible pass-through. The server fixes the
   model, prompts, schemas, reasoning level, output ceiling, provider endpoint,
   and Responses `store: false`; client attempts to add fields or select capabilities fail.
@@ -1485,7 +1696,7 @@ The wire protocol and operational bounds are documented in
   GPT-6 Luna through Responses at medium reasoning. Screening discards only
   non-product feedback with both decision and category confidence/probability
   at least 0.95. Refused or uncertain answers proceed to detailed analysis;
-  the Windows client also retains comments when screening fails.
+  both desktop and browser clients retain comments when screening fails.
 - Detail prompt version `naruto-opinion-v4` retains the complete supporting
   judgment, cause, comparison, or impact in verbatim evidence. A topic with both
   favorable and unfavorable judgments uses mixed sentiment and evidence for
@@ -1496,9 +1707,17 @@ The wire protocol and operational bounds are documented in
   the existing access/refresh session contract, encrypts that session with
   operating-system secure storage, and never stores the account password. No
   Naruto-specific account, invitation, token, or allowlist record is created.
+- Naruto Web uses the existing shared HttpOnly browser session and displayed
+  account identity fence. The page and extension never persist an Archtree
+  password or Bearer credential. Account transitions immediately hide the old
+  account and prevent late analysis responses from adopting a replacement
+  account's identity. Desktop and Web requests share the analysis capacity.
 - Bearer authentication runs before the classifier body parser. Request bodies,
   comments, model output, authorization headers, and session tokens are not
   logged or stored by the proxy.
+- Browser classification requires exact same-origin proof, cookie authentication,
+  and the current displayed account identity before the bounded body parser.
+  The desktop analysis API remains Bearer-only and rejects browser origins.
 
 ## Database and S3 Lifecycle
 

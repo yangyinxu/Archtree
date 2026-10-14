@@ -1,0 +1,120 @@
+import assert from 'node:assert/strict';
+import { type Server } from 'node:http';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { createApp } from '../src/app';
+import { safeWebReturnTo } from '../src/controllers/authController';
+
+/** Creates a temporary public bundle without relying on developer-generated assets. */
+const withBundle = async (available: boolean, run: (baseUrl: string) => Promise<void>) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-naruto-host-'));
+  const narutoDistPath = path.join(temporaryRoot, 'naruto');
+  const listenerDistPath = path.join(temporaryRoot, 'listener');
+  if (available) {
+    await mkdir(path.join(narutoDistPath, 'assets'), {recursive: true});
+    await mkdir(path.join(narutoDistPath, '.vite'));
+    await mkdir(listenerDistPath);
+    await Promise.all([
+      writeFile(path.join(narutoDistPath, 'index.html'), '<!doctype html><title>Naruto browser fixture</title>'),
+      writeFile(path.join(narutoDistPath, 'assets', 'app-123.js'), 'export const naruto = true;'),
+      writeFile(path.join(narutoDistPath, 'assets', 'app-123.css'), 'body { color: green; }'),
+      writeFile(path.join(narutoDistPath, 'naruto-mobile-chrome-extension.zip'), Buffer.from('PK synthetic fixture')),
+      writeFile(path.join(narutoDistPath, 'release-source.json'), '{"private":"release metadata"}'),
+      writeFile(path.join(narutoDistPath, '.archtree-naruto-build'), 'internal marker'),
+      writeFile(path.join(narutoDistPath, 'unlisted.js'), 'internal script'),
+      writeFile(path.join(narutoDistPath, '.vite', 'manifest.json'), JSON.stringify({
+        index: {file: 'assets/app-123.js', css: ['assets/app-123.css'], assets: ['../outside.js', 'release-source.json']}
+      })),
+      writeFile(path.join(listenerDistPath, 'index.html'), '<!doctype html><title>Finitude fixture</title>')
+    ]);
+  }
+  const server = await new Promise<Server>(resolve => {
+    const listening = createApp({narutoDistPath, listenerDistPath}).listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  try { await run(`http://127.0.0.1:${address.port}`); }
+  finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    assert.ok(path.resolve(temporaryRoot).startsWith(path.resolve(os.tmpdir()) + path.sep));
+    await rm(temporaryRoot, {recursive: true, force: true});
+  }
+};
+
+test('Naruto bundle errors and API namespaces stay separate from Finitude and auth', async () => {
+  await withBundle(false, async baseUrl => {
+    const response = await fetch(`${baseUrl}/naruto`);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.match((await response.json()).message, /naruto-web\/dist/);
+    const deepLink = await fetch(`${baseUrl}/naruto/report`);
+    assert.equal(deepLink.status, 503);
+    const capability = await fetch(`${baseUrl}/naruto/api/v1/status`, {headers: {'sec-fetch-site': 'same-origin'}});
+    assert.equal(capability.status, 200);
+    for (const endpoint of ['/naruto/api/v1/unknown', '/naruto/api/v2/status', '/naruto/api',
+      '/naruto/%61pi/v2/status', '/naruto/API/v2/status']) {
+      const missingApi = await fetch(`${baseUrl}${endpoint}`, {headers: {'sec-fetch-site': 'same-origin'}});
+      assert.equal(missingApi.status, 404);
+      assert.match(missingApi.headers.get('content-type') ?? '', /application\/json/);
+    }
+    const auth = await fetch(`${baseUrl}/auth/capabilities`);
+    assert.equal(auth.status, 200);
+  });
+});
+
+test('Naruto serves declared assets, extension download, and deep links without exposing build metadata', async () => {
+  await withBundle(true, async baseUrl => {
+    for (const endpoint of ['/naruto', '/naruto/', '/naruto/report/summary?period=week']) {
+      const page = await fetch(`${baseUrl}${endpoint}`);
+      assert.equal(page.status, 200);
+      assert.equal(page.headers.get('cache-control'), 'no-cache');
+      assert.match(await page.text(), /Naruto browser fixture/);
+      assert.match(page.headers.get('content-security-policy') ?? '', /script-src 'self'/);
+      assert.doesNotMatch(page.headers.get('content-security-policy') ?? '', /unsafe-inline/);
+      assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(page.headers.get('x-frame-options'), 'DENY');
+    }
+    for (const endpoint of ['/naruto/assets/app-123.js', '/naruto/assets/app-123.css']) {
+      const asset = await fetch(`${baseUrl}${endpoint}`);
+      assert.equal(asset.status, 200);
+      assert.equal(asset.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    }
+    const extension = await fetch(`${baseUrl}/naruto/naruto-mobile-chrome-extension.zip`);
+    assert.equal(extension.status, 200);
+    assert.equal(extension.headers.get('cache-control'), 'no-cache');
+    assert.match(extension.headers.get('content-disposition') ?? '', /attachment; filename="naruto-mobile-chrome-extension.zip"/);
+    assert.match(extension.headers.get('content-type') ?? '', /application\/zip/);
+    for (const endpoint of [
+      '/naruto/assets/missing.js', '/naruto/assets', '/naruto/unlisted.js',
+      '/naruto/release-source.json', '/naruto/.archtree-naruto-build', '/naruto/.vite/manifest.json',
+      '/naruto/%2earchtree-naruto-build', '/naruto/%2evite/manifest.json',
+      '/naruto/assets/%2e%2e%2f%2e%2e%2foutside.js', '/naruto/%5cprivate'
+    ]) {
+      const missing = await fetch(`${baseUrl}${endpoint}`);
+      assert.equal(missing.status, 404, endpoint);
+      assert.equal(missing.headers.get('cache-control'), 'no-store');
+      assert.doesNotMatch(await missing.text(), /Naruto browser fixture|release metadata|internal marker/);
+    }
+    const listener = await fetch(`${baseUrl}/finitude/library`);
+    assert.equal(listener.status, 200);
+    assert.match(await listener.text(), /Finitude fixture/);
+    const noCapture = await fetch(`${baseUrl}/naruto-mobile/nonexistent`);
+    assert.equal(noCapture.status, 404);
+    assert.doesNotMatch(await noCapture.text(), /Naruto browser fixture/);
+  });
+});
+
+test('login return destinations allow only the Naruto entry page', () => {
+  for (const destination of ['/naruto', '/naruto/', '/naruto/?period=week#report']) {
+    assert.equal(safeWebReturnTo(destination), destination);
+  }
+  for (const destination of [
+    '/naruto/api/v1/classify', '/naruto/assets/app.js', '/naruto/report',
+    '/naruto/naruto-mobile-chrome-extension.zip', '/naruto/../naruto/',
+    '/naruto/%2e%2e/naruto/', '/naruto/%2f%2fattacker.example',
+    '/naruto\\attacker.example', '//attacker.example/naruto', 'https://attacker.example/naruto'
+  ]) assert.equal(safeWebReturnTo(destination), '/', destination);
+});

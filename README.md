@@ -81,7 +81,7 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. Startup verifies the `required-indexes-v6-social-reports` constraints before
+new scope after rotation. Startup verifies the `required-indexes-v7-artist-follows` constraints before
 admission; these are additive schema changes even when the feature is disabled.
 
 See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
@@ -428,13 +428,41 @@ The Firefox and WebKit compressed-media projects (`firefox-audio-formats`,
 `webkit-audio-formats`) are included in the blocking Linux social gate with
 every other project. To reproduce just this pair on Linux with the CI audio sink:
 `CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=firefox-audio-formats --project=webkit-audio-formats`.
-The 2026-10-11 repair candidate restores this strict gate; new consecutive
-pull-request and merged-main CI passes are still required. Keep production rooms
-disabled until that acceptance and the rollout checks pass (see the
+Checked on 2026-10-12: the complete blocking gate passed for both the
+[pull request](https://github.com/yangyinxu/Archtree/actions/runs/38169379414)
+and [merged main `2c1cf6e`](https://github.com/yangyinxu/Archtree/actions/runs/38170519764).
+Each run passed all 17 social scenarios, including the Firefox/WebKit audio and
+recovery projects, plus 347 listener browser tests with 10 intentional
+Chromium-owned skips. The production `/finitude/` HTML and its four directly
+referenced JS/CSS resources also matched that main artifact byte for byte.
+The [release matrix](docs/testing/finitude-web-release-matrix.md#verified-release-status--checked-2026-10-12)
+records the exact identities and evidence limits. Production rooms remain disabled;
+the controlled rollout checks are still required before public enablement (see the
 [social rollout runbook](docs/deployment/social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms)).
+Later production checks on 2026-10-12 completed QA registration, verified-email
+login and registration-link replay rejection. Already-registered and six-digit
+password-reset emails were received; reset completion and session revocation
+remain untested. Three original QA audio fixtures were published, and each passed
+canonical HEAD plus two Range checks against the source bytes. AAC passed a
+supplemental check using its stored `audio/x-m4a` MIME type. The administrator
+analysis page confirmed all three new sources **Ready for rooms** after automatic
+upload analysis. In an isolated signed-in in-app browser with both flags off,
+each track played, paused, sought to 60 seconds while staying paused, and resumed
+with an advancing clock. This verifies ordinary playback in that browser only,
+not audible output, other browsers or physical devices. Pinned Room media,
+including AAC's required `audio/mp4` response, and actual Room playback remain
+pending; see
+the [production acceptance record](docs/deployment/finitude-web-rollout-runbook.md#production-authentication-and-media-checks--2026-10-12).
+
 Room playback preloads media while paused so readiness can precede the shared
 start; confirming a completed seek does not seek again to the same position.
-It corrects startup drift after credible media-clock advancement. A corrective
+An explicit resync during a native seek keeps its pending intent until that seek
+finishes, then recomputes the position from the current authoritative anchor.
+It cannot overlap native seeks or report the superseded position as ready.
+It corrects startup drift after credible media-clock advancement. Small-drift
+heartbeats retain their clock reference but defer rate changes until that first
+progress, avoiding a decoder flush before playback begins; larger drift can still
+seek immediately. A corrective
 seek measures the clock time lost during that seek, separately from initial
 play startup. At most two additional seeks per playback occurrence may compensate
 the measured delay, within six seconds of the first compensation. The second
@@ -446,11 +474,14 @@ predictive lead is capped at two seconds. Later ordinary heartbeat
 corrections can reuse the measured delay until the playback effect changes.
 All pending work is cancelled by local pause, authority loss, or source changes.
 A fully buffered Audio decoder that stays paused with only current-frame data
-after a completed seek gets at most one paused source reload per playback occurrence.
-After a controller-owned drift correction, `HAVE_CURRENT_DATA` (`readyState: 2`)
-can persist even while the media clock advances; that case also gets this single
-recovery. Ordinary playback is not reloaded solely for reporting current-frame
-data. Readiness still requires future data, and local pause or leaving cancels
+after preparation gets at most one paused source reload per playback occurrence.
+A later completed controller-owned drift correction has one separate recovery
+for that occurrence: `HAVE_CURRENT_DATA` (`readyState: 2`) can persist even while
+the media clock advances. A successful preparation reload does not consume this
+later correction recovery. Each phase rechecks its own source and seek ownership,
+and explicit resync does not replenish either budget. Ordinary playback is not
+reloaded solely for reporting current-frame data. Readiness still requires future
+data, and local pause or leaving cancels
 recovery.
 For that recovered occurrence, drift corrections use explicit measured seeks
 instead of playback-rate changes, which can trigger additional decoder seeks.
@@ -643,6 +674,11 @@ Required variables:
   128. See the
   [capacity budget](docs/testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04)
   before raising them.
+- `FINITUDE_ARTIST_FOLLOWS_ENABLED`: defaults to `false` in every environment,
+  independently of Social, Playlists and Catalog Credit display switches. Set
+  `true` only after the required Artist Follow indexes and lifecycle checks
+  pass. Disabling rejects new Follow with `503 ARTIST_FOLLOWS_DISABLED`; private
+  status and Unfollow remain available and no relationship data is deleted.
 - `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in
@@ -714,6 +750,50 @@ The fixed API lives at `/naruto-mobile/api/v1`:
 - `GET /access` verifies an authenticated Archtree Bearer session.
 - `POST /classify` accepts only the bounded `triage` or `detail` protocol.
 
+Naruto Web is served independently at `/naruto` from `naruto-web/dist`.
+The generated bundle contains the Web application, its Vite asset manifest,
+and `naruto-mobile-chrome-extension.zip`. Only declared public assets, the
+HTML entry, and that extension download are served; release metadata and build
+markers remain private. Extensionless deep links receive the SPA entry, missing
+resources return 404, and a missing bundle returns 503 without capturing API,
+authentication, or Finitude routes. Prepare this bundle before deploying the
+site. The existing Windows EXE and desktop-only API remain supported.
+
+For the built local portal, open `http://localhost:8080/naruto` in the same Chrome
+profile as the installed collector extension. The matching extension supports
+local HTTP `/naruto` portals on `localhost` and `127.0.0.1` at ports 8080, 5173,
+and 3765. After an extension update, replace the files in its unpacked directory,
+reload it in `chrome://extensions`, then refresh the portal before connecting.
+
+The browser-specific API lives at `/naruto/api/v1`:
+
+- `GET /status` returns availability, protocol version, fixed model, and shared
+  capacity to a same-origin browser without requiring login.
+- `POST /classify` uses the same v1 `triage`/`detail` envelope as the desktop API.
+  It requires an existing HttpOnly Archtree cookie session, exact same-origin
+  JSON proof, and `X-Finitude-Account-Viewer` containing the displayed account's
+  ID. Authorization headers are rejected on this browser surface. Authentication,
+  the account fence, service readiness, rate limits, and concurrency admission
+  run before the 1 MB JSON parser.
+
+The matching Naruto client retries transient Node and Chrome fetch failures,
+including interrupted response bodies, up to six attempts per batch with
+exponential backoff. A persistent detail failure retains completed local cache
+records and offers **继续分析并生成报告** to resume. An older saved `Failed to
+fetch` error receives the same recovery guidance after updating the Web bundle.
+Cancellation, account changes, and unrelated programming errors are not treated
+as retryable transport failures.
+
+The page resolves its initial identity through `GET /auth/browser/session`
+(`user.id`) and sends signed-out users to
+`/auth/login-web?returnTo=%2Fnaruto%2F`. This reuses the existing shared browser
+session coordination; no Naruto account or credential store is introduced.
+The Chrome extension collects in the user's own signed-in Bilibili browser,
+retains raw records and task progress locally, and supports explicit local
+exports. The server does not run a browser or receive Bilibili credentials.
+The extension does not call the paid browser API directly; the same-origin Web
+page submits only the existing bounded classification fields.
+
 Set `OPENAI_API_KEY` in the Elastic Beanstalk runtime environment. Set optional
 `OPENAI_ORG_ID` and `OPENAI_PROJECT_ID` when requests must explicitly select the
 organization and project that have model access. These settings apply to both
@@ -725,6 +805,15 @@ endpoints and stores the rotating session with operating-system encryption.
 The proxy never returns the OpenAI key or accepts arbitrary OpenAI request
 options.
 
+For local development, configure `OPENAI_API_KEY` in this Archtree checkout's
+ignored root `.env`, then restart with `npm run dev`. The server does not load
+the sibling Naruto client's `.env`. The browser's `/naruto/api/v1/status`
+reports whether server provider configuration is present; it does not validate
+upstream account access or quota. Archtree sign-in and analysis availability
+are independent: an authenticated listener stays signed in while analysis is
+unavailable, and the UI explains that service state rather than asking them to
+sign in again. Refresh the portal after changing server configuration.
+
 Screening uses `POST /v1/decisions`, `gpt-6-luna`, and prompt version
 `naruto-decisions-v1`. Named questions address each comment independently.
 Detailed analysis uses `POST /v1/responses`, `gpt-6-luna`, medium reasoning,
@@ -733,8 +822,9 @@ are normalized to `uncertain`. Screening request failures are retained by the
 Windows client for detailed analysis. Deploy the matching proxy before releasing
 the updated Windows client. The protocol envelope remains version 1.
 
-The classifier admits up to 12 simultaneous requests per client IP and 12
-across the server process. The existing per-IP 60-request/minute budget still
+The desktop and browser classifiers together admit up to 12 simultaneous
+requests per client IP and 12 across the server process. The existing per-IP
+60-request/minute budget still
 applies. Both Decisions and detail calls share this capacity; the desktop
 client reduces its active request budget and honors `Retry-After` when either
 the proxy or upstream provider returns 429. Chrome collection tabs have an
@@ -1042,7 +1132,61 @@ These gates are parallel jobs, each with its own timeout of 30 minutes or less:
 `build` (production build and E2E type check), `unit-integration`,
 `social-e2e` and `browser-e2e`. The two browser jobs test the one production
 build that `build` shares as the short-lived `finitude-web-release-build`
-artifact. `release-artifact` needs all four jobs, so it is skipped unless every
+artifact. The social job first runs the unchanged WebKit compressed-audio scenario
+with its own fixture processes and evidence directory, then runs the complete
+social matrix. The ordinary browser job first verifies native scheduled startup,
+pause/resume, rate correction, and natural completion in all three engines with
+zero retries and a separate evidence directory, then runs its complete matrix.
+The prepare/seek trace uses its original synthetic two-second 8 kHz PCM WAV. The
+combined scheduled-start, pause/resume, rate, and end scenario uses the existing
+original synthetic `room-tone.mp3`, shared with the independent social format gate.
+Both use real loopback HTTP with byte-verified HEAD, Range, and If-Range responses;
+evidence records each format's actual bytes, SHA-256, native metadata, events, and
+transport outcomes. Completion seeks to 0.2 seconds before the native MP3 duration
+and still requires a real end event without automatic queue advancement.
+MP3 duration uses the social format gate's 150 ms boundary for native gapless and
+frame-padding differences; readiness and continuous-clock checks remain unchanged.
+Diagnostics inspect native ranges only in explicit stable snapshots with decoded
+data and no pending seek; native event callbacks never query ranges. Unobserved
+ranges are marked separately from observed empty ranges. An early WebKit range
+query can change its unknown-duration cache. Synthetic
+playback epochs retain their own clock anchors, including explicitly scheduled starts.
+The pause/resume scenario proves natural clock movement both before pausing and
+after resuming; a native `playing` event alone does not prove advancing playback.
+The probe samples native progress before controller event handlers, then confirms
+the decoder remains ready and continuous after those handlers finish. A seek or
+readiness change in the same event cannot masquerade as stable playback.
+Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
+browser job also checks its PCM and audio-output plugins before the synthetic
+startup preflight.
+Only that synthetic preflight enables decoder debug output. A streaming filter
+discards raw browser/GStreamer lines and emits at most 200 fixed buffering, seek,
+and pipeline-state records without URLs or payloads. Ordinary test failures stay
+visible, and `pipefail` preserves the original test exit status. Full browser and
+social runs do not enable decoder logging.
+Only the two ordinary Linux browser test commands set
+`FINITUDE_E2E_ISOLATED_AUDIO=1`. Before exposing an audio-enable button, the probe
+requires Linux CI and verifies through `pactl` that the default `archtree_ci` output
+uses `module-null-sink.c`; a missing or different output fails setup. Each scenario
+creates its initially muted media, then clicks **Enable isolated test audio** with
+a real browser gesture. The button only calls the existing mute control. Local
+Windows runs keep the media muted and expose no button.
+The same two commands retain
+`WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L4101-L4144)
+disables WPE's viewport power-saving pause for hidden muted video elements,
+including audio-only sources. Media clocks, readiness, seeks, rates, and end events
+remain native. Both ordinary and social Linux test commands set
+`WPE_SHELL_DISABLE_MEDIA_DISK_CACHE=1`
+using [WPE's media cache setting](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L3345-L3359).
+This isolates native seek scenarios from the GStreamer download-cache completion
+path while retaining the default decoder and real HTTP/Range transport. With
+disk caching enabled, the Linux WPE backend can keep reporting current-frame
+data after a fully buffered seek even as its media clock advances. This CI
+isolation does not establish support for that default-cache path. The independent
+social gate keeps the default autoplay and visibility policies, and still requires
+real decoded readiness, continuous progress and synchronization within 750 ms.
+Both jobs retain preflight and full-matrix evidence, and every invocation is
+blocking. `release-artifact` needs all four jobs, so it is skipped unless every
 gate succeeds. It stages those same build bytes without rebuilding and binds each
 gate step's outcome into the provenance. A run normally finishes in about 20–25
 minutes, inside the promoter's wait. If branch protection is added, require every
@@ -1193,8 +1337,14 @@ Important:
 Finitude clients discover and conditionally refresh reviewed runtime bundles
 through two unauthenticated, read-only endpoints:
 
-- `GET /api/localizations/v1/manifest`
-- `GET /api/localizations/v1/bundles/{locale}`
+- `GET /api/localizations/v2/manifest`
+- `GET /api/localizations/v2/bundles/{locale}`
+
+The v2 route serves the complete runtime catalog (at most 2,000 messages and
+256 KiB). Existing `/api/localizations/v1` routes retain the listener namespace,
+excluding `admin.*`, with its original 1,000-message bound. The generator emits
+both independently revised variants. Old native readers keep their reviewed
+languages rather than rejecting an expanded administrator bundle.
 
 Only canonical, manifest-allowlisted BCP 47 locale tags are served. Responses
 support strong `ETag` revalidation; bundles also return `Content-Language`.
@@ -1208,6 +1358,148 @@ When the sibling native repositories are present, run
 same manifest plus packaged `en-US.json` into Finitude iOS and Android. Use
 `-- --ios-root <path> --android-root <path>` when the repositories are not in
 their conventional sibling directories.
+
+## Finitude Administrator Workbench
+
+The private administrator API is mounted at `/api/admin/v1`. It uses the current
+persisted `admin` role, same-origin cookie mutation protection, bounded parsers,
+account-viewer fencing and `no-store` responses. `GET /capabilities` advertises
+admission independently of the normal listener DTOs. All flags below default
+closed and accept only the literal `true`:
+
+| Configuration | Purpose |
+| --- | --- |
+| `FINITUDE_ADMIN_IMPORTS_ENABLED` | Admit new import projects, analysis and publication steps |
+| `OPENAI_API_KEY` | Reuse the existing Naruto Mobile server provider configuration for `gpt-6-luna` |
+| `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` | Optional existing provider routing; never returned to clients |
+| `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
+| `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` | Operator assertion that the staging bucket denies public/CDN access |
+| `FINITUDE_ADMIN_CATALOG_ENABLED` | Admit versioned edits to existing catalog metadata |
+| `FINITUDE_ADMIN_VISIBILITY_ENABLED` | Admit explicit public/hidden changes |
+| `FINITUDE_HIDDEN_DELIVERY_ENFORCED` | Operator assertion that historical object URLs, S3 policies and CDN delivery deny hidden access |
+
+A private ACL alone does not override a public bucket policy. Verify denied
+unauthenticated access to the staging prefix and historical canonical URLs
+before enabling the corresponding assertion. The application enforces hidden
+reads even when admission flags are rolled back. Old external artwork without
+an owned asset must migrate before hiding its owner. Previously delivered files
+cannot be recalled. Private preview GET/HEAD accepts the account-viewer header,
+or a non-secret `viewer` query parameter for browser media elements; neither is
+an authentication credential. Every preview requires the current admin session.
+
+The Web and native import editors use Draft, Review, Files and Publish sections.
+Section navigation retains account-fenced local work and does not dispatch a
+mutation. Compact value comparisons keep source evidence expandable; publication
+recovery has its own status and actions. Confirmation windows show the frozen
+named target and proposed change before secondary explanations. Technical IDs
+remain available in Details rather than leading normal catalog and Page rows.
+
+Import routes (relative to `/api/admin/v1`):
+
+- `GET /imports`: bounded workbench inventory/counts, filters and opaque cursor.
+- `POST /imports`: `{operationId, manifest, draft?}`; names and relative paths,
+  at most 100 files, never client S3 locations or absolute filesystem paths.
+- `GET /imports/:id`, `PATCH /imports/:id`: read/save a private draft.
+- `POST /imports/:id/analyze`, `/adopt`, `/decisions`, `/cancel-analysis`:
+  persisted analysis and selective review with `{operationId, expectedRevision}`.
+- `GET /imports/:id/duplicate-candidates`: bounded candidates; a name match is
+  never verified identity or automatic reuse.
+- `POST /imports/:id/assets/:slotId`: one multipart `file`; `Idempotency-Key`
+  and numeric `If-Match` reserve its private object identity before S3 work.
+  `slotId=cover` is the independent manual cover slot.
+- `DELETE /imports/:id/assets/:slotId`: explicit staged cleanup with the same
+  operation headers; unknown/failed cleanup retains lifecycle evidence.
+- `POST /imports/:id/select-cover`: explicitly select a ready manual or embedded
+  artwork slot; uploading artwork alone never selects it.
+- `GET /imports/:id/assets/:slotId/preview`: protected staged artwork preview.
+- `POST /imports/:id/publish`: explicit reviewed approval, then asynchronous
+  fixed-identity publication; `/resume-publication` reconciles that approval's
+  original operation ID rather than creating another Album.
+- `POST /imports/:id/cancel-publication`: explicit cancellation with
+  `{operationId, expectedRevision, publicationOperationId}`. The new operation
+  UUID binds the exact original publication UUID. An active worker lease or a
+  completed publication rejects cancellation. The private response includes
+  `publicationRecovery: {operationId, cleanupPending, startedByMe} | null`.
+  For a cancelled publication, `/resume-publication` reconciles and deletes
+  unused canonical copies under the requesting current administrator, even after
+  the original grant expires. It never reattaches or repeats an unknown copy.
+  Draft edits, suggestion review and duplicate decisions remain available while
+  cleanup is pending; source changes, analysis and a new publication approval
+  resume only after confirmed cleanup. A new approval preserves the cancelled
+  operation's history and allocates independent catalog/storage identities.
+  Each project admits at most 16 publication approvals, retaining at most 15
+  complete historical snapshots; `capabilities.publish` closes at that limit.
+  Cancellation and cleanup remain admitted independently of this new-work limit.
+
+Ordinary import mutations retain their 256-receipt admission limit. Required
+asset cleanup and publication cancellation use separate lifecycle receipts tied
+to each admitted asset version or approved publication, preserving exact replay
+and UUID-collision checks without consuming the ordinary mutation allowance.
+The client receives a bounded recent receipt projection; the original publication
+UUID remains available through `publicationRecovery` for durable reconciliation.
+
+The analysis worker admits two active projects globally and one per initiating
+admin, uses 24-hour grants and 120-second leases, and checkpoints every provider
+attempt before dispatch. A stopped analysis still occupies its actor/global slot
+until its in-flight provider outcome is checkpointed. Each project permits two generations and at most 22
+calls and the deployment reserves at most 220 attempts per UTC day across all
+projects, ten tracks per chunk, 4,000 output tokens/call, 48 KB context and 256 KB
+responses. `store:false` is sent to the provider; it is not a zero-retention
+promise. Credentials, emails, raw music and absolute paths are not analysis
+context. Potentially paid ambiguous outcomes block automatic replay. Production
+cost/quality measurements and real S3 proof are separate from mocked tests.
+Daily reservations are persisted in the same transaction as a chunk checkpoint;
+uncertain outcomes and dispatches stopped after reservation remain counted.
+
+The publisher reserves immutable approvals and catalog IDs before copying
+objects. It uses version-bound GET and conditional checksum PUT to canonical
+storage. Canonical destination PUT uses one SDK attempt and a 90-second deadline
+within its five-minute lease, preventing a late SDK retry from recreating a
+confirmed-clean object. The publisher checkpoints unknown outcomes and publishes the ready graph in one
+MongoDB transaction. An unresolved object never loses its import evidence.
+Stopping the server stops new steps and awaits admitted worker work before
+closing MongoDB. Required indexes and the global admission record initialize
+with normal server startup.
+Audio/artwork reconciliation includes unresolved canonical copy reservations
+from import and cover operations before reporting orphan candidates. Completed
+history does not mask later unreferenced objects; unresolved cleanup evidence
+remains counted even after an operation is cancelled.
+
+Existing catalog routes use metadata-digest revisions so legacy edits also cause
+conflicts: `GET /catalog/:kind`, `GET/PATCH /catalog/:kind/:id`, where `kind` is
+`artist`, `album`, `audioTrack` or `organization`. A patch contains
+`{operationId, expectedRevision, fields?, visibility?}`. Credits and attribution
+must be supplied together; memberships and storage keys are never editable
+fields. Track Number edits recompute the parent's automatic order atomically.
+`GET /pages/:slug` and `PATCH /pages/:slug/items/:itemId` address one Page
+placement, preserving reusable definitions and order. Each placement includes
+bounded `name`, `sourceMode` (`manual`, `dynamic` or null) and `referenceStatus`
+(`ready`, `missing` or `unsupported`) display metadata. The Page digest binds
+that resolved metadata, so a referenced name/source change requires fresh
+confirmation. A named target is write-fenced with the visibility mutation.
+`/artwork` and `/media`
+are private previews with current-source and current-role stream revocation.
+Unknown commit responses retry the original intent; stale revisions require
+reviewing the latest saved state. Client confirmation dialogs retain the opened
+revision and exact publication/asset identity; a background refresh invalidates
+the confirmation rather than replacing its approved target.
+
+`POST /catalog/:kind/:id/cover` takes
+`{operationId, expectedRevision, importId, slotId, expectedSourceRevision}`;
+`DELETE` takes `{operationId, expectedRevision}`. The owner digest and numeric
+source-import revision both bind the approved preview. Organization cover edits
+are unsupported because that kind has no owned-image lifecycle. Replacement
+copies into a reserved canonical asset, attaches it atomically, then cleans the
+old asset. `GET /catalog/:kind/:id/cover-operations` prioritizes unresolved work
+and cleanup debt; `POST /catalog/:kind/:id/cover-operations/:operationId/reconcile`
+reuses the original approval. Each actor may hold at most 256 unresolved cover
+operations. Confirmed history remains traceable without consuming that capacity.
+`POST /catalog/:kind/:id/cover-operations/:originalOperationId/cancel` explicitly
+cancels an unattached approval with a new `{operationId, expectedRevision}`
+receipt. A null revision is accepted only when the owner is absent or non-ready.
+Attached changes and active worker leases cannot be cancelled. Unused target
+cleanup retains its source pin and storage evidence until confirmed; cancelled
+cleanup can be reconciled by any current administrator without reattaching it.
 
 ## Browser Auth and Content Management
 
@@ -1379,6 +1671,12 @@ App session endpoints:
 - `DELETE /auth/activity/listening-history`
 - `DELETE /auth/account`
 
+Native authentication requests can declare `X-Finitude-Device-Type` as
+`android-phone` or `android-tablet`. The older `phone` and `tablet` categories
+remain iPhone and iPad for existing iOS clients. Archtree stores a fixed friendly
+label for these allowlisted categories; arbitrary device names are ignored.
+This applies to newly created sessions and does not rewrite older stored labels.
+
 Retired code-based registration endpoints answer immediately, before
 validation, rate limiting or any database access, with
 `410 {"code":"email_registration_moved","message":"Email sign-up has moved to the Finitude website. Create your account there, then sign in."}`:
@@ -1547,6 +1845,13 @@ Web content management:
   configuration, and manual-item maintenance are grouped into collapsible
   tools; Page and Carousel reorder controls support both drag-and-drop and
   Move up/Move down buttons.
+- Page attachment is confirmed only after its transaction succeeds. The
+  administrator-only `POST /content/pages/:slug/items/carousel` and
+  `POST /content/pages/:slug/items/collection` endpoints return
+  `409 page_attachment_not_applied` when the Page reaches its 100-item limit
+  or disappears after the initial lookup. Existing items remain unchanged;
+  refresh the Page before retrying. The Carousel attachment form reports the
+  same failure instead of showing a successful placement.
 - Operations links the focused MediaTrack and storage-audit workspaces, shows
   the retained step status for each guided Artist release, links completed
   content back to its workspace, and only offers retry when an operation needs
@@ -1662,8 +1967,48 @@ Personalized Library:
 - `POST /content/me/saves/status` resolves saved state for up to 100 visible
   items, and `POST /content/me/recently-played` records explicit playback
   actions.
-- Personalized carousels mix Albums and MediaTracks from either Recently Saved
-  or Recently Played and resolve for the viewer requesting an expanded page.
+- Recently Saved and Recently Played carousels mix Albums and MediaTracks and
+  resolve for the viewer requesting an expanded page.
+- Artist Follow is a separate private relationship. `POST
+  /content/me/artist-follows/status` accepts exactly `{ "artistIds": [...] }`
+  with at most 100 hexadecimal IDs and returns input-ordered `items` containing
+  `artistId`, `following` and nullable ISO `followedAt`. `PUT` and `DELETE
+  /content/me/artist-follows/:artistId` return that same individual status.
+  All routes require existing Bearer authentication or the cookie viewer fence,
+  return `private, no-store`, and never accept a client-selected owner. Repeated
+  Follow preserves the original timestamp; repeated Unfollow succeeds even for
+  an unavailable/deleted Artist. Only ready Artists accept Follow. Account and
+  Artist write fences serialize Follow against either deletion; account cleanup
+  is transactional, and failed Artist cleanup retains lifecycle evidence.
+- `GET /api/listener/v1/personalization-capabilities` is public and `no-store`:
+  `{ "contractVersion": 1, "deterministicDiscovery": false, "artistFollows": false }`
+  (the final Boolean reflects the independent flag). The old capability DTO is
+  unchanged. This release does not implement deterministic Discovery.
+- Administrators can configure a personalized Carousel with source
+  `followedArtistReleases` and an integer limit of 1–20. Both Home projections
+  require `X-Finitude-Personalization-Version: 1`, a signed-in viewer, the enabled
+  flag and eligible results. Otherwise only this section is omitted; other
+  configured sections retain their order. The shared resolver returns ready
+  releases dated today through 89 previous UTC days, using canonical Artist
+  Credit roles and independent Album-family qualification from the shared rules.
+  Each contextual Home item may carry
+  `{ "reason": { "code": "followedArtist", "artist": { "id": "...", "name": "..." } } }`;
+  public content summaries and expanded `included` objects never gain this field.
+- Startup revision `required-indexes-v7-artist-follows` requires the unique
+  `artistFollows(userId, artistId)` index, owner/follow-date and Artist/owner
+  cleanup indexes, and the Album/MediaTrack descending calendar-date indexes.
+  The resolver uses those date indexes, bounded equality joins and a 3-second
+  database deadline per content class; it does not load an unlimited Follow ID
+  list or add an arbitrary account Follow cap. Missing required indexes prevent
+  readiness. Keep the feature disabled until the additive index rollout and
+  both Home compatibility projections have been verified.
+- Shared synthetic contract fixtures live in `test/fixtures/personalization/v1`.
+  After updating the canonical files and their SHA-256 manifest, run
+  `node scripts/sync-personalization-fixtures.mjs` to copy the exact corpus to
+  sibling iOS/Android test resources. Run
+  `node scripts/sync-personalization-fixtures.mjs --check` to verify canonical
+  hashes and byte equality without writing files. These fixtures prove contract
+  compatibility, not production enablement or real-account acceptance.
 - Each recent history is capped at 20 mixed-content entries; the full saved
   relationship is retained separately.
 - Library items expose `lastPlayedAt` and `lastActivityAt`. A new save seeds
@@ -2058,3 +2403,102 @@ Reconciliation:
   Operations and the Audio Storage Audit before retrying so a delayed success is
   not duplicated. Album promotion is available only when the batch has both a
   selected Album and an explicitly selected Primary Artist.
+
+### Preparing the Naruto browser distribution
+
+The Naruto browser UI and Chrome extension are built from the sibling
+`naruto-mobile` repository. Install its locked dependencies with `npm ci`, then
+prepare its hosted assets from this Archtree checkout:
+
+```powershell
+npm run prepare:naruto-web
+# Or choose an explicit source checkout:
+npm run prepare:naruto-web -- D:\Documents\GitHub\naruto-mobile
+```
+
+The helper runs the sibling's `npm run build:hosted`, validates the `/naruto/`
+Vite manifest and extension download, and copies only the hosted distribution
+to the ignored `naruto-web/dist/` directory. A distribution digest and source
+commit/dirty metadata accompany the build; desktop data, local configuration,
+and credentials are excluded. `/naruto/naruto-mobile-chrome-extension.zip`
+downloads the unpacked extension described by the UI's installation guide.
+Extension `0.1.2` adds bounded scrolling/waiting for lazy Bilibili comments and
+keeps incomplete sources retryable. Reload the updated extension and refresh the
+portal before continuing an older investigation; its first explicit resume
+retries legacy title-only sources while retaining local evidence and spent time.
+When preparing a new bundle while the local Archtree server is running, restart
+that server before refreshing the page so its static-asset allowlist includes
+the new hashed bundle files.
+Extension `0.1.3` also requests `tabGroups` to keep tool-created collector tabs
+in an orange `火影调查` group. Existing browser groups and user tabs are not
+adopted; pausing and finishing preserve user-added or repurposed tabs. Replace
+the extracted extension files and reload it in Chrome after preparing an update.
+Extension `0.1.4` also accepts late tracking-query/trailing-slash changes to the
+same canonical video or dynamic, while retaining content-ID and tab-placement
+ownership boundaries. Its visible connection message includes the loaded version;
+fixed local warning reasons identify the failed collection stage without page
+payloads or upstream exception text.
+Extension `0.1.5` retries still-loading background comments by briefly activating
+one owned collector tab at a time in its existing window/group. It restores the
+previous selection only if the user has not changed tabs, and requires no new
+extension permissions. Its reader scrolls the actual observed comment host.
+Extension `0.1.6` additionally recognizes Bilibili's rendered zero-comment count
+paired with its end-of-comments footer as a completed empty source. An end
+marker alone or hidden/unfinished comment UI remains pending.
+Extension `0.1.7` opens login checks and collection in separate new normal Chrome
+windows with `focused: false`. Parallel collector tabs share one dedicated
+window and the orange investigation group; delayed-comment retries change only
+that window's selected tab. The existing user window keeps its selection.
+Cleanup removes only owned tabs, so a user-added tab keeps its window open.
+
+`npm run stage:eb-artifact` includes this separately prepared distribution when
+present and revalidates its provenance. Prepare it before staging any release
+intended to serve Naruto. The normal Archtree build does not rebuild the sibling
+or fetch its private source. Without a prepared distribution, `/naruto` returns
+503 while the existing APIs and Finitude listener remain available. Naruto
+releases use the same release verification and deployment process as Archtree;
+generated bundles and deployment archives must not be committed.
+
+Automatic Naruto release packaging is opt-in. Set the Archtree repository's
+Actions variable `NARUTO_SOURCE_COMMIT` to a complete 40-character commit SHA
+already committed and pushed to `yangyinxu/naruto-mobile`. Branches, tags,
+abbreviated hashes, and malformed values are rejected. When that repository is
+private, provide `NARUTO_SOURCE_TOKEN` as an Actions secret with read-only
+Contents access to that source repository; the default `GITHUB_TOKEN` is normally
+limited to Archtree. Checkout does not persist the source credential.
+
+For a `main` push with the variable configured, the release workflow checks out
+that exact source under ignored `.naruto-source/`, installs its locked
+dependencies and Chromium, runs its tests, prepares the hosted distribution,
+and runs the local browser demo smoke. Any failure blocks the release. The
+shared build artifact includes `naruto-web/dist` and its hidden manifest and
+provenance; the final Elastic Beanstalk ZIP also includes `naruto-web`. The
+existing Archtree release gates and promotion identity remain required. This
+CI smoke exercises the local demo; real-extension collection is covered by
+the source tests and the separate installed-Chrome smoke described below.
+
+Without `NARUTO_SOURCE_COMMIT`, the ordinary release excludes Naruto and the
+deployed `/naruto` page returns 503. A local prepared bundle does not configure
+CI. Both repositories' implementation changes must be committed and pushed
+before enabling a Naruto release, with Archtree's changes delivered through
+the existing `main` release process. Updating the source variable alone does
+not trigger a workflow or deployment; a subsequent authorized `main` push is
+required. Pull-request gates do not check out the optional source or use its
+private token.
+
+After preparing the current distribution, run the local demo smoke with
+`npm run smoke:naruto-web`. To exercise the real unpacked Chrome extension and
+the hosted live flow together in an isolated temporary Chrome profile, set an
+explicit installed Chrome executable:
+
+```powershell
+$env:NARUTO_HOSTED_EXTENSION_EXECUTABLE = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+npm run smoke:naruto-web
+Remove-Item Env:NARUTO_HOSTED_EXTENSION_EXECUTABLE
+```
+
+The optional mode uses Chrome's local `Extensions.loadUnpacked` debugging API
+in the temporary profile. Bilibili pages, account persistence reads, and server
+classification are synthetic fixtures; it never uses a personal browser
+profile, a real account, or paid provider calls. Both modes verify reports, ZIP
+import/export, IndexedDB reload, and blocked unexpected browser origins.

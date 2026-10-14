@@ -9,8 +9,8 @@ import { socialRollout } from '../../config/socialRollout';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { touchActiveAccount, AccountReferenceUnavailableError } from '../../services/accountReferenceFenceService';
 import { getJwtSecret } from '../../services/authSessionService';
-import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
-import { resolveRoomAudioRepresentation, touchRoomAudioRepresentation } from '../../services/mediaRepresentationService';
+import { findPublicAudioTracks, findPublicAudioAccessRecords } from '../../services/catalogVisibilityService';
+import { resolveRoomAudioRepresentation, touchRoomAudioRepresentation, readRoomMediaAccess, type RoomMediaAccess } from '../../services/mediaRepresentationService';
 import { assertRoomAuthority, inspectRoomAuthority } from '../../realtime/roomAuthority';
 import { notifyRoomChanges } from '../../realtime/roomEvents';
 import { socialOperations, type RoomTransition, type SocialOperations } from '../../realtime/socialOperations';
@@ -31,6 +31,10 @@ export interface RoomServiceOptions {
     inspectAuthority?: (session: ClientSession) => Promise<number>;
     resolveMedia?: (id: string, session?: ClientSession) => Promise<RoomMediaDescriptor | null>;
     touchMedia?: (id: string, revision: string, session: ClientSession) => Promise<RoomMediaDescriptor | null>;
+    /** Access-only check preserves unavailable public occurrences without exposing hidden metadata. */
+    canReadMedia?: (id: string, session: ClientSession) => Promise<boolean>;
+    /** Batches current access for queued entries without changing injected single-track resolver contracts. */
+    readMediaAccess?: (ids: string[], session: ClientSession) => Promise<Map<string, RoomMediaAccess>>;
     beforeAccountFence?: (actor: RoomActor, session: ClientSession) => Promise<void>;
     beforeCommit?: (session: ClientSession) => Promise<void>;
     afterCommit?: () => Promise<void>;
@@ -62,6 +66,13 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
     const inspectAuthority = options.inspectAuthority ?? (options.assertAuthority ? undefined : inspectRoomAuthority);
     const resolveMedia = options.resolveMedia ?? resolveRoomAudioRepresentation;
     const touchMedia = options.touchMedia ?? touchRoomAudioRepresentation;
+    const canReadMedia = options.canReadMedia ?? (async (id: string, session: ClientSession) =>
+        Boolean(await findPublicAudioAccessRecords({ _id: new ObjectId(id) }, session).project({ _id: 1 }).next()));
+    const readMediaAccess = options.readMediaAccess ?? (!options.resolveMedia && !options.canReadMedia ? readRoomMediaAccess : async (ids: string[], session: ClientSession) => {
+        const rows = new Map<string, RoomMediaAccess>();
+        for (const id of new Set(ids)) { const media = await resolveMedia(id, session); rows.set(id, { media, canRead: Boolean(media) || await canReadMedia(id, session) }); }
+        return rows;
+    });
     const capacity = options.capacity ?? socialCapacity();
     const operations = options.operations ?? socialOperations;
     const db = () => { const value = getDb(); if (!value) return fail('room_unavailable', 503); return value; };
@@ -230,12 +241,17 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         }
         if (room.transfer && room.transfer.expiresAt.getTime() <= now()) { room.transfer = null; changed = true; }
         const current = room.queue.find(value => value.entryId === room.timeline.entryId);
-        if (current && !current.unavailable && (room.timeline.state === 'playing' || room.preparation)) {
-            const media = await readMedia(current);
-            if (!media || media.mediaRevision !== current.mediaRevision) {
-                current.unavailable = true; pauseRoom(room, now()); room.queueRevision = incrementRoomVersion(room.queueRevision); changed = true;
+        let queueChanged = false;
+        for (const entry of room.queue) {
+            if (entry.unavailable) continue;
+            const media = await readMedia(entry);
+            if (!media || media.mediaRevision !== entry.mediaRevision) {
+                entry.unavailable = true;
+                if (entry === current) pauseRoom(room, now());
+                queueChanged = true;
             }
         }
+        if (queueChanged) { room.queueRevision = incrementRoomVersion(room.queueRevision); changed = true; }
         if (room.preparation && finishPreparation(room)) changed = true;
         if (enabled() && room.epoch === candidate.epoch && room.playbackGeneration === candidate.playbackGeneration
             && room.queueRevision === candidate.queueRevision && room.timeline.entryId === candidate.timeline.entryId
@@ -263,15 +279,15 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
             }
             const epoch = await inspectAuthority(session);
             const sessions = new Map<string, SweepSession>();
-            const media = new Map<string, RoomMediaDescriptor | null>();
+            let media: Map<string, RoomMediaAccess> | undefined;
             const readSession = async (value: RoomMemberDocument) => {
                 const key = `${value.accountId}:${value.controllerSessionId}`;
                 if (!sessions.has(key)) sessions.set(key, await readSweepSession(value, session));
                 return sessions.get(key)!;
             };
             const readMedia = async (entry: RoomQueueEntryDocument) => {
-                if (!media.has(entry.mediaTrackId)) media.set(entry.mediaTrackId, await resolveMedia(entry.mediaTrackId, session));
-                return media.get(entry.mediaTrackId)!;
+                media ??= await readMediaAccess(room.queue.map(value => value.mediaTrackId), session);
+                return media.get(entry.mediaTrackId)?.media ?? null;
             };
             if (await planSweep(candidate, room, epoch, readSession, readMedia) !== 'unchanged') return false;
             // Filtering a cohort can be an in-memory-only change. Preserve that original fenced pass too.
@@ -299,16 +315,29 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 memberId: value.membershipId, role: value.membershipId === room.hostMembershipId ? 'host' as const : 'guest' as const,
                 controllerGeneration: value.controllerGeneration, connected: connected(value), ready: value.readyPlaybackGeneration === room.playbackGeneration }] : [];
         });
-        const entry = room.queue.find(value => value.entryId === room.timeline.entryId);
+        // Historical queue metadata is private evidence. Every delivered snapshot resolves
+        // current access, including paused rooms and entries that are not playing yet.
+        const queue: RoomSnapshot['queue'] = [];
+        const access = await readMediaAccess(room.queue.map(value => value.mediaTrackId), session);
+        for (const value of room.queue) {
+            if (!access.get(value.mediaTrackId)?.canRead) continue;
+            // A replaced but still public source retains the established unavailable
+            // queue occurrence. Its pinned URL cannot open replacement bytes.
+            queue.push({ entryId: value.entryId, mediaTrackId: value.mediaTrackId,
+                mediaRevision: value.mediaRevision, durationMs: value.durationMs,
+                title: value.title, streamUrl: value.streamUrl, mediaType: 'Audio' });
+        }
+        const entry = queue.find(value => value.entryId === room.timeline.entryId);
+        const preparation = room.preparation && queue.some(value => value.entryId === room.preparation!.entryId)
+            ? room.preparation : null;
         const result: RoomSnapshot = { protocolVersion: 1, roomId: room._id, epoch: room.epoch, revision: room.revision, serverTimeMs: now(),
             status: room.hostSuspended ? 'suspended' : 'open', controlMode: room.controlMode, controlGeneration: room.controlGeneration,
             hostMemberId: room.hostMembershipId, hostAbsenceDeadlineMs: room.hostAbsentSince ? room.hostAbsentSince.getTime() + ROOM_LIMITS.hostGraceMs : null,
-            queueRevision: room.queueRevision, queue: room.queue.map(value => ({ entryId: value.entryId, mediaTrackId: value.mediaTrackId,
-                mediaRevision: value.mediaRevision, durationMs: value.durationMs, title: value.title, streamUrl: value.streamUrl, mediaType: 'Audio' })),
+            queueRevision: room.queueRevision, queue,
             timeline: entry ? { ...room.timeline, playbackGeneration: room.playbackGeneration, mediaRevision: entry.mediaRevision, durationMs: entry.durationMs } : null,
-            preparation: room.preparation ? { preparationId: room.preparation.preparationId, playbackGeneration: room.preparation.playbackGeneration,
-                entryId: room.preparation.entryId, mediaRevision: room.preparation.mediaRevision, targetPositionMs: room.preparation.targetPositionMs,
-                deadlineServerTimeMs: room.preparation.deadlineAt.getTime(), cohortMembershipIds: room.preparation.cohort.map(value => value.membershipId) } : null,
+            preparation: preparation ? { preparationId: preparation.preparationId, playbackGeneration: preparation.playbackGeneration,
+                entryId: preparation.entryId, mediaRevision: preparation.mediaRevision, targetPositionMs: preparation.targetPositionMs,
+                deadlineServerTimeMs: preparation.deadlineAt.getTime(), cohortMembershipIds: preparation.cohort.map(value => value.membershipId) } : null,
             members, self: { memberId: own.membershipId, controllerGeneration: own.controllerGeneration, isController: controls(own, actor),
                 canControl: controls(own, actor) && (room.controlMode === 'everyone' || own.membershipId === room.hostMembershipId) },
             transferOffer: room.transfer && (own.membershipId === room.hostMembershipId || own.membershipId === room.transfer.targetMembershipId)
@@ -689,9 +718,9 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
         async eligibleMedia(actor) {
             return transaction(actor, async session => {
                 await profile(actor.userId, session);
-                const candidates = await db().collection('audioTracks').find({ ...readyAudioStorageFilter,
+                const candidates = await findPublicAudioTracks({
                     'mediaRepresentation.seekable': true, 'mediaRepresentation.format': { $in: ['wav-pcm', 'mp3', 'm4a-aac'] } },
-                    { session, projection: { _id: 1 } }).sort({ _id: -1 }).limit(100).toArray();
+                    session).project({ _id: 1 }).sort({ _id: -1 }).limit(100).toArray();
                 const result: RoomMediaDescriptor[] = [];
                 for (const candidate of candidates) {
                     const value = await resolveMedia(candidate._id.toString(), session);
@@ -720,11 +749,11 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                         || !Number.isSafeInteger(parsed.expiresAt) || Number(parsed.expiresAt) <= now()) return fail('cursor_invalid', 400);
                     afterId = parsed.afterId;
                 }
-                const candidates = await db().collection('audioTracks').find({ ...readyAudioStorageFilter,
+                const candidates = await findPublicAudioTracks({
                     'mediaRepresentation.seekable': true, 'mediaRepresentation.format': { $in: ['wav-pcm', 'mp3', 'm4a-aac'] },
                     _id: { $type: 'objectId', ...(afterId ? { $lt: new ObjectId(afterId) } : {}) },
                     ...(query ? { title: { $regex: query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } } : {})
-                }, { session, projection: { _id: 1 } }).sort({ _id: -1 }).limit(ROOM_MEDIA_DISCOVERY_LIMITS.candidates + 1).maxTimeMS(2_000).toArray();
+                }, session).project({ _id: 1 }).sort({ _id: -1 }).limit(ROOM_MEDIA_DISCOVERY_LIMITS.candidates + 1).maxTimeMS(2_000).toArray();
                 const items: RoomMediaDescriptor[] = [];
                 let scanned = 0;
                 // A cursor advances past rejected representations too; a sparse page cannot strand older media.
@@ -883,7 +912,11 @@ export const createRoomService = (options: RoomServiceOptions = {}): RoomApi => 
                 const epoch = await authority(session);
                 const room = await rooms().findOne({ _id: candidate._id }, { session }); if (!room || room.state !== 'open') return null;
                 const wasSuspended = room.hostSuspended;
-                const plan = await planSweep(candidate, room, epoch, value => readSweepSession(value, session), entry => resolveMedia(entry.mediaTrackId, session));
+                let access: Map<string, RoomMediaAccess> | undefined;
+                const plan = await planSweep(candidate, room, epoch, value => readSweepSession(value, session), async entry => {
+                    access ??= await readMediaAccess(room.queue.map(value => value.mediaTrackId), session);
+                    return access.get(entry.mediaTrackId)?.media ?? null;
+                });
                 if (plan === 'close') {
                     // planSweep closes for exactly these three conditions; read them before closeRoom clears the host.
                     const reason = room.expiresAt.getTime() <= now() ? 'expired' as const : host(room) ? 'hostAbsent' as const : 'hostMissing' as const;

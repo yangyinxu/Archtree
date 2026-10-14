@@ -365,6 +365,7 @@ test('image reconciliation audits cover art and private avatars without mutating
             { key: `images/${coverDetached}`, size: 11 },
             { key: `images/${avatarWrongPrefix}`, size: 12 },
             { key: 'images/orphan-cover', size: 13 },
+            { key: `images/${'7'.repeat(24)}`, size: 13 },
             { key: `images/${malformedImageId}`, size: 15 }
         ],
         'avatars/': [{ key: 'avatars/orphan-avatar', size: 14 }]
@@ -374,6 +375,7 @@ test('image reconciliation audits cover art and private avatars without mutating
     const report = await reconcileImageStorage({
         bucket: 'audit-bucket',
         loadAssets: async () => assets,
+        loadReservedKeys: async () => new Set([`images/${'7'.repeat(24)}`]),
         loadOwners: async ownerType => owners[ownerType],
         listObjects: async (_bucket, prefix) => [...storageLists[prefix]],
         headObject: async (_bucket, key) => ({
@@ -387,7 +389,7 @@ test('image reconciliation audits cover art and private avatars without mutating
     assert.equal(mutations, 0);
     assert.equal(report.summary.databaseCoverArtCount, 3);
     assert.equal(report.summary.databaseAvatarCount, 2);
-    assert.equal(report.summary.s3CoverArtCount, 5);
+    assert.equal(report.summary.s3CoverArtCount, 6);
     assert.equal(report.summary.s3AvatarCount, 1);
     assert.equal(report.summary.orphanedObjectCount, 2);
     assert.deepEqual(

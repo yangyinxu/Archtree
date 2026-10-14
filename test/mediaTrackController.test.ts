@@ -75,7 +75,8 @@ test('canonical MediaTrack resolution returns only the one selected Audio or Vid
             ['head', {
                 Bucket: process.env.S3_BUCKET_NAME!,
                 Key: track.s3Key
-            }, signal]
+            }, signal],
+            ['find', trackId]
         ]);
     }
 });

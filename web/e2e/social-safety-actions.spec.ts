@@ -31,6 +31,7 @@ const installSocial = async (page: Page) => {
     const url = new URL(request.url());
     const path = url.pathname.replace('/api/social/v1', '');
     if (request.method() === 'GET') {
+      if (path === '/me/changes') return json(route, { revision: 0 });
       if (path === '/me/profile') return json(route, { profile: { ...own, active: true, discoverable: true, revision: 1 } });
       if (path === '/capabilities') return json(route, { socialEnabled: true, roomsEnabled: false });
       if (path === '/room-invitations') return json(route, { invitations: [] });

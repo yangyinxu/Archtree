@@ -647,7 +647,7 @@ export const renderManagePage = (params: {
               const dynamicSummary = isArtistCarousel
                   ? `<span class="pill">Dynamic</span> <span>${escapeHtml(artistName)}, ${carousel.artistConfig?.contentType === 'album' ? 'Albums' : 'MediaTracks'}</span>`
                   : isPersonalizedCarousel
-                      ? `<span class="pill">Personalized</span> <span>${carousel.personalizedConfig?.source === 'recentlyPlayed' ? 'Recently Played' : 'Recently Saved'}, mixed content</span>`
+                      ? `<span class="pill">Personalized</span> <span>${carousel.personalizedConfig?.source === 'followedArtistReleases' ? 'Followed Artist Releases' : carousel.personalizedConfig?.source === 'recentlyPlayed' ? 'Recently Played' : 'Recently Saved'}, mixed content</span>`
                   : '<span class="pill pill--muted">Manual</span>';
               const itemLabel = `${items.length} configured item${items.length === 1 ? '' : 's'}`;
               return `<div class="hierarchy-item"><strong>${renderReferencedItem(carousel, String(carousel.name ?? ''))}</strong><div class="item-meta">${dynamicSummary}</div>${renderNestedList(carouselItems, itemLabel)}</div>`;
@@ -731,7 +731,7 @@ export const renderManagePage = (params: {
                     <p class="drag-help">Items are generated automatically from the selected artist and cannot be manually reordered.</p>
                 </div>
                 <div class="personalized-carousel-config stack" hidden>
-                    <select name="personalizedSource"><option value="recentlySaved">Recently Saved</option><option value="recentlyPlayed">Recently Played</option></select>
+                    <select name="personalizedSource"><option value="recentlySaved">Recently Saved</option><option value="recentlyPlayed">Recently Played</option><option value="followedArtistReleases">Followed Artist Releases</option></select>
                     <input name="personalizedLimit" type="number" min="1" max="20" value="20" />
                     <p class="drag-help">Albums and MediaTracks are mixed automatically for the signed-in viewer.</p>
                 </div>
@@ -754,7 +754,7 @@ export const renderManagePage = (params: {
             <form class="update-personalized-carousel" method="POST" action="/content/manage/composition/carousel/update-personalized">
                 <select class="personalized-carousel-selector" name="carouselId" required><option value="" disabled selected>Select personalized carousel</option>${personalizedCarouselOptions}</select>
                 <input name="name" placeholder="Carousel name" required />
-                <select name="personalizedSource" required><option value="recentlySaved">Recently Saved</option><option value="recentlyPlayed">Recently Played</option></select>
+                <select name="personalizedSource" required><option value="recentlySaved">Recently Saved</option><option value="recentlyPlayed">Recently Played</option><option value="followedArtistReleases">Followed Artist Releases</option></select>
                 <input name="personalizedLimit" type="number" min="1" max="20" value="20" required />
                 <button type="submit">Update Personalized Carousel</button>
             </form>

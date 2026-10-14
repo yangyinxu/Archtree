@@ -16,8 +16,13 @@ import { createLocalizationRouter } from './routes/localizationRoutes';
 import { createEngineeringRouter } from './routes/engineeringRoutes';
 import videoRoutes from './routes/videoRoutes';
 import narutoMobileRoutes from './routes/narutoMobileRoutes';
+import { createNarutoBrowserRouter } from './narutoMobile/browserRoutes';
+import { mountNarutoBrowserApplication } from './narutoMobile/browserApplication';
 import { createSocialRouter } from './routes/socialRoutes';
 import { createRoomRouter } from './routes/roomRoutes';
+import { createAdminCapabilitiesRouter } from './routes/adminCapabilitiesRoutes';
+import { createAdminImportRouter } from './routes/adminImportRoutes';
+import { createAdminCatalogRouter } from './routes/adminCatalogRoutes';
 import {
   attachOptionalAuth,
   requireAdmin,
@@ -49,6 +54,8 @@ export interface CreateAppOptions {
   lifecycle?: ServerLifecycle;
   /** Overrides the production listener bundle location for isolated route tests. */
   listenerDistPath?: string;
+  /** Overrides the Naruto browser bundle location for isolated route tests. */
+  narutoDistPath?: string;
   /** Overrides the generated internal engineering guide for isolated route tests. */
   engineeringDistPath?: string;
   /** Overrides generated localization artifacts for isolated route tests. */
@@ -252,8 +259,14 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/content/manage', requireAuthForWeb, requireAdminForWeb);
   app.use(requireSharedContentAdminBeforeBody);
 
+  // Admin capabilities and import routes authorize before bounded body parsing.
+  app.use('/api/admin/v1', createAdminCapabilitiesRouter());
+  app.use('/api/admin/v1', createAdminImportRouter());
+  app.use('/api/admin/v1', createAdminCatalogRouter());
+
   // Authenticate paid Naruto requests before accepting their bounded JSON bodies.
   app.use('/naruto-mobile/api/v1', narutoMobileRoutes);
+  app.use('/naruto/api/v1', createNarutoBrowserRouter());
 
   // Social authentication and its smaller JSON limit precede the general parser.
   app.use('/api/social/v1', createRoomRouter());
@@ -278,12 +291,15 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/content', contentRoutes);
   app.use('/feed', feedRoutes);
   app.use('/video', videoRoutes);
-  app.use('/api/localizations/v1', createLocalizationRouter(options.localizationDistPath));
+  app.use('/api/localizations/v1', createLocalizationRouter(options.localizationDistPath, 'v1'));
+  app.use('/api/localizations/v2', createLocalizationRouter(options.localizationDistPath, 'v2'));
   app.use('/api/listener/v1', listenerRoutes);
 
   const listenerDistPath = options.listenerDistPath
     ?? path.resolve(__dirname, '..', 'web', 'dist');
   mountListenerApplication(app, listenerDistPath);
+  mountNarutoBrowserApplication(app, options.narutoDistPath
+    ?? path.resolve(__dirname, '..', 'naruto-web', 'dist'));
 
   app.get('/', attachOptionalAuth, async (req, res, next) => {
     try {

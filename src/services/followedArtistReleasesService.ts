@@ -1,0 +1,167 @@
+import type { Document } from 'mongodb';
+import { getDb } from '../infrastructure/database';
+import { isArtistFollowEnabled } from '../config/artistFollowRollout';
+import { readyPublicAlbumFilter, readyPublicArtistFilter, readyPublicTrackVisibilityFilter, publicAudioVisibilityPipeline } from './catalogVisibilityService';
+
+/** Contextual Home explanation; never a field on a public catalog summary. */
+export interface FollowedArtistReason {
+    code: 'followedArtist';
+    artist: { id: string; name: string };
+}
+export interface FollowedArtistReleaseRef {
+    contentType: 'album' | 'audioTrack';
+    contentId: string;
+    order: number;
+    reason: FollowedArtistReason;
+}
+
+/** Calendar arithmetic uses UTC midnights, including today and exactly 89 previous days. */
+export const followedReleaseWindow = (now: Date) => {
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    return { start: new Date(end.getTime() - 89 * 86_400_000), end };
+};
+
+const objectId = (input: unknown) => ({ $convert: { input, to: 'objectId', onError: null, onNull: null } });
+const safeArray = (input: string) => ({ $cond: [{ $isArray: input }, input, []] });
+const matchesString = (input: string, regex: string) => ({ $regexMatch: {
+    input: { $cond: [{ $eq: [{ $type: input }, 'string'] }, input, ''] }, regex
+} });
+
+/** Match the complete canonical Credit boundary before reasons, limits or Album-family suppression. */
+const canonicalCreditStages = (): Document[] => [
+    { $match: { $expr: { $cond: [{ $and: [
+        { $eq: ['$attributionStatus', 'documented'] },
+        { $gt: [{ $size: safeArray('$credits') }, 0] },
+        { $lte: [{ $size: safeArray('$credits') }, 50] }
+    ] }, { $and: [
+        { $allElementsTrue: [{ $map: { input: safeArray('$credits'), as: 'credit', in: { $and: [
+            { $eq: [{ $type: '$$credit' }, 'object'] },
+            matchesString('$$credit.creditId', '^[A-Za-z0-9_-]{8,100}$'),
+            matchesString('$$credit.subjectId', '^[0-9a-f]{24}$'),
+            { $or: [
+                { $and: [{ $eq: ['$$credit.subjectType', 'artist'] }, { $in: ['$$credit.role', [
+                    'primary', 'featured', 'performer', 'composer', 'producer', 'remixer', 'legacyUnspecified'
+                ]] }] },
+                { $and: [{ $eq: ['$$credit.subjectType', 'organization'] }, { $in: ['$$credit.role', [
+                    'label', 'publisher', 'distributor', 'presenter', 'legacyUnspecified'
+                ]] }] }
+            ] },
+            { $isNumber: '$$credit.order' },
+            { $gte: ['$$credit.order', 0] }, { $lte: ['$$credit.order', Number.MAX_SAFE_INTEGER] },
+            { $eq: ['$$credit.order', { $convert: { input: '$$credit.order', to: 'long', onError: -1, onNull: -1 } }] }
+        ] } } }] },
+        ...[
+            '$$credit.creditId',
+            ['$$credit.subjectType', '$$credit.subjectId', '$$credit.role']
+        ].map(key => ({ $eq: [
+            { $size: safeArray('$credits') },
+            { $size: { $setUnion: [{ $map: { input: safeArray('$credits'), as: 'credit', in: key } }, []] } }
+        ] }))
+    ] }, false] } } }
+];
+
+/** Rejects partial, fractional and rolled-over dates before applying the inclusive window. */
+const dateStages = (start: Date, end: Date): Document[] => [
+    { $match: {
+        'releaseDate.year': { $type: 'number', $gte: start.getUTCFullYear(), $lte: end.getUTCFullYear() },
+        'releaseDate.month': { $type: 'number', $gte: 1, $lte: 12 },
+        'releaseDate.day': { $type: 'number', $gte: 1, $lte: 31 }
+    } },
+    { $match: { $expr: { $cond: [
+        { $and: ['year', 'month', 'day'].map(part => ({ $isNumber: `$releaseDate.${part}` })) },
+        { $and: ['year', 'month', 'day'].map(part => ({ $eq: [{ $mod: [`$releaseDate.${part}`, 1] }, 0] })) }, false
+    ] } } },
+    { $set: { _releaseDate: { $dateFromParts: { year: '$releaseDate.year', month: '$releaseDate.month', day: '$releaseDate.day', timezone: 'UTC' } } } },
+    { $match: { _releaseDate: { $gte: start, $lte: end }, $expr: { $and: [
+        { $eq: [{ $month: '$_releaseDate' }, '$releaseDate.month'] },
+        { $eq: [{ $dayOfMonth: '$_releaseDate' }, '$releaseDate.day'] }
+    ] } } }
+];
+
+/** Per-credit equality joins use the owner/Artist unique index, independent of follow-list size. */
+const reasonStages = (userId: string, roles: readonly string[]): Document[] => [
+    ...canonicalCreditStages(),
+    { $set: { _followCredits: { $filter: { input: safeArray('$credits'), as: 'credit', cond: { $and: [
+        { $eq: ['$$credit.subjectType', 'artist'] },
+        { $in: ['$$credit.role', roles] }
+    ] } } } } },
+    { $unwind: '$_followCredits' },
+    { $lookup: { from: 'artistFollows', let: { artistId: '$_followCredits.subjectId' }, pipeline: [
+        { $match: { userId, $expr: { $eq: ['$artistId', '$$artistId'] } } },
+        { $limit: 1 }, { $project: { _id: 1 } }
+    ], as: '_follow' } },
+    { $match: { '_follow.0': { $exists: true } } },
+    { $set: { _artistObjectId: objectId('$_followCredits.subjectId') } },
+    { $lookup: { from: 'artists', localField: '_artistObjectId', foreignField: '_id', pipeline: [
+        { $match: { ...readyPublicArtistFilter, $expr: { $eq: [{ $type: '$name' }, 'string'] } } },
+        { $project: { name: { $trim: { input: '$name' } } } }, { $match: { name: { $ne: '' } } }
+    ], as: '_reasonArtist' } },
+    { $unwind: '$_reasonArtist' },
+    { $set: {
+        _roleRank: { $indexOfArray: [['primary', 'featured', 'performer'], '$_followCredits.role'] },
+        _creditOrder: '$_followCredits.order'
+    } },
+    { $sort: { _id: 1, _roleRank: 1, _creditOrder: 1, '_followCredits.subjectId': 1 } },
+    { $group: { _id: '$_id', owner: { $first: '$$ROOT' } } },
+    { $replaceRoot: { newRoot: '$owner' } },
+    { $set: { reason: { code: 'followedArtist', artist: {
+        id: { $toString: '$_reasonArtist._id' }, name: '$_reasonArtist.name'
+    } } } },
+    { $unset: ['_followCredits', '_follow', '_artistObjectId', '_reasonArtist', '_roleRank', '_creditOrder'] }
+];
+
+/** A ready orphan/unlisted track never proves an Album has a canonical playable member. */
+const playableAlbumStages = (): Document[] => [
+    { $set: { _canonicalTrackIds: { $map: { input: safeArray('$audioTrackIds'), as: 'id', in: objectId('$$id') } } } },
+    { $lookup: { from: 'audioTracks', localField: '_canonicalTrackIds', foreignField: '_id',
+        let: { albumId: { $toString: '$_id' } }, pipeline: [
+            { $match: readyPublicTrackVisibilityFilter },
+            { $match: { $expr: { $eq: ['$albumId', '$$albumId'] } } },
+            { $limit: 1 }, { $project: { _id: 1 } }
+        ], as: '_playable' } },
+    { $match: { '_playable.0': { $exists: true } } },
+    { $unset: ['_canonicalTrackIds', '_playable'] }
+];
+
+/** Shared by both Home projections. Fixed output, indexed joins, and server time bounds prevent follow fanout. */
+export const resolveFollowedArtistReleases = async (
+    userId: string | undefined, limit: number, negotiated: boolean, now = new Date()
+): Promise<FollowedArtistReleaseRef[]> => {
+    if (!userId || !negotiated || !isArtistFollowEnabled()) return [];
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) return [];
+    const { start, end } = followedReleaseWindow(now);
+    const albumQualification = [
+        { $match: readyPublicAlbumFilter }, ...dateStages(start, end),
+        ...playableAlbumStages(), ...reasonStages(userId, ['primary', 'featured'])
+    ];
+    const finish = (contentType: 'album' | 'audioTrack'): Document[] => [
+        { $sort: { _releaseDate: -1, _id: 1 } }, { $limit: limit },
+        { $project: { _id: 0, contentType: { $literal: contentType }, contentId: { $toString: '$_id' }, reason: 1, date: '$_releaseDate' } }
+    ];
+    const db = getDb()!;
+    if (!await db.collection('artistFollows').findOne({ userId }, { projection: { _id: 1 }, maxTimeMS: 3_000 })) return [];
+    const queryOptions = { maxTimeMS: 3_000, allowDiskUse: false,
+        hint: { 'releaseDate.year': -1, 'releaseDate.month': -1, 'releaseDate.day': -1, _id: 1 } as const };
+    const [albums, tracks] = await Promise.all([
+        db.collection('albums').aggregate([...albumQualification, ...finish('album')], queryOptions).toArray(),
+        db.collection('audioTracks').aggregate([
+            ...publicAudioVisibilityPipeline(), ...dateStages(start, end),
+            ...reasonStages(userId, ['primary', 'featured', 'performer']),
+            { $set: { _albumObjectId: objectId('$albumId') } },
+            { $lookup: { from: 'albums', localField: '_albumObjectId', foreignField: '_id',
+                let: { trackId: { $toString: '$_id' } },
+                pipeline: [
+                    { $match: { $expr: { $in: ['$$trackId', safeArray('$audioTrackIds')] } } },
+                    ...albumQualification, { $limit: 1 }, { $project: { _id: 1 } }
+                ], as: '_qualifyingAlbum' } },
+            { $match: { '_qualifyingAlbum.0': { $exists: false } } },
+            ...finish('audioTrack')
+        ], queryOptions).toArray()
+    ]);
+    return [...albums, ...tracks].sort((a, b) => b.date.getTime() - a.date.getTime()
+        || (a.contentType === b.contentType ? 0 : a.contentType === 'album' ? -1 : 1)
+        || a.contentId.localeCompare(b.contentId)).slice(0, limit).map((row, order) => ({
+            contentType: row.contentType, contentId: row.contentId, order,
+            reason: { code: 'followedArtist', artist: { id: row.reason.artist.id, name: String(row.reason.artist.name ?? '').trim() } }
+        }));
+};

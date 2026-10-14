@@ -92,7 +92,11 @@ const service = async () => {
     const epoch = await authority.acquire();
     assert.ok(epoch);
     return { epoch, api: createRoomService({ now: () => now, enabled: () => true, assertAuthority: authority.assert,
-        inspectAuthority: authority.inspect, resolveMedia, touchMedia: async () => media, operations }) };
+        inspectAuthority: authority.inspect, resolveMedia, touchMedia: async () => media, operations,
+        readMediaAccess: async (ids, session) => {
+            const rows = await db().collection('audioTracks').find({ _id: { $in: ids.map(id => new ObjectId(id)) } }, { session }).toArray();
+            return new Map(rows.map(row => [String(row._id), { media: { ...media, mediaTrackId: String(row._id) }, canRead: true }]));
+        } }) };
 };
 
 /** The gateway refresh: one fresh authorized room read plus the social invalidation revision. */
@@ -114,21 +118,21 @@ test('an idle sweep costs one read, and each steady room adds about two reads pe
             const measured = await perCall(10, () => api.sweep()) - idle;
             costs[`${members}${playing ? 'p' : ''}`] = measured;
             // Room read, two lease inspections, two transaction aborts, per-member account and session reads,
-            // plus the current media while playing: 2M + 5, plus one while playing.
-            assert.ok(measured <= 2 * members + 5 + (playing ? 1 : 0) + 0.5, `${members}-member ${playing ? 'playing' : 'paused'} room used ${measured} operations per sweep`);
+            // plus one batched queue-access read in either playback state: 2M + 6.
+            assert.ok(measured <= 2 * members + 6.5, `${members}-member ${playing ? 'playing' : 'paused'} room used ${measured} operations per sweep`);
         }
     }
     assert.ok(costs['8'] > costs['1'], 'larger rooms must cost more; otherwise the measurement is not observing the sweep');
 });
 
-test('a connected socket refresh costs at most five operations idle and eight in a room', async () => {
+test('a connected socket refresh costs at most five operations idle and nine in a room', async () => {
     const { api, epoch } = await service();
     const idle = await listener();
     const idleCost = await perCall(10, refresh(api, idle.actor));
     assert.ok(idleCost <= 5.5, `idle refresh used ${idleCost} operations`);
     const { people } = await openRoom(4, epoch, false);
     const memberCost = await perCall(10, refresh(api, people[1].actor));
-    assert.ok(memberCost <= 8.5, `member refresh used ${memberCost} operations`);
+    assert.ok(memberCost <= 9.5, `member refresh used ${memberCost} operations`);
     assert.ok(memberCost > idleCost);
 });
 
@@ -143,4 +147,15 @@ test('a steady controller heartbeat costs the member count plus six operations',
         const measured = await perCall(10, () => api.heartbeat(people[0].actor, report));
         assert.ok(measured <= members + 6.5, `${members}-member heartbeat used ${measured} operations`);
     }
+});
+
+test('a ten-track queue keeps the same sweep and refresh operation budgets', async () => {
+    const { api, epoch } = await service();
+    const { room, people } = await openRoom(2, epoch, false);
+    const more = Array.from({ length: 9 }, () => new ObjectId());
+    await db().collection('audioTracks').insertMany(more.map(_id => ({ _id })));
+    await db().collection<RoomDocument>('socialRooms').updateOne({ _id: room._id }, { $push: { queue: { $each: more.map(_id => ({ ...media, mediaTrackId: _id.toHexString(), entryId: id('e') })) } } });
+    await api.sweep();
+    assert.ok(await perCall(10, () => api.sweep()) <= 11.5);
+    assert.ok(await perCall(10, refresh(api, people[0].actor)) <= 9.5);
 });

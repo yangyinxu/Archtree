@@ -23,7 +23,7 @@ router.post('/audioTrack/:audioTrackId/upload', requireAuth, requireAdmin, uploa
 router.post('/audioTrack/:audioTrackId/video', requireAuth, requireAdmin, uploadConcurrencyLimit, attachRequestAbortSignal, cleanupTemporaryUploads, requireUploadSize(maxVideoUploadMb + 1), videoUpload.single('videoFile'), asyncHandler(soundtrackVideoController.uploadSoundtrackVideoFile));
 router.delete('/audioTrack/:audioTrackId/video', requireAuth, requireAdmin, asyncHandler(soundtrackVideoController.deleteSoundtrackVideoFile));
 router.delete('/audioTrack/:audioTrackId', requireAuth, requireAdmin, asyncHandler(audioTrackController.deleteAudioTrack));
-router.get('/audioTrack/aws/:audioTrackId', limitMediaConcurrencyFor('playback'), audioTrackController.getAudioFile);
+router.get('/audioTrack/aws/:audioTrackId', limitMediaConcurrencyFor('playback'), asyncHandler(audioTrackController.getAudioFile));
 router.head('/mediaTrack/stream/:mediaTrackId', limitMediaConcurrencyFor('playback'), asyncHandler(mediaTrackController.headMediaTrack));
 router.get('/mediaTrack/stream/:mediaTrackId', limitMediaConcurrencyFor('playback'), asyncHandler(mediaTrackController.streamMediaTrack));
 router.head('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrencyFor('download'), asyncHandler(audioTrackController.headAudioTrackDownload));

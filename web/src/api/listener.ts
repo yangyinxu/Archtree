@@ -67,6 +67,7 @@ export const getListenerHome = (viewerKey?: string | null, signal?: AbortSignal)
   const viewer = viewerKey?.trim();
   return apiRequest(`${listenerBasePath}/home`, listenerHomeSchema, {
     signal,
+    headers: { 'X-Finitude-Personalization-Version': '1' },
     ...(viewer ? { accountViewer: viewer } : {})
   });
 };

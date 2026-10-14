@@ -1,0 +1,271 @@
+import { checkAdminWorker, startAdminWorker, type AdminWorkTracker } from './adminWorkerLifecycle';
+import { randomUUID } from 'node:crypto';
+import { ObjectId } from 'mongodb';
+import { getDatabaseClient, getDb } from '../infrastructure/database';
+import { catalogSearchProjection } from '../utils/catalogSearch';
+import { normalizeCatalogCredits, validateAttribution } from '../models/catalogCredit';
+import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
+import { readyArtistLifecycleFilter, touchReadyArtistReferences } from '../services/artistReferenceFenceService';
+import { readyAlbumLifecycleFilter, touchReadyAlbumReferences } from '../services/albumReferenceFenceService';
+import { touchReadyAudioTrackReferences } from '../services/audioTrackReferenceFenceService';
+import { readyAudioStorageFilter } from '../utils/audioStorageKey';
+import { sortTrackIdsByEmbeddedTrackNumber } from '../services/albumTrackLinkService';
+import { isAdminVisibilityEditingEnabled } from '../services/adminCapabilityService';
+import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
+import { getAdminImport, importCandidateProjection, importCollection, importCandidateRevision, mutateAdminImport, touchImportAdmin, withImportAdmin } from './adminImportService';
+import { importPrivateStorageReady, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
+import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
+
+const conflict = () => new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CONFLICT');
+const ready = () => { if (!importEnabled() || !importPrivateStorageReady() || !process.env.S3_BUCKET_NAME?.trim()) throw new AdminImportError(503, 'ADMIN_IMPORT_STORAGE_UNAVAILABLE'); requireCatalogCreditWrites(); };
+const credits = (artistId: string) => normalizeCatalogCredits([{ creditId: `import_primary_${artistId}`, subjectType: 'artist', subjectId: artistId, role: 'primary', order: 0 }]);
+const date = (value: { year: number; month: number | null; day: number | null } | null) => value ? { year: value.year, ...(value.month === null ? {} : { month: value.month }), ...(value.day === null ? {} : { day: value.day }) } : {};
+const candidateProjection = importCandidateProjection;
+// Approval expiry gates each new S3 step and the final transaction, not recording a completed step's evidence.
+const currentApproval = (publication: ImportPublication) => {
+    if (publication.grantExpiresAt <= new Date()) throw new AdminImportError(409, 'ADMIN_IMPORT_APPROVAL_EXPIRED');
+};
+
+/** Explicit approval creates one Album or appends only missing tracks to the exact reviewed existing Album. */
+export async function publishAdminImport(actor: string, id: string, raw: unknown) {
+    const body = record(raw); exact(body, ['operationId', 'expectedRevision']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
+    const result = await mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'publish', async (doc, session) => {
+        ready();
+        if ((doc.media?.publicationHistory?.length ?? 0) + (doc.media?.publication ? 1 : 0) >= ADMIN_IMPORT_LIMITS.publications) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_APPROVAL_LIMIT');
+        if (doc.media?.publication) {
+            if (doc.media.publication.state !== 'cancelled' || doc.media.publication.cleanupPending) throw conflict();
+            // Only a new explicit approval may replace a confirmed-clean cancelled intent; retain its full evidence.
+            (doc.media.publicationHistory ??= []).push(structuredClone(doc.media.publication));
+            delete doc.media.publication;
+        }
+        if (['queued', 'running'].includes(doc.analysis.state) || doc.suggestions.some(suggestion => suggestion.generation === doc.analysis.generation && suggestion.decision === 'pending')) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        if (doc.draft.album.visibility === 'hidden' && !isAdminVisibilityEditingEnabled()) throw new AdminImportError(409, 'ADMIN_IMPORT_HIDDEN_DELIVERY_NOT_READY');
+        if (!doc.draft.album.title || !doc.draft.album.artistName) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
+        const artistDecision = doc.decisions.find(decision => decision.scope === 'artist');
+        if (!artistDecision || !['reuse', 'create-distinct'].includes(artistDecision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        const albumDecision = doc.decisions.find(decision => decision.scope === 'album'); if (!albumDecision || !['reuse', 'create-distinct'].includes(albumDecision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        let existingAlbum: any = null;
+        if (albumDecision.action === 'reuse') {
+            existingAlbum = await getDb()!.collection('albums').findOne({ _id: new ObjectId(albumDecision.candidateId!), ...readyAlbumLifecycleFilter }, { session, projection: candidateProjection });
+            if (!existingAlbum || importCandidateRevision(existingAlbum) !== albumDecision.candidateRevision || (existingAlbum.visibility ?? 'public') !== doc.draft.album.visibility || artistDecision.action !== 'reuse' || !Array.isArray(existingAlbum.credits) || !existingAlbum.credits.some((credit: any) => credit.subjectType === 'artist' && credit.role === 'primary' && credit.subjectId === artistDecision.candidateId)) throw new AdminImportError(409, 'ADMIN_IMPORT_DUPLICATE_STALE');
+            if (!Array.isArray(existingAlbum.audioTrackIds) || existingAlbum.audioTrackIds.length > 5000) throw new AdminImportError(409, 'ADMIN_IMPORT_TARGET_TOO_LARGE');
+        }
+        const selected = doc.draft.tracks.filter(track => doc.decisions.find(decision => decision.scope === 'track' && decision.slotId === track.slotId)?.action !== 'skip');
+        if ((!selected.length && !existingAlbum) || selected.some(track => !track.title)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
+        const reused = new Map<string, any>();
+        for (const track of selected) {
+            const decision = doc.decisions.find(decision => decision.scope === 'track' && decision.slotId === track.slotId);
+            if (!decision || !['reuse', 'create-distinct'].includes(decision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+            if (decision.action === 'reuse') {
+                const target = existingAlbum && await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(decision.candidateId!), albumId: existingAlbum._id.toHexString(), ...readyAudioStorageFilter }, { session, projection: candidateProjection });
+                if (!target || importCandidateRevision(target) !== decision.candidateRevision || !existingAlbum.audioTrackIds.includes(target._id.toHexString()) || [...reused.values()].some(value => value._id.equals(target._id))) throw new AdminImportError(409, 'ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'); reused.set(track.slotId, target);
+            } else { const asset = doc.media?.assets.find(asset => asset.slotId === track.slotId); if (!asset || asset.state !== 'ready' || !asset.etag) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE'); }
+        }
+        const coverAsset = doc.media?.assets.find(asset => asset.slotId === doc.media?.selectedCoverSlotId); if (coverAsset && existingAlbum) throw new AdminImportError(409, 'ADMIN_IMPORT_EXISTING_COVER_PRESERVED'); if (coverAsset && (coverAsset.state !== 'ready' || !coverAsset.etag)) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE');
+        let artistId = new ObjectId().toHexString();
+        if (artistDecision.action === 'reuse') {
+            const existing = await getDb()!.collection('artists').findOne({ _id: new ObjectId(artistDecision.candidateId!), ...readyArtistLifecycleFilter }, { session, projection: candidateProjection });
+            if (!existing || importCandidateRevision(existing) !== artistDecision.candidateRevision) throw new AdminImportError(409, 'ADMIN_IMPORT_DUPLICATE_STALE'); artistId = existing._id.toHexString();
+        }
+        doc.media ??= { assets: [] };
+        const tracks: ImportPublication['tracks'] = selected.map(track => { const reusedTrack = reused.get(track.slotId); const id = reusedTrack?._id.toHexString() ?? new ObjectId().toHexString(); return { slotId: track.slotId, id, key: reusedTrack ? '' : `audio/${id}/${new ObjectId().toHexString()}`, reused: Boolean(reusedTrack), candidateRevision: reusedTrack ? importCandidateRevision(reusedTrack) : null, state: reusedTrack ? 'ready' : 'pending', versionId: null, etag: null }; });
+        tracks.sort((left, right) => { const a = doc.draft.tracks.find(t => t.slotId === left.slotId)!.trackNumber, b = doc.draft.tracks.find(t => t.slotId === right.slotId)!.trackNumber; return (a ?? Infinity) - (b ?? Infinity) || left.id.localeCompare(right.id); });
+        const coverId = coverAsset ? new ObjectId().toHexString() : null;
+        doc.media.publication = { operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(doc.draft), decisions: structuredClone(doc.decisions), state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), artistId, newArtist: artistDecision.action === 'create-distinct', albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null };
+    });
+    return result;
+}
+
+const target = (id: string, publication: ImportPublication, asset: ImportAsset, key: string): ImportObjectTarget => ({ ...importAssetTarget(id, asset), bucket: publication.bucket, key, operationId: publication.operationId });
+
+/** An explicit cancellation fences the current approval and never rolls back a committed catalog graph. */
+export async function cancelAdminImportPublication(actor: string, id: string, raw: unknown, storage: ImportObjectStorage = defaultImportObjectStorage) {
+    const body = record(raw); exact(body, ['operationId', 'expectedRevision', 'publicationOperationId']);
+    if (!uuid(body.operationId) || !uuid(body.publicationOperationId) || body.operationId === body.publicationOperationId
+        || !Number.isSafeInteger(body.expectedRevision) || Number(body.expectedRevision) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
+    const result = await mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'cancel-publication', async doc => {
+        const publication = doc.media?.publication;
+        if (!publication || publication.operationId !== body.publicationOperationId) throw conflict();
+        if (publication.state === 'complete') throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_COMPLETE');
+        if (publication.state === 'cancelled') throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CANCELLED');
+        if (publication.leaseUntil && publication.leaseUntil > new Date()) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_ACTIVE');
+        publication.state = 'cancelled'; publication.cancellation = { operationId: body.operationId as string, actorId: actor };
+        publication.cleanupPending = publication.tracks.some(track => !track.reused) || Boolean(publication.cover);
+        publication.leaseOwner = null; publication.leaseUntil = null;
+    });
+    await runAdminImportPublicationOnce(storage, id, undefined, body.publicationOperationId as string, actor);
+    return { ...(await getAdminImport(actor, id)), receipt: result.receipt };
+}
+
+/** Cancelled copies remain pinned until exact deletion/absence is confirmed, including a lost DELETE response. */
+async function cleanupCancelledPublication(id: string, worker: string, publication: ImportPublication,
+    actor: string, storage: ImportObjectStorage, signal?: AbortSignal) {
+    const capture = () => withImportAdmin(actor, async session => {
+        const doc = await importCollection().findOne({ _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
+            'media.publication.state': 'cancelled', 'media.publication.leaseOwner': worker }, { session });
+        if (!doc?.media?.publication) throw conflict(); return doc;
+    });
+    const checkpoint = async (slotId: string, cover: boolean, identity: ImportObjectIdentity | null, complete: boolean) => withImportAdmin(actor, async session => {
+        const doc = await importCollection().findOne({ _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
+            'media.publication.state': 'cancelled', 'media.publication.leaseOwner': worker }, { session });
+        if (!doc?.media?.publication) throw conflict();
+        const part = cover ? doc.media.publication.cover : doc.media.publication.tracks.find(track => track.slotId === slotId && !track.reused);
+        if (!part) throw conflict();
+        if (identity) Object.assign(part, identity, { state: 'ready' });
+        if (complete) part.cleanupComplete = true;
+        doc.media.publication.leaseUntil = new Date(Date.now() + 300_000); doc.revision++; doc.updatedAt = new Date();
+        await importCollection().replaceOne({ _id: doc._id, revision: doc.revision - 1, 'media.publication.leaseOwner': worker }, doc, { session });
+    });
+    const doc = await capture();
+    const parts = [...publication.tracks.filter(track => !track.reused).map(track => ({ part: track, cover: false })),
+        ...(publication.cover ? [{ part: publication.cover, cover: true }] : [])];
+    for (const { part, cover } of parts) {
+        if (part.cleanupComplete) continue;
+        checkAdminWorker(signal); await capture();
+        const asset = doc.media!.assets.find(asset => asset.slotId === part.slotId); if (!asset) throw conflict();
+        const destination = target(id, publication, asset, part.key);
+        let identity = await storage.head(destination, signal);
+        if (identity) {
+            if (part.etag && (identity.etag !== part.etag || identity.versionId !== part.versionId)) throw conflict();
+            // Retain the observed version before crossing DELETE so an ambiguous response can reconcile safely.
+            await checkpoint(part.slotId, cover, identity, false);
+            checkAdminWorker(signal); await capture();
+            await storage.delete({ ...destination, ...identity });
+            checkAdminWorker(signal);
+            if (await storage.head(destination, signal)) throw conflict();
+        } else if (part.state === 'unknown' && !part.etag) {
+            // A previously sent PUT may still settle; absence alone cannot release its source evidence.
+            throw new AdminImportError(503, 'ADMIN_IMPORT_PUBLICATION_OUTCOME_UNKNOWN');
+        }
+        await checkpoint(part.slotId, cover, identity, true);
+    }
+    await withImportAdmin(actor, async session => {
+        checkAdminWorker(signal);
+        const current = await importCollection().findOne({ _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
+            'media.publication.state': 'cancelled', 'media.publication.leaseOwner': worker }, { session });
+        if (!current?.media?.publication || current.media.publication.tracks.some(track => !track.reused && !track.cleanupComplete)
+            || (current.media.publication.cover && !current.media.publication.cover.cleanupComplete)) throw conflict();
+        current.media.publication.cleanupPending = false; current.media.publication.issue = null;
+        current.media.publication.leaseOwner = null; current.media.publication.leaseUntil = null;
+        current.revision++; current.updatedAt = new Date();
+        await importCollection().replaceOne({ _id: current._id, revision: current.revision - 1, 'media.publication.leaseOwner': worker }, current, { session });
+    });
+}
+/** HEAD-only reconciliation is always safe; unknown sent copies are never repeated when absence is ambiguous. */
+export async function runAdminImportPublicationOnce(storage: ImportObjectStorage = defaultImportObjectStorage, onlyId?: string, signal?: AbortSignal,
+    operationId?: string, cleanupActor?: string): Promise<boolean> {
+    if (signal?.aborted) return false;
+    if (!onlyId && (!importEnabled() || !importPrivateStorageReady())) return false;
+    const worker = randomUUID(), now = new Date();
+    const claim = await importCollection().findOneAndUpdate({ ...(onlyId && objectId(onlyId) ? { _id: new ObjectId(onlyId) } : {}),
+        ...(operationId ? { 'media.publication.operationId': operationId } : {}),
+        $and: [{ $or: [{ 'media.publication.state': { $in: ['preparing', ...(onlyId ? ['needsAttention'] : [])] } },
+            ...(onlyId ? [{ 'media.publication.state': 'cancelled', 'media.publication.cleanupPending': true }] : [])] },
+        { $or: [{ 'media.publication.leaseUntil': null }, { 'media.publication.leaseUntil': { $lte: now } }] }] }, { $set: { 'media.publication.leaseOwner': worker, 'media.publication.leaseUntil': new Date(Date.now() + 300_000) } }, { returnDocument: 'after' });
+    const doc = claim.value; if (!doc?.media?.publication) return false; const id = doc._id.toHexString(), publication = doc.media.publication;
+    if (publication.state === 'cancelled') {
+        try { await cleanupCancelledPublication(id, worker, publication, cleanupActor ?? publication.cancellation?.actorId ?? publication.actorId, storage, signal); }
+        catch { await importCollection().updateOne({ _id: doc._id, 'media.publication.operationId': publication.operationId, 'media.publication.leaseOwner': worker, 'media.publication.state': 'cancelled' },
+            { $set: { 'media.publication.cleanupPending': true, 'media.publication.issue': 'storageUnknown', 'media.publication.leaseOwner': null, 'media.publication.leaseUntil': null, updatedAt: new Date() }, $inc: { revision: 1 } }); }
+        return true;
+    }
+    let issue: ImportPublication['issue'] = null;
+    try {
+        ready(); if (publication.bucket !== process.env.S3_BUCKET_NAME?.trim()) throw new Error('configuration'); currentApproval(publication);
+        await withImportAdmin(publication.actorId, async session => {
+            const current = await importCollection().findOne({ _id: doc._id, 'media.publication.leaseOwner': worker }, { session }); if (!current?.media?.publication) throw conflict(); currentApproval(current.media.publication);
+            if (!publication.newArtist && !await getDb()!.collection('artists').findOne({ _id: new ObjectId(publication.artistId), ...readyArtistLifecycleFilter }, { session, projection: { _id: 1 } })) throw conflict();
+        });
+        const copies = [...publication.tracks.filter(track => !track.reused).map(track => ({ slotId: track.slotId, key: track.key, value: track, isCover: false })), ...(publication.cover ? [{ slotId: publication.cover.slotId, key: publication.cover.key, value: publication.cover, isCover: true }] : [])];
+        for (const copy of copies) {
+            checkAdminWorker(signal);
+            // Every bounded S3 action has a fresh lease and original-role admission check.
+            await withImportAdmin(publication.actorId, async session => {
+                const current = await importCollection().findOne({ _id: doc._id, 'media.publication.leaseOwner': worker }, { session });
+                if (!current?.media?.publication) throw conflict(); currentApproval(current.media.publication);
+                const renewed = await importCollection().updateOne({ _id: doc._id, 'media.publication.leaseOwner': worker }, { $set: { 'media.publication.leaseUntil': new Date(Date.now() + 300_000) } }, { session }); if (!renewed.matchedCount) throw conflict();
+            });
+            const asset = doc.media.assets.find(asset => asset.slotId === copy.slotId); if (!asset || asset.state !== 'ready' || !asset.etag) throw conflict();
+            const destination = target(id, publication, asset, copy.key);
+            checkAdminWorker(signal);
+            let confirmed: ImportObjectIdentity | null = await storage.head(destination, signal);
+            if (copy.value.state === 'ready') { if (!confirmed || confirmed.etag !== copy.value.etag || confirmed.versionId !== copy.value.versionId) throw conflict(); continue; }
+            if (!confirmed && copy.value.state === 'unknown') { issue = 'storageUnknown'; break; }
+            if (!confirmed) {
+                // Persist sent/unknown BEFORE crossing S3, preserving ambiguous copy evidence across process death.
+                const reserved = await withImportAdmin(publication.actorId, async session => {
+                    const current = await importCollection().findOne({ _id: doc._id, 'media.publication.leaseOwner': worker }, { session }); if (!current?.media?.publication) return false; currentApproval(current.media.publication);
+                    const part = copy.isCover ? current.media.publication.cover : current.media.publication.tracks.find(track => track.slotId === copy.slotId); if (!part || part.state !== 'pending') return false; part.state = 'unknown'; current.media.publication.leaseUntil = new Date(Date.now() + 300_000); current.revision++; current.updatedAt = new Date();
+                    await importCollection().replaceOne({ _id: current._id, revision: current.revision - 1, 'media.publication.leaseOwner': worker }, current, { session }); return true;
+                });
+                if (!reserved) throw conflict();
+                checkAdminWorker(signal);
+                try { confirmed = await storage.copy({ ...importAssetTarget(id, asset), etag: asset.etag, versionId: asset.versionId }, destination, signal); } catch { confirmed = await storage.head(destination, signal); }
+            }
+            if (!confirmed) { issue = 'storageUnknown'; break; }
+            const storedIdentity = confirmed;
+            await withImportAdmin(publication.actorId, async session => {
+                const current = await importCollection().findOne({ _id: doc._id, 'media.publication.leaseOwner': worker }, { session }); if (!current?.media?.publication) throw conflict();
+                const part = copy.isCover ? current.media.publication.cover : current.media.publication.tracks.find(track => track.slotId === copy.slotId); if (!part) throw conflict();
+                Object.assign(part, { state: 'ready', ...storedIdentity }); current.media.publication.leaseUntil = new Date(Date.now() + 300_000); current.revision++; current.updatedAt = new Date();
+                await importCollection().replaceOne({ _id: current._id, revision: current.revision - 1, 'media.publication.leaseOwner': worker }, current, { session });
+            });
+        }
+        checkAdminWorker(signal);
+        if (!issue) await commitPublication(id, worker, signal);
+    } catch (error) { issue = error instanceof AdminImportError && error.status === 403 ? 'permissionLost' : error instanceof AdminImportError && error.status === 409 ? 'catalogConflict' : 'storageUnknown'; }
+    if (issue) await importCollection().updateOne({ _id: doc._id, 'media.publication.leaseOwner': worker, 'media.publication.state': { $nin: ['complete', 'cancelled'] } }, { $set: { 'media.publication.state': 'needsAttention', 'media.publication.issue': issue, 'media.publication.leaseOwner': null, 'media.publication.leaseUntil': null, updatedAt: new Date() }, $inc: { revision: 1 } });
+    return true;
+}
+
+/** Catalog graph and publication receipt commit together; S3 work never holds a Mongo transaction. */
+async function commitPublication(id: string, worker: string, signal?: AbortSignal) {
+    const session = getDatabaseClient().startSession();
+    try {
+        await session.withTransaction(async () => {
+            const doc = await importCollection().findOne({ _id: new ObjectId(id), 'media.publication.leaseOwner': worker }, { session }); const publication = doc?.media?.publication; if (!doc || !publication) throw conflict();
+            checkAdminWorker(signal); await touchImportAdmin(publication.actorId, session); ready(); currentApproval(publication);
+            if (publication.snapshot.album.visibility === 'hidden' && !isAdminVisibilityEditingEnabled()) throw conflict();
+            if (publication.tracks.some(track => track.state !== 'ready') || (publication.cover && publication.cover.state !== 'ready')) throw conflict();
+            const primary = credits(publication.artistId); validateAttribution('documented', primary);
+            let existingAlbum: any = null;
+            if (!publication.newAlbum) { existingAlbum = await getDb()!.collection('albums').findOne({ _id: new ObjectId(publication.albumId) }, { session, projection: candidateProjection }); if (!existingAlbum || importCandidateRevision(existingAlbum) !== publication.albumRevision) throw conflict(); await touchReadyAlbumReferences([publication.albumId], session); }
+            if (publication.newArtist) await getDb()!.collection('artists').insertOne({ _id: new ObjectId(publication.artistId), name: publication.snapshot.album.artistName, bio: '', birthDate: {}, coverArtUrl: '', albumIds: [publication.albumId], createdBy: publication.actorId, lifecycleStatus: 'ready', lifecycleUpdatedAt: new Date(), lifecycleError: null, referenceRevision: 0, visibility: publication.snapshot.album.visibility, ...catalogSearchProjection(publication.snapshot.album.artistName) }, { session });
+            else {
+                const artist = await getDb()!.collection('artists').findOne({ _id: new ObjectId(publication.artistId), ...readyArtistLifecycleFilter }, { session, projection: candidateProjection });
+                const decision = publication.decisions.find(decision => decision.scope === 'artist' && decision.action === 'reuse'); if (!artist || !decision || importCandidateRevision(artist) !== decision.candidateRevision) throw conflict();
+                await touchReadyArtistReferences([publication.artistId], session);
+                await getDb()!.collection('artists').updateOne({ _id: artist._id }, { $addToSet: { albumIds: publication.albumId } }, { session });
+            }
+            const cover = publication.coverId ? { coverArtId: publication.coverId, coverArtUrl: `/content/images/${publication.coverId}` } : { coverArtUrl: '' };
+            if (!existingAlbum) await getDb()!.collection('albums').insertOne({ _id: new ObjectId(publication.albumId), title: publication.snapshot.album.title, ...cover, audioTrackIds: publication.tracks.map(track => track.id), releaseDate: date(publication.snapshot.album.releaseDate), createdBy: publication.actorId, visibility: publication.snapshot.album.visibility, lifecycleStatus: 'ready', lifecycleUpdatedAt: new Date(), lifecycleError: null, referenceRevision: 0, credits: primary, attributionStatus: 'documented', creditRevision: 1, ...catalogSearchProjection(publication.snapshot.album.title) }, { session });
+            for (const track of publication.tracks) {
+                if (track.reused) { await touchReadyAudioTrackReferences([track.id], session); const current = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(track.id), albumId: publication.albumId }, { session, projection: candidateProjection }); if (!current || importCandidateRevision(current) !== track.candidateRevision || !existingAlbum?.audioTrackIds.includes(track.id)) throw conflict(); continue; }
+                const source = doc.media!.assets.find(asset => asset.slotId === track.slotId)!, draft = publication.snapshot.tracks.find(item => item.slotId === track.slotId)!;
+                if (!source.representation || !source.duration || !source.format) throw conflict();
+                await getDb()!.collection('audioTracks').insertOne({ _id: new ObjectId(track.id), title: draft.title, artistIds: [publication.artistId], genres: [], albumId: publication.albumId, releaseDate: date(publication.snapshot.album.releaseDate), duration: source.duration, format: { type: source.format }, coverArtUrl: '', createdBy: publication.actorId, originalFileName: source.filename, contentType: source.contentType, mediaType: 'audio', s3Key: track.key, visibility: 'public', uploadStatus: 'ready', uploadUpdatedAt: new Date(), uploadError: null, publicationStatus: 'ready', publicationUpdatedAt: new Date(), publicationError: null, playlistReferenceRevision: 0, contentReferenceRevision: 0, credits: primary, attributionStatus: 'documented', creditRevision: 1, ...(draft.trackNumber === null ? {} : { trackNumber: draft.trackNumber, trackNumberSource: 'admin-import' }), mediaRepresentation: { ...source.representation, objectKey: track.key, etag: track.etag, versionId: track.versionId }, mediaByteHash: { algorithm: 'sha256', value: source.sha256, byteLength: source.byteLength, objectKey: track.key, etag: track.etag, versionId: track.versionId }, ...catalogSearchProjection(draft.title) }, { session });
+            }
+            if (existingAlbum) { const ids = [...new Set([...existingAlbum.audioTrackIds, ...publication.tracks.map(track => track.id)])] as string[]; const rows = await getDb()!.collection('audioTracks').find({ _id: { $in: ids.map(id => new ObjectId(id)) } }, { session, projection: { trackNumber: 1 } }).limit(5101).toArray(); const order = sortTrackIdsByEmbeddedTrackNumber(ids, new Map(rows.map(row => [row._id.toHexString(), row.trackNumber]))); await getDb()!.collection('albums').updateOne({ _id: existingAlbum._id }, { $set: { audioTrackIds: order } }, { session }); }
+            if (publication.cover && publication.coverId) { const source = doc.media!.assets.find(asset => asset.slotId === publication.cover!.slotId)!; await getDb()!.collection('imageAssets').insertOne({ _id: new ObjectId(publication.coverId), ownerType: 'album', ownerId: publication.albumId, createdBy: publication.actorId, originalFileName: source.filename, contentType: source.contentType, s3Key: publication.cover.key, uploadStatus: 'ready', uploadUpdatedAt: new Date(), uploadError: null, uploadOutcomeUnknown: false, storageIdentity: { etag: publication.cover.etag, versionId: publication.cover.versionId } }, { session }); }
+            checkAdminWorker(signal); currentApproval(publication);
+            publication.state = 'complete'; publication.issue = null; publication.leaseOwner = null; publication.leaseUntil = null; doc.revision++; doc.updatedAt = new Date();
+            await importCollection().replaceOne({ _id: doc._id, revision: doc.revision - 1, 'media.publication.leaseOwner': worker }, doc, { session });
+        }, { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' }, maxCommitTimeMS: 10_000 });
+    } finally { await session.endSession(); }
+}
+
+/** Explicit same-intent resume reconciles existing copies before continuing the retained approval. */
+export async function resumeAdminImportPublication(actor: string, id: string, operationId: string, storage: ImportObjectStorage = defaultImportObjectStorage) {
+    if (!uuid(operationId) || !objectId(id)) throw conflict();
+    const receipt = await withImportAdmin(actor, async session => {
+        const doc = await importCollection().findOne({ _id: new ObjectId(id) }, { session });
+        const receipt = doc?.receipts.find(receipt => receipt.kind === 'publish' && receipt.operationId === operationId);
+        if (!receipt || (doc!.media?.publication?.operationId !== operationId && !doc!.media?.publicationHistory?.some(value => value.operationId === operationId && value.state === 'cancelled' && !value.cleanupPending))) throw conflict();
+        return { operationId: receipt.operationId, kind: receipt.kind, revision: receipt.revision };
+    });
+    await runAdminImportPublicationOnce(storage, id, undefined, operationId, actor);
+    return { ...(await getAdminImport(actor, id)), receipt };
+}
+export function startAdminImportPublisher(storage: ImportObjectStorage = defaultImportObjectStorage, intervalMs = 2_000, track?: AdminWorkTracker): () => Promise<void> {
+    return startAdminWorker(signal => runAdminImportPublicationOnce(storage, undefined, signal), intervalMs, track);
+}

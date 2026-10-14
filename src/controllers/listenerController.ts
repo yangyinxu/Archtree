@@ -24,10 +24,12 @@ import {
 import { boundedSearchQuery } from '../utils/search';
 import { isPlaylistFeatureEnabled } from '../services/playlistFeatureService';
 import { catalogCreditRollout } from '../config/catalogCreditRollout';
+import { isArtistFollowEnabled, supportsArtistFollowHome } from '../config/artistFollowRollout';
 import { socialRollout } from '../config/socialRollout';
 
 const setPublicCatalogCache = (res: Response) => {
-    res.setHeader('Cache-Control', 'public, max-age=60');
+    // Visibility can change without changing an asset URL or a viewer's account.
+    res.setHeader('Cache-Control', 'private, no-store');
 };
 
 /** Exposes only rollout-safe listener feature flags used to hide unavailable UI. */
@@ -47,6 +49,12 @@ export const capabilities = async (_req: Request, res: Response) => {
     });
 };
 
+/** Separately versioned so released strict capability decoders remain unchanged. */
+export const personalizationCapabilities = async (_req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({ contractVersion: 1, deterministicDiscovery: false, artistFollows: isArtistFollowEnabled() });
+};
+
 /** Returns the ordered listener Home without caching viewer-specific sections. */
 export const home = async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -54,7 +62,8 @@ export const home = async (req: Request, res: Response) => {
     res.vary('Cookie');
     res.vary('Authorization');
     const viewerUserId = (req as AuthenticatedRequest).auth?.userId;
-    const result = await getListenerHome(viewerUserId);
+    res.vary('X-Finitude-Personalization-Version');
+    const result = await getListenerHome(viewerUserId, supportsArtistFollowHome(req.headers['x-finitude-personalization-version']));
     if (!result) return res.status(404).json({ message: 'Home page was not found.' });
     return res.status(200).json(result);
 };

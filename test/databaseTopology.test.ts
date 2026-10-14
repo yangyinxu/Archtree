@@ -107,7 +107,7 @@ test('cached readiness rechecks topology after expiry and recovers without new i
         writes++; avatarMigrations++;
       },
       listIndexes: () => ({ toArray: async () => databaseIndexes.filter(index => index.collection === name)
-        .map(index => ({ key: index.keys, unique: index.options?.unique })) })
+        .map(index => ({ key: index.keys, ...structuredClone(index.options ?? {}) })) })
     })
   } as unknown as Db;
   t.mock.method(MongoClient.prototype, 'connect', async function (this: MongoClient) { return this; });

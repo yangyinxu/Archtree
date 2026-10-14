@@ -7,6 +7,7 @@ import { normalizeUserRole, UserRole } from './authRoleService';
 import { withActiveAccount } from './accountReferenceFenceService';
 import { recordSecurityEvent } from './securityAuditService';
 import { EmailVerificationRequiredError, emailVerificationState } from './emailVerificationService';
+import { describeDeclaredSessionDevice } from './deviceSessionService';
 
 export interface SessionUser {
     _id: { toString(): string };
@@ -113,14 +114,7 @@ const userAgentFrom = (req?: Request) =>
 
 /** Accepts only the app's bounded platform category, never a user-provided device name. */
 const deviceFrom = (req?: Request) => {
-    const type = String(req?.get('X-Finitude-Device-Type') ?? '').toLowerCase();
-    if (type === 'phone') {
-        return { deviceName: 'iPhone', deviceType: 'phone' as const };
-    }
-    if (type === 'tablet') {
-        return { deviceName: 'iPad', deviceType: 'tablet' as const };
-    }
-    return undefined;
+    return describeDeclaredSessionDevice(req?.get('X-Finitude-Device-Type'));
 };
 
 /** Creates the initial access/refresh pair for a newly authenticated user. */

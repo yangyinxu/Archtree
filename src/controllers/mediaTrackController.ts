@@ -1,3 +1,4 @@
+import { isPublicCatalogVisibility } from '../services/catalogVisibilityService';
 import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { NextFunction, Request, Response } from 'express';
 import { Readable } from 'node:stream';
@@ -12,6 +13,7 @@ import {
 } from '../services/mediaRepresentationService';
 import {
     createMediaAbortContext,
+    mediaAuthorizationTimeoutMs,
     parseSingleByteRange,
     pipeMediaStream,
     shouldHonorRange
@@ -29,7 +31,7 @@ const s3ErrorStatus = (error: any) => {
 };
 
 export interface MediaTrackResolverDependencies {
-    findReadyTrack: (mediaTrackId: string) => Promise<any | null>;
+    findReadyTrack: (mediaTrackId: string, maxTimeMS?: number) => Promise<any | null>;
     headObject: (
         params: { Bucket: string; Key: string; IfMatch?: string; VersionId?: string },
         abortSignal: AbortSignal
@@ -37,7 +39,7 @@ export interface MediaTrackResolverDependencies {
 }
 
 const defaultResolverDependencies: MediaTrackResolverDependencies = {
-    findReadyTrack: mediaTrackId => AudioTrack.findReadyPublicById(mediaTrackId),
+    findReadyTrack: (mediaTrackId, maxTimeMS) => AudioTrack.findReadyPublicById(mediaTrackId, maxTimeMS),
     headObject: (params, abortSignal) => getS3().send(
         new HeadObjectCommand(params),
         { abortSignal }
@@ -56,7 +58,7 @@ export const resolveReadyMediaTrackAsset = async (
     const normalizedId = String(mediaTrackId ?? '').trim().toLowerCase();
     if (!/^[0-9a-f]{24}$/.test(normalizedId)) return { status: 'notFound' as const };
     const track: any = await dependencies.findReadyTrack(normalizedId);
-    if (!track) return { status: 'notFound' as const };
+    if (!track || !isPublicCatalogVisibility(track)) return { status: 'notFound' as const };
 
     const mediaType = activeMediaTypeForTrack(track);
     if (requiredMediaType && mediaType !== requiredMediaType) {
@@ -76,17 +78,31 @@ export const resolveReadyMediaTrackAsset = async (
     if (!Number.isSafeInteger(metadata.ContentLength) || metadata.ContentLength <= 0) {
         return { status: 'notFound' as const };
     }
+    // A visibility change during storage metadata I/O must precede any response validator or bytes.
+    const current = await dependencies.findReadyTrack(normalizedId);
+    if (!current || !isPublicCatalogVisibility(current)
+        || activeMediaObjectKeyForTrack(current) !== s3Key) return { status: 'notFound' as const };
     if (pinned) {
         if (metadata.ETag !== pinned.etag || metadata.ContentLength !== pinned.byteLength
             || (pinned.versionId && metadata.VersionId !== pinned.versionId)) return { status: 'notFound' as const };
         // Replacement or deletion while HEAD was pending must not open an obsolete representation.
-        const current = await dependencies.findReadyTrack(normalizedId);
         const currentRepresentation = storedMediaRepresentationForTrack(current);
         if (!currentRepresentation || currentRepresentation.revision !== pinned.revision
             || currentRepresentation.objectKey !== pinned.objectKey
             || currentRepresentation.etag !== pinned.etag
             || currentRepresentation.versionId !== pinned.versionId) return { status: 'notFound' as const };
     }
+    const authorize = async () => {
+        const latest = await dependencies.findReadyTrack(normalizedId, mediaAuthorizationTimeoutMs);
+        if (!latest || !isPublicCatalogVisibility(latest)
+            || activeMediaTypeForTrack(latest) !== mediaType
+            || activeMediaObjectKeyForTrack(latest) !== s3Key) return false;
+        if (!pinned) return true;
+        const representation = storedMediaRepresentationForTrack(latest);
+        return Boolean(representation && representation.revision === pinned.revision
+            && representation.objectKey === pinned.objectKey && representation.etag === pinned.etag
+            && representation.versionId === pinned.versionId && representation.byteLength === pinned.byteLength);
+    };
     return {
         status: 'ready' as const,
         track,
@@ -97,7 +113,8 @@ export const resolveReadyMediaTrackAsset = async (
             : activeMediaContentTypeForTrack(track),
         params,
         metadata,
-        pinned
+        pinned,
+        authorize
     };
 };
 
@@ -139,7 +156,7 @@ const setMediaHeaders = (
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Type', asset.contentType);
     res.setHeader('Content-Length', contentLength);
-    res.setHeader('Cache-Control', asset.pinned ? 'no-store, no-transform' : 'no-transform');
+    res.setHeader('Cache-Control', asset.pinned ? 'no-store, no-transform' : 'private, no-store, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
     if (asset.metadata.ETag) res.setHeader('ETag', asset.metadata.ETag);
 };
@@ -212,14 +229,16 @@ export const streamMediaTrack = async (
             stream.destroy();
             return res.status(404).end();
         }
-        res.status(byteResponse.status);
-        if (byteResponse.status === 206) res.setHeader('Content-Range', byteResponse.contentRange);
-        setMediaHeaders(res, asset, end - start + 1);
-        res.setHeader(
-            'Content-Disposition',
-            `inline; filename="${String(asset.track._id)}.${asset.mediaType === 'video' ? 'mp4' : 'media'}"`
-        );
-        await pipeMediaStream(req, res, stream, context);
+        await pipeMediaStream(req, res, stream, context, {
+            authorize: asset.authorize,
+            onAuthorized: () => {
+                res.status(byteResponse.status);
+                if (byteResponse.status === 206) res.setHeader('Content-Range', byteResponse.contentRange);
+                setMediaHeaders(res, asset, end - start + 1);
+                res.setHeader('Content-Disposition',
+                    `inline; filename="${String(asset.track._id)}.${asset.mediaType === 'video' ? 'mp4' : 'media'}"`);
+            }
+        });
     } catch (error: any) {
         if (context.aborted || error?.name === 'AbortError') return;
         logCatalogFailure(res, 'media_stream_failed', error);

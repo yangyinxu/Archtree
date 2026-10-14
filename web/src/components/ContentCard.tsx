@@ -1,7 +1,8 @@
 import { Link } from 'react-router';
 import { Play } from 'lucide-react';
 
-import { contentByline, type AudioTrackSummary, type ContentSummary } from '../api/contentSchemas';
+import { contentByline, type AudioTrackSummary, type ContentSummary, type FollowedArtistReason as Reason } from '../api/contentSchemas';
+import { FollowedArtistReason } from './FollowedArtistReason';
 import { Artwork } from './Artwork';
 import styles from './ContentCard.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
@@ -13,6 +14,7 @@ export interface ContentCardProps {
   item: ContentSummary;
   onPlay?: (audioTrack: AudioTrackSummary) => void;
   artworkSizes?: string;
+  reason?: Reason;
 }
 
 // Subtract the action's inline padding and border from each outer grid-card width.
@@ -22,6 +24,7 @@ export const defaultContentCardArtworkSizes = '(max-width: 400px) calc(100vw - 3
 export const ContentCard = ({
   item,
   onPlay,
+  reason,
   artworkSizes = defaultContentCardArtworkSizes
 }: ContentCardProps) => {
   const { locale, t } = useLocalization();
@@ -63,7 +66,7 @@ export const ContentCard = ({
   );
 
   return (
-    <article className={styles.card}>
+    <article className={`${styles.card} ${reason ? styles.withReason : ''}`}>
       {item.contentType === 'audioTrack' ? (
         onPlay ? (
           <button
@@ -88,6 +91,7 @@ export const ContentCard = ({
           {body}
         </Link>
       )}
+      <FollowedArtistReason reason={reason} />
       {item.contentType !== 'artist' && <span className={styles.shareAction}>
         {item.contentType === 'audioTrack' && item.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={item.id} title={title} />}
         <LazyShareMusicButton contentType={item.contentType} contentId={item.id} title={title} />

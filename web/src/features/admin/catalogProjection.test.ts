@@ -1,0 +1,20 @@
+import { QueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
+import { captureAccountOperation } from '../../api/accountEpoch';
+import { adminWorkspace } from './adminWorkspace';
+import { AdminCommand, clearCatalogProjections } from './useAdminCommand';
+import { deferred, json, viewer } from './adminFixtures.testSupport';
+afterEach(() => { vi.unstubAllGlobals(); adminWorkspace.reset(); });
+test('admitted catalog success in User view clears stale projections and fences old reads without clearing account or relationship facts', async () => {
+  adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin');
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const keep = [['browser-session'], ['listener','save-statuses',viewer], ['listener','playlist-memberships',viewer], ['social',viewer,'relationships']];
+  const remove = [['listener','home',viewer], ['listener','playlist',viewer,'id'], ['listener','artist','id'], ['social',viewer,'music-shares']];
+  for (const key of [...keep,...remove]) client.setQueryData(key, { synthetic: true });
+  const late = deferred<unknown>(); const read = client.fetchQuery({ queryKey:['listener','search','old'], queryFn: () => late.promise }).catch(() => {});
+  const reply = deferred<Response>(); vi.stubGlobal('fetch', vi.fn((_path: string, init:RequestInit) => { const operationId = JSON.parse(String(init.body)).operationId; return reply.promise.then(() => json({receipt:{operationId}})); }));
+  const command = new AdminCommand(z.object({receipt:z.object({operationId:z.string()})}), () => clearCatalogProjections(client)); command.run('/catalog/artist/id',{expectedRevision:'old'});
+  adminWorkspace.select('user'); reply.resolve(json({})); await vi.waitFor(() => expect(command.getSnapshot().result).not.toBeNull());
+  for (const key of remove) expect(client.getQueryData(key)).toBeUndefined(); for (const key of keep) expect(client.getQueryData(key)).toEqual({synthetic:true});
+  late.resolve({oldTitle:'must not reappear'}); await read; expect(client.getQueryData(['listener','search','old'])).toBeUndefined();
+});

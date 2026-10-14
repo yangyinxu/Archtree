@@ -7,8 +7,9 @@ import { getDb } from '../../infrastructure/database';
 import type { MusicShareDocument } from '../../repositories/social/musicShareDocuments';
 import type { SocialBudgetDocument, SocialProfileDocument, SocialRelationshipDocument } from '../../repositories/social/socialDocuments';
 import { getListenerAlbum, getListenerAudioTrack } from '../../services/listenerContentService';
-import { AlbumReferenceUnavailableError, touchReadyAlbumReferences } from '../../services/albumReferenceFenceService';
-import { AudioTrackReferenceUnavailableError, touchReadyAudioTrackReferences } from '../../services/audioTrackReferenceFenceService';
+import { AlbumReferenceUnavailableError } from '../../services/albumReferenceFenceService';
+import { AudioTrackReferenceUnavailableError } from '../../services/audioTrackReferenceFenceService';
+import { touchPublicAlbumReferences, touchPublicAudioTrackReferences } from '../../services/publicCatalogReferenceFenceService';
 import { readSocialToken, signSocialToken } from './socialTokens';
 
 export type ResolveMusicShareContent = (type: SharedMusicType, id: string, session?: ClientSession) => Promise<SharedMusicContent | null>;
@@ -74,8 +75,8 @@ export const createMusicShareService = (options: { now: () => number; secret: ()
             const incoming = budget?.musicIncomingDay === day ? budget.musicIncoming ?? 0 : 0;
             if (incoming >= MUSIC_SHARE_LIMITS.incomingPerDay) throw new SocialError(429, 'music_share_limit');
             try {
-                if (action.contentType === 'album') await touchReadyAlbumReferences([action.contentId], session);
-                else await touchReadyAudioTrackReferences([action.contentId], session);
+                if (action.contentType === 'album') await touchPublicAlbumReferences([action.contentId], session);
+                else await touchPublicAudioTrackReferences([action.contentId], session);
             } catch (error) {
                 if (error instanceof AlbumReferenceUnavailableError || error instanceof AudioTrackReferenceUnavailableError) throw new SocialError(404, 'music_unavailable');
                 throw error;

@@ -337,12 +337,19 @@ change.
 ## Public delivery API
 
 Translations are public application resources and do not require a listener
-session. Archtree exposes two read-only endpoints:
+session. Archtree exposes two read-only endpoints for current clients:
 
 ```http
-GET /api/localizations/v1/manifest
-GET /api/localizations/v1/bundles/{locale}
+GET /api/localizations/v2/manifest
+GET /api/localizations/v2/bundles/{locale}
 ```
+
+The v2 catalog is bounded to 2,000 messages and 256 KiB. The generator also
+writes `generated/legacy/manifest.json` and its `bundles/`, excluding `admin.*`.
+The existing v1 endpoints serve that independently revised listener namespace
+with a 1,000-message bound. This preserves existing native readers without
+changing their accepted schema or silently discarding keys. Native clients that
+consume the complete catalog use v2 and package the full generated fallback.
 
 The manifest response is intentionally small:
 

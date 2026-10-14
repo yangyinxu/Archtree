@@ -1,5 +1,6 @@
 import type { Db, CreateIndexesOptions, IndexSpecification, Document } from 'mongodb';
 import { catalogSearchCollections } from '../utils/catalogSearch';
+import { adminImportIndexes } from '../administration/adminImportService';
 
 const catalogSearchIndexKeys: IndexSpecification[] = [
   { catalogSearchVersion: 1 },
@@ -14,6 +15,17 @@ export const databaseIndexes: Array<{
     /** Required nonunique indexes bound transactional cleanup and provision its collections. */
     required?: boolean;
   }> = [
+    ...adminImportIndexes,
+    { collection: 'adminCatalogCoverOperations', keys: { actor: 1, operationId: 1 }, options: { unique: true } },
+    { collection: 'adminCatalogCoverOperations', keys: { 'cancellation.actor': 1, 'cancellation.operationId': 1 }, options: { unique: true, partialFilterExpression: { 'cancellation.actor': { $type: 'string' }, 'cancellation.operationId': { $type: 'string' } } }, required: true },
+    { collection: 'adminCatalogCoverOperations', keys: { kind: 1, ownerId: 1, state: 1 }, required: true },
+    { collection: 'adminCatalogCoverOperations', keys: { state: 1, leaseUntil: 1 }, required: true },
+    { collection: 'adminCatalogCoverOperations', keys: { actor: 1, state: 1, cleanupPending: 1 }, required: true },
+    { collection: 'adminCatalogCoverOperations', keys: { kind: 1, ownerId: 1, cleanupPending: 1, createdAt: -1, _id: -1 }, required: true },
+    { collection: 'audioTracks', keys: { 'mediaByteHash.value': 1 }, options: { sparse: true } },
+    { collection: 'adminCatalogMutations', keys: { actor: 1, operationId: 1 }, options: { unique: true } },
+    { collection: 'adminCatalogMutations', keys: { actor: 1, expiresAt: 1 }, required: true },
+    { collection: 'adminCatalogMutations', keys: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'pages', keys: { slug: 1 }, options: { unique: true } },
     { collection: 'users', keys: { email: 1 }, options: { unique: true } },
     { collection: 'users', keys: { username: 1 } },
@@ -38,6 +50,11 @@ export const databaseIndexes: Array<{
     { collection: 'userSaves', keys: { userId: 1, savedAt: -1 } },
     { collection: 'userSaves', keys: { userId: 1, lastPlayedAt: -1, _id: -1 } },
     { collection: 'userSaves', keys: { userId: 1, lastActivityAt: -1, _id: -1 } },
+    { collection: 'artistFollows', keys: { userId: 1, artistId: 1 }, options: { unique: true } },
+    { collection: 'artistFollows', keys: { userId: 1, followedAt: -1, _id: -1 }, required: true },
+    { collection: 'artistFollows', keys: { artistId: 1, userId: 1 }, required: true },
+    { collection: 'albums', keys: { 'releaseDate.year': -1, 'releaseDate.month': -1, 'releaseDate.day': -1, _id: 1 }, required: true },
+    { collection: 'audioTracks', keys: { 'releaseDate.year': -1, 'releaseDate.month': -1, 'releaseDate.day': -1, _id: 1 }, required: true },
     { collection: 'userActivity', keys: { userId: 1 }, options: { unique: true } },
     { collection: 'playlists', keys: { ownerUserId: 1, updatedAt: -1, _id: -1 } },
     {
@@ -128,7 +145,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v6-social-reports';
+export const requiredIndexRevision = 'required-indexes-v8-administrator-imports';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */
@@ -150,12 +167,12 @@ export class DatabaseCollectionInitializationError extends Error {
 const indexId = (index: typeof databaseIndexes[number]) =>
   `${index.collection}:${Object.keys(index.keys).join(',')}`;
 
-/** Accepts complete constraints and cleanup indexes, never sparse or partial substitutes. */
+/** Requires the exact declared constraint, including a partial predicate only when explicitly specified. */
 const matchesRequiredIndex = (actual: Document, expected: typeof databaseIndexes[number]) =>
   JSON.stringify(actual.key) === JSON.stringify(expected.keys)
   && (expected.options?.unique === true ? actual.unique === true : !actual.unique)
   && !actual.sparse
-  && !actual.partialFilterExpression
+  && JSON.stringify(actual.partialFilterExpression) === JSON.stringify(expected.options?.partialFilterExpression)
   && !actual.hidden
   && actual.expireAfterSeconds === expected.options?.expireAfterSeconds
   && (!actual.collation || actual.collation.locale === 'simple');

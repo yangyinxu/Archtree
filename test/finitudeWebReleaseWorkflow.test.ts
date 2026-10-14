@@ -124,6 +124,60 @@ test('browser evidence is retained even when a browser gate fails', async () => 
 /** Splits one job block into its steps; each step starts with `- name:` at six spaces. */
 const stepBlocks = (job: string) => job.split(/^ {6}- name: /m).slice(1).map(step => ({ name: step.split('\n')[0], body: step }));
 
+test('native playback startup fails early without replacing the complete browser gate', async () => {
+  const jobs = jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n'));
+  const steps = stepBlocks(jobs.get('browser-e2e')!);
+  const preflight = steps.find(step => step.name === 'Verify native playback startup before the complete browser matrix');
+  const gate = steps.find(step => /^ {8}id: browser$/m.test(step.body));
+  assert.ok(preflight && gate);
+  assert.ok(steps.indexOf(preflight) < steps.indexOf(gate));
+  assert.match(preflight.body, /room-playback-feasibility\.spec\.ts --grep='real scheduled start' --retries=0/);
+  assert.match(preflight.body, /--output=test-results\/room-playback-preflight/);
+  assert.match(preflight.body, /PULSE_LATENCY_MSEC: '100'/);
+  assert.match(preflight.body, /^ {10}xvfb-run -a npm run test:e2e/m);
+  assert.match(preflight.body, /set -o pipefail/);
+  assert.match(preflight.body, /2>&1 \| node scripts\/filter-native-media-evidence\.mjs/);
+  assert.match(preflight.body, /GST_DEBUG: '0,webkitmediaplayer:5'/);
+  assert.doesNotMatch(gate.body, /GST_DEBUG|DEBUG:|filter-native-media-evidence/);
+  assert.doesNotMatch(preflight.body, /continue-on-error|^ {8}if:|--project/m);
+  assert.ok(gate.body.includes('run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none\n'));
+  assert.doesNotMatch(gate.body, /continue-on-error|^ {8}if:|--grep|--project/m);
+  assert.match(steps.find(step => step.body.includes('name: finitude-web-browser-evidence'))!.body,
+    /^ {12}web\/test-results$/m);
+});
+
+test('ordinary browser gesture and viewport isolation does not change native social policy', async () => {
+  const workflow = (await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n');
+  const jobs = jobBlocks(workflow);
+  const browser = jobs.get('browser-e2e')!;
+  assert.doesNotMatch(workflow, /WEBKIT_GST_USE_PLAYBIN3/);
+  for (const name of ['WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS', 'FINITUDE_E2E_ISOLATED_AUDIO']) {
+    const flag = `${name}: '1'`;
+    const steps = stepBlocks(browser).filter(step => step.body.includes(flag));
+    assert.equal(steps.length, 2);
+    assert.ok(steps.some(step => step.name === 'Verify native playback startup before the complete browser matrix'));
+    assert.ok(steps.some(step => /^ {8}id: browser$/m.test(step.body)));
+    assert.equal(browser.split(flag).length - 1, 2, 'The switch belongs only to the two ordinary browser invocations.');
+    assert.equal(workflow.split(name).length - 1, 2, 'No global environment or other job may inherit the ordinary browser switch.');
+    assert.ok(!jobs.get('social-e2e')!.includes(name));
+  }
+});
+
+test('both complete native browser gates use the same WPE download-cache isolation as their preflights', async () => {
+  const workflow = (await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n');
+  const jobs = jobBlocks(workflow);
+  const flag = "WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'";
+  assert.equal(workflow.split(flag).length - 1, 4, 'Only the four Linux browser test invocations disable WPE disk caching.');
+  for (const name of ['browser-e2e', 'social-e2e']) {
+    const steps = stepBlocks(jobs.get(name)!);
+    const isolated = steps.filter(step => step.body.includes(flag));
+    assert.equal(isolated.length, 2, `${name} must test the full matrix with the same cache backend as its preflight.`);
+    assert.ok(isolated.some(step => step.name.startsWith('Verify ')));
+    assert.ok(isolated.some(step => /^ {8}id: (browser|social)$/m.test(step.body)));
+    for (const step of isolated) assert.doesNotMatch(step.body, /continue-on-error|^ {8}if:/m);
+  }
+});
+
 test('every social browser project participates in one blocking release outcome', async () => {
   const jobs = jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n'));
   const social = jobs.get('social-e2e')!;
@@ -141,4 +195,11 @@ test('every social browser project participates in one blocking release outcome'
   assert.doesNotMatch(jobs.get('release-artifact')!, /quarantined/);
   const evidence = steps.find(step => step.body.includes('name: finitude-social-browser-evidence'))!;
   assert.match(evidence.body, /^ {12}web\/test-results\/social-real$/m);
+  assert.match(evidence.body, /^ {12}web\/test-results\/social-webkit-preflight$/m);
+  const preflight = steps.find(step => step.name === 'Verify WebKit compressed audio before the complete social matrix');
+  assert.ok(preflight, 'The original WebKit scenario must fail early before the complete social matrix.');
+  assert.ok(steps.indexOf(preflight) < steps.indexOf(gate));
+  assert.match(preflight.body, /--project=webkit-audio-formats --output=test-results\/social-webkit-preflight/);
+  assert.match(preflight.body, /PULSE_LATENCY_MSEC: '100'/);
+  assert.doesNotMatch(preflight.body, /continue-on-error|^ {8}if:|--retries/m);
 });

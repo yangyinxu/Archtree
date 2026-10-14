@@ -1,6 +1,7 @@
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getDb } from '../infrastructure/database';
 import { getS3 } from '../infrastructure/s3';
+import { loadAdminCanonicalReservations } from './adminCanonicalReservationService';
 
 type ListedImageObject = {
     key: string;
@@ -27,6 +28,7 @@ export interface ImageReconciliationDependencies {
     ) => Promise<any[]>;
     listObjects?: (bucket: string, prefix: 'images/' | 'avatars/') => Promise<ListedImageObject[]>;
     headObject?: (bucket: string, key: string) => Promise<any>;
+    loadReservedKeys?: () => Promise<Set<string>>;
 }
 
 const configuredReconciliationLimit = Number(process.env.MAX_RECONCILIATION_OBJECTS ?? 50_000);
@@ -153,8 +155,9 @@ export const reconcileImageStorage = async (
     const assetsByKey = new Map(assets.map((asset) => [String(asset.s3Key ?? ''), asset]));
     const assetsById = new Map(assets.map((asset) => [String(asset._id), asset]));
     const s3Keys = new Set(s3Objects.map((object) => object.key));
+    const reservedKeys = await (dependencies.loadReservedKeys?.() ?? (needsDatabase ? loadAdminCanonicalReservations(bucket, reconciliationLimit) : Promise.resolve(new Set<string>())));
 
-    const orphanCandidates = s3Objects.filter((object) => !assetsByKey.has(object.key));
+    const orphanCandidates = s3Objects.filter((object) => !assetsByKey.has(object.key) && !reservedKeys.has(object.key));
     const orphanedObjects: any[] = [];
     for (let index = 0; index < orphanCandidates.length; index += 10) {
         orphanedObjects.push(...await Promise.all(

@@ -1,3 +1,5 @@
+import { preserveCatalogVisibilityUpdate } from '../services/catalogVisibilityService';
+import type { CatalogVisibility } from '../services/catalogVisibilityService';
 import { ObjectId } from 'mongodb';
 
 import { getDb } from '../infrastructure/database';
@@ -23,6 +25,7 @@ export type OrganizationType = typeof organizationTypes[number];
 
 /** Represents a non-Artist institution that can receive release Credits. */
 export class Organization {
+    visibility: CatalogVisibility = 'public';
     _id?: ObjectId;
     name: string;
     organizationType: OrganizationType;
@@ -95,6 +98,7 @@ export class Organization {
     }
 
     static updateById(organizationId: string, update: Record<string, unknown>) {
+        preserveCatalogVisibilityUpdate(update);
         const allowed: Record<string, unknown> = {};
         if (update.name !== undefined) allowed.name = String(update.name).trim();
         if (update.description !== undefined) allowed.description = String(update.description).trim();

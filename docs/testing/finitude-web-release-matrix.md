@@ -39,21 +39,61 @@ not production account access or deployment.
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
 tests, both production builds, and E2E TypeScript. The focused Audio/Video
-continuity, responsive-shell, and accessibility Chromium gate passes 24/24;
-the reviewed visual suite then passes 10/10 in strict no-update mode. Firefox
-and WebKit complete with 130 passes and 10 documented Chromium-owned skips.
-The full Chromium run completes all 70 cases with 69 stable passes and the
+continuity, responsive-shell, and accessibility Chromium gate passed 24/24;
+the reviewed visual suite then passed 10/10 in strict no-update mode. Firefox
+and WebKit completed with 130 passes and 10 documented Chromium-owned skips.
+The full Chromium run completed all 70 cases with 69 stable passes and the
 pre-existing Archtree logout-header timing assertion passing its automatic
-retry; because CI deliberately fails on flaky tests, that command remains
-non-zero even though the same assertion passes an isolated CI rerun. A clean
-commit-identified CI matrix remains required before release. The largest
+retry; because CI deliberately fails on flaky tests, that command was
+non-zero even though the same assertion passed an isolated CI rerun. A clean
+commit-identified CI matrix was still required at that point. The largest
 initial route was Playlist Detail at 148.4 KiB gzip against the 150 KiB budget;
 CSS was 28.3 KiB gzip against the 32 KiB budget, and that build shipped no bundled
 font or image payload. CI repeats the browser gate through
 `.github/workflows/finitude-web-release.yml`; the platform-scoped path prevents
-Linux CI from silently comparing against macOS font rendering. A separately
-reviewed Linux baseline and a subsequent strict no-update CI pass remain
-required before release.
+Linux CI from silently comparing against macOS font rendering. The current
+strict no-update Linux result is recorded below; the historical failure remains
+separate evidence.
+
+### Verified release status — checked 2026-10-12
+
+The latest pull-request and merged-main release workflows both completed all
+five jobs on Ubuntu 24.04: production build/type check, unit/Mongo integration,
+real social/media/WebSocket scenarios, three-engine listener/axe checks, and
+retained Elastic Beanstalk artifact staging.
+
+| Run | Exact source | Result |
+| --- | --- | --- |
+| [Pull request 38169379414](https://github.com/yangyinxu/Archtree/actions/runs/38169379414), created 2026-10-11 19:45:43 UTC | `7fd123132a45869c20ba68679db0abe2303d5bcc` | All five jobs passed; social 17/17; listener 347 passed, 10 intentional skips |
+| [Merged main 38170519764](https://github.com/yangyinxu/Archtree/actions/runs/38170519764), created 2026-10-11 20:02:22 UTC | `2c1cf6e37e9ea95bf13b8218a153f3e3aa5b45cc` | All five jobs passed; social 17/17; listener 347 passed, 10 intentional skips |
+
+The social results include `firefox-audio-formats`, `webkit-audio-formats`,
+`firefox-rooms-recovery` and `webkit-rooms-recovery`, with zero retries and no
+non-blocking quarantine step. The listener gate ran Chromium, Firefox and WebKit
+with `--update-snapshots=none`; its ten skips are the existing Chromium-owned
+visual, keyboard-order and layout-shift cases in the other two engines.
+
+The 2026-10-12 public check matched `/finitude/` HTML and all four directly
+referenced JS/CSS resources byte for byte against the retained main artifact
+above. This identifies those served Web bytes, not the backend's on-instance
+`RELEASE.json` or production email/Rooms acceptance. Separate 2026-10-12 production
+checks completed QA registration and verified-email login, rejected the original
+registration link on replay within its validity period, and received the
+already-registered and six-digit reset emails. Three approved audio fixtures are
+public; each passed canonical HEAD plus two Range checks against its original
+bytes, including AAC's supplemental check for the stored `audio/x-m4a` MIME type.
+The administrator analysis page confirmed all three new sources **Ready for rooms**
+after automatic upload analysis; this does not establish fresh decoding of the
+older catalog. All three also passed ordinary play, pause, paused seek to 60
+seconds and explicit resume in an isolated signed-in in-app browser with both
+flags off. Each used one media element and its canonical URL, reported a
+120-second duration with no error, and advanced its clock only when playing.
+Each test had a single-track queue, so Next was disabled and queue advancement
+was not tested. Audible output, other browsers and physical devices remain
+unverified. Pinned Room media (including AAC's `audio/mp4` response), Room playback,
+reset completion/session revocation, remaining authentication flows, and controlled
+Rooms/deployment/rollback checks remain open. Exact fixture identities and limits
+are in the [production acceptance record](../deployment/finitude-web-rollout-runbook.md#production-authentication-and-media-checks--2026-10-12).
 
 Passing these projects does not prove support for a branded browser release.
 Playwright WebKit is not Safari, and bundled Chromium is not a substitute for
@@ -138,9 +178,10 @@ aggregate or zero-resource teardown assertion was emitted for the interrupted
 run. Source and production-bundle hashes were unchanged throughout the run and
 verified again before this documentation update. This is partial evidence, not a
 completed eight-hour pass. No further long test is requested for this change.
-Current full Linux/cross-engine, physical-device output, production-equivalent S3,
-and deployment/rollback gates remain open; selected Windows passes do not close
-them. The tested production entry bundle was `index-BMUnW763.js`; the largest
+That historical Windows run did not close the Linux/cross-engine gate; the later
+Linux acceptance is recorded above. Physical-device output, production-equivalent
+S3, and deployment/rollback gates remain separate requirements. The tested
+production entry bundle was `index-BMUnW763.js`; the largest
 initial route was 149.5 KiB gzip and CSS was 30.8 KiB gzip, within their existing
 150/32 KiB budgets.
 
@@ -175,21 +216,21 @@ gates pass. Its final `release-artifact` job runs only after the parallel
 stages the same production build those browser jobs tested. The `social-e2e`
 gate runs every Linux social project in one blocking step, including
 `firefox-audio-formats` and `webkit-audio-formats`, and keeps evidence under
-`social-real/` in the `finitude-social-browser-evidence` artifact. The 2026-10-11
-repair candidate restores this complete gate with zero retries and unchanged
-drift/readiness thresholds. Local regression results do not establish Linux
-decoder acceptance: new consecutive pull-request and merged-main CI passes are
-still required, and production rooms remain disabled until those passes and the
-rollout checks are recorded (see the
+`social-real/` in the `finitude-social-browser-evidence` artifact. The complete
+gate retains zero social retries and unchanged drift/readiness thresholds. The
+pull-request and merged-main runs recorded in the 2026-10-12 check above passed
+the Linux decoder gate. Production rooms remain disabled; controlled rollout
+checks are still required before public enablement (see the
 [social rollout runbook](../deployment/social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms)).
 
 Follow
 [`../deployment/finitude-web-rollout-runbook.md`](../deployment/finitude-web-rollout-runbook.md)
 to promote the exact same archive, retain the immediately previous successful
 archive, execute smoke/observation gates, and roll back without rebuilding. The
-artifact contract has local automated evidence; the staging rollout and
-rollback rehearsal remain pending external evidence. A temporary structural
-rehearsal also proved that an archived revision can build, stage, zip, pass
+artifact contract has successful Linux CI evidence, and the served Web entry
+and directly referenced assets match the latest main artifact. The staging
+rollout and rollback rehearsal still require their own evidence. A temporary
+structural rehearsal also proved that an archived revision can build, stage, zip, pass
 `unzip -t`, and reproduce its staged tree without touching the working tree.
 It is deliberately not accepted as rollback evidence: an older retained
 release uses `/listen/assets/`, while the current stager requires

@@ -1,0 +1,68 @@
+{
+  "contractVersion": 1,
+  "asOf": "2026-10-13T23:59:59.000Z",
+  "followedArtists": [
+    {
+      "id": "000000000000000000000065",
+      "name": "Lorem Ensemble"
+    },
+    {
+      "id": "000000000000000000000066",
+      "name": "Ipsum Quartet"
+    }
+  ],
+  "expectedItems": [
+    {
+      "contentType": "album",
+      "contentId": "0000000000000000000000c9",
+      "order": 0,
+      "reason": {
+        "code": "followedArtist",
+        "artist": {
+          "id": "000000000000000000000065",
+          "name": "Lorem Ensemble"
+        }
+      }
+    },
+    {
+      "contentType": "album",
+      "contentId": "0000000000000000000000ca",
+      "order": 1,
+      "reason": {
+        "code": "followedArtist",
+        "artist": {
+          "id": "000000000000000000000066",
+          "name": "Ipsum Quartet"
+        }
+      }
+    },
+    {
+      "contentType": "audioTrack",
+      "contentId": "00000000000000000000012d",
+      "order": 2,
+      "reason": {
+        "code": "followedArtist",
+        "artist": {
+          "id": "000000000000000000000065",
+          "name": "Lorem Ensemble"
+        }
+      }
+    },
+    {
+      "contentType": "audioTrack",
+      "contentId": "00000000000000000000012e",
+      "order": 3,
+      "reason": {
+        "code": "followedArtist",
+        "artist": {
+          "id": "000000000000000000000066",
+          "name": "Ipsum Quartet"
+        }
+      }
+    }
+  ],
+  "albumFamilyTrackIds": [
+    "00000000000000000000012f",
+    "000000000000000000000130"
+  ]
+}

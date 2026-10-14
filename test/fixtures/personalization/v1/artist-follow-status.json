@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "artistId": "000000000000000000000065",
+      "following": true,
+      "followedAt": "2026-10-12T15:00:00.000Z"
+    },
+    {
+      "artistId": "000000000000000000000066",
+      "following": false,
+      "followedAt": null
+    }
+  ]
+}

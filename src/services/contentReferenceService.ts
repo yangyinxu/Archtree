@@ -169,6 +169,7 @@ export const cleanupDeletedContentReferences = async (
     const { canonicalContentId, referenceIds } = storedReferenceIds(contentId);
 
     if (type === 'artist') {
+        operations.push(db.collection('artistFollows').deleteMany({ artistId: { $in: referenceIds } }));
         const removeArtistCreditPipeline = [
             {
                 $set: {

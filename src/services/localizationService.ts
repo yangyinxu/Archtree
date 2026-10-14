@@ -128,7 +128,8 @@ const validateManifest = (value: unknown): LocalizationManifest => {
 
 const validateBundle = (
   value: unknown,
-  expected: LocalizationManifestLocale
+  expected: LocalizationManifestLocale,
+  maxMessages: number
 ) => {
   if (!isRecord(value)
     || !hasExactKeys(value, ['schemaVersion', 'locale', 'revision', 'messages'])
@@ -137,7 +138,7 @@ const validateBundle = (
     || value.revision !== expected.revision
     || !isRecord(value.messages)
     || Object.keys(value.messages).length === 0
-    || Object.keys(value.messages).length > 1_000
+    || Object.keys(value.messages).length > maxMessages
     || Object.values(value.messages).some((message) =>
       typeof message !== 'string' || message.length === 0 || message.length > 4_000)) {
     throw new LocalizationArtifactError(`The ${expected.locale} localization bundle is invalid.`);
@@ -152,13 +153,21 @@ const validateBundle = (
 
 /** Reads only generated, manifested localization representations from the deployment artifact. */
 export class LocalizationService {
-  constructor(private readonly generatedRoot = path.resolve(
+  private readonly generatedRoot: string;
+  private readonly maxMessages: number;
+
+  constructor(generatedRoot = path.resolve(
     __dirname,
     '..',
     '..',
     'localization',
     'generated'
-  )) {}
+  ), compatibility: 'v1' | 'v2' = 'v2') {
+    const legacyRoot = path.join(generatedRoot, 'legacy');
+    this.generatedRoot = compatibility === 'v1' && fs.existsSync(path.join(legacyRoot, 'manifest.json'))
+      ? legacyRoot : generatedRoot;
+    this.maxMessages = compatibility === 'v1' ? 1_000 : 2_000;
+  }
 
   getManifest(): LocalizationRepresentation {
     const representation = readJsonRepresentation(
@@ -185,7 +194,7 @@ export class LocalizationService {
       maxBundleBytes,
       `The ${expected.locale} localization bundle`
     );
-    validateBundle(representation.value, expected);
+    validateBundle(representation.value, expected, this.maxMessages);
     return {
       body: representation.body,
       etag: representation.etag,

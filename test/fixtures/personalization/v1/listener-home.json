@@ -1,0 +1,96 @@
+{
+  "title": "Home",
+  "sections": [
+    {
+      "id": "000000000000000000000191",
+      "title": "New from artists you follow",
+      "presentation": "carousel",
+      "items": [
+        {
+          "contentType": "album",
+          "id": "0000000000000000000000c9",
+          "title": "Dolor Dawn",
+          "artworkUrl": "",
+          "artistNames": [
+            "Lorem Ensemble"
+          ],
+          "releaseDate": {
+            "year": 2026,
+            "month": 10,
+            "day": 13
+          },
+          "reason": {
+            "code": "followedArtist",
+            "artist": {
+              "id": "000000000000000000000065",
+              "name": "Lorem Ensemble"
+            }
+          }
+        },
+        {
+          "contentType": "album",
+          "id": "0000000000000000000000ca",
+          "title": "Sit Sunset",
+          "artworkUrl": "",
+          "artistNames": [
+            "Ipsum Quartet"
+          ],
+          "releaseDate": {
+            "year": 2026,
+            "month": 10,
+            "day": 13
+          },
+          "reason": {
+            "code": "followedArtist",
+            "artist": {
+              "id": "000000000000000000000066",
+              "name": "Ipsum Quartet"
+            }
+          }
+        },
+        {
+          "contentType": "audioTrack",
+          "id": "00000000000000000000012d",
+          "title": "Amet Current",
+          "artworkUrl": "",
+          "artistNames": [
+            "Lorem Ensemble"
+          ],
+          "albumId": null,
+          "albumTitle": null,
+          "duration": "2:00",
+          "mediaType": "audio",
+          "streamUrl": "/content/mediaTrack/stream/00000000000000000000012d",
+          "reason": {
+            "code": "followedArtist",
+            "artist": {
+              "id": "000000000000000000000065",
+              "name": "Lorem Ensemble"
+            }
+          }
+        },
+        {
+          "contentType": "audioTrack",
+          "id": "00000000000000000000012e",
+          "title": "Consectetur Rain",
+          "artworkUrl": "",
+          "artistNames": [
+            "Ipsum Quartet"
+          ],
+          "albumId": null,
+          "albumTitle": null,
+          "duration": "2:00",
+          "mediaType": "audio",
+          "streamUrl": "/content/mediaTrack/stream/00000000000000000000012e",
+          "reason": {
+            "code": "followedArtist",
+            "artist": {
+              "id": "000000000000000000000066",
+              "name": "Ipsum Quartet"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

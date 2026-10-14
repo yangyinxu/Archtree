@@ -116,6 +116,35 @@ const setupSourceRetry = () => {
     changePhysicalSource: () => { generation++; } };
 };
 
+/** Native seek completion is asynchronous, independently of apply/resync resolving or metadata being available. */
+const setupPendingNativeSeek = async () => {
+  let clock = 10_000, generation = 1;
+  const audio = new RoomAudio();
+  audio.src = queue[0].streamUrl; audio.currentSrc = audio.src; audio.duration = 120; audio.readyState = 4;
+  const overlappingSeek = vi.fn(), onObservation = vi.fn(), onIntent = vi.fn();
+  const seek = vi.fn((position: number) => {
+    if (audio.seeking) overlappingSeek();
+    audio.currentTime = position; audio.seeking = true; audio.readyState = 2;
+    return true;
+  });
+  const controller = createRoomPlaybackController({ media: () => audio, sourceGeneration: () => generation,
+    install: async () => undefined, updateQueue: vi.fn(), play: () => audio.play(), pause: () => audio.pause(),
+    seek, detach: vi.fn() }, { now: () => clock, onObservation, onIntent });
+  const room = controller.attachment;
+  const initial: RoomPlaybackState = { ...frame(0), revision: 1, playbackEpoch: 1,
+    status: 'paused', positionSeconds: 0, anchorMonotonicMs: clock };
+  await room.apply(initial);
+  room.pauseLocally();
+  audio.currentTime = 1.5;
+  const playing: RoomPlaybackState = { ...initial, revision: 2, playbackEpoch: 2, status: 'playing' };
+  await room.apply(playing);
+  onObservation.mockClear();
+  return { room, audio, controller, playing, seek, overlappingSeek, onObservation, onIntent,
+    advance: (milliseconds: number) => { clock += milliseconds; }, now: () => clock,
+    finishSeek: (readyState = 4) => { audio.seeking = false; audio.readyState = readyState; controller.observe('seeked', audio); },
+    changePhysicalSource: () => { generation++; } };
+};
+
 afterEach(() => vi.useRealTimers());
 
 test('ordinary player construction requires an explicit room controller to attach', () => {
@@ -527,6 +556,81 @@ test('a deliberate local pause survives remote play, selection, and delayed call
   store.destroy();
 });
 
+test('immediate resync waits for the pending native seek before preparing the latest playing anchor', async () => {
+  const value = await setupPendingNativeSeek();
+  const { room, audio, controller, seek, overlappingSeek, onObservation, onIntent } = value;
+  try {
+    expect(seek).toHaveBeenCalledExactlyOnceWith(0);
+    value.advance(7);
+    await room.resync();
+    expect(seek).toHaveBeenCalledTimes(1);
+    controller.observe('canplay', audio);
+    expect(onObservation).not.toHaveBeenCalled();
+    expect(audio.playCalls).toBe(0);
+
+    value.advance(350);
+    value.finishSeek(2);
+    expect(seek).toHaveBeenCalledTimes(2);
+    expect(seek).toHaveBeenLastCalledWith(0.357);
+    expect(onObservation).not.toHaveBeenCalled(); // The obsolete completion cannot consume this effect's observation.
+    expect(audio.playCalls).toBe(0);
+    value.finishSeek(2);
+    expect(onObservation.mock.calls.map(([observation]) => observation.type)).toEqual(['seek-complete']);
+    expect(audio.playCalls).toBe(0); // A completed seek still needs decoded data before readiness/play.
+    audio.readyState = 4; controller.observe('canplay', audio);
+    expect(onObservation.mock.calls.map(([observation]) => observation.type)).toEqual(['seek-complete', 'ready']);
+    expect(audio.playCalls).toBe(1);
+    expect(overlappingSeek).not.toHaveBeenCalled();
+    expect(onIntent).not.toHaveBeenCalled();
+  } finally { room.detach(); }
+});
+
+test.each(['local-pause', 'detach', 'physical-source'] as const)('%s fences a resync deferred behind a native seek', async cancellation => {
+  const value = await setupPendingNativeSeek();
+  const { room, audio, seek, overlappingSeek, onObservation, onIntent } = value;
+  try {
+    value.advance(7); await room.resync();
+    expect(seek).toHaveBeenCalledTimes(1);
+    if (cancellation === 'local-pause') room.pauseLocally();
+    if (cancellation === 'detach') room.detach();
+    if (cancellation === 'physical-source') value.changePhysicalSource();
+    value.advance(350); value.finishSeek();
+    if (cancellation === 'local-pause') {
+      expect(seek).toHaveBeenCalledTimes(2); // Preparation may continue while the device stays deliberately paused.
+      value.finishSeek();
+    } else {
+      expect(seek).toHaveBeenCalledTimes(1);
+      expect(onObservation).not.toHaveBeenCalled();
+    }
+    expect(audio.playCalls).toBe(0);
+    expect(audio.paused).toBe(true);
+    expect(overlappingSeek).not.toHaveBeenCalled();
+    expect(onIntent).not.toHaveBeenCalled();
+  } finally { room.detach(); }
+});
+
+test('a newer playback epoch supersedes a resync deferred behind a native seek', async () => {
+  const value = await setupPendingNativeSeek();
+  const { room, audio, playing, seek, overlappingSeek, onObservation, onIntent } = value;
+  try {
+    value.advance(7); await room.resync();
+    value.advance(250);
+    await room.apply({ ...playing, revision: 3, playbackEpoch: 3, positionSeconds: 40, anchorMonotonicMs: value.now() });
+    expect(seek).toHaveBeenCalledTimes(1);
+    value.advance(50); value.finishSeek(2);
+    expect(seek).toHaveBeenCalledTimes(2);
+    expect(seek).toHaveBeenLastCalledWith(40.05);
+    expect(onObservation).not.toHaveBeenCalled();
+    expect(audio.playCalls).toBe(0);
+    value.finishSeek();
+    expect(onObservation.mock.calls.map(([observation]) => [observation.type, observation.playbackEpoch]))
+      .toEqual([['seek-complete', 3], ['ready', 3]]);
+    expect(audio.playCalls).toBe(1);
+    expect(overlappingSeek).not.toHaveBeenCalled();
+    expect(onIntent).not.toHaveBeenCalled();
+  } finally { room.detach(); }
+});
+
 test('metadata and seek readiness are distinct from actual start, and old source events are ignored', async () => {
   const { room, audio, onObservation, store } = setup();
   audio.autoStart = false;
@@ -916,6 +1020,7 @@ test('rate correction resets by deadline and uses seek fallback; unsupported rat
   const { room, audio, store, onObservation } = setup();
   audio.duration = 20;
   await room.apply(frame(5)); audio.ready();
+  await vi.advanceTimersByTimeAsync(100); audio.currentTime = 0.1; audio.emit('timeupdate');
   audio.currentTime = 1;
   expect(room.correct(1.3)).toBe('rate');
   expect(audio.playbackRate).toBe(1.05);
@@ -972,8 +1077,10 @@ test('drift correction cannot overwrite an unfinished readiness seek', async () 
   audio.seeking = true;
   await room.apply({ ...frame(5), revision: 8, playbackEpoch: 60, positionSeconds: 1, anchorMonotonicMs: 10_000, playbackAllowed: false });
   expect(room.correct(1.4)).toBe('none');
-  expect(audio.currentTime).toBe(1);
+  expect(audio.currentTime).toBe(0); // The previous native seek still owns the element until its completion.
+  expect(onObservation.mock.calls.some(([value]) => value.playbackEpoch === 60)).toBe(false);
   audio.seeking = false; audio.emit('seeked');
+  expect(audio.currentTime).toBe(1);
   expect(onObservation.mock.calls.some(([value]) => value.type === 'unsupported-seek')).toBe(false);
   expect(onObservation.mock.calls.some(([value]) => value.type === 'ready' && value.playbackEpoch === 60)).toBe(true);
   store.destroy();
@@ -1008,13 +1115,19 @@ test('a pending old play promise cannot resume local pause or a replacement atta
 
 test('a completed but inaccurate seek reports unsupported instead of readiness or automatic retry', async () => {
   const { room, audio, store, onObservation } = setup();
-  audio.seeking = true;
+  let nativePosition = 0;
+  Object.defineProperty(audio, 'currentTime', {
+    get: () => nativePosition,
+    set: (position: number) => { nativePosition = position; if (audio.readyState >= 1) audio.seeking = true; }
+  });
   await room.apply(frame(6)); audio.ready();
-  audio.currentTime = 0; audio.seeking = false; audio.emit('seeked'); audio.emit('canplay');
+  nativePosition = 0; audio.seeking = false; audio.emit('seeked'); audio.emit('canplay');
   expect(onObservation.mock.calls.map(([value]) => value.type)).toEqual(['unsupported-seek']);
   expect(audio.playCalls).toBe(0);
   expect(audio.currentTime).toBe(0);
   await room.resync();
+  expect(onObservation.mock.calls.map(([value]) => value.type)).toEqual(['unsupported-seek']);
+  audio.seeking = false; audio.emit('seeked');
   expect(onObservation.mock.calls.map(([value]) => value.type)).toEqual(['unsupported-seek', 'seek-complete', 'ready']);
   store.destroy();
 });

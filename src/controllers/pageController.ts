@@ -1,3 +1,5 @@
+import { findPublicAudioTracks, readyPublicAlbumFilter, publicCatalogVisibilityFilter, isPublicCatalogVisibility } from '../services/catalogVisibilityService';
+import { supportsArtistFollowHome } from '../config/artistFollowRollout';
 import { NextFunction, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 
@@ -21,12 +23,17 @@ import {
 } from '../services/publicCatalogService';
 import { toPublicExpandedPage, toPublicPage } from '../services/publicPageService';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
-import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
 import { deleteCarouselAndPageReferences } from '../services/pageReferenceLifecycleService';
 import { ManualCompositionConflictError } from '../services/manualCompositionService';
 
 // v1 only allows composition pages for Home and Library.
 const allowedSlugs: PageSlug[] = ['home', 'library'];
+
+// A null attachment result means the transaction found a full or missing Page, not a committed write.
+const pageAttachmentNotApplied = {
+    code: 'page_attachment_not_applied',
+    message: 'Carousel was not attached because the page is full or no longer available. Refresh the page and try again.'
+};
 
 const getPageSlug = (value: string): PageSlug | null => {
     const normalized = value.trim().toLowerCase();
@@ -84,7 +91,8 @@ const parseCarouselDefinition = (body: any): {
     if (mode === 'personalized') {
         const source = String(body?.personalizedSource ?? '').trim();
         const requestedLimit = Number(body?.personalizedLimit ?? 20);
-        if ((source !== 'recentlySaved' && source !== 'recentlyPlayed') || !Number.isFinite(requestedLimit)) {
+        if ((source !== 'recentlySaved' && source !== 'recentlyPlayed' && source !== 'followedArtistReleases') || !Number.isFinite(requestedLimit)
+            || (source === 'followedArtistReleases' && (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 20))) {
             return null;
         }
         return {
@@ -201,6 +209,11 @@ export const getPageBySlug = async (req: Request, res: Response, next: NextFunct
 };
 
 export const getExpandedPageBySlug = async (req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Pragma', 'no-cache');
+    res.vary('Cookie');
+    res.vary('Authorization');
+    res.vary('X-Finitude-Personalization-Version');
     try {
         const slug = getPageSlug(String(req.params.slug ?? ''));
         if (!slug) {
@@ -213,7 +226,7 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         }
 
         const orderedItems = Array.isArray(page.items)
-            ? [...page.items]
+            ? [...page.items].filter(isPublicCatalogVisibility)
                 .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0))
                 .slice(0, 100)
             : [];
@@ -230,7 +243,7 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         // Expand carousel references into full carousel payloads for client rendering.
         const viewerUserId = (req as AuthenticatedRequest).auth?.userId;
         const [carousels, contentCollections]: any[][] = await Promise.all([
-            Carousel.fetchByIds(carouselIds, viewerUserId),
+            Carousel.fetchByIds(carouselIds, viewerUserId, slug === 'home' && supportsArtistFollowHome(req.headers['x-finitude-personalization-version'])),
             ContentCollection.fetchByIds(collectionIds)
         ]);
         const resolvedRefs = [
@@ -260,17 +273,18 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             albumIds.length > 0
                 ? db.collection('albums').find({
                     _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) },
-                    ...readyAlbumLifecycleFilter
+                    ...readyPublicAlbumFilter
                 }).maxTimeMS(3_000).toArray()
                 : [],
             audioTrackIds.length > 0
-                ? db.collection('audioTracks').find({
+                ? findPublicAudioTracks({
                     ...readyPublicAudioFilter,
                     _id: { $in: audioTrackIds.map((id) => ObjectId.createFromHexString(id)) }
                 }).maxTimeMS(3_000).toArray()
                 : [],
             postIds.length > 0
                 ? db.collection('posts').find({
+                    ...publicCatalogVisibilityFilter,
                     _id: { $in: postIds.map((id) => ObjectId.createFromHexString(id)) }
                 }).project({
                     _id: 1,
@@ -291,7 +305,7 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
         const linkedAlbums = missingLinkedAlbumIds.length > 0
             ? await db.collection('albums').find({
                 _id: { $in: missingLinkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) },
-                ...readyAlbumLifecycleFilter
+                ...readyPublicAlbumFilter
             }).maxTimeMS(3_000).toArray()
             : [];
         const includedAlbums = [...albums, ...linkedAlbums];
@@ -539,6 +553,9 @@ export const attachCarouselToPage = async (req: Request, res: Response, next: Ne
 
         const position = parseOptionalPosition(req.body.position);
         const items = await Page.addCarouselItem(slug, carouselId, authReq.auth.userId, position);
+        if (items === null) {
+            return res.status(409).json(pageAttachmentNotApplied);
+        }
 
         return res.status(200).json({
             message: 'Carousel attached to page.',
@@ -979,7 +996,10 @@ export const attachCarouselToPageWeb = async (req: Request, res: Response, next:
         }
 
         const position = parseOptionalPosition(req.body.position);
-        await Page.addCarouselItem(slug, carouselId, authReq.auth.userId, position);
+        const items = await Page.addCarouselItem(slug, carouselId, authReq.auth.userId, position);
+        if (items === null) {
+            return redirectWithMessage(res, pageAttachmentNotApplied.message);
+        }
 
         return redirectWithMessage(res, 'Carousel attached to page.');
     } catch (error) {

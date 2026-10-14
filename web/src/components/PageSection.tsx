@@ -8,7 +8,7 @@ import {
   type ReactNode
 } from 'react';
 
-import type { AlbumSummary, AudioTrackSummary, SectionPresentation } from '../api/contentSchemas';
+import type { AlbumSummary, AudioTrackSummary, HomeContentSummary, SectionPresentation } from '../api/contentSchemas';
 import { ContentCard } from './ContentCard';
 import { ContentListRow } from './ContentListRow';
 import { Icon } from './Icon';
@@ -87,7 +87,7 @@ export interface PageSectionProps {
   id: string;
   title: string;
   presentation: SectionPresentation;
-  items: Array<AlbumSummary | AudioTrackSummary>;
+  items: Array<HomeContentSummary>;
   onPlay?: (audioTrack: AudioTrackSummary) => void;
   renderTrackTrailing?: (audioTrack: AudioTrackSummary) => ReactNode;
 }
@@ -259,6 +259,7 @@ export const PageSection = ({
         ? items.map((item, index) => (
             <ContentListRow
               item={item}
+              reason={item.reason}
               key={entryKeys[index]}
               onPlay={onPlay}
               trailing={item.contentType === 'audioTrack' ? renderTrackTrailing?.(item) : undefined}
@@ -266,7 +267,7 @@ export const PageSection = ({
           ))
         : items.map((item, index) => (
           <li className={styles.cardItem} key={entryKeys[index]}>
-            <ContentCard artworkSizes={cardArtworkSizes} item={item} onPlay={onPlay} />
+            <ContentCard artworkSizes={cardArtworkSizes} item={item} onPlay={onPlay} reason={item.reason} />
           </li>
         ))}
     </ul>

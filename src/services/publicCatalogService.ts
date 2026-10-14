@@ -1,10 +1,10 @@
+import { isPublicCatalogVisibility, readyPublicArtistFilter, readyPublicAlbumFilter, readyPublicOrganizationFilter, readyPublicTrackVisibilityFilter, findPublicAudioTracks } from './catalogVisibilityService';
 import { ObjectId } from 'mongodb';
 
 import { getDb } from '../infrastructure/database';
 import { resolvedCoverArtUrl } from '../utils/coverArt';
 import { catalogSearchFilter } from '../utils/catalogSearch';
 import { normalizeUtf8Text } from '../utils/textEncoding';
-import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import {
     activeMediaObjectKeyForTrack,
     activeMediaTypeForTrack,
@@ -12,11 +12,9 @@ import {
 } from '../utils/mediaStorageKey';
 import {
     isReadyArtistLifecycle,
-    readyArtistLifecycleFilter
 } from './artistReferenceFenceService';
 import {
     isReadyAlbumLifecycle,
-    readyAlbumLifecycleFilter
 } from './albumReferenceFenceService';
 import {
     AttributionStatus,
@@ -24,7 +22,6 @@ import {
     normalizeCatalogCredits,
     validateAttribution
 } from '../models/catalogCredit';
-import { readyOrganizationLifecycleFilter } from './organizationReferenceFenceService';
 import { catalogCreditRollout } from '../config/catalogCreditRollout';
 
 export interface PublicSimpleDate {
@@ -96,9 +93,10 @@ export interface PublicFeedPost {
     createdAt: string;
 }
 
-export const readyPublicAudioFilter = readyAudioStorageFilter;
+export const readyPublicAudioFilter = readyPublicTrackVisibilityFilter;
 
 const artistProjection = {
+    visibility: 1,
     _id: 1,
     name: 1,
     albumIds: 1,
@@ -114,6 +112,7 @@ const organizationProjection = {
     description: 1
 };
 const albumProjection = {
+    visibility: 1,
     _id: 1,
     title: 1,
     coverArtId: 1,
@@ -125,6 +124,7 @@ const albumProjection = {
     attributionStatus: 1
 };
 const audioTrackProjection = {
+    visibility: 1,
     _id: 1,
     title: 1,
     coverArtId: 1,
@@ -225,11 +225,11 @@ const loadCreditSubjectNames = async (owners: any[]) => {
     const [artists, organizations] = await Promise.all([
         artistIds.length > 0 ? getDb()!.collection('artists').find({
             _id: { $in: artistIds.map(toObjectId) },
-            ...readyArtistLifecycleFilter
+            ...readyPublicArtistFilter
         }).project({ name: 1 }).toArray() : [],
         organizationIds.length > 0 ? getDb()!.collection('organizations').find({
             _id: { $in: organizationIds.map(toObjectId) },
-            ...readyOrganizationLifecycleFilter
+            ...readyPublicOrganizationFilter
         }).project({ name: 1 }).toArray() : []
     ]);
     return new Map<string, string>([
@@ -270,7 +270,7 @@ export const resolvePublicCatalogBylines = async (owners: any[]) => {
 
 /** Returns true only when MongoDB records a playable object lifecycle. */
 export const isReadyPublicAudioTrack = (track: any) =>
-    track?.uploadStatus === 'ready'
+    isPublicCatalogVisibility(track) && track?.uploadStatus === 'ready'
     && (!Object.prototype.hasOwnProperty.call(track ?? {}, 'publicationStatus')
         || track?.publicationStatus === 'ready')
     && Boolean(activeMediaObjectKeyForTrack(track));
@@ -311,6 +311,7 @@ export const toPublicAudioTrack = (
     subjectNames?: ReadonlyMap<string, string>
 ): PublicAudioTrack | null => {
     if (!isReadyPublicAudioTrack(track)) return null;
+    if (track?.albumId && (!album || !isPublicCatalogVisibility(album))) return null;
     const visibleAlbumId = album ? objectIdString(track?.albumId) : null;
     return {
         _id: String(track?._id ?? ''),
@@ -358,7 +359,7 @@ const loadVisibleAlbumIds = async (artists: any[]) => {
     const albums = await getDb()!.collection('albums')
         .find({
             _id: { $in: albumIds.map(toObjectId) },
-            ...readyAlbumLifecycleFilter
+            ...readyPublicAlbumFilter
         })
         .project({ _id: 1 })
         .maxTimeMS(queryTimeoutMs)
@@ -368,14 +369,12 @@ const loadVisibleAlbumIds = async (artists: any[]) => {
 
 /** Adds database-confirmed Album references to public Artist DTOs. */
 export const projectPublicArtists = async (artists: any[]) => {
-    const readyArtists = artists.filter(isReadyArtistLifecycle);
+    const readyArtists = artists.filter(item => isReadyArtistLifecycle(item) && isPublicCatalogVisibility(item));
     const visibleAlbumIds = await loadVisibleAlbumIds(readyArtists);
     return readyArtists.map((artist) => toPublicArtist(artist, visibleAlbumIds));
 };
 
-const findReadyDeclaredTracks = (trackIds: readonly string[]) => getDb()!
-    .collection('audioTracks')
-    .find({
+const findReadyDeclaredTracks = (trackIds: readonly string[]) => findPublicAudioTracks({
         ...readyPublicAudioFilter,
         _id: { $in: trackIds.map(toObjectId) }
     })
@@ -383,9 +382,7 @@ const findReadyDeclaredTracks = (trackIds: readonly string[]) => getDb()!
     .maxTimeMS(queryTimeoutMs)
     .toArray();
 
-const findReadyFallbackTracksForAlbum = (albumId: string, limit: number) => getDb()!
-    .collection('audioTracks')
-    .find({
+const findReadyFallbackTracksForAlbum = (albumId: string, limit: number) => findPublicAudioTracks({
         ...readyPublicAudioFilter,
         albumId: { $in: storedObjectIdValues(albumId) }
     })
@@ -407,7 +404,7 @@ const loadFallbackTrackIdsByAlbum = async (
             const tracks = await loader(albumId, maximumAlbumTracks);
             const trackIds = uniqueObjectIdStrings(
                 tracks
-                    .filter((track) => objectIdString(track?.albumId) === albumId)
+                    .filter((track) => isPublicCatalogVisibility(track) && objectIdString(track?.albumId) === albumId)
                     .map((track) => track?._id),
                 maximumAlbumTracks
             );
@@ -445,7 +442,7 @@ const loadReadyAlbumTrackIds = async (
     ]);
     const readyIds = new Set(declaredTracks.flatMap((track) => {
         const id = objectIdString(track?._id);
-        return id ? [id] : [];
+        return id && isPublicCatalogVisibility(track) ? [id] : [];
     }));
 
     return new Map(albums.map((album) => {
@@ -473,7 +470,7 @@ export const projectPublicAlbums = async (
     albums: any[],
     dependencies: PublicAlbumProjectionDependencies = {}
 ) => {
-    const readyAlbums = albums.filter(isReadyAlbumLifecycle);
+    const readyAlbums = albums.filter(item => isReadyAlbumLifecycle(item) && isPublicCatalogVisibility(item));
     const [trackIdsByAlbum, subjectNames] = await Promise.all([
         loadReadyAlbumTrackIds(readyAlbums, dependencies),
         loadCreditSubjectNames(readyAlbums)
@@ -497,7 +494,7 @@ export const projectPublicAudioTracks = async (tracks: any[]) => {
             ? getDb()!.collection('albums')
             .find({
                 _id: { $in: albumIds.map(toObjectId) },
-                ...readyAlbumLifecycleFilter
+                ...readyPublicAlbumFilter
             })
             .project({ _id: 1, coverArtId: 1, coverArtUrl: 1 })
             .maxTimeMS(queryTimeoutMs)
@@ -507,7 +504,7 @@ export const projectPublicAudioTracks = async (tracks: any[]) => {
             ? getDb()!.collection('artists')
                 .find({
                     _id: { $in: artistIds.map(toObjectId) },
-                    ...readyArtistLifecycleFilter
+                    ...readyPublicArtistFilter
                 })
                 .project({ _id: 1 })
                 .maxTimeMS(queryTimeoutMs)
@@ -536,7 +533,7 @@ export const projectPublicAudioTracks = async (tracks: any[]) => {
 
 export const listPublicArtists = async (limit: number, offset: number) => {
     const artists = await getDb()!.collection('artists')
-        .find(readyArtistLifecycleFilter)
+        .find(readyPublicArtistFilter)
         .project(artistProjection)
         .sort({ name: 1, _id: 1 })
         .skip(offset)
@@ -550,7 +547,7 @@ export const getPublicArtist = async (artistId: string) => {
     const id = objectIdString(artistId);
     if (!id) return null;
     const artist = await getDb()!.collection('artists')
-        .find({ _id: toObjectId(id), ...readyArtistLifecycleFilter })
+        .find({ _id: toObjectId(id), ...readyPublicArtistFilter })
         .project(artistProjection)
         .maxTimeMS(queryTimeoutMs)
         .next();
@@ -559,7 +556,7 @@ export const getPublicArtist = async (artistId: string) => {
 
 export const listPublicAlbums = async (limit: number, offset: number) => {
     const albums = await getDb()!.collection('albums')
-        .find(readyAlbumLifecycleFilter)
+        .find(readyPublicAlbumFilter)
         .project(albumProjection)
         .sort({ title: 1, _id: 1 })
         .skip(offset)
@@ -573,7 +570,7 @@ export const getPublicAlbum = async (albumId: string) => {
     const id = objectIdString(albumId);
     if (!id) return null;
     const album = await getDb()!.collection('albums')
-        .find({ _id: toObjectId(id), ...readyAlbumLifecycleFilter })
+        .find({ _id: toObjectId(id), ...readyPublicAlbumFilter })
         .project(albumProjection)
         .maxTimeMS(queryTimeoutMs)
         .next();
@@ -587,11 +584,11 @@ export const getPublicOrganization = async (organizationId: string) => {
     if (!id) return null;
     const organization = await getDb()!.collection('organizations').find({
         _id: toObjectId(id),
-        ...readyOrganizationLifecycleFilter
+        ...readyPublicOrganizationFilter
     }).project(organizationProjection).maxTimeMS(queryTimeoutMs).next();
     if (!organization) return null;
     const albums = await getDb()!.collection('albums').find({
-        ...readyAlbumLifecycleFilter,
+        ...readyPublicAlbumFilter,
         credits: { $elemMatch: { subjectType: 'organization', subjectId: id } }
     }).project(albumProjection).sort({
         'releaseDate.year': -1,
@@ -612,8 +609,7 @@ export const getPublicOrganization = async (organizationId: string) => {
 };
 
 export const listPublicAudioTracks = async (limit: number, offset: number) => {
-    const tracks = await getDb()!.collection('audioTracks')
-        .find(readyPublicAudioFilter)
+    const tracks = await findPublicAudioTracks(readyPublicAudioFilter)
         .project(audioTrackProjection)
         .sort({ title: 1, _id: 1 })
         .skip(offset)
@@ -626,23 +622,23 @@ export const listPublicAudioTracks = async (limit: number, offset: number) => {
 export const searchPublicCatalog = async (query: string, limit: number) => {
     const organizationSearch = catalogCreditRollout().organizationSurfacesEnabled
         ? getDb()!.collection('organizations').find({
-            $and: [catalogSearchFilter('name', query), readyOrganizationLifecycleFilter]
+            $and: [catalogSearchFilter('name', query), readyPublicOrganizationFilter]
         }).project(organizationProjection).sort({ name: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray()
         : Promise.resolve([]);
     const [artists, organizations, albums, tracks] = await Promise.all([
         getDb()!.collection('artists').find({
-            $and: [catalogSearchFilter('name', query), readyArtistLifecycleFilter]
+            $and: [catalogSearchFilter('name', query), readyPublicArtistFilter]
         })
             .project(artistProjection).sort({ name: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray(),
         organizationSearch,
         getDb()!.collection('albums').find({
-            $and: [catalogSearchFilter('title', query), readyAlbumLifecycleFilter]
+            $and: [catalogSearchFilter('title', query), readyPublicAlbumFilter]
         })
             .project(albumProjection).sort({ title: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray(),
-        getDb()!.collection('audioTracks').find({ $and: [readyPublicAudioFilter, catalogSearchFilter('title', query)] })
+        findPublicAudioTracks({ $and: [readyPublicAudioFilter, catalogSearchFilter('title', query)] })
             .project(audioTrackProjection).sort({ title: 1, _id: 1 })
             .limit(limit).maxTimeMS(queryTimeoutMs).toArray()
     ]);

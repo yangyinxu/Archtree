@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
-import { contentByline, type AudioTrackSummary, type ContentSummary } from '../api/contentSchemas';
+import { contentByline, type AudioTrackSummary, type ContentSummary, type FollowedArtistReason as Reason } from '../api/contentSchemas';
+import { FollowedArtistReason } from './FollowedArtistReason';
 import { Artwork } from './Artwork';
 import styles from './ContentListRow.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
@@ -13,10 +14,11 @@ export interface ContentListRowProps {
   onPlay?: (audioTrack: AudioTrackSummary) => void;
   trailing?: ReactNode;
   shareable?: boolean;
+  reason?: Reason;
 }
 
 /** Renders a canonical single-column row whose whole surface is the primary action. */
-export const ContentListRow = ({ item, onPlay, trailing, shareable = true }: ContentListRowProps) => {
+export const ContentListRow = ({ item, onPlay, trailing, shareable = true, reason }: ContentListRowProps) => {
   const { locale, t } = useLocalization();
   const title = item.contentType === 'artist'
     ? item.name.trim() || t('content.title.unknown_artist')
@@ -47,6 +49,7 @@ export const ContentListRow = ({ item, onPlay, trailing, shareable = true }: Con
 
   return (
     <li className={styles.row}>
+      <div className={styles.primary}>
       {item.contentType === 'audioTrack' ? (
         onPlay ? (
           <button
@@ -71,6 +74,8 @@ export const ContentListRow = ({ item, onPlay, trailing, shareable = true }: Con
           {body}
         </Link>
       )}
+      <FollowedArtistReason reason={reason} />
+      </div>
       {(trailing || shareable && item.contentType !== 'artist') && <span className={styles.trailing}>{trailing}
         {shareable && item.contentType === 'audioTrack' && item.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={item.id} title={title} />}
         {shareable && item.contentType !== 'artist' && <LazyShareMusicButton contentType={item.contentType} contentId={item.id} title={title} />}

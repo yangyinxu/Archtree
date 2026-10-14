@@ -4,6 +4,7 @@ import catalogRoutes from './content/catalogRoutes';
 import compositionRoutes from './content/compositionRoutes';
 import contentManagerRoutes from './content/contentManagerRoutes';
 import playlistRoutes from './content/playlistRoutes';
+import artistFollowRoutes from './content/artistFollowRoutes';
 import userLibraryRoutes from './content/userLibraryRoutes';
 import * as imageController from '../controllers/imageController';
 import {
@@ -16,6 +17,7 @@ const router: Router = express.Router();
 
 router.use('/manage', contentManagerRoutes);
 router.use(playlistRoutes);
+router.use(artistFollowRoutes);
 router.use(userLibraryRoutes);
 router.get(
     '/images/:imageId/v1/:width.webp',

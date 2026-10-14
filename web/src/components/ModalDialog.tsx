@@ -16,6 +16,7 @@ export interface ModalDialogProps {
   title: string;
   kicker?: string;
   description?: string;
+  headerContent?: ReactNode;
   initialFocusRef: RefObject<HTMLElement | null>;
   returnFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
@@ -29,6 +30,7 @@ export const ModalDialog = ({
   title,
   kicker,
   description,
+  headerContent,
   initialFocusRef,
   returnFocusRef,
   onClose,
@@ -134,6 +136,7 @@ export const ModalDialog = ({
           <div>
             {kicker && <p className={styles.kicker}>{kicker}</p>}
             <h2 id={titleId}>{title}</h2>
+            {headerContent}
             {description && <p className={styles.description} id={descriptionId}>{description}</p>}
           </div>
         </div>

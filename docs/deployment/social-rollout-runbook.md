@@ -93,12 +93,14 @@ The 2026-10-11 console and CloudShell reads confirmed `AWS_REGION=us-east-1`,
 `AUTH_LINK_ORIGIN=https://kashewt.com`. SES reports `SendingEnabled: true`,
 `ProductionAccessEnabled: false`, and successful domain verification and DKIM
 for `kashewt.com`. Account-level suppression covers `BOUNCE` and `COMPLAINT`;
-the account's production-access `Details` object is empty. `AUTH_CODE_PEPPER`
-is absent from the environment properties;
-the application currently supports its `JWT_SECRET` fallback. The remaining
-configuration and acceptance sequence follows the completed permission work:
+the account's production-access `Details` object was empty. `AUTH_CODE_PEPPER`
+was absent from the environment properties at that check, so the application
+used its supported `JWT_SECRET` fallback. The remaining
+configuration and acceptance sequence includes the later approved recipient
+permission repair and T1 acceptance; the remaining email-flow checks stay open:
 
-1. Complete: the production runtime identity is confirmed as `ArchtreeAdmin`.
+1. Domain-policy setup complete: the production runtime identity is confirmed
+   as `ArchtreeAdmin`.
    Its inline `ArchtreeSesSendAuthEmail` policy was narrowed and read back as
    `ses:SendEmail` on
    `arn:aws:ses:us-east-1:<production-account-id>:identity/kashewt.com`, conditioned
@@ -107,30 +109,47 @@ configuration and acceptance sequence follows the completed permission work:
    Simulation returns `allowed` for the approved sender and domain, and
    `implicitDeny` for another sender, `ses:SendRawEmail` and another identity.
    The raw-email action and wildcard identity scope have been removed.
-2. Generate and configure a dedicated `AUTH_CODE_PEPPER` through the approved
-   secret-management path; never put its value in this document or command logs.
-   Changing from the fallback key invalidates outstanding reset codes and emailed
-   links, so make the change in the deployment window and request new links for
-   verification afterward. Do not rotate `JWT_SECRET` for this purpose.
+   Two later SDK transport probes returned `AccessDenied` for the exact approved
+   sandbox-recipient SES identity. The operator subsequently approved adding
+   only that identity, retaining `ses:SendEmail` and the exact From-address
+   condition. All five simulations passed again, the update returned HTTP 200,
+   and strict readback matched the approved policy. Independent transport and
+   application T1 emails were then received; see the
+   [evening completion record](#email-permission-and-t1-completion--2026-10-12).
+2. Complete on 2026-10-12: the operator configured a dedicated `AUTH_CODE_PEPPER`
+   in CloudShell, and boolean-only environment readback confirmed it is present
+   after the update completed. No value is retained here. Changing from the
+   fallback key invalidates outstanding reset codes and emailed links; request
+   new links for verification afterward. Future rotations must use the approved
+   secret-management path without logging values. Do not rotate `JWT_SECRET`
+   for this purpose.
 3. While SES remains in its regional sandbox, use only an explicitly authorized,
    verified test recipient (or the SES mailbox simulator). Verify each exact
    recipient address before sending; do not assume a plus-address variant inherits
-   another address's verification. The approved base test recipient is verified,
-   but the exact registration-test alias had no SES identity. Its verification
-   was requested and the AWS verification email was received; final identity
-   confirmation awaits operator approval. The console production-access form is
-   prepared with `TRANSACTIONAL`, `https://kashewt.com` and English, with optional
-   contacts blank. Its terms acknowledgement remains unchecked and the form has
-   not been submitted. Submission requires operator approval at that step;
-   production access and AWS approval remain pending. The
+   another address's verification. The 2026-10-11 recipient-verification attempt
+   is recorded below as historical evidence. Current testing uses the operator's
+   dedicated test mailbox; its exact SES identity was verified later on
+   2026-10-12, with `VerifiedForSendingStatus: true`. Keep the address outside the
+   repository and preserve the operator's primary signed-in session. The operator
+   has explicitly chosen to retain the SES sandbox and defer the production-access
+   request. Earlier console form preparation used `TRANSACTIONAL`,
+   `https://kashewt.com` and English, with optional contacts blank; it did not
+   submit a request or accept its terms. The unsubmitted form was subsequently
+   cancelled, returning to the Get set up page with its sandbox heading and no
+   open terms or submission form. No submission is currently authorized.
+   The
    [SES production-access procedure](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html)
    defines the regional sandbox restriction; a successful sandbox test does not
    make ordinary listener email delivery available.
 4. After configuration and permission verification, verify receipt of registration,
    already-registered and verification messages through the application and open
-   their links on the production origin. Retain only a timestamp, message type,
-   delivery result and link-origin result; never retain recipient addresses,
-   one-time links, tokens or private account content in the repository. Require
+   their links on the production origin. T1 receipt, account creation/login and
+   rejection of its consumed link within 30 minutes are verified. T2 receipt and
+   its token-free production destinations, plus six-digit reset-code receipt,
+   are also verified; T3/legacy verification and actual password-reset completion
+   remain open. Retain only a timestamp, message type, delivery result and
+   link-origin result; never retain recipient addresses, one-time links, tokens
+   or private account content in the repository. Require
    `ProductionAccessEnabled: true` before declaring public email delivery ready.
 
 The authorized production `POST /auth/browser/registration/request` test on
@@ -141,10 +160,28 @@ the approved test recipient found zero application emails. The last-hour log
 query found zero registration failure events, but log streaming began after the
 request, so that result does not establish SES acceptance. The separately
 requested AWS SES recipient-verification email was visibly received at 15:02 UTC;
-this confirms receipt of that AWS message only. Final SES identity confirmation
-awaits operator approval. Repeat the application test after the exact recipient
-is verified, then inspect the application email and its link. The delivery gate
-remains open; no recipient address, verification URL or token is retained here.
+this confirms receipt of that AWS message only. At that point, final SES identity
+confirmation awaited operator approval, and the application test still needed
+to be repeated after verification, including email receipt and link inspection.
+The delivery gate remained open; no recipient address, verification URL or token
+is retained here.
+
+The initial 2026-10-12 read-only check reconfirmed the verified domain and DKIM,
+`ProductionAccessEnabled: false`, and no configured `AUTH_CODE_PEPPER`.
+Application email receipt and link use were unverified at that check. The current
+dedicated test mailbox is separate from the historical recipient attempt above;
+that AWS verification message supplies no evidence for delivery to the current
+test mailbox.
+
+The later [completion update](#configuration-and-notification-completion--2026-10-12)
+records the dedicated pepper and exact test-recipient verification. SES production
+access remains disabled by operator decision, and the unsubmitted request is
+intentionally deferred. Public email readiness remains unmet. The
+subsequent [diagnostic record](#email-diagnostics-and-catalog-inventory--2026-10-12)
+preserves the earlier application failure and independent transport denials.
+The later [evening completion record](#email-permission-and-t1-completion--2026-10-12)
+records the approved permission repair, T1 creation/replay, T2 and reset-code
+receipt, with the remaining email-flow limits kept explicit.
 
 ## Signals
 
@@ -214,14 +251,22 @@ filters can read these fields (see the transformer below).
 
 ### CloudWatch metric filters and alarms
 
-Application status: In progress. The 2026-10-11 logging update completed with the
+Application status: Log ingestion, alarms and operator test-notification delivery
+are complete. The 2026-10-11 logging update completed with the
 environment `Ready/Green/Ok` and its application version unchanged. Seven log
 groups have seven-day retention and stdout receives real `ops_summary` events.
 The stdout transformer, eight transformed-log metric filters, eight alarms and
 `archtree-operations` SNS topic are created. Each metric has six real 60-second
 datapoints in the latest 15-minute readback, and all eight alarms are `OK` with
-actions enabled and the topic configured. The topic has no subscription, so
-operator notification delivery remains unverified.
+actions enabled and the topic configured. The topic had no subscription, so
+operator notification delivery remained unverified at that baseline check.
+
+The initial 2026-10-12 readback again found all eight alarms `OK`, with actions
+enabled, and zero confirmed or pending operations-topic subscriptions. This refreshes
+the baseline alarm evidence. The later
+[completion update](#configuration-and-notification-completion--2026-10-12)
+records the single approved confirmed subscription and verified test-notification
+receipt, closing that gate without changing the earlier observations.
 
 Stream the application log to CloudWatch Logs first (console: **Configuration →
 Updates, monitoring, and logging → Instance log streaming**, or option
@@ -251,8 +296,8 @@ Enable streaming and the transformer before creating log metric filters, and
 confirm a real `ops_summary` event reaches the stdout group. Transformations and
 metric filters apply at ingestion; they do not reconstruct historical events.
 Confirm the SNS subscription and a test notification before
-treating a configured alarm as operator-visible. Subscription confirmation and
-this notification check remain pending; creating a topic alone closes neither.
+treating a configured alarm as operator-visible. Both checks completed for the
+current subscription on 2026-10-12; repeat them whenever its destination changes.
 
 The original `{ $.category = "ops_summary" }` filter matched no production
 events because the raw message contains the platform prefix. `TestTransformer`
@@ -335,13 +380,20 @@ On the Atlas side, watch the cluster's operation counters, connections and
    (`/health` is 200) and the room audio decoder and catalog backfill checks from
    the Finitude Web runbook have passed, so eligible Audio exists.
 3. Prepare two dedicated test accounts that you control. Never use a real
-   listener's account or data for smoke tests.
+   listener's account or data for smoke tests. Keep their browser contexts
+   separate from the operator's primary session, which must remain signed in.
+   The tested Gmail plus-address variant resolved to the same application
+   account. A distinct QA account has since completed registration and login in
+   the in-app browser; the original Chrome account was recovered through the
+   normal Finitude session refresh. Use those separate contexts for the smoke
+   test; aliases alone are not evidence of separate participants.
 4. Optionally rehearse locally with `npm run build` and `npm run demo:social`,
    which uses its own MongoDB and fixtures.
-5. **Prerequisite for `FINITUDE_ROOMS_ENABLED=true`:** the cross-engine audio
-   repair candidate must pass the complete blocking release gate on consecutive
-   pull-request and merged-main runs (next section). Until then, enable at most
-   `FINITUDE_SOCIAL_ENABLED` (social without rooms).
+5. **CI prerequisite for `FINITUDE_ROOMS_ENABLED=true`:** the complete blocking
+   release gate must pass on consecutive pull-request and merged-main runs.
+   This prerequisite is complete for the current release (next section).
+   Keep rooms disabled until the remaining production prerequisites and
+   controlled rollout checks are ready.
 
 ### Cross-engine audio acceptance (blocks enabling rooms)
 
@@ -383,23 +435,29 @@ blocks artifact staging and the `social` provenance outcome. To reproduce just
 the compressed-audio pair on Linux with an isolated audio sink:
 `CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=firefox-audio-formats --project=webkit-audio-formats`.
 
-These are candidate repairs and gate configuration changes, not a completed
-Linux verification. The historical runs below tested earlier code and cannot
-supply acceptance for this candidate.
+The [2026-10-12 release evidence](../testing/finitude-web-release-matrix.md#verified-release-status--checked-2026-10-12)
+records consecutive successful pull-request and merged-main runs of the complete
+blocking gate. It closes Linux cross-engine acceptance for the current release.
+The 2026-10-11 evidence table below remains historical and does not describe the
+latest CI or deployed version.
 
 Before rooms are enabled in production:
 
-1. Run the complete blocking Linux gate with the repair candidate; diagnose any
-   remaining failures without widening tolerances or adding retries to hide drift.
-2. Record new consecutive passing pull-request and merged-main runs of that gate,
-   with both projects and the exact candidate/build identity in the evidence record.
-3. Keep production rooms disabled until those CI passes are recorded. Then use
-   the controlled test window below for deployment smoke, observation and
-   kill-switch checks before leaving the feature enabled for public use.
+1. For each new release candidate, preserve the complete blocking Linux gate;
+   diagnose failures without widening tolerances or adding retries to hide drift.
+2. Retain consecutive passing pull-request and merged-main runs with both audio
+   projects and the exact candidate/build identity. The linked current release
+   record contains this evidence.
+3. Keep production rooms disabled while email delivery, distinct test-account
+   and audio-catalog preparation remain incomplete. Use the controlled test
+   window below for deployment smoke, observation and kill-switch checks before
+   leaving the feature enabled for public use.
 
 ## 2. Enable for testing
 
-1. Pick a quiet window and record the start time, owner and stop conditions.
+1. Obtain separate operator approval for the controlled Rooms window; it remains
+   pending, and the decision to retain the SES sandbox does not authorize it.
+   Pick a quiet window and record the start time, owner and stop conditions.
    Confirm the repaired cross-engine audio projects have passed the blocking
    acceptance gate (section 1, step 5); otherwise do not set `FINITUDE_ROOMS_ENABLED`.
 2. Set `FINITUDE_SOCIAL_ENABLED=true` and `FINITUDE_ROOMS_ENABLED=true` in one
@@ -491,14 +549,15 @@ rooms back on.
 
 ### Deployment verification — 2026-10-11
 
-The following observations refresh the release record without closing the
-enablement, monitoring or rollback gates. These CI runs predate the repair
-candidate and restored complete gate described above:
+This historical record preserves what was observed on 2026-10-11 without
+closing the enablement, monitoring or rollback gates. Its CI runs predate the
+repaired complete gate; the current CI evidence is linked above and the later
+production check follows this table.
 
 | Check | Observed evidence and limit |
 | --- | --- |
-| Latest main workflow | [Run 37220116476](https://github.com/yangyinxu/Archtree/actions/runs/37220116476), created 2026-10-04 17:20:11 UTC, commit `b7c44fdad3aa84d05ba12637beeefd75c7737108`, succeeded. Its blocking social selection passed 15 tests. The non-blocking selection failed Firefox's seek-generation check (expected 5, received 4); WebKit passed. Overall success does not close quarantine. |
-| Latest pull-request workflow | [Run 37219198449](https://github.com/yangyinxu/Archtree/actions/runs/37219198449), created 2026-10-04 17:05:34 UTC, head `9630720508e22600c220d3a76d479ec28c82406d`, succeeded, including both quarantined tests. The subsequent main failure prevents treating this as stable cross-engine acceptance. |
+| Main workflow observed then | [Run 37220116476](https://github.com/yangyinxu/Archtree/actions/runs/37220116476), created 2026-10-04 17:20:11 UTC, commit `b7c44fdad3aa84d05ba12637beeefd75c7737108`, succeeded. Its blocking social selection passed 15 tests. The non-blocking selection failed Firefox's seek-generation check (expected 5, received 4); WebKit passed. Overall success did not close quarantine. |
+| Pull-request workflow observed then | [Run 37219198449](https://github.com/yangyinxu/Archtree/actions/runs/37219198449), created 2026-10-04 17:05:34 UTC, head `9630720508e22600c220d3a76d479ec28c82406d`, succeeded, including both quarantined tests. The subsequent main failure prevented treating this as stable cross-engine acceptance. |
 | Public Web deployment | `/finitude` HTML and its four directly referenced JS/CSS assets matched the retained main artifact byte for byte. The artifact's `RELEASE.json` records the main commit above and build `github-37220116476-1`. The backend's on-instance `RELEASE.json` has not been independently read. |
 | Production environment | A later signed-in console inspection confirmed `Archtree-2024-env` (`e-qeb3ekat4i`) in `us-east-1`, Health `Ok`, running version `code-pipeline-1791171387027-ArchtreeBuildArtifacts-745b4485-c6dd-468b-b4ec-bb5b5e6bb624`, Node.js 24 on Amazon Linux 2023 platform `6.11.9`, one ARM64 `t4g.micro`, and enhanced health reporting. |
 | Public runtime | `/health` returned 200 with `rooms.enabled: false`, `authorityState: "inactive"`, zero sockets and zero room failure counters. `/api/listener/v1/capabilities` reported both social and rooms disabled. `/health` exposes no release identity. These snapshots do not prove startup logs, backfill, monitoring or a kill-switch rehearsal. |
@@ -512,6 +571,76 @@ candidate and restored complete gate described above:
 
 The initial infrastructure inspection was read-only; the dated logging,
 transformation, metric, alarm and topic steps above record the authorized changes.
-Production rollout flags remain disabled. Complete the remaining delivery and monitoring
-checks with the authorized management identity and operator-owned test accounts;
-an accepted update does not establish successful runtime or notification delivery.
+Production rollout flags were disabled at that inspection. Complete the remaining
+delivery and monitoring checks with the authorized management identity and
+operator-owned test accounts; an accepted update does not establish successful
+runtime or notification delivery.
+
+### Production verification — 2026-10-12
+
+This read-only CloudShell and public-endpoint check refreshes the production
+evidence. It neither changes the historical record above nor closes email,
+notification, audio-catalog or playing-room acceptance. Current CI and served
+Web-byte identities remain in the
+[release record](finitude-web-rollout-runbook.md#verified-release-and-served-web-bytes--checked-2026-10-12).
+
+| Check | Observed evidence and limit |
+| --- | --- |
+| Environment and registered source bundle | `Archtree-2024-env` (`e-qeb3ekat4i`) is `Ready/Green/Ok`, running version `code-pipeline-1791749817909-ArchtreeBuildArtifacts-b9ef073e-49dc-4b87-b05a-cc178f823cce`. That application's registered SourceBundle contains `RELEASE.json` with `commitSha=2c1cf6e37e9ea95bf13b8218a153f3e3aa5b45cc` and `buildId=github-38170519764-1`. This binds the registered version to its source bundle; it is not a direct read of the running instance's file. |
+| Public health and transport | HTTPS `/health` returned 200 with `rooms.enabled: false`; HTTP returned 308. One WebSocket upgrade probe with a synthetic ticket and foreign Origin returned `503 0`. The disabled-room handler was reached through Nginx; no real ticket, authenticated connection or enabled-room Origin behavior was exercised. |
+| Current-deployment startup | Complete pagination of the 2026-10-11 19:45–20:30 UTC startup window found one `server_listening` event, one room wind-down completion and zero `optional_index_unavailable` events. These are startup observations, not a kill-switch test with a playing room. |
+| Decoder deployment hook | The same fully paginated window contained one pinned-installation message and one decoder-ready message. The hook checks the saved archive-digest marker, runs the actual FFmpeg/ffprobe version checks, and requires AAC/MP3 decoders, MOV/MP3 demuxers, PCM s16le, file/pipe input and the null muxer, including a final capability check through `/usr/local/bin/ffmpeg`. It does not recalculate the installed binary's digest. This is deployment-hook evidence; no independent SSH/SSM FFmpeg command or production media analysis was performed. |
+| Authentication email | SES domain and DKIM remain verified, production access remains disabled (sandbox), and `AUTH_CODE_PEPPER` is absent. Application email receipt and link use remain pending. Use the operator's dedicated test mailbox and retain no private address or one-time link in this record. |
+| Alarms and notifications | All eight alarms are `OK` with actions enabled. The operations topic has zero confirmed subscriptions and zero pending subscriptions. Notification subscription, confirmation and actual receipt remain pending. |
+| Remaining controlled acceptance | Dedicated pepper configuration, SES production access and application email/link acceptance, operator notification receipt, production audio analysis/backfill, two-account Rooms smoke and observation, playing-room redeployment recovery and the kill-switch rehearsal remain open. Preserve the operator's primary signed-in session throughout test-account work. |
+
+### Configuration and notification completion — 2026-10-12
+
+These historical authorized changes follow the read-only baseline above. The
+remaining-acceptance row records the state at that stage, before the later
+completion and sandbox-retention decision below. No secret, private email address,
+verification URL or account payload is retained here.
+
+| Check | Completion evidence and limit |
+| --- | --- |
+| Dedicated pepper | The operator personally executed the CloudShell configuration command. The initial result was `updateAccepted: true` with the environment `Updating`; subsequent environment readback was `Ready/Green/Info`, and a boolean-only option check returned `dedicatedPepperConfigured: true`. The update is complete; no pepper value was printed or recorded in this evidence. Previously issued reset codes and emailed links must be requested again. |
+| Post-update runtime | HTTPS `/health` reported `status: "ok"`, `rooms.enabled: false` and `authorityState: "inactive"`. This verifies recovery from the configuration update with rooms off; it does not replace a playing-room redeployment rehearsal. |
+| Dedicated SES test recipient | The exact dedicated mailbox's AWS verification page reported success, and `GetEmailIdentity` returned `VerifiedForSendingStatus: true`. This permits the authorized sandbox application test but does not prove an application email was delivered. |
+| Operator notification subscription | The operator explicitly approved an ongoing email subscription and test notification. Subscription creation and confirmation succeeded; fully paginated `ListSubscriptionsByTopic` readback confirmed exactly one approved email subscription. No endpoint is retained here. |
+| Notification receipt | A clearly marked `TEST ONLY` SNS publication returned HTTP 200. The dedicated test inbox received `Archtree P0 test notification`, with timestamp `2026-10-12T22:32:34.112763+00:00`; both subject and body were verified. This closes subscription and test-receipt acceptance for the operations topic. |
+| Account isolation | The primary Gmail and existing Finitude sessions remained signed in. A tested Gmail plus-address variant resolved to the same application account; second-account preparation and the two-account Rooms smoke therefore remain incomplete. |
+| Remaining acceptance | `ProductionAccessEnabled: false`; the production-access request remains unsubmitted pending the operator's approval of its terms. Application registration and other authentication email receipt/link checks, production audio analysis/backfill, distinct two-account Rooms observation, playing-room redeployment and kill-switch rehearsal remain open. |
+
+### Email diagnostics and catalog inventory — 2026-10-12
+
+These historical checks preserve the earlier baseline and completion records. They
+close only identification of existing pending audio-backfill candidates; they
+do not close authentication delivery, fresh media decoding or playing-room
+acceptance. No private recipient, token or account payload is retained here.
+
+| Check | Observed evidence and limit |
+| --- | --- |
+| Application registration | The generic 202/check-email response was followed by a failure. Complete pagination of the 22:32–22:36:59 UTC stdout window found one `email_registration_request_failed` at `2026-10-12T22:34:16.393Z`; the other three authentication failure categories and the suppression/undeliverable categories were zero. The event records no error class, and the dedicated inbox contained no application message. This establishes a failed request, not a delivery delay; the event alone cannot distinguish account lookup, token preparation or SES failure. |
+| Production credential principal | CloudShell read the configured standard AWS access-key identifier only into memory and used IAM `GetAccessKeyLastUsed` to compare its `UserName`. Boolean-only output confirmed `productionAuthPrincipalChecked: true`, `matchesReviewedUser: true`, `explicitCredentialPairPresent: true`, `sessionTokenAbsent: true` and `profileAbsent: true`. The configured production credentials belong to `ArchtreeAdmin`, matching the independent SDK probe and proposed-policy user. No key or configuration value was printed. This does not establish whether the running process retains cached credentials or replace a new application send and inbox receipt check. |
+| Independent SES transport | Two controlled SDK transport probes returned `AccessDenied`. Safe classification identified the exact approved test-recipient SES identity as the denied resource. At this check, the `ArchtreeAdmin` policy had only the sender-domain resource, `ses:SendEmail` and the exact From-address condition. A proposal adding only that approved recipient identity passed five simulation cases, but user approval and the permission update were pending. No successful SES acceptance or application receipt had been established. |
+| Existing Audio inventory | The ordinary administrator Room audio analysis UI was read through all four pages: 94 ready/published Audio sources, comprising 72 `eligible`, 22 `unsupported`, and zero `notAnalyzed`, `retryable`, `running` or `unavailable`; no next page remained. The UI and CLI dry run share `listRoomAudioAnalysis`. Thus no pending source requires backfill apply in this inventory. No CLI, S3 HEAD/GET or Analyze action ran, so this is a complete status inventory, not evidence that all media was decoded again. |
+| Remaining acceptance | Resolve and verify the approved-recipient permission, then verify application email receipt and usable links; SES production access still requires its separately approved request and AWS approval. Fresh-media production decode, distinct two-account Rooms smoke and observation, playing-room redeployment and kill-switch rehearsal remain open. The operator has approved three synthetic audio uploads, but no upload or decoder outcome is recorded yet. |
+
+### Email permission and T1 completion — 2026-10-12
+
+This later operator-approved repair and retest supersede the unresolved email
+permission status above while preserving those earlier failures. Only the
+specific completed gates below are closed.
+
+| Check | Completion evidence and limit |
+| --- | --- |
+| Approved permission repair | The operator authorized the prepared exact-recipient update. The guarded apply repeated all five simulation cases successfully, `put_user_policy` returned HTTP 200, and strict readback matched the approved policy (`approvedPolicyApplied: true`). The addition is limited to the approved test-recipient SES identity; no private address or policy resource containing that address is retained here. |
+| Independent transport receipt | The SDK probe returned `apiSuccess: true`. The dedicated inbox received and opened `TEST ONLY - Archtree SES transport diagnostic` from `no-reply@kashewt.com`; its fixed test body contains no authentication token or account data. This verifies that transport test only. |
+| Application T1 creation and single use | `Finish creating your Finitude account` arrived at 22:54 UTC. The actual link was checked only in memory against `https://kashewt.com/finitude/register/complete`, with its token in the fragment, and initial inspection opened the setup form. The operator completed registration and login; Account showed email verified. Replay of the consumed T1 link within its 30-minute lifetime was invalid. No private address, credentials or token is retained here. |
+| T2 and reset-code receipt | The already-registered notice was received with correct, token-free production login and password-reset links. A password-reset email containing a six-digit code was also received. No password reset was performed, so reset completion and session-revocation acceptance remain open; no code is retained here. |
+| Post-repair logs | The fully paginated 22:52–22:56:36.551 UTC CloudWatch window reported `complete: true` and zero events for all six allowlisted authentication error, suppression and undeliverable categories. This complements the observed T1 receipt; it does not prove untested email flows. |
+| New-media and canonical transport | The first synthetic MP3 create attempt had redirected to login without a confirmed outcome. The original Chrome session then recovered through Finitude's normal refresh, and all three authorized synthetic QA tracks were created and publicly ready. The final fourth analysis page showed all three as Ready for rooms. Each canonical source passed HEAD plus two ranges compared with its original bytes. The M4A probe initially failed its strict MIME check; that result is retained, and an explicit supplemental check for the actual stored `audio/x-m4a` type passed. These results close fresh-media eligibility and transport for these three fixtures, not browser room playback. |
+| Ordinary Web playback | With both rollout flags off, the isolated QA account played each of the three approved tracks once through its Search action and single-track queue. Each had exactly one DOM media element with the correct query-free canonical source, 120-second duration, no media error, `readyState: 4`, and advancing time while playing. After Pause, Home plus five Page Up keys sought to 60 seconds while remaining paused with a stable clock; explicit Play resumed time advancement. The VBR source briefly reached `readyState: 1` during seek and recovered to `4` before explicit resume. Next was disabled as expected for a single-track queue, so queue Next was not tested. The QA player finished paused. This closes only these ordinary playback checks, not full Listener, pinned-player, Rooms/synchronization, physical-device or audible-output acceptance. |
+| Read-only storage audit | At 23:30:45 UTC, the normal Operations link opened `/admin/audio-storage/reconciliation`. The complete Audio report showed 104 track records, 98 current S3 objects, zero orphans, six historical missing-file records and zero incomplete audio lifecycles; none of the three known QA IDs appeared in issue findings. The separate Video finding is one legacy active/ready lifecycle with its S3 object present, not a new QA issue or a missing/failed operation. No remediation or deletion was invoked, and all six historical records remain; metadata cannot reconstruct their absent media. The service uses `ListObjectsV2` for current keys and `HeadObject` only for orphan metadata, not `ListObjectVersions`. This does not verify QA replacement/deletion or noncurrent-version cleanup. |
+| Current controlled-test boundary | The original Chrome account and the distinct registered, verified in-app-browser QA account are signed in separately. The guarded environment inspection is `Ready/Green` on the original version, with its registered source bundle available; both rollout flags are unset and therefore false, and no rehearsal version exists. No Rooms enablement or rehearsal has run. Separate approval for the controlled window remains pending; the SES sandbox decision does not authorize it. |
+| Remaining acceptance | T3/legacy verification and password-reset completion/session revocation remain open. The operator has chosen to retain the SES sandbox and intentionally defer its production-access request; the unsubmitted form was cancelled and the console returned to sandbox setup. Exact verified-recipient test evidence remains valid, but ordinary-listener email delivery is not ready. Controlled two-account Rooms smoke and observation, playing-room same-bundle redeployment/restoration and the kill-switch rehearsal remain open. |

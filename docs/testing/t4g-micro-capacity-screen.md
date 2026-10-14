@@ -297,14 +297,16 @@ more expensive. Run it with `npm run test:integration`.
 | --- | ---: | --- | ---: |
 | Sweep with no open room | 1 | 250 ms | 4 |
 | Lease renewal | 2 | 3 s | 0.7 |
-| Each open room in a sweep, M members | 2M + 5, +1 while playing | 250 ms | 8M + 20, +4 |
+| Each open room in a sweep, M members | 2M + 6 | 250 ms | 8M + 24 |
 | Socket refresh outside a room | 5 | 5 s | 1 |
-| Socket refresh for a room member | 8 | 5 s | 1.6 |
+| Socket refresh for a room member | 9 | 5 s | 1.8 |
 | Controller heartbeat, M-member room | M + 6 | 5 s | (M + 6) / 5 |
 
 A playing room with M active members therefore costs about
-4(2M + 6) + M(M + 6)/5 + 1.6M operations per second: 46 for two members, 58 for
-three, 70 for four and 123 for eight. A paused room costs four fewer. Each visible
+4(2M + 6) + M(M + 6)/5 + 1.8M operations per second: 47 for two members, 59 for
+three, 71 for four and 125 for eight. A paused room has the same visibility-read
+cost: the whole queue is checked through one bounded batch in either state.
+Each visible
 social tab also polls invitations every 15 seconds and capabilities every 30
 seconds, about 0.5 operations per second by inspection of those routes, whether or
 not it holds a socket. A tab refused a socket waits for the server's 30-second
@@ -317,19 +319,22 @@ once the general seats are full.
 ### Shipped limits
 
 `.ebextensions/social-capacity.config` sets one open room, two members and ten
-realtime sockets. The worst case is 4.7 (sweep and lease) + 46 (a playing
+realtime sockets. The worst case is 4.7 (sweep and lease) + 47 (a playing
 two-member room) + 8 (eight sockets outside the room) + about 5 (ten visible tabs
-polling), or about 64 operations per second. That leaves about 36 for everything
-else. Three members (about 75) or a second two-member room (about 110) would use
+polling), or about 65 operations per second. That leaves about 35 for everything
+else. Three members (about 76) or a second two-member room would use
 the reserve on the free tier. The two room members keep reserved seats: accounts
 outside a room may use only eight of the ten sockets, at most two per account.
 
-The sweep reads the whole room document four times a second. A two-member room
+The sweep reads the whole room document four times a second. The additional
+batched visibility/representation reads vary with queue size and metadata;
+the following room-document numbers are a lower bound, not total egress.
+A two-member room
 with ten queued songs is about 5.5 KB of BSON, so sweeps alone transfer about
 80 MB per open-room hour, and about 100–125 MB with refreshes and heartbeats. A
 full 100-entry queue is about 43 KB, or about 620 MB per hour from sweeps. The
-free tier's 10 GB weekly egress therefore covers roughly 80 hours of small open
-rooms, or about 15 with full queues, before any catalog traffic. Watch Atlas
+free tier's 10 GB weekly egress therefore permits at most roughly 80 hours of small open
+rooms, or about 15 with full queues, before those access reads or catalog traffic. Watch Atlas
 **Network Out** alongside its operation counters.
 
 Raise the limits only after measuring Atlas operation counters together with the
