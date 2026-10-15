@@ -171,6 +171,19 @@ test('rejects an artifact without the HTTPS recovery hook', async (t) => {
   await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
 });
 
+test('rejects an artifact without either OOTD co-host hook', async (t) => {
+  for (const hook of [
+    '.platform/hooks/postdeploy/03_cohost_ootd.sh',
+    '.platform/confighooks/postdeploy/03_cohost_ootd.sh'
+  ]) {
+    const sourceRoot = await createSourceFixture();
+    t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+    await rm(path.join(sourceRoot, hook));
+
+    await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
+  }
+});
+
 test('rejects an artifact without the port 443 security-group contract', async (t) => {
   const sourceRoot = await createSourceFixture();
   t.after(() => rm(sourceRoot, { recursive: true, force: true }));
