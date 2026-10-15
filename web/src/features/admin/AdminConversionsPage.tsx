@@ -125,7 +125,7 @@ function Conversions() {
         })}>{t('conversion.capture')}</button>
         <details className={styles.details}><summary>{t('conversion.count', { count: source.data.tracks.length })}</summary><ul className={styles.files}>{source.data.tracks.map(track => <li key={track.id}>{track.title || track.originalFileName || t('common.untitled')}</li>)}</ul></details></>}
     </section>}
-    <form className={styles.panel} onSubmit={event => { event.preventDefault(); void work(async () => {
+    <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!supported || !access.conversion) return; void work(async () => {
       await conversionStore.createLocal(access.viewerId, files, rootLabel.trim()); setFiles([]);
     }); }}>
       <h2>{t('conversion.select')}</h2>
@@ -136,7 +136,7 @@ function Conversions() {
       {invalid && <p role="alert">{t('conversion.invalid')}</p>}
       {files.length > 0 && <><label className={styles.field}>{t('conversion.root')}<input className={styles.input} required disabled={busy || Boolean(activeBatch)} maxLength={200} value={rootLabel} onChange={event => setRootLabel(event.target.value)} /></label>
         <p className={styles.meta}>{t('conversion.root_help')}</p>
-        <button className={`${styles.button} ${styles.primary}`} type="submit" disabled={busy || Boolean(activeBatch) || !rootLabel.trim() || !access.conversion}>{t('conversion.capture')}</button>
+        <button className={`${styles.button} ${styles.primary}`} type="submit" disabled={busy || Boolean(activeBatch) || !supported || !rootLabel.trim() || !access.conversion}>{t('conversion.capture')}</button>
         <details className={styles.details}><summary>{t('conversion.count', { count: files.length })}</summary><ul className={styles.files}>{files.map(file => <li key={file.webkitRelativePath || file.name}>{file.webkitRelativePath || file.name}</li>)}</ul></details></>}
     </form>
     <h2>{t('conversion.device')}</h2>

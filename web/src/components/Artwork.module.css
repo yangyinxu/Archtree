@@ -7,7 +7,7 @@
   box-shadow: var(--shadow-artwork);
   color: var(--color-text-subtle);
   display: flex;
-  flex: 0 0 auto;
+  flex: none;
   justify-content: center;
   overflow: hidden;
   width: 100%;
@@ -18,7 +18,8 @@
 }
 
 .artwork img {
-  height: 100%;
+  /* Derive height from width; WebKit can include the frame border in a percentage height. */
+  aspect-ratio: 1;
   object-fit: cover;
   width: 100%;
 }

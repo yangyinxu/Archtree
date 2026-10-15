@@ -7,9 +7,9 @@ import { AdminConversionsPage } from './AdminConversionsPage';
 import { session, viewer } from './adminFixtures.testSupport';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), createLocal: vi.fn(), run: vi.fn(), upload: vi.fn(), stop: vi.fn(),
-  source: vi.fn(), listener: null as null | (() => void) }));
+  source: vi.fn(), storageSupported: vi.fn(() => true), listener: null as null | (() => void) }));
 vi.mock('./conversionApi', () => ({ conversionApi: { source: mocks.source } }));
-vi.mock('./conversionStore', () => ({ conversionStore: { storageSupported: () => true, list: mocks.list, createLocal: mocks.createLocal,
+vi.mock('./conversionStore', () => ({ conversionStore: { storageSupported: mocks.storageSupported, list: mocks.list, createLocal: mocks.createLocal,
   subscribe: (fn: () => void) => { mocks.listener = fn; return () => { mocks.listener = null; }; }, getOutputFile: vi.fn() } }));
 vi.mock('./conversionRunner', () => ({ conversionRunner: { run: mocks.run, upload: mocks.upload, stop: mocks.stop, getActiveBatch: () => null, subscribe: () => () => undefined } }));
 function mount(path = '/admin/conversions') {
@@ -17,7 +17,7 @@ function mount(path = '/admin/conversions') {
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><AdminConversionsPage /></MemoryRouter></QueryClientProvider>);
 }
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.list.mockResolvedValue([]); mocks.createLocal.mockResolvedValue({}); mocks.run.mockResolvedValue(undefined); mocks.upload.mockResolvedValue(undefined);
+  vi.clearAllMocks(); mocks.storageSupported.mockReturnValue(true); mocks.list.mockResolvedValue([]); mocks.createLocal.mockResolvedValue({}); mocks.run.mockResolvedValue(undefined); mocks.upload.mockResolvedValue(undefined);
   adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, undefined, true); adminWorkspace.select('admin');
 });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
@@ -25,6 +25,19 @@ afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
 test('User view never reads private local task metadata', () => {
   adminWorkspace.select('user'); mount(); expect(mocks.list).not.toHaveBeenCalled();
   expect(screen.queryByRole('heading', { name: 'Local MP3 conversion' })).not.toBeInTheDocument();
+});
+
+test('unavailable device storage blocks local capture even after a file event or direct form submission', async () => {
+  mocks.storageSupported.mockReturnValue(false); mount();
+  expect(await screen.findByText(/Local conversion is unavailable in this browser/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Choose FLAC / WAV' })).toBeDisabled();
+  const input = document.querySelector('input[accept]')!;
+  fireEvent.change(input, { target: { files: [new File(['source'], 'Track.wav')] } });
+  expect(screen.getByRole('button', { name: 'Create local conversion task' })).toBeDisabled();
+  fireEvent.submit(input.closest('form')!);
+  expect(mocks.list).not.toHaveBeenCalled(); expect(mocks.createLocal).not.toHaveBeenCalled();
+  expect(mocks.run).not.toHaveBeenCalled(); expect(mocks.upload).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
 test('selecting lossless files only creates the device task and cannot start encoding or uploading', async () => {
