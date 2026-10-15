@@ -1135,10 +1135,10 @@ build that `build` shares as the short-lived `finitude-web-release-build`
 artifact. The social job first runs the unchanged WebKit compressed-audio scenario
 with its own fixture processes and evidence directory, then runs the complete
 social matrix. The ordinary browser job first verifies native scheduled startup,
-pause/resume, rate correction, and natural completion in all three engines with
+pause/resume, drift correction, and natural completion in all three engines with
 zero retries and a separate evidence directory, then runs its complete matrix.
 The prepare/seek trace uses its original synthetic two-second 8 kHz PCM WAV. The
-combined scheduled-start, pause/resume, rate, and end scenario uses the existing
+combined scheduled-start, pause/resume, drift, and end scenario uses the existing
 original synthetic `room-tone.mp3`, shared with the independent social format gate.
 Both use real loopback HTTP with byte-verified HEAD, Range, and If-Range responses;
 evidence records each format's actual bytes, SHA-256, native metadata, events, and
@@ -1156,6 +1156,11 @@ after resuming; a native `playing` event alone does not prove advancing playback
 The probe samples native progress before controller event handlers, then confirms
 the decoder remains ready and continuous after those handlers finish. A seek or
 readiness change in the same event cannot masquerade as stable playback.
+The drift assertion requires a 1.05 playback rate on a healthy decoder. If the
+same playback occurrence reloaded its source during explicit resync and then
+proved native progress, it instead requires the documented seek fallback at
+normal rate. Correction evidence records the reload count, target and result;
+either path must prove fresh native progress again before testing completion.
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
@@ -2655,6 +2660,32 @@ or fetch its private source. Without a prepared distribution, `/naruto` returns
 503 while the existing APIs and Finitude listener remain available. Naruto
 releases use the same release verification and deployment process as Archtree;
 generated bundles and deployment archives must not be committed.
+
+#### Required Naruto source handoff on `develop`
+
+Current Naruto source handoff:
+[`d77c1f1630164151bf1e8b14fea05d5f1c035519`](https://github.com/yangyinxu/naruto-mobile/commit/d77c1f1630164151bf1e8b14fea05d5f1c035519).
+
+Every push to `yangyinxu/naruto-mobile`'s `main` branch, including a
+documentation-only push, requires a matching Archtree update on `develop`.
+The person or agent pushing Naruto is responsible for completing this handoff:
+
+1. Record the exact pushed Naruto commit SHA in the entry above. Build from a
+   clean checkout of that commit with
+   `npm run prepare:naruto-web -- <source-directory>` and run
+   `npm run smoke:naruto-web`.
+2. Verify that `naruto-web/dist/release-source.json` has the matching
+   `sourceCommit` and `sourceDirty: false`. Commit and push the source handoff
+   and any required integration changes to Archtree `develop`, preserving
+   unrelated work and leaving generated distributions ignored.
+3. Report both repository commits and the verification results. This is a
+   required collaboration workflow; no CI job automatically synchronizes the
+   repositories. The README entry records the `develop` handoff and is not read
+   by the production release workflow.
+
+Before an authorized Archtree `main` release, set the Actions variable
+`NARUTO_SOURCE_COMMIT` to this same complete source SHA. A routine `develop`
+handoff does not push Archtree `main` or deploy production.
 
 Automatic Naruto release packaging is opt-in. Set the Archtree repository's
 Actions variable `NARUTO_SOURCE_COMMIT` to a complete 40-character commit SHA
