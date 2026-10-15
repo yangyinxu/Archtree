@@ -286,8 +286,16 @@ const validateListenerDistribution = async (artifactRoot) => {
 
   const physicalAssetsRoot = path.join(distRoot, 'assets');
   const physicalAssets = await listFiles(physicalAssetsRoot);
+  // Vite omits Web Worker bundles from the manifest; accept a hashed asset that a manifested chunk loads by name.
+  const manifestedScripts = await Promise.all([...referencedAssets].filter(asset => asset.endsWith('.js'))
+    .map(asset => readFile(path.join(distRoot, asset), 'utf8')));
   for (const assetPath of physicalAssets) {
     const relativeAsset = path.relative(distRoot, assetPath).split(path.sep).join('/');
+    const basename = path.posix.basename(relativeAsset);
+    if (!referencedAssets.has(relativeAsset) && /-[A-Za-z0-9_-]{8,}\.js$/.test(basename)
+      && manifestedScripts.some(source => source.includes(basename))) {
+      referencedAssets.add(relativeAsset);
+    }
     if (!referencedAssets.has(relativeAsset)) {
       throw new Error(`Listener distribution contains an unmanifested asset: ${relativeAsset}`);
     }
