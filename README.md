@@ -1135,10 +1135,10 @@ build that `build` shares as the short-lived `finitude-web-release-build`
 artifact. The social job first runs the unchanged WebKit compressed-audio scenario
 with its own fixture processes and evidence directory, then runs the complete
 social matrix. The ordinary browser job first verifies native scheduled startup,
-pause/resume, rate correction, and natural completion in all three engines with
+pause/resume, drift correction, and natural completion in all three engines with
 zero retries and a separate evidence directory, then runs its complete matrix.
 The prepare/seek trace uses its original synthetic two-second 8 kHz PCM WAV. The
-combined scheduled-start, pause/resume, rate, and end scenario uses the existing
+combined scheduled-start, pause/resume, drift, and end scenario uses the existing
 original synthetic `room-tone.mp3`, shared with the independent social format gate.
 Both use real loopback HTTP with byte-verified HEAD, Range, and If-Range responses;
 evidence records each format's actual bytes, SHA-256, native metadata, events, and
@@ -1156,6 +1156,11 @@ after resuming; a native `playing` event alone does not prove advancing playback
 The probe samples native progress before controller event handlers, then confirms
 the decoder remains ready and continuous after those handlers finish. A seek or
 readiness change in the same event cannot masquerade as stable playback.
+The drift assertion requires a 1.05 playback rate on a healthy decoder. If the
+same playback occurrence reloaded its source during explicit resync and then
+proved native progress, it instead requires the documented seek fallback at
+normal rate. Correction evidence records the reload count, target and result;
+either path must prove fresh native progress again before testing completion.
 Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.

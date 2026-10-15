@@ -282,7 +282,7 @@ test('real audio prepares and seeks without feedback; shared trace keeps one med
   await page.evaluate(() => window.roomProbe.destroy());
 });
 
-test('real scheduled start, local pause, rate correction and natural end cannot echo commands', async ({ page }) => {
+test('real scheduled start, local pause, drift correction and natural end cannot echo commands', async ({ page }, testInfo) => {
   await page.evaluate(() => window.roomProbe.apply(0));
   await enableIsolatedAudio(page);
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().readyState)).toBeGreaterThanOrEqual(3);
@@ -304,11 +304,38 @@ test('real scheduled start, local pause, rate correction and natural end cannot 
   await page.evaluate(() => window.roomProbe.pauseLocally());
   await page.evaluate(() => window.roomProbe.apply(5, { revision: 10, playbackEpoch: 50 }));
   expect(await page.evaluate(() => window.roomProbe.state().paused)).toBe(true);
-  await page.evaluate(() => window.roomProbe.resync());
+  const beforeResync = await page.evaluate(async () => {
+    const { loads, error, readyState, duration } = window.roomProbe.state();
+    await window.roomProbe.resync();
+    return { loads, error, readyState, duration };
+  });
+  // Existing metadata rules out the separate explicit bad-source retry, which does not disable rate changes.
+  expect(beforeResync.error).toBeNull();
+  expect(beforeResync.readyState).toBeGreaterThanOrEqual(1);
+  expect(Number.isFinite(beforeResync.duration) && (beforeResync.duration ?? 0) > 0).toBe(true);
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().paused)).toBe(false);
   await expectCredibleProgress(page);
-  expect(await page.evaluate(() => window.roomProbe.correct((window.roomProbe.state().currentTime ?? 0) + 0.25))).toBe('rate');
-  expect(await page.evaluate(() => window.roomProbe.state().rate)).toBe(1.05);
+  const correction = await page.evaluate(() => {
+    const before = window.roomProbe.state();
+    const positionSeconds = (before.currentTime ?? 0) + 0.25;
+    const action = window.roomProbe.correct(positionSeconds);
+    const after = window.roomProbe.state();
+    return { action, positionSeconds, loads: before.loads, rate: after.rate, currentTime: after.currentTime,
+      unsupportedRate: after.observations.some(item => item.type === 'unsupported-rate' && item.playbackEpoch === 50) };
+  });
+  await testInfo.attach('room-drift-correction', { contentType: 'application/json',
+    body: JSON.stringify({ beforeResync, ...correction }) });
+  // A successful reload during this occurrence deliberately disables rate changes on the recovered decoder.
+  const recovered = correction.loads > beforeResync.loads;
+  expect(correction.unsupportedRate).toBe(false);
+  expect(correction.action).toBe(recovered ? 'seek' : 'rate');
+  expect(correction.rate).toBe(recovered ? 1 : 1.05);
+  if (recovered) {
+    // Allow the native-clock tolerance around the controller's two-second predictive-lead bound.
+    expect(correction.currentTime).toBeGreaterThanOrEqual(correction.positionSeconds - 0.05);
+    expect(correction.currentTime).toBeLessThanOrEqual(correction.positionSeconds + 2.05);
+  }
+  await expectCredibleProgress(page);
   await page.evaluate(() => window.roomProbe.seekThroughNativeElement(window.roomProbe.state().duration! - 0.2));
   await expect.poll(() => page.evaluate(() => window.roomProbe.state().snapshot.status)).toBe('ended');
   const ended = await page.evaluate(() => window.roomProbe.state());
