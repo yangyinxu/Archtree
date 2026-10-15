@@ -15,6 +15,7 @@ import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
 import { pageItemIdentity } from '../utils/pageItemIdentity';
 import { touchAvailablePageItemReferences } from '../services/pageReferenceLifecycleService';
 import { parseImportDate, cleanText, uuid, type ImportDate } from './adminImportContract';
+import { adminCatalogArtworkSource } from './adminCatalogArtworkSource';
 
 export type AdminCatalogKind = 'album' | 'artist' | 'audioTrack' | 'organization';
 export class AdminCatalogError extends Error {
@@ -54,7 +55,7 @@ const visibility = (value: unknown) => value === undefined ? 'public' : value ==
 
 /** A metadata hash detects edits through legacy writers as well as this new API. */
 const revision = (value: unknown) => `cr_${createHash('sha256').update(JSON.stringify(value)).digest('base64url')}`;
-const fields = (kind: AdminCatalogKind, doc: any): Record<string, unknown> => {
+export const adminCatalogEditableFields = (kind: AdminCatalogKind, doc: any): Record<string, unknown> => {
     if (kind === 'artist') return { name: text(doc.name, 200), bio: text(doc.bio, 10_000, true), birthDate: date(doc.birthDate) };
     if (kind === 'organization') return { name: text(doc.name, 200), description: text(doc.description, 10_000, true), organizationType: organizationTypes.includes(doc.organizationType) ? doc.organizationType : 'other' };
     let credits = null;
@@ -63,6 +64,7 @@ const fields = (kind: AdminCatalogKind, doc: any): Record<string, unknown> => {
         attributionStatus: doc.attributionStatus === 'documented' ? 'documented' : 'unknown',
         ...(kind === 'audioTrack' ? { trackNumber: Number.isInteger(doc.trackNumber) && doc.trackNumber > 0 && doc.trackNumber <= 9999 ? doc.trackNumber : null } : {}) };
 };
+const fields = adminCatalogEditableFields;
 const stateForRevision = (kind: AdminCatalogKind, doc: any) => ({
     fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
     coverArtUrl: doc.coverArtUrl ?? null, artistIds: doc.artistIds ?? null, albumId: doc.albumId ?? null,
@@ -98,9 +100,9 @@ export const adminCatalogSnapshot = async (kind: AdminCatalogKind, doc: any, ses
         if (!album || visibility(album.visibility) === 'hidden') effectiveVisibility = 'hidden';
     }
     const ownerId = String(doc._id);
-    const coverId = /^[0-9a-f]{24}$/.test(String(doc.coverArtId)) ? String(doc.coverArtId) : null;
+    const artwork = adminCatalogArtworkSource(doc);
     return { kind, id: ownerId, revision: revision(stateForRevision(kind, doc)), visibility: visibility(doc.visibility), effectiveVisibility,
-        fields: fields(kind, doc), coverUrl: coverId ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
+        fields: fields(kind, doc), coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
         mediaUrl: kind === 'audioTrack' ? `/api/admin/v1/catalog/audioTrack/${ownerId}/media` : null,
         capabilities: { editing: isAdminCatalogEditingEnabled(), visibility: isAdminVisibilityEditingEnabled() } };
 };

@@ -670,16 +670,70 @@ The wire protocol and operational bounds are documented in
   They cannot be enabled until
   direct S3/CDN delivery and historical public URL policy are verified. Public
   and private application responses never redirect to hidden object locations.
-- Admins switch between Admin and User views without signing out or rebuilding
+- On Web, admins switch between Admin and User views without signing out or rebuilding
   listening state. User view is the default; leaving Admin view hides private
   presentation, cancels private reads and stops previews. Unsaved drafts and
-  unknown operation intents may remain only in account-fenced memory and resume
+  unknown catalog/import operation intents may remain only in account-fenced memory and resume
   after current capabilities are verified. Account or role loss clears them.
+  Device-local conversion state follows the separate durable, owner-scoped
+  recovery rules below.
   View selection is presentation, not authorization.
+- The iOS and Android clients provide listener experiences only. They do not
+  expose an administrator view, workbench, import editor, catalog/Page editor,
+  private administrator preview or administrator upload flow. An administrator
+  account can still sign in and use ordinary listener features. Administration
+  and local media conversion are available through the Web workbench.
 - Existing catalog edits are separate from import review. They preserve unrelated
   metadata, memberships, and storage references, reject stale snapshots, and
   use the canonical Credit and artwork lifecycle. Track Number changes update
   the assigned Album's automatic order in the same transaction.
+- Web manual catalog confirmation shows the captured saved and proposed values
+  for every field in its partial update, including visibility and coupled Credit
+  attribution changes. Dates retain their known precision; an unavailable Credit
+  list is distinct from an explicitly empty list. If a confirmed refresh detects
+  a newer item revision, the open confirmation explains why saving is disabled
+  and directs the administrator back to review. Closing it preserves unsaved
+  edits; reviewing the latest saved version requires a new confirmation.
+- Web administration uses a dedicated page layout for the workbench, imports,
+  existing-Album reviews, catalog and Page management. Listener navigation,
+  global music search, Now Playing and player controls do not appear in this
+  layout. The Admin/User view switch remains reachable. Entering or leaving
+  administration preserves the authenticated account, playback queue and
+  position, and active Room session; returning to User view restores listener
+  navigation and controls.
+- The Web workbench exposes management of existing Albums and a separate catalog
+  review queue. A completed import links to its confirmed catalog Album and
+  Artist for subsequent edits; it never unlocks or republishes its old approval.
+- The Web catalog inventories present artwork and names as a single detail entry
+  for Albums, Artists, MediaTracks and Organizations. Artist portraits are
+  circular; Organizations use their name mark, matching listener details.
+  Manual editing and applicable management actions are available from each
+  administrator detail page instead of repeated inventory actions. Proofreading
+  applies to Albums; local MP3 conversion applies to Albums and audio MediaTracks.
+  Detail pages display current saved artwork, including supported legacy
+  artwork, through protected administrator delivery and retain the dedicated
+  administrator layout. Returning to the inventory retains the content category.
+- Administrators may create a private proofreading project for a ready existing
+  Album with at most 100 ready Audio members. Empty Albums are supported; missing,
+  malformed, mixed Video, or inconsistent memberships require repair before
+  creating a review. The server captures current catalog revisions and original
+  filenames when retained. Missing historical filenames and folder names remain
+  explicitly unknown; an Album title is not presented as a source folder.
+- Existing-Album proofreading shares the durable analysis, grant, concurrency and
+  provider-call limits of imports. Opening a project or editing its private draft
+  never starts paid analysis. Luna suggestions do not change the catalog. An
+  administrator can independently review suggestions and manually edit the
+  private Album title/date and Track titles/numbers, then explicitly select saved
+  fields for a separate catalog confirmation.
+- Applying an existing-Album review validates every captured catalog revision,
+  membership, readiness and filename/media identity. A replacement or external
+  edit prevents applying the stale project, rather than silently rebasing it.
+  Selected metadata changes, automatic Album order and the operation receipt
+  commit atomically; retries use the original intent. Artist identity/Credits,
+  artwork, visibility, membership and stored media are preserved. Artist-name
+  suggestions are identity hints for a separate explicit catalog Credit edit.
+  Applied reviews remain read-only; further corrections use the current Web
+  catalog editor or a new Web review.
 - Administrator confirmations bind the item and revision displayed when opened.
   A refresh that changes the draft, publication approval or staged file requires
   a fresh review; confirmation never silently rebases onto a newer target.
@@ -840,11 +894,11 @@ The wire protocol and operational bounds are documented in
   same reviewed catalog revision. Runtime copy may update remotely, while a
   change to operating-system-owned copy becomes visible with the next app
   release that includes regenerated native resources.
-- Finitude Web keeps a globe language shortcut at the bottom-left of the
-  desktop sidebar, matching the persistent placement pattern used by Spotify.
-  Compact layouts expose the same control as a top-bar icon. Both open the same
-  accessible selector for published languages. Native selectors continue to
-  show System.
+- Finitude Web listener pages keep a globe language shortcut at the bottom-left
+  of the desktop sidebar, matching the persistent placement pattern used by
+  Spotify. Compact listener layouts and the dedicated administration layout
+  expose the same control in the top bar. Both open the same accessible selector
+  for published languages. Native selectors continue to show System.
 - Every published-language option shows its native name as the primary label
   and a stable English name as secondary context. Both names are maintained
   once in canonical locale metadata and published in the shared manifest so
@@ -983,10 +1037,10 @@ The wire protocol and operational bounds are documented in
   from the superseded optional-video prototype. That state is migration input,
   not authorization to expose two playable objects; all old objects retain
   lifecycle evidence until migration or cleanup is confirmed.
-- Finitude Web automatically uses its existing browse layout for Audio. Video
-  automatically replaces the center workspace with a contain-fit theater and
-  uses the right panel for the playback queue. Video offers no cover-only or
-  audio-only mode switch.
+- Finitude Web listener pages automatically use their existing browse layout
+  for Audio. Video automatically replaces the center workspace with a
+  contain-fit theater and uses the right panel for the playback queue. Video
+  offers no cover-only or audio-only mode switch.
 - Audio and Video use one long-lived media element, queue, elapsed clock,
   transport, Shuffle/Repeat state, playback origin, and activity identity.
   Automatic queue advancement changes presentation from the next MediaTrack's
@@ -1076,7 +1130,8 @@ The wire protocol and operational bounds are documented in
   expanded presentation of that same player and queue. Closing it returns to
   the compact presentation without changing route or playback; horizontal
   compact-player swipes move only to an available adjacent queue item.
-- Web playback shortcuts are inactive while focus is in an editable control.
+- Web playback shortcuts are inactive in the dedicated administration layout
+  and while focus is in an editable control.
   Unmodified single-character shortcuts are not used; the accessible player
   help lists the available non-character keys and every action remains
   available through visible controls.
@@ -1224,7 +1279,7 @@ The wire protocol and operational bounds are documented in
 
 ## Administrator Album Imports
 
-- Imports are private, durable administrator projects. The shared workbench
+- Imports are private, durable administrator projects. The Web workbench
   provides analyzing, awaiting review, needs attention, and completed views with
   independent upload, analysis, review, and publication state. All current admins
   may resume saved projects; ordinary users cannot read their titles or assets.
@@ -1294,6 +1349,60 @@ The wire protocol and operational bounds are documented in
 - Expiring grants prevent new copy/attachment/publication steps. Cleanup of a
   confirmed detached or explicitly cancelled object remains recoverable after
   grant expiry, with current administrator checks and exact storage identity.
+
+## Web Administrator Local MP3 Conversion
+
+- The Web workbench supports explicit device-local conversion of lossless FLAC
+  and PCM WAVE sources to high-quality MP3. Uploaded source bytes are downloaded
+  through authenticated private media routes before conversion; encoding never
+  runs on the server. Actual container, codec and complete decodability determine
+  eligibility, not a filename or MIME declaration. Unsupported or corrupt inputs
+  are identified individually and never produce a completed result.
+  Browsers without the required device-local storage explain that conversion is
+  unavailable and cannot create new conversion tasks.
+- The first quality preset is 320 kbps CBR. Mono and stereo retain their channel
+  counts; unsupported channel layouts require an explicit alternative rather
+  than silent downmixing. Supported 44.1/48 kHz sources retain their sample rate;
+  other supported rates use a disclosed resampling policy. Conversion does not
+  apply automatic loudness changes or alter catalog attribution.
+- Administrators can convert newly selected files or the current sources of an
+  existing Album. One Album action creates a fixed ordered batch with independent
+  per-track progress, failure, retry and completion. Repeating the same action
+  reuses the matching device task. Later Album members are not silently added.
+- Local lossless originals remain read-only and are never deleted by conversion,
+  upload or MP3-cache cleanup. A local copy fetched from an uploaded source also
+  remains a retained source rather than disposable MP3 cache. Users can manage
+  application-owned retained source copies explicitly; external original files
+  are never removed by Finitude.
+- Conversion jobs, validated sources and generated MP3 files persist on the
+  current device under the initiating account. Only a currently authenticated
+  administrator for that account can run, inspect or upload these private jobs.
+  Leaving Admin view, signing out or losing permission stops new work and hides
+  private presentation. Durable state never contains credentials or signed URLs.
+  Browser permission to protect storage from eviction is optional. An unanswered,
+  denied or unavailable permission request does not block task creation while
+  local storage and quota remain available; browser eviction or site-data removal
+  can still remove device-local files.
+- Closing the page or terminating its process does not promise continued
+  encoding. Reopening offers recovery after current authorization and source
+  checks. Completed validated tracks are reused; a partially encoded track is
+  restarted from its retained complete source. Compatible validated partial
+  source downloads may resume; bytes from different sources are never combined.
+- Conversion and upload are separate approvals. Upload freezes each destination,
+  source version, output identity and quality preset. Existing Audio replacement
+  preserves the MediaTrack identity and its relationships, follows the canonical
+  new-object promotion and old-object cleanup lifecycle, and updates actual MP3
+  format and duration. New Album imports still require their own review and
+  publication approval.
+- An interrupted or uncertain upload retains its original operation identity and
+  local MP3. Recovery first reconciles that operation; it does not blindly create
+  another replacement or re-encode a completed file. An Album reports partial
+  success without retrying already confirmed tracks.
+- A generated local MP3 is disposable cache only after the exact output is
+  confirmed on S3 and the destination is ready. Unconfirmed upload, failed
+  publication or an unknown result never triggers local MP3 deletion. Cleanup
+  failure remains visible and retryable, and never removes the retained lossless
+  source. This administrator cache is not Web listener offline content.
 
 ## Page Items
 

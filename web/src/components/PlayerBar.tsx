@@ -99,6 +99,8 @@ const trapDialogFocus = (event: ReactKeyboardEvent<HTMLElement>) => {
 };
 
 interface PlayerBarProps {
+  /** Dedicated management routes keep playback alive while suppressing player presentation and shortcuts. */
+  active?: boolean;
   /** Tests may inject a store; the application always uses the one shared browser store. */
   store?: PlayerStore;
   /** The shell owns this presentation state so playback never remounts with the side pane. */
@@ -204,6 +206,7 @@ const TransportControls = ({
 
 /** Presents compact, expanded, and keyboard surfaces over one route-independent player store. */
 export const PlayerBar = ({
+  active = true,
   nowPlayingOpen = false,
   onToggleNowPlaying,
   store = playerStore
@@ -272,6 +275,11 @@ export const PlayerBar = ({
   }, [helpOpen]);
 
   useEffect(() => {
+    if (!active) { setExpanded(false); setHelpOpen(false); }
+  }, [active]);
+
+  useEffect(() => {
+    if (!active) return;
     const handleShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const dialog = event.target instanceof Element ? event.target.closest('[aria-modal="true"]') : null;
@@ -315,7 +323,7 @@ export const PlayerBar = ({
 
     document.addEventListener('keydown', handleShortcut);
     return () => document.removeEventListener('keydown', handleShortcut);
-  }, [current, expanded, helpOpen, playbackActive, store]);
+  }, [active, current, expanded, helpOpen, playbackActive, store]);
 
   const startCompactGesture = (event: ReactPointerEvent<HTMLElement>) => {
     if (!event.currentTarget.contains(event.target as Node)) return;
@@ -433,6 +441,8 @@ export const PlayerBar = ({
       </span>
     </>
   );
+
+  if (!active) return null;
 
   return (
     <>

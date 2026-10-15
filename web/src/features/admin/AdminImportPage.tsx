@@ -7,11 +7,11 @@ import { adminWorkspace } from './adminWorkspace';
 import { useAdminMutation } from './useAdminMutation';
 import { ImportStages, MutationStatus, useOnline } from './AdminShared';
 import { ImportDraftEditor } from './ImportDraftEditor';
-import { ImportReview } from './ImportReview';
-import { ImportDuplicates } from './ImportDuplicates';
 import { AdminNav } from './AdminNav';
 import styles from './adminStyles';
 const ImportMedia = lazy(() => import('./ImportMedia').then(module => ({ default: module.ImportMedia })));
+const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
+const ImportDuplicates = lazy(() => import('./ImportDuplicates').then(module => ({ default: module.ImportDuplicates })));
 
 interface EditorBuffer { draft: ImportDraft; revision: number; dirty: boolean; selected: string[] }
 function ImportProject({ id }: { id: string }) {
@@ -23,6 +23,8 @@ function ImportProject({ id }: { id: string }) {
   const [editor, setEditor] = useState<EditorBuffer | null>(() => adminWorkspace.buffer(bufferKey) ?? null);
   const [confirmed, setConfirmed] = useState<ImportDetail | null>(null);
   const [stage, setStage] = useState<'draft' | 'review' | 'files' | 'publication'>(() => adminWorkspace.buffer(`stage:${id}`) ?? 'draft');
+  const [reviewVisited, setReviewVisited] = useState(stage === 'review');
+  const [, refreshLocalFiles] = useState(0);
   const mutation = useAdminMutation(id);
   const query = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, id],
@@ -47,7 +49,19 @@ function ImportProject({ id }: { id: string }) {
   }, [mutation.result]);
   useEffect(() => { if (editor) adminWorkspace.retain(bufferKey, editor, access); }, [editor]);
   useEffect(() => { adminWorkspace.retain(`stage:${id}`, stage, access); }, [stage]);
+  // Keep candidate search state mounted after its first visit while deferring the initial review bundle.
+  useEffect(() => { if (stage === 'review') setReviewVisited(true); }, [stage]);
   const item = confirmed;
+  useEffect(() => {
+    if (!item || stage !== 'files' && item.publication !== 'complete') return;
+    const guard = adminWorkspace.capture();
+    // This bridge is lazy: ordinary import editing does not load the local encoding queue.
+    void import('./conversionImportBridge').then(async bridge => {
+      if (item.publication === 'complete') await bridge.finalizeConversionImport(id, guard);
+      else await bridge.hydrateConversionImport(id, guard);
+      if (adminWorkspace.current(guard)) refreshLocalFiles(value => value + 1);
+    }).catch(() => { /* The local queue offers explicit recovery when storage is unavailable. */ });
+  }, [id, stage, item?.publication]);
   const locked = mutation.running || Boolean(mutation.intent) || !online;
   const publicationLocked = Boolean(confirmed && ['preparing', 'needsAttention', 'complete'].includes(confirmed.publication));
   const conflict = Boolean(editor && item && editor.dirty && editor.revision !== item.revision);
@@ -88,11 +102,11 @@ function ImportProject({ id }: { id: string }) {
       </section>
       </div>
       <div hidden={stage !== 'review'} role="tabpanel" id="import-panel-review" aria-labelledby="import-tab-review">
-      <ImportReview draft={editor.draft} filenames={item.manifest.files} suggestions={item.suggestions} selected={editor.selected}
+      {stage === 'review' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportReview draft={editor.draft} filenames={item.manifest.files} suggestions={item.suggestions} selected={editor.selected}
         onSelect={selected => setEditor({ ...editor, selected })} disabled={savedOnly || Boolean(active)}
         onAdopt={selectedIds => mutate('adopt', { generation: item.analysis.generation, selectedIds, rejectIds: [] })}
-        onReject={rejectIds => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds })} />
-      <ImportDuplicates key={item.revision} item={item} disabled={savedOnly || Boolean(active)} onSave={decisions => mutate('decisions', { decisions })} />
+        onReject={rejectIds => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds })} /></Suspense>}
+      {reviewVisited && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDuplicates key={item.revision} item={item} disabled={savedOnly || Boolean(active)} onSave={decisions => mutate('decisions', { decisions })} /></Suspense>}
       </div>
       {(['files', 'publication'] as const).map(value => <div key={value} hidden={stage !== value} role="tabpanel" id={`import-panel-${value}`} aria-labelledby={`import-tab-${value}`}>
       <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={value} active={stage === value} item={item} operation={mutation.operation} disabled={locked || editor.dirty || conflict || Boolean(active)} /></Suspense>

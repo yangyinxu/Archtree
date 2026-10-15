@@ -12,7 +12,7 @@ import { readyAudioStorageFilter } from '../utils/audioStorageKey';
 import { sortTrackIdsByEmbeddedTrackNumber } from '../services/albumTrackLinkService';
 import { isAdminVisibilityEditingEnabled } from '../services/adminCapabilityService';
 import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
-import { getAdminImport, importCandidateProjection, importCollection, importCandidateRevision, mutateAdminImport, touchImportAdmin, withImportAdmin } from './adminImportService';
+import { getAdminImport, importCandidateProjection, importCollection, importPurposeFilter, importCandidateRevision, mutateAdminImport, touchImportAdmin, withImportAdmin } from './adminImportService';
 import { importPrivateStorageReady, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
 
@@ -101,12 +101,12 @@ export async function cancelAdminImportPublication(actor: string, id: string, ra
 async function cleanupCancelledPublication(id: string, worker: string, publication: ImportPublication,
     actor: string, storage: ImportObjectStorage, signal?: AbortSignal) {
     const capture = () => withImportAdmin(actor, async session => {
-        const doc = await importCollection().findOne({ _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
+        const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
             'media.publication.state': 'cancelled', 'media.publication.leaseOwner': worker }, { session });
         if (!doc?.media?.publication) throw conflict(); return doc;
     });
     const checkpoint = async (slotId: string, cover: boolean, identity: ImportObjectIdentity | null, complete: boolean) => withImportAdmin(actor, async session => {
-        const doc = await importCollection().findOne({ _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
+        const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
             'media.publication.state': 'cancelled', 'media.publication.leaseOwner': worker }, { session });
         if (!doc?.media?.publication) throw conflict();
         const part = cover ? doc.media.publication.cover : doc.media.publication.tracks.find(track => track.slotId === slotId && !track.reused);
@@ -141,7 +141,7 @@ async function cleanupCancelledPublication(id: string, worker: string, publicati
     }
     await withImportAdmin(actor, async session => {
         checkAdminWorker(signal);
-        const current = await importCollection().findOne({ _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
+        const current = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.publication.operationId': publication.operationId,
             'media.publication.state': 'cancelled', 'media.publication.leaseOwner': worker }, { session });
         if (!current?.media?.publication || current.media.publication.tracks.some(track => !track.reused && !track.cleanupComplete)
             || (current.media.publication.cover && !current.media.publication.cover.cleanupComplete)) throw conflict();
@@ -157,7 +157,7 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
     if (signal?.aborted) return false;
     if (!onlyId && (!importEnabled() || !importPrivateStorageReady())) return false;
     const worker = randomUUID(), now = new Date();
-    const claim = await importCollection().findOneAndUpdate({ ...(onlyId && objectId(onlyId) ? { _id: new ObjectId(onlyId) } : {}),
+    const claim = await importCollection().findOneAndUpdate({ ...importPurposeFilter, ...(onlyId && objectId(onlyId) ? { _id: new ObjectId(onlyId) } : {}),
         ...(operationId ? { 'media.publication.operationId': operationId } : {}),
         $and: [{ $or: [{ 'media.publication.state': { $in: ['preparing', ...(onlyId ? ['needsAttention'] : [])] } },
             ...(onlyId ? [{ 'media.publication.state': 'cancelled', 'media.publication.cleanupPending': true }] : [])] },
@@ -223,7 +223,7 @@ async function commitPublication(id: string, worker: string, signal?: AbortSigna
     const session = getDatabaseClient().startSession();
     try {
         await session.withTransaction(async () => {
-            const doc = await importCollection().findOne({ _id: new ObjectId(id), 'media.publication.leaseOwner': worker }, { session }); const publication = doc?.media?.publication; if (!doc || !publication) throw conflict();
+            const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.publication.leaseOwner': worker }, { session }); const publication = doc?.media?.publication; if (!doc || !publication) throw conflict();
             checkAdminWorker(signal); await touchImportAdmin(publication.actorId, session); ready(); currentApproval(publication);
             if (publication.snapshot.album.visibility === 'hidden' && !isAdminVisibilityEditingEnabled()) throw conflict();
             if (publication.tracks.some(track => track.state !== 'ready') || (publication.cover && publication.cover.state !== 'ready')) throw conflict();
@@ -258,7 +258,7 @@ async function commitPublication(id: string, worker: string, signal?: AbortSigna
 export async function resumeAdminImportPublication(actor: string, id: string, operationId: string, storage: ImportObjectStorage = defaultImportObjectStorage) {
     if (!uuid(operationId) || !objectId(id)) throw conflict();
     const receipt = await withImportAdmin(actor, async session => {
-        const doc = await importCollection().findOne({ _id: new ObjectId(id) }, { session });
+        const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id) }, { session });
         const receipt = doc?.receipts.find(receipt => receipt.kind === 'publish' && receipt.operationId === operationId);
         if (!receipt || (doc!.media?.publication?.operationId !== operationId && !doc!.media?.publicationHistory?.some(value => value.operationId === operationId && value.state === 'cancelled' && !value.cleanupPending))) throw conflict();
         return { operationId: receipt.operationId, kind: receipt.kind, revision: receipt.revision };

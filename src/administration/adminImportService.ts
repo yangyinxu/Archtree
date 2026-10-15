@@ -7,18 +7,25 @@ import { readyArtistLifecycleFilter } from '../services/artistReferenceFenceServ
 import { readyAlbumLifecycleFilter } from '../services/albumReferenceFenceService';
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, cleanText, defaultDraft, exact, importEnabled, invalidImport, objectId, parseDraft, parseManifest, record, uuid, type AdminImportDetail, type AdminImportResponse, type ImportAnalysisState, type ImportDraft, type ImportDuplicateCandidate, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportWorkbenchFilter, type ImportWorkbenchResponse } from './adminImportContract';
 import { type AnalysisInput, type ImportAnalysisProvider, ImportProviderError, OpenAiImportAnalysisProvider } from './adminImportProvider';
+import type { CatalogReviewSource, CatalogReviewApplied } from './adminCatalogReviewContract';
 import type { ImportMedia } from './adminImportMediaTypes';
 import { importPrivateStorageReady } from './adminImportMediaTypes';
 
-type Receipt = ImportReceipt & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
+export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
+type Receipt = ProjectReceipt;
 type Chunk = { index: number; slots: string[]; album: boolean; hash: string; state: 'pending' | 'inflight' | 'complete' | 'failed' | 'unknown'; attemptId: string | null; startedAt: Date | null; completedAt: Date | null };
 type Analysis = { state: ImportAnalysisState; generation: number; operationId: string | null; actorId: string | null; grantExpiresAt: Date | null; baseline: ImportDraft | null; tags?: { slotId: string; tags: ImportEmbeddedTags }[]; chunks: Chunk[]; issue: ImportIssue; leaseOwner: string | null; leaseUntil: Date | null };
-export type AdminImportDocument = { _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number; suggestions: ImportSuggestion[]; decisions: ImportDuplicateDecision[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; media?: ImportMedia };
+export type AdminImportDocument = { purpose?: 'import' | 'catalogReview' | null; catalogSource?: CatalogReviewSource; catalogEvidence?: Record<string, string>; catalogApplied?: CatalogReviewApplied; _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number; suggestions: ImportSuggestion[]; decisions: ImportDuplicateDecision[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; media?: ImportMedia };
 export const importCollection = () => getDb()!.collection<AdminImportDocument>('adminAlbumImports');
 const collection = importCollection;
+/** Legacy documents have no purpose; explicit review projects never enter old import surfaces. */
+export const importPurposeFilter = { purpose: { $in: ['import', null] as const } };
+export const isImportProject = (doc: AdminImportDocument) => doc.purpose == null || doc.purpose === 'import';
+export type AdminProjectPolicy<T> = { purpose: 'import' | 'catalogReview'; response: (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null, session: ClientSession) => T | Promise<T> };
+
 export const importDigest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const digest = importDigest;
-const idleAnalysis = (): Analysis => ({ state: 'idle', generation: 0, operationId: null, actorId: null, grantExpiresAt: null, baseline: null, chunks: [], issue: null, leaseOwner: null, leaseUntil: null });
+export const idleAnalysis = (): Analysis => ({ state: 'idle', generation: 0, operationId: null, actorId: null, grantExpiresAt: null, baseline: null, chunks: [], issue: null, leaseOwner: null, leaseUntil: null });
 const notFound = () => new AdminImportError(404, 'ADMIN_IMPORT_NOT_FOUND');
 const conflict = (code = 'ADMIN_IMPORT_REVISION_CONFLICT') => new AdminImportError(409, code);
 const isActive = (doc: AdminImportDocument) => ['queued', 'running'].includes(doc.analysis.state);
@@ -42,6 +49,7 @@ const withAdmin = withImportAdmin;
 
 /** Required indexes are exported so startup uses the repository's central index verifier. */
 export const adminImportIndexes = [
+    { collection: 'adminAlbumImports', keys: { purpose: 1, createdAt: -1, _id: -1 }, options: { name: 'admin_project_purpose_inventory' }, required: true },
     { collection: 'adminAlbumImports', keys: { createdAt: -1, _id: -1 }, options: { name: 'admin_import_inventory' }, required: true },
     { collection: 'adminAlbumImports', keys: { 'analysis.state': 1, 'analysis.leaseUntil': 1, createdAt: 1 }, options: { name: 'admin_import_worker' }, required: true },
     { collection: 'adminAlbumImports', keys: { 'analysis.actorId': 1, 'analysis.state': 1 }, options: { name: 'admin_import_actor_admission' }, required: true },
@@ -61,20 +69,27 @@ export function adminImportDto(doc: AdminImportDocument, actorId: string, provid
         publicationRecovery: doc.media?.publication ? { operationId: doc.media.publication.operationId, cleanupPending: Boolean(doc.media.publication.cleanupPending), startedByMe: doc.media.publication.actorId === actorId } : null,
         assets: (doc.media?.assets ?? []).map(({ slotId, state, byteLength, sha256, contentType, tags, recovery, operationId, actorId: owner }) => ({ slotId, state, byteLength, sha256, contentType, tags: tags ?? null, recovery: { operationId: recovery?.operationId ?? operationId, expectedRevision: recovery?.expectedRevision ?? 1, kind: recovery?.kind ?? 'upload', startedByMe: (recovery?.actorId ?? owner) === actorId } })), selectedCoverSlotId: doc.media?.selectedCoverSlotId ?? null,
         published: doc.media?.publication?.state === 'complete' ? { albumId: doc.media.publication.albumId, artistId: doc.media.publication.artistId, trackIds: doc.media.publication.tracks.map(track => track.id) } : null,
-        capabilities: { analysis: importEnabled() && providerAvailable, upload: importEnabled() && importPrivateStorageReady(), publish: importEnabled() && importPrivateStorageReady() && (doc.media?.publicationHistory?.length ?? 0) + (doc.media?.publication ? 1 : 0) < LIMITS.publications }, receipts: [...doc.receipts, ...(doc.recoveryReceipts ?? [])].sort((a, b) => a.revision - b.revision).slice(-LIMITS.receipts).map(({ operationId, kind, revision }) => ({ operationId, kind, revision }))
+        capabilities: { analysis: importEnabled() && providerAvailable, upload: importEnabled() && importPrivateStorageReady(), publish: importEnabled() && importPrivateStorageReady() && (doc.media?.publicationHistory?.length ?? 0) + (doc.media?.publication ? 1 : 0) < LIMITS.publications }, receipts: [...doc.receipts, ...(doc.recoveryReceipts ?? [])].sort((a, b) => a.revision - b.revision).slice(-LIMITS.receipts).filter(receipt => receipt.kind !== 'apply').map(({ operationId, kind, revision }) => ({ operationId, kind: kind as ImportReceipt['kind'], revision }))
     };
 }
-const response = (doc: AdminImportDocument, actor: string, receipt: ImportReceipt | null = null): AdminImportResponse => ({ item: adminImportDto(doc, actor), receipt: receipt ? { operationId: receipt.operationId, kind: receipt.kind, revision: receipt.revision } : null });
-function mutation(raw: unknown, extra: string[]) { const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...extra]); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) return invalidImport(); return body as typeof body & { operationId: string; expectedRevision: number }; }
+const response = (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null = null): AdminImportResponse => {
+    if (!isImportProject(doc) || receipt?.kind === 'apply') throw notFound();
+    return { item: adminImportDto(doc, actor), receipt: receipt ? { operationId: receipt.operationId, kind: receipt.kind, revision: receipt.revision } : null };
+};
+const importPolicy: AdminProjectPolicy<AdminImportResponse> = { purpose: 'import', response };
+export function parseAdminProjectMutation(raw: unknown, extra: string[]) { const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...extra]); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) return invalidImport(); return body as typeof body & { operationId: string; expectedRevision: number }; }
+
+const mutation = parseAdminProjectMutation;
 
 /** Receipt lookup precedes revision checks: an uncertain acknowledgement must replay the original intent. */
-export async function mutateAdminImport(actor: string, id: string, body: Record<string, unknown> & { operationId: string; expectedRevision: number }, kind: Receipt['kind'], change: (doc: AdminImportDocument, session: ClientSession) => Promise<void>): Promise<AdminImportResponse> {
+export async function mutateAdminProject<T>(actor: string, id: string, body: Record<string, unknown> & { operationId: string; expectedRevision: number }, kind: Receipt['kind'], change: (doc: AdminImportDocument, session: ClientSession) => Promise<void>, policy: AdminProjectPolicy<T>): Promise<T> {
     const _id = idValue(id), hash = digest({ kind, body });
     return withAdmin(actor, async session => {
-        const doc = await collection().findOne({ _id }, { session }); if (!doc) throw notFound();
+        const doc = await collection().findOne({ _id, ...(policy.purpose === 'import' ? importPurposeFilter : { purpose: policy.purpose }) }, { session }); if (!doc) throw notFound();
         const prior = [...doc.receipts, ...(doc.recoveryReceipts ?? [])].find(receipt => receipt.operationId === body.operationId);
-        if (prior) { if (prior.hash !== hash || (prior.actorId !== actor && kind !== 'cleanup')) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return response(doc, actor, prior); }
+        if (prior) { if (prior.hash !== hash || (prior.actorId !== actor && kind !== 'cleanup')) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return policy.response(doc, actor, prior, session); }
         if (doc.revision !== body.expectedRevision) throw conflict();
+        if (doc.catalogApplied) throw conflict('ADMIN_CATALOG_REVIEW_APPLIED');
         const publication = doc.media?.publication;
         if (publication && !['cleanup', 'cancel-publication'].includes(kind)
             && (publication.state !== 'cancelled' || (publication.cleanupPending && !['edit', 'adopt', 'decisions'].includes(kind)))) throw conflict('ADMIN_IMPORT_PUBLICATION_LOCKED');
@@ -84,9 +99,10 @@ export async function mutateAdminImport(actor: string, id: string, body: Record<
         await change(doc, session); doc.revision++; doc.updatedAt = new Date();
         const receipt: Receipt = { operationId: body.operationId, kind, revision: doc.revision, actorId: actor, hash, at: doc.updatedAt }; if (kind === 'adopt') receipt.selection = { generation: body.generation as number, acceptedIds: [...body.selectedIds as string[]], rejectedIds: [...body.rejectIds as string[]] }; if (recovery) (doc.recoveryReceipts ??= []).push(receipt); else doc.receipts.push(receipt);
         const update = await collection().replaceOne({ _id, revision: body.expectedRevision }, doc, { session }); if (update.matchedCount !== 1) throw conflict();
-        return response(doc, actor, receipt);
+        return policy.response(doc, actor, receipt, session);
     });
 }
+export const mutateAdminImport = (actor: string, id: string, body: Record<string, unknown> & { operationId: string; expectedRevision: number }, kind: ImportReceipt['kind'], change: (doc: AdminImportDocument, session: ClientSession) => Promise<void>) => mutateAdminProject(actor, id, body, kind, change, importPolicy);
 const mutate = mutateAdminImport;
 
 export async function createAdminImport(actor: string, raw: unknown): Promise<AdminImportResponse> {
@@ -95,14 +111,14 @@ export async function createAdminImport(actor: string, raw: unknown): Promise<Ad
     const operationId = input.operationId, _id = new ObjectId(digest({ actor, operationId }).slice(0, 24)), hash = digest({ kind: 'create', manifest, draft, operationId });
     return withAdmin(actor, async session => {
         const previous = await collection().findOne({ _id }, { session });
-        if (previous) { const receipt = previous.receipts[0]; if (receipt.hash !== hash || receipt.actorId !== actor) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return response(previous, actor, receipt); }
+        if (previous) { if (!isImportProject(previous)) throw notFound(); const receipt = previous.receipts[0]; if (receipt.hash !== hash || receipt.actorId !== actor) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return response(previous, actor, receipt); }
         admit();
         const now = new Date(), receipt: Receipt = { operationId, kind: 'create', revision: 1, hash, actorId: actor, at: now };
         const doc: AdminImportDocument = { _id, actorId: actor, revision: 1, createdAt: now, updatedAt: now, manifest, draft, analysis: idleAnalysis(), analysisHistory: [], attemptsUsed: 0, suggestions: [], decisions: [], receipts: [receipt] };
         await collection().insertOne(doc, { session }); return response(doc, actor, receipt);
     });
 }
-export const getAdminImport = (actor: string, id: string) => withAdmin(actor, async session => { const doc = await collection().findOne({ _id: idValue(id) }, { session }); if (!doc) throw notFound(); return response(doc, actor); });
+export const getAdminImport = (actor: string, id: string) => withAdmin(actor, async session => { const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound(); return response(doc, actor); });
 export const editAdminImport = (actor: string, id: string, raw: unknown) => { const body = mutation(raw, ['draft']); return mutate(actor, id, body, 'edit', async doc => { doc.draft = parseDraft(body.draft, doc.manifest); }); };
 
 const filters: Record<ImportWorkbenchFilter, Record<string, unknown>> = {
@@ -114,7 +130,7 @@ export async function listAdminImports(actor: string, query: Record<string, unkn
     const filter = query.filter ?? 'all'; if (!Object.keys(filters).includes(filter as string)) return invalidImport();
     if (query.startedByMe !== undefined && !['true', 'false'].includes(query.startedByMe as string)) return invalidImport();
     const limit = query.limit === undefined ? LIMITS.page : Number(query.limit); if (!Number.isInteger(limit) || limit < 1 || limit > LIMITS.page || (query.limit !== undefined && !/^\d{1,2}$/.test(String(query.limit)))) return invalidImport();
-    const q = query.q === undefined ? '' : cleanText(query.q, 100, true); const base: Record<string, unknown> = { ...(query.startedByMe === 'true' ? { actorId: actor } : {}) };
+    const q = query.q === undefined ? '' : cleanText(query.q, 100, true); const base: Record<string, unknown> = { ...importPurposeFilter, ...(query.startedByMe === 'true' ? { actorId: actor } : {}) };
     if (q) { const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); base.$or = ['manifest.rootLabel', 'draft.album.title', 'draft.album.artistName'].map(field => ({ [field]: { $regex: escaped, $options: 'i' } })); }
     let page: Record<string, unknown> = {};
     if (query.cursor !== undefined) {
@@ -130,9 +146,10 @@ export async function listAdminImports(actor: string, query: Record<string, unkn
     });
 }
 
-export function analyzeAdminImport(actor: string, id: string, raw: unknown, provider: ImportAnalysisProvider = new OpenAiImportAnalysisProvider()) {
+export const analyzeAdminImport = (actor: string, id: string, raw: unknown, provider: ImportAnalysisProvider = new OpenAiImportAnalysisProvider()) => analyzeAdminProject(actor, id, raw, provider, importPolicy);
+export function analyzeAdminProject<T>(actor: string, id: string, raw: unknown, provider: ImportAnalysisProvider, policy: AdminProjectPolicy<T>) {
     const body = mutation(raw, []);
-    return mutate(actor, id, body, 'analyze', async (doc, session) => {
+    return mutateAdminProject(actor, id, body, 'analyze', async (doc, session) => {
         admit(); if (!provider.configured()) throw new AdminImportError(503, 'ADMIN_IMPORT_PROVIDER_UNAVAILABLE');
         if (isActive(doc) || doc.analysis.chunks.some(chunk => chunk.state === 'inflight')) throw conflict('ADMIN_IMPORT_ANALYSIS_ACTIVE');
         if (doc.analysis.issue === 'providerOutcomeUnknown') throw conflict('ADMIN_IMPORT_ANALYSIS_OUTCOME_UNKNOWN');
@@ -149,16 +166,17 @@ export function analyzeAdminImport(actor: string, id: string, raw: unknown, prov
         if (doc.attemptsUsed + chunks.length > LIMITS.attempts) throw conflict('ADMIN_IMPORT_BUDGET_EXHAUSTED');
         if (doc.analysis.generation) doc.analysisHistory.push(structuredClone(doc.analysis));
         doc.analysis = { state: 'queued', generation, operationId: body.operationId, actorId: actor, grantExpiresAt: new Date(Date.now() + LIMITS.grantMs), baseline: structuredClone(doc.draft), tags, chunks, issue: null, leaseOwner: null, leaseUntil: null };
-    });
+    }, policy);
 }
 export const cancelAdminImportAnalysis = (actor: string, id: string, raw: unknown) => mutate(actor, id, mutation(raw, []), 'cancel-analysis', async doc => { if (isActive(doc)) doc.analysis.state = 'cancelled'; });
 
 function valueAt(draft: ImportDraft, suggestion: ImportSuggestion) { return suggestion.scope === 'album' ? draft.album[suggestion.field as 'title' | 'artistName' | 'releaseDate'] : draft.tracks.find(track => track.slotId === suggestion.slotId)![suggestion.field as 'title' | 'trackNumber']; }
-export function adoptAdminImportSuggestions(actor: string, id: string, raw: unknown) {
+export const adoptAdminImportSuggestions = (actor: string, id: string, raw: unknown) => adoptAdminProjectSuggestions(actor, id, raw, importPolicy);
+export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: unknown, policy: AdminProjectPolicy<T>) {
     const body = mutation(raw, ['generation', 'selectedIds', 'rejectIds']);
     if (!Number.isInteger(body.generation) || !Array.isArray(body.selectedIds) || !Array.isArray(body.rejectIds) || body.selectedIds.length + body.rejectIds.length < 1 || body.selectedIds.length + body.rejectIds.length > 203 || [...body.selectedIds, ...body.rejectIds].some(value => typeof value !== 'string' || !/^[a-f0-9]{24}$/.test(value)) || new Set([...body.selectedIds, ...body.rejectIds]).size !== body.selectedIds.length + body.rejectIds.length) return invalidImport();
     const selected = body.selectedIds as string[], rejected = body.rejectIds as string[];
-    return mutate(actor, id, body, 'adopt', async doc => {
+    return mutateAdminProject(actor, id, body, 'adopt', async doc => {
         if (doc.analysis.generation !== body.generation) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
         const targets = [...selected, ...rejected].map(id => doc.suggestions.find(s => s.id === id && s.generation === body.generation && s.decision === 'pending'));
         if (targets.some(s => !s)) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
@@ -171,7 +189,7 @@ export function adoptAdminImportSuggestions(actor: string, id: string, raw: unkn
             } else suggestion.decision = 'rejected';
         }
         doc.draft = parseDraft(doc.draft, doc.manifest);
-    });
+    }, policy);
 }
 
 export const importCandidateProjection = { name: 1, title: 1, coverArtId: 1, coverArtUrl: 1, creditRevision: 1, adminRevision: 1, albumId: 1, audioTrackIds: 1, releaseDate: 1, credits: 1, visibility: 1, lifecycleStatus: 1, uploadStatus: 1, publicationStatus: 1, mediaType: 1, s3Key: 1, mediaRepresentation: 1, mediaByteHash: 1, updatedAt: 1 };
@@ -189,7 +207,7 @@ const candidateCollection = { artist: 'artists', album: 'albums', track: 'audioT
 const readyCandidate = (kind: ImportDuplicateCandidate['kind']) => kind === 'track' ? { $and: [readyAudioStorageFilter, { $or: [{ mediaType: 'audio' }, { mediaType: { $exists: false } }] }] } : kind === 'artist' ? readyArtistLifecycleFilter : readyAlbumLifecycleFilter;
 export async function adminImportDuplicateCandidates(actor: string, id: string) {
     return withAdmin(actor, async session => {
-        const doc = await collection().findOne({ _id: idValue(id) }, { session }); if (!doc) throw notFound(); const items: ImportDuplicateCandidate[] = [];
+        const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound(); const items: ImportDuplicateCandidate[] = [];
         const labels = { artist: [doc.draft.album.artistName], album: [doc.draft.album.title], track: doc.draft.tracks.map(track => track.title) };
         const hashes = new Set((doc.media?.assets ?? []).filter(asset => asset.state === 'ready' && doc.manifest.files.some(file => file.slotId === asset.slotId)).map(asset => asset.sha256));
         for (const kind of ['artist', 'album', 'track'] as const) {
@@ -268,7 +286,7 @@ export async function runAdminImportWorkerOnce(provider: ImportAnalysisProvider 
             else {
                 const chunk = analysis.chunks.find(chunk => chunk.state === 'pending');
                 if (!chunk) { analysis.state = 'complete'; analysis.leaseOwner = null; analysis.leaseUntil = null; }
-                else { analysis.state = 'running'; chunk.state = 'inflight'; chunk.attemptId = attemptId; chunk.startedAt = now; doc.attemptsUsed++; input = { generation: analysis.generation, chunk: chunk.index, manifest: { rootLabel: doc.manifest.rootLabel, files: chunk.album ? doc.manifest.files : doc.manifest.files.filter(file => chunk.slots.includes(file.slotId)) }, baseline: { album: analysis.baseline!.album, tracks: chunk.album ? [] : analysis.baseline!.tracks.filter(track => chunk.slots.includes(track.slotId)) }, slots: chunk.slots, album: chunk.album, tags: boundedTags(analysis.tags ?? [], chunk.album ? doc.manifest.files.slice(0, 10).map(file => file.slotId) : chunk.slots) }; }
+                else { analysis.state = 'running'; chunk.state = 'inflight'; chunk.attemptId = attemptId; chunk.startedAt = now; doc.attemptsUsed++; input = { ...(doc.purpose === 'catalogReview' ? { purpose: 'catalogReview' as const } : {}), generation: analysis.generation, chunk: chunk.index, manifest: { rootLabel: doc.manifest.rootLabel, files: chunk.album ? doc.manifest.files : doc.manifest.files.filter(file => chunk.slots.includes(file.slotId)) }, baseline: { album: analysis.baseline!.album, tracks: chunk.album ? [] : analysis.baseline!.tracks.filter(track => chunk.slots.includes(track.slotId)) }, slots: chunk.slots, album: chunk.album, tags: boundedTags(analysis.tags ?? [], chunk.album ? doc.manifest.files.slice(0, 10).map(file => file.slotId) : chunk.slots) }; }
             }
             doc.revision++; doc.updatedAt = now; await collection().replaceOne({ _id: doc._id, revision: doc.revision - 1, 'analysis.leaseOwner': worker }, doc, { session });
         }, { writeConcern: { w: 'majority' } });

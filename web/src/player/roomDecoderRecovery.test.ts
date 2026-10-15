@@ -194,6 +194,31 @@ test.each(['local pause', 'permission loss', 'detach'] as const)('%s blocks the 
   room.detach();
 });
 
+test('decoder recovery during explicit resync uses seek correction without emitting shared commands', async () => {
+  const { room, state, target, install, seek, decoded, controller, onIntent } = setup();
+  await room.apply(state); decoded(4);
+  const playing = { ...state, revision: 2, status: 'playing' as const, playbackAllowed: true,
+    anchorMonotonicMs: 10000 + performance.now() };
+  await room.apply(playing);
+  await vi.advanceTimersByTimeAsync(100); target.currentTime += 0.1; controller.observe('timeupdate', target);
+  room.pauseLocally();
+  await room.apply({ ...playing, revision: 3, playbackEpoch: 2, anchorMonotonicMs: 10000 + performance.now() });
+  target.readyState = 2;
+  const loadsBeforeResync = install.mock.calls.length;
+  await room.resync();
+  expect(target.paused).toBe(true);
+  await vi.advanceTimersByTimeAsync(1000); decoded(4);
+  expect(install).toHaveBeenCalledTimes(loadsBeforeResync + 1);
+  expect(target.paused).toBe(false);
+  await vi.advanceTimersByTimeAsync(100); target.currentTime += 0.1; controller.observe('timeupdate', target);
+  const position = target.currentTime + 0.25;
+  expect(room.correct(position)).toBe('seek');
+  expect(seek).toHaveBeenLastCalledWith(position);
+  expect(target.playbackRate).toBe(1);
+  expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+});
+
 test('a failed reload does not mark a decoder as requiring the recovered-rate fallback', async () => {
   const { room, state, target, install, decoded, controller } = setup();
   await room.apply(state); decoded(2);

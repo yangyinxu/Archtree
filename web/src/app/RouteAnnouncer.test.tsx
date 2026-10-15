@@ -6,8 +6,9 @@ afterEach(cleanup);
 
 test.each([
   ['/admin/imports', 'Workbench'],
-  ['/admin/imports/new', 'New Album'],
+  ['/admin/imports/new', 'Upload new Album'],
   ['/admin/imports/111111111111111111111111', 'Album import'],
+  ['/admin/catalog-reviews/111111111111111111111111', 'Existing Album review'],
   ['/admin/catalog', 'Catalog'],
   ['/admin/catalog/album/111111111111111111111111', 'Edit catalog content'],
   ['/admin/catalog/artist/111111111111111111111111', 'Edit catalog content'],

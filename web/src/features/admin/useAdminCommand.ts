@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
 import { ApiError } from '../../api/client';
-import { adminEndpointRequest } from './adminApi';
+import { adminEndpointRequest } from './adminTransport';
 import { adminWorkspace } from './adminWorkspace';
 
 interface Intent { path: string; body: string; operationId: string; method: string }

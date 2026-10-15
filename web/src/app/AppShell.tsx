@@ -85,9 +85,10 @@ const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => {
   );
 };
 
-/** Keeps navigation, route content, and the single player mounted together. */
+/** Keeps one listening runtime behind listener routes and the independent management workspace. */
 const AppShellContent = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const capabilities = useQuery(listenerCapabilitiesQuery());
   const [nowPlayingOpen, setNowPlayingOpen] = useState(true);
   const [widePanelResizersEnabled, setWidePanelResizersEnabled] = useState(false);
@@ -95,7 +96,9 @@ const AppShellContent = () => {
   const player = usePlayer(playerStore);
   const { t } = useLocalization();
   const videoPlaying = player.currentItem?.mediaType === 'video';
+  const adminRoute = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
   const effectiveNowPlayingOpen = videoPlaying || nowPlayingOpen;
+  const listenerVideoVisible = videoPlaying && !adminRoute;
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') {
@@ -112,9 +115,9 @@ const AppShellContent = () => {
 
   return (
     <div
-      className={styles.shell}
-      data-now-playing-open={effectiveNowPlayingOpen}
-      data-video-playing={videoPlaying || undefined}
+      className={adminRoute ? styles.adminShell : styles.shell}
+      data-now-playing-open={!adminRoute && effectiveNowPlayingOpen}
+      data-video-playing={listenerVideoVisible || undefined}
       ref={shellRef}
     >
       <a className={styles.skipLink} href="#main-content" onClick={skipToMainContent}>
@@ -128,7 +131,7 @@ const AppShellContent = () => {
           <span className={styles.brandName}>Finitude</span>
         </Link>
 
-        <div className={styles.topbarCenter}>
+        <div className={styles.topbarCenter} aria-hidden={adminRoute || undefined} hidden={adminRoute} inert={adminRoute || undefined}>
           <div className={styles.historyControls} aria-label={t('shell.history.label')}>
             <button type="button" onClick={() => navigate(-1)} aria-label={t('shell.history.back')} title={t('shell.history.back')}>
               <Icon name="arrow-left" />
@@ -140,67 +143,72 @@ const AppShellContent = () => {
           <Suspense fallback={<div className={styles.search} aria-hidden="true" />}><TopSearch /></Suspense>
         </div>
 
-        <Suspense fallback={null}>
+        {!adminRoute && <Suspense fallback={null}>
           <LanguageSelector placement="mobile" />
-        </Suspense>
+        </Suspense>}
         <div className={styles.accountActions}>
-          <Suspense fallback={null}><AdminControls /></Suspense>
-          {capabilities.data?.social?.enabled && <Suspense fallback={null}><GlobalRoomInvitations /></Suspense>}
+          <Suspense fallback={null}><AdminControls hideWorkbenchLink={adminRoute} /></Suspense>
+          {capabilities.data?.social?.enabled && <Suspense fallback={null}><GlobalRoomInvitations hideEntries={adminRoute} /></Suspense>}
+          {adminRoute && <Suspense fallback={null}><LanguageSelector placement="header" /></Suspense>}
           <Suspense fallback={<span className={styles.accountLoading} aria-hidden="true" />}><AccountEntry /></Suspense>
         </div>
       </header>
 
-      <aside className={styles.sidebar} aria-label={t('shell.sidebar.label')} id="library-sidebar">
+      <aside className={styles.sidebar} aria-hidden={adminRoute || undefined} aria-label={t('shell.sidebar.label')} hidden={adminRoute} inert={adminRoute || undefined} id="library-sidebar">
         <PrimaryNavigation />
-        {capabilities.data?.playlists && (
+        {capabilities.data?.playlists && !adminRoute && (
           <Suspense fallback={<div className={styles.sidebarLoading} aria-hidden="true" />}>
             <PlaylistSidebar />
           </Suspense>
         )}
         <Suspense fallback={null}>
-          <LanguageSelector />
+          <LanguageSelector active={!adminRoute} />
         </Suspense>
       </aside>
 
-      {widePanelResizersEnabled && !videoPlaying && (
+      {widePanelResizersEnabled && !videoPlaying && !adminRoute && (
         <Suspense fallback={null}>
-          <ShellPanelResizers nowPlayingOpen={nowPlayingOpen} shellRef={shellRef} />
+          <ShellPanelResizers nowPlayingOpen={effectiveNowPlayingOpen} shellRef={shellRef} />
         </Suspense>
       )}
 
       <div className={styles.workspace}>
         <main
-          aria-hidden={videoPlaying || undefined}
+          aria-hidden={listenerVideoVisible || undefined}
           className={styles.main}
-          data-obscured={videoPlaying || undefined}
+          data-obscured={listenerVideoVisible || undefined}
           id="main-content"
-          inert={videoPlaying ? true : undefined}
+          inert={listenerVideoVisible ? true : undefined}
           tabIndex={-1}
         >
           <Outlet />
         </main>
         {videoPlaying && (
-          <Suspense fallback={<div className={styles.videoLoading} aria-hidden="true" />}>
-            <VideoTheater />
-          </Suspense>
+          <div className={styles.videoSlot} aria-hidden={adminRoute || undefined} hidden={adminRoute} inert={adminRoute || undefined}>
+            <Suspense fallback={<div className={styles.videoLoading} aria-hidden="true" />}>
+              <VideoTheater />
+            </Suspense>
+          </div>
         )}
       </div>
 
       <aside
-        aria-hidden={!effectiveNowPlayingOpen || undefined}
+        aria-hidden={adminRoute || !effectiveNowPlayingOpen || undefined}
         aria-label={t('shell.now_playing.details_label')}
         className={styles.nowPlayingSlot}
         id="now-playing-aside"
-        inert={!effectiveNowPlayingOpen ? true : undefined}
+        hidden={adminRoute}
+        inert={adminRoute || !effectiveNowPlayingOpen ? true : undefined}
       >
         <Suspense fallback={<div className={styles.asideLoading} aria-hidden="true" />}>
           <NowPlayingAside />
         </Suspense>
       </aside>
 
-      <div className={styles.playerSlot}>
+      <div className={styles.playerSlot} aria-hidden={adminRoute || undefined} hidden={adminRoute} inert={adminRoute || undefined}>
         <Suspense fallback={<div className={styles.playerLoading} aria-hidden="true" />}>
           <PlayerBar
+            active={!adminRoute}
             nowPlayingOpen={effectiveNowPlayingOpen}
             onToggleNowPlaying={videoPlaying
               ? undefined
@@ -208,7 +216,7 @@ const AppShellContent = () => {
           />
         </Suspense>
       </div>
-      <PrimaryNavigation mobile />
+      {!adminRoute && <PrimaryNavigation mobile />}
     </div>
   );
 };

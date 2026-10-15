@@ -23,6 +23,8 @@ import { createRoomRouter } from './routes/roomRoutes';
 import { createAdminCapabilitiesRouter } from './routes/adminCapabilitiesRoutes';
 import { createAdminImportRouter } from './routes/adminImportRoutes';
 import { createAdminCatalogRouter } from './routes/adminCatalogRoutes';
+import { createAdminCatalogReviewRouter } from './routes/adminCatalogReviewRoutes';
+import { createAdminConversionRouter } from './routes/adminConversionRoutes';
 import {
   attachOptionalAuth,
   requireAdmin,
@@ -262,6 +264,8 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   // Admin capabilities and import routes authorize before bounded body parsing.
   app.use('/api/admin/v1', createAdminCapabilitiesRouter());
   app.use('/api/admin/v1', createAdminImportRouter());
+  app.use('/api/admin/v1', createAdminCatalogReviewRouter());
+  app.use('/api/admin/v1', createAdminConversionRouter());
   app.use('/api/admin/v1', createAdminCatalogRouter());
 
   // Authenticate paid Naruto requests before accepting their bounded JSON bodies.

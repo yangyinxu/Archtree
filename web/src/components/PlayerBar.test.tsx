@@ -278,6 +278,47 @@ test('applies keyboard shortcuts outside editable fields and exposes accessible 
   expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument();
 });
 
+test('inactive player presentation removes shortcuts and dialogs while preserving playback', async () => {
+  setMobileViewport(false);
+  const user = userEvent.setup();
+  const { store, audioFactory } = await playerFixture();
+  const view = render(<PlayerBar store={store} />);
+  await user.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }));
+  expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+  const before = store.getSnapshot();
+  view.rerender(<PlayerBar active={false} store={store} />);
+  expect(screen.queryByRole('region', { name: 'Now playing' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  for (const key of [' ', 'ArrowLeft', 'ArrowRight', 'Escape']) {
+    const event = new KeyboardEvent('keydown', { key, cancelable: true });
+    document.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  }
+  expect(store.getSnapshot()).toBe(before);
+  view.rerender(<PlayerBar store={store} />);
+  expect(screen.getByRole('region', { name: 'Now playing' })).toBeVisible();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(audioFactory).toHaveBeenCalledTimes(1);
+  fireEvent.keyDown(document, { key: ' ' });
+  await waitFor(() => expect(store.getSnapshot().status).toBe('playing'));
+});
+
+test('inactive compact player dismisses its expanded view without changing the track', async () => {
+  setMobileViewport(true);
+  const user = userEvent.setup();
+  const { store } = await playerFixture();
+  const view = render(<PlayerBar store={store} />);
+  await user.click(screen.getByRole('button', { name: 'Open Now Playing: Still Water' }));
+  expect(screen.getByRole('dialog', { name: 'Still Water' })).toBeInTheDocument();
+  const before = store.getSnapshot();
+  view.rerender(<PlayerBar active={false} store={store} />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(store.getSnapshot()).toBe(before);
+  view.rerender(<PlayerBar store={store} />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Open Now Playing: Still Water' })).toBeVisible();
+});
+
 test('exposes five state-driven desktop transport controls', async () => {
   setMobileViewport(false);
   const user = userEvent.setup();

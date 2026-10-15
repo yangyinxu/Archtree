@@ -1,6 +1,5 @@
 import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
 import { nativeSocialBrowser } from './support/nativeSocialBrowser';
-import { capturePulseAudioDiagnostics } from './support/pulseAudioDiagnostics';
 import { installMediaEventDiagnostics, readMediaEventDiagnostics } from './support/mediaEventDiagnostics';
 import type { RoomSnapshot } from '../src/api/rooms';
 import { expectNoUnownedAxeViolations } from '../e2e/support/accessibility';
@@ -323,7 +322,7 @@ test('real social route continues background audio, arbitrates gestures, recover
     } finally {
       if (failures.length) console.log(`Non-success browser responses: ${JSON.stringify(failures)}`);
       await test.info().attach('playback-state', { body: JSON.stringify({
-        browser: browserName, phase, pulseAudio: await capturePulseAudioDiagnostics(),
+        browser: browserName, phase,
         alice: { room: aliceRoom(), media: await media(alice).catch(() => []), visibility: await alice.evaluate(() => document.visibilityState).catch(() => 'unavailable'), frames: aliceRoom.frames, closes: await transportCloses(alice).catch(() => []) },
         nativeMediaEvents: await readMediaEventDiagnostics(alice).catch(() => []),
         bob: { room: bobRoom(), media: await media(bob).catch(() => []), visibility: await bob.evaluate(() => document.visibilityState).catch(() => 'unavailable'), frames: bobRoom.frames, closes: await transportCloses(bob).catch(() => []) }, failures, backgroundEvidence
@@ -509,8 +508,7 @@ test('real room command races, controller recovery and running host transfer pre
         guestCommands, host: { room: hostState(), media: await media(host).catch(() => []),
           nativeMediaEvents: await readMediaEventDiagnostics(host).catch(() => []) },
         guest: { room: guestState(), media: await media(guest).catch(() => []),
-          nativeMediaEvents: await readMediaEventDiagnostics(guest).catch(() => []) },
-        pulseAudio: await capturePulseAudioDiagnostics() }), contentType: 'application/json' });
+          nativeMediaEvents: await readMediaEventDiagnostics(guest).catch(() => []) } }), contentType: 'application/json' });
     }
   } finally {
     await Promise.all(contexts.map(context => context.close()));

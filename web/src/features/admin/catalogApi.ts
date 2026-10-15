@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { importDateSchema } from './adminApi';
+import { importDateSchema } from './adminNamingSchema';
 export const catalogKinds = ['album', 'artist', 'audioTrack', 'organization'] as const;
 export type CatalogKind = typeof catalogKinds[number];
 const id = z.string().regex(/^[a-f0-9]{24}$/);

@@ -79,6 +79,30 @@ test('rejects an unmanifested file outside the listener assets directory', async
   await assert.rejects(stageFixture(sourceRoot), /unexpected file/i);
 });
 
+test('stages a hashed Worker bundle that a manifested chunk loads but rejects an unreferenced one', async (t) => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await writeFixtureFile(sourceRoot, 'web/dist/assets/index-AbCd1234.js', 'new Worker("/finitude/assets/conversionWorker-Wk12345678.js");\n');
+  await writeFixtureFile(sourceRoot, 'web/dist/assets/conversionWorker-Wk12345678.js', 'self.onmessage = () => {};\n');
+
+  const { outputDirectory } = await stageFixture(sourceRoot);
+  assert.match(await readFile(path.join(outputDirectory, 'web/dist/assets/conversionWorker-Wk12345678.js'), 'utf8'), /onmessage/);
+
+  const strayRoot = await createSourceFixture();
+  t.after(() => rm(strayRoot, { recursive: true, force: true }));
+  await writeFixtureFile(strayRoot, 'web/dist/assets/stray-Zx12345678.js', 'console.log("stray");\n');
+  await assert.rejects(stageFixture(strayRoot), /unmanifested asset: assets\/stray-Zx12345678\.js/);
+});
+
+test('stages the encoder license notices copied from web/public', async (t) => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await writeFixtureFile(sourceRoot, 'web/dist/licenses/mp3/NOTICES.txt', 'notices\n');
+
+  const { outputDirectory } = await stageFixture(sourceRoot);
+  assert.equal(await readFile(path.join(outputDirectory, 'web/dist/licenses/mp3/NOTICES.txt'), 'utf8'), 'notices\n');
+});
+
 for (const relativeOutput of ['docs', 'test', '.git']) {
   test(`rejects the arbitrary ${relativeOutput} output directory without changing it`, async (t) => {
     const sourceRoot = await createSourceFixture();
@@ -169,6 +193,19 @@ test('rejects an artifact without the HTTPS recovery hook', async (t) => {
   await rm(path.join(sourceRoot, '.platform/hooks/postdeploy/02_install_certbot_timer.sh'));
 
   await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
+});
+
+test('rejects an artifact without either OOTD co-host hook', async (t) => {
+  for (const hook of [
+    '.platform/hooks/postdeploy/03_cohost_ootd.sh',
+    '.platform/confighooks/postdeploy/03_cohost_ootd.sh'
+  ]) {
+    const sourceRoot = await createSourceFixture();
+    t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+    await rm(path.join(sourceRoot, hook));
+
+    await assert.rejects(stageFixture(sourceRoot), /required Elastic Beanstalk deployment file/i);
+  }
 });
 
 test('rejects an artifact without the port 443 security-group contract', async (t) => {

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { ModalDialog } from '../../components/ModalDialog';
 import type { ImportDetail } from './adminApi';
 import { importPath } from './adminApi';
@@ -82,6 +83,10 @@ export function ImportMedia({ item, operation, disabled, view, active = true }: 
     {item.publication === 'cancelled' && <p role="status">{t(publicationCleanup ? 'publication.cancelled_cleanup' : 'publication.cancelled')}</p>}
     {item.publication === 'complete' && item.published && <p role="status">{t('media.published')}</p>}
     <div className={styles.actions}>
+    {item.publication === 'complete' && item.published && <>
+      <Link className={styles.link} to={`/admin/catalog/album/${item.published.albumId}`}>{t('published.edit_album')}</Link>
+      <Link className={styles.link} to={`/admin/catalog/artist/${item.published.artistId}`}>{t('published.edit_artist')}</Link>
+    </>}
     {!publicationLocked && <button className={`${styles.button} ${styles.primary}`} disabled={disabled || !item.capabilities.publish} onClick={() => setConfirmation({ kind: 'publish', importId: item.id, revision: item.revision, label: item.draft.album.title || item.manifest.rootLabel })}>{t('action.publish')}</button>}
     {!publicationLocked && !item.capabilities.publish && <p role="status">{t('publication.unavailable')}</p>}
     {item.publication === 'needsAttention' && publishOperation && <button className={styles.button} disabled={disabled} onClick={() => operation.resume(`${path}/resume-publication`, publishOperation)}>{t('action.resume')}</button>}

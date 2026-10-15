@@ -1,43 +1,75 @@
 import { useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
-import { adminRequest, filters, workbenchSchema, type WorkbenchFilter } from './adminApi';
+import { adminEndpointRequest, adminRequest, filters, workbenchSchema, type WorkbenchFilter } from './adminApi';
+import { reviewWorkbenchSchema } from './catalogReviewApi';
 import { ImportStages, useOnline } from './AdminShared';
 import { AdminNav } from './AdminNav';
+import { adminWorkspace } from './adminWorkspace';
 import styles from './adminStyles';
 
+/** Separate private queues share filters; source navigation never admits analysis or catalog writes. */
 function Workbench() {
   const t = useAdminText();
   const access = useAdminAccess();
   const online = useOnline();
+  const [location, setLocation] = useSearchParams();
+  const source = location.get('source') === 'catalogReviews' ? 'catalogReviews' : 'imports';
+  const setSource = (value: 'imports' | 'catalogReviews') => setLocation(previous => {
+    const next = new URLSearchParams(previous);
+    if (value === 'imports') next.delete('source'); else next.set('source', value);
+    return next;
+  });
   const [filter, setFilter] = useState<WorkbenchFilter>('all');
   const [mine, setMine] = useState(false);
   const [search, setSearch] = useState('');
   const [submitted, setSubmitted] = useState('');
-  const query = useInfiniteQuery({
+  const parameters = (cursor: string | null) => {
+    const params = new URLSearchParams({ filter, limit: '25' });
+    if (mine) params.set('startedByMe', 'true');
+    if (submitted) params.set('q', submitted);
+    if (cursor) params.set('cursor', cursor);
+    return params;
+  };
+  const imports = useInfiniteQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, 'list', filter, mine, submitted],
+    enabled: source === 'imports',
     initialPageParam: null as string | null,
-    queryFn: ({ signal, pageParam }) => {
-      const params = new URLSearchParams({ filter, limit: '25' });
-      if (mine) params.set('startedByMe', 'true');
-      if (submitted) params.set('q', submitted);
-      if (pageParam) params.set('cursor', pageParam);
-      return adminRequest(`?${params}`, workbenchSchema, { signal });
-    },
+    queryFn: ({ signal, pageParam }) => adminRequest(`?${parameters(pageParam)}`, workbenchSchema, { signal }),
     getNextPageParam: page => page.nextCursor ?? undefined,
     retry: false, gcTime: 0, refetchOnWindowFocus: 'always',
     refetchInterval: query => online && query.state.data?.pages.some(page => page.items.some(item => ['running', 'queued'].includes(item.analysis.state) || item.publication === 'preparing')) ? 5000 : false
   });
-  const items = [...new Map((query.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()];
+  const reviews = useInfiniteQuery({
+    queryKey: ['admin-catalog-reviews', access.viewerId, access.epoch, access.generation, 'list', filter, mine, submitted],
+    enabled: source === 'catalogReviews',
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) => adminEndpointRequest(`/catalog-reviews?${parameters(pageParam)}`, reviewWorkbenchSchema, { signal }),
+    getNextPageParam: page => page.nextCursor ?? undefined,
+    retry: false, gcTime: 0, refetchOnWindowFocus: 'always',
+    refetchInterval: query => online && query.state.data?.pages.some(page => page.items.some(item => ['running', 'queued'].includes(item.analysis.state))) ? 5000 : false
+  });
+  const query = source === 'imports' ? imports : reviews;
+  const importItems = [...new Map((imports.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()];
+  const reviewItems = [...new Map((reviews.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()];
+  const empty = source === 'imports' ? importItems.length === 0 : reviewItems.length === 0;
+  const unfiltered = filter === 'all' && !mine && !submitted;
   return <section className={styles.page}><AdminNav />
-    <header className={styles.header}><h1 className={styles.title}>{t('workbench.title')}</h1><div className={styles.check}>
+    <header className={styles.header}><div><h1 className={styles.title}>{t('workbench.title')}</h1><div className={styles.actions}>
       <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button>
+      <Link className={styles.link} to="/admin/catalog">{t('workbench.manage_albums')}</Link>
+      <Link className={styles.link} to="/admin/conversions">{t('conversion.title')}</Link>
       {access.imports && <Link className={`${styles.link} ${styles.primary}`} to="/admin/imports/new">{t('workbench.new')}</Link>}
-    </div></header>
+    </div></div></header>
+    <div className={styles.filters} role="group" aria-label={t('workbench.source')}>
+      <button className={styles.filter} type="button" aria-pressed={source === 'imports'} onClick={() => setSource('imports')}>{t('workbench.import_source')}</button>
+      <button className={styles.filter} type="button" aria-pressed={source === 'catalogReviews'} onClick={() => setSource('catalogReviews')}>{t('workbench.review_source')}</button>
+    </div>
     <div className={styles.filters} aria-label={t('workbench.title')}>
       {filters.map(value => <button type="button" className={styles.filter} aria-pressed={value === filter} key={value} onClick={() => setFilter(value)}>
-        {t(`workbench.${value}`)}{query.data && ` (${query.data.pages[0].counts[value]})`}</button>)}
+        {t(source === 'catalogReviews' && value === 'awaitingReview' ? 'workbench.review_unfinished'
+          : source === 'catalogReviews' && value === 'completed' ? 'workbench.review_completed' : `workbench.${value}`)}{query.data && ` (${query.data.pages[0].counts[value]})`}</button>)}
     </div>
     <form className={styles.toolbar} onSubmit={event => { event.preventDefault(); setSubmitted(search.trim()); }}>
       <label className={styles.field}>{t('workbench.search')}<input className={styles.input} value={search} maxLength={100} onChange={event => setSearch(event.target.value)} /></label>
@@ -47,12 +79,39 @@ function Workbench() {
     {!online && <p role="status" className={styles.error}>{t('common.offline')}</p>}
     {query.isPending && online && <p role="status">{t('common.loading')}</p>}
     {query.isError && <div role="alert" className={styles.error}><p>{t('common.error')}</p><button className={styles.button} type="button" onClick={() => void query.refetch()}>{t('common.retry')}</button></div>}
-    {query.isSuccess && items.length === 0 && <p className={styles.empty}>{t(filter === 'all' && !mine && !submitted ? 'workbench.empty' : 'workbench.no_matches')}</p>}
-    <ul className={styles.cards}>{items.map(item => <li className={styles.card} key={item.id}>
+    {query.isSuccess && empty && <div className={styles.notice}>
+      <p>{t(unfiltered ? source === 'imports' ? 'workbench.empty' : 'workbench.review_empty' : 'workbench.no_matches')}</p>
+      {unfiltered && <Link className={styles.link} to="/admin/catalog">{t('workbench.choose_existing')}</Link>}
+    </div>}
+    <ul className={styles.cards}>{source === 'imports' ? importItems.map(item => <li className={styles.card} key={item.id}>
       <h2><Link className={styles.itemLink} to={`/admin/imports/${item.id}`}>{item.title || item.rootLabel || t('common.untitled')}</Link></h2>
       <p className={styles.muted}>{item.artistName}</p><ImportStages item={item} />
       <p className={styles.muted}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString() })}</p>
-    </li>)}</ul>
+      <Link className={styles.link} to={`/admin/imports/${item.id}`} onClick={() => {
+        if (!['preparing', 'needsAttention', 'complete'].includes(item.publication)) adminWorkspace.retain(`stage:${item.id}`, 'draft', access);
+      }}>{t(['preparing', 'needsAttention', 'complete'].includes(item.publication) ? 'workbench.open' : 'action.edit')}</Link>
+    </li>) : reviewItems.map(item => {
+      // A finished analysis is not a catalog write; applied reviews close any historical suggestions.
+      const stage = item.state === 'applied' ? 'workbench.review_closed'
+        : ['queued', 'running'].includes(item.analysis.state) ? 'workbench.review_analyzing'
+        : item.analysis.state === 'needsAttention' ? 'workbench.review_needs_attention'
+        : item.pendingSuggestions > 0 ? 'workbench.review_pending'
+        : item.analysis.state === 'complete' ? 'workbench.review_handled'
+        : item.analysis.state === 'cancelled' ? 'state.cancelled' : 'workbench.review_not_started';
+      return <li className={styles.card} key={item.id}>
+        <h2><Link className={styles.itemLink} to={`/admin/catalog-reviews/${item.id}`}>{item.title || t('common.untitled')}</Link></h2>
+        {item.state === 'applied' && <span className={styles.badge}>{t('catalog_review.applied')}</span>}
+        <dl className={styles.statusRow}>
+          <div><dt>{t('workbench.review_stage')}</dt><dd>{t(stage, { count: item.pendingSuggestions })}{['queued', 'running'].includes(item.analysis.state) && item.analysis.totalChunks > 0 && ` · ${item.analysis.completedChunks}/${item.analysis.totalChunks}`}</dd></div>
+          <div><dt>{t('workbench.review_album')}</dt><dd>{t(item.state === 'applied' ? 'workbench.review_updated' : 'workbench.review_not_updated')}</dd></div>
+        </dl>
+        <p className={styles.muted}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString() })}</p>
+        <div className={styles.actions}>
+          <Link className={styles.link} to={`/admin/catalog-reviews/${item.id}`}>{t('workbench.open_review')}</Link>
+          <Link className={styles.link} to={`/admin/catalog/album/${item.albumId}`}>{t('published.edit_album')}</Link>
+        </div>
+      </li>;
+    })}</ul>
     {query.hasNextPage && <button className={styles.button} disabled={query.isFetchingNextPage || !online} onClick={() => void query.fetchNextPage()}>{t('workbench.more')}</button>}
   </section>;
 }

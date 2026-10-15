@@ -11,7 +11,8 @@ test('admin admission defaults off and never exposes provider configuration', ()
         assert.deepEqual(getAdminCapabilities(), {
             schemaVersion: 1, admin: true,
             albumImports: { enabled: false, analysisAvailable: false, model: 'gpt-6-luna', maxFiles: 100 },
-            catalog: { editing: false, visibility: false }
+            catalog: { editing: false, visibility: false },
+            localMp3Conversion: { enabled: false, readSources: false, replace: false, preset: 'mp3-320', maxFiles: 100 }
         });
         process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true';
         process.env.OPENAI_API_KEY = 'fixture-provider-value';
@@ -19,6 +20,7 @@ test('admin admission defaults off and never exposes provider configuration', ()
         process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED = 'true';
         assert.equal(getAdminCapabilities().albumImports.analysisAvailable, true);
         assert.equal(getAdminCapabilities().catalog.visibility, false);
+        assert.deepEqual(getAdminCapabilities().localMp3Conversion, { enabled: true, readSources: true, replace: true, preset: 'mp3-320', maxFiles: 100 });
         process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'true';
         assert.equal(getAdminCapabilities().catalog.visibility, true);
         assert.equal(JSON.stringify(getAdminCapabilities()).includes('fixture-provider-value'), false);

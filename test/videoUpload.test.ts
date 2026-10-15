@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import test from 'node:test';
 
 import { videoUpload } from '../src/middleware/videoUpload';
+import { audioDiskStorage } from '../src/middleware/audioUpload';
 
 const boundary = 'finitude-video-upload-boundary';
 
@@ -75,4 +76,27 @@ test('video upload still rejects a second text field', async () => {
         parseSingleVideo(request),
         (error: any) => error?.code === 'LIMIT_FIELD_COUNT'
     );
+});
+
+test('extra or unexpected video parts reject and remove any temporary file already written', async () => {
+    const id = 'Content-Disposition: form-data; name="audioTrackId"\r\n\r\n507f1f77bcf86cd799439011';
+    const file = ['Content-Disposition: form-data; name="videoFile"; filename="performance.mp4"',
+        'Content-Type: video/mp4', '', 'not-yet-validated-mp4-bytes'].join('\r\n');
+    const unexpected = 'Content-Disposition: form-data; name="unexpected"\r\n\r\nprivate-value';
+    const paths: string[] = [], original = audioDiskStorage._handleFile;
+    audioDiskStorage._handleFile = (request, uploaded, callback) => original.call(audioDiskStorage, request, uploaded, (error, info) => {
+        if (info?.path) paths.push(info.path);
+        callback(error, info);
+    });
+    try {
+        for (const parts of [[id, file, unexpected], [id, file, file], [file, file], [id, file.replace('name="videoFile"', 'name="unexpected"')]]) {
+            await assert.rejects(parseSingleVideo(multipartRequest(parts)),
+                (error: any) => ['LIMIT_FIELD_COUNT', 'LIMIT_FILE_COUNT', 'LIMIT_PART_COUNT', 'LIMIT_UNEXPECTED_FILE'].includes(error.code));
+        }
+        assert.ok(paths.length > 0, 'the fixture exercises cleanup after disk storage starts');
+        for (const temporary of paths) await assert.rejects(fs.access(temporary), (error: any) => error.code === 'ENOENT');
+    } finally {
+        audioDiskStorage._handleFile = original;
+        await Promise.all(paths.map(temporary => fs.unlink(temporary).catch(() => undefined)));
+    }
 });

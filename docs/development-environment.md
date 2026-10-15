@@ -144,10 +144,8 @@ explicit configuration and a local FFmpeg; the deployed Content Manager page
 remains their in-app equivalent. Missing runtime makes compressed uploads
 ineligible with a retryable analysis reason while ordinary uploads/playback stay
 available. The analyzer tests intentionally require a real decoder; do not mark
-missing-decoder fixture checks as passed. Local checks preserve Chromium's
-`--disable-audio-output`; compressed-media and focused room-recovery scenarios add Firefox/WebKit hosts
-only on Linux with `CI=true` or `CI=1`, using isolated servers and the CI null
-audio sink. Local Firefox/WebKit execution remains excluded.
+missing-decoder fixture checks as passed. Browser checks run Chromium only, with
+`--disable-audio-output`.
 
 When transferring a Windows working copy into isolated Linux verification, use
 Git's canonical line endings and executable modes rather than treating a raw
@@ -162,11 +160,6 @@ renderer; they do not supply audio hardware or establish media readiness. Label
 this profile separately from default CI, retain real click and media assertions,
 and preserve a media failure even when page rendering recovers. A working
 animation or click probe is not a passing playback gate.
-
-The separate sustained-room gate and bounded options are documented in
-[`README.md`](../README.md#verify-sustained-audio-rooms-locally). It does not run
-as part of the ordinary short test matrix. It owns its resource cleanup and uses
-no workstation application database or cloud credentials.
 
 ## Disposable MongoDB tests
 
@@ -194,6 +187,9 @@ run cleanup.
 ## Windows and Linux gates
 
 `npm test` runs all portable server and Web unit tests on every supported host.
+Web tests use Vitest 4 with jsdom, collect `web/src` and the resource-budget script
+tests, clear mock call history before each test and restore spies. Deferred-account tests wait for the captured
+generation change rather than assuming when a lazy module finishes loading.
 On Linux it also runs both `*.linux.test.ts` suites: HTTPS platform hooks and
 Elastic Beanstalk artifact validation. Windows and macOS print their exclusion
 explicitly; these hosts cannot verify Bash/systemd behavior or POSIX executable
@@ -238,7 +234,7 @@ not provide the required filesystem and operating-system behavior.
 
 The release workflow continues to require unit tests (including Linux suites),
 MongoDB lifecycle integration tests, the production build, browser fixture type
-checks, Chromium/Firefox/WebKit playback and accessibility tests, and validated
+checks, Chromium playback and accessibility tests, and validated
 artifact staging. Windows checks do not replace that release matrix.
 
 ## Repairing this Windows workstation
@@ -286,7 +282,7 @@ failure without modifying browser binaries, permissions, or test assertions:
 
 ```powershell
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA 'Programs\ArchtreeRuntimes\playwright'
-npx --no-install playwright install chromium firefox webkit
+npx --no-install playwright install chromium
 npm run test:e2e
 ```
 

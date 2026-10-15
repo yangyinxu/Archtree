@@ -74,10 +74,12 @@ const expectedRootEntries = new Set([
 
 const requiredPlatformHooks = [
   '.platform/confighooks/postdeploy/01_configure_https.sh',
+  '.platform/confighooks/postdeploy/03_cohost_ootd.sh',
   '.platform/hooks/prebuild/01_install_certbot.sh',
   '.platform/hooks/prebuild/02_install_ffmpeg.sh',
   '.platform/hooks/postdeploy/01_configure_https.sh',
-  '.platform/hooks/postdeploy/02_install_certbot_timer.sh'
+  '.platform/hooks/postdeploy/02_install_certbot_timer.sh',
+  '.platform/hooks/postdeploy/03_cohost_ootd.sh'
 ];
 
 const requiredDeploymentFiles = [
@@ -284,8 +286,16 @@ const validateListenerDistribution = async (artifactRoot) => {
 
   const physicalAssetsRoot = path.join(distRoot, 'assets');
   const physicalAssets = await listFiles(physicalAssetsRoot);
+  // Vite omits Web Worker bundles from the manifest; accept a hashed asset that a manifested chunk loads by name.
+  const manifestedScripts = await Promise.all([...referencedAssets].filter(asset => asset.endsWith('.js'))
+    .map(asset => readFile(path.join(distRoot, asset), 'utf8')));
   for (const assetPath of physicalAssets) {
     const relativeAsset = path.relative(distRoot, assetPath).split(path.sep).join('/');
+    const basename = path.posix.basename(relativeAsset);
+    if (!referencedAssets.has(relativeAsset) && /-[A-Za-z0-9_-]{8,}\.js$/.test(basename)
+      && manifestedScripts.some(source => source.includes(basename))) {
+      referencedAssets.add(relativeAsset);
+    }
     if (!referencedAssets.has(relativeAsset)) {
       throw new Error(`Listener distribution contains an unmanifested asset: ${relativeAsset}`);
     }
@@ -299,13 +309,15 @@ const validateListenerDistribution = async (artifactRoot) => {
     '.vite/manifest.json',
     ...referencedAssets
   ]);
+  // web/public/licenses is copied verbatim and served at /finitude/licenses for the bundled LGPL/MPL encoder.
+  const isLicense = relative => relative === 'licenses' || relative.startsWith('licenses/');
   for (const entry of await listTreeEntries(distRoot)) {
     const relative = path.relative(distRoot, entry.path).split(path.sep).join('/');
     if (entry.type === 'directory') {
-      if (relative !== '.vite' && relative !== 'assets' && !relative.startsWith('assets/')) {
+      if (relative !== '.vite' && relative !== 'assets' && !relative.startsWith('assets/') && !isLicense(relative)) {
         throw new Error(`Listener distribution contains an unexpected directory: ${relative}`);
       }
-    } else if (!allowedFiles.has(relative)) {
+    } else if (!allowedFiles.has(relative) && !isLicense(relative)) {
       throw new Error(`Listener distribution contains an unexpected file: ${relative}`);
     }
   }

@@ -1,0 +1,113 @@
+import { adminWorkspace } from './adminWorkspace';
+import type { AdminGuard } from './adminTransport';
+import { ApiError } from '../../api/client';
+import type { conversionApi, ConversionReceipt } from './conversionApi';
+import { conversionStore, conversionEncodingResultSchema, conversionExecutorLock, conversionMaximumBytes, ConversionLocalError, conversionErrorCodes,
+  type ConversionStore, type ConversionTask, type ConversionErrorCode } from './conversionStore';
+import type { ConversionWorkerStage } from './conversionWorkerProtocol';
+
+export interface ConversionProgress { taskId: string; stage: ConversionWorkerStage | 'fetching' | 'uploading'; progress: number }
+export interface ConversionRunnerDependencies {
+  store?: ConversionStore; api?: typeof conversionApi; fetch?: typeof fetch; worker?: () => Worker; locks?: LockManager;
+}
+const interrupted = () => new ConversionLocalError('conversion_cancelled');
+const classify = (error: unknown): ConversionErrorCode => error instanceof ConversionLocalError ? error.code
+  : error instanceof DOMException && error.name === 'AbortError' ? 'conversion_cancelled'
+    : error instanceof ApiError && error.status === 409 ? 'conversion_source_changed' : 'conversion_source_unavailable';
+
+/** One owner-wide lease covers source reads, encoding and confirmation uploads across every tab. */
+export const createConversionRunner = (dependencies: ConversionRunnerDependencies = {}) => {
+  const store = dependencies.store ?? conversionStore;
+  const getApi = async () => dependencies.api ?? (await import('./conversionApi')).conversionApi;
+  const fetcher = dependencies.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+  const makeWorker = dependencies.worker ?? (() => new Worker(new URL('./conversionWorker.ts', import.meta.url), { type: 'module' }));
+  let active: { batchId: string; controller: AbortController; worker?: Worker } | null = null;
+  const listeners = new Set<() => void>();
+  const emit = () => { for (const listener of listeners) listener(); };
+  const stop = () => { active?.controller.abort(); active?.worker?.terminate(); };
+  const check = (guard: AdminGuard, signal?: AbortSignal, requireFeature = true) => {
+    if (signal?.aborted) throw interrupted();
+    if (!adminWorkspace.current(guard) || requireFeature && !adminWorkspace.getSnapshot().conversion) throw new ConversionLocalError('conversion_permission_changed');
+  };
+  const execute = async <T>(batchId: string, guard: AdminGuard, feature: boolean, action: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+    check(guard, undefined, feature); if (active) throw new ConversionLocalError('conversion_busy');
+    const running = { batchId, controller: new AbortController() }; active = running; emit();
+    const detach = adminWorkspace.subscribe(() => { if (!adminWorkspace.current(guard) || feature && !adminWorkspace.getSnapshot().conversion) stop(); });
+    const leave = () => stop(); if (typeof window !== 'undefined') window.addEventListener('pagehide', leave);
+    try {
+      const locks = dependencies.locks ?? navigator.locks;
+      if (!locks?.request) throw new ConversionLocalError('conversion_storage_unsupported');
+      return await locks.request(conversionExecutorLock(guard.viewerId), { mode: 'exclusive', ifAvailable: true }, async lock => {
+        if (!lock) throw new ConversionLocalError('conversion_busy'); check(guard, running.controller.signal, feature);
+        return action(running.controller.signal);
+      });
+    } finally { detach(); if (typeof window !== 'undefined') window.removeEventListener('pagehide', leave);
+      active?.worker?.terminate(); if (active === running) active = null; emit(); }
+  };
+  const note = async (task: ConversionTask, patch: Parameters<ConversionStore['updateTask']>[3], guard: AdminGuard) =>
+    store.updateTask(task.ownerId, task.batchId, task.id, patch, guard);
+  const run = (batchId: string, guard: AdminGuard, progress?: (event: ConversionProgress) => void) => execute(batchId, guard, true, async signal => {
+    const batch = await store.get(guard.viewerId, batchId, guard);
+    for (const selected of batch.tasks) {
+      check(guard, signal); let task = selected;
+      if (task.cacheRemoved || task.status === 'uploaded') continue;
+      try {
+        if (task.source.kind === 'remote' && !task.intent) {
+          const fresh = await (await getApi()).source('tracks', task.source.track.id, guard, signal); check(guard, signal);
+          const current = fresh.tracks[0];
+          if (fresh.tracks.length !== 1 || current.id !== task.source.track.id || current.revision !== task.source.track.revision
+            || current.sourceRevision !== task.source.track.sourceRevision || JSON.stringify(fresh.album) !== JSON.stringify(batch.album)) throw new ConversionLocalError('conversion_source_changed');
+        }
+        if (task.intent && task.source.kind === 'remote') {
+          try {
+            let original = (await (await getApi()).read(task.source.track.id, task.intent.operationId, guard, signal)).operation;
+            if (original.cleanupPending || !original.ready && original.status !== 'awaitingUpload') original = (await (await getApi()).reconcile(task.source.track.id, task.intent.operationId, guard, signal)).operation;
+            check(guard, signal); task = await receipt(task, original, guard);
+            if (original.ready) { await store.cleanupConfirmed(task, { ready: true, trackId: original.trackId, sha256: original.output.sha256, byteLength: original.output.byteLength }); continue; }
+            if (original.issue === 'ADMIN_CONVERSION_CANCELLED' || original.cleanupPending) throw new ConversionLocalError('conversion_cancelled');
+          } catch (error) { if (!(error instanceof ApiError && error.status === 404)) throw error; }
+        }
+        if (task.result) {
+          try { await store.getOutputFile(task); await note(task, { status: task.intent ? 'needsAttention' : 'complete', error: task.intent ? 'conversion_upload_unknown' : null }, guard); continue; }
+          catch (error) {
+            if (!task.intent && !batch.importIntent) task = await note(task, { result: null, status: 'queued', error: null }, guard);
+          }
+        }
+        const file = await (await import('./conversionDownload')).downloadConversionSource(task, batch, guard, signal, progress, store, await getApi(), fetcher, check, (code): never => { throw new ConversionLocalError(code); }, conversionMaximumBytes); task = (await store.get(guard.viewerId, batchId, guard)).tasks.find(item => item.id === task.id)!;
+        task = await note(task, { status: 'encoding', error: null }, guard); task = await (await import('./conversionEncode')).encodeConversionTask(task, file, guard, signal, progress, { store, check, makeWorker,
+          parseResult: value => conversionEncodingResultSchema.parse(value), ErrorClass: ConversionLocalError, errorCodes: conversionErrorCodes,
+          activeWorker: (worker, registered) => { if (registered) { if (active) active.worker = worker; } else if (active?.worker === worker) active.worker = undefined; } });
+        if (task.intent) await note(task, { status: 'needsAttention', error: 'conversion_upload_unknown' }, guard);
+      } catch (error) {
+        if (adminWorkspace.current(guard)) await note(task, { status: signal.aborted ? 'paused' : 'needsAttention', error: classify(error) }, guard);
+        if (signal.aborted || !adminWorkspace.current(guard)) throw error;
+      }
+    }
+    return store.get(guard.viewerId, batchId, guard);
+  });
+  const receipt = async (task: ConversionTask, received: ConversionReceipt, guard: AdminGuard) => {
+    if (!task.intent || task.source.kind !== 'remote' || received.operationId !== task.intent.operationId || received.trackId !== task.source.track.id
+      || received.output.sha256 !== task.intent.output.sha256 || received.output.byteLength !== task.intent.output.byteLength || received.output.preset !== 'mp3-320') throw new ConversionLocalError('conversion_output_invalid');
+    return note(task, { receipt: received }, guard);
+  };
+  const upload = async (batchId: string, guard: AdminGuard, taskIds?: string[], approvedTasks?: ConversionTask[]) => {
+    check(guard, undefined, false); const frozen = await store.get(guard.viewerId, batchId, guard);
+    if (frozen.kind !== 'existing') throw new ConversionLocalError('conversion_state_invalid');
+    const ids = taskIds ?? frozen.tasks.filter(task => task.result || task.intent).map(task => task.id);
+    if (!ids.length || new Set(ids).size !== ids.length || ids.some(id => !frozen.tasks.some(task => task.id === id))) throw new ConversionLocalError('conversion_state_invalid');
+    const approved = approvedTasks ?? frozen.tasks.filter(task => ids.includes(task.id));
+    if (approved.length !== ids.length || new Set(approved.map(task => task.id)).size !== ids.length || approved.some(task => task.ownerId !== guard.viewerId || task.batchId !== batchId || !ids.includes(task.id))) throw new ConversionLocalError('conversion_state_invalid');
+    return execute(batchId, guard, false, async signal => (await import('./conversionUpload')).uploadConversionTasks(frozen, ids, approved, guard, signal,
+      { store, getApi, check, note, receipt, ErrorClass: ConversionLocalError, isNotFound: error => error instanceof ApiError && error.status === 404, current: adminWorkspace.current }));
+  };
+  const cancel = (task: ConversionTask, guard: AdminGuard) => execute(task.batchId, guard, false, async signal => {
+    const batch = await store.get(guard.viewerId, task.batchId, guard), current = batch.tasks.find(item => item.id === task.id);
+    if (!current?.intent || current.source.kind !== 'remote') throw new ConversionLocalError('conversion_state_invalid');
+    try { const result = await (await getApi()).cancel(current.source.track.id, current.intent.operationId, guard, signal); check(guard, signal, false);
+      await receipt(current, result.operation, guard); return note(current, { status: 'needsAttention', error: 'conversion_cancelled' }, guard); }
+    catch (error) { if (adminWorkspace.current(guard)) await note(current, { status: 'needsAttention', error: 'conversion_upload_unknown' }, guard); throw error; }
+  });
+  return { run, stop, upload, cancel, getActiveBatch: () => active?.batchId ?? null,
+    subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; } };
+};
+export const conversionRunner = createConversionRunner();

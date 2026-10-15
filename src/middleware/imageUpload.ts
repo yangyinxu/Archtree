@@ -35,12 +35,11 @@ export const artistReleaseImageUpload = multer({
 export const avatarUpload = multer({
     storage,
     limits: {
-        // Busboy emits the limit event when the size reaches the ceiling.
-        fileSize: maxAvatarUploadMb * 1024 * 1024 + 1,
+        // Multer converts these inclusive maxima to Busboy's exclusive thresholds.
+        fileSize: maxAvatarUploadMb * 1024 * 1024,
         files: 1,
         fields: 0,
-        // Busboy's parts ceiling is exclusive of the one accepted file part.
-        parts: 2,
+        parts: 1,
         fieldNameSize: 100,
         fieldSize: 1024,
         headerPairs: 100

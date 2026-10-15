@@ -18,6 +18,23 @@ test('the Files section identifies its own task and leaves publication actions i
   expect(screen.getAllByLabelText('Select original file')).toHaveLength(3);
   expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
 });
+test('a completed publication links confirmed catalog identities without reopening or publishing the historical import', () => {
+  const item = detail(); item.publication = 'complete'; item.capabilities.publish = true;
+  item.published = { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: [] };
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {});
+  mount(item, operation, 'publication');
+  expect(screen.getByRole('link', { name: 'Edit published Album' })).toHaveAttribute('href', '/admin/catalog/album/111111111111111111111111');
+  expect(screen.getByRole('link', { name: 'Edit Artist' })).toHaveAttribute('href', '/admin/catalog/artist/222222222222222222222222');
+  expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
+  expect(run).not.toHaveBeenCalled();
+});
+test.each(['notStarted', 'complete'] as const)('catalog edit links require complete publication and its confirmed identities (%s)', publication => {
+  const item = detail(); item.publication = publication;
+  item.published = publication === 'complete' ? null : { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: [] };
+  mount(item, new AdminMutation(), 'publication');
+  expect(screen.queryByRole('link', { name: 'Edit published Album' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Edit Artist' })).not.toBeInTheDocument();
+});
 test('an upload receipt with unknown storage outcome retains identical multipart bytes and original key until ready', async () => {
   const requests: RequestInit[] = []; const item = detail();
   vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => { requests.push(init); const operationId = new Headers(init.headers).get('Idempotency-Key')!; return json({ item: { ...item, assets: [{ slotId, state: requests.length === 1 ? 'unknown' : 'ready', byteLength: 3, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: { operationId, expectedRevision: 1, kind: 'upload', startedByMe: true } }] }, receipt: { operationId, kind: 'upload', revision: 2 } }); }));

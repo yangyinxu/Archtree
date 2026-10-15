@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { useEffect } from 'react';
 import { browserSessionQueryKey, browserSessionResolvingQueryKey } from '../../api/session';
 import { advanceAccountEpoch } from '../../api/accountEpoch';
 import { socialRolloutGateEvent } from '../../api/client';
@@ -23,10 +24,11 @@ const invitation = (): RoomInvitation => ({ invitationId: 'invitation-a', genera
 const show = (viewerId: string | null = 'viewer-a', social?: SocialRollout) => {
   const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }), social);
   client.setQueryData(browserSessionQueryKey, viewerId ? { user: { id: viewerId } } : null);
-  const view = render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/search']}>
-    <GlobalRoomInvitations />
-  </MemoryRouter></QueryClientProvider>);
-  return { client, ...view };
+  const surface = (hideEntries = false) => <QueryClientProvider client={client}><MemoryRouter initialEntries={['/search']}>
+    <GlobalRoomInvitations hideEntries={hideEntries} />
+  </MemoryRouter></QueryClientProvider>;
+  const view = render(surface());
+  return { client, hideEntries: (hidden: boolean) => view.rerender(surface(hidden)), ...view };
 };
 beforeEach(() => {
   vi.clearAllMocks(); mocks.profile.mockResolvedValue({ profile }); mocks.invitations.mockResolvedValue({ invitations: [] });
@@ -152,6 +154,30 @@ test('social without rooms hides room entry points while transport and listening
   act(() => { seedListenerCapabilities(client); });
   expect(await screen.findByRole('link', { name: 'Room invitations' })).toBeVisible();
   expect(screen.getByRole('link', { name: /^Open room/ })).toBeVisible();
+});
+
+test('hiding management entry points keeps room transport and listening publication mounted', async () => {
+  const mounted = vi.fn(), stopped = vi.fn();
+  mocks.publisher.mockImplementation(() => {
+    useEffect(() => { mounted(); return stopped; }, []);
+    return null;
+  });
+  const { hideEntries, client } = show();
+  await screen.findByRole('link', { name: 'Room invitations' });
+  await waitFor(() => expect(mounted).toHaveBeenCalledTimes(1));
+  const connectionCount = mocks.ensure.mock.calls.length;
+  hideEntries(true);
+  expect(screen.queryByRole('link', { name: /^Room invitations/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /^Open room/ })).not.toBeInTheDocument();
+  expect(stopped).not.toHaveBeenCalled();
+  expect(mocks.ensure).toHaveBeenCalledTimes(connectionCount);
+  const invalidate = vi.spyOn(client, 'invalidateQueries');
+  act(() => window.dispatchEvent(new Event(socialRolloutGateEvent)));
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: listenerCapabilitiesQueryKey });
+  hideEntries(false);
+  await screen.findByRole('link', { name: 'Room invitations' });
+  expect(mounted).toHaveBeenCalledTimes(1);
+  expect(stopped).not.toHaveBeenCalled();
 });
 
 test('a rollout gate response refreshes public and account room capabilities until unmounted', async () => {

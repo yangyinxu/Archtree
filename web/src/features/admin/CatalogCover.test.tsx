@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { captureAccountOperation } from '../../api/accountEpoch';
@@ -8,7 +8,7 @@ import { detail, json, projectId, session, slotId, viewer } from './adminFixture
 import type { CatalogItem } from './catalogApi';
 const item:CatalogItem={kind:'artist',id:'111111111111111111111111',revision:`cr_${'a'.repeat(43)}`,visibility:'public',effectiveVisibility:'public',coverUrl:'/api/admin/v1/catalog/artist/111111111111111111111111/artwork',mediaUrl:null,capabilities:{editing:true,visibility:true},fields:{name:'Synthetic artist',bio:'',birthDate:null}};
 const operationId='30000000-0000-4000-8000-000000000003';
-function mount(removed=vi.fn(),snapshot:CatalogItem|null=item){const client=new QueryClient();client.setQueryData(['browser-session'],session);const confirmed=vi.fn();render(<QueryClientProvider client={client}><MemoryRouter><CatalogCover item={snapshot} kind={item.kind} id={item.id} disabled={false} onConfirmed={confirmed} onRemoved={removed}/></MemoryRouter></QueryClientProvider>);return confirmed;}
+function mount(removed=vi.fn(),snapshot:CatalogItem|null=item,options:{disabled?:boolean;approvalDisabled?:boolean}={}){const client=new QueryClient();client.setQueryData(['browser-session'],session);const confirmed=vi.fn();render(<QueryClientProvider client={client}><MemoryRouter><CatalogCover item={snapshot} kind={item.kind} id={item.id} disabled={options.disabled??false} approvalDisabled={options.approvalDisabled} onConfirmed={confirmed} onRemoved={removed}/></MemoryRouter></QueryClientProvider>);return confirmed;}
 beforeEach(()=>{adminWorkspace.reset();adminWorkspace.authorize(captureAccountOperation(viewer),true,true,undefined,{editing:true,visibility:true});adminWorkspace.select('admin');});
 afterEach(()=>{cleanup();adminWorkspace.reset();vi.unstubAllGlobals();});
 test('ready source cover selection captures both revisions and requires separate approval; cleanup pending is confirmed success',async()=>{
@@ -19,7 +19,7 @@ test('ready source cover selection captures both revisions and requires separate
     if(path.includes('/imports?')){const {manifest,draft,suggestions,decisions:_decisions,capabilities:_capabilities,receipts:_receipts,assets:_assets,published:_published,publicationRecovery:_recovery,selectedCoverSlotId:_selected,...common}=source;return json({items:[{...common,title:'Synthetic source',rootLabel:manifest.rootLabel,artistName:'',visibility:'hidden',pendingSuggestions:suggestions.length}],counts:{all:1,analyzing:0,awaitingReview:1,needsAttention:0,completed:0},nextCursor:null});}
     return json({item:source,receipt:null});
   }));
-  const confirmed=mount();await waitFor(()=>expect(screen.getByRole('button',{name:'Choose from import projects'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Choose from import projects'}));fireEvent.click(await screen.findByRole('button',{name:'Synthetic source'}));fireEvent.click(await screen.findByRole('button',{name:/Use this image/}));expect(writes).toHaveLength(0);fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Replace catalog cover'}));
+  const confirmed=mount();expect(screen.getByText('Choose a ready image from an import project. Replacing or removing the cover requires its own confirmation.')).toBeVisible();await waitFor(()=>expect(screen.getByRole('button',{name:'Choose from import projects'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Choose from import projects'}));fireEvent.click(await screen.findByRole('button',{name:'Synthetic source'}));fireEvent.click(await screen.findByRole('button',{name:/Use this image/}));expect(writes).toHaveLength(0);fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Replace catalog cover'}));
   await waitFor(()=>expect(confirmed).toHaveBeenCalledWith(item));expect(writes[0]).toMatchObject({expectedRevision:item.revision,expectedSourceRevision:source.revision,importId:projectId,slotId:'cover'});expect(await screen.findByText('The cover change is confirmed. Previous image cleanup still needs attention.')).toBeVisible();
 });
 test('after reopening, only the initiating administrator can reconcile original cover receipt without generating a new key',async()=>{
@@ -66,4 +66,50 @@ test('a confirmed cancellation cannot reopen an obsolete approval from a delayed
   fireEvent.click(cleanup);
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1]).toBe(`/api/admin/v1/catalog/artist/${item.id}/cover-operations/${operationId}/reconcile`);
+});
+
+test.each(['complete','cancelled'] as const)('editing disabled still recovers historical %s cleanup without adopting a manual draft', async state => {
+  const snapshot={...item,capabilities:{editing:false,visibility:true}},dirty={base:item,fields:{...item.fields,name:'Unsaved manual name'},visibility:item.visibility,dirty:true};
+  adminWorkspace.authorize(captureAccountOperation(viewer),true,true,undefined,{editing:false,visibility:true});
+  adminWorkspace.retain(`catalog:artist:${item.id}`,dirty,adminWorkspace.capture());
+  const writes:Array<{path:string;body:string}>=[];
+  vi.stubGlobal('fetch',vi.fn(async(path:string,init:RequestInit)=>{
+    if(init.method==='POST'){writes.push({path,body:String(init.body)});return json({item:snapshot,receipt:{operationId},coverOperation:{state,cleanupPending:false}});}
+    return json({items:[{operationId,startedByMe:state==='complete',state,cleanupPending:true}]});
+  }));
+  const confirmed=mount(vi.fn(),snapshot,{approvalDisabled:true});
+  expect(screen.getByRole('button',{name:'Choose from import projects'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Remove catalog cover'})).toBeDisabled();
+  const recover=await screen.findByRole('button',{name:state==='cancelled'?'Retry cleanup':'Resume operation'});expect(recover).toBeEnabled();fireEvent.click(recover);
+  await waitFor(()=>expect(confirmed).toHaveBeenCalledWith(snapshot));
+  expect(writes).toEqual([{path:`/api/admin/v1/catalog/artist/${item.id}/cover-operations/${operationId}/reconcile`,body:'{}'}]);
+  expect(adminWorkspace.buffer(`catalog:artist:${item.id}`)).toEqual(dirty);
+});
+
+test('editing disabled retains an explicit current-revision cancellation and its cleanup receipt', async () => {
+  const snapshot={...item,capabilities:{editing:false,visibility:true}},writes:Array<{path:string;body:string}>=[];
+  adminWorkspace.authorize(captureAccountOperation(viewer),true,true,undefined,{editing:false,visibility:true});
+  vi.stubGlobal('fetch',vi.fn(async(path:string,init:RequestInit)=>{
+    if(init.method==='POST'){writes.push({path,body:String(init.body)});return json({item:snapshot,receipt:{operationId:JSON.parse(String(init.body)).operationId},coverOperation:{state:'cancelled',cleanupPending:true}});}
+    return json({items:[{operationId,startedByMe:false,state:'needsAttention',cleanupPending:false}]});
+  }));mount(vi.fn(),snapshot,{approvalDisabled:true});
+  const cancel=await screen.findByRole('button',{name:'Cancel approval'});expect(cancel).toBeEnabled();fireEvent.click(cancel);expect(writes).toHaveLength(0);
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Cancel approval'}));await waitFor(()=>expect(writes).toHaveLength(1));
+  expect(writes[0].path).toBe(`/api/admin/v1/catalog/artist/${item.id}/cover-operations/${operationId}/cancel`);
+  expect(JSON.parse(writes[0].body)).toMatchObject({expectedRevision:item.revision});expect(JSON.parse(writes[0].body).operationId).not.toBe(operationId);
+  expect(await screen.findByRole('button',{name:'Retry cleanup'})).toBeEnabled();
+});
+
+test('a capability change invalidates an already open new cover approval before any write', async () => {
+  const writes:RequestInit[]=[];vi.stubGlobal('fetch',vi.fn(async(_path:string,init:RequestInit)=>{if(init.method==='DELETE')writes.push(init);return json({items:[]});}));mount();
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Remove catalog cover'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Remove catalog cover'}));
+  act(()=>adminWorkspace.authorize(captureAccountOperation(viewer),true,true,undefined,{editing:false,visibility:true}));
+  const confirm=within(screen.getByRole('dialog')).getByRole('button',{name:'Remove catalog cover'});expect(confirm).toBeDisabled();fireEvent.click(confirm);expect(writes).toHaveLength(0);
+});
+
+test.each(['offline','running'] as const)('historical recovery still obeys the %s fence', async fence => {
+  if(fence==='offline')vi.stubGlobal('navigator',{...navigator,onLine:false});
+  vi.stubGlobal('fetch',vi.fn(async()=>json({items:[{operationId,startedByMe:true,state:'needsAttention',cleanupPending:false}]})));
+  mount(vi.fn(),item,{disabled:fence==='running',approvalDisabled:true});
+  expect(await screen.findByRole('button',{name:'Resume operation'})).toBeDisabled();expect(screen.getByRole('button',{name:'Cancel approval'})).toBeDisabled();
 });

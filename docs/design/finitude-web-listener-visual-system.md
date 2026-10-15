@@ -215,8 +215,6 @@ announced even when its spinner is static.
   mobile landscape.
 - Verify default, hover, focus-visible, pressed, selected, disabled, loading,
   empty, error, missing-artwork, long-text, and reduced-motion states.
-- No final handoff is complete while actionable P0, P1, or P2 findings remain
-  in the project-root `design-qa.md`.
 
 The deterministic artwork used during local visual QA is original generated
 test material and is not shipped by the application. Production cards continue

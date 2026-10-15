@@ -11,14 +11,15 @@ const filePart = (size = 3) => [
 ].join('\r\n');
 
 /** Mirrors the native Data and Web Blob single-file multipart contract. */
-const parse = async (parts: string[]) => {
+const requestFor = (parts: string[]) => {
     const body = Buffer.from([...parts.map(part => `--${boundary}\r\n${part}\r\n`), `--${boundary}--\r\n`].join(''));
     const request: any = Readable.from([body]);
     request.headers = { 'content-type': `multipart/form-data; boundary=${boundary}`, 'content-length': String(body.length) };
     request.method = 'PUT';
-    await new Promise<void>((resolve, reject) => avatarUpload.single('avatar')(request, {} as any, error => error ? reject(error) : resolve()));
     return request;
 };
+const parseRequest = (request: any) => new Promise<void>((resolve, reject) => avatarUpload.single('avatar')(request, {} as any, error => error ? reject(error) : resolve()));
+const parse = async (parts: string[]) => { const request = requestFor(parts); await parseRequest(request); return request; };
 
 test('avatar parser retains native and Web one-file requests at the image ceiling', async () => {
     const request = await parse([filePart(maxAvatarUploadMb * 1024 * 1024)]);
@@ -33,6 +34,37 @@ test('avatar parser rejects text fields and extra files before retaining arbitra
         (error: any) => ['LIMIT_FILE_COUNT', 'LIMIT_PART_COUNT'].includes(error.code));
     await assert.rejects(parse([filePart(maxAvatarUploadMb * 1024 * 1024 + 1)]),
         (error: any) => error.code === 'LIMIT_FILE_SIZE');
+});
+
+test('avatar parser rejects one byte beyond the exact image ceiling without retaining the file buffer', async () => {
+    const request = requestFor([filePart(maxAvatarUploadMb * 1024 * 1024 + 1)]);
+    await assert.rejects(parseRequest(request), (error: any) => error.code === 'LIMIT_FILE_SIZE');
+    assert.equal(request.file?.buffer, undefined);
+    assert.deepEqual(Object.keys(request.body), []);
+});
+
+test('disallowed text parts before or after the avatar never become a retained request body', async () => {
+    for (const field of [
+        'Content-Disposition: form-data; name="avatar"\r\n\r\n',
+        'Content-Disposition: form-data; name="unexpected[1000000000]"\r\n\r\nprivate-value',
+        'Content-Disposition: form-data; name="__proto__[secret]"\r\n\r\nprivate-value'
+    ]) {
+        for (const parts of [[field, filePart()], [filePart(), field]]) {
+            const request = requestFor(parts);
+            await assert.rejects(parseRequest(request), (error: any) => ['LIMIT_FIELD_COUNT', 'LIMIT_PART_COUNT'].includes(error.code));
+            assert.deepEqual(Object.keys(request.body), []);
+            assert.equal(request.file?.buffer, undefined);
+        }
+    }
+});
+
+test('a second or unexpected avatar file leaves no retained image buffer', async () => {
+    for (const parts of [[filePart(), filePart()], [filePart().replace('name="avatar"', 'name="unexpected"')]]) {
+        const request = requestFor(parts);
+        await assert.rejects(parseRequest(request), (error: any) => ['LIMIT_FILE_COUNT', 'LIMIT_PART_COUNT', 'LIMIT_UNEXPECTED_FILE'].includes(error.code));
+        assert.equal(request.file?.buffer, undefined);
+        assert.deepEqual(Object.keys(request.body), []);
+    }
 });
 
 test('avatar request envelope rejects oversized or unbounded streams before parsing', () => {

@@ -16,9 +16,8 @@ export const videoUpload = multer({
         fileSize: maxVideoUploadMb * 1024 * 1024,
         files: 1,
         fields: 1,
-        // Busboy emits partsLimit when the count reaches this value, so the
-        // expected one ID field plus one file needs an exclusive ceiling of 3.
-        parts: 3,
+        // Multer treats this as the inclusive maximum: one ID field plus one file.
+        parts: 2,
         fieldNameSize: 100,
         fieldSize: 1024,
         headerPairs: 100

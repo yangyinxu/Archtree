@@ -12,9 +12,10 @@ export interface AdminWorkspaceState {
   analysis: boolean;
   catalogEditing: boolean;
   catalogVisibility: boolean;
+  conversion: boolean;
 }
 
-let state: AdminWorkspaceState = { viewerId: '', epoch: -1, authorized: false, mode: 'user', generation: 0, authority: 0, imports: false, analysis: false, catalogEditing: false, catalogVisibility: false };
+let state: AdminWorkspaceState = { viewerId: '', epoch: -1, authorized: false, mode: 'user', generation: 0, authority: 0, imports: false, analysis: false, catalogEditing: false, catalogVisibility: false, conversion: false };
 const listeners = new Set<() => void>();
 /** Private editing buffers survive view/route changes, never an account or permission change. */
 const buffers = new Map<string, unknown>();
@@ -25,17 +26,17 @@ export const adminWorkspace = {
   subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   reset() {
     buffers.clear();
-    state = { viewerId: '', epoch: -1, authorized: false, mode: 'user', generation: state.generation + 1, authority: state.authority + 1, imports: false, analysis: false, catalogEditing: false, catalogVisibility: false };
+    state = { viewerId: '', epoch: -1, authorized: false, mode: 'user', generation: state.generation + 1, authority: state.authority + 1, imports: false, analysis: false, catalogEditing: false, catalogVisibility: false, conversion: false };
     emit();
   },
   suspend() {
     state = { ...state, authorized: false, generation: state.generation + 1 }; emit();
   },
-  authorize(guard: AccountOperationGuard, imports: boolean, analysis: boolean, authority = state.authority, catalog = { editing: false, visibility: false }) {
+  authorize(guard: AccountOperationGuard, imports: boolean, analysis: boolean, authority = state.authority, catalog = { editing: false, visibility: false }, conversion = false) {
     if (!isAccountOperationCurrent(guard) || authority !== state.authority) return;
     const same = state.viewerId === guard.viewerId && state.epoch === guard.epoch;
     if (!same) buffers.clear();
-    state = { viewerId: guard.viewerId, epoch: guard.epoch, authorized: true, imports, analysis, authority, catalogEditing: catalog.editing, catalogVisibility: catalog.visibility,
+    state = { viewerId: guard.viewerId, epoch: guard.epoch, authorized: true, imports, analysis, authority, catalogEditing: catalog.editing, catalogVisibility: catalog.visibility, conversion,
       mode: same ? state.mode : 'user', generation: same ? state.generation : state.generation + 1 };
     emit();
   },

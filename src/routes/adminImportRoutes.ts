@@ -49,7 +49,7 @@ export function createAdminImportRouter(storage: ImportObjectStorage = defaultIm
         return resumeAdminImportPublication(actor, req.params.id, req.body.operationId, storage);
     })));
     const temporary = new WeakMap<express.Request, string[]>();
-    const upload = multer({ storage: multer.diskStorage({ destination: os.tmpdir(), filename(req, file, callback) { const extension = path.extname(file.originalname).slice(0, 16).replace(/[^.a-zA-Z0-9]/g, ''); const name = `archtree-import-${randomUUID()}${extension}`; const paths = temporary.get(req) ?? []; paths.push(path.join(os.tmpdir(), name)); temporary.set(req, paths); callback(null, name); } }), limits: { files: 1, fileSize: maxAudioUploadMb * 1024 ** 2, fields: 0, parts: 2 } }).single('file');
+    const upload = multer({ storage: multer.diskStorage({ destination: os.tmpdir(), filename(req, file, callback) { const extension = path.extname(file.originalname).slice(0, 16).replace(/[^.a-zA-Z0-9]/g, ''); const name = `archtree-import-${randomUUID()}${extension}`; const paths = temporary.get(req) ?? []; paths.push(path.join(os.tmpdir(), name)); temporary.set(req, paths); callback(null, name); } }), limits: { files: 1, fileSize: maxAudioUploadMb * 1024 ** 2, fields: 0, parts: 1 } }).single('file');
     router.post('/imports/:id/assets/:slotId', (req, res, next) => {
         if (!importEnabled() || !importPrivateStorageReady()) return res.status(503).json({ code: 'ADMIN_IMPORT_STORAGE_UNAVAILABLE' });
         try { importMediaMutationHeaders(req.get('Idempotency-Key'), req.get('If-Match')); if (!objectId(req.params.id) || (req.params.slotId !== 'cover' && !uuid(req.params.slotId))) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT'); next(); }

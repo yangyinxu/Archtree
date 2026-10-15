@@ -81,7 +81,7 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. Startup verifies the `required-indexes-v7-artist-follows` constraints before
+new scope after rotation. Startup verifies the `required-indexes-v9-administrator-conversions` constraints before
 admission; these are additive schema changes even when the feature is disabled.
 
 See [the social API contract](docs/architecture.md#social-identity-and-relationship-api)
@@ -417,28 +417,11 @@ output or physical headphone routing.
 The compressed-media social scenario uploads original CBR MP3, Xing VBR MP3 and
 AAC-LC M4A fixtures through the production storage lifecycle. It checks pinned
 HEAD/Range responses, real decoding, readiness, seeking, cross-format advancement
-and absence of command echoes. In Linux CI (`CI=true` or `CI=1`), the same
-scenario also runs with Firefox and WebKit hosts, each paired with an isolated
-Chromium guest and its own server/database. Dedicated Firefox/WebKit room projects
-also verify explicit controller recovery after reload and host transfer during
-playback, with both participants using the selected engine. These extra projects
-are collected only on Linux CI; browser-specific results remain separate from
-Chromium proof. Chromium retains the separate strict native-background scenario.
-The Firefox and WebKit compressed-media projects (`firefox-audio-formats`,
-`webkit-audio-formats`) are included in the blocking Linux social gate with
-every other project. To reproduce just this pair on Linux with the CI audio sink:
-`CI=1 xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web -- --project=firefox-audio-formats --project=webkit-audio-formats`.
-Checked on 2026-10-12: the complete blocking gate passed for both the
-[pull request](https://github.com/yangyinxu/Archtree/actions/runs/38169379414)
-and [merged main `2c1cf6e`](https://github.com/yangyinxu/Archtree/actions/runs/38170519764).
-Each run passed all 17 social scenarios, including the Firefox/WebKit audio and
-recovery projects, plus 347 listener browser tests with 10 intentional
-Chromium-owned skips. The production `/finitude/` HTML and its four directly
-referenced JS/CSS resources also matched that main artifact byte for byte.
-The [release matrix](docs/testing/finitude-web-release-matrix.md#verified-release-status--checked-2026-10-12)
-records the exact identities and evidence limits. Production rooms remain disabled;
-the controlled rollout checks are still required before public enablement (see the
-[social rollout runbook](docs/deployment/social-rollout-runbook.md#cross-engine-audio-acceptance-blocks-enabling-rooms)).
+and absence of command echoes. All social projects run in Chromium only; the
+earlier Firefox/WebKit real-audio projects were removed because their Linux
+audio stack made CI flaky without catching product bugs. Production rooms remain
+disabled; the controlled rollout checks are still required before public
+enablement (see the [social rollout runbook](docs/deployment/social-rollout-runbook.md)).
 Later production checks on 2026-10-12 completed QA registration, verified-email
 login and registration-link replay rejection. Already-registered and six-digit
 password-reset emails were received; reset completion and session revocation
@@ -490,35 +473,18 @@ transitions on a decoder that already needed recovery. A new occurrence resumes
 normal rate correction. Rate restoration never authorizes a seek from stale
 readiness or permission state.
 CI runs these scenarios in their own job and uploads `finitude-social-browser-evidence`
-from it whether they pass or fail; the MongoDB integration and ordinary browser
-gates run in parallel jobs.
-The isolated PulseAudio sink uses a requested 100 ms device-buffer budget
-(`PULSE_LATENCY_MSEC=100`); its unrestricted default can introduce seconds of
-output buffering (see [PulseAudio latency control](https://www.freedesktop.org/software/pulseaudio/doxygen/structpa__buffer__attr.html)).
-This changes only the simulated output device, with no browser media-clock
-substitution or readiness/drift threshold changes. Compressed-audio evidence
-records the observed stream/sink latencies when available, continuous playback
-advancement, and capture-time-adjusted drift. These results do not establish a
-latency guarantee for arbitrary physical or Bluetooth output devices.
+when they fail; the MongoDB integration and ordinary browser gates run in parallel jobs.
 
 In isolated Linux CI (`CI=true` or `CI=1`), the native-tab fixture matches
 Playwright's default `--no-sandbox` launch option; other local launches keep the
-browser sandbox. This changes no host sandbox or AppArmor settings. Native
-startup failures report exit/signal status and at most 4 KiB of startup stderr;
-collection stops when the debugging connection is established, before login.
+browser sandbox.
 
-On macOS, the ordinary listener E2E configuration defaults to Chromium only and
-prints a notice that Firefox/WebKit were excluded: their headless modes do not
-provide verified isolation from hardware audio output. Run the full three-browser
-matrix in an isolated Linux CI environment without host audio passthrough. To
-deliberately allow hardware audio on a Mac, use
-`FINITUDE_E2E_ALLOW_HARDWARE_AUDIO=1 npm run test:e2e`; this can take over connected
-headphones. Report excluded browser projects as not run, not as passed. Other
-platforms retain their existing three-browser matrix.
+The listener and social E2E configurations run Chromium only, with
+`--disable-audio-output`, on every platform.
 
 The legacy
-`contracts/social/prototype-v1/playback-trace.json` remains a feasibility fixture
-for native DEBUG adapters, not the room wire contract. Native devices and native
+`contracts/social/prototype-v1/playback-trace.json` remains a unit-test fixture
+and native DEBUG adapter input, not the room wire contract. Native devices and native
 background participation, shared Video and deployment performance remain tracked in
 [the social implementation plan](docs/plans/social-and-shared-playback-plan.md).
 
@@ -552,9 +518,8 @@ rather than repeat the code and must stay synchronized with behavior.
 - `npm test`: run server and listener unit/component tests
 - `npm run test:server:linux`: explicitly run the Linux platform-hook and artifact
   tests; these also run automatically as part of `npm test` on Linux
-- `npm run test:e2e`: run the production listener bundle against Chromium,
-  Firefox, and WebKit with accessibility checks
-- `npm run test:e2e:chromium`: run the faster Chromium-only browser gate
+- `npm run test:e2e`: run the production listener bundle in Chromium with
+  accessibility checks (`test:e2e:chromium` is an alias)
 - `npm run typecheck:e2e --workspace @archtree/finitude-web`: type-check the
   Playwright configuration, fixtures, and browser specs without launching a
   browser
@@ -913,20 +878,13 @@ Install the version-matched browser runtimes once before running the local
 browser gate:
 
 ```bash
-npx playwright install chromium firefox webkit
+npx playwright install chromium
 npm run typecheck:e2e --workspace @archtree/finitude-web
 CI=1 npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 ```
 
-Chromium owns the reviewed deterministic pixel baselines; Firefox and WebKit
-retain behavior and accessibility coverage. Review intentional visual changes
-before creating or updating any named Chromium screenshot rather than bulk-
-refreshing snapshots to make a failure pass. Snapshot paths are platform-
-scoped so one operating system never silently approves another system font's
-rendering. Before each Chromium capture, the visual helper pins scroll-container
-gutters to a transparent 10 px (the Linux baseline width), so macOS goldens do
-not depend on the System Settings scroll-bar choice and both platforms share
-one layout.
+There are no pixel-snapshot tests; layout is checked through behavior and
+accessibility assertions.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, authenticated Library,
@@ -991,6 +949,8 @@ avatars remain private behind `/auth/avatar`. Finitude Web derives responsive
 `/content/images/:imageId/v1/:width.webp`. They are versioned, revalidated,
 CPU-concurrency bounded responses and never create extra S3 objects; the
 original image route remains the fallback and native-client contract.
+The shared Web artwork component keeps both its bordered frame and decoded image
+square, including in WebKit; Artist portraits retain their circular crop.
 
 The Archtree landing page links both signed-out and signed-in visitors to
 `/finitude` while preserving its existing content-management and authentication
@@ -1059,139 +1019,27 @@ Run this only in an environment approved for load testing. The harness models
 concurrent clients from one runner; release evidence still needs approved
 multi-source staging traffic against the real media store.
 
-### Verify sustained Audio rooms locally
-
-After `npm ci`, `npm run doctor`, and `npm run build`, run
-`npm run test:soak:rooms`. This separate gate defaults to two members and 30
-minutes, using real browser media clocks, authenticated HTTP, WebSockets, an owned
-MongoDB replica set, and a loopback S3 protocol fixture. It never uses configured
-application databases or external storage, and Chromium hardware audio stays disabled.
-Ports 4187 and 4188 must be free.
-
-```powershell
-$env:FINITUDE_ROOM_SOAK_SECONDS = '1800'
-$env:FINITUDE_ROOM_SOAK_CYCLE_SECONDS = '45'
-$env:FINITUDE_ROOM_SOAK_MEMBERS = '2'
-npm run test:soak:rooms
-```
-
-Duration accepts 60–28,800 seconds; cycle spacing accepts 15–300 seconds and cannot
-exceed duration; members accept 2–8. Invalid settings fail before startup. The
-duration/spacing combination must also fit the real retained mutation budget;
-use the default 45-second spacing for eight hours. Reload/device recovery is
-capped at 16 per run to respect daily scope issuance, after which that cycle
-continues local pause/resume checks. No production quota is reset or relaxed.
-Every run first proves reload without autoplay or automatic takeover, followed by
-explicit **Use this device** recovery. Timed cycles repeat local pause during
-shared selection, shared pause/play, and device recovery. Each shared gesture
-honors previously observed `Retry-After` and published request-window headroom
-from every participant before dispatch, sends one command, and must receive an
-applied outcome and the exact selected entry or transport state; continued
-playback of an old entry cannot count as a successful selection. The gate checks actual
-media-clock advancement and capture-time-adjusted pairwise drift against the
-existing 750 ms browser-test tolerance. Closing participants must release all
-upgrade transports, active media requests, and pending playback reads. A capability-protected loopback
-control plane confirms fixture resource cleanup before Windows runner termination.
-
-Evidence under ignored `web/test-results/room-soak` contains bounded aggregate
-counts, fixed-route HTTP failure/admission counts, application-fixture Node
-process RSS/heap extrema, drift, and
-cleanup status; it excludes account/media IDs,
-URLs, private payloads, raw exceptions, and a growing frame/trace history. Run this
-gate separately from builds and other load generators. Memory extrema describe
-that application process, exclude browser/MongoDB/whole-machine memory, and do
-not establish absence of leaks. A local pass does not
-certify AWS/S3 capacity, physical audio, branded browsers, or a longer duration.
-Multiple contexts share one loopback source IP and the real per-IP media admission
-limits; a playback pass does not imply that every background HTTP read succeeded.
-Room HTTP limits follow each member's account instead: GET/HEAD work is capped at
-four/account and 40/process within the unchanged total six/account and 48/process
-HTTP pool, reserving capacity from read bursts for explicit controls and tickets,
-and each account's room requests share its own 180/minute window. Other writes can
-still consume the shared process-wide concurrency capacity.
-Increasing members to eight is an admission/capacity stress case, not a guaranteed
-passing profile: concurrent replacement media requests can overlap old requests
-at the per-IP media ceiling, while snapshot-triggered reads also compete for room
-HTTP capacity. Preserve any resulting 429 and playback failure as evidence; do not
-raise quotas or drop participant assertions to obtain a pass.
-
 ## AWS CodeBuild
 
 `buildspec.yml` is a promotion-only bridge from GitHub Actions to Elastic
 Beanstalk. It runs on Node 24 and Python 3; it does not run `npm ci`, rebuild the
 application, or substitute a bundle produced by a smaller test suite.
 
-The `.github/workflows/finitude-web-release.yml` workflow runs unit/component
-tests, Mongo lifecycle integration, production builds, E2E type checking, real
-social scenarios, and all three browser/axe projects before staging its bundle.
-The `social-e2e` job runs every Linux social project in one blocking step,
-including `firefox-audio-formats` and `webkit-audio-formats`. No social failure is
-ignored. The complete step's outcome is bound into provenance as the `social`
-gate, and failure evidence is retained under `web/test-results/social-real`.
-These gates are parallel jobs, each with its own timeout of 30 minutes or less:
-`build` (production build and E2E type check), `unit-integration`,
-`social-e2e` and `browser-e2e`. The two browser jobs test the one production
-build that `build` shares as the short-lived `finitude-web-release-build`
-artifact. The social job first runs the unchanged WebKit compressed-audio scenario
-with its own fixture processes and evidence directory, then runs the complete
-social matrix. The ordinary browser job first verifies native scheduled startup,
-pause/resume, rate correction, and natural completion in all three engines with
-zero retries and a separate evidence directory, then runs its complete matrix.
-The prepare/seek trace uses its original synthetic two-second 8 kHz PCM WAV. The
-combined scheduled-start, pause/resume, rate, and end scenario uses the existing
-original synthetic `room-tone.mp3`, shared with the independent social format gate.
-Both use real loopback HTTP with byte-verified HEAD, Range, and If-Range responses;
-evidence records each format's actual bytes, SHA-256, native metadata, events, and
-transport outcomes. Completion seeks to 0.2 seconds before the native MP3 duration
-and still requires a real end event without automatic queue advancement.
-MP3 duration uses the social format gate's 150 ms boundary for native gapless and
-frame-padding differences; readiness and continuous-clock checks remain unchanged.
-Diagnostics inspect native ranges only in explicit stable snapshots with decoded
-data and no pending seek; native event callbacks never query ranges. Unobserved
-ranges are marked separately from observed empty ranges. An early WebKit range
-query can change its unknown-duration cache. Synthetic
-playback epochs retain their own clock anchors, including explicitly scheduled starts.
-The pause/resume scenario proves natural clock movement both before pausing and
-after resuming; a native `playing` event alone does not prove advancing playback.
-The probe samples native progress before controller event handlers, then confirms
-the decoder remains ready and continuous after those handlers finish. A seek or
-readiness change in the same event cannot masquerade as stable playback.
-Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
-browser job also checks its PCM and audio-output plugins before the synthetic
-startup preflight.
-Only that synthetic preflight enables decoder debug output. A streaming filter
-discards raw browser/GStreamer lines and emits at most 200 fixed buffering, seek,
-and pipeline-state records without URLs or payloads. Ordinary test failures stay
-visible, and `pipefail` preserves the original test exit status. Full browser and
-social runs do not enable decoder logging.
-Only the two ordinary Linux browser test commands set
-`FINITUDE_E2E_ISOLATED_AUDIO=1`. Before exposing an audio-enable button, the probe
-requires Linux CI and verifies through `pactl` that the default `archtree_ci` output
-uses `module-null-sink.c`; a missing or different output fails setup. Each scenario
-creates its initially muted media, then clicks **Enable isolated test audio** with
-a real browser gesture. The button only calls the existing mute control. Local
-Windows runs keep the media muted and expose no button.
-The same two commands retain
-`WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS=1`; this [WebKit environment switch](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L4101-L4144)
-disables WPE's viewport power-saving pause for hidden muted video elements,
-including audio-only sources. Media clocks, readiness, seeks, rates, and end events
-remain native. Both ordinary and social Linux test commands set
-`WPE_SHELL_DISABLE_MEDIA_DISK_CACHE=1`
-using [WPE's media cache setting](https://github.com/WebKit/WebKit/blob/343e13bf22dca9d0ec227801419aab0f9001a32f/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp#L3345-L3359).
-This isolates native seek scenarios from the GStreamer download-cache completion
-path while retaining the default decoder and real HTTP/Range transport. With
-disk caching enabled, the Linux WPE backend can keep reporting current-frame
-data after a fully buffered seek even as its media clock advances. This CI
-isolation does not establish support for that default-cache path. The independent
-social gate keeps the default autoplay and visibility policies, and still requires
-real decoded readiness, continuous progress and synchronization within 750 ms.
-Both jobs retain preflight and full-matrix evidence, and every invocation is
-blocking. `release-artifact` needs all four jobs, so it is skipped unless every
-gate succeeds. It stages those same build bytes without rebuilding and binds each
-gate step's outcome into the provenance. A run normally finishes in about 20–25
-minutes, inside the promoter's wait. If branch protection is added, require every
-gate job's check, not only `release-artifact`: GitHub reports a skipped job as
-passing. Every Playwright configuration rejects focused tests in CI. The workflow uploads
+The `.github/workflows/finitude-web-release.yml` workflow runs on pull requests
+and `main` pushes. Its parallel gate jobs, each with a timeout of 25 minutes or less, are:
+
+- `build`: production build, E2E type check, and the optional pinned Naruto source.
+- `unit-integration`: `npm test` and the Mongo-backed `npm run test:integration`.
+- `social-e2e`: real MongoDB/media/WebSocket social scenarios in Chromium.
+- `browser-e2e`: the listener browser and axe suite in Chromium.
+
+Both browser jobs test the one production build that `build` shares as the
+short-lived `finitude-web-release-build` artifact. Playwright retries a failed
+test once in CI; a test that passes on retry is reported as flaky, not failed.
+`release-artifact` needs every gate, stages those same build bytes without
+rebuilding, and binds each gate's outcome into the provenance. If branch
+protection is added, require every gate job's check, not only `release-artifact`:
+GitHub reports a skipped job as passing. The workflow uploads
 `archtree-eb-<commit>-<run-id>-<attempt>` for 30 days, containing the runtime ZIP
 and `release-provenance.json` with the bundle SHA-256, exact source/run/attempt,
 and all successful gate names. PR artifacts are review evidence only.
@@ -1289,6 +1137,40 @@ process environment directly. Configuration-only deployments also rerun the
 same idempotent configurator, so correcting the domain or ACME properties does
 not require an unrelated application release.
 
+### Co-hosted OOTD preview
+
+The production instance can also host the separately built OOTD owner preview
+at `ootd.kashewt.com` (OOTD repository, ADR 0002). Archtree contains no OOTD
+source: `.platform/hooks/postdeploy/03_cohost_ootd.sh` and its configuration
+hook only fetch, verify, sandbox, and route a pinned OOTD artifact.
+
+- The deployment hook installs itself as `/usr/local/sbin/ootd-cohost` and
+  starts `ootd-cohost-deploy.service` without waiting, so OOTD's download,
+  dependency install, migration, and health check never run inside or fail an
+  Archtree deployment. Follow it with `journalctl -u ootd-cohost-deploy`.
+- OOTD runs as the `ootd` user on `127.0.0.1:3100` (`ootd-web.service`) and as
+  bounded `ootd-*.timer` jobs. Every OOTD unit denies EC2 instance metadata and
+  has a `MemoryMax` limit, so it cannot use this instance profile or exhaust
+  Archtree's memory. A 1 GiB swap file is added by default.
+- Nginx serves `ootd.kashewt.com` from `/etc/nginx/conf.d/ootd-cohost.conf` with
+  its own Let's Encrypt certificate (reusing `ACME_EMAIL`); the Archtree
+  renewal timer renews it with the Archtree certificate.
+- Non-secret properties: `OOTD_COHOST_ENABLED`, `OOTD_COHOST_DOMAIN`,
+  `OOTD_COHOST_ARTIFACT_S3_URI`, `OOTD_COHOST_ARTIFACT_SHA256`,
+  `OOTD_COHOST_SECRET_ID`, and optional `OOTD_COHOST_AWS_REGION`,
+  `OOTD_COHOST_MEMORY_MAX` (default `320M`), and `OOTD_COHOST_SWAP_MIB`
+  (default `1024`). OOTD secrets stay in the named Secrets Manager secret and
+  are written only to a root-only systemd environment file; never put them in
+  Elastic Beanstalk properties, which the Archtree process receives.
+- The instance role needs `s3:GetObject` on the OOTD artifact prefix and
+  `secretsmanager:GetSecretValue` on that one secret. With
+  `OOTD_COHOST_ENABLED` unset the hook does nothing; `false` stops OOTD and
+  removes its route and environment file while keeping releases.
+
+The OOTD repository's `docs/deployment.md` defines the secret contents and the
+release procedure: update the artifact URI and digest through a configuration
+deployment, and restore the previous pair to roll back.
+
 ### Room audio decoder on Elastic Beanstalk
 
 Amazon Linux 2023 has no FFmpeg package, so
@@ -1378,6 +1260,24 @@ closed and accept only the literal `true`:
 | `FINITUDE_ADMIN_VISIBILITY_ENABLED` | Admit explicit public/hidden changes |
 | `FINITUDE_HIDDEN_DELIVERY_ENFORCED` | Operator assertion that historical object URLs, S3 policies and CDN delivery deny hidden access |
 
+Signing in as an administrator does not enable catalog writes. When
+`FINITUDE_ADMIN_CATALOG_ENABLED` is closed, the catalog editor is read-only and
+cannot create a new existing-Album review. Readback and authorized recovery of
+previous operations remain available. An existing Album review needs no staging
+bucket; starting Luna also requires the imports flag and configured provider.
+
+For an explicitly enabled local administrator session, use the existing ignored
+`.env` for provider configuration, then start the application with:
+
+```sh
+npx --no-install cross-env FINITUDE_ADMIN_CATALOG_ENABLED=true FINITUDE_ADMIN_IMPORTS_ENABLED=true npm run dev
+```
+
+Restart the running server after configuration changes and refresh the browser's
+administrator capabilities. Existing inherited environment values take precedence
+over `.env`, so the explicit startup values above also override a closed parent
+shell flag. This command does not assert private staging storage or hidden delivery.
+
 A private ACL alone does not override a public bucket policy. Verify denied
 unauthenticated access to the staging prefix and historical canonical URLs
 before enabling the corresponding assertion. The application enforces hidden
@@ -1387,12 +1287,115 @@ cannot be recalled. Private preview GET/HEAD accepts the account-viewer header,
 or a non-secret `viewer` query parameter for browser media elements; neither is
 an authentication credential. Every preview requires the current admin session.
 
-The Web and native import editors use Draft, Review, Files and Publish sections.
+Catalog snapshots expose only the protected `/catalog/:kind/:id/artwork` path,
+including supported legacy `coverArtUrl` records. A stored image preview requires
+the ready image lifecycle record to belong to the current ready owner and retain
+its exact reference. Legacy external artwork uses a credential-free HTTPS proxy:
+only port 443, all DNS answers must be public unicast, the socket pins one checked
+answer, and TLS verifies the original hostname of each connection. A fixed
+application User-Agent identifies the image client without account information.
+At most three HTTPS redirects are followed; every destination repeats the URL,
+DNS and TLS checks. Missing or duplicate Location fields, unsafe destinations
+and loops fail closed, and redirect bodies are destroyed without forwarding
+cookies, authorization or referrer headers. Download and decoding share an eight-second
+deadline, a 10 MiB input limit and a 16-million-pixel ceiling. The process admits
+two legacy downloads/decodes at once, queues at most 16 (eight per account), and
+cancels queued work on disconnect or expiry. Raster decoding also shares the
+canonical artwork-transform budget. Supported static
+JPEG, PNG, WebP and GIF inputs are completely decoded, stripped of metadata and
+returned as WebP at most 1280 pixels per side. The response is private/no-store
+and stops waiting at its deadline; an already-started native decode retains its
+capacity until its actual promise settles and has a separate native timeout.
+Every response rechecks the current administrator session, ready owner and exact source
+before delivery. It never exposes the legacy URL or changes storage, and does
+not satisfy the separate historical-URL migration requirement for hiding content.
+
+The Web import editor uses Draft, Review, Files and Publish sections.
 Section navigation retains account-fenced local work and does not dispatch a
 mutation. Compact value comparisons keep source evidence expandable; publication
 recovery has its own status and actions. Confirmation windows show the frozen
 named target and proposed change before secondary explanations. Technical IDs
 remain available in Details rather than leading normal catalog and Page rows.
+
+The workbench is Web-only. Finitude iOS and Android expose listener features even
+for administrator accounts; they do not load administrator capabilities, private
+previews, import/catalog/Page editors or upload controls.
+
+### Device-local MP3 conversion
+
+Open `/finitude/admin/conversions`, or choose **Convert to MP3** for an existing
+Album or AudioTrack in Catalog. The device queue accepts up to 100 FLAC/PCM WAVE
+files, each at most 512 MiB. Actual complete decoding determines eligibility.
+Generated outputs also have a 512 MiB hard limit. Embedded metadata is bounded
+to 16 MiB/4096 blocks, and declared FLAC frame lengths to 1 MiB. Invalid, corrupt,
+unsupported or oversized sources remain separate failed members of the batch.
+Folder intake inspects at most 1024 selected entries, keeps FLAC/WAVE signatures
+and named audio candidates, and skips unrelated covers or text files. Individually
+selected files are decoded regardless of their extension; stored MP3 paths use
+the same normalized, bounded output filename as the generated file.
+The preset is 320 kbps CBR, retaining mono/stereo and 44.1/48 kHz; other supported
+sample rates are converted to 48 kHz. No volume normalization or channel downmix
+is applied. MP3 encoder delay and padding mean this is not a gapless guarantee.
+
+The feature requires a secure context, OPFS, IndexedDB and Web Locks. It requests
+persistent browser storage, but browsers may deny persistence or evict data.
+That permission request is advisory and does not hold task creation open while
+Firefox waits for a browser prompt, or fail conversion if permission is denied
+or unavailable. Actual IndexedDB/OPFS writes, storage quota and account ownership
+checks still have to succeed.
+Browser ports without the required storage APIs show the unavailable explanation
+and disable task creation. The browser gate requires real conversion in Chromium
+and Firefox. It measures native capabilities in every engine; unsupported WebKit
+ports instead verify unavailable controls and still run source-preview, layout
+and localization checks. Only the four encoding/upload scenarios that require
+durable files are explicitly skipped there, with capability evidence retained.
+Keep external originals. Only one same-account tab executes device jobs at a
+time. Jobs and bytes remain on this browser/profile/device under their initiating
+account; current administrator authorization is required to see or recover them.
+Closing a page/process pauses conversion. An unfinished track starts again from
+its retained source; verified MP3s are reused. Source downloads resume only under
+the same strong ETag and exact range. A changed source is never appended.
+
+New local files create an import draft after all selected tracks finish; metadata,
+duplicate review, upload and publication retain the existing import workflow.
+Existing tracks use a frozen operation and preserve Track identity and relations.
+Unknown uploads reconcile the original operation before resending bytes. Local
+MP3 deletion requires exact current S3 and ready-publication proof. Failed or
+uncertain results retain the MP3. Retained lossless copies and selected external
+originals are never removed by MP3-cache cleanup.
+
+Conversion endpoints, relative to `/api/admin/v1`, all require current admin and
+matching account-viewer identity:
+
+- `GET /conversions/albums/:id/source`, `/conversions/tracks/:id/source`:
+  private ordered sources and opaque catalog/media/membership revisions.
+- `POST /conversions/tracks/:id/operations`: fixed UUID, source revisions,
+  strong ETag/length, Album snapshot and output SHA-256/length/preset/filename.
+- `POST /conversions/tracks/:id/operations/:operationId/upload`: one bounded
+  multipart `audioFile`; actual 320 kbps MP3 frames and digest are validated.
+- `GET /conversions/tracks/:id/operations/:operationId`, `POST .../reconcile`:
+  exact actor-owned operation and storage/publication recovery. Never infer
+  completion from a reservation or merely successful PUT.
+- `POST /conversions/tracks/:id/operations/:operationId/cancel`: abandon only an
+  unattached output, retaining exact cleanup evidence for an unknown PUT.
+- `GET /conversions/imports/:id/ready`: creator-only exact published slot proof;
+  staged assets and different-byte duplicate reuse cannot clear MP3 cache.
+  `POST` to the same path with `{slots: [uuid]}` checks only selected pending
+  cache slots, allowing later members to progress under the bounded S3-read budget.
+
+`FINITUDE_ADMIN_CATALOG_ENABLED` advertises `localMp3Conversion` capability and
+admits new conversion operations. Turning it off does not prevent recovery of an
+already attached output or cleanup. No server encoding service or extra key is
+needed. Source files remain private authenticated media, not public S3 redirects.
+The isolated hashed conversion Worker alone receives `wasm-unsafe-eval`; the
+document keeps strict script policy. The LAME WASM module is bundled locally,
+with no runtime CDN fetch or COOP/COEP requirement.
+
+Dependencies are pinned to Mediabunny/MP3 encoder 1.61.4 and noble hashes 2.4.0.
+Licenses, attribution, LAME 3.100 source, wrapper/source modules and rebuild
+instructions ship at `/finitude/licenses/mp3/NOTICES.txt` alongside the source
+archives. The Worker has a separate 256 KiB gzip budget; ordinary route and CSS
+budgets are unchanged. `npm run build:web` checks all three budgets.
 
 Import routes (relative to `/api/admin/v1`):
 
@@ -1450,6 +1453,58 @@ context. Potentially paid ambiguous outcomes block automatic replay. Production
 cost/quality measurements and real S3 proof are separate from mocked tests.
 Daily reservations are persisted in the same transaction as a chunk checkpoint;
 uncertain outcomes and dispatches stopped after reservation remain counted.
+
+Web **Workbench → Edit or review existing Album** exposes explicit manual editing
+and creation of an existing-Album review. The separate **Existing Album reviews**
+queue retains saved projects when the browser closes. **Unfinished** includes all
+unapplied reviews; **Album updated** confirms that this project's selected fields
+were applied. Luna progress and the original-Album update status are shown
+separately. **Save review draft** changes only the private draft; **Update original
+Album** requires selecting saved changes and confirming their frozen old/new
+values. **Start Luna review** is available above the track editor and always has
+its own confirmation. All `/finitude/admin/*` pages use a dedicated administration
+layout with management navigation, language/account controls and the Admin/User
+view switch. Listener navigation, global music search and playback controls are
+absent. Switching back to User view restores the listener layout while retaining
+the authenticated session, playback state and active Room connection.
+The catalog uses artwork/name entries for Albums, Artists, MediaTracks and
+Organizations, with management actions on their detail pages. The inventory
+loads separately from editing controls. Its optional `kind=artist`,
+`kind=audioTrack` or `kind=organization` query parameter selects a category;
+missing or unsupported values select Albums. Detail return links retain that
+category. Organizations use a name mark, matching listener details, and do not
+gain artwork upload controls.
+Direct catalog saves also confirm the frozen partial patch with per-field saved
+and proposed values, including coupled Credits and attribution. A newer catalog
+revision disables the open confirmation and shows its recovery instruction;
+cancelling preserves unsaved edits. Offline or failed reads do not report a
+revision change without a confirmed newer item.
+Analysis uses retained original
+filenames and saved metadata; absent historical folder/file evidence stays empty.
+No media is uploaded, copied or published by this workflow. Artist attribution,
+artwork and visibility remain separate catalog edits.
+
+Catalog review routes (relative to `/api/admin/v1`):
+
+- `POST /catalog-reviews`: `{operationId, albumId, expectedRevision}` captures a
+  ready Album and up to 100 ready Audio members. Empty Albums are supported;
+  malformed, missing, Video or inconsistent members are explicitly rejected.
+  Creation is controlled by `FINITUDE_ADMIN_CATALOG_ENABLED` and does not start
+  analysis. Original filenames are allowlisted basenames, never storage keys.
+- `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
+  workbench pagination and private readback. `sourceStatus` distinguishes current,
+  changed and unavailable sources. Old `/imports` routes exclude these projects;
+  strict native import DTOs are unchanged.
+- `PATCH /catalog-reviews/:id` and `POST` to `/analyze`, `/adopt` or
+  `/cancel-analysis`: save/review privately with the original UUID and numeric
+  revision. Analysis uses the existing import flag, provider and shared budgets;
+  viewing, editing or creating a project does not dispatch a provider request.
+- `POST /catalog-reviews/:id/apply`: `{operationId, expectedRevision, fields}`
+  selects saved Album `title`/`releaseDate` or Track `title`/`trackNumber` paths.
+  Revisions, membership, readiness and internal filename/media evidence are
+  checked in the same transaction as metadata/order updates and the receipt.
+  Stale sources reject the whole operation. Applied projects become read-only;
+  no upload, duplicate-decision, S3 or publication endpoint exists for them.
 
 The publisher reserves immutable approvals and catalog IDs before copying
 objects. It uses version-bound GET and conditional checksum PUT to canonical
@@ -1994,7 +2049,7 @@ Personalized Library:
   Each contextual Home item may carry
   `{ "reason": { "code": "followedArtist", "artist": { "id": "...", "name": "..." } } }`;
   public content summaries and expanded `included` objects never gain this field.
-- Startup revision `required-indexes-v7-artist-follows` requires the unique
+- Startup revision `required-indexes-v9-administrator-conversions` requires the unique
   `artistFollows(userId, artistId)` index, owner/follow-date and Artist/owner
   cleanup indexes, and the Album/MediaTrack descending calendar-date indexes.
   The resolver uses those date indexes, bounded equality joins and a 3-second
@@ -2458,6 +2513,32 @@ or fetch its private source. Without a prepared distribution, `/naruto` returns
 503 while the existing APIs and Finitude listener remain available. Naruto
 releases use the same release verification and deployment process as Archtree;
 generated bundles and deployment archives must not be committed.
+
+#### Required Naruto source handoff on `develop`
+
+Current Naruto source handoff:
+[`d77c1f1630164151bf1e8b14fea05d5f1c035519`](https://github.com/yangyinxu/naruto-mobile/commit/d77c1f1630164151bf1e8b14fea05d5f1c035519).
+
+Every push to `yangyinxu/naruto-mobile`'s `main` branch, including a
+documentation-only push, requires a matching Archtree update on `develop`.
+The person or agent pushing Naruto is responsible for completing this handoff:
+
+1. Record the exact pushed Naruto commit SHA in the entry above. Build from a
+   clean checkout of that commit with
+   `npm run prepare:naruto-web -- <source-directory>` and run
+   `npm run smoke:naruto-web`.
+2. Verify that `naruto-web/dist/release-source.json` has the matching
+   `sourceCommit` and `sourceDirty: false`. Commit and push the source handoff
+   and any required integration changes to Archtree `develop`, preserving
+   unrelated work and leaving generated distributions ignored.
+3. Report both repository commits and the verification results. This is a
+   required collaboration workflow; no CI job automatically synchronizes the
+   repositories. The README entry records the `develop` handoff and is not read
+   by the production release workflow.
+
+Before an authorized Archtree `main` release, set the Actions variable
+`NARUTO_SOURCE_COMMIT` to this same complete source SHA. A routine `develop`
+handoff does not push Archtree `main` or deploy production.
 
 Automatic Naruto release packaging is opt-in. Set the Archtree repository's
 Actions variable `NARUTO_SOURCE_COMMIT` to a complete 40-character commit SHA

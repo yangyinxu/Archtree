@@ -20,5 +20,12 @@ export const getAdminCapabilities = () => ({
     catalog: {
         editing: isAdminCatalogEditingEnabled(),
         visibility: isAdminVisibilityEditingEnabled()
+    },
+    localMp3Conversion: {
+        enabled: isAdminCatalogEditingEnabled(),
+        readSources: isAdminCatalogEditingEnabled(),
+        replace: isAdminCatalogEditingEnabled(),
+        preset: 'mp3-320' as const,
+        maxFiles: 100
     }
 });

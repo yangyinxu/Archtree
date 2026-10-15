@@ -945,9 +945,7 @@
   .primaryButton,
   .secondaryButton,
   .dangerButton,
-  .textButton,
-  .rowAction,
-  .pickerResultButton {
+  .textButton {
     min-height: var(--control-min-size);
   }
 }

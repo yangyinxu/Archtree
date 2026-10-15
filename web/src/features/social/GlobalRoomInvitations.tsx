@@ -31,7 +31,7 @@ const PendingInvitations = ({ viewerId }: { viewerId: string }) => {
 /** The transport keeps following the account room capability even while its entry points are hidden. */
 const RoomConnection = ({ viewerId }: { viewerId: string }) => { useRoomInvitationConnection(viewerId); return null; };
 
-const ViewerInvitations = ({ viewerId }: { viewerId: string }) => {
+const ViewerInvitations = ({ viewerId, hideEntries }: { viewerId: string; hideEntries: boolean }) => {
   const { roomsEnabled } = useSocialAvailability();
   const profile = useQuery({ queryKey: ['social', viewerId, 'profile'],
     queryFn: ({ signal }) => getSocialProfile(viewerId, signal), retry: false });
@@ -39,7 +39,7 @@ const ViewerInvitations = ({ viewerId }: { viewerId: string }) => {
     if (profile.data && !profile.data.profile?.active) roomSession.stop();
   }, [profile.data]);
   return profile.data?.profile?.active && !profile.isError ? <><RoomConnection viewerId={viewerId} />
-    {roomsEnabled && <><GlobalActiveRoom viewerId={viewerId} /><PendingInvitations viewerId={viewerId} /></>}
+    {roomsEnabled && !hideEntries && <><GlobalActiveRoom viewerId={viewerId} /><PendingInvitations viewerId={viewerId} /></>}
     <Suspense fallback={null}><GlobalListeningPublisher viewerId={viewerId} /></Suspense></> : null;
 };
 
@@ -47,8 +47,9 @@ const ViewerInvitations = ({ viewerId }: { viewerId: string }) => {
  * Lives inside the session privacy barrier and never takes a playback action on receipt. The shell mounts it
  * only while social is enabled, so it also owns reacting to a rollout gate: any feature-gate response
  * refreshes the public and account room capabilities, which hides the entry points the server now rejects.
+ * Management hides entry points while preserving the current transport and actual-playback publisher.
  */
-export const GlobalRoomInvitations = () => {
+export const GlobalRoomInvitations = ({ hideEntries = false }: { hideEntries?: boolean }) => {
   const client = useQueryClient();
   const session = useQuery(browserSessionQuery());
   const resolving = useQuery(browserSessionResolvingQuery());
@@ -61,5 +62,5 @@ export const GlobalRoomInvitations = () => {
     return () => removeEventListener(socialRolloutGateEvent, refresh);
   }, [client]);
   return session.data && !session.isError && !resolving.data
-    ? <ViewerInvitations key={session.data.user.id} viewerId={session.data.user.id} /> : null;
+    ? <ViewerInvitations key={session.data.user.id} viewerId={session.data.user.id} hideEntries={hideEntries} /> : null;
 };

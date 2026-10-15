@@ -98,7 +98,10 @@ test('a stale login generation cannot publish another account transition', async
 
   const first = loginBrowserSession({ identifier: 'first', password: 'password' });
   await vi.waitFor(() => expect(loginCalls).toBe(1));
+  const firstGeneration = captureAccountOperation('viewer');
   const second = loginBrowserSession({ identifier: 'second', password: 'password' });
+  // Lazy module loading is asynchronous; establish the newer generation before releasing the old response.
+  await vi.waitFor(() => expect(isAccountOperationCurrent(firstGeneration)).toBe(false));
   releaseFirst();
   const [firstResult, secondResult] = await Promise.all([first, second]);
 

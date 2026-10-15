@@ -6,7 +6,7 @@ import { isAdminCatalogEditingEnabled, isAdminVisibilityEditingEnabled } from '.
 import { deleteCoverArt, updateCoverArtOwnerAndCleanup, maxCoverArtInputBytes } from '../services/imageStorageService';
 import { adminCatalogItemRevision, AdminCatalogError, adminCatalogSnapshot, readAdminCatalogRecord, withCurrentAdministrator, type AdminCatalogKind } from './adminCatalogService';
 import { exact, objectId, record, uuid } from './adminImportContract';
-import { importCollection, importDigest } from './adminImportService';
+import { importCollection, importPurposeFilter, importDigest } from './adminImportService';
 import { importPrivateStorageReady, type ImportAsset } from './adminImportMediaTypes';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from './adminImportStorage';
 
@@ -72,7 +72,7 @@ async function mutateCover(actor: string, rawKind: AdminCatalogKind, ownerId: st
         if (previousImageId) { const previous = objectId(previousImageId) && await getDb()!.collection('imageAssets').findOne({ _id: new ObjectId(previousImageId), ownerType: kind, ownerId, s3Key: `images/${previousImageId}` }, { session }); if (!previous || previous.uploadStatus !== 'ready') fail(409, 'ADMIN_CATALOG_COVER_EVIDENCE_REQUIRED'); }
         const _id = new ObjectId(), now = new Date(); let source: ImportAsset | null = null, sourceImportId: string | null = null;
         if (!clear) {
-            const project = await importCollection().findOne({ _id: new ObjectId(body.importId as string) }, { session });
+            const project = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(body.importId as string) }, { session });
             if (!project || project.revision !== body.expectedSourceRevision) fail(409, 'ADMIN_CATALOG_COVER_SOURCE_CHANGED');
             source = project?.media?.assets.find(asset => asset.slotId === body.slotId && asset.state === 'ready' && ['image/jpeg', 'image/png', 'image/webp'].includes(asset.contentType)) ?? null;
             if (!source?.etag || source.byteLength > maxCoverArtInputBytes) fail(409, 'ADMIN_IMPORT_ASSET_CONFLICT');

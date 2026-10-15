@@ -31,3 +31,16 @@ test('track review identifies its source file without expanding evidence or chan
   expect(screen.getByText('Mira Vale/Night Windows/01 First.mp3')).toBeVisible();
   expect(document.querySelectorAll('details[open]')).toHaveLength(0);
 });
+
+test('an empty catalog review uses its workflow guidance without adopting or rejecting suggestions', () => {
+  const item = detail(), navigate = vi.fn(), onAdopt = vi.fn(), onReject = vi.fn();
+  render(<ImportReview draft={item.draft} suggestions={[]} selected={[]} onSelect={vi.fn()} onAdopt={onAdopt} onReject={onReject} disabled={false}
+    draftCopy="Saved suggestions still require a separate original Album update."
+    emptyContent={<div><p>Luna has not run yet.</p><button onClick={navigate}>Edit the review draft</button></div>} />);
+  expect(screen.getByText('Saved suggestions still require a separate original Album update.')).toBeVisible();
+  expect(screen.queryByText('There are no pending suggestions.')).not.toBeInTheDocument();
+  expect(onAdopt).not.toHaveBeenCalled(); expect(onReject).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit the review draft' }));
+  expect(navigate).toHaveBeenCalledOnce();
+  expect(onAdopt).not.toHaveBeenCalled(); expect(onReject).not.toHaveBeenCalled();
+});

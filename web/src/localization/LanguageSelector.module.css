@@ -163,7 +163,8 @@
     display: block;
   }
 
-  .mobileTrigger .trigger {
+  .mobileTrigger .trigger,
+  .headerTrigger .trigger {
     background: var(--color-surface-raised);
     border: 0;
     justify-content: center;
@@ -171,7 +172,8 @@
     width: 2.5rem;
   }
 
-  .mobileTrigger .triggerText {
+  .mobileTrigger .triggerText,
+  .headerTrigger .triggerText {
     display: none;
   }
 }

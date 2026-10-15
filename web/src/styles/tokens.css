@@ -22,16 +22,11 @@
   --color-accent-border: rgb(30 215 96 / 0.28);
   --color-on-accent: #000;
   --color-violet: #7268bd;
-  --color-violet-soft: rgb(114 104 189 / 0.18);
-  --color-warm: #e4a67f;
   --color-danger: #f3727f;
   --color-danger-soft: rgb(237 44 63 / 0.16);
   --color-danger-border: rgb(243 114 127 / 0.3);
   --color-on-danger: #000;
-  --color-success-soft: rgb(30 215 96 / 0.18);
-  --color-success-border: rgb(30 215 96 / 0.25);
   --color-focus: #fff;
-  --color-focus-soft: rgb(255 255 255 / 0.24);
   --color-backdrop: rgb(0 0 0 / 0.76);
   --color-seek-track: rgb(255 255 255 / 0.28);
   --color-player-ghost: rgb(255 255 255 / 0.14);
@@ -60,7 +55,6 @@
   --type-display: clamp(2.25rem, 5.5vw, 4.8rem);
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
-  --radius-lg: 0.5rem;
   --radius-pill: 999px;
   --shadow-sm: 0 8px 24px rgb(0 0 0 / 0.42);
   --shadow-lg: 0 24px 64px rgb(0 0 0 / 0.56);
@@ -92,7 +86,6 @@
   --layer-expanded-player: 110;
   --layer-confirmation: 120;
   --layer-help: 130;
-  --panel-gap: 0.5rem;
   --shell-gap: 0.5rem;
   --panel-radius: 0.5rem;
   --main-pane-min: 26rem;
@@ -103,7 +96,6 @@
   --player-height: 5.1rem;
   --mobile-player-height: 3.55rem;
   --mobile-nav-height: 3.7rem;
-  --content-max: 96rem;
 }
 
 @media (min-width: 768px) and (max-width: 1007px) {
