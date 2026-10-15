@@ -1303,6 +1303,40 @@ process environment directly. Configuration-only deployments also rerun the
 same idempotent configurator, so correcting the domain or ACME properties does
 not require an unrelated application release.
 
+### Co-hosted OOTD preview
+
+The production instance can also host the separately built OOTD owner preview
+at `ootd.kashewt.com` (OOTD repository, ADR 0002). Archtree contains no OOTD
+source: `.platform/hooks/postdeploy/03_cohost_ootd.sh` and its configuration
+hook only fetch, verify, sandbox, and route a pinned OOTD artifact.
+
+- The deployment hook installs itself as `/usr/local/sbin/ootd-cohost` and
+  starts `ootd-cohost-deploy.service` without waiting, so OOTD's download,
+  dependency install, migration, and health check never run inside or fail an
+  Archtree deployment. Follow it with `journalctl -u ootd-cohost-deploy`.
+- OOTD runs as the `ootd` user on `127.0.0.1:3100` (`ootd-web.service`) and as
+  bounded `ootd-*.timer` jobs. Every OOTD unit denies EC2 instance metadata and
+  has a `MemoryMax` limit, so it cannot use this instance profile or exhaust
+  Archtree's memory. A 1 GiB swap file is added by default.
+- Nginx serves `ootd.kashewt.com` from `/etc/nginx/conf.d/ootd-cohost.conf` with
+  its own Let's Encrypt certificate (reusing `ACME_EMAIL`); the Archtree
+  renewal timer renews it with the Archtree certificate.
+- Non-secret properties: `OOTD_COHOST_ENABLED`, `OOTD_COHOST_DOMAIN`,
+  `OOTD_COHOST_ARTIFACT_S3_URI`, `OOTD_COHOST_ARTIFACT_SHA256`,
+  `OOTD_COHOST_SECRET_ID`, and optional `OOTD_COHOST_AWS_REGION`,
+  `OOTD_COHOST_MEMORY_MAX` (default `320M`), and `OOTD_COHOST_SWAP_MIB`
+  (default `1024`). OOTD secrets stay in the named Secrets Manager secret and
+  are written only to a root-only systemd environment file; never put them in
+  Elastic Beanstalk properties, which the Archtree process receives.
+- The instance role needs `s3:GetObject` on the OOTD artifact prefix and
+  `secretsmanager:GetSecretValue` on that one secret. With
+  `OOTD_COHOST_ENABLED` unset the hook does nothing; `false` stops OOTD and
+  removes its route and environment file while keeping releases.
+
+The OOTD repository's `docs/deployment.md` defines the secret contents and the
+release procedure: update the artifact URI and digest through a configuration
+deployment, and restore the previous pair to roll back.
+
 ### Room audio decoder on Elastic Beanstalk
 
 Amazon Linux 2023 has no FFmpeg package, so

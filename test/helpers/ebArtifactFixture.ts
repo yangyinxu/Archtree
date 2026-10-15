@@ -54,10 +54,12 @@ export const createSourceFixture = async () => {
   await writeFixtureFile(root, 'web/dist/assets/logo-Qwer1234.webp', 'fixture image\n');
   for (const hook of [
     '.platform/confighooks/postdeploy/01_configure_https.sh',
+    '.platform/confighooks/postdeploy/03_cohost_ootd.sh',
     '.platform/hooks/prebuild/01_install_certbot.sh',
     '.platform/hooks/prebuild/02_install_ffmpeg.sh',
     '.platform/hooks/postdeploy/01_configure_https.sh',
-    '.platform/hooks/postdeploy/02_install_certbot_timer.sh'
+    '.platform/hooks/postdeploy/02_install_certbot_timer.sh',
+    '.platform/hooks/postdeploy/03_cohost_ootd.sh'
   ]) {
     await writeFixtureFile(root, hook, '#!/usr/bin/env bash\n');
     await chmod(path.join(root, hook), 0o755);
