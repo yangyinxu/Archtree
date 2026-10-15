@@ -240,12 +240,15 @@ jobs:
           retention-days: 30
 
   browser-e2e:
-    name: Production-bundle browser and accessibility tests
+    name: Production-bundle browser and accessibility tests (${{ matrix.browser }})
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    outputs:
-      browser: ${{ steps.browser.outcome }}
+    strategy:
+      # Every engine remains blocking; let the other engines finish and retain their evidence after a failure.
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
 
     steps:
       - name: Check out repository
@@ -298,7 +301,7 @@ jobs:
           FINITUDE_E2E_ISOLATED_AUDIO: '1'
         run: |
           set -o pipefail
-          xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts --grep='real scheduled start' --retries=0 --update-snapshots=none --output=test-results/room-playback-preflight 2>&1 | node scripts/filter-native-media-evidence.mjs
+          xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- room-playback-feasibility.spec.ts --grep='real scheduled start' --retries=0 --project=${{ matrix.browser }} --update-snapshots=none --output=test-results/room-playback-preflight 2>&1 | node scripts/filter-native-media-evidence.mjs
 
       - name: Run production-bundle browser and accessibility tests
         id: browser
@@ -307,13 +310,13 @@ jobs:
           WEBKIT_GST_ALLOW_PLAYBACK_OF_INVISIBLE_VIDEOS: '1'
           WPE_SHELL_DISABLE_MEDIA_DISK_CACHE: '1'
           FINITUDE_E2E_ISOLATED_AUDIO: '1'
-        run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
+        run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --project=${{ matrix.browser }} --update-snapshots=none
 
       - name: Retain browser evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v5
         with:
-          name: finitude-web-browser-evidence
+          name: finitude-web-browser-evidence-${{ matrix.browser }}
           path: |
             web/playwright-report
             web/test-results
@@ -370,7 +373,8 @@ jobs:
           RELEASE_E2E_TYPECHECK_RESULT: ${{ needs.build.outputs.e2e_typecheck }}
           RELEASE_SOCIAL_RESULT: ${{ needs.social-e2e.outputs.social }}
           RELEASE_INTEGRATION_RESULT: ${{ needs.unit-integration.outputs.integration }}
-          RELEASE_BROWSER_RESULT: ${{ needs.browser-e2e.outputs.browser }}
+          # Matrix outputs can be overwritten by the last engine; use the aggregate result of every engine instead.
+          RELEASE_BROWSER_RESULT: ${{ needs.browser-e2e.result }}
           RELEASE_STAGING_RESULT: ${{ steps.staging.outcome }}
         run: node scripts/write-release-provenance.mjs
 

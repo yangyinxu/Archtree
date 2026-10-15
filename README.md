@@ -1130,13 +1130,18 @@ ignored. The complete step's outcome is bound into provenance as the `social`
 gate, and failure evidence is retained under `web/test-results/social-real`.
 These gates are parallel jobs, each with its own timeout of 30 minutes or less:
 `build` (production build and E2E type check), `unit-integration`,
-`social-e2e` and `browser-e2e`. The two browser jobs test the one production
-build that `build` shares as the short-lived `finitude-web-release-build`
+`social-e2e` and `browser-e2e`. The browser gate runs independent Chromium,
+Firefox and WebKit jobs with `fail-fast: false`; one engine's failure does not
+cancel the other engines or discard their evidence. The social job and all three
+browser jobs test the one production build that `build` shares as the short-lived
+`finitude-web-release-build`
 artifact. The social job first runs the unchanged WebKit compressed-audio scenario
 with its own fixture processes and evidence directory, then runs the complete
-social matrix. The ordinary browser job first verifies native scheduled startup,
-pause/resume, drift correction, and natural completion in all three engines with
-zero retries and a separate evidence directory, then runs its complete matrix.
+social matrix. Each ordinary browser job first verifies native scheduled startup,
+pause/resume, drift correction, and natural completion in its engine with
+zero retries and a separate evidence directory, then runs that engine's complete
+browser and accessibility suite. Evidence artifacts have distinct
+`finitude-web-browser-evidence-chromium`, `-firefox` and `-webkit` names.
 The prepare/seek trace uses its original synthetic two-second 8 kHz PCM WAV. The
 combined scheduled-start, pause/resume, drift, and end scenario uses the existing
 original synthetic `room-tone.mp3`, shared with the independent social format gate.
@@ -1161,7 +1166,7 @@ same playback occurrence reloaded its source during explicit resync and then
 proved native progress, it instead requires the documented seek fallback at
 normal rate. Correction evidence records the reload count, target and result;
 either path must prove fresh native progress again before testing completion.
-Both browser jobs run inside Xvfb with the isolated PulseAudio sink. The ordinary
+All browser jobs run inside Xvfb with the isolated PulseAudio sink. Each ordinary
 browser job also checks its PCM and audio-output plugins before the synthetic
 startup preflight.
 Only that synthetic preflight enables decoder debug output. A streaming filter
@@ -1190,12 +1195,14 @@ data after a fully buffered seek even as its media clock advances. This CI
 isolation does not establish support for that default-cache path. The independent
 social gate keeps the default autoplay and visibility policies, and still requires
 real decoded readiness, continuous progress and synchronization within 750 ms.
-Both jobs retain preflight and full-matrix evidence, and every invocation is
-blocking. `release-artifact` needs all four jobs, so it is skipped unless every
-gate succeeds. It stages those same build bytes without rebuilding and binds each
-gate step's outcome into the provenance. A run normally finishes in about 20–25
-minutes, inside the promoter's wait. If branch protection is added, require every
-gate job's check, not only `release-artifact`: GitHub reports a skipped job as
+All browser jobs retain preflight and full-suite evidence, and every invocation is
+blocking. `release-artifact` needs all four logical gates, including every browser
+matrix job, so it is skipped unless every gate succeeds. It stages those same
+build bytes without rebuilding and binds each gate's outcome into the provenance;
+the browser gate uses the aggregate matrix result. Engines have independent
+25-minute job budgets so their combined test count cannot exhaust one shared
+timeout. The promoter retains its bounded 35-minute wait. If branch protection is
+added, require every gate job's check, not only `release-artifact`: GitHub reports a skipped job as
 passing. Every Playwright configuration rejects focused tests in CI. The workflow uploads
 `archtree-eb-<commit>-<run-id>-<attempt>` for 30 days, containing the runtime ZIP
 and `release-provenance.json` with the bundle SHA-256, exact source/run/attempt,
@@ -1496,6 +1503,10 @@ is applied. MP3 encoder delay and padding mean this is not a gapless guarantee.
 
 The feature requires a secure context, OPFS, IndexedDB and Web Locks. It requests
 persistent browser storage, but browsers may deny persistence or evict data.
+That permission request is advisory and does not hold task creation open while
+Firefox waits for a browser prompt, or fail conversion if permission is denied
+or unavailable. Actual IndexedDB/OPFS writes, storage quota and account ownership
+checks still have to succeed.
 Keep external originals. Only one same-account tab executes device jobs at a
 time. Jobs and bytes remain on this browser/profile/device under their initiating
 account; current administrator authorization is required to see or recover them.

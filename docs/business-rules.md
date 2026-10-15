@@ -1377,6 +1377,10 @@ The wire protocol and operational bounds are documented in
   administrator for that account can run, inspect or upload these private jobs.
   Leaving Admin view, signing out or losing permission stops new work and hides
   private presentation. Durable state never contains credentials or signed URLs.
+  Browser permission to protect storage from eviction is optional. An unanswered,
+  denied or unavailable permission request does not block task creation while
+  local storage and quota remain available; browser eviction or site-data removal
+  can still remove device-local files.
 - Closing the page or terminating its process does not promise continued
   encoding. Reopening offers recovery after current authorization and source
   checks. Completed validated tracks are reused; a partially encoded track is

@@ -205,7 +205,10 @@ export const createConversionStore = (persistence: ConversionPersistence = produ
     // Query the origin-wide lease before describing a crashed job as paused; another tab may still own it.
     return rows.map(row => parseBatch(row, owner)).sort((left, right) => right.createdAt - left.createdAt).map(batch => ({ ...batch,
       tasks: batch.tasks.map(task => !active && ['fetching', 'encoding', 'uploading'].includes(task.status) ? { ...task, status: 'paused' as const } : task) })); };
-  const reserve = async (required: number, checked: AdminGuard) => { await persistence.persist(); gate(checked.viewerId, checked);
+  const reserve = async (required: number, checked: AdminGuard) => {
+    // Eviction protection is advisory; Firefox may wait indefinitely for a browser permission decision.
+    try { void persistence.persist().catch(() => undefined); } catch { /* Storage access and quota still decide admission below. */ }
+    gate(checked.viewerId, checked);
     const estimate = await persistence.estimate(); gate(checked.viewerId, checked);
     if (typeof estimate.quota === 'number' && typeof estimate.usage === 'number' && required > estimate.quota - estimate.usage) throw new ConversionLocalError('conversion_storage_full'); };
   const copy = async (owner: string, taskId: string, file: File, checked: AdminGuard) => {
