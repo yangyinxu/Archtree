@@ -309,13 +309,15 @@ const validateListenerDistribution = async (artifactRoot) => {
     '.vite/manifest.json',
     ...referencedAssets
   ]);
+  // web/public/licenses is copied verbatim and served at /finitude/licenses for the bundled LGPL/MPL encoder.
+  const isLicense = relative => relative === 'licenses' || relative.startsWith('licenses/');
   for (const entry of await listTreeEntries(distRoot)) {
     const relative = path.relative(distRoot, entry.path).split(path.sep).join('/');
     if (entry.type === 'directory') {
-      if (relative !== '.vite' && relative !== 'assets' && !relative.startsWith('assets/')) {
+      if (relative !== '.vite' && relative !== 'assets' && !relative.startsWith('assets/') && !isLicense(relative)) {
         throw new Error(`Listener distribution contains an unexpected directory: ${relative}`);
       }
-    } else if (!allowedFiles.has(relative)) {
+    } else if (!allowedFiles.has(relative) && !isLicense(relative)) {
       throw new Error(`Listener distribution contains an unexpected file: ${relative}`);
     }
   }

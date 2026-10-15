@@ -94,6 +94,15 @@ test('stages a hashed Worker bundle that a manifested chunk loads but rejects an
   await assert.rejects(stageFixture(strayRoot), /unmanifested asset: assets\/stray-Zx12345678\.js/);
 });
 
+test('stages the encoder license notices copied from web/public', async (t) => {
+  const sourceRoot = await createSourceFixture();
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await writeFixtureFile(sourceRoot, 'web/dist/licenses/mp3/NOTICES.txt', 'notices\n');
+
+  const { outputDirectory } = await stageFixture(sourceRoot);
+  assert.equal(await readFile(path.join(outputDirectory, 'web/dist/licenses/mp3/NOTICES.txt'), 'utf8'), 'notices\n');
+});
+
 for (const relativeOutput of ['docs', 'test', '.git']) {
   test(`rejects the arbitrary ${relativeOutput} output directory without changing it`, async (t) => {
     const sourceRoot = await createSourceFixture();
