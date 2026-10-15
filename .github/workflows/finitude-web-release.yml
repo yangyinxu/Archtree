@@ -198,12 +198,15 @@ jobs:
           name: finitude-web-release-build
           path: .
 
-      - name: Install Chromium and operating-system dependencies
-        run: npx playwright install --with-deps chromium
+      - name: Install Chromium, Xvfb and operating-system dependencies
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get install --yes xvfb
 
+      # The room scenarios launch a headed Chromium to verify real background-tab behavior.
       - name: Run real social MongoDB, media, and WebSocket browser tests
         id: social
-        run: npm run test:e2e:social --workspace @archtree/finitude-web
+        run: xvfb-run -a npm run test:e2e:social --workspace @archtree/finitude-web
 
       - name: Retain social browser evidence
         if: ${{ failure() }}
