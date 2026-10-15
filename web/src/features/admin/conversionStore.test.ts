@@ -6,6 +6,10 @@ import { authorize, owner, ownerB, installFiles, file, manifest, memoryPersisten
 beforeEach(() => { installFiles(); vi.stubGlobal('navigator', { locks: locks() }); authorize(); });
 afterEach(() => { vi.unstubAllGlobals(); adminWorkspace.reset(); });
 
+/** Covers both source admission paths without substituting their storage or authorization checks. */
+const captureBatch = (store: ReturnType<typeof createConversionStore>, kind: 'local' | 'existing') => kind === 'local'
+  ? store.createLocal(owner, [file()], 'Lorem') : store.createExisting(owner, manifest());
+
 test('local selected bytes and full identity survive recreation without source recopy', async () => {
   const memory = memoryPersistence(), store = createConversionStore(memory.persistence), selected = file();
   const batch = await store.createLocal(owner, [selected], 'Lorem');
@@ -103,6 +107,65 @@ test('quota exhaustion and a failed manifest commit never write untraceable sour
   memory.persistence.estimate = async () => ({ quota: 1024 ** 4, usage: 0 }); memory.fault.commit = true;
   await expect(createConversionStore(memory.persistence).createLocal(owner, [file()], 'Lorem')).rejects.toThrow(); expect(memory.files.size).toBe(0);
 });
+
+for (const kind of ['local', 'existing'] as const) {
+  test.each(['pending', 'denied', 'rejected', 'thrown'] as const)(`${kind} capture continues when eviction protection is %s`, async outcome => {
+    const memory = memoryPersistence();
+    const persist = vi.fn((): Promise<boolean> => {
+      if (outcome === 'pending') return new Promise<boolean>(() => undefined);
+      if (outcome === 'denied') return Promise.resolve(false);
+      if (outcome === 'rejected') return Promise.reject(new DOMException('Synthetic refusal', 'NotAllowedError'));
+      throw new DOMException('Synthetic unavailable permission request', 'InvalidStateError');
+    });
+    memory.persistence.persist = persist;
+    const store = createConversionStore(memory.persistence), batch = await captureBatch(store, kind);
+    expect(persist).toHaveBeenCalledOnce();
+    expect(batch.tasks).toHaveLength(1);
+    expect(batch.tasks[0]).toMatchObject({ status: 'queued', source: { kind: kind === 'local' ? 'local' : 'remote', complete: kind === 'local' } });
+    expect(await store.get(owner, batch.id)).toEqual(batch);
+    expect(memory.batches.size).toBe(1); expect(memory.files.size).toBe(kind === 'local' ? 1 : 0);
+  });
+
+  test.each(['granted', 'rejected'] as const)(`${kind} late persistence permission %s cannot write after an account transition`, async outcome => {
+    const memory = memoryPersistence();
+    let grant!: (value: boolean) => void, reject!: (error: Error) => void;
+    memory.persistence.persist = () => new Promise<boolean>((resolve, refuse) => { grant = resolve; reject = refuse; });
+    const store = createConversionStore(memory.persistence); await captureBatch(store, kind);
+    const batches = structuredClone([...memory.batches]), files = [...memory.files].map(([id, bytes]) => [id, Array.from(bytes)]);
+    const create = vi.spyOn(memory.persistence, 'create'), mutate = vi.spyOn(memory.persistence, 'mutate'), openFile = vi.spyOn(memory.persistence, 'file');
+    authorize(ownerB);
+    if (outcome === 'granted') grant(true); else reject(new DOMException('Synthetic delayed refusal', 'NotAllowedError'));
+    await Promise.resolve(); await Promise.resolve();
+    expect(create).not.toHaveBeenCalled(); expect(mutate).not.toHaveBeenCalled(); expect(openFile).not.toHaveBeenCalled();
+    expect([...memory.batches]).toEqual(batches); expect([...memory.files].map(([id, bytes]) => [id, Array.from(bytes)])).toEqual(files);
+    await expect(store.list(owner)).rejects.toMatchObject({ code: 'conversion_permission_changed' });
+    expect(await store.list(ownerB)).toEqual([]);
+  });
+
+  test(`${kind} pending persistence permission cannot bypass the quota admission check`, async () => {
+    const memory = memoryPersistence();
+    memory.persistence.persist = () => new Promise<boolean>(() => undefined);
+    const estimate = vi.fn(async () => ({ usage: 10, quota: 11 })); memory.persistence.estimate = estimate;
+    await expect(captureBatch(createConversionStore(memory.persistence), kind)).rejects.toMatchObject({ code: 'conversion_storage_full' });
+    expect(estimate).toHaveBeenCalledOnce(); expect(memory.batches.size).toBe(0); expect(memory.files.size).toBe(0);
+  });
+
+  test(`${kind} authorization loss during the permission request prevents task admission`, async () => {
+    const memory = memoryPersistence();
+    memory.persistence.persist = () => { advanceAccountEpoch(); return new Promise<boolean>(() => undefined); };
+    const estimate = vi.fn(memory.persistence.estimate); memory.persistence.estimate = estimate;
+    await expect(captureBatch(createConversionStore(memory.persistence), kind)).rejects.toMatchObject({ code: 'conversion_permission_changed' });
+    expect(estimate).not.toHaveBeenCalled(); expect(memory.batches.size).toBe(0); expect(memory.files.size).toBe(0);
+  });
+
+  test(`${kind} authorization loss while estimating quota prevents task admission`, async () => {
+    const memory = memoryPersistence();
+    memory.persistence.persist = () => new Promise<boolean>(() => undefined);
+    memory.persistence.estimate = async () => { advanceAccountEpoch(); return { usage: 0, quota: 1024 ** 4 }; };
+    await expect(captureBatch(createConversionStore(memory.persistence), kind)).rejects.toMatchObject({ code: 'conversion_permission_changed' });
+    expect(memory.batches.size).toBe(0); expect(memory.files.size).toBe(0);
+  });
+}
 
 test('an empty Album preview never allocates a conversion job or requests storage', async () => {
   const memory = memoryPersistence(), list = vi.fn(memory.persistence.list), estimate = vi.fn(memory.persistence.estimate), persist = vi.fn(memory.persistence.persist);

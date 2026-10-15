@@ -85,6 +85,10 @@ test('the release bundle is staged only after every gate job succeeds and binds 
     if (gate === 'staging') {
       assert.equal(binding, '${{ steps.staging.outcome }}');
       assert.match(release, /^ {8}id: staging$/m);
+    } else if (gate === 'browser') {
+      // A matrix step output is only the last finisher's value; provenance must require the whole matrix.
+      assert.equal(binding, '${{ needs.browser-e2e.result }}');
+      assert.doesNotMatch(jobs.get('browser-e2e')!, /^ {4}outputs:/m);
     } else {
       assert.ok(outputs.has(gate), `A gate job must export ${gate}`);
       assert.equal(binding, `\${{ needs.${outputs.get(gate)}.outputs.${gate} }}`);
@@ -114,7 +118,7 @@ test('one production build is tested by both browser gates and staged without re
 
 test('browser evidence is retained even when a browser gate fails', async () => {
   const jobs = jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n'));
-  const evidence = { 'social-e2e': 'finitude-social-browser-evidence', 'browser-e2e': 'finitude-web-browser-evidence' };
+  const evidence = { 'social-e2e': 'finitude-social-browser-evidence', 'browser-e2e': 'finitude-web-browser-evidence-${{ matrix.browser }}' };
   for (const [name, artifact] of Object.entries(evidence)) {
     const step = jobs.get(name)!.split(`name: ${artifact}`)[0].split('- name: ').at(-1)!;
     assert.match(step, /if: \$\{\{ !cancelled\(\)/, `${artifact} must upload after a failed gate`);
@@ -123,6 +127,21 @@ test('browser evidence is retained even when a browser gate fails', async () => 
 
 /** Splits one job block into its steps; each step starts with `- name:` at six spaces. */
 const stepBlocks = (job: string) => job.split(/^ {6}- name: /m).slice(1).map(step => ({ name: step.split('\n')[0], body: step }));
+
+test('the complete browser gate runs every engine independently without cancelling another engine on failure', async () => {
+  const jobs = jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n'));
+  const browser = jobs.get('browser-e2e')!;
+  assert.match(browser, /^ {4}strategy:\n(?: {6}#[^\n]*\n)* {6}fail-fast: false\n {6}matrix:\n {8}browser: \[chromium, firefox, webkit\]$/m);
+  assert.ok(browser.includes('name: Production-bundle browser and accessibility tests (${{ matrix.browser }})'));
+  assert.doesNotMatch(browser, /continue-on-error|^ {4}if:|max-parallel:/m);
+  const steps = stepBlocks(browser);
+  const evidence = steps.find(step => step.body.includes('name: finitude-web-browser-evidence-${{ matrix.browser }}'));
+  assert.ok(evidence, 'Each engine must retain its evidence without overwriting another engine.');
+  for (const step of steps.filter(step => step.body.includes('xvfb-run -a npm run test:e2e'))) {
+    assert.equal(step.body.split('--project=${{ matrix.browser }}').length - 1, 1);
+    assert.doesNotMatch(step.body.replace('--project=${{ matrix.browser }}', ''), /--project/);
+  }
+});
 
 test('native playback startup fails early without replacing the complete browser gate', async () => {
   const jobs = jobBlocks((await readFile(workflowUrl, 'utf8')).replace(/\r\n/g, '\n'));
@@ -139,9 +158,10 @@ test('native playback startup fails early without replacing the complete browser
   assert.match(preflight.body, /2>&1 \| node scripts\/filter-native-media-evidence\.mjs/);
   assert.match(preflight.body, /GST_DEBUG: '0,webkitmediaplayer:5'/);
   assert.doesNotMatch(gate.body, /GST_DEBUG|DEBUG:|filter-native-media-evidence/);
-  assert.doesNotMatch(preflight.body, /continue-on-error|^ {8}if:|--project/m);
-  assert.ok(gate.body.includes('run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none\n'));
-  assert.doesNotMatch(gate.body, /continue-on-error|^ {8}if:|--grep|--project/m);
+  assert.ok(preflight.body.includes('--retries=0 --project=${{ matrix.browser }}'));
+  assert.doesNotMatch(preflight.body, /continue-on-error|^ {8}if:/m);
+  assert.ok(gate.body.includes('run: xvfb-run -a npm run test:e2e --workspace @archtree/finitude-web -- --project=${{ matrix.browser }} --update-snapshots=none\n'));
+  assert.doesNotMatch(gate.body, /continue-on-error|^ {8}if:|--grep|--retries/m);
   assert.match(steps.find(step => step.body.includes('name: finitude-web-browser-evidence'))!.body,
     /^ {12}web\/test-results$/m);
 });
