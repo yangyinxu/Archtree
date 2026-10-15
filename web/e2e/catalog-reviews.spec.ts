@@ -315,12 +315,14 @@ async function expectDecodedPrivateCover(image: Locator, kind: Exclude<CatalogKi
   await expect(image).toBeVisible();
   await image.evaluate(element => (element as HTMLImageElement).decode());
   const evidence = await image.evaluate(element => {
-    const value = element as HTMLImageElement, rect = value.getBoundingClientRect(), url = new URL(value.src);
+    const value = element as HTMLImageElement, rect = value.getBoundingClientRect(), frame = value.parentElement!.getBoundingClientRect(), url = new URL(value.src);
     return { width: rect.width, height: rect.height, naturalWidth: value.naturalWidth, naturalHeight: value.naturalHeight,
+      frameWidth: frame.width, frameHeight: frame.height,
       path: url.pathname, viewer: url.searchParams.get('viewer'), origin: url.origin, srcset: value.getAttribute('srcset') };
   });
   expect(evidence.naturalWidth).toBe(640); expect(evidence.naturalHeight).toBe(640);
   expect(evidence.width).toBeGreaterThan(32); expect(Math.abs(evidence.width - evidence.height)).toBeLessThan(1);
+  expect(Math.abs(evidence.frameWidth - evidence.frameHeight)).toBeLessThan(1);
   expect(evidence.path).toMatch(new RegExp(`^/api/admin/v1/catalog/${kind}/[a-f0-9]{24}/artwork$`));
   expect(evidence.viewer).toBe(viewer); expect(evidence.origin).toBe(new URL(image.page().url()).origin); expect(evidence.srcset).toBeNull();
   return evidence;

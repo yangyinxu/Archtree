@@ -991,6 +991,8 @@ avatars remain private behind `/auth/avatar`. Finitude Web derives responsive
 `/content/images/:imageId/v1/:width.webp`. They are versioned, revalidated,
 CPU-concurrency bounded responses and never create extra S3 objects; the
 original image route remains the fallback and native-client contract.
+The shared Web artwork component keeps both its bordered frame and decoded image
+square, including in WebKit; Artist portraits retain their circular crop.
 
 The Archtree landing page links both signed-out and signed-in visitors to
 `/finitude` while preserving its existing content-management and authentication
@@ -1473,6 +1475,12 @@ That permission request is advisory and does not hold task creation open while
 Firefox waits for a browser prompt, or fail conversion if permission is denied
 or unavailable. Actual IndexedDB/OPFS writes, storage quota and account ownership
 checks still have to succeed.
+Browser ports without the required storage APIs show the unavailable explanation
+and disable task creation. The browser gate requires real conversion in Chromium
+and Firefox. It measures native capabilities in every engine; unsupported WebKit
+ports instead verify unavailable controls and still run source-preview, layout
+and localization checks. Only the four encoding/upload scenarios that require
+durable files are explicitly skipped there, with capability evidence retained.
 Keep external originals. Only one same-account tab executes device jobs at a
 time. Jobs and bytes remain on this browser/profile/device under their initiating
 account; current administrator authorization is required to see or recover them.

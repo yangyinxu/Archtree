@@ -38,9 +38,51 @@ async function select(page: Page, files: { name: string; mimeType: string; buffe
   await page.getByRole('button', { name: 'Create local conversion task' }).click();
 }
 
+/** Native storage availability varies between WebKit ports; the UI must enforce that same admission boundary. */
+async function expectStorageAvailability(page: Page) {
+  const capabilities = await page.evaluate(() => ({ secure: isSecureContext, indexedDB: typeof indexedDB,
+    storage: typeof navigator.storage, getDirectory: typeof navigator.storage?.getDirectory,
+    locksRequest: typeof navigator.locks?.request, worker: typeof Worker }));
+  await test.info().attach('conversion-storage-capabilities', { contentType: 'application/json', body: JSON.stringify(capabilities) });
+  const supported = capabilities.secure && capabilities.indexedDB === 'object' && capabilities.getDirectory === 'function'
+    && capabilities.locksRequest === 'function' && capabilities.worker === 'function';
+  if (['chromium', 'firefox'].includes(test.info().project.name)) {
+    expect(supported, 'Chromium and Firefox must keep running the complete real conversion scenarios.').toBe(true);
+  }
+  const picker = page.getByRole('button', { name: 'Choose FLAC / WAV', exact: true });
+  const folder = page.getByRole('button', { name: 'Choose an Album folder', exact: true });
+  if (supported) { await expect(picker).toBeEnabled(); await expect(folder).toBeEnabled(); }
+  else {
+    await expect(page.getByRole('status').filter({ hasText: 'Local conversion is unavailable in this browser' })).toBeVisible();
+    await expect(picker).toBeDisabled(); await expect(folder).toBeDisabled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  }
+  return supported;
+}
+
+/** Real encoding needs OPFS; unsupported ports still run the separate availability and source-layout scenarios. */
+async function requireConversionStorage(page: Page) {
+  test.skip(!await expectStorageAvailability(page), 'This browser port lacks the native durable storage required for local conversion.');
+}
+
+test('native storage availability controls capture without starting work on unsupported browsers', async ({ page }) => {
+  const mutations: string[] = [];
+  page.on('request', request => { if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/admin/v1/')) mutations.push(request.method()); });
+  await setup(page); await open(page);
+  if (!await expectStorageAvailability(page)) {
+    await page.locator('input[type=file][accept]').setInputFiles([{ name: 'Tone.wav', mimeType: 'audio/wav', buffer: wave() }]);
+    await expect(page.getByRole('button', { name: 'Create local conversion task' })).toBeDisabled();
+    await page.locator('input[type=file][accept]').evaluate(input => (input as HTMLInputElement).form!.requestSubmit());
+    await expect(page.getByRole('button', { name: 'Convert / resume Album' })).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  }
+  expect(mutations).toEqual([]);
+});
+
 test('FLAC and WAV batch converts with production CSP, retains sources and reuses completed output after reload', async ({ page }, info) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await setup(page); await open(page);
+  await requireConversionStorage(page);
   const flac = readFileSync(new URL('./fixtures/conversion/synthetic-mono-48.flac', import.meta.url));
   await select(page, [{ name: '01-Tone.wav', mimeType: 'untrusted/type', buffer: wave() }, { name: '02-Tone.flac', mimeType: 'audio/flac', buffer: flac }]);
   await page.getByRole('button', { name: 'Convert / resume Album' }).click();
@@ -65,6 +107,7 @@ test('FLAC and WAV batch converts with production CSP, retains sources and reuse
 
 test('a corrupt member stays visible while the other Album member completes', async ({ page }) => {
   await setup(page); await open(page);
+  await requireConversionStorage(page);
   await select(page, [{ name: 'Bad.flac', mimeType: 'audio/flac', buffer: Buffer.from('fLaC broken') }, { name: 'Good.wav', mimeType: 'audio/wav', buffer: wave() }]);
   await page.getByRole('button', { name: 'Convert / resume Album' }).click();
   await expect(page.getByText('MP3 ready locally', { exact: true })).toHaveCount(1);
@@ -74,6 +117,7 @@ test('a corrupt member stays visible while the other Album member completes', as
 
 test('extensionless FLAC and renamed WAV decode and download with consistent MP3 filenames', async ({ page }) => {
   await setup(page); await open(page);
+  await requireConversionStorage(page);
   const flac = readFileSync(new URL('./fixtures/conversion/synthetic-mono-48.flac', import.meta.url));
   await select(page, [{ name: 'Tone', mimeType: 'application/octet-stream', buffer: flac }, { name: 'Other.data', mimeType: 'untrusted/type', buffer: wave() }]);
   await page.getByRole('button', { name: 'Convert / resume Album' }).click();
@@ -104,13 +148,15 @@ for (const locale of ['en-US', 'zh-Hans']) for (const width of [1280, 390]) test
       format: { container: 'WAVE', codec: 'PCM', lossless: true, sampleRate: 48000, channels: 2, bitDepth: 24, duration: 180 },
       mediaUrl: `/api/admin/v1/catalog/audioTrack/${id}/media` }; }) }, headers }));
   await open(page, '?album=222222222222222222222222');
+  const supported = await expectStorageAvailability(page);
   if (locale === 'zh-Hans') {
     await page.getByRole('button', { name: 'Change language. Current language: English (United States)' }).click();
     await page.getByRole('dialog', { name: 'Choose your language' }).getByRole('radio', { name: '简体中文', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-Hans');
   }
   const action = page.getByRole('button', { name: locale === 'zh-Hans' ? '创建本地转换任务' : 'Create local conversion task' });
-  await expect(action).toBeEnabled();
+  if (supported) await expect(action).toBeEnabled();
+  else await expect(action).toBeDisabled();
   expect((await action.boundingBox())!.y).toBeLessThan(844);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await expect(page.getByText('Track 100 · Long filename and Japanese 日本語 / 中文')).not.toBeVisible();
@@ -141,7 +187,8 @@ test('lost upload response reconciles the same operation and deletes only the co
       upload: ready ? 'ready' : 'notStarted', publication: ready ? 'ready' : 'notStarted', ready, cleanupPending: false, issue: null,
       output: { sha256: intent.output.sha256, byteLength: intent.output.byteLength, preset: 'mp3-320' } } }, headers });
   });
-  await open(page, `?track=${trackId}`); await page.getByRole('button', { name: 'Create local conversion task' }).click();
+  await open(page, `?track=${trackId}`); await requireConversionStorage(page);
+  await page.getByRole('button', { name: 'Create local conversion task' }).click();
   await page.getByRole('button', { name: 'Convert / resume Album' }).click(); await expect(page.getByText('MP3 ready locally', { exact: true })).toBeVisible();
   const submit = async () => { await page.getByRole('button', { name: 'Review MP3 replacement' }).click(); await page.getByRole('dialog').getByRole('button', { name: 'Upload / reconcile MP3s' }).click(); };
   await submit(); await expect(page.getByText('Needs attention; files retained', { exact: true })).toBeVisible();

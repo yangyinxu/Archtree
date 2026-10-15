@@ -1358,6 +1358,8 @@ The wire protocol and operational bounds are documented in
   runs on the server. Actual container, codec and complete decodability determine
   eligibility, not a filename or MIME declaration. Unsupported or corrupt inputs
   are identified individually and never produce a completed result.
+  Browsers without the required device-local storage explain that conversion is
+  unavailable and cannot create new conversion tasks.
 - The first quality preset is 320 kbps CBR. Mono and stereo retain their channel
   counts; unsupported channel layouts require an explicit alternative rather
   than silent downmixing. Supported 44.1/48 kHz sources retain their sample rate;
