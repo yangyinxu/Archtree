@@ -1575,6 +1575,13 @@ layout with management navigation, language/account controls and the Admin/User
 view switch. Listener navigation, global music search and playback controls are
 absent. Switching back to User view restores the listener layout while retaining
 the authenticated session, playback state and active Room connection.
+The catalog uses artwork/name entries for Albums, Artists, MediaTracks and
+Organizations, with management actions on their detail pages. The inventory
+loads separately from editing controls. Its optional `kind=artist`,
+`kind=audioTrack` or `kind=organization` query parameter selects a category;
+missing or unsupported values select Albums. Detail return links retain that
+category. Organizations use a name mark, matching listener details, and do not
+gain artwork upload controls.
 Direct catalog saves also confirm the frozen partial patch with per-field saved
 and proposed values, including coupled Credits and attribution. A newer catalog
 revision disables the open confirmation and shows its recovery instruction;

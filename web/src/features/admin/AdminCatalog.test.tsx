@@ -8,9 +8,17 @@ import { CatalogEditConfirmation } from './CatalogEditConfirmation';
 import { catalogPatch } from './catalogApi';
 import { AdminPagesPage } from './AdminPagesPage';
 import { deferred, json, session, viewer } from './adminFixtures.testSupport';
-import type { CatalogItem } from './catalogApi';
+import type { CatalogItem, CatalogKind } from './catalogApi';
 const album = (): Extract<CatalogItem, { kind: 'album' }> => ({ kind: 'album', id: '111111111111111111111111', revision: `cr_${'a'.repeat(43)}`, visibility: 'public', effectiveVisibility: 'public', coverUrl: null, mediaUrl: null, capabilities: { editing: true, visibility: true }, fields: { title: 'Synthetic catalog Album', releaseDate: null, credits: null, attributionStatus: 'unknown' } });
-function mount(element: React.ReactNode) { const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session); render(<QueryClientProvider client={client}><MemoryRouter>{element}</MemoryRouter></QueryClientProvider>); return client; }
+function catalogItem(kind: CatalogKind): CatalogItem {
+  const base = album();
+  if (kind === 'artist') return { ...base, kind, fields: { name: 'Synthetic artist', bio: '', birthDate: null } };
+  if (kind === 'organization') return { ...base, kind, fields: { name: '𠮷 Synthetic organization', description: '', organizationType: 'archive' } };
+  if (kind === 'audioTrack') return { ...base, kind, fields: { ...base.fields, title: 'Synthetic track', releaseDate: { year: 2023, month: 4, day: null }, trackNumber: 2 } };
+  return base;
+}
+const itemName = (item: CatalogItem) => 'name' in item.fields ? item.fields.name : item.fields.title;
+function mount(element: React.ReactNode, path = '/') { const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session); render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}>{element}</MemoryRouter></QueryClientProvider>); return client; }
 beforeEach(() => { adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }); adminWorkspace.select('admin'); });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); vi.restoreAllMocks(); onlineManager.setOnline(true); });
 test('Album inventory uses its private cover and title as one detail entry without repeated management actions', async () => {
@@ -60,6 +68,96 @@ test.each(['inventory', 'details'] as const)('explicit %s refresh retries a fail
   await waitFor(() => expect(reads).toBeGreaterThan(previousReads));
   const recovered = document.querySelector('img')!; expect(recovered).not.toBe(original);
   expect(recovered).toHaveAttribute('src', `${item.coverUrl}?viewer=${viewer}`); expect(recovered).not.toHaveAttribute('srcset');
+});
+
+test.each(['artist', 'audioTrack', 'organization'] as const)('%s inventory has one artwork/name entry and no repeated management actions', async kind => {
+  const base = catalogItem(kind), name = itemName(base);
+  const item = { ...base, coverUrl: kind === 'organization' ? null : `/api/admin/v1/catalog/${kind}/${base.id}/artwork` };
+  adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }, true);
+  vi.stubGlobal('fetch', vi.fn(async () => json({ items: [item], nextCursor: null })));
+  mount(<AdminCatalogPage />, `/admin/catalog?kind=${kind}`);
+  const link = await screen.findByRole('link', { name });
+  expect(link).toHaveAttribute('href', `/admin/catalog/${kind}/${item.id}`);
+  expect(link.closest('li')!.querySelectorAll('a')).toHaveLength(1);
+  expect(link.closest('li')!.querySelectorAll('button')).toHaveLength(0);
+  expect(link).toHaveAccessibleDescription(kind === 'organization' ? 'Public · Archive' : kind === 'audioTrack' ? 'Public · 2023 · Track number 2' : 'Public');
+  if (kind === 'organization') { expect(within(link).getByText('𠮷', { exact: true })).toHaveAttribute('aria-hidden', 'true'); expect(link.querySelector('img')).toBeNull(); }
+  else { expect(link.querySelector('img')).toHaveAttribute('src', `${item.coverUrl}?viewer=${viewer}`); expect(link.querySelector('img')).toHaveAttribute('alt', ''); expect(link.querySelector('img')).not.toHaveAttribute('srcset'); }
+  expect(screen.queryByRole('link', { name: 'Edit manually' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Review existing Album' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Convert to MP3' })).not.toBeInTheDocument();
+  act(() => adminWorkspace.select('user')); expect(document.querySelector('img')).toBeNull(); expect(screen.queryByRole('link', { name })).not.toBeInTheDocument();
+});
+
+test.each(['artist', 'audioTrack', 'organization'] as const)('%s details show saved presentation and only management supported by that type', async kind => {
+  const base = catalogItem(kind), name = itemName(base);
+  const item = { ...base, coverUrl: kind === 'organization' ? null : `/api/admin/v1/catalog/${kind}/${base.id}/artwork` };
+  adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }, true);
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => path.endsWith('/cover-operations') ? json({ items: [] }) : json({ item })));
+  mount(<AdminCatalogPage kind={kind} id={item.id} />);
+  const heading = await screen.findByRole('heading', { name, level: 1 });
+  if (kind === 'organization') { expect(within(heading.closest('header')!).getByText('𠮷', { exact: true })).toHaveAttribute('aria-hidden', 'true'); expect(document.querySelector('img')).toBeNull(); }
+  else { const image = await screen.findByRole('img', { name: `${name} ${kind === 'artist' ? 'portrait' : 'cover'}` }); expect(image).toHaveAttribute('src', `${item.coverUrl}?viewer=${viewer}`); expect(image).toHaveAttribute('loading', 'eager'); expect(image).not.toHaveAttribute('srcset'); }
+  expect(screen.getByRole('link', { name: 'Back to catalog' })).toHaveAttribute('href', `/admin/catalog?kind=${kind}`);
+  const actions = within(screen.getByRole('group', { name: 'Edit catalog content' }));
+  expect(actions.getByRole('link', { name: 'Edit manually' })).toHaveAttribute('href', '#catalog-details');
+  expect(screen.queryByRole('button', { name: 'Review existing Album' })).not.toBeInTheDocument();
+  if (kind === 'audioTrack') expect(actions.getByRole('link', { name: 'Convert to MP3' })).toHaveAttribute('href', `/admin/conversions?track=${item.id}`);
+  else expect(screen.queryByRole('link', { name: 'Convert to MP3' })).not.toBeInTheDocument();
+  expect(await screen.findByRole('textbox', { name: kind === 'audioTrack' ? 'Title' : 'Name' })).toHaveValue(name);
+});
+
+test.each(['artist', 'audioTrack'] as const)('%s details retain draft values while refreshing the saved heading and retrying failed private artwork', async kind => {
+  const base = catalogItem(kind), original = { ...base, coverUrl: `/api/admin/v1/catalog/${kind}/${base.id}/artwork` };
+  const name = itemName(base); let latest = original;
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => path.endsWith('/cover-operations') ? json({ items: [] }) : json({ item: latest })));
+  mount(<AdminCatalogPage kind={kind} id={base.id} />);
+  const input = await screen.findByRole('textbox', { name: kind === 'artist' ? 'Name' : 'Title' });
+  fireEvent.change(input, { target: { value: 'Unsaved local value' } });
+  const oldImage = document.querySelector('img')!; fireEvent.error(oldImage); expect(document.querySelector('img')).toBeNull();
+  latest = { ...original, revision: `cr_${'b'.repeat(43)}`, fields: { ...original.fields, ...(kind === 'artist' ? { name: 'Latest saved name' } : { title: 'Latest saved name' }) } } as typeof original;
+  fireEvent.click(screen.getAllByRole('button', { name: 'Refresh status' })[0]);
+  await screen.findByRole('heading', { name: 'Latest saved name', level: 1 });
+  expect(input).toHaveValue('Unsaved local value'); expect(document.querySelector('img')).not.toBeNull();
+  expect(adminWorkspace.buffer<{ base: CatalogItem; dirty: boolean }>(`catalog:${kind}:${base.id}`)).toMatchObject({ base: { revision: original.revision }, dirty: true });
+  expect(screen.queryByRole('link', { name: 'Convert to MP3' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name, level: 1 })).not.toBeInTheDocument();
+});
+
+test.each(['artist', 'audioTrack', 'organization'] as const)('%s details keep manual editing disabled when current capabilities are closed', async kind => {
+  const item = { ...catalogItem(kind), capabilities: { editing: false, visibility: false } };
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => path.endsWith('/cover-operations') ? json({ items: [] }) : json({ item })));
+  mount(<AdminCatalogPage kind={kind} id={item.id} />);
+  await screen.findByRole('heading', { name: itemName(item), level: 1 });
+  expect(screen.getByRole('button', { name: 'Edit manually' })).toBeDisabled();
+  expect(await screen.findByRole('textbox', { name: kind === 'audioTrack' ? 'Title' : 'Name' })).toBeDisabled();
+});
+
+test('invalid catalog category falls back to Albums and category switches update the visible inventory', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => json({ items: [catalogItem(path.includes('/artist?') ? 'artist' : 'album')], nextCursor: null })));
+  mount(<AdminCatalogPage />, '/admin/catalog?kind=not-a-kind');
+  await screen.findByRole('link', { name: album().fields.title });
+  expect(screen.getByRole('button', { name: 'Albums' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: 'Artists' }));
+  await screen.findByRole('link', { name: 'Synthetic artist' });
+  expect(screen.getByRole('button', { name: 'Artists' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test.each([
+  ['album', 'Untitled album'], ['artist', 'Unknown artist'], ['audioTrack', 'Untitled MediaTrack'], ['organization', 'Unknown organization']
+] as const)('an unnamed %s uses its own accessible name fallback', async (kind, name) => {
+  const base = catalogItem(kind), item = { ...base, fields: { ...base.fields, ...('name' in base.fields ? { name: ' \n ' } : { title: ' \n ' }) } } as CatalogItem;
+  vi.stubGlobal('fetch', vi.fn(async () => json({ items: [item], nextCursor: null })));
+  mount(<AdminCatalogPage />, `/admin/catalog?kind=${kind}`);
+  expect(await screen.findByRole('link', { name })).toHaveAttribute('href', `/admin/catalog/${kind}/${item.id}`);
+});
+
+test.each([['artist', 404], ['organization', 503]] as const)('%s error details retain the category-specific return entry', async (kind, status) => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => path.endsWith('/cover-operations') ? json({ items: [] }) : json({ code: 'unavailable' }, status)));
+  mount(<AdminCatalogPage kind={kind} id={album().id} />);
+  await screen.findByRole('alert');
+  expect(screen.getByRole('link', { name: 'Back to catalog' })).toHaveAttribute('href', `/admin/catalog?kind=${kind}`);
+  expect(screen.queryByRole('link', { name: 'Edit manually' })).not.toBeInTheDocument();
 });
 
 test('existing catalog save is explicit, partial and preserves unsaved edits on revision conflict', async () => {
