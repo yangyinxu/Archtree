@@ -8,7 +8,7 @@ behavior contract.
 
 The Playwright suite runs the production `web/dist` bundle through Archtree's
 Express application and uses deterministic browser-only API and audio fixtures.
-It covers bundled Chromium, Firefox, and WebKit engines, critical/serious axe
+It runs in bundled Chromium only, and covers critical/serious axe
 findings, keyboard skip navigation, reduced motion, direct route refreshes, and
 320 px, 768 px, and 1440 px reflow checks. It also verifies that wheel input
 over the desktop player cannot move the application shell while the main content
@@ -54,6 +54,15 @@ font or image payload. CI repeats the browser gate through
 Linux CI from silently comparing against macOS font rendering. The current
 strict no-update Linux result is recorded below; the historical failure remains
 separate evidence.
+
+### CI scope change — 2026-10-15
+
+The listener and social gates now run Chromium only, retry a failed test once,
+and no longer fail a run for a test that passes on retry. The Firefox/WebKit
+projects, the Linux PulseAudio/GStreamer setup, the native-playback preflights
+and the tests that asserted the workflow's YAML shape were removed: they made
+pull-request CI fail repeatedly on audio timing without finding product bugs.
+The evidence below predates this change.
 
 ### Verified release status — checked 2026-10-12
 

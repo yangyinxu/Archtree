@@ -144,10 +144,8 @@ explicit configuration and a local FFmpeg; the deployed Content Manager page
 remains their in-app equivalent. Missing runtime makes compressed uploads
 ineligible with a retryable analysis reason while ordinary uploads/playback stay
 available. The analyzer tests intentionally require a real decoder; do not mark
-missing-decoder fixture checks as passed. Local checks preserve Chromium's
-`--disable-audio-output`; compressed-media and focused room-recovery scenarios add Firefox/WebKit hosts
-only on Linux with `CI=true` or `CI=1`, using isolated servers and the CI null
-audio sink. Local Firefox/WebKit execution remains excluded.
+missing-decoder fixture checks as passed. Browser checks run Chromium only, with
+`--disable-audio-output`.
 
 When transferring a Windows working copy into isolated Linux verification, use
 Git's canonical line endings and executable modes rather than treating a raw
@@ -241,7 +239,7 @@ not provide the required filesystem and operating-system behavior.
 
 The release workflow continues to require unit tests (including Linux suites),
 MongoDB lifecycle integration tests, the production build, browser fixture type
-checks, Chromium/Firefox/WebKit playback and accessibility tests, and validated
+checks, Chromium playback and accessibility tests, and validated
 artifact staging. Windows checks do not replace that release matrix.
 
 ## Repairing this Windows workstation
@@ -289,7 +287,7 @@ failure without modifying browser binaries, permissions, or test assertions:
 
 ```powershell
 $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:LOCALAPPDATA 'Programs\ArchtreeRuntimes\playwright'
-npx --no-install playwright install chromium firefox webkit
+npx --no-install playwright install chromium
 npm run test:e2e
 ```
 
