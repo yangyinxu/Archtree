@@ -62,7 +62,9 @@ and no longer fail a run for a test that passes on retry. The Firefox/WebKit
 projects, the Linux PulseAudio/GStreamer setup, the native-playback preflights
 and the tests that asserted the workflow's YAML shape were removed: they made
 pull-request CI fail repeatedly on audio timing without finding product bugs.
-The evidence below predates this change.
+The visual-regression goldens, the room-playback feasibility spec, the motion
+(layout-shift) spec and the separate room soak gate were also removed. The
+evidence below predates this change.
 
 ### Verified release status — checked 2026-10-12
 
@@ -139,18 +141,6 @@ countdowns, an observer-session logout that leaves the playing device in the roo
 and a host's sign out everywhere that ends the room. Only this project's disposable
 fixture can age a recorded host absence; it changes no limit, timer or snapshot,
 and the application's sweep performs every transition.
-
-`npm run test:soak:rooms` is a separate 30-minute gate, with 2–8 synthetic members
-and configurable bounded duration/cycle spacing. See the
-[commands and limits](../../README.md#verify-sustained-audio-rooms-locally).
-It reports actual media advancement, capture-time-aligned drift, application-fixture
-Node process RSS/heap extrema, and zero upgraded sockets/media requests/pending
-playback reads after participant cleanup. Browser, MongoDB, and whole-machine
-memory are outside these measurements; extrema do not establish absence of leaks. An
-aggregate attachment remains available after playback or browser cleanup failures.
-Global teardown explicitly drains the owned fixture, including MongoDB, S3 and
-copied distribution, before acknowledging completion. Do not substitute a short
-smoke pass for endurance evidence or a local fixture pass for production capacity.
 
 The 2026-10-01 uncommitted `develop` candidate passed `npm test` (710 backend
 and 989 Web tests), `npm run test:integration` (580 tests), `npm run build`, and

@@ -161,11 +161,6 @@ this profile separately from default CI, retain real click and media assertions,
 and preserve a media failure even when page rendering recovers. A working
 animation or click probe is not a passing playback gate.
 
-The separate sustained-room gate and bounded options are documented in
-[`README.md`](../README.md#verify-sustained-audio-rooms-locally). It does not run
-as part of the ordinary short test matrix. It owns its resource cleanup and uses
-no workstation application database or cloud credentials.
-
 ## Disposable MongoDB tests
 
 Install **MongoDB Community 8.0.12**, the version pinned in release CI, from the

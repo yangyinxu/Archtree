@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
 type SocialSuite = { name: string; port: number; spec?: string; grep?: RegExp };
 
 // Each test owns one fixture process, so one test's requests cannot spend another's per-IP or per-account rate windows.
-// Ports 4187/4188 belong to the separate room soak configuration. 4190 is a Fetch-blocked port, so room-lifecycle uses 4191.
+// 4190 is a Fetch-blocked port, so room-lifecycle uses 4191.
 const suites: SocialSuite[] = [{ name: 'rooms', port: 4175, grep: /real social route continues background audio/ },
   { name: 'rooms-recovery', port: 4189, spec: 'rooms', grep: /real room command races, controller recovery and running host transfer/ },
   { name: 'invitations', port: 4176 }, { name: 'song-requests', port: 4177 }, { name: 'music-shares', port: 4178 },

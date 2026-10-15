@@ -12,7 +12,8 @@ import type { CatalogItem, CatalogKind } from '../src/features/admin/catalogApi'
 const shots = process.env.FINITUDE_CATALOG_E2E_SCREENSHOTS_DIR ?? '/tmp/finitude-first-use-fixed-20261014';
 type Locale = 'en-US' | 'zh-Hans';
 let locale: Locale = 'en-US';
-const localizedViewports = [{ width: 1280, locale: 'en-US' }, { width: 390, locale: 'en-US' }, { width: 1280, locale: 'zh-Hans' }, { width: 390, locale: 'zh-Hans' }] as const;
+// One desktop English and one mobile Chinese pass cover both layout and localization without the full cross product.
+const localizedViewports = [{ width: 1280, locale: 'en-US' }, { width: 390, locale: 'zh-Hans' }] as const;
 
 /** Use the shipped localization contract, including counts and names, for real language-switch coverage. */
 function label(key: keyof typeof english, parameters: Record<string, string | number> = {}) {

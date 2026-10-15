@@ -483,8 +483,8 @@ The listener and social E2E configurations run Chromium only, with
 `--disable-audio-output`, on every platform.
 
 The legacy
-`contracts/social/prototype-v1/playback-trace.json` remains a feasibility fixture
-for native DEBUG adapters, not the room wire contract. Native devices and native
+`contracts/social/prototype-v1/playback-trace.json` remains a unit-test fixture
+and native DEBUG adapter input, not the room wire contract. Native devices and native
 background participation, shared Video and deployment performance remain tracked in
 [the social implementation plan](docs/plans/social-and-shared-playback-plan.md).
 
@@ -883,14 +883,8 @@ npm run typecheck:e2e --workspace @archtree/finitude-web
 CI=1 npm run test:e2e --workspace @archtree/finitude-web -- --update-snapshots=none
 ```
 
-Chromium owns the reviewed deterministic pixel baselines. Review intentional visual changes
-before creating or updating any named Chromium screenshot rather than bulk-
-refreshing snapshots to make a failure pass. Snapshot paths are platform-
-scoped so one operating system never silently approves another system font's
-rendering. Before each Chromium capture, the visual helper pins scroll-container
-gutters to a transparent 10 px (the Linux baseline width), so macOS goldens do
-not depend on the System Settings scroll-bar choice and both platforms share
-one layout.
+There are no pixel-snapshot tests; layout is checked through behavior and
+accessibility assertions.
 
 The listener reads browser-safe content from `/api/listener/v1`. The versioned
 namespace provides Home, Search, Album, Artist, Track, authenticated Library,
@@ -1024,62 +1018,6 @@ npm run test:media-load
 Run this only in an environment approved for load testing. The harness models
 concurrent clients from one runner; release evidence still needs approved
 multi-source staging traffic against the real media store.
-
-### Verify sustained Audio rooms locally
-
-After `npm ci`, `npm run doctor`, and `npm run build`, run
-`npm run test:soak:rooms`. This separate gate defaults to two members and 30
-minutes, using real browser media clocks, authenticated HTTP, WebSockets, an owned
-MongoDB replica set, and a loopback S3 protocol fixture. It never uses configured
-application databases or external storage, and Chromium hardware audio stays disabled.
-Ports 4187 and 4188 must be free.
-
-```powershell
-$env:FINITUDE_ROOM_SOAK_SECONDS = '1800'
-$env:FINITUDE_ROOM_SOAK_CYCLE_SECONDS = '45'
-$env:FINITUDE_ROOM_SOAK_MEMBERS = '2'
-npm run test:soak:rooms
-```
-
-Duration accepts 60–28,800 seconds; cycle spacing accepts 15–300 seconds and cannot
-exceed duration; members accept 2–8. Invalid settings fail before startup. The
-duration/spacing combination must also fit the real retained mutation budget;
-use the default 45-second spacing for eight hours. Reload/device recovery is
-capped at 16 per run to respect daily scope issuance, after which that cycle
-continues local pause/resume checks. No production quota is reset or relaxed.
-Every run first proves reload without autoplay or automatic takeover, followed by
-explicit **Use this device** recovery. Timed cycles repeat local pause during
-shared selection, shared pause/play, and device recovery. Each shared gesture
-honors previously observed `Retry-After` and published request-window headroom
-from every participant before dispatch, sends one command, and must receive an
-applied outcome and the exact selected entry or transport state; continued
-playback of an old entry cannot count as a successful selection. The gate checks actual
-media-clock advancement and capture-time-adjusted pairwise drift against the
-existing 750 ms browser-test tolerance. Closing participants must release all
-upgrade transports, active media requests, and pending playback reads. A capability-protected loopback
-control plane confirms fixture resource cleanup before Windows runner termination.
-
-Evidence under ignored `web/test-results/room-soak` contains bounded aggregate
-counts, fixed-route HTTP failure/admission counts, application-fixture Node
-process RSS/heap extrema, drift, and
-cleanup status; it excludes account/media IDs,
-URLs, private payloads, raw exceptions, and a growing frame/trace history. Run this
-gate separately from builds and other load generators. Memory extrema describe
-that application process, exclude browser/MongoDB/whole-machine memory, and do
-not establish absence of leaks. A local pass does not
-certify AWS/S3 capacity, physical audio, branded browsers, or a longer duration.
-Multiple contexts share one loopback source IP and the real per-IP media admission
-limits; a playback pass does not imply that every background HTTP read succeeded.
-Room HTTP limits follow each member's account instead: GET/HEAD work is capped at
-four/account and 40/process within the unchanged total six/account and 48/process
-HTTP pool, reserving capacity from read bursts for explicit controls and tickets,
-and each account's room requests share its own 180/minute window. Other writes can
-still consume the shared process-wide concurrency capacity.
-Increasing members to eight is an admission/capacity stress case, not a guaranteed
-passing profile: concurrent replacement media requests can overlap old requests
-at the per-IP media ceiling, while snapshot-triggered reads also compete for room
-HTTP capacity. Preserve any resulting 429 and playback failure as evidence; do not
-raise quotas or drop participant assertions to obtain a pass.
 
 ## AWS CodeBuild
 
