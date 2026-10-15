@@ -218,7 +218,8 @@ jobs:
           retention-days: 30
 
   browser-e2e:
-    name: Production-bundle browser and accessibility tests (Chromium)
+    # Must match the required status check on main exactly.
+    name: Production-bundle browser and accessibility tests
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 25
