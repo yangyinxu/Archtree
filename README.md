@@ -2622,6 +2622,32 @@ or fetch its private source. Without a prepared distribution, `/naruto` returns
 releases use the same release verification and deployment process as Archtree;
 generated bundles and deployment archives must not be committed.
 
+#### Required Naruto source handoff on `develop`
+
+Current Naruto source handoff:
+[`d77c1f1630164151bf1e8b14fea05d5f1c035519`](https://github.com/yangyinxu/naruto-mobile/commit/d77c1f1630164151bf1e8b14fea05d5f1c035519).
+
+Every push to `yangyinxu/naruto-mobile`'s `main` branch, including a
+documentation-only push, requires a matching Archtree update on `develop`.
+The person or agent pushing Naruto is responsible for completing this handoff:
+
+1. Record the exact pushed Naruto commit SHA in the entry above. Build from a
+   clean checkout of that commit with
+   `npm run prepare:naruto-web -- <source-directory>` and run
+   `npm run smoke:naruto-web`.
+2. Verify that `naruto-web/dist/release-source.json` has the matching
+   `sourceCommit` and `sourceDirty: false`. Commit and push the source handoff
+   and any required integration changes to Archtree `develop`, preserving
+   unrelated work and leaving generated distributions ignored.
+3. Report both repository commits and the verification results. This is a
+   required collaboration workflow; no CI job automatically synchronizes the
+   repositories. The README entry records the `develop` handoff and is not read
+   by the production release workflow.
+
+Before an authorized Archtree `main` release, set the Actions variable
+`NARUTO_SOURCE_COMMIT` to this same complete source SHA. A routine `develop`
+handoff does not push Archtree `main` or deploy production.
+
 Automatic Naruto release packaging is opt-in. Set the Archtree repository's
 Actions variable `NARUTO_SOURCE_COMMIT` to a complete 40-character commit SHA
 already committed and pushed to `yangyinxu/naruto-mobile`. Branches, tags,
