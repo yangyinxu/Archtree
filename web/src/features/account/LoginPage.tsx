@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { browserAuthenticationCapabilitiesQuery } from '../../api/account';
 import { isAccountOperationCurrent } from '../../api/accountEpoch';
@@ -13,11 +13,8 @@ import {
 import { Icon } from '../../components/Icon';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import styles from './AccountSurfaces.module.css';
-import {
-  AuthFormFeedback,
-  emailFromRouteState,
-  noticeFromRouteState
-} from './AuthFormSupport';
+import { AuthFormFeedback } from './AuthFormSupport';
+import { kashewtAccountPaths } from './kashewtAccountPaths';
 
 /** Only the server's typed verification-required result gets the verification guidance. */
 export const isEmailVerificationRequired = (error: unknown) => error instanceof ApiError
@@ -83,8 +80,6 @@ export const LoginPage = () => {
     session.data?.user.id
   ]);
 
-  const routeNotice = noticeFromRouteState(location.state);
-
   if (session.data) {
     const destination = safeLoginDestination(location.state, location.search);
     const continueInvitation = destination === '/social/invitations' || destination.startsWith('/social/invitations/');
@@ -94,8 +89,6 @@ export const LoginPage = () => {
           <div>
             <span className={styles.panelIcon}><Icon name="account" /></span>
             <h1 className={styles.panelTitle}>{t('auth.login.already_listening', { name: session.data.user.displayName || session.data.user.email })}</h1>
-            {/* A registration or verification for another address finishes here without switching accounts. */}
-            {routeNotice && <p className={`${styles.success} ${styles.panelNotice}`} role="status">{routeNotice}</p>}
             <div className={styles.actions}>
               {continueInvitation && <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => navigate(destination, { replace: true })}>{t('room.invitation_continue')}</button>}
               <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => navigate('/')}>{t('account.common.return_home')}</button>
@@ -133,23 +126,17 @@ export const LoginPage = () => {
           }}
         >
           <h2 className={styles.formTitle}>{t('auth.login.form_title')}</h2>
-          <AuthFormFeedback error={errorMessage} status={login.isError ? '' : routeNotice} focusKey={login.submittedAt} />
+          <AuthFormFeedback error={errorMessage} focusKey={login.submittedAt} />
           {verificationRequired && (
             <p className={styles.assistiveAction}>
-              <Link
-                className={styles.inlineLink}
-                state={login.variables?.identifier.includes('@')
-                  ? { email: login.variables.identifier.trim() }
-                  : undefined}
-                to="/verify-email"
-              >
+              <a className={styles.inlineLink} href={kashewtAccountPaths.verifyEmail}>
                 {t('auth.login.verification_link_prompt')}
-              </Link>
+              </a>
             </p>
           )}
           <div className={styles.field}>
             <label htmlFor="login-identifier">{t('account.field.email_or_username')}</label>
-            <input autoComplete="username" defaultValue={emailFromRouteState(location.state)} id="login-identifier" maxLength={254} name="identifier" required type="text" />
+            <input autoComplete="username" id="login-identifier" maxLength={254} name="identifier" required type="text" />
           </div>
           <div className={styles.field}>
             <label htmlFor="login-password">{t('account.field.password')}</label>
@@ -159,9 +146,9 @@ export const LoginPage = () => {
             {login.isPending ? t('auth.login.logging_in') : t('common.action.log_in')}
           </button>
           <div className={styles.authLinkRow}>
-            <Link className={styles.inlineLink} to="/forgot-password">{t('auth.login.forgot_password')}</Link>
+            <a className={styles.inlineLink} href={kashewtAccountPaths.forgotPassword}>{t('auth.login.forgot_password')}</a>
             {capabilities.data?.emailRegistration && (
-              <Link className={styles.inlineLink} to="/register">{t('auth.login.create_account')}</Link>
+              <a className={styles.inlineLink} href={kashewtAccountPaths.register}>{t('auth.login.create_account')}</a>
             )}
           </div>
           <p className={styles.privacy}>{t('auth.login.privacy')}</p>

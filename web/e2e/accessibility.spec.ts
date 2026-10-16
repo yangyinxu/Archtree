@@ -43,13 +43,23 @@ const publicPages = [
   },
   {
     label: 'register',
-    path: '/finitude/register',
+    path: '/account/register',
     ready: (page: Page) => page.getByRole('button', { name: 'Send link' })
   },
   {
     label: 'verify-email-request',
-    path: '/finitude/verify-email',
+    path: '/account/verify-email',
     ready: (page: Page) => page.getByRole('heading', { name: 'Get a verification link.' })
+  },
+  {
+    label: 'forgot-password',
+    path: '/account/forgot-password',
+    ready: (page: Page) => page.getByRole('button', { name: 'Send reset code' })
+  },
+  {
+    label: 'reset-password',
+    path: '/account/reset-password',
+    ready: (page: Page) => page.getByRole('button', { name: 'Reset password' })
   },
   {
     label: 'account-signed-out',
@@ -80,14 +90,14 @@ test('registration completion form has no unowned axe findings', async ({ page }
     contentType: 'application/json; charset=utf-8',
     body: JSON.stringify({ email: 'lorem-listener@example.test' })
   }));
-  await page.goto(`/finitude/register/complete#token=${mockedLinkToken}`);
+  await page.goto(`/account/register/complete#token=${mockedLinkToken}`);
   await expect(page.getByLabel('Display name')).toBeVisible();
   await expectNoUnownedAxeViolations(page, 'register-complete');
 });
 
 test('invalid registration link state has no unowned axe findings', async ({ page }) => {
-  await page.goto('/finitude/register/complete');
-  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used' })).toBeVisible();
+  await page.goto('/account/register/complete');
+  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used.' })).toBeVisible();
   await expectNoUnownedAxeViolations(page, 'register-complete-invalid');
 });
 
@@ -97,7 +107,7 @@ test('verification confirmation has no unowned axe findings', async ({ page }) =
     contentType: 'application/json; charset=utf-8',
     body: JSON.stringify({ email: 'ipsum-listener@example.test' })
   }));
-  await page.goto(`/finitude/verify-email#token=${mockedLinkToken}`);
+  await page.goto(`/account/verify-email#token=${mockedLinkToken}`);
   await expect(page.getByRole('button', { name: 'Verify email' })).toBeVisible();
   await expectNoUnownedAxeViolations(page, 'verify-email-confirm');
 });

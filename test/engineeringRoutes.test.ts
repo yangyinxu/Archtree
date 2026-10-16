@@ -6,7 +6,8 @@ import path from 'node:path';
 import test, { TestContext } from 'node:test';
 import jwt from 'jsonwebtoken';
 
-import { createApp, renderLandingActions } from '../src/app';
+import { createApp } from '../src/app';
+import { renderLandingActions } from '../src/views/portfolio/homeView';
 import { safeWebReturnTo } from '../src/controllers/authController';
 import AuthSession from '../src/models/authSession';
 import User from '../src/models/user';
@@ -312,8 +313,8 @@ test('login preserves safe engineering deep links while rejecting external URLs 
 test('only administrators see the Engineering Guide landing action', () => {
   for (const role of [undefined, 'user', 'creator', 'ADMIN']) {
     const actions = role === undefined ? renderLandingActions() : renderLandingActions({ userId: ordinaryUserId, email: 'user@example.test', role });
-    assert.doesNotMatch(`${actions.headerActions}${actions.heroActions}`, /href="\/engineering"/);
+    assert.doesNotMatch(`${actions.headerActions}${actions.adminTools}`, /href="\/engineering"/);
   }
   const admin = renderLandingActions({ userId: adminUserId, email: 'admin@example.test', role: 'admin' });
-  assert.match(admin.heroActions, /href="\/engineering"[^>]*>.*Engineering Guide/);
+  assert.match(admin.adminTools, /href="\/engineering"[^>]*>.*Engineering Guide/);
 });

@@ -25,19 +25,25 @@ import { createAdminImportRouter } from './routes/adminImportRoutes';
 import { createAdminCatalogRouter } from './routes/adminCatalogRoutes';
 import { createAdminCatalogReviewRouter } from './routes/adminCatalogReviewRoutes';
 import { createAdminConversionRouter } from './routes/adminConversionRoutes';
+import { createPortfolioAdminRouter } from './routes/portfolioAdminRoutes';
+import { createAccountPageRouter } from './routes/accountPageRoutes';
+import {
+  createMongoPortfolioStore,
+  listPublicPortfolioProjects,
+  type PortfolioStore
+} from './portfolio/portfolioStore';
+import { renderHomePage } from './views/portfolio/homeView';
 import {
   attachOptionalAuth,
   requireAdmin,
   requireAdminForWeb,
   requireAuth,
   requireAuthForWeb,
-  type AuthContext,
   type AuthenticatedRequest
 } from './middleware/authMiddleware';
 import { createHealthController } from './controllers/healthController';
 import { isCompletedRequestWorkCancellation, ServerLifecycle } from './services/serverLifecycleService';
 import { createRequestDiagnostics, safeServerErrorCategory } from './middleware/requestDiagnosticsMiddleware';
-import { escapeHtml } from './views/html';
 import { maxAudioUploadMb } from './middleware/audioUpload';
 import { maxAvatarUploadMb, maxImageUploadMb } from './middleware/imageUpload';
 import { maxVideoUploadMb } from './middleware/videoUpload';
@@ -64,6 +70,8 @@ export interface CreateAppOptions {
   localizationDistPath?: string;
   /** Retains explicit runtime context for existing isolated application callers. */
   environment?: string;
+  /** Overrides the MongoDB portfolio store for isolated route tests. */
+  portfolioStore?: PortfolioStore;
 }
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -132,10 +140,27 @@ const redirectLegacyListener = (req: Request, res: Response) => {
   return res.redirect(308, `${listenerApplicationPath}${suffix}`);
 };
 
+/**
+ * Account lifecycle pages that moved from the Finitude SPA to Kashewt. The
+ * native apps' Create Account button and older links still open the Finitude
+ * paths; browsers carry a link token's `#token=` fragment across the redirect.
+ */
+const kashewtAccountPageRedirects: ReadonlyArray<readonly [string, string]> = [
+  ['register', '/account/register'],
+  ['register/complete', '/account/register/complete'],
+  ['verify-email', '/account/verify-email'],
+  ['forgot-password', '/account/forgot-password'],
+  ['reset-password', '/account/reset-password']
+];
+
 /** Mounts the built listener SPA without allowing its fallback to capture backend routes. */
 const mountListenerApplication = (app: Application, listenerDistPath: string) => {
   app.get(legacyListenerApplicationPath, redirectLegacyListener);
   app.get(`${legacyListenerApplicationPath}/*`, redirectLegacyListener);
+  for (const [listenerRoute, accountPath] of kashewtAccountPageRedirects) {
+    // The query string is dropped: these pages take no parameters, and the token stays in the fragment.
+    app.get(`${listenerApplicationPath}/${listenerRoute}`, (_req, res) => res.redirect(303, accountPath));
+  }
 
   const indexPath = path.join(listenerDistPath, 'index.html');
   if (!fs.existsSync(indexPath)) {
@@ -180,54 +205,10 @@ const mountListenerApplication = (app: Application, listenerDistPath: string) =>
   });
 };
 
-export interface LandingActions {
-  headerActions: string;
-  heroActions: string;
-}
-
-/** Keeps public listening visible while exposing management actions only to administrators. */
-export const renderLandingActions = (
-  auth?: Pick<AuthContext, 'userId' | 'email' | 'role'>
-): LandingActions => {
-  const listenerButton = '<a class="button button--listener" href="/finitude"><i class="ph ph-music-notes" aria-hidden="true"></i>Open Finitude</a>';
-  if (auth) {
-    const contentManagerHeaderAction = auth.role === 'admin'
-      ? '<a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Content Manager</a>'
-      : '';
-    const adminHeroActions = auth.role === 'admin'
-      ? `<a class="button" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Open Content Manager</a>
-        <a class="button button--secondary" href="/content/manage/audio-tracks"><i class="ph ph-waveform" aria-hidden="true"></i>Browse MediaTracks</a>
-        <a class="button button--secondary" href="/engineering"><i class="ph ph-tree-structure" aria-hidden="true"></i>Engineering Guide</a>`
-      : '';
-    return {
-      headerActions: `<div class="header-actions">
-        <span class="muted">${escapeHtml(auth.email)}</span>
-        ${contentManagerHeaderAction}
-        <form method="POST" action="/auth/logout-web"><input type="hidden" name="viewerId" value="${escapeHtml(auth.userId)}" /><button class="button--secondary" type="submit"><i class="ph ph-sign-out" aria-hidden="true"></i>Log out</button></form>
-      </div>`,
-      heroActions: `<div class="action-row">
-        ${listenerButton}
-        ${adminHeroActions}
-      </div>`
-    };
-  }
-
-  return {
-    headerActions: `<div class="header-actions">
-      <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
-      <a class="button" href="/finitude/register"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
-    </div>`,
-    heroActions: `<div class="action-row">
-      ${listenerButton}
-      <a class="button" href="/finitude/register"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
-      <a class="button button--secondary" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
-    </div>`
-  };
-};
-
 /** Constructs the Express application without connecting to MongoDB or opening a socket. */
 export const createApp = (options: CreateAppOptions = {}): Application => {
   const app: Application = express();
+  const portfolioStore = options.portfolioStore ?? createMongoPortfolioStore();
   const lifecycle = options.lifecycle ?? new ServerLifecycle();
   const diagnostics = createRequestDiagnostics();
   app.disable('x-powered-by');
@@ -290,8 +271,10 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use(bodyParser.json());
   app.use(bodyParser.urlencoded({ extended: false }));
 
+  app.use('/admin/projects', createPortfolioAdminRouter({ store: portfolioStore }));
   app.use('/admin', adminRoutes);
   app.use('/auth', authRoutes);
+  app.use('/account', createAccountPageRouter());
   app.use('/content', contentRoutes);
   app.use('/feed', feedRoutes);
   app.use('/video', videoRoutes);
@@ -307,15 +290,16 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
 
   app.get('/', attachOptionalAuth, async (req, res, next) => {
     try {
-      const auth = (req as AuthenticatedRequest).auth;
-      const template = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8');
-      const { headerActions, heroActions } = renderLandingActions(auth);
-
-      return res.status(200).send(
-        template
-          .replace('{{HEADER_ACTIONS}}', headerActions)
-          .replace('{{HERO_ACTIONS}}', heroActions)
-      );
+      const projects = await listPublicPortfolioProjects(portfolioStore, (error) => {
+        // The homepage stays up with catalog defaults while settings are unreadable.
+        console.error(JSON.stringify({
+          category: 'portfolio_read_failed',
+          errorCategory: safeServerErrorCategory(error),
+          requestId: res.locals.requestId,
+          occurredAt: new Date().toISOString()
+        }));
+      });
+      return res.status(200).send(renderHomePage({ auth: (req as AuthenticatedRequest).auth, projects }));
     } catch (error) {
       return next(error);
     }

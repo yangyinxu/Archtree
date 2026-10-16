@@ -85,20 +85,20 @@ export type AuthEmailTemplate =
 export const renderAuthEmail = (email: AuthEmailTemplate, origin: string | null) => {
     if (email.template === 'resetCode') {
         return {
-            subject: 'Reset your Finitude password',
+            subject: 'Reset your Kashewt password',
             text: `Use code ${email.code} to reset your password. This code expires soon. If you did not request it, you can ignore this email.`
         };
     }
     if (!origin) throw configurationError();
-    const passwordRecoveryUrl = `${origin}/finitude/forgot-password`;
+    const passwordRecoveryUrl = `${origin}/account/forgot-password`;
     if (email.template === 'T1') {
         return {
-            subject: 'Finish creating your Finitude account',
+            subject: 'Finish creating your Kashewt account',
             text: [
-                'Someone asked to create a Finitude account with this email address.',
+                'Someone asked to create a Kashewt account with this email address. A Kashewt account works across Finitude, Naruto Mobile, and other Kashewt projects.',
                 '',
                 'To choose your display name and password, open this link within 30 minutes:',
-                `${origin}/finitude/register/complete#token=${email.token}`,
+                `${origin}/account/register/complete#token=${email.token}`,
                 '',
                 'The link works once. If you didn\'t ask for this, ignore this email and no account will be created.'
             ].join('\n')
@@ -106,12 +106,12 @@ export const renderAuthEmail = (email: AuthEmailTemplate, origin: string | null)
     }
     if (email.template === 'T2') {
         return {
-            subject: 'You already have a Finitude account',
+            subject: 'You already have a Kashewt account',
             text: [
-                'Someone asked to create a Finitude account with this email address, but it already has one. Nothing was changed.',
+                'Someone asked to create a Kashewt account with this email address, but it already has one. Nothing was changed.',
                 '',
-                'Log in on the web or in the Finitude app:',
-                `${origin}/finitude/login`,
+                'Log in on the web or in a Kashewt app such as Finitude:',
+                `${origin}/auth/login-web`,
                 '',
                 'Forgot your password? Reset it here:',
                 passwordRecoveryUrl,
@@ -121,12 +121,12 @@ export const renderAuthEmail = (email: AuthEmailTemplate, origin: string | null)
         };
     }
     return {
-        subject: 'Verify your Finitude email',
+        subject: 'Verify your Kashewt email',
         text: [
-            'Your Finitude account needs a verified email address before you can sign in again.',
+            'Your Kashewt account needs a verified email address before you can sign in again.',
             '',
             'If you just tried to sign in or asked for this link, open it within 30 minutes and select Verify email, then sign in again:',
-            `${origin}/finitude/verify-email#token=${email.token}`,
+            `${origin}/account/verify-email#token=${email.token}`,
             '',
             'Your password doesn\'t change. If you didn\'t just try to sign in, don\'t open the link. Reset your password instead:',
             passwordRecoveryUrl

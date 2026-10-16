@@ -18,22 +18,8 @@
       ],
       "variables": {}
     },
-    "account.common.back_login": {
-      "description": "Link returning to Log in.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "account.common.checking": {
       "description": "Shared loading state while the current account is checked.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "account.common.code_error": {
-      "description": "Safe fallback when an account verification code cannot be checked.",
       "delivery": [
         "runtime"
       ],
@@ -67,13 +53,6 @@
       ],
       "variables": {}
     },
-    "account.common.return_login": {
-      "description": "Action returning to Log in.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "account.field.confirm_new_password": {
       "description": "New password confirmation field label.",
       "delivery": [
@@ -81,22 +60,8 @@
       ],
       "variables": {}
     },
-    "account.field.confirm_password": {
-      "description": "Password confirmation field label.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "account.field.current_password": {
       "description": "Current password field label.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "account.field.display_name": {
-      "description": "Required display-name field on the registration completion page.",
       "delivery": [
         "runtime"
       ],
@@ -3852,103 +3817,8 @@
       ],
       "variables": {}
     },
-    "auth.email_link.description": {
-      "description": "Explains the verification confirmation step; the password is unchanged.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.email_link.invalid_copy": {
-      "description": "Shown when a verification link cannot be used; offers a new link.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.email_link.request_description": {
-      "description": "Explains the non-enumerating verification-link request form.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.email_link.request_title": {
-      "description": "Heading of the verification-link request form.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.email_link.send": {
-      "description": "Button that requests a verification link.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.email_link.sending": {
-      "description": "Pending label while a verification link is requested.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.email_link.sent": {
-      "description": "Non-enumerating status after a verification-link request.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.email_link.title": {
-      "description": "Heading on the page opened from a verification link.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "auth.email.domain_undeliverable": {
       "description": "Inline email-field error on the Web sign-up, verification-link and password-recovery forms when the server rejects the address because its domain cannot receive email, for example a mistyped or nonexistent domain. Never implies whether an account exists.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.email.sent_to": {
-      "description": "Status line after a Web sign-up, verification-link or password-recovery request is accepted, showing the exact address the request used so the listener can spot a typo. {email} is the submitted email address, shown verbatim. Shown the same way for every address, so it never reveals whether an account exists.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "email": "string"
-      }
-    },
-    "auth.email.suggestion": {
-      "description": "Clickable suggestion below an email field when the typed domain looks like a misspelling of a popular email provider. {email} is the full corrected email address; selecting it replaces the typed address.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "email": "string"
-      }
-    },
-    "auth.email.use_different": {
-      "description": "Action shown after an accepted Web sign-up, verification-link or password-recovery request that clears the form so the listener can enter a different email address.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.link.checking": {
-      "description": "Status while an emailed link is checked.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.link.invalid_title": {
-      "description": "Heading when an emailed link cannot be used.",
       "delivery": [
         "runtime"
       ],
@@ -4096,29 +3966,8 @@
       ],
       "variables": {}
     },
-    "auth.recovery.accepted": {
-      "description": "Non-enumerating password recovery acceptance status.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "auth.recovery.description": {
       "description": "Password recovery page introduction.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.recovery.enter": {
-      "description": "Action opening the password reset form.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.recovery.eyebrow": {
-      "description": "Eyebrow above password recovery.",
       "delivery": [
         "runtime"
       ],
@@ -4138,104 +3987,6 @@
       ],
       "variables": {}
     },
-    "auth.recovery.sending": {
-      "description": "Pending reset-code request label.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.recovery.title": {
-      "description": "Password recovery page title.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.action": {
-      "description": "Button that creates the account from a registration link.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.description": {
-      "description": "Registration completion page description.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.exists_copy": {
-      "description": "Shown when the link’s address already has an account.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.exists_title": {
-      "description": "Heading when the link’s address already has an account.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.eyebrow": {
-      "description": "Eyebrow on the page opened from a registration link.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.form_title": {
-      "description": "Form heading on the registration completion page.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.invalid_copy": {
-      "description": "Shown when a registration link cannot be used.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.name_rejected": {
-      "description": "Error when the display name is rejected.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.password_rejected": {
-      "description": "Error when the server rejects the chosen password.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.request_new": {
-      "description": "Link back to the registration request page.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.success": {
-      "description": "Log in notice after registration completes.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register_complete.title": {
-      "description": "Heading on the registration completion page.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "auth.register.accepted": {
       "description": "Non-enumerating registration acceptance status.",
       "delivery": [
@@ -4243,92 +3994,8 @@
       ],
       "variables": {}
     },
-    "auth.register.already_account": {
-      "description": "Prompt preceding the Log in link on registration.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.availability_error": {
-      "description": "Registration capability check error.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.checking": {
-      "description": "Pending registration capability label.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.creating": {
-      "description": "Pending registration label.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "auth.register.description": {
       "description": "Registration page introduction.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.eyebrow": {
-      "description": "Eyebrow above registration.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.form_title": {
-      "description": "Registration form title.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.link_description": {
-      "description": "Registration request page description for email-link sign-up.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.link_sent": {
-      "description": "Non-enumerating status after a registration link request.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.send_link": {
-      "description": "Button that requests a registration link.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.sending_link": {
-      "description": "Pending label while a registration link is requested.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.title": {
-      "description": "Registration page title.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.register.unavailable": {
-      "description": "Registration-disabled state.",
       "delivery": [
         "runtime"
       ],
@@ -4348,29 +4015,8 @@
       ],
       "variables": {}
     },
-    "auth.reset.eyebrow": {
-      "description": "Eyebrow above password reset.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "auth.reset.form_title": {
       "description": "Password reset form title.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.reset.request_another": {
-      "description": "Action requesting another reset code.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.reset.resetting": {
-      "description": "Pending password reset label.",
       "delivery": [
         "runtime"
       ],
@@ -4383,13 +4029,6 @@
       ],
       "variables": {}
     },
-    "auth.reset.title": {
-      "description": "Password reset page title.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "auth.verify.accepted": {
       "description": "Non-enumerating resend acceptance status.",
       "delivery": [
@@ -4397,29 +4036,8 @@
       ],
       "variables": {}
     },
-    "auth.verify.action": {
-      "description": "Email verification submit action.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "auth.verify.description": {
       "description": "Email verification page introduction.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.verify.eyebrow": {
-      "description": "Eyebrow above email verification.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.verify.form_title": {
-      "description": "Email verification form title.",
       "delivery": [
         "runtime"
       ],
@@ -4439,22 +4057,8 @@
       ],
       "variables": {}
     },
-    "auth.verify.success": {
-      "description": "Success notice after email verification.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "auth.verify.title": {
       "description": "Email verification page title.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "auth.verify.verifying": {
-      "description": "Pending email verification label.",
       "delivery": [
         "runtime"
       ],
@@ -9054,27 +8658,6 @@
       ],
       "variables": {}
     },
-    "route.title.create_account": {
-      "description": "Document title for account registration.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "route.title.finish_account": {
-      "description": "Route title announced for the registration completion page.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "route.title.forgot_password": {
-      "description": "Document title for password recovery.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "route.title.home": {
       "description": "Document title for Home.",
       "delivery": [
@@ -9131,13 +8714,6 @@
       ],
       "variables": {}
     },
-    "route.title.reset_password": {
-      "description": "Document title for resetting a password.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "route.title.search": {
       "description": "Document title for Search without a query.",
       "delivery": [
@@ -9156,13 +8732,6 @@
     },
     "route.title.sessions": {
       "description": "Document title for signed-in devices.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "route.title.verify_email": {
-      "description": "Document title for email verification.",
       "delivery": [
         "runtime"
       ],

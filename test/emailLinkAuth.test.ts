@@ -60,45 +60,45 @@ test('only the exact 43-character base64url token shape is accepted', () => {
 
 test('email templates use the exact copy and links, and never put a token in a subject', () => {
     const t1 = renderAuthEmail({ template: 'T1', token }, origin);
-    assert.equal(t1.subject, 'Finish creating your Finitude account');
+    assert.equal(t1.subject, 'Finish creating your Kashewt account');
     assert.equal(t1.text, [
-        'Someone asked to create a Finitude account with this email address.',
+        'Someone asked to create a Kashewt account with this email address. A Kashewt account works across Finitude, Naruto Mobile, and other Kashewt projects.',
         '',
         'To choose your display name and password, open this link within 30 minutes:',
-        `${origin}/finitude/register/complete#token=${token}`,
+        `${origin}/account/register/complete#token=${token}`,
         '',
         'The link works once. If you didn\'t ask for this, ignore this email and no account will be created.'
     ].join('\n'));
 
     const t2 = renderAuthEmail({ template: 'T2' }, origin);
-    assert.equal(t2.subject, 'You already have a Finitude account');
+    assert.equal(t2.subject, 'You already have a Kashewt account');
     assert.equal(t2.text, [
-        'Someone asked to create a Finitude account with this email address, but it already has one. Nothing was changed.',
+        'Someone asked to create a Kashewt account with this email address, but it already has one. Nothing was changed.',
         '',
-        'Log in on the web or in the Finitude app:',
-        `${origin}/finitude/login`,
+        'Log in on the web or in a Kashewt app such as Finitude:',
+        `${origin}/auth/login-web`,
         '',
         'Forgot your password? Reset it here:',
-        `${origin}/finitude/forgot-password`,
+        `${origin}/account/forgot-password`,
         '',
         'If you didn\'t ask for this, you can ignore this email.'
     ].join('\n'));
     assert.doesNotMatch(t2.text, /#token=/);
 
     const t3 = renderAuthEmail({ template: 'T3', token }, origin);
-    assert.equal(t3.subject, 'Verify your Finitude email');
+    assert.equal(t3.subject, 'Verify your Kashewt email');
     assert.equal(t3.text, [
-        'Your Finitude account needs a verified email address before you can sign in again.',
+        'Your Kashewt account needs a verified email address before you can sign in again.',
         '',
         'If you just tried to sign in or asked for this link, open it within 30 minutes and select Verify email, then sign in again:',
-        `${origin}/finitude/verify-email#token=${token}`,
+        `${origin}/account/verify-email#token=${token}`,
         '',
         'Your password doesn\'t change. If you didn\'t just try to sign in, don\'t open the link. Reset your password instead:',
-        `${origin}/finitude/forgot-password`
+        `${origin}/account/forgot-password`
     ].join('\n'));
 
     const reset = renderAuthEmail({ template: 'resetCode', code: '135790' }, null);
-    assert.equal(reset.subject, 'Reset your Finitude password');
+    assert.equal(reset.subject, 'Reset your Kashewt password');
     assert.equal(reset.text, 'Use code 135790 to reset your password. This code expires soon. If you did not request it, you can ignore this email.');
     for (const subject of [t1.subject, t2.subject, t3.subject, reset.subject]) {
         assert.equal(subject.includes(token), false);
@@ -119,7 +119,7 @@ test('link emails are built from AUTH_LINK_ORIGIN and sent through SES as plain 
     assert.equal(commands[0].FromEmailAddress, 'auth@example.test');
     assert.deepEqual(commands[0].Destination, { ToAddresses: ['lorem@example.test'] });
     assert.equal(commands[0].Content.Simple.Body.Html, undefined);
-    assert.match(commands[0].Content.Simple.Body.Text.Data, /https:\/\/listen\.example\.test\/finitude\/register\/complete#token=/);
+    assert.match(commands[0].Content.Simple.Body.Text.Data, /https:\/\/listen\.example\.test\/account\/register\/complete#token=/);
 
     withEnvironment(t, { AUTH_LINK_ORIGIN: undefined });
     await assert.rejects(sendAuthEmail('lorem@example.test', 'T3', () => ({ template: 'T3', token })), { statusCode: 503 });

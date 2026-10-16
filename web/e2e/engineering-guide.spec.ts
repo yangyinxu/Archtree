@@ -17,10 +17,10 @@ test.afterAll(async () => {
   if (preview) await new Promise<void>((resolve, reject) => preview.server.close(error => error ? reject(error) : resolve()));
 });
 
-test('hosted engineering deep links retain the destination through Archtree login', async ({ page }) => {
+test('hosted engineering deep links retain the destination through Kashewt login', async ({ page }) => {
   await page.goto('/engineering/flows/read-album');
   await expect(page).toHaveURL(/\/auth\/login-web\?returnTo=%2Fengineering%2Fflows%2Fread-album$/);
-  await expect(page.getByRole('heading', { name: 'Log in to Archtree' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Log in to Kashewt.' })).toBeVisible();
   await expect(page.locator('input[name="returnTo"]')).toHaveValue('/engineering/flows/read-album');
 });
 
@@ -101,10 +101,10 @@ test('guide remains navigable without JavaScript and rejects unpublished files',
   }
 });
 
-test('hosted Chinese engineering deep links retain their locale through Archtree login', async ({ page }) => {
+test('hosted Chinese engineering deep links retain their locale through Kashewt login', async ({ page }) => {
   await page.goto('/engineering/zh-hans/flows/read-album');
   await expect(page).toHaveURL(/\/auth\/login-web\?returnTo=%2Fengineering%2Fzh-hans%2Fflows%2Fread-album$/);
-  await expect(page.getByRole('heading', { name: 'Log in to Archtree' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Log in to Kashewt.' })).toBeVisible();
   await expect(page.locator('input[name="returnTo"]')).toHaveValue('/engineering/zh-hans/flows/read-album');
 });
 

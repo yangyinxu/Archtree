@@ -230,7 +230,7 @@ test('the Archtree sign-up page and form redirect to Web registration without ac
     const email = 'generic-web-registration@example.com';
     const page = await fetch(`${baseUrl}/auth/signup-web`, { redirect: 'manual' });
     assert.equal(page.status, 303);
-    assert.equal(page.headers.get('location'), '/finitude/register');
+    assert.equal(page.headers.get('location'), '/account/register');
     const form = await fetch(`${baseUrl}/auth/signup-web`, {
         method: 'POST',
         redirect: 'manual',
@@ -242,7 +242,7 @@ test('the Archtree sign-up page and form redirect to Web registration without ac
         body: new URLSearchParams({ email, password: 'generic-web-registration-password', username: 'Generic Listener' })
     });
     assert.equal(form.status, 303);
-    assert.equal(form.headers.get('location'), '/finitude/register');
+    assert.equal(form.headers.get('location'), '/account/register');
     assert.equal(await User.findByEmail(email), null);
     assert.equal(deliveryAttempts.get(email), undefined);
 });

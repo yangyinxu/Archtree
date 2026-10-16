@@ -952,9 +952,19 @@ original image route remains the fallback and native-client contract.
 The shared Web artwork component keeps both its bordered frame and decoded image
 square, including in WebKit; Artist portraits retain their circular crop.
 
-The Archtree landing page links both signed-out and signed-in visitors to
-`/finitude` while preserving its existing content-management and authentication
-actions. Content-management actions are rendered only for administrators.
+The homepage (`/`) is the kashewt.com portfolio. It lists the public projects
+from `src/portfolio/projectCatalog.ts` (Finitude, its iOS and Android clients,
+Naruto Mobile, and OOTD) in the order stored in the single `portfolioSettings`
+document. Project names, descriptions, and links change in that file; a project
+added there appears last with its default visibility. If the settings cannot be
+read, the homepage falls back to the catalog defaults. Log in, Create account,
+and Log out stay in the header, and administrators also see shortcuts to the
+projects console, Content Manager, MediaTracks, and the Engineering Guide.
+
+Administrators manage the homepage at `/admin/projects`: move a project up or
+down and switch it between public and hidden. Each form posts the settings
+revision the page was rendered from, so a change made from a stale page is
+refused with a notice instead of overwriting a newer order.
 
 `POST /api/listener/v1/telemetry` accepts only same-origin JSON envelopes of
 one to ten bounded anonymous events. It has an independent 16 KiB body limit,
@@ -1137,6 +1147,15 @@ process environment directly. Configuration-only deployments also rerun the
 same idempotent configurator, so correcting the domain or ACME properties does
 not require an unrelated application release.
 
+### Deployment swap
+
+Elastic Beanstalk runs `npm install` on every application and configuration
+deployment while Archtree keeps serving, which can exhaust the 1 GiB instance
+and end the install with exit 137. `.platform/hooks/prebuild/00_ensure_swap.sh`
+(also run by `.platform/confighooks/prebuild/`) therefore enables a 1 GiB swap
+file at `/var/swap/archtree.swap` before dependencies install and records it in
+`/etc/fstab`.
+
 ### Co-hosted OOTD preview
 
 The production instance can also host the separately built OOTD owner preview
@@ -1151,7 +1170,8 @@ hook only fetch, verify, sandbox, and route a pinned OOTD artifact.
 - OOTD runs as the `ootd` user on `127.0.0.1:3100` (`ootd-web.service`) and as
   bounded `ootd-*.timer` jobs. Every OOTD unit denies EC2 instance metadata and
   has a `MemoryMax` limit, so it cannot use this instance profile or exhaust
-  Archtree's memory. A 1 GiB swap file is added by default.
+  Archtree's memory. It adds its own swap file only when less than
+  `OOTD_COHOST_SWAP_MIB` of swap is already active.
 - Nginx serves `ootd.kashewt.com` from `/etc/nginx/conf.d/ootd-cohost.conf` with
   its own Let's Encrypt certificate (reusing `ACME_EMAIL`); the Archtree
   renewal timer renews it with the Archtree certificate.
@@ -1561,12 +1581,14 @@ cleanup can be reconciled by any current administrator without reattaching it.
 Web auth endpoints:
 
 - `GET /auth/signup-web` and `POST /auth/signup-web`: `303` to
-  `/finitude/register` without any account work (the POST body is ignored)
+  `/account/register` without any account work (the POST body is ignored)
 - `GET /auth/login-web`
 - `POST /auth/login-web`
 - `POST /auth/logout-web`
 
-`GET /auth/login-web` renders the Archtree-branded login surface. Its script
+`GET /auth/login-web` renders the Kashewt-branded login surface, with links to
+Kashewt sign-up and password recovery. `?notice=registered|verified|password_reset`
+shows a fixed confirmation after those flows; any other value shows nothing. Its script
 holds the shared origin-wide Web Lock while calling `POST /auth/browser/login`;
 an HTML-only `POST /auth/login-web` fails closed with `409` and never installs
 credentials or redirects to Finitude. An already-authenticated GET redirects
@@ -1612,7 +1634,7 @@ Email registration happens only on the Web, by emailed link:
   `202 {"message":"Check your email for the next step."}` for every account
   state. An address without an account, or with an unverified record from the
   earlier code-based sign-up, receives a single-use registration link
-  (`AUTH_LINK_ORIGIN/finitude/register/complete#token=...`, 30 minutes). An
+  (`AUTH_LINK_ORIGIN/account/register/complete#token=...`, 30 minutes). An
   address with an account receives an "already registered" notice with Log in
   and password-reset links, and nothing changes. An address whose domain
   cannot receive mail gets `422 {"code":"email_domain_undeliverable"}` instead
@@ -1633,7 +1655,7 @@ Email registration happens only on the Web, by emailed link:
   `422 {"code":"email_domain_undeliverable"}` when the domain cannot receive
   mail. Only an account created before verification existed (no
   `emailVerified` field and no linked identity with the same email) receives a
-  verification link (`AUTH_LINK_ORIGIN/finitude/verify-email#token=...`).
+  verification link (`AUTH_LINK_ORIGIN/account/verify-email#token=...`).
 - `POST /auth/browser/email-verification/inspect` takes `{ "token" }` and
   returns `200 {"email"}` or `400 link_invalid` without consuming it.
   `POST /auth/browser/email-verification/confirm` returns `204` after it
@@ -1646,36 +1668,48 @@ and verification requires an explicit confirm request. All three link emails
 budget of three per normalized address per 15 minutes; requests over it get
 the same response and send nothing (`auth_link_email_suppressed`).
 
-Finitude Web pages for these links:
+Kashewt account pages (`src/routes/accountPageRoutes.ts`,
+`src/views/account/accountViews.ts`, `src/public/account-forms.js`). Accounts
+are Kashewt accounts shared by Finitude, Naruto Mobile and other projects, so
+sign-up, emailed links and password recovery live here rather than in any one
+app. The pages are static, `no-store` shells under the strict CSP; their
+script calls the same `/auth/browser/*` endpoints:
 
-- `/finitude/register` asks only for an email and shows the same "check your
-  email" status for every address; the form stays available to ask again.
-- `/finitude/register`, the `/finitude/verify-email` link request and
-  `/finitude/forgot-password` share one email form
-  (`web/src/features/account/AuthFormSupport.tsx`). A
-  `422 email_domain_undeliverable` is shown as an error on the email field,
-  which receives focus, for as long as the field holds the rejected address;
-  every other failure keeps the generic request error. An accepted request
-  shows the trimmed, lowercased address it was sent to with a **Use a
-  different email** action that clears the form. Sending again posts the
-  field's current address, so a resend to an undeliverable domain is rejected
-  again. While the listener types, a domain within a small Damerau-Levenshtein
-  distance of a popular provider (`web/src/features/account/emailDomainSuggestion.ts`)
-  gets a "Did you mean ...?" button in a polite live region, which replaces the
-  address only when selected; known providers and a few real look-alike
-  domains are never corrected.
-- `/finitude/register/complete#token=...` captures the token, removes the
-  fragment from the address bar and history entry at once (the token stays
-  only in page memory), and inspects the link. It then shows the address and
-  asks for a display name and password. Success sends the listener to Log in
-  with the address prefilled; it never signs in or changes a signed-in browser
-  session. Invalid, expired or used links offer a new link, and an address that
-  now has an account links to Log in and password recovery.
-- `/finitude/verify-email#token=...` shows the address and verifies it only
-  after **Verify email** is selected, then returns to Log in. Without a token,
-  or after an unusable link, the page offers a non-enumerating request for a
-  new verification link. Log in maps `403 email_verification_required` to a
-  verification message with a link to that request form.
+- `/account/register` asks only for an email and shows the same "check your
+  email" page for every address, with where the link went and **Use a
+  different email**. It reads `GET /auth/browser/capabilities` and shows an
+  unavailable notice when email registration is off.
+- `/account/register/complete#token=...` reads the fragment once, removes it
+  from the address bar and history entry, and inspects the link. It then shows
+  the address and asks for a display name and password; success returns to
+  `/auth/login-web?notice=registered` and never signs in. Invalid, expired or
+  used links offer a new link, and an address that now has an account links
+  to Log in and password recovery.
+- `/account/verify-email#token=...` shows the address and verifies it only
+  after **Verify email** is selected, then returns to
+  `/auth/login-web?notice=verified`. Without a token, or after an unusable
+  link, it offers a non-enumerating request for a new verification link.
+- `/account/forgot-password` requests the six-digit code, and
+  `/account/reset-password` applies it with a new password, then returns to
+  `/auth/login-web?notice=password_reset`.
+- Email fields show `422 email_domain_undeliverable` on the field, which
+  receives focus, and keep the generic error for every other failure. While
+  the listener types, a domain within a small Damerau-Levenshtein distance of a
+  popular provider (`src/public/email-suggestion.js`, covered by
+  `test/accountPages.test.ts`) gets a "Did you mean ...?" button that replaces
+  the address only when selected.
+
+Finitude Web has no account lifecycle pages of its own. The server answers
+`/finitude/register`, `/finitude/register/complete`, `/finitude/verify-email`,
+`/finitude/forgot-password` and `/finitude/reset-password` with a `303`
+redirect to the matching `/account/*` page (browsers keep a `#token=`
+fragment across it). That keeps the iOS and Android **Create Account on the
+Web** buttons, which open `/finitude/register`, and links from older emails
+working. Finitude's Log in (`/finitude/login`) keeps its form and links to
+**Forgot password?**, **Create account** and, after
+`403 email_verification_required`, the verification-link request as
+full-page links to those Kashewt pages; Account links an unverified address
+to `/account/verify-email` the same way.
 
 A sign-in that presents a valid credential (password through `/auth/login` or
 `/auth/browser/login`, a passkey assertion, or a linked Apple or Google

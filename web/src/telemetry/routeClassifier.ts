@@ -4,14 +4,6 @@ import type {
   TelemetryStatusBucket
 } from './contracts';
 
-const authRoutes = new Set([
-  'login',
-  'register',
-  'verify-email',
-  'forgot-password',
-  'reset-password'
-]);
-
 /** Reduces dynamic listener paths to a fixed privacy-safe route dimension. */
 export const classifyListenerRoute = (pathname: string): ListenerRouteName => {
   const path = pathname.split('?', 1)[0].replace(/^\/finitude\/?/, '').replace(/^\/+|\/+$/g, '');
@@ -22,7 +14,8 @@ export const classifyListenerRoute = (pathname: string): ListenerRouteName => {
   if (first === 'albums') return 'album';
   if (first === 'artists') return 'artist';
   if (first === 'organizations') return 'organization';
-  if (authRoutes.has(first)) return 'auth';
+  // Sign-up, emailed links and recovery are Kashewt pages outside the app; only Log in remains.
+  if (first === 'login') return 'auth';
   return 'other';
 };
 

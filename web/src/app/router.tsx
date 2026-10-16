@@ -10,12 +10,7 @@ const AdminRouter = lazy(() => import('../features/admin/AdminRouter'));
 const AccountPage = lazy(() => import('../features/account/AccountPage').then(({ AccountPage }) => ({ default: AccountPage })));
 const AccountSessionsPage = lazy(() => import('../features/account/AccountSessionsPage').then(({ AccountSessionsPage }) => ({ default: AccountSessionsPage })));
 const ChangePasswordPage = lazy(() => import('../features/account/ChangePasswordPage').then(({ ChangePasswordPage }) => ({ default: ChangePasswordPage })));
-const ForgotPasswordPage = lazy(() => import('../features/account/ForgotPasswordPage').then(({ ForgotPasswordPage }) => ({ default: ForgotPasswordPage })));
 const LoginPage = lazy(() => import('../features/account/LoginPage').then(({ LoginPage }) => ({ default: LoginPage })));
-const RegisterPage = lazy(() => import('../features/account/RegisterPage').then(({ RegisterPage }) => ({ default: RegisterPage })));
-const RegisterCompletePage = lazy(() => import('../features/account/RegisterCompletePage').then(({ RegisterCompletePage }) => ({ default: RegisterCompletePage })));
-const ResetPasswordPage = lazy(() => import('../features/account/ResetPasswordPage').then(({ ResetPasswordPage }) => ({ default: ResetPasswordPage })));
-const VerifyEmailPage = lazy(() => import('../features/account/VerifyEmailPage').then(({ VerifyEmailPage }) => ({ default: VerifyEmailPage })));
 const AlbumPage = lazy(() => import('../features/catalog/AlbumPage').then(({ AlbumPage }) => ({ default: AlbumPage })));
 const ArtistPage = lazy(() => import('../features/catalog/ArtistPage').then(({ ArtistPage }) => ({ default: ArtistPage })));
 const OrganizationPage = lazy(() => import('../features/catalog/OrganizationPage').then(({ OrganizationPage }) => ({ default: OrganizationPage })));
@@ -69,11 +64,6 @@ export const appRoutes: RouteObject[] = [
       { path: 'artists/:artistId', element: loadRoute(<ArtistPage />), errorElement: <RouteErrorPage /> },
       { path: 'organizations/:organizationId', element: loadRoute(<OrganizationPage />), errorElement: <RouteErrorPage /> },
       { path: 'login', element: loadRoute(<LoginPage />), errorElement: <RouteErrorPage /> },
-      { path: 'register', element: loadRoute(<RegisterPage />), errorElement: <RouteErrorPage /> },
-      { path: 'register/complete', element: loadRoute(<RegisterCompletePage />), errorElement: <RouteErrorPage /> },
-      { path: 'verify-email', element: loadRoute(<VerifyEmailPage />), errorElement: <RouteErrorPage /> },
-      { path: 'forgot-password', element: loadRoute(<ForgotPasswordPage />), errorElement: <RouteErrorPage /> },
-      { path: 'reset-password', element: loadRoute(<ResetPasswordPage />), errorElement: <RouteErrorPage /> },
       { path: 'account/sessions', element: loadRoute(<AccountSessionsPage />), errorElement: <RouteErrorPage /> },
       { path: 'account/password', element: loadRoute(<ChangePasswordPage />), errorElement: <RouteErrorPage /> },
       { path: 'account', element: loadRoute(<AccountPage />), errorElement: <RouteErrorPage /> },

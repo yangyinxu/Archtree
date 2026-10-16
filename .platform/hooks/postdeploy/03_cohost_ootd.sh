@@ -151,6 +151,13 @@ ensure_swap() {
   if "${SWAPON}" --show=NAME --noheadings 2>/dev/null | grep -Fxq "${SWAP_FILE}"; then
     return 0
   fi
+  # Archtree's prebuild hook normally provides swap already; add OOTD's file
+  # only when the active total is below the requested size.
+  local active_bytes
+  active_bytes=$("${SWAPON}" --show=SIZE --bytes --noheadings 2>/dev/null | awk '{ total += $1 } END { print total + 0 }')
+  if (( active_bytes >= SWAP_MIB * 1048576 )); then
+    return 0
+  fi
   if [[ ! -f "${SWAP_FILE}" ]]; then
     install -d -m 0700 "$(dirname "${SWAP_FILE}")"
     "${FALLOCATE}" -l "${SWAP_MIB}M" "${SWAP_FILE}"
