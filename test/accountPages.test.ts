@@ -8,7 +8,6 @@ import vm from 'node:vm';
 
 import { createApp } from '../src/app';
 import { renderAuthEmail } from '../src/services/authEmailService';
-import { suggestEmailCorrection } from '../web/src/features/account/emailDomainSuggestion';
 
 const pages = [
     ['/account/register', 'register', 'Create a Kashewt account.'],
@@ -55,6 +54,38 @@ test('Kashewt account pages are private, script-driven shells under the strict p
     }
 });
 
+test('Finitude account paths, including the native Create Account path, redirect to Kashewt pages', async () => {
+    const app = createApp({ environment: 'test', listenerDistPath: path.join(os.tmpdir(), 'archtree-account-pages-missing') });
+    const server = await new Promise<Server>((resolve) => {
+        const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    });
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const base = `http://127.0.0.1:${address.port}`;
+    try {
+        for (const [accountPath] of pages) {
+            const finitudePath = accountPath.replace(/^\/account/, '/finitude');
+            for (const requested of [finitudePath, `${finitudePath}/`, `${finitudePath}?email=private%40example.test`]) {
+                const response = await fetch(`${base}${requested}`, { redirect: 'manual' });
+                assert.equal(response.status, 303, requested);
+                // Query text never follows; the fragment carrying a link token is kept by the browser.
+                assert.equal(response.headers.get('location'), accountPath, requested);
+            }
+        }
+        // The legacy `/listen` prefix reaches the same pages through the SPA prefix redirect.
+        const legacy = await fetch(`${base}/listen/register`, { redirect: 'manual' });
+        assert.equal(legacy.status, 308);
+        assert.equal(legacy.headers.get('location'), '/finitude/register');
+        // Remaining Finitude routes, such as its own login, are not redirected.
+        const login = await fetch(`${base}/finitude/login`, { redirect: 'manual' });
+        assert.equal(login.status, 503);
+        const unrelated = await fetch(`${base}/finitude/register/other`, { redirect: 'manual' });
+        assert.equal(unrelated.status, 503);
+    } finally {
+        await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+});
+
 test('every emailed link opens a Kashewt account page', () => {
     const token = 'A'.repeat(43);
     const origin = 'https://kashewt.example.test';
@@ -72,17 +103,60 @@ test('every emailed link opens a Kashewt account page', () => {
     }
 });
 
-test('the Kashewt email suggestion matches the Finitude implementation', () => {
+/** Loads the browser script the Kashewt sign-up, verification and recovery forms use for typo suggestions. */
+const loadEmailSuggestion = () => {
     const context: { kashewtSuggestEmailCorrection?: (value: string) => string | null } = {};
     vm.runInNewContext(readFileSync(path.join(__dirname, '../src/public/email-suggestion.js'), 'utf8'), { globalThis: context });
-    const suggest = context.kashewtSuggestEmailCorrection;
-    assert.equal(typeof suggest, 'function');
-    for (const input of [
-        'Lorem-Listener@gmial.com', 'name@gmail.co', 'name@gmail.com', 'name@GMAIL.COM', 'name@yahoo.ca', 'name@hp.com',
-        'name@outlok.com', 'name@hotmial.com', 'name@icloud.con', 'name@qq.co', 'name@mail.com', 'name@protonmail.co',
-        'name@gmail.com.', 'no-at-sign', 'a@b@gmail.com', ' spaced@gmial.com ', 'name with space@gmial.com', '',
-        'name@ymail.com', 'name@foxmial.com', 'name@163.co', `${'x'.repeat(250)}@gmial.com`
+    assert.equal(typeof context.kashewtSuggestEmailCorrection, 'function');
+    return context.kashewtSuggestEmailCorrection!;
+};
+
+const suggestedProviders = [
+    'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com',
+    'me.com', 'proton.me', 'protonmail.com', 'qq.com', '163.com', '126.com', 'foxmail.com', 'sina.com'
+];
+
+test('the Kashewt email suggestion corrects one likely typo of a popular provider', () => {
+    const suggest = loadEmailSuggestion();
+    for (const [typed, provider] of [
+        ['gmial.com', 'gmail.com'], ['gmail.con', 'gmail.com'], ['gmail.co', 'gmail.com'], ['gmailcom', 'gmail.com'],
+        ['gnail.com', 'gmail.com'], ['gmaill.com', 'gmail.com'], ['googlemial.com', 'googlemail.com'],
+        ['outlok.com', 'outlook.com'], ['hotmial.com', 'hotmail.com'], ['live.con', 'live.com'], ['yaho.com', 'yahoo.com'],
+        ['iclod.com', 'icloud.com'], ['me.con', 'me.com'], ['proton.m', 'proton.me'], ['protonmial.com', 'protonmail.com'],
+        ['qq.con', 'qq.com'], ['163.con', '163.com'], ['126.co', '126.com'], ['foxmial.com', 'foxmail.com'], ['sian.com', 'sina.com']
     ]) {
-        assert.equal(suggest!(input), suggestEmailCorrection(input), input);
+        assert.equal(suggest(`lorem@${typed}`), `lorem@${provider}`, typed);
+    }
+    // The local part is kept exactly as typed; only the domain's letter case is ignored.
+    assert.equal(suggest('Lorem.Ipsum+Dolor@GMIAL.COM'), 'Lorem.Ipsum+Dolor@gmail.com');
+    assert.equal(suggest('  Lorem@Hotmial.Com  '), 'Lorem@hotmail.com');
+    // Code points and NFC: a look-alike or astral character is one edit, and only the provider domain is substituted.
+    assert.equal(suggest('lorem@gmaïl.com'), 'lorem@gmail.com');
+    assert.equal(suggest('lörem.\u{1F600}@gmial.com'), 'lörem.\u{1F600}@gmail.com');
+    assert.equal(suggest('lorem@qq.cám'), 'lorem@qq.com');
+    assert.equal(suggest('lorem@qq.ca\u0301m'), 'lorem@qq.com');
+    assert.equal(suggest('lorem@gmail.c\u{1F600}m'), 'lorem@gmail.com');
+});
+
+test('the Kashewt email suggestion never corrects a real, ambiguous or malformed address', () => {
+    const suggest = loadEmailSuggestion();
+    for (const provider of suggestedProviders) {
+        for (const domain of [provider, provider.toUpperCase(), `${provider}.`]) {
+            assert.equal(suggest(`lorem@${domain}`), null, domain);
+        }
+    }
+    for (const value of [
+        // Real look-alike and regional mail domains.
+        'lorem@mail.com', 'lorem@email.com', 'lorem@ymail.com', 'lorem@q.com', 'lorem@yahoo.ca', 'lorem@outlook.cl',
+        'lorem@live.cn', 'lorem@protonmail.ch', 'lorem@sina.cn', 'Lorem@Gmail.Com',
+        // Short providers and top-level-domain-only changes allow one edit; ties suggest nothing.
+        'lorem@hp.com', 'lorem@mac.com', 'lorem@gmail.c', 'lorem@gmail.', 'lorem@136.com', 'lorem@hoxmail.com',
+        // Not one local@domain pair.
+        '', '   ', 'gmial.com', '@gmial.com', 'lorem@', 'lorem@.', 'lorem@ipsum@gmial.com', 'lorem@@gmial.com',
+        'lorem ipsum@gmial.com', 'lorem@gmial .com', `${'l'.repeat(250)}@gmial.com`,
+        // Unrelated internationalized domains, in Unicode or punycode.
+        'lorem@bücher.de', 'lorem@xn--bcher-kva.de', 'lorem@例え.jp'
+    ]) {
+        assert.equal(suggest(value), null, value);
     }
 });

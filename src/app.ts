@@ -140,10 +140,27 @@ const redirectLegacyListener = (req: Request, res: Response) => {
   return res.redirect(308, `${listenerApplicationPath}${suffix}`);
 };
 
+/**
+ * Account lifecycle pages that moved from the Finitude SPA to Kashewt. The
+ * native apps' Create Account button and older links still open the Finitude
+ * paths; browsers carry a link token's `#token=` fragment across the redirect.
+ */
+const kashewtAccountPageRedirects: ReadonlyArray<readonly [string, string]> = [
+  ['register', '/account/register'],
+  ['register/complete', '/account/register/complete'],
+  ['verify-email', '/account/verify-email'],
+  ['forgot-password', '/account/forgot-password'],
+  ['reset-password', '/account/reset-password']
+];
+
 /** Mounts the built listener SPA without allowing its fallback to capture backend routes. */
 const mountListenerApplication = (app: Application, listenerDistPath: string) => {
   app.get(legacyListenerApplicationPath, redirectLegacyListener);
   app.get(`${legacyListenerApplicationPath}/*`, redirectLegacyListener);
+  for (const [listenerRoute, accountPath] of kashewtAccountPageRedirects) {
+    // The query string is dropped: these pages take no parameters, and the token stays in the fragment.
+    app.get(`${listenerApplicationPath}/${listenerRoute}`, (_req, res) => res.redirect(303, accountPath));
+  }
 
   const indexPath = path.join(listenerDistPath, 'index.html');
   if (!fs.existsSync(indexPath)) {

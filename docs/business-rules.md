@@ -1571,11 +1571,16 @@ The wire protocol and operational bounds are documented in
   Kashewt projects. Kashewt has its own Web pages for sign-up, registration
   links, verification links, and password recovery, outside any one app.
   Authentication emails are Kashewt-branded, and every link in them opens a
-  Kashewt page. Finitude's own Web account pages keep working with the same
-  accounts.
+  Kashewt page.
+- Finitude has no account pages of its own for these steps. Finitude Web's
+  Log in links to Kashewt sign-up and password recovery, and its
+  verification guidance links to the Kashewt verification page. Older
+  Finitude addresses for these pages, including links in emails sent before
+  the move, open the matching Kashewt page, and an emailed link still works
+  there.
 - Email registration is available only on the Web. The Finitude apps do not
-  offer an email sign-up form. They open the Web sign-up page in the browser,
-  and they keep Apple and Google sign-in.
+  offer an email sign-up form. Their Create Account button opens Kashewt
+  sign-up in the browser, and they keep Apple and Google sign-in.
 - Web sign-up asks only for an email address and always answers with the same
   "check your email" response.
   - When the address has no account, or only an unverified record left by the

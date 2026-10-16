@@ -1661,56 +1661,45 @@ the same response and send nothing (`auth_link_email_suppressed`).
 Kashewt account pages (`src/routes/accountPageRoutes.ts`,
 `src/views/account/accountViews.ts`, `src/public/account-forms.js`). Accounts
 are Kashewt accounts shared by Finitude, Naruto Mobile and other projects, so
-the homepage, the login page and every authentication email lead here rather
-than into the Finitude app. The pages are static, `no-store` shells under the
-strict CSP; their script calls the same `/auth/browser/*` endpoints:
+sign-up, emailed links and password recovery live here rather than in any one
+app. The pages are static, `no-store` shells under the strict CSP; their
+script calls the same `/auth/browser/*` endpoints:
 
-- `/account/register` asks only for an email, shows where the link went, and
-  offers **Use a different email**. It reads `GET /auth/browser/capabilities`
-  and shows an unavailable notice when email registration is off.
-- `/account/register/complete#token=...` and `/account/verify-email#token=...`
-  read the fragment once, remove it from the address bar and history, inspect
-  the link, and continue as the Finitude pages below do; success returns to
-  `/auth/login-web?notice=registered` or `?notice=verified`.
+- `/account/register` asks only for an email and shows the same "check your
+  email" page for every address, with where the link went and **Use a
+  different email**. It reads `GET /auth/browser/capabilities` and shows an
+  unavailable notice when email registration is off.
+- `/account/register/complete#token=...` reads the fragment once, removes it
+  from the address bar and history entry, and inspects the link. It then shows
+  the address and asks for a display name and password; success returns to
+  `/auth/login-web?notice=registered` and never signs in. Invalid, expired or
+  used links offer a new link, and an address that now has an account links
+  to Log in and password recovery.
+- `/account/verify-email#token=...` shows the address and verifies it only
+  after **Verify email** is selected, then returns to
+  `/auth/login-web?notice=verified`. Without a token, or after an unusable
+  link, it offers a non-enumerating request for a new verification link.
 - `/account/forgot-password` requests the six-digit code, and
   `/account/reset-password` applies it with a new password, then returns to
   `/auth/login-web?notice=password_reset`.
-- Email fields show `422 email_domain_undeliverable` on the field and offer the
-  same "Did you mean ...?" correction, from `src/public/email-suggestion.js`, a
-  browser copy of `web/src/features/account/emailDomainSuggestion.ts` that
-  `test/accountPages.test.ts` keeps in agreement.
+- Email fields show `422 email_domain_undeliverable` on the field, which
+  receives focus, and keep the generic error for every other failure. While
+  the listener types, a domain within a small Damerau-Levenshtein distance of a
+  popular provider (`src/public/email-suggestion.js`, covered by
+  `test/accountPages.test.ts`) gets a "Did you mean ...?" button that replaces
+  the address only when selected.
 
-Finitude Web keeps its own account pages, which the iOS and Android **Create
-Account on the Web** buttons still open and which use the same accounts:
-
-- `/finitude/register` asks only for an email and shows the same "check your
-  email" status for every address; the form stays available to ask again.
-- `/finitude/register`, the `/finitude/verify-email` link request and
-  `/finitude/forgot-password` share one email form
-  (`web/src/features/account/AuthFormSupport.tsx`). A
-  `422 email_domain_undeliverable` is shown as an error on the email field,
-  which receives focus, for as long as the field holds the rejected address;
-  every other failure keeps the generic request error. An accepted request
-  shows the trimmed, lowercased address it was sent to with a **Use a
-  different email** action that clears the form. Sending again posts the
-  field's current address, so a resend to an undeliverable domain is rejected
-  again. While the listener types, a domain within a small Damerau-Levenshtein
-  distance of a popular provider (`web/src/features/account/emailDomainSuggestion.ts`)
-  gets a "Did you mean ...?" button in a polite live region, which replaces the
-  address only when selected; known providers and a few real look-alike
-  domains are never corrected.
-- `/finitude/register/complete#token=...` captures the token, removes the
-  fragment from the address bar and history entry at once (the token stays
-  only in page memory), and inspects the link. It then shows the address and
-  asks for a display name and password. Success sends the listener to Log in
-  with the address prefilled; it never signs in or changes a signed-in browser
-  session. Invalid, expired or used links offer a new link, and an address that
-  now has an account links to Log in and password recovery.
-- `/finitude/verify-email#token=...` shows the address and verifies it only
-  after **Verify email** is selected, then returns to Log in. Without a token,
-  or after an unusable link, the page offers a non-enumerating request for a
-  new verification link. Log in maps `403 email_verification_required` to a
-  verification message with a link to that request form.
+Finitude Web has no account lifecycle pages of its own. The server answers
+`/finitude/register`, `/finitude/register/complete`, `/finitude/verify-email`,
+`/finitude/forgot-password` and `/finitude/reset-password` with a `303`
+redirect to the matching `/account/*` page (browsers keep a `#token=`
+fragment across it). That keeps the iOS and Android **Create Account on the
+Web** buttons, which open `/finitude/register`, and links from older emails
+working. Finitude's Log in (`/finitude/login`) keeps its form and links to
+**Forgot password?**, **Create account** and, after
+`403 email_verification_required`, the verification-link request as
+full-page links to those Kashewt pages; Account links an unverified address
+to `/account/verify-email` the same way.
 
 A sign-in that presents a valid credential (password through `/auth/login` or
 `/auth/browser/login`, a passkey assertion, or a linked Apple or Google

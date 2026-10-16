@@ -1,9 +1,8 @@
 // Suggests a correction when a typed email domain looks like a misspelling of
-// a popular provider (`name@gmial.com` → `name@gmail.com`). This is the plain
-// browser copy of web/src/features/account/emailDomainSuggestion.ts for the
-// server-rendered Kashewt account pages; test/accountPages.test.ts checks that
-// both give the same answers. It never blocks a request and changes the
-// address only when the person selects the suggestion.
+// a popular provider (`name@gmial.com` → `name@gmail.com`) on the
+// server-rendered Kashewt account pages; test/accountPages.test.ts covers its
+// answers. It never blocks a request and changes the address only when the
+// person selects the suggestion.
 (() => {
   const providers = Object.freeze([
     'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com',

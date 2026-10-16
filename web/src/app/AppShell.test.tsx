@@ -353,12 +353,15 @@ test('announces the Social route with its product title', async () => {
   expect(document.title).toBe('Listen together · Finitude');
 });
 
-test('announces the registration completion route by its own title', async () => {
-  renderRoute('/register/complete');
-  expect(await screen.findByText('Finish creating account page')).toBeInTheDocument();
-  expect(document.title).toBe('Finish creating account · Finitude');
-  expect(await screen.findByRole('heading', { level: 1, name: 'This link can’t be used' })).toBeInTheDocument();
-});
+test.each(['/register', '/register/complete', '/verify-email', '/forgot-password', '/reset-password'])(
+  'leaves the Kashewt account page %s out of the app router',
+  async (pathname) => {
+    // The server redirects these addresses to /account/*, so the app never routes them itself.
+    renderRoute(pathname);
+    expect(await screen.findByText('Page not found page')).toBeInTheDocument();
+    expect(document.title).toBe('Page not found · Finitude');
+  }
+);
 
 test('logs in through the browser session endpoint and returns Home', async () => {
   const user = userEvent.setup();

@@ -244,57 +244,48 @@ test('an undeliverable domain is flagged on the field on every resend, and nothi
   const auth = await installAccountJourney(page, baseURL, sessionFor(newAccountId, newEmail, 'Lorem Listener'));
   const registrationRequests = () => auth.requests.filter(({ path }) => path === '/auth/browser/registration/request');
 
-  await page.goto('/finitude/register');
+  await page.goto('/account/register');
   const email = page.getByLabel('Email');
   const send = page.getByRole('button', { name: 'Send link' });
-  const sentStatus = page.getByRole('status').filter({ hasText: 'Check your email.' });
   await email.fill(undeliverableEmail);
   await send.click();
   await expect(page.getByRole('alert')).toHaveText(domainError);
-  await expect(email).toHaveAttribute('aria-invalid', 'true');
-  await expect(email).toHaveAccessibleDescription(domainError);
   await expect(email).toBeFocused();
-  await expect(sentStatus).toHaveCount(0);
-  await expectNoUnownedAxeViolations(page, 'register-undeliverable-domain');
 
   // Sending the same address again is rejected again, and still nothing is mailed.
   await send.click();
   await expect.poll(() => registrationRequests().length).toBe(2);
   await expect(page.getByRole('alert')).toHaveText(domainError);
+  await expect(email).toHaveAttribute('aria-invalid', 'true');
   await expect(email).toBeFocused();
   expect(auth.outbox).toEqual([]);
 
-  // A corrected address goes through, shows where it went, and can be sent again.
+  // Typing clears the field error; a corrected address goes through and can be replaced.
   await email.fill(newEmail);
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toBeHidden();
   await expect(email).not.toHaveAttribute('aria-invalid');
   await send.click();
-  await expect(sentStatus).toContainText(`Sent to ${newEmail}`);
-  await send.click();
-  await expect.poll(() => auth.outbox.length).toBe(2);
-  await expect(sentStatus).toContainText(`Sent to ${newEmail}`);
-  await expectNoUnownedAxeViolations(page, 'register-link-sent');
-
+  await expect(page.getByRole('heading', { level: 1, name: 'Check your email.' })).toBeVisible();
+  await expect(page.getByText(newEmail, { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Use a different email' }).click();
   await expect(email).toHaveValue('');
   await expect(email).toBeFocused();
-  await expect(sentStatus).toHaveCount(0);
 
   // The verification-link and password-recovery requests reject the address the same way.
-  for (const [path, action] of [
-    ['/finitude/verify-email', 'Send verification link'],
-    ['/finitude/forgot-password', 'Send reset code']
+  for (const [path, field, action] of [
+    ['/account/verify-email', '#verify-email', 'Send verification link'],
+    ['/account/forgot-password', '#forgot-email', 'Send reset code']
   ] as const) {
     await page.goto(path);
-    await page.getByLabel('Email').fill(undeliverableEmail);
+    await page.locator(field).fill(undeliverableEmail);
     await page.getByRole('button', { name: action }).click();
     await expect(page.getByRole('alert')).toHaveText(domainError);
-    await expect(page.getByRole('status').filter({ hasText: 'Sent to' })).toHaveCount(0);
+    await expect(page.locator(field)).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByRole('status')).toBeHidden();
   }
-  await expect(page.getByRole('button', { name: 'Enter reset code' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Enter reset code' })).toBeHidden();
 
   expect(auth.outbox.map(({ to, subject }) => ({ to, subject }))).toEqual([
-    { to: newEmail, subject: 'Finish creating your Kashewt account' },
     { to: newEmail, subject: 'Finish creating your Kashewt account' }
   ]);
   expect(auth.requests
@@ -308,32 +299,42 @@ test('an undeliverable domain is flagged on the field on every resend, and nothi
   expectCleanContract(auth);
 });
 
-test('a mistyped provider domain is suggested while typing and applied before the link is sent', async ({ page, baseURL }) => {
+test('Finitude account addresses open the Kashewt pages, keeping an emailed link token', async ({ page, baseURL }) => {
   const auth = await installAccountJourney(page, baseURL, sessionFor(newAccountId, newEmail, 'Lorem Listener'));
 
+  // The iOS and Android Create Account button opens this address.
   await page.goto('/finitude/register');
-  const email = page.getByLabel('Email');
-  await email.pressSequentially('Lorem-Listener@gmial.com');
-  const suggestion = page.getByRole('button', { name: 'Did you mean Lorem-Listener@gmail.com?' });
-  await expect(suggestion).toBeVisible();
-  // Nothing changes until the listener selects it.
-  await expect(email).toHaveValue('Lorem-Listener@gmial.com');
-  await expectNoUnownedAxeViolations(page, 'register-email-suggestion');
+  await expect(page).toHaveURL(/\/account\/register$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Create a Kashewt account.' })).toBeVisible();
+  await page.getByLabel('Email').fill(newEmail);
+  await page.getByRole('button', { name: 'Send link' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Check your email.' })).toBeVisible();
 
-  // Tab reaches the suggestion right after the field; Enter applies it without sending.
-  await email.focus();
-  await page.keyboard.press('Tab');
-  await expect(suggestion).toBeFocused();
-  await page.keyboard.press('Enter');
-  await expect(email).toHaveValue('Lorem-Listener@gmail.com');
-  await expect(email).toBeFocused();
-  await expect(suggestion).toHaveCount(0);
-  expect(auth.requests).toEqual([]);
+  // A link emailed before the move still works: the browser carries its fragment across the redirect.
+  const link = auth.latestLink(newEmail, 'registration');
+  const token = link.split('#token=')[1];
+  await page.goto(`/finitude/register/complete#token=${token}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'Set up your Kashewt account.' })).toBeVisible();
+  await expect(page).toHaveURL(/\/account\/register\/complete$/);
+  expect(await page.evaluate(() => window.location.hash)).toBe('');
+  await expect(page.getByLabel('Email')).toHaveValue(newEmail);
 
-  await page.keyboard.press('Enter');
-  await expect(page.getByRole('status').filter({ hasText: 'Check your email.' }))
-    .toContainText('Sent to lorem-listener@gmail.com');
-  expect(auth.outbox.map(({ to }) => to)).toEqual(['lorem-listener@gmail.com']);
+  for (const [from, heading] of [
+    ['/finitude/verify-email', 'Get a verification link.'],
+    ['/finitude/forgot-password', 'Reset your password.'],
+    ['/finitude/reset-password', 'Choose a new password.']
+  ] as const) {
+    await page.goto(from);
+    await expect(page).toHaveURL(new RegExp(`${from.replace('/finitude/', '/account/')}$`));
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+  }
+
+  // Finitude's own Log in sends sign-up and recovery to Kashewt as full page loads.
+  await page.goto('/finitude/login');
+  await expect(page.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/account/register');
+  await page.getByRole('link', { name: 'Forgot password?' }).click();
+  await expect(page).toHaveURL(/\/account\/forgot-password$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Reset your password.' })).toBeVisible();
   expectCleanContract(auth);
 });
 

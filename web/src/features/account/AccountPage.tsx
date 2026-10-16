@@ -12,6 +12,7 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { clearSearchHistory } from '../search/searchHistory';
 import { AccountLifecyclePanel } from './AccountLifecyclePanel';
+import { kashewtAccountPaths } from './kashewtAccountPaths';
 import { AvatarSettings } from './avatar';
 import styles from './AccountSurfaces.module.css';
 
@@ -97,7 +98,7 @@ export const AccountPage = () => {
               </div>
             </dl>
             {!session.data.user.emailVerified && (
-              <Link className={styles.inlineLink} state={{ email: session.data.user.email }} to="/verify-email">{t('account.page.verify_email')}</Link>
+              <a className={styles.inlineLink} href={kashewtAccountPaths.verifyEmail}>{t('account.page.verify_email')}</a>
             )}
             <nav aria-label={t('account.page.settings_label')} className={styles.settingsList}>
               <Link className={styles.settingsLink} to="/account/sessions">

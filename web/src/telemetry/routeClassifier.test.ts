@@ -7,9 +7,10 @@ test('reduces dynamic listener URLs to bounded route names', () => {
   expect(classifyListenerRoute('/finitude/organizations/private-content-id')).toBe('organization');
   expect(classifyListenerRoute('/finitude/playlists')).toBe('playlists');
   expect(classifyListenerRoute('/finitude/playlists/private-playlist-id')).toBe('playlist');
-  expect(classifyListenerRoute('/finitude/reset-password/private-token')).toBe('auth');
-  expect(classifyListenerRoute('/finitude/register/complete')).toBe('auth');
-  expect(classifyListenerRoute('/finitude/verify-email')).toBe('auth');
+  expect(classifyListenerRoute('/finitude/login?returnTo=%2Fprivate')).toBe('auth');
+  // Former account routes now redirect to Kashewt pages and are no longer app routes.
+  expect(classifyListenerRoute('/finitude/reset-password/private-token')).toBe('other');
+  expect(classifyListenerRoute('/finitude/register/complete')).toBe('other');
   expect(classifyListenerRoute('/finitude/unrecognized/private-content-id')).toBe('other');
 });
 
