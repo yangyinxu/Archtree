@@ -155,7 +155,8 @@ ensure_swap() {
   # only when the active total is below the requested size.
   local active_bytes
   active_bytes=$("${SWAPON}" --show=SIZE --bytes --noheadings 2>/dev/null | awk '{ total += $1 } END { print total + 0 }')
-  if (( active_bytes >= SWAP_MIB * 1048576 )); then
+  # A swap file's usable size is one page short of its file size.
+  if (( active_bytes >= (SWAP_MIB - 1) * 1048576 )); then
     return 0
   fi
   if [[ ! -f "${SWAP_FILE}" ]]; then
@@ -233,11 +234,16 @@ install_release() {
   local staging archive actual
   RELEASE_DIR="${release}"
   if [[ -f "${release}/.ootd-cohost-ready" ]]; then
+    # Releases prepared before this mode was set are repaired in place.
+    chmod 0755 "${release}"
     return 0
   fi
   install -d -m 0755 "${RELEASES}"
   rm -rf "${release}"
   staging=$(mktemp -d "${RELEASES}/.staging.XXXXXX")
+  # mktemp creates a root-only 0700 directory; the `ootd` user must be able to
+  # enter the release (read-only) to run migrations and the web service.
+  chmod 0755 "${staging}"
   archive="${staging}.zip"
   if ! "${AWS}" s3 cp --region "${REGION}" --only-show-errors "${ARTIFACT_URI}" "${archive}"; then
     rm -rf "${staging}" "${archive}"
