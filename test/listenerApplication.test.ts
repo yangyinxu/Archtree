@@ -206,7 +206,8 @@ test('listener routes report a clear service error when the bundle is absent', a
     const landingHtml = await landingPage.text();
     // Without a database the homepage falls back to the catalog defaults.
     assert.equal(landingHtml.match(/href="\/finitude"/g)?.length, 1);
-    assert.match(landingHtml, /<body class="landing-page portfolio-page">/);
+    assert.match(landingHtml, /<body class="portfolio-page">/);
+    assert.match(landingHtml, /<ol class="bento">/);
     assert.match(landingHtml, /href="\/assets\/portfolio\.css"/);
     assert.match(landingHtml, /href="\/naruto">Open Naruto/);
     assert.doesNotMatch(landingHtml, /ootd\.kashewt\.com/);

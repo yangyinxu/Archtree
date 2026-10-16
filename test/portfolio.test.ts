@@ -18,7 +18,7 @@ import {
 import { portfolioProjects, type PortfolioProject } from '../src/portfolio/projectCatalog';
 import { createPortfolioAdminRouter } from '../src/routes/portfolioAdminRoutes';
 import { renderPortfolioAdminPage } from '../src/views/portfolio/adminProjectsView';
-import { renderHomePage } from '../src/views/portfolio/homeView';
+import { portfolioTileSlots, renderHomePage } from '../src/views/portfolio/homeView';
 
 const project = (slug: string, overrides: Partial<PortfolioProject> = {}): PortfolioProject => ({
     slug,
@@ -28,6 +28,8 @@ const project = (slug: string, overrides: Partial<PortfolioProject> = {}): Portf
     tags: ['Web'],
     icon: 'cube',
     link: { label: `Open ${slug}`, href: `/${slug}` },
+    accent: 'blue',
+    preview: 'player',
     defaultVisibility: 'public',
     ...overrides
 });
@@ -139,6 +141,23 @@ test('the homepage lists only the given projects and escapes their copy', () => 
     assert.match(html, /2 projects/);
     assert.match(html, /© 2026/);
     assert.match(renderHomePage({ projects: [] }), /No projects are public right now/);
+});
+
+test('the bento grid features the first project and pairs the rest', () => {
+    assert.deepEqual(portfolioTileSlots(0), []);
+    assert.deepEqual(portfolioTileSlots(1), ['wide']);
+    assert.deepEqual(portfolioTileSlots(2), ['feature', 'side-tall']);
+    assert.deepEqual(portfolioTileSlots(3), ['feature', 'side', 'side']);
+    assert.deepEqual(portfolioTileSlots(4), ['feature', 'side', 'side', 'wide']);
+    assert.deepEqual(portfolioTileSlots(5), ['feature', 'side', 'side', 'half', 'half']);
+    assert.deepEqual(portfolioTileSlots(6), ['feature', 'side', 'side', 'half', 'half', 'wide']);
+
+    const html = renderHomePage({ projects: [project('a'), project('b', { accent: 'orange', preview: 'comments' })], year: 2026 });
+    assert.match(html, /class="tile tile--feature tile--blue"/);
+    assert.match(html, /class="tile tile--side-tall tile--orange"/);
+    assert.match(html, /class="art art--comments" aria-hidden="true"/);
+    assert.match(html, /class="pf-button pf-button--accent tile__link" href="\/a">Open a/);
+    assert.doesNotMatch(html, /style=/);
 });
 
 test('the console renders every project with its revision and disables moves at the ends', () => {

@@ -3,6 +3,12 @@ export type PortfolioVisibility = 'public' | 'hidden';
 
 export const portfolioVisibilities: readonly PortfolioVisibility[] = ['public', 'hidden'];
 
+/** Homepage tile color family. */
+export type PortfolioAccent = 'blue' | 'orange';
+
+/** Which decorative illustration a homepage tile draws. */
+export type PortfolioPreview = 'player' | 'iphone' | 'android' | 'comments' | 'wardrobe';
+
 export interface PortfolioProjectLink {
     label: string;
     href: string;
@@ -23,6 +29,8 @@ export interface PortfolioProject {
     /** Phosphor icon name without the `ph-` prefix. */
     icon: string;
     link: PortfolioProjectLink | null;
+    accent: PortfolioAccent;
+    preview: PortfolioPreview;
     defaultVisibility: PortfolioVisibility;
 }
 
@@ -39,6 +47,8 @@ export const portfolioProjects: readonly PortfolioProject[] = [
         tags: ['Web', 'React', 'Node.js'],
         icon: 'music-notes',
         link: { label: 'Open Finitude', href: '/finitude' },
+        accent: 'blue',
+        preview: 'player',
         defaultVisibility: 'public'
     },
     {
@@ -49,6 +59,8 @@ export const portfolioProjects: readonly PortfolioProject[] = [
         tags: ['iOS', 'SwiftUI'],
         icon: 'device-mobile',
         link: null,
+        accent: 'blue',
+        preview: 'iphone',
         defaultVisibility: 'public'
     },
     {
@@ -59,6 +71,8 @@ export const portfolioProjects: readonly PortfolioProject[] = [
         tags: ['Android', 'Jetpack Compose'],
         icon: 'android-logo',
         link: null,
+        accent: 'blue',
+        preview: 'android',
         defaultVisibility: 'public'
     },
     {
@@ -69,6 +83,8 @@ export const portfolioProjects: readonly PortfolioProject[] = [
         tags: ['Web', 'Chrome extension', 'Windows'],
         icon: 'chat-circle-text',
         link: { label: 'Open Naruto', href: '/naruto' },
+        accent: 'orange',
+        preview: 'comments',
         defaultVisibility: 'public'
     },
     {
@@ -79,10 +95,25 @@ export const portfolioProjects: readonly PortfolioProject[] = [
         tags: ['Web', 'Next.js'],
         icon: 't-shirt',
         link: { label: 'Open OOTD', href: 'https://ootd.kashewt.com' },
+        accent: 'orange',
+        preview: 'wardrobe',
         // Stays hidden until ootd.kashewt.com is live.
         defaultVisibility: 'hidden'
     }
 ];
+
+/** Stack chips under the homepage introduction. */
+export const portfolioStack: readonly string[] = [
+    'TypeScript', 'React', 'Node.js', 'SwiftUI', 'Jetpack Compose', 'MongoDB', 'AWS'
+];
+
+/** The "Now building" card beside the introduction. */
+export const portfolioFocus = {
+    name: 'OOTD',
+    description: 'A private digital wardrobe with daily outfit recommendations.'
+} as const;
+
+export const portfolioGitHubUrl = 'https://github.com/yangyinxu';
 
 export const isPortfolioVisibility = (value: unknown): value is PortfolioVisibility =>
     value === 'public' || value === 'hidden';
