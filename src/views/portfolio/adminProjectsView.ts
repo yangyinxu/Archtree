@@ -1,0 +1,102 @@
+import type { PortfolioEntry, ResolvedPortfolio } from '../../portfolio/portfolioStore';
+import { escapeHtml } from '../html';
+
+export const portfolioAdminPath = '/admin/projects';
+
+/** Fixed outcome notices: a redirect names one, so the page never echoes URL text. */
+const notices = {
+    applied: ['Saved. The homepage now shows this order.', false],
+    noop: ['Nothing changed.', false],
+    stale: ['Someone else changed the projects first. Review the current order and try again.', true],
+    unknown_project: ['That project no longer exists.', true],
+    invalid: ['The request was not valid.', true],
+    unavailable: ['Projects are temporarily unavailable. Try again.', true]
+} as const satisfies Record<string, readonly [string, boolean]>;
+export type PortfolioAdminNotice = keyof typeof notices;
+export const isPortfolioAdminNotice = (value: unknown): value is PortfolioAdminNotice =>
+    typeof value === 'string' && Object.prototype.hasOwnProperty.call(notices, value);
+
+export interface PortfolioAdminPageInput {
+    adminEmail: string;
+    portfolio: ResolvedPortfolio;
+    notice: PortfolioAdminNotice | null;
+}
+
+const encode = (value: string) => encodeURIComponent(value);
+
+/** A single-button form; every mutation carries the revision the page was rendered from. */
+const actionForm = (slug: string, action: string, revision: number, fields: Record<string, string>, button: string) => `<form method="POST" action="${portfolioAdminPath}/${encode(slug)}/${action}">
+          <input type="hidden" name="revision" value="${revision}" />
+          ${Object.entries(fields).map(([name, value]) => `<input type="hidden" name="${name}" value="${escapeHtml(value)}" />`).join('')}
+          ${button}
+        </form>`;
+
+const renderRow = (entry: PortfolioEntry, index: number, total: number, revision: number) => {
+    const { project, visibility } = entry;
+    const name = escapeHtml(project.name);
+    const isPublic = visibility === 'public';
+    const moveButton = (direction: 'up' | 'down', disabled: boolean) => actionForm(project.slug, 'move', revision, { direction },
+        `<button type="submit" class="button--secondary project-admin__icon-button"${disabled ? ' disabled' : ''} aria-label="Move ${name} ${direction}"><i class="ph ph-arrow-${direction}" aria-hidden="true"></i></button>`);
+    const visibilityButton = actionForm(project.slug, 'visibility', revision, { visibility: isPublic ? 'hidden' : 'public' },
+        isPublic
+            ? `<button type="submit" class="button--secondary"><i class="ph ph-eye-slash" aria-hidden="true"></i>Hide</button>`
+            : `<button type="submit"><i class="ph ph-eye" aria-hidden="true"></i>Make public</button>`);
+    return `<li class="project-admin__row${isPublic ? '' : ' project-admin__row--hidden'}">
+        <span class="project-admin__position">${String(index + 1).padStart(2, '0')}</span>
+        <div class="project-admin__summary">
+          <strong><i class="ph ph-${escapeHtml(project.icon)}" aria-hidden="true"></i>${name}</strong>
+          <div class="item-meta">
+            <span>${escapeHtml(project.tagline)}</span>
+            <span>${project.link ? escapeHtml(project.link.href) : 'No public link'}</span>
+          </div>
+        </div>
+        <span class="pill${isPublic ? '' : ' pill--muted'}">${isPublic ? 'Public' : 'Hidden'}</span>
+        <div class="project-admin__actions">
+          ${moveButton('up', index === 0)}
+          ${moveButton('down', index === total - 1)}
+          ${visibilityButton}
+        </div>
+      </li>`;
+};
+
+/** Renders the administrator console for portfolio order and visibility. */
+export const renderPortfolioAdminPage = ({ adminEmail, portfolio, notice }: PortfolioAdminPageInput) => {
+    const message = notice ? notices[notice] : null;
+    const publicCount = portfolio.entries.filter((entry) => entry.visibility === 'public').length;
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Projects - kashewt admin</title>
+  <link rel="stylesheet" href="/assets/archtree.css" />
+  <link rel="stylesheet" href="/assets/portfolio.css" />
+</head>
+<body class="audit-page">
+  <main class="page-shell">
+    <header class="site-header operations-header">
+      <div class="operations-header__identity">
+        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">k</span><span>kashewt</span></a>
+        <p class="eyebrow">Administrator tools</p>
+        <h1>Projects</h1>
+        <p class="muted operations-meta"><span>Signed in as <strong>${escapeHtml(adminEmail)}</strong></span><span>${publicCount} of ${portfolio.entries.length} public</span></p>
+      </div>
+      <div class="header-actions">
+        <a class="button" href="/"><i class="ph ph-arrow-up-right" aria-hidden="true"></i>View homepage</a>
+        <a class="button button--secondary" href="/content/manage"><i class="ph ph-stack" aria-hidden="true"></i>Content Manager</a>
+      </div>
+    </header>
+    ${message ? `<div class="alert${message[1] ? ' alert--error' : ''}" role="status">${escapeHtml(message[0])}</div>` : ''}
+
+    <section class="card project-admin__guide" aria-labelledby="project-admin-guide">
+      <h2 id="project-admin-guide">Homepage order and visibility</h2>
+      <p class="muted">The homepage lists public projects in this order. Hidden projects are left off the homepage only: their own pages stay reachable by URL and keep their own sign-in rules. Names, descriptions, and links are edited in code.</p>
+    </section>
+
+    <ol class="project-admin__list" aria-label="Projects in homepage order">
+      ${portfolio.entries.map((entry, index) => renderRow(entry, index, portfolio.entries.length, portfolio.revision)).join('')}
+    </ol>
+  </main>
+</body>
+</html>`;
+};

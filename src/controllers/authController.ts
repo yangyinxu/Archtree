@@ -96,7 +96,9 @@ export const safeWebReturnTo = (value: unknown) => {
     const engineeringDestination = destination.pathname.length <= 174
       && /^\/engineering(?:\/[a-z0-9]+(?:-[a-z0-9]+)*){0,4}\/?$/.test(destination.pathname);
     const narutoDestination = destination.pathname === '/naruto' || destination.pathname === '/naruto/';
+    const portfolioAdminDestination = destination.pathname === '/admin/projects';
     if (!contentManagerDestination
+      && !portfolioAdminDestination
       && !listenerDestination
       && !legacyListenerDestination
       && !engineeringDestination

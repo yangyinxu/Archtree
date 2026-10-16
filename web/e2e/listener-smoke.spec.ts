@@ -3,14 +3,15 @@ import { expect, test } from './support/test';
 
 const albumPath = `/finitude/albums/${catalogIds.album}`;
 
-test('opens the listener from the Archtree landing page without replacing account actions', async ({ page }) => {
+test('opens Finitude from the portfolio landing page without replacing account actions', async ({ page }) => {
   const response = await page.goto('/');
 
   expect(response?.status()).toBe(200);
   await expect(page.locator('.site-header').getByRole('link', { name: 'Open Finitude' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Open Finitude' })).toHaveCount(1);
-  await expect(page.getByRole('link', { name: 'Log in' })).toHaveCount(2);
-  await expect(page.getByRole('link', { name: 'Create account' })).toHaveCount(2);
+  await expect(page.getByRole('heading', { name: 'Finitude', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Log in' })).toHaveCount(1);
+  await expect(page.getByRole('link', { name: 'Create account' })).toHaveCount(1);
   for (const link of await page.getByRole('link', { name: 'Create account' }).all()) {
     await expect(link).toHaveAttribute('href', '/finitude/register');
   }

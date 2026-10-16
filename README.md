@@ -952,9 +952,19 @@ original image route remains the fallback and native-client contract.
 The shared Web artwork component keeps both its bordered frame and decoded image
 square, including in WebKit; Artist portraits retain their circular crop.
 
-The Archtree landing page links both signed-out and signed-in visitors to
-`/finitude` while preserving its existing content-management and authentication
-actions. Content-management actions are rendered only for administrators.
+The homepage (`/`) is the kashewt.com portfolio. It lists the public projects
+from `src/portfolio/projectCatalog.ts` (Finitude, its iOS and Android clients,
+Naruto Mobile, and OOTD) in the order stored in the single `portfolioSettings`
+document. Project names, descriptions, and links change in that file; a project
+added there appears last with its default visibility. If the settings cannot be
+read, the homepage falls back to the catalog defaults. Log in, Create account,
+and Log out stay in the header, and administrators also see shortcuts to the
+projects console, Content Manager, MediaTracks, and the Engineering Guide.
+
+Administrators manage the homepage at `/admin/projects`: move a project up or
+down and switch it between public and hidden. Each form posts the settings
+revision the page was rendered from, so a change made from a stale page is
+refused with a notice instead of overwriting a newer order.
 
 `POST /api/listener/v1/telemetry` accepts only same-origin JSON envelopes of
 one to ten bounded anonymous events. It has an independent 16 KiB body limit,

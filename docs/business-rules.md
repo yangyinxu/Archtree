@@ -1109,9 +1109,16 @@ The wire protocol and operational bounds are documented in
 - The compact Web player remains anchored to the viewport bottom. Scrolling
   page content, including a wheel gesture that begins over the player, must not
   move the player or the surrounding application shell.
-- The Archtree landing page presents a visible Finitude Web entry to signed-out
-  and signed-in visitors. Public browsing does not require authentication, and
-  the entry does not replace content-management or account actions.
+- The Archtree landing page is the kashewt.com portfolio. It lists every public
+  portfolio project, including Finitude Web, to signed-out and signed-in
+  visitors in the order administrators set. Public browsing does not require
+  authentication, and project entries do not replace content-management or
+  account actions.
+- Only admins can reorder portfolio projects or switch them between public and
+  hidden. A hidden project is left off the landing page only; hiding is not an
+  authorization boundary, and the project's own routes keep their own access
+  rules. A change made from an outdated view of the order is refused rather
+  than overwriting a newer one.
 - The Archtree landing page's Log in action opens an Archtree-branded login
   page and never redirects to Finitude's login page. Finitude remains a
   separate explicit entry. A visitor who is already authenticated is returned

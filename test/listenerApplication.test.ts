@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createApp, renderLandingActions } from '../src/app';
+import { createApp } from '../src/app';
+import { renderLandingActions } from '../src/views/portfolio/homeView';
 
 const listen = async (listenerDistPath: string) => {
   const app = createApp({ listenerDistPath, environment: 'test' });
@@ -75,26 +76,22 @@ test('production defaults to the single trusted Nginx proxy hop', () => {
   }
 });
 
-test('landing actions expose Finitude while reserving Content Manager for admins', () => {
+test('landing actions keep account actions for everyone and management shortcuts for admins', () => {
   const signedOut = renderLandingActions();
-  assert.doesNotMatch(signedOut.headerActions, /href="\/finitude">Open Finitude/);
-  assert.match(signedOut.heroActions, /href="\/finitude"><i class="ph ph-music-notes"[^>]*><\/i>Open Finitude/);
   assert.match(signedOut.headerActions, /href="\/auth\/login-web"><i class="ph ph-sign-in"[^>]*><\/i>Log in/);
-  assert.match(signedOut.heroActions, /href="\/finitude\/register"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
   assert.match(signedOut.headerActions, /href="\/finitude\/register"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
-  assert.doesNotMatch(signedOut.headerActions + signedOut.heroActions, /signup-web/);
+  assert.doesNotMatch(signedOut.headerActions, /signup-web/);
+  assert.equal(signedOut.adminTools, '');
 
   const signedInUser = renderLandingActions({
     userId: 'listener-id',
     email: 'listener+<beta>@example.com',
     role: 'user'
   });
-  assert.doesNotMatch(signedInUser.headerActions, /href="\/finitude">Open Finitude/);
-  assert.match(signedInUser.heroActions, /href="\/finitude"><i class="ph ph-music-notes"[^>]*><\/i>Open Finitude/);
   assert.match(signedInUser.headerActions, /listener\+&lt;beta&gt;@example\.com/);
   assert.doesNotMatch(signedInUser.headerActions, /<beta>/);
-  assert.doesNotMatch(signedInUser.headerActions, /content\/manage/);
-  assert.doesNotMatch(signedInUser.heroActions, /content\/manage/);
+  assert.doesNotMatch(signedInUser.headerActions, /content\/manage|admin\/projects/);
+  assert.equal(signedInUser.adminTools, '');
   assert.match(signedInUser.headerActions, /action="\/auth\/logout-web"/);
   assert.match(signedInUser.headerActions, /name="viewerId" value="listener-id"/);
 
@@ -103,17 +100,17 @@ test('landing actions expose Finitude while reserving Content Manager for admins
     email: 'legacy@example.com',
     role: 'creator'
   });
-  assert.doesNotMatch(legacyRole.headerActions, /content\/manage/);
-  assert.doesNotMatch(legacyRole.heroActions, /content\/manage/);
+  assert.equal(legacyRole.adminTools, '');
 
   const admin = renderLandingActions({
     userId: 'admin-id',
     email: 'admin@example.com',
     role: 'admin'
   });
-  assert.match(admin.headerActions, /href="\/content\/manage"><i class="ph ph-stack"[^>]*><\/i>Content Manager/);
-  assert.match(admin.heroActions, /href="\/content\/manage"><i class="ph ph-stack"[^>]*><\/i>Open Content Manager/);
-  assert.match(admin.heroActions, /href="\/content\/manage\/audio-tracks"><i class="ph ph-waveform"[^>]*><\/i>Browse MediaTracks/);
+  assert.match(admin.adminTools, /href="\/admin\/projects"><i class="ph ph-squares-four"[^>]*><\/i>Manage projects/);
+  assert.match(admin.adminTools, /href="\/content\/manage"><i class="ph ph-stack"[^>]*><\/i>Content Manager/);
+  assert.match(admin.adminTools, /href="\/content\/manage\/audio-tracks"><i class="ph ph-waveform"[^>]*><\/i>MediaTracks/);
+  assert.match(admin.adminTools, /href="\/engineering"><i class="ph ph-tree-structure"[^>]*><\/i>Engineering Guide/);
 });
 
 test('listener routes report a clear service error when the bundle is absent', async () => {
@@ -207,14 +204,17 @@ test('listener routes report a clear service error when the bundle is absent', a
     assert.equal(landingPage.status, 200);
     assertSecurityHeaders(landingPage);
     const landingHtml = await landingPage.text();
+    // Without a database the homepage falls back to the catalog defaults.
     assert.equal(landingHtml.match(/href="\/finitude"/g)?.length, 1);
-    assert.match(landingHtml, /<body class="landing-page">/);
-    assert.match(landingHtml, /<h1>Every release, connected\.<\/h1>/);
-    assert.match(landingHtml, /src="\/assets\/archtree-catalog-workspace\.webp"/);
-    assert.match(landingHtml, /ph ph-tree-structure/);
-    assert.match(landingHtml, /ph ph-waveform/);
-    assert.match(landingHtml, /aria-labelledby="capabilities-title"/);
-    assert.doesNotMatch(landingHtml, /class="grid" aria-label="Archtree capabilities"/);
+    assert.match(landingHtml, /<body class="landing-page portfolio-page">/);
+    assert.match(landingHtml, /href="\/assets\/portfolio\.css"/);
+    assert.match(landingHtml, /href="\/naruto">Open Naruto/);
+    assert.doesNotMatch(landingHtml, /ootd\.kashewt\.com/);
+    assert.doesNotMatch(landingHtml, /admin\/projects/);
+
+    const portfolioStyles = await fetch(`${baseUrl}/assets/portfolio.css`);
+    assert.equal(portfolioStyles.status, 200);
+    assert.match(portfolioStyles.headers.get('content-type') ?? '', /text\/css/);
   } finally {
     await close(server);
     await rm(temporaryRoot, { recursive: true, force: true });
