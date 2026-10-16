@@ -25,6 +25,7 @@ import { Passkey } from '../models/passkey';
 import { respondEmailVerificationRequired } from './emailAuthController';
 import { normalizeUserRole } from '../services/authRoleService';
 import { EmailVerificationRequiredError, emailVerificationState } from '../services/emailVerificationService';
+import { accountPaths, isLoginNotice, renderLoginPage as renderKashewtLoginPage } from '../views/account/accountViews';
 
 /**
  * Interface for Error object with statusCode property
@@ -113,78 +114,6 @@ export const safeWebReturnTo = (value: unknown) => {
   } catch {
     return '/';
   }
-};
-
-const escapeHtml = (value: string) => {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-};
-
-const renderLoginHtml = (params: {
-  identifier?: string;
-  returnTo?: string;
-  errorMessage?: string;
-  successMessage?: string;
-  token?: string;
-  userId?: string;
-}) => {
-  const identifier = escapeHtml(params.identifier ?? '');
-  const errorMessage = params.errorMessage ? `<div class="alert alert--error" role="alert">${escapeHtml(params.errorMessage)}</div>` : '';
-  const successMessage = params.successMessage ? `<div class="alert" role="status">${escapeHtml(params.successMessage)}</div>` : '';
-  const token = params.token ? `<pre class="card" style="white-space:pre-wrap;word-break:break-word;">${escapeHtml(params.token)}</pre>` : '';
-  const userId = params.userId ? `<p><strong>User ID:</strong> ${escapeHtml(params.userId)}</p>` : '';
-  const returnTo = escapeHtml(params.returnTo ?? '/');
-
-  return `<!DOCTYPE html>
-<html lang="en" class="auth-document">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Archtree Login</title>
-  <link rel="stylesheet" href="/assets/archtree.css" />
-</head>
-<body class="auth-page auth-page--login">
-  <main class="auth-layout">
-    <section class="auth-intro" aria-label="Archtree catalog workspace">
-      <img class="auth-intro__image" src="/assets/archtree-catalog-workspace.webp" width="1120" height="1400" alt="" />
-      <a class="brand" href="/">
-        <span class="brand-mark" aria-hidden="true"><i class="ph ph-tree-structure"></i></span>
-        <span>Archtree</span>
-      </a>
-      <div class="auth-intro__copy">
-        <h2>Return to every release in progress.</h2>
-        <p>Your catalog, media lifecycle, and page structure are ready where you left them.</p>
-      </div>
-    </section>
-    <section class="auth-form-panel">
-      <div class="auth-form-panel__inner">
-        <p class="eyebrow">Welcome back</p>
-        <h1>Log in to Archtree</h1>
-        <p class="muted">Continue managing your catalog and listening experience.</p>
-        ${errorMessage}
-        ${successMessage}
-        ${userId}
-        ${token}
-        <form method="POST" action="/auth/login-web" data-browser-session-login>
-          <input type="hidden" name="returnTo" value="${returnTo}" />
-          <div class="alert alert--error" role="alert" tabindex="-1" data-login-error hidden></div>
-          <label for="login-identifier"><i class="ph ph-user" aria-hidden="true"></i>Email or username</label>
-          <input id="login-identifier" type="text" name="identifier" value="${identifier}" autocomplete="username" required />
-          <label for="login-password"><i class="ph ph-lock-key" aria-hidden="true"></i>Password</label>
-          <input id="login-password" type="password" name="password" autocomplete="current-password" required />
-          <button type="submit"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</button>
-        </form>
-        <p class="auth-footer">Need an account? <a href="/finitude/register">Create one</a></p>
-      </div>
-    </section>
-  </main>
-  <script src="/assets/browser-session-forms.js"></script>
-</body>
-</html>`;
 };
 
 // A fixed-cost comparison prevents missing accounts from returning materially faster.
@@ -329,9 +258,9 @@ const revokePreviousBrowserSessionForLogin = async (
   }
 };
 
-/** Sends the retired Archtree sign-up page and form to Web registration without any account work. */
+/** Sends the retired Archtree sign-up page and form to Kashewt registration without any account work. */
 export const redirectToWebRegistration = (_req: Request, res: Response) => {
-  res.redirect(303, '/finitude/register');
+  res.redirect(303, accountPaths.register);
 };
 
 export const renderLoginPage = (req: Request, res: Response) => {
@@ -339,7 +268,8 @@ export const renderLoginPage = (req: Request, res: Response) => {
   setBrowserSessionPrivacyHeaders(res);
   const auth = (req as Request & { auth?: { userId: string } }).auth;
   if (auth) return res.redirect(303, returnTo);
-  return res.status(200).send(renderLoginHtml({ returnTo }));
+  const notice = isLoginNotice(req.query.notice) ? req.query.notice : null;
+  return res.status(200).send(renderKashewtLoginPage({ returnTo, notice }));
 };
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
@@ -380,9 +310,9 @@ export const loginFromWeb = async (req: Request, res: Response) => {
   const returnTo = safeWebReturnTo(req.body.returnTo);
   const identifier = normalizeIdentifier(req.body.identifier ?? req.body.email ?? req.body.username);
   // A non-scripted HTML submission cannot prove ownership of the origin-wide
-  // Web Lock. Keep it on Archtree and fail closed without inspecting credentials.
+  // Web Lock. Keep it on the Kashewt login page and fail closed without inspecting credentials.
   recordSecurityEvent('browser_form_login_uncoordinated');
-  return res.status(409).send(renderLoginHtml({
+  return res.status(409).send(renderKashewtLoginPage({
     identifier,
     returnTo,
     errorMessage: 'This browser could not safely coordinate login. Enable JavaScript and try again.'

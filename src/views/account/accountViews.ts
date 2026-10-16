@@ -1,0 +1,215 @@
+import { escapeHtml } from '../html';
+
+/**
+ * Kashewt account pages: one account for every project, so sign-up, email
+ * links, password recovery, and login live here rather than inside one app.
+ * The pages are static shells; `/assets/account-forms.js` drives each state
+ * against the existing `/auth/browser/*` JSON endpoints.
+ */
+
+export const accountPaths = {
+    register: '/account/register',
+    registerComplete: '/account/register/complete',
+    verifyEmail: '/account/verify-email',
+    forgotPassword: '/account/forgot-password',
+    resetPassword: '/account/reset-password',
+    login: '/auth/login-web'
+} as const;
+
+interface AccountShellInput {
+    title: string;
+    page: string;
+    body: string;
+    footer?: string;
+    scripts?: readonly string[];
+}
+
+/** Shared dark Kashewt shell; no inline styles or scripts, so the strict CSP applies. */
+export const renderAccountShell = ({ title, page, body, footer = '', scripts = ['/assets/email-suggestion.js', '/assets/account-forms.js'] }: AccountShellInput) => `<!DOCTYPE html>
+<html lang="en" class="account-document">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0e0f12" />
+  <meta name="referrer" content="no-referrer" />
+  <title>${escapeHtml(title)} · Kashewt</title>
+  <link rel="stylesheet" href="/assets/archtree.css" />
+  <link rel="stylesheet" href="/assets/portfolio.css" />
+  <link rel="stylesheet" href="/assets/account.css" />
+</head>
+<body class="portfolio-page account-page">
+  <main class="account-shell">
+    <header class="site-header pf-header">
+      <a class="pf-brand" href="/"><span class="pf-brand__mark" aria-hidden="true">K</span><span>Kashewt</span></a>
+    </header>
+    <section class="account-card" data-account-page="${escapeHtml(page)}">
+      ${body}
+    </section>
+    ${footer ? `<p class="account-footer">${footer}</p>` : ''}
+  </main>
+  ${scripts.map((script) => `<script src="${escapeHtml(script)}"></script>`).join('\n  ')}
+</body>
+</html>`;
+
+/** A state block; scripts reveal exactly one per page. */
+const state = (name: string, content: string, visible = false) =>
+    `<div class="account-state" data-state="${name}"${visible ? '' : ' hidden'}>${content}</div>`;
+
+const heading = (kicker: string, title: string, lede: string) => `<p class="pf-kicker">${kicker}</p>
+      <h1 class="account-title">${title}</h1>
+      <p class="account-lede">${lede}</p>`;
+
+const formError = '<div class="account-alert account-alert--error" role="alert" tabindex="-1" data-form-error hidden></div>';
+const formStatus = '<div class="account-alert" role="status" tabindex="-1" data-form-status hidden></div>';
+const noscript = '<noscript><p class="account-alert account-alert--error">This page needs JavaScript to reach the account service securely.</p></noscript>';
+
+const emailField = (id: string, extra = '') => `<label for="${id}">Email</label>
+        <input id="${id}" type="email" name="email" maxlength="254" autocomplete="email" required${extra} />
+        <button class="account-suggestion" type="button" data-email-suggestion hidden></button>`;
+
+const passwordFields = (prefix: string, label = 'Password') => `<label for="${prefix}-password">${label}</label>
+        <input id="${prefix}-password" type="password" name="password" minlength="12" maxlength="256" autocomplete="new-password" required aria-describedby="${prefix}-password-hint" />
+        <p class="account-hint" id="${prefix}-password-hint">Use 12–256 characters and avoid common passwords.</p>
+        <label for="${prefix}-confirm">Confirm ${label.toLowerCase()}</label>
+        <input id="${prefix}-confirm" type="password" name="confirmPassword" minlength="12" maxlength="256" autocomplete="new-password" required />`;
+
+const button = (label: string, busy: string) =>
+    `<button class="pf-button pf-button--accent account-submit" type="submit" data-busy-label="${busy}">${label}</button>`;
+
+const loginLink = `Already have an account? <a href="${accountPaths.login}">Log in</a>`;
+
+/** Email sign-up. The script swaps in the unavailable notice when the deployment cannot send links. */
+export const renderRegisterPage = () => renderAccountShell({
+    title: 'Create account',
+    page: 'register',
+    body: `${state('form', `${heading('Create account', 'Create a Kashewt account.', 'A Kashewt account works across Finitude, Naruto Mobile, and other Kashewt projects. Enter your email and we’ll send a link to finish creating it.')}
+      ${noscript}
+      <form class="account-form" data-form="register" novalidate>
+        ${formError}
+        ${emailField('register-email')}
+        ${button('Send link', 'Sending link…')}
+      </form>`, true)}
+      ${state('sent', `${heading('Check your email', 'Check your email.', 'We sent the next step to <strong data-sent-email></strong>. Registration links expire after 30 minutes.')}
+      <button class="pf-button pf-button--ghost" type="button" data-action="restart">Use a different email</button>`)}
+      ${state('unavailable', `${heading('Create account', 'Sign-up is unavailable.', 'Email sign-up isn’t available right now. Please try again later.')}`)}`,
+    footer: loginLink
+});
+
+/** Finishes registration from the emailed `#token=` link. */
+export const renderRegisterCompletePage = () => renderAccountShell({
+    title: 'Finish creating account',
+    page: 'register-complete',
+    body: `${state('checking', `${heading('Finish creating account', 'Checking your link…', 'This only takes a moment.')}${noscript}`, true)}
+      ${state('invalid', `${heading('Link unavailable', 'This link can’t be used.', 'It’s invalid, has expired, or was already used. Request a new link to continue.')}
+      <a class="pf-button pf-button--accent" href="${accountPaths.register}">Request a new link</a>`)}
+      ${state('exists', `${heading('Already registered', 'This email already has an account.', 'Log in with your password, or reset it if you’ve forgotten it.')}
+      <div class="account-actions"><a class="pf-button pf-button--accent" href="${accountPaths.login}">Log in</a><a class="pf-button pf-button--ghost" href="${accountPaths.forgotPassword}">Forgot password?</a></div>`)}
+      ${state('error', `${heading('Finish creating account', 'We couldn’t check that link.', 'Something went wrong on our side. Please try again.')}
+      <button class="pf-button pf-button--ghost" type="button" data-action="retry">Try again</button>`)}
+      ${state('form', `${heading('Finish creating account', 'Set up your Kashewt account.', 'Your email is confirmed. Choose a display name and password.')}
+      <form class="account-form" data-form="register-complete" novalidate>
+        ${formError}
+        <label for="complete-email">Email</label>
+        <input id="complete-email" type="email" name="email" autocomplete="username" readonly data-account-email />
+        <label for="complete-name">Display name</label>
+        <input id="complete-name" type="text" name="displayName" maxlength="80" autocomplete="name" required />
+        ${passwordFields('complete')}
+        ${button('Create account', 'Creating account…')}
+      </form>`)}`,
+    footer: loginLink
+});
+
+/** Confirms an emailed verification link, or requests a new one. */
+export const renderVerifyEmailPage = () => renderAccountShell({
+    title: 'Verify email',
+    page: 'verify-email',
+    body: `${state('checking', `${heading('Verify email', 'Checking your link…', 'This only takes a moment.')}${noscript}`, true)}
+      ${state('confirm', `${heading('Verify email', 'Confirm this email is yours.', 'Confirm the address below to finish verifying your Kashewt account. Your password doesn’t change.')}
+      <form class="account-form" data-form="verify-confirm" novalidate>
+        ${formError}
+        <label for="verify-confirm-email">Email</label>
+        <input id="verify-confirm-email" type="email" name="email" readonly data-account-email />
+        ${button('Verify email', 'Verifying…')}
+      </form>`)}
+      ${state('request', `<p class="pf-kicker">Verify email</p>
+      <h1 class="account-title" data-variant="request">Get a verification link.</h1>
+      <h1 class="account-title" data-variant="invalid" hidden>This link can’t be used.</h1>
+      <p class="account-lede" data-variant="request">Enter your account email. If it still needs verification, we’ll send a link that expires after 30 minutes.</p>
+      <p class="account-lede" data-variant="invalid" hidden>It’s invalid, has expired, or was already used. Enter your email to get a new verification link.</p>
+      <form class="account-form" data-form="verify-request" novalidate>
+        ${formError}
+        ${formStatus}
+        ${emailField('verify-email')}
+        ${button('Send verification link', 'Sending link…')}
+      </form>`)}`,
+    footer: `<a href="${accountPaths.login}">Back to Log in</a>`
+});
+
+/** Requests the six-digit password reset code. */
+export const renderForgotPasswordPage = () => renderAccountShell({
+    title: 'Forgot password',
+    page: 'forgot-password',
+    body: state('form', `${heading('Password recovery', 'Reset your password.', 'Enter your account email and we’ll send a six-digit reset code when that address can use password recovery.')}
+      ${noscript}
+      <form class="account-form" data-form="forgot-password" novalidate>
+        ${formError}
+        ${formStatus}
+        ${emailField('forgot-email')}
+        ${button('Send reset code', 'Sending reset code…')}
+      </form>
+      <a class="pf-button pf-button--ghost" href="${accountPaths.resetPassword}" data-reveal-on-sent hidden>Enter reset code</a>`, true),
+    footer: `<a href="${accountPaths.login}">Back to Log in</a>`
+});
+
+/** Applies a reset code and a new password; every session is signed out. */
+export const renderResetPasswordPage = () => renderAccountShell({
+    title: 'Reset password',
+    page: 'reset-password',
+    body: state('form', `${heading('Reset password', 'Choose a new password.', 'Use the six-digit code from your email. Resetting signs your account out on every device.')}
+      ${noscript}
+      <form class="account-form" data-form="reset-password" novalidate>
+        ${formError}
+        ${emailField('reset-email')}
+        <label for="reset-code">Reset code</label>
+        <input id="reset-code" type="text" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required />
+        ${passwordFields('reset', 'New password')}
+        ${button('Reset password', 'Resetting…')}
+      </form>`, true),
+    footer: `<a href="${accountPaths.forgotPassword}">Request another code</a>`
+});
+
+/** Fixed notices the login page shows after an account flow; the URL names one, never the text. */
+export const loginNotices = {
+    registered: 'Your account is ready. Log in with your email and new password.',
+    verified: 'Email verified. You can now log in.',
+    password_reset: 'Password reset. Log in again with your new password.'
+} as const;
+export type LoginNotice = keyof typeof loginNotices;
+export const isLoginNotice = (value: unknown): value is LoginNotice =>
+    typeof value === 'string' && Object.prototype.hasOwnProperty.call(loginNotices, value);
+
+/** The Kashewt login page. Field names and data hooks match browser-session-forms.js. */
+export const renderLoginPage = (params: {
+    identifier?: string;
+    returnTo?: string;
+    errorMessage?: string;
+    notice?: LoginNotice | null;
+}) => renderAccountShell({
+    title: 'Log in',
+    page: 'login',
+    scripts: ['/assets/browser-session-forms.js'],
+    body: `<div class="account-state">${heading('Welcome back', 'Log in to Kashewt.', 'Use your Kashewt account for Finitude, Naruto Mobile, and other Kashewt projects.')}
+      ${params.errorMessage ? `<div class="account-alert account-alert--error" role="alert">${escapeHtml(params.errorMessage)}</div>` : ''}
+      ${params.notice ? `<div class="account-alert" role="status">${escapeHtml(loginNotices[params.notice])}</div>` : ''}
+      <form class="account-form" method="POST" action="/auth/login-web" data-browser-session-login>
+        <input type="hidden" name="returnTo" value="${escapeHtml(params.returnTo ?? '/')}" />
+        <div class="account-alert account-alert--error" role="alert" tabindex="-1" data-login-error hidden></div>
+        <label for="login-identifier">Email or username</label>
+        <input id="login-identifier" type="text" name="identifier" value="${escapeHtml(params.identifier ?? '')}" autocomplete="username" required />
+        <div class="account-label-row"><label for="login-password">Password</label><a href="${accountPaths.forgotPassword}">Forgot password?</a></div>
+        <input id="login-password" type="password" name="password" autocomplete="current-password" required />
+        <button class="pf-button pf-button--accent account-submit" type="submit"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</button>
+      </form></div>`,
+    footer: `Need an account? <a href="${accountPaths.register}">Create one</a> · <a href="${accountPaths.verifyEmail}">Verify email</a>`
+});

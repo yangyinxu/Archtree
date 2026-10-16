@@ -52,35 +52,34 @@ const logIn = async (page: Page, password: string) => {
   await page.getByRole('button', { name: 'Log in', exact: true }).click();
 };
 
-test('registers a new account through the emailed link and logs in with it', async ({ page, baseURL }) => {
+test('registers a Kashewt account through the emailed link and logs in with it', async ({ page, baseURL }) => {
   const auth = await installAccountJourney(page, baseURL, sessionFor(newAccountId, newEmail, 'Lorem Listener'));
 
-  await page.goto('/finitude/register');
-  await expect(page.getByRole('heading', { level: 1, name: 'Make your Library yours.' })).toBeVisible();
+  await page.goto('/account/register');
+  await expect(page.getByRole('heading', { level: 1, name: 'Create a Kashewt account.' })).toBeVisible();
   await expect(page.getByLabel('Password')).toHaveCount(0);
   await page.getByLabel('Email').fill(newEmail);
   await page.getByRole('button', { name: 'Send link' }).click();
-  const sentStatus = page.getByRole('status').filter({ hasText: 'Check your email.' });
-  await expect(sentStatus).toHaveText(
-    'Check your email. We sent a message to this address with the next step. Registration links expire after 30 minutes.'
-      + ` Sent to ${newEmail}`
-  );
+  await expect(page.getByRole('heading', { level: 1, name: 'Check your email.' })).toBeVisible();
+  await expect(page.getByText(newEmail, { exact: true })).toBeVisible();
 
   // An address that already has an account sees exactly the same page; only the email differs.
+  await page.getByRole('button', { name: 'Use a different email' }).click();
+  await expect(page.getByLabel('Email')).toBeFocused();
+  await expect(page.getByLabel('Email')).toHaveValue('');
   await page.getByLabel('Email').fill(verifiedSession.user.email);
   await page.getByRole('button', { name: 'Send link' }).click();
-  await expect(sentStatus).toHaveText(/^Check your email\./);
-  await expect(sentStatus).toContainText(`Sent to ${verifiedSession.user.email}`);
+  await expect(page.getByText(verifiedSession.user.email, { exact: true })).toBeVisible();
   expect(auth.outbox.map(({ to, subject }) => ({ to, subject }))).toEqual([
-    { to: newEmail, subject: 'Finish creating your Finitude account' },
-    { to: verifiedSession.user.email, subject: 'You already have a Finitude account' }
+    { to: newEmail, subject: 'Finish creating your Kashewt account' },
+    { to: verifiedSession.user.email, subject: 'You already have a Kashewt account' }
   ]);
   expect(auth.outbox[1].text).not.toContain('#token=');
 
   const link = auth.latestLink(newEmail, 'registration');
   await page.goto(link);
-  await expect(page.getByRole('heading', { level: 1, name: 'Set up your listener account.' })).toBeVisible();
-  await expect(page).toHaveURL(/\/finitude\/register\/complete$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Set up your Kashewt account.' })).toBeVisible();
+  await expect(page).toHaveURL(/\/account\/register\/complete$/);
   expect(await page.evaluate(() => window.location.hash)).toBe('');
   await expect(page.getByLabel('Email')).toHaveValue(newEmail);
   await page.getByLabel('Display name').fill('Lorem Listener');
@@ -88,46 +87,44 @@ test('registers a new account through the emailed link and logs in with it', asy
   await page.getByLabel('Confirm password').fill(newPassword);
   await page.getByRole('button', { name: 'Create account' }).click();
 
-  await expect(page).toHaveURL(/\/finitude\/login$/);
-  await expect(page.getByRole('status').filter({ hasText: 'Your account is ready.' })).toHaveText(
-    'Your account is ready. Log in with your email and new password here or in the Finitude app.'
-  );
-  await expect(page.getByLabel('Email or username')).toHaveValue(newEmail);
+  await expect(page).toHaveURL(/\/auth\/login-web\?notice=registered$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Log in to Kashewt.' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Your account is ready. Log in with your email and new password.');
   const completion = auth.requests.find(({ path }) => path === '/auth/browser/registration/complete');
   expect(completion?.body).toEqual({ token: link.split('#token=')[1], password: newPassword, displayName: 'Lorem Listener' });
   expect(auth.accountState(newEmail)).toBe('verified');
 
+  await page.getByLabel('Email or username').fill(newEmail);
   await logIn(page, newPassword);
-  await expect(page).toHaveURL(/\/finitude$/);
-  await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
 
   // The link worked once.
   await page.goto(link);
-  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used.' })).toBeVisible();
   expectCleanContract(auth);
 });
 
 test('an expired registration link offers a new link that works', async ({ page, baseURL }) => {
   const auth = await installAccountJourney(page, baseURL, sessionFor(newAccountId, newEmail, 'Lorem Listener'));
 
-  await page.goto('/finitude/register');
+  await page.goto('/account/register');
   await page.getByLabel('Email').fill(newEmail);
   await page.getByRole('button', { name: 'Send link' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Check your email.' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Check your email.' })).toBeVisible();
   const expired = auth.latestLink(newEmail, 'registration');
   auth.expireLinks();
 
   await page.goto(expired);
-  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used' })).toBeVisible();
-  await expect(page.getByText('This link is invalid, has expired, or was already used. Request a new link to continue.')).toBeVisible();
-  await expect(page.getByLabel('Display name')).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used.' })).toBeVisible();
+  await expect(page.getByText('It’s invalid, has expired, or was already used. Request a new link to continue.')).toBeVisible();
+  await expect(page.getByLabel('Display name')).toBeHidden();
   expect(await page.evaluate(() => window.location.hash)).toBe('');
 
   await page.getByRole('link', { name: 'Request a new link' }).click();
-  await expect(page).toHaveURL(/\/finitude\/register$/);
+  await expect(page).toHaveURL(/\/account\/register$/);
   await page.getByLabel('Email').fill(newEmail);
   await page.getByRole('button', { name: 'Send link' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Check your email.' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Check your email.' })).toBeVisible();
   const fresh = auth.latestLink(newEmail, 'registration');
   expect(fresh).not.toBe(expired);
 
@@ -147,55 +144,99 @@ test('a legacy account verifies its email from the link, then logs in', async ({
     'Verify your email to log in. We sent a verification link to your email address. Open it, then log in again.'
   );
   expect(auth.outbox.map(({ to, subject }) => ({ to, subject }))).toEqual([
-    { to: legacySession.user.email, subject: 'Verify your Finitude email' }
+    { to: legacySession.user.email, subject: 'Verify your Kashewt email' }
   ]);
-
-  // The listener can ask for another link from the same message.
-  await page.getByRole('link', { name: 'Didn’t get the email? Send a new verification link' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Get a verification link.' })).toBeVisible();
-  await expect(page.getByLabel('Email')).toHaveValue(legacySession.user.email);
-  await page.getByRole('button', { name: 'Send verification link' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'If this address needs verification' })).toHaveText(
-    `If this address needs verification, we sent a link. Check your email. Sent to ${legacySession.user.email}`
-  );
-  expect(auth.outbox).toHaveLength(2);
 
   await page.goto(auth.latestLink(legacySession.user.email, 'verifyEmail'));
   await expect(page.getByRole('heading', { level: 1, name: 'Confirm this email is yours.' })).toBeVisible();
   await expect(page.getByText('Your password doesn’t change.', { exact: false })).toBeVisible();
-  await expect(page.getByLabel('Email')).toHaveValue(legacySession.user.email);
+  await expect(page.locator('#verify-confirm-email')).toHaveValue(legacySession.user.email);
   expect(await page.evaluate(() => window.location.hash)).toBe('');
   // Opening the page must not verify the address; only the explicit click does.
   expect(auth.requests.filter(({ path }) => path === '/auth/browser/email-verification/confirm')).toEqual([]);
   expect(auth.accountState(legacySession.user.email)).toBe('legacy_unverified');
 
   await page.getByRole('button', { name: 'Verify email' }).click();
-  await expect(page).toHaveURL(/\/finitude\/login$/);
-  await expect(page.getByRole('status').filter({ hasText: 'Email verified.' })).toHaveText('Email verified. You can now log in.');
-  await expect(page.getByLabel('Email or username')).toHaveValue(legacySession.user.email);
+  await expect(page).toHaveURL(/\/auth\/login-web\?notice=verified$/);
+  await expect(page.getByRole('status')).toHaveText('Email verified. You can now log in.');
   expect(auth.accountState(legacySession.user.email)).toBe('verified');
 
+  await page.getByLabel('Email or username').fill(legacySession.user.email);
   await logIn(page, legacyPassword);
-  await expect(page).toHaveURL(/\/finitude$/);
-  await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
   expectCleanContract(auth);
 });
 
 test('an expired verification link offers a new link instead of verifying', async ({ page, baseURL }) => {
   const auth = await installAccountJourney(page, baseURL, sessionFor(newAccountId, newEmail, 'Lorem Listener'));
 
-  await page.goto('/finitude/verify-email');
-  await page.getByLabel('Email').fill(legacySession.user.email);
+  await page.goto('/account/verify-email');
+  await expect(page.getByRole('heading', { level: 1, name: 'Get a verification link.' })).toBeVisible();
+  await page.locator('#verify-email').fill(legacySession.user.email);
   await page.getByRole('button', { name: 'Send verification link' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'If this address needs verification' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('If this address needs verification, we sent a link. Check your email.');
   const link = auth.latestLink(legacySession.user.email, 'verifyEmail');
   auth.expireLinks();
 
   await page.goto(link);
-  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Verify email' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'This link can’t be used.' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Verify email' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Send verification link' })).toBeVisible();
   expect(auth.accountState(legacySession.user.email)).toBe('legacy_unverified');
+  expectCleanContract(auth);
+});
+
+test('resets a password with the emailed code, then logs in with the new one', async ({ page, baseURL }) => {
+  const auth = await installAccountJourney(page, baseURL, verifiedSession);
+  const replacement = 'ut labore et dolore magna';
+
+  await page.goto('/auth/login-web');
+  await page.getByRole('link', { name: 'Forgot password?' }).click();
+  await expect(page).toHaveURL(/\/account\/forgot-password$/);
+  await page.getByLabel('Email').fill(verifiedSession.user.email);
+  await page.getByRole('button', { name: 'Send reset code' }).click();
+  await expect(page.getByRole('status')).toHaveText('If this address can reset a password, we sent a recovery email with a six-digit code.');
+  expect(auth.outbox.map(({ subject }) => subject)).toEqual(['Reset your Kashewt password']);
+
+  await page.getByRole('link', { name: 'Enter reset code' }).click();
+  await expect(page).toHaveURL(/\/account\/reset-password$/);
+  await expect(page.getByLabel('Email')).toHaveValue(verifiedSession.user.email);
+  const resetCode = auth.latestResetCode(verifiedSession.user.email);
+  await page.getByLabel('Reset code').fill(resetCode === '000000' ? '111111' : '000000');
+  await page.getByLabel('New password', { exact: true }).fill(replacement);
+  await page.getByLabel('Confirm new password').fill(replacement);
+  await page.getByRole('button', { name: 'Reset password' }).click();
+  await expect(page.getByRole('alert')).toHaveText('That reset code is invalid or has expired. Request another code.');
+
+  await page.getByLabel('Reset code').fill(resetCode);
+  await page.getByRole('button', { name: 'Reset password' }).click();
+  await expect(page).toHaveURL(/\/auth\/login-web\?notice=password_reset$/);
+  await expect(page.getByRole('status')).toHaveText('Password reset. Log in again with your new password.');
+
+  await page.getByLabel('Email or username').fill(verifiedSession.user.email);
+  await logIn(page, replacement);
+  await expect(page).toHaveURL(/\/$/);
+  expectCleanContract(auth);
+});
+
+test('the Kashewt sign-up marks an undeliverable domain on the email field and mails nothing', async ({ page, baseURL }) => {
+  const auth = await installAccountJourney(page, baseURL, sessionFor(newAccountId, newEmail, 'Lorem Listener'));
+
+  await page.goto('/account/register');
+  const email = page.getByLabel('Email');
+  await email.fill(undeliverableEmail);
+  await page.getByRole('button', { name: 'Send link' }).click();
+  await expect(page.getByRole('alert')).toHaveText(domainError);
+  await expect(email).toHaveAttribute('aria-invalid', 'true');
+  await expect(email).toHaveAccessibleDescription(domainError);
+  await expect(email).toBeFocused();
+  await expectNoUnownedAxeViolations(page, 'kashewt-register-undeliverable-domain');
+  expect(auth.outbox).toEqual([]);
+
+  await email.fill(newEmail);
+  await page.getByRole('button', { name: 'Send link' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Check your email.' })).toBeVisible();
+  await expectNoUnownedAxeViolations(page, 'kashewt-register-link-sent');
   expectCleanContract(auth);
 });
 
@@ -253,8 +294,8 @@ test('an undeliverable domain is flagged on the field on every resend, and nothi
   await expect(page.getByRole('button', { name: 'Enter reset code' })).toHaveCount(0);
 
   expect(auth.outbox.map(({ to, subject }) => ({ to, subject }))).toEqual([
-    { to: newEmail, subject: 'Finish creating your Finitude account' },
-    { to: newEmail, subject: 'Finish creating your Finitude account' }
+    { to: newEmail, subject: 'Finish creating your Kashewt account' },
+    { to: newEmail, subject: 'Finish creating your Kashewt account' }
   ]);
   expect(auth.requests
     .filter(({ body }) => (body as { email?: unknown }).email === undeliverableEmail)
@@ -292,6 +333,31 @@ test('a mistyped provider domain is suggested while typing and applied before th
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status').filter({ hasText: 'Check your email.' }))
     .toContainText('Sent to lorem-listener@gmail.com');
+  expect(auth.outbox.map(({ to }) => to)).toEqual(['lorem-listener@gmail.com']);
+  expectCleanContract(auth);
+});
+
+test('Kashewt sign-up suggests a mistyped provider domain and applies it only when selected', async ({ page, baseURL }) => {
+  const auth = await installAccountJourney(page, baseURL, sessionFor(newAccountId, newEmail, 'Lorem Listener'));
+
+  await page.goto('/account/register');
+  const email = page.getByLabel('Email');
+  await email.pressSequentially('Lorem-Listener@gmial.com');
+  const suggestion = page.getByRole('button', { name: 'Did you mean Lorem-Listener@gmail.com?' });
+  await expect(suggestion).toBeVisible();
+  await expect(email).toHaveValue('Lorem-Listener@gmial.com');
+
+  await email.focus();
+  await page.keyboard.press('Tab');
+  await expect(suggestion).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(email).toHaveValue('Lorem-Listener@gmail.com');
+  await expect(email).toBeFocused();
+  await expect(suggestion).toBeHidden();
+  expect(auth.requests).toEqual([]);
+
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { level: 1, name: 'Check your email.' })).toBeVisible();
   expect(auth.outbox.map(({ to }) => to)).toEqual(['lorem-listener@gmail.com']);
   expectCleanContract(auth);
 });

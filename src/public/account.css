@@ -1,0 +1,187 @@
+/* Kashewt account pages (/account/* and the login page). Builds on the
+   portfolio tokens in portfolio.css, so it always renders dark. */
+
+html.account-document {
+  background: #0e0f12;
+}
+
+.account-shell {
+  display: flex;
+  width: min(480px, calc(100% - 32px));
+  min-height: 100dvh;
+  flex-direction: column;
+  margin: 0 auto;
+  padding-bottom: 40px;
+}
+
+.account-card {
+  margin-top: clamp(24px, 8vh, 72px);
+  border: 1px solid var(--pf-line);
+  border-radius: 24px;
+  background: var(--pf-surface);
+  padding: clamp(24px, 5vw, 36px);
+}
+
+.account-state {
+  display: grid;
+  gap: 16px;
+}
+
+.account-state[hidden] {
+  display: none;
+}
+
+.account-card .pf-kicker {
+  margin: 0;
+}
+
+.account-title {
+  margin: 0;
+  font-size: clamp(1.75rem, 5vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.account-title:focus {
+  outline: none;
+}
+
+.account-lede {
+  margin: 0;
+  color: var(--pf-soft);
+}
+
+.account-lede strong {
+  color: var(--pf-ink);
+  overflow-wrap: anywhere;
+}
+
+.account-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.account-page label {
+  margin-top: 8px;
+  color: #c9cdd3;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.account-page input {
+  min-height: 46px;
+  border: 1px solid var(--pf-line-strong);
+  border-radius: 12px;
+  color: var(--pf-ink);
+  background: var(--pf-ground);
+  padding: 10px 12px;
+}
+
+.account-page input:focus {
+  border-color: var(--pf-blue);
+  outline: 2px solid rgba(124, 156, 255, 0.35);
+  outline-offset: 1px;
+}
+
+.account-page input[readonly] {
+  color: var(--pf-soft);
+  background: var(--pf-raised);
+}
+
+.account-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.account-label-row label {
+  margin-top: 0;
+}
+
+.account-label-row a,
+.account-footer a {
+  color: var(--pf-blue);
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.account-hint {
+  margin: 0;
+  color: var(--pf-muted);
+  font-size: 0.82rem;
+}
+
+.portfolio-page .account-submit {
+  justify-content: center;
+  margin-top: 16px;
+  border-radius: 12px;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.account-alert {
+  border: 1px solid #2d4a3c;
+  border-radius: 12px;
+  color: #b8e2cb;
+  background: #13241c;
+  padding: 12px 14px;
+  font-size: 0.92rem;
+}
+
+.account-alert--error {
+  border-color: #5a2f2b;
+  color: #ffc2b8;
+  background: #2a1614;
+}
+
+.account-alert[hidden] {
+  display: none;
+}
+
+.account-alert:focus {
+  outline: 2px solid var(--pf-blue);
+  outline-offset: 2px;
+}
+
+.account-footer {
+  margin: 20px 0 0;
+  color: var(--pf-muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.portfolio-page .account-suggestion {
+  justify-self: start;
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--pf-blue);
+  background: transparent;
+  padding: 4px 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  box-shadow: none;
+  transform: none;
+}
+
+.portfolio-page .account-suggestion:hover {
+  color: #a9bcff;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.portfolio-page .account-suggestion[hidden] {
+  display: none;
+}

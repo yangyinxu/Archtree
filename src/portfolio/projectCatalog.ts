@@ -107,7 +107,7 @@ export const portfolioStack: readonly string[] = [
     'TypeScript', 'React', 'Node.js', 'SwiftUI', 'Jetpack Compose', 'MongoDB', 'AWS'
 ];
 
-/** The "Now building" card beside the introduction. */
+/** The "In progress" card beside the introduction. */
 export const portfolioFocus = {
     name: 'OOTD',
     description: 'A private digital wardrobe with daily outfit recommendations.'

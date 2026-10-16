@@ -79,7 +79,7 @@ test('production defaults to the single trusted Nginx proxy hop', () => {
 test('landing actions keep account actions for everyone and management shortcuts for admins', () => {
   const signedOut = renderLandingActions();
   assert.match(signedOut.headerActions, /href="\/auth\/login-web"><i class="ph ph-sign-in"[^>]*><\/i>Log in/);
-  assert.match(signedOut.headerActions, /href="\/finitude\/register"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
+  assert.match(signedOut.headerActions, /href="\/account\/register"><i class="ph ph-user-plus"[^>]*><\/i>Create account/);
   assert.doesNotMatch(signedOut.headerActions, /signup-web/);
   assert.equal(signedOut.adminTools, '');
 
@@ -147,24 +147,30 @@ test('listener routes report a clear service error when the bundle is absent', a
     const loginPage = await fetch(`${baseUrl}/auth/login-web`, { redirect: 'manual' });
     assert.equal(loginPage.status, 200);
     assert.equal(loginPage.headers.get('location'), null);
-    assertSecurityHeaders(loginPage, { inlineStyles: true });
+    assertSecurityHeaders(loginPage);
     assert.equal(loginPage.headers.getSetCookie().length, 0);
     const loginHtml = await loginPage.text();
-    assert.match(loginHtml, /<html lang="en" class="auth-document">/);
-    assert.match(loginHtml, /<h1>Log in to Archtree<\/h1>/);
-    assert.match(loginHtml, /<body class="auth-page auth-page--login">/);
-    assert.match(loginHtml, /class="auth-layout"/);
-    assert.match(loginHtml, /ph ph-tree-structure/);
+    assert.match(loginHtml, /<html lang="en" class="account-document">/);
+    assert.match(loginHtml, /<h1 class="account-title">Log in to Kashewt\.<\/h1>/);
+    assert.match(loginHtml, /<body class="portfolio-page account-page">/);
+    assert.match(loginHtml, /href="\/assets\/account\.css"/);
     assert.match(loginHtml, /ph ph-sign-in/);
     assert.match(loginHtml, /data-browser-session-login/);
-    assert.doesNotMatch(loginHtml, /\/finitude\/login/);
-    assert.match(loginHtml, /Need an account\? <a href="\/finitude\/register">Create one<\/a>/);
+    assert.doesNotMatch(loginHtml, /Archtree|\/finitude\//);
+    assert.doesNotMatch(loginHtml, /style=/);
+    assert.match(loginHtml, /Need an account\? <a href="\/account\/register">Create one<\/a>/);
+    assert.match(loginHtml, /href="\/account\/forgot-password">Forgot password\?<\/a>/);
     assert.doesNotMatch(loginHtml, /signup-web/);
 
-    // Email registration moved to the Finitude Web pages.
+    const noticePage = await (await fetch(`${baseUrl}/auth/login-web?notice=registered`)).text();
+    assert.match(noticePage, /role="status">Your account is ready\. Log in with your email and new password\.<\/div>/);
+    const unknownNotice = await (await fetch(`${baseUrl}/auth/login-web?notice=%3Cb%3E`)).text();
+    assert.doesNotMatch(unknownNotice, /role="status"/);
+
+    // The retired Archtree sign-up URL now leads to Kashewt registration.
     const signupPage = await fetch(`${baseUrl}/auth/signup-web`, { redirect: 'manual' });
     assert.equal(signupPage.status, 303);
-    assert.equal(signupPage.headers.get('location'), '/finitude/register');
+    assert.equal(signupPage.headers.get('location'), '/account/register');
     assertSecurityHeaders(signupPage);
     await signupPage.text();
 

@@ -22,7 +22,7 @@ export const renderLandingActions = (auth?: LandingViewer): LandingActions => {
         return {
             headerActions: `<nav class="pf-header__actions" aria-label="Account">
       <a class="pf-button pf-button--ghost" href="/auth/login-web"><i class="ph ph-sign-in" aria-hidden="true"></i>Log in</a>
-      <a class="pf-button pf-button--light" href="/finitude/register"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
+      <a class="pf-button pf-button--light" href="/account/register"><i class="ph ph-user-plus" aria-hidden="true"></i>Create account</a>
     </nav>`,
             adminTools: ''
         };
@@ -134,8 +134,8 @@ export const renderHomePage = ({ auth, projects, year = new Date().getUTCFullYea
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0e0f12" />
-    <title>kashewt · Projects</title>
-    <meta name="description" content="Apps built end to end by kashewt: the services, the web apps, and the native clients that use them." />
+    <title>Kashewt · Projects</title>
+    <meta name="description" content="Kashewt projects: web, iOS, and Android apps and the services behind them." />
     <link rel="stylesheet" href="/assets/archtree.css" />
     <link rel="stylesheet" href="/assets/portfolio.css" />
 </head>
@@ -143,21 +143,21 @@ export const renderHomePage = ({ auth, projects, year = new Date().getUTCFullYea
     <main class="pf-shell">
         <header class="site-header pf-header">
             <a class="pf-brand" href="/">
-                <span class="pf-brand__mark" aria-hidden="true">k</span>
-                <span>kashewt</span>
+                <span class="pf-brand__mark" aria-hidden="true">K</span>
+                <span>Kashewt</span>
             </a>
             ${headerActions}
         </header>
 
         <section class="pf-hero" aria-labelledby="portfolio-title">
             <div class="pf-hero__copy">
-                <p class="pf-kicker">Portfolio · ${year}</p>
-                <h1 id="portfolio-title">I build apps<br />end to end.</h1>
-                <p class="pf-hero__lede">The services, the web apps, and the native clients that use them — designed, built, and run by one person.</p>
+                <p class="pf-kicker">Portfolio</p>
+                <h1 id="portfolio-title">Web and mobile apps, and the services behind them.</h1>
+                <p class="pf-hero__lede">Current projects across web, iOS, and Android, together with the backend services that support them.</p>
                 <ul class="pf-stack" aria-label="Stack">${portfolioStack.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
             </div>
-            <aside class="pf-focus" aria-label="Now building">
-                <p class="pf-focus__label"><span class="pf-focus__dot" aria-hidden="true"></span>Now building</p>
+            <aside class="pf-focus" aria-label="In progress">
+                <p class="pf-focus__label"><span class="pf-focus__dot" aria-hidden="true"></span>In progress</p>
                 <p class="pf-focus__name">${escapeHtml(portfolioFocus.name)}</p>
                 <p class="pf-focus__description">${escapeHtml(portfolioFocus.description)}</p>
             </aside>
@@ -167,14 +167,14 @@ export const renderHomePage = ({ auth, projects, year = new Date().getUTCFullYea
 
         <section class="pf-work" aria-labelledby="projects-title">
             <div class="pf-work__heading">
-                <h2 id="projects-title">Selected work</h2>
+                <h2 id="projects-title">Projects</h2>
                 <p>${projects.length} ${projects.length === 1 ? 'project' : 'projects'}</p>
             </div>
             ${grid}
         </section>
 
         <footer class="pf-footer">
-            <p class="pf-footer__wordmark" aria-hidden="true">kashewt</p>
+            <p class="pf-footer__wordmark" aria-hidden="true">Kashewt</p>
             <p class="pf-footer__links"><a href="${escapeHtml(portfolioGitHubUrl)}">GitHub</a><span>© ${year}</span></p>
         </footer>
     </main>

@@ -26,6 +26,7 @@ import { createAdminCatalogRouter } from './routes/adminCatalogRoutes';
 import { createAdminCatalogReviewRouter } from './routes/adminCatalogReviewRoutes';
 import { createAdminConversionRouter } from './routes/adminConversionRoutes';
 import { createPortfolioAdminRouter } from './routes/portfolioAdminRoutes';
+import { createAccountPageRouter } from './routes/accountPageRoutes';
 import {
   createMongoPortfolioStore,
   listPublicPortfolioProjects,
@@ -256,6 +257,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/admin/projects', createPortfolioAdminRouter({ store: portfolioStore }));
   app.use('/admin', adminRoutes);
   app.use('/auth', authRoutes);
+  app.use('/account', createAccountPageRouter());
   app.use('/content', contentRoutes);
   app.use('/feed', feedRoutes);
   app.use('/video', videoRoutes);

@@ -48,6 +48,8 @@ export interface EmailLinkAuthFixture {
   expireLinks: () => void;
   /** Returns the newest link of a purpose mailed to an address, parsed exactly as server tests do. */
   latestLink: (to: string, purpose: LinkPurpose) => string;
+  /** The newest six-digit password reset code mailed to an address. */
+  latestResetCode: (to: string) => string;
   accountState: (email: string) => AccountState | undefined;
 }
 
@@ -126,12 +128,12 @@ export const installEmailLinkAuth = async (
     const token = issueLink('registration', email);
     outbox.push({
       to: email,
-      subject: 'Finish creating your Finitude account',
+      subject: 'Finish creating your Kashewt account',
       text: [
-        'Someone asked to create a Finitude account with this email address.',
+        'Someone asked to create a Kashewt account with this email address. A Kashewt account works across Finitude, Naruto Mobile, and other Kashewt projects.',
         '',
         'To choose your display name and password, open this link within 30 minutes:',
-        `${origin}/finitude/register/complete#token=${token}`,
+        `${origin}/account/register/complete#token=${token}`,
         '',
         'The link works once. If you didn\'t ask for this, ignore this email and no account will be created.'
       ].join('\n')
@@ -139,15 +141,15 @@ export const installEmailLinkAuth = async (
   };
   const sendAlreadyRegistered = (email: string) => outbox.push({
     to: email,
-    subject: 'You already have a Finitude account',
+    subject: 'You already have a Kashewt account',
     text: [
-      'Someone asked to create a Finitude account with this email address, but it already has one. Nothing was changed.',
+      'Someone asked to create a Kashewt account with this email address, but it already has one. Nothing was changed.',
       '',
-      'Log in on the web or in the Finitude app:',
-      `${origin}/finitude/login`,
+      'Log in on the web or in a Kashewt app such as Finitude:',
+      `${origin}/auth/login-web`,
       '',
       'Forgot your password? Reset it here:',
-      `${origin}/finitude/forgot-password`,
+      `${origin}/account/forgot-password`,
       '',
       'If you didn\'t ask for this, you can ignore this email.'
     ].join('\n')
@@ -156,23 +158,28 @@ export const installEmailLinkAuth = async (
     const token = issueLink('verifyEmail', email);
     outbox.push({
       to: email,
-      subject: 'Verify your Finitude email',
+      subject: 'Verify your Kashewt email',
       text: [
-        'Your Finitude account needs a verified email address before you can sign in again.',
+        'Your Kashewt account needs a verified email address before you can sign in again.',
         '',
         'If you just tried to sign in or asked for this link, open it within 30 minutes and select Verify email, then sign in again:',
-        `${origin}/finitude/verify-email#token=${token}`,
+        `${origin}/account/verify-email#token=${token}`,
         '',
         'Your password doesn\'t change. If you didn\'t just try to sign in, don\'t open the link. Reset your password instead:',
-        `${origin}/finitude/forgot-password`
+        `${origin}/account/forgot-password`
       ].join('\n')
     });
   };
-  const sendResetCode = (email: string) => outbox.push({
-    to: email,
-    subject: 'Reset your Finitude password',
-    text: `Use code ${String(randomInt(0, 1_000_000)).padStart(6, '0')} to reset your password. This code expires soon. If you did not request it, you can ignore this email.`
-  });
+  const resetCodes = new Map<string, string>();
+  const sendResetCode = (email: string) => {
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    resetCodes.set(email, code);
+    outbox.push({
+      to: email,
+      subject: 'Reset your Kashewt password',
+      text: `Use code ${code} to reset your password. This code expires soon. If you did not request it, you can ignore this email.`
+    });
+  };
   const consumeSiblings = (purpose: LinkPurpose, email: string) => {
     for (const link of links.values()) {
       if (link.purpose === purpose && link.email === email) link.consumedAt = Date.now();
@@ -270,6 +277,21 @@ export const installEmailLinkAuth = async (
       else if (account) sendResetCode(address);
       return json(route, 202, generic.recovery);
     }
+    if (path === '/auth/browser/password/reset') {
+      const { email, code, password } = readBody(request, ['email', 'code', 'password']);
+      const address = String(email).toLowerCase();
+      const account = accounts.get(address);
+      if (!account || resetCodes.get(address) !== code) {
+        return json(route, 400, { message: 'The reset code is invalid or expired.' });
+      }
+      if (typeof password !== 'string' || password.length < 12 || password.length > 256) {
+        return json(route, 422, { message: 'Please check the submitted fields.' });
+      }
+      resetCodes.delete(address);
+      account.password = password;
+      account.state = 'verified';
+      return json(route, 204);
+    }
     if (path === '/auth/browser/email-verification/inspect') {
       const { token } = readBody(request, ['token']);
       const link = liveLink('verifyEmail', token);
@@ -319,10 +341,16 @@ export const installEmailLinkAuth = async (
       for (const link of links.values()) link.expiresAt = Date.now() - 1;
     },
     latestLink: (to, purpose) => {
-      const path = purpose === 'registration' ? '/finitude/register/complete#' : '/finitude/verify-email#';
+      const path = purpose === 'registration' ? '/account/register/complete#' : '/account/verify-email#';
       const email = [...outbox].reverse().find((candidate) => candidate.to === to && candidate.text.includes(path));
       const match = email ? linkInEmail.exec(email.text) : null;
       if (!match) throw new Error(`No ${purpose} link was mailed to ${to}.`);
+      return match[1];
+    },
+    latestResetCode: (to) => {
+      const email = [...outbox].reverse().find((candidate) => candidate.to === to && /^Use code \d{6} /.test(candidate.text));
+      const match = email ? /^Use code (\d{6}) /.exec(email.text) : null;
+      if (!match) throw new Error(`No reset code was mailed to ${to}.`);
       return match[1];
     },
     accountState: (email) => accounts.get(email.toLowerCase())?.state

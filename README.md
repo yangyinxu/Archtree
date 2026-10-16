@@ -1571,12 +1571,14 @@ cleanup can be reconciled by any current administrator without reattaching it.
 Web auth endpoints:
 
 - `GET /auth/signup-web` and `POST /auth/signup-web`: `303` to
-  `/finitude/register` without any account work (the POST body is ignored)
+  `/account/register` without any account work (the POST body is ignored)
 - `GET /auth/login-web`
 - `POST /auth/login-web`
 - `POST /auth/logout-web`
 
-`GET /auth/login-web` renders the Archtree-branded login surface. Its script
+`GET /auth/login-web` renders the Kashewt-branded login surface, with links to
+Kashewt sign-up and password recovery. `?notice=registered|verified|password_reset`
+shows a fixed confirmation after those flows; any other value shows nothing. Its script
 holds the shared origin-wide Web Lock while calling `POST /auth/browser/login`;
 an HTML-only `POST /auth/login-web` fails closed with `409` and never installs
 credentials or redirects to Finitude. An already-authenticated GET redirects
@@ -1622,7 +1624,7 @@ Email registration happens only on the Web, by emailed link:
   `202 {"message":"Check your email for the next step."}` for every account
   state. An address without an account, or with an unverified record from the
   earlier code-based sign-up, receives a single-use registration link
-  (`AUTH_LINK_ORIGIN/finitude/register/complete#token=...`, 30 minutes). An
+  (`AUTH_LINK_ORIGIN/account/register/complete#token=...`, 30 minutes). An
   address with an account receives an "already registered" notice with Log in
   and password-reset links, and nothing changes. An address whose domain
   cannot receive mail gets `422 {"code":"email_domain_undeliverable"}` instead
@@ -1643,7 +1645,7 @@ Email registration happens only on the Web, by emailed link:
   `422 {"code":"email_domain_undeliverable"}` when the domain cannot receive
   mail. Only an account created before verification existed (no
   `emailVerified` field and no linked identity with the same email) receives a
-  verification link (`AUTH_LINK_ORIGIN/finitude/verify-email#token=...`).
+  verification link (`AUTH_LINK_ORIGIN/account/verify-email#token=...`).
 - `POST /auth/browser/email-verification/inspect` takes `{ "token" }` and
   returns `200 {"email"}` or `400 link_invalid` without consuming it.
   `POST /auth/browser/email-verification/confirm` returns `204` after it
@@ -1656,7 +1658,30 @@ and verification requires an explicit confirm request. All three link emails
 budget of three per normalized address per 15 minutes; requests over it get
 the same response and send nothing (`auth_link_email_suppressed`).
 
-Finitude Web pages for these links:
+Kashewt account pages (`src/routes/accountPageRoutes.ts`,
+`src/views/account/accountViews.ts`, `src/public/account-forms.js`). Accounts
+are Kashewt accounts shared by Finitude, Naruto Mobile and other projects, so
+the homepage, the login page and every authentication email lead here rather
+than into the Finitude app. The pages are static, `no-store` shells under the
+strict CSP; their script calls the same `/auth/browser/*` endpoints:
+
+- `/account/register` asks only for an email, shows where the link went, and
+  offers **Use a different email**. It reads `GET /auth/browser/capabilities`
+  and shows an unavailable notice when email registration is off.
+- `/account/register/complete#token=...` and `/account/verify-email#token=...`
+  read the fragment once, remove it from the address bar and history, inspect
+  the link, and continue as the Finitude pages below do; success returns to
+  `/auth/login-web?notice=registered` or `?notice=verified`.
+- `/account/forgot-password` requests the six-digit code, and
+  `/account/reset-password` applies it with a new password, then returns to
+  `/auth/login-web?notice=password_reset`.
+- Email fields show `422 email_domain_undeliverable` on the field and offer the
+  same "Did you mean ...?" correction, from `src/public/email-suggestion.js`, a
+  browser copy of `web/src/features/account/emailDomainSuggestion.ts` that
+  `test/accountPages.test.ts` keeps in agreement.
+
+Finitude Web keeps its own account pages, which the iOS and Android **Create
+Account on the Web** buttons still open and which use the same accounts:
 
 - `/finitude/register` asks only for an email and shows the same "check your
   email" status for every address; the form stays available to ask again.

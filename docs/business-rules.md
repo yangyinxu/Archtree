@@ -1109,7 +1109,7 @@ The wire protocol and operational bounds are documented in
 - The compact Web player remains anchored to the viewport bottom. Scrolling
   page content, including a wheel gesture that begins over the player, must not
   move the player or the surrounding application shell.
-- The Archtree landing page is the kashewt.com portfolio. It lists every public
+- The landing page is the Kashewt portfolio at kashewt.com. It lists every public
   portfolio project, including Finitude Web, to signed-out and signed-in
   visitors in the order administrators set. Public browsing does not require
   authentication, and project entries do not replace content-management or
@@ -1119,12 +1119,13 @@ The wire protocol and operational bounds are documented in
   authorization boundary, and the project's own routes keep their own access
   rules. A change made from an outdated view of the order is refused rather
   than overwriting a newer one.
-- The Archtree landing page's Log in action opens an Archtree-branded login
-  page and never redirects to Finitude's login page. Finitude remains a
-  separate explicit entry. A visitor who is already authenticated is returned
-  to the requested safe destination instead of seeing another login form.
-- Logging out from the Archtree landing page or Content Manager completes on
-  Archtree and returns to the Archtree homepage; it never redirects through a
+- The landing page's Log in action opens a Kashewt-branded login page and
+  never redirects to Finitude's login page; its Create account action opens
+  Kashewt sign-up, never Finitude's. Finitude remains a separate explicit
+  entry. A visitor who is already authenticated is returned to the requested
+  safe destination instead of seeing another login form.
+- Logging out from the landing page or Content Manager completes on the
+  Kashewt site and returns to the homepage; it never redirects through a
   Finitude route. Supported browsers coordinate cookie cleanup under the
   shared session-transition lock, while the HTML fallback remains revoke-only.
 - Web logout clears account-scoped server-state caches and that account's local
@@ -1566,6 +1567,12 @@ The wire protocol and operational bounds are documented in
 
 ## Authentication and Resolution
 
+- Accounts are Kashewt accounts, shared by Finitude, Naruto Mobile, and other
+  Kashewt projects. Kashewt has its own Web pages for sign-up, registration
+  links, verification links, and password recovery, outside any one app.
+  Authentication emails are Kashewt-branded, and every link in them opens a
+  Kashewt page. Finitude's own Web account pages keep working with the same
+  accounts.
 - Email registration is available only on the Web. The Finitude apps do not
   offer an email sign-up form. They open the Web sign-up page in the browser,
   and they keep Apple and Google sign-in.

@@ -13,7 +13,7 @@ test('opens Finitude from the portfolio landing page without replacing account a
   await expect(page.getByRole('link', { name: 'Log in' })).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'Create account' })).toHaveCount(1);
   for (const link of await page.getByRole('link', { name: 'Create account' }).all()) {
-    await expect(link).toHaveAttribute('href', '/finitude/register');
+    await expect(link).toHaveAttribute('href', '/account/register');
   }
 
   await page.getByRole('link', { name: 'Open Finitude' }).click();
@@ -21,18 +21,18 @@ test('opens Finitude from the portfolio landing page without replacing account a
   await expect(page.getByRole('heading', { name: 'Browser Test Listening Room' })).toBeVisible();
 });
 
-test('keeps the landing-page login on the Archtree surface', async ({ page }) => {
+test('keeps the landing-page login on the Kashewt surface', async ({ page }) => {
   await page.goto('/');
 
   await page.locator('.site-header').getByRole('link', { name: 'Log in' }).click();
 
   await expect(page).toHaveURL(/\/auth\/login-web$/);
-  await expect(page.getByRole('heading', { name: 'Log in to Archtree' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Log in to Kashewt.' })).toBeVisible();
   await expect(page.locator('form[data-browser-session-login]')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Create one' })).toHaveAttribute('href', '/finitude/register');
+  await expect(page.getByRole('link', { name: 'Create one' })).toHaveAttribute('href', '/account/register');
 });
 
-test('submits the Archtree login through the coordinated session endpoint', async ({ page }) => {
+test('submits the Kashewt login through the coordinated session endpoint', async ({ page }) => {
   let requestHeaders: Record<string, string> = {};
   let requestBody: unknown;
   await page.route('**/auth/browser/login', async (route) => {

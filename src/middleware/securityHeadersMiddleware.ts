@@ -34,7 +34,6 @@ export const isConversionWorkerAsset = (req: Pick<Request, 'path' | 'method'>) =
 
 /** Restricts the inline-style compatibility policy to legacy server-rendered HTML. */
 export const requiresInlineStyleCompatibility = (req: Request) => {
-    if (req.path === '/auth/login-web') return true;
     const isHtmlRead = req.method === 'GET' || req.method === 'HEAD';
     if (isHtmlRead && (
         req.path === '/content/manage'

@@ -68,7 +68,7 @@ export const renderPortfolioAdminPage = ({ adminEmail, portfolio, notice }: Port
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Projects - kashewt admin</title>
+  <title>Projects - Kashewt admin</title>
   <link rel="stylesheet" href="/assets/archtree.css" />
   <link rel="stylesheet" href="/assets/portfolio.css" />
 </head>
@@ -76,7 +76,7 @@ export const renderPortfolioAdminPage = ({ adminEmail, portfolio, notice }: Port
   <main class="page-shell">
     <header class="site-header operations-header">
       <div class="operations-header__identity">
-        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">k</span><span>kashewt</span></a>
+        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">K</span><span>Kashewt</span></a>
         <p class="eyebrow">Administrator tools</p>
         <h1>Projects</h1>
         <p class="muted operations-meta"><span>Signed in as <strong>${escapeHtml(adminEmail)}</strong></span><span>${publicCount} of ${portfolio.entries.length} public</span></p>

@@ -184,7 +184,7 @@ test('Archtree HTML login stays on Archtree and rejects uncoordinated submission
     assert.equal(loginPage.headers.get('location'), null);
     assert.equal(setCookieHeaders(loginPage).length, 0);
     const loginHtml = await loginPage.text();
-    assert.match(loginHtml, /<h1>Log in to Archtree<\/h1>/);
+    assert.match(loginHtml, /<h1 class="account-title">Log in to Kashewt\.<\/h1>/);
     assert.match(loginHtml, /name="returnTo" value="\/content\/manage"/);
     assert.doesNotMatch(loginHtml, /\/finitude\/login/);
 

@@ -121,12 +121,12 @@
             body: '{}'
           });
         } catch {
-          throw new Error('Archtree could not log you out. Please try again.');
+          throw new Error('Kashewt could not log you out. Please try again.');
         }
         if (!response.ok) {
           throw new Error(await responseErrorMessage(
             response,
-            'Archtree could not log you out. Please try again.'
+            'Kashewt could not log you out. Please try again.'
           ));
         }
         completeLogout(viewerId);
@@ -142,7 +142,7 @@
         form,
         logoutError instanceof Error
           ? logoutError.message
-          : 'Archtree could not log you out. Please try again.'
+          : 'Kashewt could not log you out. Please try again.'
       );
     } finally {
       form.removeAttribute('aria-busy');
@@ -193,7 +193,7 @@
         });
         if (!response.ok) throw new Error(await responseErrorMessage(
           response,
-          'Archtree could not log you in. Please try again.'
+          'Kashewt could not log you in. Please try again.'
         ));
         publishSessionChange('login');
         window.location.assign(safeSameOriginDestination(fields.get('returnTo')));
@@ -202,7 +202,7 @@
       if (error instanceof HTMLElement) {
         error.textContent = loginError instanceof Error
           ? loginError.message
-          : 'Archtree could not log you in. Please try again.';
+          : 'Kashewt could not log you in. Please try again.';
         error.hidden = false;
         error.focus();
       }

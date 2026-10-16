@@ -51,10 +51,10 @@ const retired = {
     message: 'Email sign-up has moved to the Finitude website. Create your account there, then sign in.'
 };
 const subjects = {
-    registration: 'Finish creating your Finitude account',
-    alreadyRegistered: 'You already have a Finitude account',
-    verification: 'Verify your Finitude email',
-    reset: 'Reset your Finitude password'
+    registration: 'Finish creating your Kashewt account',
+    alreadyRegistered: 'You already have a Kashewt account',
+    verification: 'Verify your Kashewt email',
+    reset: 'Reset your Kashewt password'
 };
 
 let baseUrl = '';
@@ -332,7 +332,7 @@ test('a new address registers through a single-use link built from AUTH_LINK_ORI
     const mail = await waitForEmail(email, 1);
     assert.equal(mail.subject, subjects.registration);
     assert.ok(mail.token);
-    assert.ok(mail.text.includes(`${linkOrigin}/finitude/register/complete#token=${mail.token}\n`));
+    assert.ok(mail.text.includes(`${linkOrigin}/account/register/complete#token=${mail.token}\n`));
     assert.doesNotMatch(mail.text, /attacker/);
     assert.equal(await User.findByEmail(email), null, 'a request creates no account');
 
@@ -423,8 +423,8 @@ test('every account state receives the identical registration response; accounts
         const notice = await waitForEmail(email, 1);
         assert.equal(notice.subject, subjects.alreadyRegistered);
         assert.equal(notice.token, undefined);
-        assert.ok(notice.text.includes(`${linkOrigin}/finitude/login\n`));
-        assert.ok(notice.text.includes(`${linkOrigin}/finitude/forgot-password\n`));
+        assert.ok(notice.text.includes(`${linkOrigin}/auth/login-web\n`));
+        assert.ok(notice.text.includes(`${linkOrigin}/account/forgot-password\n`));
         assert.equal(await linkTokens().countDocuments({ email }), 0);
     }
     assert.equal((await waitForEmail(fresh, 1)).subject, subjects.registration);
@@ -446,7 +446,7 @@ test('a legacy account is blocked with a verification link, keeps its sessions, 
     assert.equal((await login(email, 'Wrong lorem ipsum 000')).status, 401);
     const mail = await waitForEmail(email, 1);
     assert.equal(mail.subject, subjects.verification);
-    assert.ok(mail.text.includes(`${linkOrigin}/finitude/verify-email#token=${mail.token}\n`));
+    assert.ok(mail.text.includes(`${linkOrigin}/account/verify-email#token=${mail.token}\n`));
     assert.ok(mail.text.includes('Your password doesn\'t change.'));
     assert.equal(sentTo(email).length, 1, 'a wrong password sends nothing');
 
@@ -722,7 +722,7 @@ test('retired code-based endpoints answer 410 without writes or email, and the o
             } : {})
         });
         assert.equal(response.status, 303);
-        assert.equal(response.headers.get('location'), '/finitude/register');
+        assert.equal(response.headers.get('location'), '/account/register');
     }
     await pause(50);
     assert.equal(await users().countDocuments(), usersBefore);
