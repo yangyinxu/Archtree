@@ -246,6 +246,8 @@ test('installs a verified release, sandboxes it and routes HTTPS after issuance'
     assert.equal(result.stderr.includes(value), false);
   }
   assert.equal(await readlink(fixture.current), fixture.release);
+  // The sandboxed `ootd` user must be able to enter the root-owned release.
+  assert.equal((await stat(fixture.release)).mode & 0o777, 0o755);
   assert.ok(await exists(path.join(fixture.release, '.ootd-cohost-ready')));
   assert.ok(await exists(path.join(fixture.release, '.ootd-cohost-migrated')));
 
