@@ -55,6 +55,8 @@ export const createSourceFixture = async () => {
   for (const hook of [
     '.platform/confighooks/postdeploy/01_configure_https.sh',
     '.platform/confighooks/postdeploy/03_cohost_ootd.sh',
+    '.platform/confighooks/prebuild/00_ensure_swap.sh',
+    '.platform/hooks/prebuild/00_ensure_swap.sh',
     '.platform/hooks/prebuild/01_install_certbot.sh',
     '.platform/hooks/prebuild/02_install_ffmpeg.sh',
     '.platform/hooks/postdeploy/01_configure_https.sh',

@@ -1147,6 +1147,15 @@ process environment directly. Configuration-only deployments also rerun the
 same idempotent configurator, so correcting the domain or ACME properties does
 not require an unrelated application release.
 
+### Deployment swap
+
+Elastic Beanstalk runs `npm install` on every application and configuration
+deployment while Archtree keeps serving, which can exhaust the 1 GiB instance
+and end the install with exit 137. `.platform/hooks/prebuild/00_ensure_swap.sh`
+(also run by `.platform/confighooks/prebuild/`) therefore enables a 1 GiB swap
+file at `/var/swap/archtree.swap` before dependencies install and records it in
+`/etc/fstab`.
+
 ### Co-hosted OOTD preview
 
 The production instance can also host the separately built OOTD owner preview
@@ -1161,7 +1170,8 @@ hook only fetch, verify, sandbox, and route a pinned OOTD artifact.
 - OOTD runs as the `ootd` user on `127.0.0.1:3100` (`ootd-web.service`) and as
   bounded `ootd-*.timer` jobs. Every OOTD unit denies EC2 instance metadata and
   has a `MemoryMax` limit, so it cannot use this instance profile or exhaust
-  Archtree's memory. A 1 GiB swap file is added by default.
+  Archtree's memory. It adds its own swap file only when less than
+  `OOTD_COHOST_SWAP_MIB` of swap is already active.
 - Nginx serves `ootd.kashewt.com` from `/etc/nginx/conf.d/ootd-cohost.conf` with
   its own Let's Encrypt certificate (reusing `ACME_EMAIL`); the Archtree
   renewal timer renews it with the Archtree certificate.
