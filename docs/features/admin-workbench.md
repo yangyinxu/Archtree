@@ -4,8 +4,8 @@ The private administrator API is mounted at `/api/admin/v1`. It uses the current
 persisted `admin` role, same-origin cookie mutation protection, bounded parsers,
 account-viewer fencing and `no-store` responses. `GET /capabilities` advertises
 admission independently of the normal listener DTOs. Existing catalog edits,
-cover changes, existing-Album reviews and local MP3 conversion need only that
-role and have no deployment flag. The remaining flags below default closed and
+visibility changes, cover changes, existing-Album reviews and local MP3
+conversion need only that role and have no deployment flag. The remaining flags below default closed and
 accept only the literal `true`:
 
 | Configuration | Purpose |
@@ -15,8 +15,6 @@ accept only the literal `true`:
 | `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` | Optional existing provider routing; never returned to clients |
 | `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
 | `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` | Operator assertion that the staging bucket denies public/CDN access |
-| `FINITUDE_ADMIN_VISIBILITY_ENABLED` | Admit explicit public/hidden changes (also requires `FINITUDE_HIDDEN_DELIVERY_ENFORCED`) |
-| `FINITUDE_HIDDEN_DELIVERY_ENFORCED` | Operator assertion that historical object URLs, S3 policies and CDN delivery deny hidden access |
 
 An existing Album review needs no staging bucket; starting Luna also requires
 the imports flag and configured provider.
@@ -34,9 +32,10 @@ over `.env`, so the explicit startup values above also override a closed parent
 shell flag. This command does not assert private staging storage or hidden delivery.
 
 A private ACL alone does not override a public bucket policy. Verify denied
-unauthenticated access to the staging prefix and historical canonical URLs
-before enabling the corresponding assertion. The application enforces hidden
-reads even when admission flags are rolled back. Old external artwork without
+unauthenticated access to the staging prefix before enabling that assertion.
+Hiding relies on the catalog bucket denying anonymous reads (verified for
+production on 2026-10-17): media and artwork reach clients only through
+visibility-checked application routes. Old external artwork without
 an owned asset must migrate before hiding its owner. Previously delivered files
 cannot be recalled. Private preview GET/HEAD accepts the account-viewer header,
 or a non-secret `viewer` query parameter for browser media elements; neither is

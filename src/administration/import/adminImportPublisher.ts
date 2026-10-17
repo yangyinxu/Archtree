@@ -20,7 +20,6 @@ import { readyAlbumLifecycleFilter, touchReadyAlbumReferences } from '../../serv
 import { touchReadyAudioTrackReferences } from '../../services/audio/audioTrackReferenceFenceService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { sortTrackIdsByEmbeddedTrackNumber } from '../../services/catalog/albumTrackLinkService';
-import { isAdminVisibilityEditingEnabled } from '../adminCapabilityService';
 import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
 import { getAdminImport, importCandidateProjection, importCollection, importPurposeFilter, importCandidateRevision, mutateAdminImport, touchImportAdmin, withImportAdmin } from './adminImportService';
 import { importPrivateStorageReady, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
@@ -49,7 +48,6 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
             delete doc.media.publication;
         }
         if (['queued', 'running'].includes(doc.analysis.state) || doc.suggestions.some(suggestion => suggestion.generation === doc.analysis.generation && suggestion.decision === 'pending')) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
-        if (doc.draft.album.visibility === 'hidden' && !isAdminVisibilityEditingEnabled()) throw new AdminImportError(409, 'ADMIN_IMPORT_HIDDEN_DELIVERY_NOT_READY');
         if (!doc.draft.album.title || !doc.draft.album.artistName) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
         const artistDecision = doc.decisions.find(decision => decision.scope === 'artist');
         if (!artistDecision || !['reuse', 'create-distinct'].includes(artistDecision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
@@ -235,7 +233,6 @@ async function commitPublication(id: string, worker: string, signal?: AbortSigna
         await session.withTransaction(async () => {
             const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.publication.leaseOwner': worker }, { session }); const publication = doc?.media?.publication; if (!doc || !publication) throw conflict();
             checkAdminWorker(signal); await touchImportAdmin(publication.actorId, session); ready(); currentApproval(publication);
-            if (publication.snapshot.album.visibility === 'hidden' && !isAdminVisibilityEditingEnabled()) throw conflict();
             if (publication.tracks.some(track => track.state !== 'ready') || (publication.cover && publication.cover.state !== 'ready')) throw conflict();
             const primary = credits(publication.artistId); validateAttribution('documented', primary);
             let existingAlbum: any = null;

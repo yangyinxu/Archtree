@@ -15,7 +15,6 @@
 import { createHash } from 'node:crypto';
 import { ObjectId, type ClientSession, type Document } from 'mongodb';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
-import { isAdminVisibilityEditingEnabled } from '../adminCapabilityService';
 import { readyAlbumLifecycleFilter, touchReadyAlbumReferences } from '../../services/catalog/albumReferenceFenceService';
 import { orderedAlbumTrackIds } from '../../services/catalog/albumTrackLinkService';
 import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
@@ -118,7 +117,7 @@ export const adminCatalogSnapshot = async (kind: AdminCatalogKind, doc: any, ses
     return { kind, id: ownerId, revision: revision(stateForRevision(kind, doc)), visibility: visibility(doc.visibility), effectiveVisibility,
         fields: fields(kind, doc), coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
         mediaUrl: kind === 'audioTrack' ? `/api/admin/v1/catalog/audioTrack/${ownerId}/media` : null,
-        capabilities: { editing: true, visibility: isAdminVisibilityEditingEnabled() } };
+        capabilities: { editing: true, visibility: true } };
 };
 
 export const getAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawId: string) => withCurrentAdministrator(actor, async session => {
@@ -164,7 +163,6 @@ const parseFields = (kind: AdminCatalogKind, value: unknown) => {
 
 /** Previously public external artwork cannot be recalled by changing a database enum. */
 const assertHiddenDelivery = async (kind: AdminCatalogKind, doc: any, session: ClientSession) => {
-    if (!isAdminVisibilityEditingEnabled()) fail(503, 'ADMIN_VISIBILITY_UNAVAILABLE');
     const hasExternal = (value: any) => !value.coverArtId && typeof value.coverArtUrl === 'string' && /^https?:/i.test(value.coverArtUrl);
     if (hasExternal(doc)) fail(409, 'ADMIN_VISIBILITY_STORAGE_MIGRATION_REQUIRED');
     if (kind === 'album' && await getDb()!.collection('audioTracks').findOne({ albumId: { $in: [String(doc._id), doc._id, String(doc._id).toUpperCase()] },
@@ -202,10 +200,7 @@ export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawI
         const previous = await replay(actor, body, fingerprint, session); if (previous) return previous;
         const doc = await readAdminCatalogRecord(kind, rawId, session); if (!doc) return fail(404, 'ADMIN_CATALOG_NOT_FOUND');
         if (revision(stateForRevision(kind, doc)) !== body.expectedRevision) fail(409, 'ADMIN_CATALOG_REVISION_CONFLICT');
-        if (desiredVisibility !== undefined && desiredVisibility !== visibility(doc.visibility)) {
-            if (!isAdminVisibilityEditingEnabled()) fail(503, 'ADMIN_VISIBILITY_UNAVAILABLE');
-            if (desiredVisibility === 'hidden') await assertHiddenDelivery(kind, doc, session);
-        }
+        if (desiredVisibility === 'hidden' && visibility(doc.visibility) !== 'hidden') await assertHiddenDelivery(kind, doc, session);
         const actualPatch = { ...patch };
         if (hasOwn(actualPatch, 'credits')) {
             requireCatalogCreditWrites();
@@ -275,7 +270,6 @@ export const editAdminPageItem = (actor: string, slug: string, itemId: string, r
     const fingerprint = revision([slug, itemId, body]);
     return withCurrentAdministrator(actor, async session => {
         const previous = await replay(actor, body, fingerprint, session); if (previous) return previous;
-        if (!isAdminVisibilityEditingEnabled()) fail(503, 'ADMIN_VISIBILITY_UNAVAILABLE');
         const page = await getDb()!.collection('pages').findOne({ slug }, { session });
         if (!page) return fail(404, 'ADMIN_CATALOG_NOT_FOUND');
         const snapshot = await pageSnapshot(page, session);
