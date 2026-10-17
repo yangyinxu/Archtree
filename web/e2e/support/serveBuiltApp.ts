@@ -48,7 +48,7 @@ isolateEnvironment();
 const { createApp } = await import('../../../src/app');
 // The authentication-email domain check answers from a synthetic resolver, so
 // a request that reaches this server never queries real DNS.
-const { setEmailDomainResolver } = await import('../../../src/services/emailDomainDeliverability');
+const { setEmailDomainResolver } = await import('../../../src/services/auth/emailDomainDeliverability');
 setEmailDomainResolver(browserTestMxResolver);
 const app = createApp({ environment: 'test', listenerDistPath });
 const server = await new Promise<Server>((resolve, reject) => {

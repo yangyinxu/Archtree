@@ -1,4 +1,4 @@
-import type { MxResolver } from '../../../src/services/emailDomainDeliverability';
+import type { MxResolver } from '../../../src/services/auth/emailDomainDeliverability';
 
 /**
  * Browser tests never query DNS. A domain under the reserved `.invalid`

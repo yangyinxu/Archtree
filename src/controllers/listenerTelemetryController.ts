@@ -1,10 +1,10 @@
 import { NextFunction, Request, Response } from 'express';
 
-import { setBrowserSessionPrivacyHeaders } from '../services/authCookieService';
+import { setBrowserSessionPrivacyHeaders } from '../services/auth/authCookieService';
 import {
     ListenerTelemetryValidationError,
     recordListenerTelemetryBatch
-} from '../services/listenerTelemetryService';
+} from '../services/listener/listenerTelemetryService';
 
 /** Accepts anonymous, bounded listener diagnostics without reflecting event data. */
 export const ingestListenerTelemetry = (

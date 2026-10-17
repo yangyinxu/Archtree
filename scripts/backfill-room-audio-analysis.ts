@@ -3,9 +3,9 @@ import 'dotenv/config';
 import { open, type FileHandle } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { connectToDatabase, disconnectFromDatabase } from '../src/infrastructure/database';
-import { analyzeRoomAudioTrack, listRoomAudioAnalysis } from '../src/services/roomAudioAnalysisService';
+import { analyzeRoomAudioTrack, listRoomAudioAnalysis } from '../src/services/roomAudio/roomAudioAnalysisService';
 import { parseRoomAudioBackfillArguments, RoomAudioBackfillArgumentError,
-    runRoomAudioAnalysisBackfill } from '../src/services/roomAudioAnalysisBackfill';
+    runRoomAudioAnalysisBackfill } from '../src/services/roomAudio/roomAudioAnalysisBackfill';
 import { assertRoomAudioRuntime } from './check-runtime.mjs';
 
 /** Applying without a capable decoder would download every compressed source only to fail. */

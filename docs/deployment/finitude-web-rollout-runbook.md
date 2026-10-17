@@ -4,6 +4,20 @@ This runbook governs promotion of the Finitude Web listener and its Archtree
 server routes. It records operational evidence; product behavior remains
 canonical in [`../business-rules.md`](../business-rules.md).
 
+<!-- @catalog -->
+**Contents**
+
+- [Release invariants](#release-invariants)
+- [1. Prepare and identify the candidate](#1-prepare-and-identify-the-candidate)
+  - [CodePipeline promotion setup](#codepipeline-promotion-setup)
+- [2. Deploy and verify staging](#2-deploy-and-verify-staging)
+- [3. Promote the same artifact](#3-promote-the-same-artifact)
+- [4. Roll back](#4-roll-back)
+- [Evidence record](#evidence-record)
+  - [Verified release and served Web bytes — checked 2026-10-12](#verified-release-and-served-web-bytes--checked-2026-10-12)
+  - [Production authentication and media checks — 2026-10-12](#production-authentication-and-media-checks--2026-10-12)
+<!-- @end-catalog -->
+
 ## Release invariants
 
 - Promote the exact tested Elastic Beanstalk bundle. Never rebuild between
@@ -27,7 +41,7 @@ canonical in [`../business-rules.md`](../business-rules.md).
   and room budgets, live in the one application process and reset on restart.
   Keep the environment at one instance and one process; adding another would
   give every account and IP an extra budget. Design shared limits first, as the
-  [single-process capacity contract](../architecture.md#single-process-capacity-contract)
+  [single-process capacity contract](../architecture/runtime.md#single-process-capacity-contract)
   requires.
 - The Playlist release adds private `playlists` and account-mutation receipt
   collections plus their owner, replay, and expiry indexes. These changes are
@@ -265,7 +279,7 @@ Before enabling rooms on a target, confirm the room audio decoder: the deploymen
 log shows the pinned FFmpeg install verified by size and SHA-256,
 `/usr/local/bin/ffmpeg -hide_banner -version` runs on the instance, and a short
 original MP3 uploaded through Content Manager is listed as eligible on the Room
-audio analysis page. Run the README's room audio catalog backfill (dry run first)
+audio analysis page. Run the [room audio catalog backfill](../features/social-and-rooms.md#room-audio-catalog-backfill) (dry run first)
 for existing tracks after this check passes.
 
 Run the checked-in media workload only on a target explicitly approved for

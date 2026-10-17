@@ -5,7 +5,7 @@ import path from 'node:path';
 /** Keeps local checks on the same supported major as the production runtime. */
 export const assertNodeRuntime = (version = process.versions.node) => {
   if (Number(version.split('.')[0]) !== 24) {
-    throw new Error(`Archtree requires Node.js 24.x; found ${version}. See docs/development-environment.md.`);
+    throw new Error(`Archtree requires Node.js 24.x; found ${version}. See docs/development/environment.md.`);
   }
 };
 
@@ -18,7 +18,7 @@ export const assertMongoRuntime = (binary = process.env.MONGOD_BINARY || 'mongod
     if (!/^db version v\d+\./m.test(version)) throw new Error('Unexpected daemon version response.');
     return version.match(/^db version (v[^\r\n]+)/m)[1];
   } catch {
-    throw new Error('MongoDB test daemon is unavailable. Install MongoDB Community 8.0.12 and add its bin directory to PATH, or set MONGOD_BINARY to the mongod executable. No application database is used. See docs/development-environment.md.');
+    throw new Error('MongoDB test daemon is unavailable. Install MongoDB Community 8.0.12 and add its bin directory to PATH, or set MONGOD_BINARY to the mongod executable. No application database is used. See docs/development/environment.md.');
   }
 };
 
@@ -42,7 +42,7 @@ export const assertRoomAudioRuntime = (binary = process.env.ROOM_AUDIO_FFMPEG_PA
       || !/^\s+file\s*$/m.test(protocols) || !/^\s+pipe\s*$/m.test(protocols)) throw new Error('Missing capabilities.');
     return version;
   } catch {
-    throw new Error('Room audio decoder is unavailable. Install FFmpeg with AAC/MP3 decoding, MOV/MP3 demuxers, PCM output, file/pipe protocols and the null muxer; add ffmpeg to PATH or set ROOM_AUDIO_FFMPEG_PATH to its absolute executable path. See docs/development-environment.md.');
+    throw new Error('Room audio decoder is unavailable. Install FFmpeg with AAC/MP3 decoding, MOV/MP3 demuxers, PCM output, file/pipe protocols and the null muxer; add ffmpeg to PATH or set ROOM_AUDIO_FFMPEG_PATH to its absolute executable path. See docs/development/environment.md.');
   }
 };
 

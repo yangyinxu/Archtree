@@ -1,5 +1,59 @@
 # Explainable Discovery and Artist Follows Plan
 
+<!-- @catalog -->
+**Contents**
+
+- [Status](#status)
+- [Objective](#objective)
+- [Scope guardrails](#scope-guardrails)
+- [Canonical-rule compatibility](#canonical-rule-compatibility)
+- [Current-state evidence](#current-state-evidence)
+  - [Archtree backend and Web](#archtree-backend-and-web)
+  - [Finitude iOS](#finitude-ios)
+  - [Finitude Android](#finitude-android)
+  - [Existing tests and plans](#existing-tests-and-plans)
+- [Smallest complete releases](#smallest-complete-releases)
+  - [Discovery v1](#discovery-v1)
+  - [Artist Follow/new releases v1](#artist-follownew-releases-v1)
+- [Discovery signal allowlist](#discovery-signal-allowlist)
+- [Deterministic candidate graph and ranking](#deterministic-candidate-graph-and-ranking)
+  - [Candidate eligibility](#candidate-eligibility)
+  - [Relationship weights](#relationship-weights)
+  - [Score and tie-breaking](#score-and-tie-breaking)
+  - [Diversity and repetition](#diversity-and-repetition)
+- [Concise explanation contract](#concise-explanation-contract)
+- [Discovery preferences, Not interested, and reset](#discovery-preferences-not-interested-and-reset)
+  - [userDiscoveryPreferences collection](#userdiscoverypreferences-collection)
+- [Artist Follow persistence and mutations](#artist-follow-persistence-and-mutations)
+  - [artistFollows collection](#artistfollows-collection)
+- [Ready followed-Artist releases](#ready-followed-artist-releases)
+- [Home composition and DTO changes](#home-composition-and-dto-changes)
+- [Private HTTP API](#private-http-api)
+- [Client behavior and account transitions](#client-behavior-and-account-transitions)
+- [Offline behavior](#offline-behavior)
+- [Retention and deletion](#retention-and-deletion)
+- [Privacy-safe metrics and logging](#privacy-safe-metrics-and-logging)
+- [Localization and accessibility](#localization-and-accessibility)
+- [Cross-platform fixture contract](#cross-platform-fixture-contract)
+- [Staged implementation plan](#staged-implementation-plan)
+  - [Stage 0 — Original product/data-contract spike](#stage-0--original-productdata-contract-spike)
+  - [Stage 1 — Follow contract promotion and frozen fixtures](#stage-1--follow-contract-promotion-and-frozen-fixtures)
+  - [Stage 2 — Backend lifecycle, Home projections, and Web](#stage-2--backend-lifecycle-home-projections-and-web)
+  - [Stage 3 — iOS and Android Follow adoption](#stage-3--ios-and-android-follow-adoption)
+  - [Stage 4 — Final regression verification and delivery](#stage-4--final-regression-verification-and-delivery)
+  - [Stage 5 — Discovery candidate adoption](#stage-5--discovery-candidate-adoption)
+  - [Stage 6 — Production Follow rollout and rollback proof](#stage-6--production-follow-rollout-and-rollback-proof)
+- [Test matrix](#test-matrix)
+- [Verified current commands](#verified-current-commands)
+  - [Archtree](#archtree)
+  - [Finitude iOS](#finitude-ios-1)
+  - [Finitude Android](#finitude-android-1)
+- [Dependencies and sequencing constraints](#dependencies-and-sequencing-constraints)
+- [Candidate decisions and selected Follow defaults](#candidate-decisions-and-selected-follow-defaults)
+- [Selected promotion order](#selected-promotion-order)
+- [Definition of done](#definition-of-done)
+<!-- @end-catalog -->
+
 ## Status
 
 The product and data-contract spike is **Complete**. Artist Follow and followed
@@ -95,13 +149,13 @@ and Finitude Android `381dc0e712a91527e8ddea196db89982782932cf`.
   Web. `GET /content/pages/home/expanded` returns page/carousel references plus
   included Catalog DTOs for native clients. Both optionally authenticate and
   already resolve viewer-specific Carousels.
-- `src/services/listenerContentService.ts` and
-  `src/services/publicCatalogService.ts` contain the ready/public projections
+- `src/services/listener/listenerContentService.ts` and
+  `src/services/catalog/publicCatalogService.ts` contain the ready/public projections
   that the new resolvers must reuse. They must not return raw MongoDB rows.
-- `src/services/accountDeletionService.ts` transactionally removes named
+- `src/services/account/accountDeletionService.ts` transactionally removes named
   private collections behind the active-account fence. New collections must
   be added to that exact transaction.
-- `src/services/listenerTelemetryService.ts` accepts only strict, bounded
+- `src/services/listener/listenerTelemetryService.ts` accepts only strict, bounded
   anonymous performance/failure events. Web sends them without cookies,
   persistence, retries, or a visitor ID.
 - `src/infrastructure/database.ts` already has unique activity/save indexes and
@@ -141,16 +195,16 @@ and Finitude Android `381dc0e712a91527e8ddea196db89982782932cf`.
 
 ### Existing tests and plans
 
-- `test/listenerContent.integration.ts` covers both Home projections,
+- `test/listener/listenerContent.integration.ts` covers both Home projections,
   personalized resolution, optional authentication, readiness, and public DTO
   allowlists.
-- `test/userLibrary.integration.ts` covers mixed activity, bounded history,
+- `test/playlists/userLibrary.integration.ts` covers mixed activity, bounded history,
   deterministic Library ordering, and pagination.
 - `test/catalogCredit*.ts` covers Credit validation, role semantics, migration,
   public projection, and deletion fences.
-- `test/accountLifecycle.integration.ts` covers transactional private-data
+- `test/account/accountLifecycle.integration.ts` covers transactional private-data
   deletion and races with other owner writes.
-- `test/listenerTelemetry.test.ts` rejects identity, raw diagnostics, unknown
+- `test/listener/listenerTelemetry.test.ts` rejects identity, raw diagnostics, unknown
   fields, and unlisted operations.
 - Web schema, Home, account-isolation, localization, telemetry, and three-engine
   E2E suites provide the client boundaries to extend.

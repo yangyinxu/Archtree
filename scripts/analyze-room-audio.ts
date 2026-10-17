@@ -1,8 +1,8 @@
 // Operational entry point: load the private `.env` before any application module reads configuration.
 import 'dotenv/config';
 import { connectToDatabase, disconnectFromDatabase } from '../src/infrastructure/database';
-import { analyzeRoomAudioTrack, listRoomAudioAnalysis } from '../src/services/roomAudioAnalysisService';
-import { parseRoomAudioAnalysisArguments, RoomAudioAnalysisArgumentError, runRoomAudioAnalysisBatch } from '../src/services/roomAudioAnalysisBatch';
+import { analyzeRoomAudioTrack, listRoomAudioAnalysis } from '../src/services/roomAudio/roomAudioAnalysisService';
+import { parseRoomAudioAnalysisArguments, RoomAudioAnalysisArgumentError, runRoomAudioAnalysisBatch } from '../src/services/roomAudio/roomAudioAnalysisBatch';
 
 /** Runs one explicit, resumable page without schema changes, hidden retries or provider output. */
 const run = async () => {

@@ -1,5 +1,25 @@
 # Finitude Web Listener Visual System
 
+<!-- @catalog -->
+**Contents**
+
+- [Direction](#direction)
+- [Source reference and baseline](#source-reference-and-baseline)
+- [Tokens](#tokens)
+  - [Color](#color)
+  - [Geometry](#geometry)
+  - [Typography](#typography)
+- [Responsive shell](#responsive-shell)
+  - [Full desktop, 1008 px and above](#full-desktop-1008-px-and-above)
+  - [Compact desktop, 800–1007 px](#compact-desktop-8001007-px)
+  - [Compact tablet, 768–799 px](#compact-tablet-768799-px)
+  - [Mobile, 767 px and below](#mobile-767-px-and-below)
+- [Component language](#component-language)
+- [Motion](#motion)
+- [Route guidance](#route-guidance)
+- [Visual acceptance](#visual-acceptance)
+<!-- @end-catalog -->
+
 ## Direction
 
 Finitude Web uses a dense, media-first dark interface informed by the supplied

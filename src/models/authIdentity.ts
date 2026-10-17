@@ -1,6 +1,6 @@
 import { ClientSession, ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
-import { withActiveAccount } from '../services/accountReferenceFenceService';
+import { withActiveAccount } from '../services/account/accountReferenceFenceService';
 
 export type AuthProvider = 'apple' | 'google';
 

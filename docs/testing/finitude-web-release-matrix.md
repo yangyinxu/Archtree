@@ -4,6 +4,21 @@ This checklist records release evidence for the Finitude Web listener. It does
 not define product behavior; `docs/business-rules.md` remains the canonical
 behavior contract.
 
+<!-- @catalog -->
+**Contents**
+
+- [Automated browser gate](#automated-browser-gate)
+  - [CI scope change — 2026-10-15](#ci-scope-change--2026-10-15)
+  - [Verified release status — checked 2026-10-12](#verified-release-status--checked-2026-10-12)
+- [Shared Audio recovery and sustained playback](#shared-audio-recovery-and-sustained-playback)
+- [Media Range load evidence](#media-range-load-evidence)
+- [Deployment artifact evidence](#deployment-artifact-evidence)
+- [Manual browser matrix](#manual-browser-matrix)
+- [Core manual flows](#core-manual-flows)
+- [Media Session observations](#media-session-observations)
+- [Release gate](#release-gate)
+<!-- @end-catalog -->
+
 ## Automated browser gate
 
 The Playwright suite runs the production `web/dist` bundle through Archtree's

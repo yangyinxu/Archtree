@@ -7,11 +7,11 @@ import path from 'node:path';
 import { requireAdmin, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { attachRequestAbortSignal, getRequestAbortSignal, uploadConcurrencyLimit, asyncHandler } from '../middleware/requestProtectionMiddleware';
 import { requireUploadSize } from '../middleware/audioUpload';
-import { onRequestWorkComplete, runRequestWork } from '../services/serverLifecycleService';
-import { CONVERSION_MAX_BYTES, AdminConversionError, conversionExact, conversionRecord } from '../administration/conversionContract';
-import { getConversionAlbumSource, getConversionTrackSource } from '../administration/conversionSources';
-import { getConversionImportReady } from '../administration/conversionImportProof';
-import { cancelConversionOperation, getConversionOperation, prepareConversionOperation, reconcileConversionOperation, requireConversionUploadAccess, uploadConversionOutput, type AdminConversionDependencies } from '../administration/conversionService';
+import { onRequestWorkComplete, runRequestWork } from '../services/platform/serverLifecycleService';
+import { CONVERSION_MAX_BYTES, AdminConversionError, conversionExact, conversionRecord } from '../administration/conversion/conversionContract';
+import { getConversionAlbumSource, getConversionTrackSource } from '../administration/conversion/conversionSources';
+import { getConversionImportReady } from '../administration/conversion/conversionImportProof';
+import { cancelConversionOperation, getConversionOperation, prepareConversionOperation, reconcileConversionOperation, requireConversionUploadAccess, uploadConversionOutput, type AdminConversionDependencies } from '../administration/conversion/conversionService';
 
 /** Auth, viewer, schema and file bounds precede all administrator conversion operations. */
 export function createAdminConversionRouter(dependencies: AdminConversionDependencies = {}) {

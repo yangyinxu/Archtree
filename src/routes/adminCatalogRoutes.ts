@@ -1,12 +1,12 @@
 import express from 'express';
 import { requireAdmin, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
-import { adminCatalogKind, editAdminCatalogItem, editAdminPageItem, getAdminCatalogItem, getAdminPage, listAdminCatalog } from '../administration/adminCatalogService';
-import { runRequestWork } from '../services/serverLifecycleService';
-import { adminCatalogArtwork, adminCatalogMedia } from '../administration/adminCatalogPreview';
-import { AdminImportError } from '../administration/adminImportContract';
+import { adminCatalogKind, editAdminCatalogItem, editAdminPageItem, getAdminCatalogItem, getAdminPage, listAdminCatalog } from '../administration/catalog/adminCatalogService';
+import { runRequestWork } from '../services/platform/serverLifecycleService';
+import { adminCatalogArtwork, adminCatalogMedia } from '../administration/catalog/adminCatalogPreview';
+import { AdminImportError } from '../administration/import/adminImportContract';
 import { asyncHandler } from '../middleware/requestProtectionMiddleware';
 import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
-import { replaceAdminCatalogCover, clearAdminCatalogCover, listAdminCatalogCoverOperations, reconcileAdminCatalogCover, cancelAdminCatalogCover } from '../administration/adminCatalogCoverService';
+import { replaceAdminCatalogCover, clearAdminCatalogCover, listAdminCatalogCoverOperations, reconcileAdminCatalogCover, cancelAdminCatalogCover } from '../administration/catalog/adminCatalogCoverService';
 
 /** Media elements cannot send the viewer header; the non-secret viewer is still only a session fence. */
 const requireAdminCatalogViewer: express.RequestHandler = (req, res, next) => {

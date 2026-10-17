@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { AuthenticatedRequest } from '../middleware/authMiddleware';
-import { ArtistFollowError, artistFollowStatuses, canonicalFollowArtistId, followArtist, unfollowArtist } from '../services/artistFollowService';
+import { ArtistFollowError, artistFollowStatuses, canonicalFollowArtistId, followArtist, unfollowArtist } from '../services/listener/artistFollowService';
 
 /** Applied before authentication as even private failures must not enter a shared cache. */
 export const privateArtistFollowResponse = (_req: Request, res: Response, next: NextFunction) => {

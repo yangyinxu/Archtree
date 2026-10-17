@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { ClientSession } from 'mongodb';
 import { getDb } from '../infrastructure/database';
-import { withActiveAccount } from '../services/accountReferenceFenceService';
+import { withActiveAccount } from '../services/account/accountReferenceFenceService';
 
 export interface PasskeyDocument {
     credentialId: string;

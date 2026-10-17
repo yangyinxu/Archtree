@@ -1,7 +1,7 @@
 // Operational entry point: load the private `.env` before any application module reads configuration.
 import 'dotenv/config';
 import { connectToDatabase, disconnectFromDatabase } from '../src/infrastructure/database';
-import { reconcileImageStorageIdentity } from '../src/services/imageStorageRecoveryService';
+import { reconcileImageStorageIdentity } from '../src/services/image/imageStorageRecoveryService';
 
 /** Default inspection is read-only. Apply changes one lifecycle row and never deletes S3 data. */
 const run = async () => {

@@ -6,10 +6,27 @@ Archtree and Finitude. Accepted product behavior is canonical in
 [business-rules.md](../business-rules.md) (Social Identity and Friendships,
 Direct Music Shares, Friend Listening Status and Shared Playback Rooms); the
 architecture is maintained in
-[architecture.md](../architecture.md#social-and-shared-playback-architecture-proposed).
+[architecture.md](../architecture/rooms.md).
 This plan sequences the work and records verification boundaries. Production
 steps and their completion are tracked in
-[deployment-todos.md](../deployment-todos.md#web-only-audio-social-launch).
+[deployment-todos.md](../deployment/todos.md#web-only-audio-social-launch).
+
+<!-- @catalog -->
+**Contents**
+
+- [Release scope](#release-scope)
+- [Local Web demonstration checkpoint (2026-09-13)](#local-web-demonstration-checkpoint-2026-09-13)
+- [Stage 0 — Repository baseline and architecture](#stage-0--repository-baseline-and-architecture)
+- [Stage 1 — Transport feasibility, product contract, and fixtures](#stage-1--transport-feasibility-product-contract-and-fixtures)
+- [Stage 2 — Social identity, relationships, and safety foundation](#stage-2--social-identity-relationships-and-safety-foundation)
+- [Stage 3 — Durable rooms, pinned media, and realtime recovery](#stage-3--durable-rooms-pinned-media-and-realtime-recovery)
+- [Stage 4 — Audio room vertical slice on Web](#stage-4--audio-room-vertical-slice-on-web)
+- [Stage 5 — Native social and Audio room adoption](#stage-5--native-social-and-audio-room-adoption)
+- [Stage 6 — Video capability](#stage-6--video-capability)
+- [Stage 7 — Capacity, staged rollout, and rollback](#stage-7--capacity-staged-rollout-and-rollback)
+- [Required verification during implementation](#required-verification-during-implementation)
+- [Plan lifecycle](#plan-lifecycle)
+<!-- @end-catalog -->
 
 ## Release scope
 
@@ -269,7 +286,7 @@ Verification on 2026-09-13:
   replica sets, including 38 social lifecycle, 11 social account cleanup and 8
   real HTTP/auth cases.
 - After fixing block queries to use the required account index,
-  `node --import tsx --test test/socialLifecycle.integration.ts` passed all 39
+  `node --import tsx --test test/social/socialLifecycle.integration.ts` passed all 39
   cases. The added actual-query profiler check examined one document and one
   index key for both block listing and capacity with 1,000 unrelated edges.
   `npm test` and `npm run build` were also rerun successfully after this fix.
@@ -284,8 +301,8 @@ rooms and realtime are Stage 3.
 The 2026-09-14 Release 1 additions extend this foundation without reopening it:
 Direct Music Shares and opt-in Friend Listening Status have their own limits,
 publisher fencing, lifecycle and account cleanup, covered by
-`test/musicShareLifecycle.integration.ts` and
-`test/listeningLifecycle.integration.ts`. Their Web flows belong to Stage 4.
+`test/social/musicShareLifecycle.integration.ts` and
+`test/social/listeningLifecycle.integration.ts`. Their Web flows belong to Stage 4.
 
 **Exit gate:** cross-account/guessing tests, request-accept/block/deactivate/delete
 races, unknown commits, scope expiry after receipt deletion and notification
@@ -506,7 +523,7 @@ enablement with operator-owned test accounts. Latency segments, same-NAT
 behavior, capacity, a redeploy with a room open and the kill switch are measured
 or rehearsed during that enablement, before the flags stay on. The steps and
 their completion are tracked in
-[deployment-todos.md](../deployment-todos.md#web-only-audio-social-launch).
+[deployment-todos.md](../deployment/todos.md#web-only-audio-social-launch).
 
 The separate local sustained-room gate now supplies bounded aggregate resource
 and real-media evidence for 2–8 members, explicit reload recovery, repeated shared
@@ -561,7 +578,7 @@ matrix.
 Operational signals and deployment capacity limits are in place: `/health` room
 gauges, a minutely `ops_summary` log line, room lifecycle/authority/capacity lines
 and suggested CloudWatch alarms in the social rollout runbook. A counted local
-database budget (`test/roomCapacityBudget.integration.ts`) shows the room sweep
+database budget (`test/rooms/roomCapacityBudget.integration.ts`) shows the room sweep
 dominates free-tier Atlas load, so the Elastic Beanstalk defaults allow one open
 two-member room and ten realtime sockets, with a reserved seat for each member
 that tabs outside the room cannot take. Lowering the sweep's per-room reads, or

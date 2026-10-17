@@ -4,6 +4,45 @@ Spike status: **Complete**
 
 Implementation status: **Not started**
 
+<!-- @catalog -->
+**Contents**
+
+- [Decision summary](#decision-summary)
+- [Scope and non-goals](#scope-and-non-goals)
+- [Current-state evidence](#current-state-evidence)
+- [Current lifecycle map](#current-lifecycle-map)
+- [Three distinct recovery concepts](#three-distinct-recovery-concepts)
+- [First implementation slice: ephemeral Page Layout preflight](#first-implementation-slice-ephemeral-page-layout-preflight)
+  - [Supported intent](#supported-intent)
+  - [Validation algorithm](#validation-algorithm)
+  - [Stable findings](#stable-findings)
+  - [Allowlisted response DTO](#allowlisted-response-dto)
+  - [Authorization and security](#authorization-and-security)
+  - [Evidence and observability](#evidence-and-observability)
+  - [First-slice concurrency truth](#first-slice-concurrency-truth)
+- [Deferred immutable drafts and atomic database publishing](#deferred-immutable-drafts-and-atomic-database-publishing)
+  - [Required data model](#required-data-model)
+  - [Draft asset lifecycle](#draft-asset-lifecycle)
+  - [Publish transaction and limits](#publish-transaction-and-limits)
+  - [Retry, conflict, reconciliation, and rollback](#retry-conflict-reconciliation-and-rollback)
+  - [Account and provenance lifecycle](#account-and-provenance-lifecycle)
+- [Implementation stages](#implementation-stages)
+  - [Stage 0 — Approve shared contract](#stage-0--approve-shared-contract)
+  - [Stage 1 — Pure candidate and validator services](#stage-1--pure-candidate-and-validator-services)
+  - [Stage 2 — Administrator route, evidence, and preview UI](#stage-2--administrator-route-evidence-and-preview-ui)
+  - [Stage 3 — Integration, E2E, and rollout](#stage-3--integration-e2e-and-rollout)
+  - [Stage 4 — Immutable draft implementation](#stage-4--immutable-draft-implementation)
+- [Required test coverage](#required-test-coverage)
+  - [Unit and component](#unit-and-component)
+  - [Integration on Mongo replica set](#integration-on-mongo-replica-set)
+  - [Browser E2E](#browser-e2e)
+  - [Deferred draft gates](#deferred-draft-gates)
+- [Rollout and rollback](#rollout-and-rollback)
+- [Documentation and dependencies](#documentation-and-dependencies)
+- [Skipped decisions with safe defaults](#skipped-decisions-with-safe-defaults)
+- [First-slice acceptance criteria](#first-slice-acceptance-criteria)
+<!-- @end-catalog -->
+
 ## Decision summary
 
 The smallest safe first slice is an administrator-only, read-only validation
@@ -48,21 +87,21 @@ The first slice does **not**:
 
 | Area | Current boundary | Primary implementation evidence |
 | --- | --- | --- |
-| Content Manager authorization | The complete `/content/manage` surface authenticates and requires the current database-backed `admin` role before parsing or uploads; controllers also reject non-admin mutation calls. | `src/app.ts`, `src/routes/content/contentManagerRoutes.ts`, `src/middleware/authMiddleware.ts`, `test/adminContentRouteGuards.test.ts`, `test/adminContentApplicationGuards.test.ts` |
-| Manager state | Inventory is global, bounded, and audit-oriented. Most forms write immediately. | `src/controllers/contentController.ts`, `src/controllers/pageController.ts`, `src/views/contentManager/pageItemsView.ts`, `test/contentManagerInventory.test.ts` |
-| Browser recovery | `archtree.artistReleaseDraft` is best-effort per-tab `sessionStorage`; it excludes files and the idempotency token, is cleared after completion, and is not authoritative. Bulk results also use `sessionStorage` only to survive navigation. | `src/public/content-manager.js`, `test/contentManagerClient.test.ts` |
-| Guided release | A retained `contentWorkflowOperations` record holds immutable intent, step status, created IDs, a lease, attempt count, and bounded errors. It resumes incomplete work; it is a publication saga/recovery log, not an editable draft. | `src/services/artistReleaseWorkflowService.ts`, `src/views/contentManager/releaseOperationsView.ts`, `test/artistReleaseWorkflow.integration.ts` |
-| Pages | `home` and `library` are live documents. A Page write is visible after commit. Attach/reorder operations use MongoDB transactions and touch exact targets to race safely with deletion. | `src/models/page.ts`, `src/services/pageReferenceLifecycleService.ts`, `test/pageReferenceLifecycle.integration.ts` |
+| Content Manager authorization | The complete `/content/manage` surface authenticates and requires the current database-backed `admin` role before parsing or uploads; controllers also reject non-admin mutation calls. | `src/app.ts`, `src/routes/content/contentManagerRoutes.ts`, `src/middleware/authMiddleware.ts`, `test/administration/adminContentRouteGuards.test.ts`, `test/administration/adminContentApplicationGuards.test.ts` |
+| Manager state | Inventory is global, bounded, and audit-oriented. Most forms write immediately. | `src/controllers/contentController.ts`, `src/controllers/pageController.ts`, `src/views/contentManager/pageItemsView.ts`, `test/content/contentManagerInventory.test.ts` |
+| Browser recovery | `archtree.artistReleaseDraft` is best-effort per-tab `sessionStorage`; it excludes files and the idempotency token, is cleared after completion, and is not authoritative. Bulk results also use `sessionStorage` only to survive navigation. | `src/public/content-manager.js`, `test/content/contentManagerClient.test.ts` |
+| Guided release | A retained `contentWorkflowOperations` record holds immutable intent, step status, created IDs, a lease, attempt count, and bounded errors. It resumes incomplete work; it is a publication saga/recovery log, not an editable draft. | `src/services/catalog/artistReleaseWorkflowService.ts`, `src/views/contentManager/releaseOperationsView.ts`, `test/catalog/artistReleaseWorkflow.integration.ts` |
+| Pages | `home` and `library` are live documents. A Page write is visible after commit. Attach/reorder operations use MongoDB transactions and touch exact targets to race safely with deletion. | `src/models/page.ts`, `src/services/content/pageReferenceLifecycleService.ts`, `test/content/pageReferenceLifecycle.integration.ts` |
 | Carousels | Manual, Artist, and personalized definitions are stored live. Manual references are fenced to existing ready catalog items; dynamic modes resolve at read time. | `src/models/carousel.ts`, `src/controllers/pageController.ts` |
 | Grid/List | A `contentCollections` row has a fixed `grid` or `list` presentation and `manual` or `dynamic` mode. Manual references are ready-fenced; dynamic device-local sources remain unresolved by the server. | `src/models/contentCollection.ts`, `src/controllers/contentCollectionController.ts` |
-| Public composition | Public DTOs explicitly allowlist Page, Carousel, Grid/List, Album, ready MediaTrack, and Post fields. Invalid, dangling, or non-ready items are omitted and order is normalized. | `src/services/publicPageService.ts`, `src/services/publicCatalogService.ts`, `test/publicPageService.test.ts` |
+| Public composition | Public DTOs explicitly allowlist Page, Carousel, Grid/List, Album, ready MediaTrack, and Post fields. Invalid, dangling, or non-ready items are omitted and order is normalized. | `src/services/content/publicPageService.ts`, `src/services/catalog/publicCatalogService.ts`, `test/content/publicPageService.test.ts` |
 | Native contract | iOS decodes the expanded Page DTO and its three item types. Native dynamic download sources remain client-resolved. Preview must preserve that DTO contract rather than add preview-only fields to public responses. | `Finitude_iOS/Finitude_iOS/Networking/Data/Page.swift`, `Finitude_iOS/docs/api.md` |
-| Catalog create | New Artist/Album artwork is ready in S3 and has an `imageAssets` record before the ready owner is inserted. A definite insert failure removes the uploaded image; uncertainty preserves evidence. | `src/controllers/artistController.ts`, `src/controllers/albumController.ts`, `src/services/imageStorageService.ts`, `test/catalogCreatePublication.integration.ts` |
-| MediaTrack publication | A MediaTrack begins with storage and publication pending. Storage may become ready first; publication and canonical Album membership commit in one MongoDB transaction. Public reads require ready publication and an identity-bound active key. | `src/models/audioTrack.ts`, `src/services/audioStorageService.ts`, `src/services/albumTrackLinkService.ts`, `src/services/audioPublicationRecoveryService.ts` |
-| Replacement | A replacement object is recorded and uploaded before a compare-and-set attachment. The old object remains active until attachment; cleanup failure remains explicit and retryable. | `src/services/audioStorageService.ts`, `src/services/imageStorageService.ts`, `test/audioStorageService.test.ts`, `test/imageLifecycleService.test.ts` |
-| Deletion | Artist, Album, MediaTrack, Carousel, and Grid/List deletion fence new references and retain metadata/evidence until required storage/reference cleanup is safe. | `src/services/artistLifecycleService.ts`, `src/services/albumLifecycleService.ts`, `src/services/audioStorageService.ts`, `src/services/pageReferenceLifecycleService.ts` |
-| Reconciliation | Audio/video, image, and content-reference reports are bounded, administrator-only, and read-only. Remediation is a separate exact, revalidated action. | `src/services/audioReconciliationService.ts`, `src/services/imageReconciliationService.ts`, `src/services/contentReferenceReconciliationService.ts`, `src/routes/adminRoutes.ts` |
-| Account/provenance | `createdBy` is provenance, not authorization. Shared writes touch the active account in the same transaction; account deletion cannot remove the only creator evidence for live shared catalog records. | `src/services/accountReferenceFenceService.ts`, `docs/business-rules.md` |
+| Catalog create | New Artist/Album artwork is ready in S3 and has an `imageAssets` record before the ready owner is inserted. A definite insert failure removes the uploaded image; uncertainty preserves evidence. | `src/controllers/artistController.ts`, `src/controllers/albumController.ts`, `src/services/image/imageStorageService.ts`, `test/catalog/catalogCreatePublication.integration.ts` |
+| MediaTrack publication | A MediaTrack begins with storage and publication pending. Storage may become ready first; publication and canonical Album membership commit in one MongoDB transaction. Public reads require ready publication and an identity-bound active key. | `src/models/audioTrack.ts`, `src/services/audio/audioStorageService.ts`, `src/services/catalog/albumTrackLinkService.ts`, `src/services/audio/audioPublicationRecoveryService.ts` |
+| Replacement | A replacement object is recorded and uploaded before a compare-and-set attachment. The old object remains active until attachment; cleanup failure remains explicit and retryable. | `src/services/audio/audioStorageService.ts`, `src/services/image/imageStorageService.ts`, `test/audio/audioStorageService.test.ts`, `test/image/imageLifecycleService.test.ts` |
+| Deletion | Artist, Album, MediaTrack, Carousel, and Grid/List deletion fence new references and retain metadata/evidence until required storage/reference cleanup is safe. | `src/services/catalog/artistLifecycleService.ts`, `src/services/catalog/albumLifecycleService.ts`, `src/services/audio/audioStorageService.ts`, `src/services/content/pageReferenceLifecycleService.ts` |
+| Reconciliation | Audio/video, image, and content-reference reports are bounded, administrator-only, and read-only. Remediation is a separate exact, revalidated action. | `src/services/audio/audioReconciliationService.ts`, `src/services/image/imageReconciliationService.ts`, `src/services/content/contentReferenceReconciliationService.ts`, `src/routes/adminRoutes.ts` |
+| Account/provenance | `createdBy` is provenance, not authorization. Shared writes touch the active account in the same transaction; account deletion cannot remove the only creator evidence for live shared catalog records. | `src/services/account/accountReferenceFenceService.ts`, `docs/business-rules.md` |
 
 ## Current lifecycle map
 

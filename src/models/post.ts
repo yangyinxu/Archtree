@@ -1,4 +1,4 @@
-import type { CatalogVisibility } from '../services/catalogVisibilityService';
+import type { CatalogVisibility } from '../services/catalog/catalogVisibilityService';
 import mongoDb, { ObjectId } from 'mongodb';
 import { getDb } from '../infrastructure/database';
 

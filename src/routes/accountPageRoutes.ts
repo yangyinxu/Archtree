@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 
-import { setBrowserSessionPrivacyHeaders } from '../services/authCookieService';
+import { setBrowserSessionPrivacyHeaders } from '../services/auth/authCookieService';
 import {
     renderForgotPasswordPage,
     renderRegisterCompletePage,

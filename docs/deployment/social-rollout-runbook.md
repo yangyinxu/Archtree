@@ -8,6 +8,30 @@ rollback follow the [Finitude Web runbook](finitude-web-rollout-runbook.md).
 Switching social or rooms off never deletes profiles, friendships, shares,
 settings or blocks.
 
+<!-- @catalog -->
+**Contents**
+
+- [Switches](#switches)
+  - [Reading and changing the flags](#reading-and-changing-the-flags)
+  - [Capacity limits](#capacity-limits)
+- [Production authentication email configuration](#production-authentication-email-configuration)
+- [Signals](#signals)
+  - [Structured log lines](#structured-log-lines)
+  - [CloudWatch metric filters and alarms](#cloudwatch-metric-filters-and-alarms)
+- [1. Before the first enablement](#1-before-the-first-enablement)
+  - [Cross-engine audio acceptance (blocks enabling rooms)](#cross-engine-audio-acceptance-blocks-enabling-rooms)
+- [2. Enable for testing](#2-enable-for-testing)
+- [3. Kill switch](#3-kill-switch)
+- [4. Re-enable](#4-re-enable)
+- [5. Roll back](#5-roll-back)
+- [Evidence record](#evidence-record)
+  - [Deployment verification — 2026-10-11](#deployment-verification--2026-10-11)
+  - [Production verification — 2026-10-12](#production-verification--2026-10-12)
+  - [Configuration and notification completion — 2026-10-12](#configuration-and-notification-completion--2026-10-12)
+  - [Email diagnostics and catalog inventory — 2026-10-12](#email-diagnostics-and-catalog-inventory--2026-10-12)
+  - [Email permission and T1 completion — 2026-10-12](#email-permission-and-t1-completion--2026-10-12)
+<!-- @end-catalog -->
+
 ## Switches
 
 | Variable | Default | Controls | Effect when not `true` |
@@ -78,7 +102,7 @@ every create writes the room authority fence, so conflicting creates retry
 against the committed room. Lowering a limit never removes members or
 closes open rooms.
 Derivation and the transfer caveat are in the
-[capacity budget](../testing/t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04).
+[capacity budget](t4g-micro-capacity-screen.md#social-and-rooms-database-budget--2026-10-04).
 To change a limit, set the variable as an environment property; that overrides the
 shipped default and restarts the application like a flag change. To return to the
 shipped value, set it back explicitly. Raise limits only after watching Atlas

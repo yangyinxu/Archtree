@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { boundedSearchQuery } from '../utils/search';
-import { getPublicOrganization, searchPublicCatalog } from '../services/publicCatalogService';
+import { getPublicOrganization, searchPublicCatalog } from '../services/catalog/publicCatalogService';
 import { boundedLimit } from '../utils/pagination';
 
 /** Returns the existing allowlisted public search projection with bounded results. */
