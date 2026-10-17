@@ -12,7 +12,8 @@
 /** Fixed, high-recall Decisions contract, mirrored by the private Archtree proxy. */
 export const DECISIONS_MODEL = 'gpt-6-luna';
 export const DECISIONS_TRIAGE_VERSION = 'naruto-decisions-v1';
-export const DECISIONS_SKIP_THRESHOLD = 0.95;
+// High-recall screening: a skip needs at least this confidence and option probability.
+export const DECISIONS_SKIP_THRESHOLD = 0.85;
 
 const informationTypes = [
   'product_feedback', 'gameplay_advice', 'factual_info', 'community_chatter',
