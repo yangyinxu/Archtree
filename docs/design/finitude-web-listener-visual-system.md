@@ -62,12 +62,13 @@ friends, device handoff, lyrics, Smart Shuffle, or editable queue behavior.
 | Raised surface | `#1f1f1f` |
 | Hover surface | `#2a2a2a` |
 | Strong hover surface | `#333333` |
+| Media-card hover / pressed | `rgb(255 255 255 / 0.07)` / `rgb(255 255 255 / 0.04)`, translucent so the highlight stays correct over any tinted surface |
 | Primary text | `#ffffff` |
 | Muted text | `#b3b3b3` |
 | Subtle text | `#8f8f8f` |
 | Hairline border | `rgb(255 255 255 / 0.10)` |
 | Strong border | `rgb(255 255 255 / 0.18)` |
-| Interaction accent | Spotify green rooted at `#1ed760`; hover `#3be477` |
+| Interaction accent | Spotify green rooted at `#1ed760`; hover `#3be477`; pressed `#1abc54` |
 | Accent foreground | `#000000` |
 | Focus | `#ffffff` outline, distinct from the green selected state |
 
@@ -88,9 +89,16 @@ separate white outline and no status relies on color alone.
 - The central pane has a 416 px minimum.
 - From 800–1007 px, the left pane becomes a 72 px icon rail while the right
   pane remains 280 px.
-- Central media grid: 168 px minimum cards with a 208 px outer cap, five
-  measured columns at the 1728 px reference viewport, 24 px column gaps, and
-  48 px row rhythm on wide screens.
+- Central media grid: 168 px minimum artwork, five measured columns at the
+  1728 px reference viewport, 24 px artwork-to-artwork column rhythm, and
+  36 px between one row's text and the next row's artwork (28 px at 480 px and
+  below).
+- Media cards inset their artwork and copy by a 0.65 rem card padding plus
+  their 1 px border (the card inset), so the hover surface frames the whole
+  card. Grid and Carousel collections, including Search Artist results, bleed
+  outward by the same inset, so artwork stays aligned with the section title,
+  Grid column counts are unchanged, and Carousel artwork keeps its clamped
+  width. Responsive artwork `sizes` hints describe the artwork, not the card.
 - Top utility bar: 48 px on wide screens; the compact mobile row is 69.6 px.
 - Desktop player: approximately 80–88 px.
 - Global layer order is Player 20, Topbar 30, Menu 80, Modal 90, Skip link
@@ -125,7 +133,7 @@ The implemented semantic roles are:
 | --- | --- |
 | Display | `clamp(2.25rem, 5.5vw, 4.8rem)` |
 | Page title | `clamp(1.9rem, 3.2vw, 2.7rem)` |
-| Section title | `clamp(1.25rem, 2.2vw, 2rem)` |
+| Section title | `clamp(1.25rem, 1.8vw, 1.5rem)` |
 | Card title | `0.92rem` |
 | Body | `0.9rem` |
 | Control label | `0.82rem` |
@@ -134,7 +142,12 @@ The implemented semantic roles are:
 
 The normal transition tokens are 120 ms for direct hover/control feedback and
 200 ms for panes, dialogs, and player presentation changes, using
-`cubic-bezier(0.2, 0, 0, 1)`.
+`cubic-bezier(0.2, 0, 0, 1)`. Media-card Play reveals use the 300 ms reveal
+token with the emphasized `cubic-bezier(0.3, 0, 0, 1)` curve.
+
+Section titles stay compact so the media, not the heading, carries a shelf.
+They sit 8 px above the card surface, which places them about 19 px above the
+artwork.
 
 ## Responsive shell
 
@@ -177,10 +190,27 @@ The normal transition tokens are 120 ms for direct hover/control feedback and
 
 ## Component language
 
-- Panels use the canvas/panel contrast instead of large borders or ambient
-  gradients.
-- Media cards are transparent or raised at rest, reveal a real Play action on
-  hover/focus, and do not lift the entire card or move its text.
+- Panels use the canvas/panel contrast instead of large borders. An
+  artwork-derived tonal gradient may tint the top of the central pane and
+  catalog headers, fading into the panel color. It is never a decorative
+  full-page wash, it keeps primary text at WCAG AA contrast, and it is shared in
+  spirit with the native clients' artwork-led backgrounds.
+- Media cards are transparent at rest. On hover or focus their whole padded
+  surface highlights with the translucent card-hover color, while the artwork
+  keeps its own soft drop shadow. The card does not lift, its artwork and text
+  do not move, and its copy aligns with the artwork edges.
+- A media card's Play action is a filled circular accent control anchored to
+  the artwork's bottom-right corner. It slides up 8 px and fades in on hover or
+  focus, grows to 1.04× under the pointer, and shrinks to 0.96× while pressed.
+  MediaTrack cards keep the whole card as their one Play target, with the
+  control as its visual affordance. Album cards keep the card as a link to the
+  Album and expose Play as a separate sibling button, never nested inside the
+  link. The separate Album Play button is omitted when the device has no hover
+  or has any touch pointer, so an invisible control can never capture a tap
+  meant for the link.
+- The MediaTrack card that is currently playing keeps its control visible as a
+  filled Pause glyph, colors its title with the accent, exposes
+  `aria-current`, and pauses on activation.
 - Rows highlight across their complete surface, including trailing controls,
   without creating overlapping actions.
 - Primary play and pause glyphs are filled transport icons on the same solid
@@ -197,6 +227,7 @@ The normal transition tokens are 120 ms for direct hover/control feedback and
 | Surface | Normal | Reduced Motion |
 | --- | --- | --- |
 | Hover/focus | 100–150 ms color/opacity; small icon/action transform only | Immediate state |
+| Media-card hover | 300 ms surface highlight and Play reveal: opacity and an 8 px rise; 1.04× hover and 0.96× press scale on the control | Immediate highlight and reveal with no rise or scale |
 | Menu/dialog | 180–240 ms opacity and 4–8 px transform | Immediate open/close |
 | Right pane | 200–300 ms opacity/transform | Immediate layout change |
 | Player expansion | 220–300 ms rigid surface transition | Immediate presentation change |

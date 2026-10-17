@@ -19,7 +19,7 @@ import {
 } from 'react';
 
 import type { AlbumSummary, AudioTrackSummary, HomeContentSummary, SectionPresentation } from '../api/contentSchemas';
-import { ContentCard } from './ContentCard';
+import { ContentCard, defaultContentCardArtworkSizes } from './ContentCard';
 import { ContentListRow } from './ContentListRow';
 import { Icon } from './Icon';
 import styles from './PageSection.module.css';
@@ -122,8 +122,8 @@ export const PageSection = ({
   const controlRevealTimerRef = useRef<number | null>(null);
   const [carouselScrollState, setCarouselScrollState] = useState(initialCarouselScrollState);
   const cardArtworkSizes = presentation === 'carousel'
-    ? '(max-width: 480px) calc(min(72vw, 17.5rem) - 1.3rem - 2px), calc(clamp(10.5rem, 16vw, 13rem) - 1.3rem - 2px)'
-    : '(max-width: 340px) calc(100vw - 3.3rem - 2px), (max-width: 480px) calc((100vw - 2.75rem) / 2 - 1.3rem - 2px), (max-width: 1023px) calc(10.5rem - 1.3rem - 2px), calc(14rem - 1.3rem - 2px)';
+    ? '(max-width: 480px) calc(min(72vw, 17.5rem)), calc(clamp(10.5rem, 16vw, 13rem))'
+    : defaultContentCardArtworkSizes;
 
   const revealControlsAfterScroll = useCallback(() => {
     const frame = carouselRef.current?.parentElement;

@@ -2,11 +2,10 @@
  * Exports
  *   Functions: AlbumPage
  * Internal
- *   Functions: readPlayingTrackId, readServerPlayingTrackId, usePlayingTrackId
  *   Constants: creditRoleKeys
  * @end-catalog */
 
-import { useMemo, useSyncExternalStore } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AudioLines } from 'lucide-react';
 import { Link, useParams } from 'react-router';
@@ -24,7 +23,7 @@ import styles from './CatalogPages.module.css';
 import { LazyRoomTrackButton } from '../social/LazyRoomTrackButton';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
-import { playerStore } from '../../player';
+import { playerStore, usePlayingTrackId } from '../../player';
 import { LazyShareMusicButton } from '../social/LazyShareMusicButton';
 
 const creditRoleKeys: Record<string, MessageKey> = {
@@ -40,23 +39,6 @@ const creditRoleKeys: Record<string, MessageKey> = {
   presenter: 'catalog.credit.presenter',
   legacyUnspecified: 'catalog.credit.credit'
 };
-
-const readPlayingTrackId = () => {
-  const snapshot = playerStore.getSnapshot();
-  return snapshot.status === 'playing' ? snapshot.currentItem?.id ?? null : null;
-};
-
-const readServerPlayingTrackId = () => {
-  const snapshot = playerStore.getServerSnapshot();
-  return snapshot.status === 'playing' ? snapshot.currentItem?.id ?? null : null;
-};
-
-/** Subscribes Album rows to playback identity without repainting on every clock tick. */
-const usePlayingTrackId = () => useSyncExternalStore(
-  playerStore.subscribe,
-  readPlayingTrackId,
-  readServerPlayingTrackId
-);
 
 /** Renders one expanded Album and launches its canonical ready-only queue. */
 export const AlbumPage = () => {

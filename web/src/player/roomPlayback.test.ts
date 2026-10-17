@@ -57,6 +57,7 @@
 
 import trace from '../../../contracts/social/prototype-v1/playback-trace.json';
 import { createPlayerStore } from './playerStore';
+import { RoomPlaybackActiveError } from './types';
 import type { PlayerAudio, PlayerMediaSession, PlayerMediaSessionAction, PlayerMediaSessionActionDetails, PlayerQueueItem } from './types';
 import type { RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
 import { createRoomPlaybackController } from './roomPlayback';
@@ -578,6 +579,10 @@ test('room mode refuses unrelated browse queue launches and keeps shuffle/repeat
   await expect(store.launchQueue(queue, 2)).rejects.toThrow('Leave room');
   await expect(store.launchAlbumQueue([], 0)).rejects.toThrow('Leave room');
   await expect(store.launchStandalone(queue[2])).rejects.toThrow('Leave room');
+  // Album card Play tells the room refusal apart from a load failure by this type.
+  await expect(store.launchQueue(queue, 2)).rejects.toBeInstanceOf(RoomPlaybackActiveError);
+  await expect(store.launchAlbumQueue(queue, 0)).rejects.toBeInstanceOf(RoomPlaybackActiveError);
+  await expect(store.launchStandalone(queue[2])).rejects.toBeInstanceOf(RoomPlaybackActiveError);
   store.toggleShuffle(); store.cycleRepeatMode(); store.setVolume(0.25); store.toggleMute();
   expect(store.getSnapshot()).toMatchObject({ currentItem: { id: queue[0].id }, shuffleEnabled: false, repeatMode: 'off', volume: 0.25, muted: true });
   expect(onIntent).not.toHaveBeenCalled();

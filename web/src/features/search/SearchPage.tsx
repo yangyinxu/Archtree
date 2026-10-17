@@ -13,6 +13,7 @@ import { listenerSearchQuery } from '../../api/listener';
 import { ContentCard } from '../../components/ContentCard';
 import { Icon } from '../../components/Icon';
 import { PageSection } from '../../components/PageSection';
+import sectionStyles from '../../components/PageSection.module.css';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
 import { LazyAddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
 import {
@@ -131,9 +132,10 @@ export const SearchPage = () => {
               {results.data.artists.length > 0 && (
                 <section aria-labelledby="artist-results-title">
                   <h3 className={styles.resultHeading} id="artist-results-title">{t('common.label.artists')}</h3>
-                  <ul className={styles.resultGrid}>
+                  {/* Artist cards share the Album grid's padded-card geometry so artwork aligns with headings. */}
+                  <ul className={sectionStyles.grid}>
                     {results.data.artists.map((artist) => (
-                      <li key={artist.id}><ContentCard item={artist} /></li>
+                      <li className={sectionStyles.cardItem} key={artist.id}><ContentCard item={artist} /></li>
                     ))}
                   </ul>
                 </section>

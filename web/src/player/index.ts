@@ -1,7 +1,8 @@
 export { playbackActivityTarget } from './activityPolicy';
 export { createPlayerStore, playerStore } from './playerStore';
 export { localizedPlayerError } from './localizedError';
-export { usePlayer } from './usePlayer';
+export { usePlayer, usePlayingTrackId } from './usePlayer';
+export { RoomPlaybackActiveError } from './types';
 export type {
   PlaybackActivityEvent,
   PlaybackActivityTarget

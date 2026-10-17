@@ -14,7 +14,7 @@ second process with `npm run dev:web`, then open
 prefix permanently redirect to the equivalent `/finitude` path. The Web build
 measures every initial route's unique compressed JavaScript and fails if any
 route exceeds the reviewed 150 KiB gzip budget. It also caps the complete
-emitted stylesheet payload at 32 KiB gzip, emitted fonts at 128 KiB, bundled
+emitted stylesheet payload at 33 KiB gzip, emitted fonts at 128 KiB, bundled
 images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
 continues to load through listener DTOs rather than being bundled into the app.
 Production CSS Modules use compact scoped identifiers; development and test
