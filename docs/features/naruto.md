@@ -162,7 +162,7 @@ generated bundles and deployment archives must not be committed.
 ### Required Naruto source handoff on `develop`
 
 Current Naruto source handoff:
-[`14f852435880ba65556ed894dfdbea177307f97f`](https://github.com/yangyinxu/naruto-mobile/commit/14f852435880ba65556ed894dfdbea177307f97f).
+[`bb1c3baf46c3073b317c3729b137e6c08892f8f6`](https://github.com/yangyinxu/naruto-mobile/commit/bb1c3baf46c3073b317c3729b137e6c08892f8f6).
 
 Every push to `yangyinxu/naruto-mobile`'s `main` branch, including a
 documentation-only push, requires a matching Archtree update on `develop`.
