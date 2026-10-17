@@ -1,7 +1,7 @@
 // Operational entry point: load the private `.env` before any application module reads configuration.
 import 'dotenv/config';
 import { connectToDatabase, disconnectFromDatabase } from '../src/infrastructure/database';
-import { backfillCatalogSearch } from '../src/services/catalogSearchBackfillService';
+import { backfillCatalogSearch } from '../src/services/catalog/catalogSearchBackfillService';
 import { catalogSearchCollections, type SearchCollection } from '../src/utils/catalogSearch';
 
 /** Explicit operational pages never initialize schema or print catalog metadata. */

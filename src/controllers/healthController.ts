@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { Db } from 'mongodb';
 import { checkDatabaseReadiness, getDb } from '../infrastructure/database';
-import { getMediaDeliveryMetrics } from '../services/mediaDeliveryService';
+import { getMediaDeliveryMetrics } from '../services/media/mediaDeliveryService';
 import type { createRequestDiagnostics } from '../middleware/requestDiagnosticsMiddleware';
-import { getRuntimeResources } from '../services/runtimeResourcesService';
+import { getRuntimeResources } from '../services/platform/runtimeResourcesService';
 import { createReadinessProbe } from '../infrastructure/readinessProbe';
 import { roomGatewayMetrics, type RoomGatewayMetrics } from '../realtime/roomGatewayMetrics';
 

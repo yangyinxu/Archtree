@@ -1,4 +1,4 @@
-import { setEmailDomainResolver, type MxResolver } from '../../src/services/emailDomainDeliverability';
+import { setEmailDomainResolver, type MxResolver } from '../../src/services/auth/emailDomainDeliverability';
 
 /**
  * Preloaded into every server test process by `scripts/lib/server-test-arguments.mjs`,

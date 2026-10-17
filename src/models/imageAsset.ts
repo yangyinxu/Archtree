@@ -3,7 +3,7 @@ import { getDb } from '../infrastructure/database';
 import {
     touchActiveAccount,
     withActiveAccount
-} from '../services/accountReferenceFenceService';
+} from '../services/account/accountReferenceFenceService';
 
 const collectionId = 'imageAssets';
 

@@ -1,4 +1,4 @@
-import type { ArtistReleaseWorkflowResult } from '../../services/artistReleaseWorkflowService';
+import type { ArtistReleaseWorkflowResult } from '../../services/catalog/artistReleaseWorkflowService';
 import { escapeHtml } from '../html';
 
 const workflowStepLabels: Record<string, string> = {

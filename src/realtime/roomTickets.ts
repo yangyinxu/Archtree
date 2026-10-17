@@ -3,7 +3,7 @@ import { ObjectId, type ClientSession } from 'mongodb';
 import type { RoomActor } from '../contracts/roomV1';
 import { SocialError } from '../contracts/socialV1';
 import { getDatabaseClient, getDb } from '../infrastructure/database';
-import { touchActiveAccount } from '../services/accountReferenceFenceService';
+import { touchActiveAccount } from '../services/account/accountReferenceFenceService';
 
 interface Ticket { _id: string; accountId: string; sessionId: string; clientId: string; origin: string; expiresAt: Date }
 const digest = (ticket: string) => createHash('sha256').update(ticket).digest('hex');

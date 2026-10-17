@@ -2,8 +2,8 @@ import { ObjectId } from 'mongodb';
 import { catalogSearchProjection } from '../../utils/catalogSearch';
 import { getDb } from '../../infrastructure/database';
 import type { Artist } from '../../models/artist';
-import { withReadyAlbumReferences } from '../../services/albumReferenceFenceService';
-import { touchActiveAccount } from '../../services/accountReferenceFenceService';
+import { withReadyAlbumReferences } from '../../services/catalog/albumReferenceFenceService';
+import { touchActiveAccount } from '../../services/account/accountReferenceFenceService';
 
 const artistCreationWriteMayHaveCommitted = (error: any) =>
     error?.hasErrorLabel?.('UnknownTransactionCommitResult') === true

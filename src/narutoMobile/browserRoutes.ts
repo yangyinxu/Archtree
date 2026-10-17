@@ -5,7 +5,7 @@ import {
   cookieMutationRejection,
   requireStrictSameOriginBrowserMutation,
   setBrowserSessionPrivacyHeaders
-} from '../services/authCookieService';
+} from '../services/auth/authCookieService';
 import {
   classifyNarutoRequest,
   handleNarutoAnalysisError,

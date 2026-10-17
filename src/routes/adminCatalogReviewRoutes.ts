@@ -1,9 +1,9 @@
 import express from 'express';
 import { requireAdmin, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { asyncHandler } from '../middleware/requestProtectionMiddleware';
-import { runRequestWork } from '../services/serverLifecycleService';
-import { AdminImportError } from '../administration/adminImportContract';
-import { createCatalogReview, listCatalogReviews, getCatalogReview, editCatalogReview, analyzeCatalogReview, adoptCatalogReview, cancelCatalogReviewAnalysis, applyCatalogReview } from '../administration/adminCatalogReviewService';
+import { runRequestWork } from '../services/platform/serverLifecycleService';
+import { AdminImportError } from '../administration/import/adminImportContract';
+import { createCatalogReview, listCatalogReviews, getCatalogReview, editCatalogReview, analyzeCatalogReview, adoptCatalogReview, cancelCatalogReviewAnalysis, applyCatalogReview } from '../administration/catalog/adminCatalogReviewService';
 
 /** Catalog proofreading has an independent private protocol; old import routes never accept its project IDs. */
 export function createAdminCatalogReviewRouter() {

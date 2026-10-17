@@ -3,6 +3,37 @@
 This document is the shared product-behavior reference for the Archtree backend
 and Finitude clients. Update it whenever an agreed business rule changes.
 
+<!-- @catalog -->
+**Contents**
+
+- [Social Identity and Friendships](#social-identity-and-friendships)
+- [Direct Music Shares](#direct-music-shares)
+- [Friend Listening Status](#friend-listening-status)
+- [Shared Playback Rooms](#shared-playback-rooms)
+- [Saved Content and Library](#saved-content-and-library)
+- [Web Listener Presentation](#web-listener-presentation)
+- [User Playlists](#user-playlists)
+- [Catalog Visibility and Administration](#catalog-visibility-and-administration)
+- [Native Home Startup and Recovery](#native-home-startup-and-recovery)
+- [Finitude Localization](#finitude-localization)
+- [Personalized Carousels](#personalized-carousels)
+- [Artist Follows and New Releases](#artist-follows-and-new-releases)
+- [Recent-Activity Limits](#recent-activity-limits)
+- [Album and MediaTrack Playback](#album-and-mediatrack-playback)
+- [Web Listener](#web-listener)
+- [Background and System Playback](#background-and-system-playback)
+- [Offline Downloads](#offline-downloads)
+- [Administrator Album Imports](#administrator-album-imports)
+- [Web Administrator Local MP3 Conversion](#web-administrator-local-mp3-conversion)
+- [Page Items](#page-items)
+- [MediaTrack Artwork](#mediatrack-artwork)
+- [Profile Identity and Avatars](#profile-identity-and-avatars)
+- [Search](#search)
+- [Authentication and Resolution](#authentication-and-resolution)
+- [Naruto Mobile private analysis proxy](#naruto-mobile-private-analysis-proxy)
+- [Database and S3 Lifecycle](#database-and-s3-lifecycle)
+<!-- @end-catalog -->
+
 ## Social Identity and Friendships
 
 - Social participation is opt-in and separate from the private account profile.
@@ -506,7 +537,7 @@ Playlist access retain their existing rules.
   a room or social allowance and stays per network address.
 
 The wire protocol and operational bounds are documented in
-[the room API contract](architecture.md#implemented-audio-room-api).
+[the room API contract](architecture/rooms.md#implemented-audio-room-api).
 
 ## Saved Content and Library
 

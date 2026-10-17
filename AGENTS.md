@@ -1,5 +1,18 @@
 # Repository Instructions
 
+<!-- @catalog -->
+**Contents**
+
+- [Git Workflow](#git-workflow)
+- [Business Rules](#business-rules)
+- [Architecture](#architecture)
+- [Planning](#planning)
+- [Documentation Hygiene](#documentation-hygiene)
+- [Security and Repository Hygiene](#security-and-repository-hygiene)
+- [Verification](#verification)
+- [Code Documentation](#code-documentation)
+<!-- @end-catalog -->
+
 ## Git Workflow
 
 - Use `develop` as the working and delivery branch by default.
@@ -20,8 +33,9 @@
 - If a requested implementation conflicts with a documented rule, identify the
   conflict and confirm the new rule before implementing it.
 - Keep business rules focused on product behavior. Keep endpoint shapes,
-  database details, and other implementation-specific documentation in the
-  README or code unless they materially define the product contract.
+  database details, and other implementation-specific documentation in
+  `docs/features/`, `docs/architecture/`, or code unless they materially define
+  the product contract.
 - When a rule affects the iOS client, inspect the sibling `Finitude_iOS`
   repository when it is available and keep its behavior consistent with the
   backend contract.
@@ -34,6 +48,18 @@
 - Do not remove the only database evidence of an S3 object while storage
   cleanup is incomplete, and do not leave successful uploads without a
   traceable lifecycle record.
+
+## Architecture
+
+- Place code, tests, and documents according to
+  `docs/architecture/standards.md`. When a change alters the layout, layers, or
+  dependency rules, update that standard in the same change.
+- New services go into the owning `src/services/<domain>/` folder and new server
+  tests into the matching `test/<domain>/` folder;
+  `test/platform/architectureBoundaries.test.ts` enforces placement and the
+  HTTP-edge dependency rules.
+- Files longer than 100 lines carry a generated catalog. Run
+  `npm run catalog:generate` after editing one; never edit a catalog by hand.
 
 ## Planning
 
@@ -56,13 +82,14 @@
 
 - When a change affects setup, dependencies, commands, configuration,
   environment variables, endpoints, authentication, media behavior, or
-  deployment, update the relevant README or operational documentation in the
-  same change.
+  deployment, update the relevant document under `docs/` (indexed in
+  `docs/README.md`) or the README in the same change. Add new documents to that
+  index.
 - Verify documented commands and examples against the current project files
   before handing off the change.
 - Keep shared Archtree/Finitude behavior in `docs/business-rules.md`; keep
-  repository-specific implementation details in this repository's README,
-  operational docs, or code.
+  repository-specific implementation details in this repository's `docs/`
+  folders or code.
 
 ## Security and Repository Hygiene
 

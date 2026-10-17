@@ -5,7 +5,7 @@ import { getUploadedFile } from '../../middleware/imageUpload';
 import {
     resumeArtistReleaseWorkflow,
     runArtistReleaseWorkflow
-} from '../../services/artistReleaseWorkflowService';
+} from '../../services/catalog/artistReleaseWorkflowService';
 import { rejectNonAdminManagerRequest, redirectWithMessage, parseDateInput } from './requestHelpers';
 
 /** Submits the reviewed, resumable Artist release setup workflow. */

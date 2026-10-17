@@ -141,7 +141,7 @@
               "find": "\"scripts\""
             },
             {
-              "path": "docs/development-environment.md",
+              "path": "docs/development/environment.md",
               "label": "Runtime setup and diagnostics",
               "find": "## Install and check"
             }
@@ -151,7 +151,7 @@
           "id": "configuration",
           "title": "Configure a private development environment",
           "body": [
-            "Read .env.example for configuration names and the README for each setting. Create a local .env only when one does not already exist, or supply settings through the process environment. Keep values out of source control and diagnostic reports.",
+            "Read .env.example for configuration names and docs/development/configuration.md for each setting. Create a local .env only when one does not already exist, or supply settings through the process environment. Keep values out of source control and diagnostic reports.",
             "DB_CONN_STRING and DB_NAME select the intended development database. It must provide writable replica-set or mongos transactions. Authentication needs JWT_SECRET; storage, mail, and optional providers have their own settings. A passing doctor check does not supply these services.",
             "Use a development database you are authorized to change. Application startup initializes required indexes and recovery state; the disposable test daemon does not become your development database."
           ],
@@ -161,7 +161,7 @@
               "label": "Configuration template"
             },
             {
-              "path": "docs/development-environment.md",
+              "path": "docs/development/environment.md",
               "label": "Application startup setup",
               "find": "## Configure application startup"
             },
@@ -204,9 +204,9 @@
               "text": "Run npm run build, then use the Express /finitude route to inspect the generated listener bundle and deep links. A missing bundle and an empty catalog are different problems.",
               "sources": [
                 {
-                  "path": "README.md",
+                  "path": "docs/development/local-run.md",
                   "label": "Local run and production-style bundle",
-                  "find": "## Local Run"
+                  "find": "# Local run"
                 }
               ]
             }
@@ -302,7 +302,7 @@
               "label": "Listener routing"
             },
             {
-              "path": "src/services/listenerContentService.ts",
+              "path": "src/services/listener/listenerContentService.ts",
               "label": "Direct read projection",
               "find": "export const getListenerAlbum"
             },
@@ -365,7 +365,7 @@
           "title": "Read contracts at the boundary",
           "body": [
             "docs/business-rules.md defines agreed product behavior across clients. src/contracts contains versioned wire types; Web response schemas validate incoming JSON. Contract fixtures exercise old and current response shapes.",
-            "docs/architecture.md contains detailed implementation material and rollout context. Proposal files under docs/plans are sequencing or future work, not automatic evidence that a feature exists or is deployed."
+            "docs/architecture contains the architecture standards plus detailed implementation material and rollout context. Proposal files under docs/plans are sequencing or future work, not automatic evidence that a feature exists or is deployed."
           ],
           "sources": [
             {
@@ -385,7 +385,8 @@
               "label": "Compatibility checks"
             },
             {
-              "path": "docs/architecture.md",
+              "path": "docs/README.md",
+              "find": "## Architecture",
               "label": "Detailed architecture reference"
             }
           ]
@@ -547,12 +548,12 @@
           ],
           "sources": [
             {
-              "path": "src/services/listenerContentService.ts",
+              "path": "src/services/listener/listenerContentService.ts",
               "label": "Listener reads",
               "find": "export const getListenerAlbum"
             },
             {
-              "path": "src/services/publicCatalogService.ts",
+              "path": "src/services/catalog/publicCatalogService.ts",
               "label": "Legacy public reads"
             },
             {
@@ -560,7 +561,7 @@
               "label": "Media and credit DTOs"
             },
             {
-              "path": "src/services/catalogCreditService.ts",
+              "path": "src/services/catalog/catalogCreditService.ts",
               "label": "Credit mutations"
             }
           ]
@@ -580,15 +581,15 @@
               "find": "export const publishNewAlbum"
             },
             {
-              "path": "src/services/albumTrackLinkService.ts",
+              "path": "src/services/catalog/albumTrackLinkService.ts",
               "label": "Album membership writes"
             },
             {
-              "path": "src/services/publicPageService.ts",
+              "path": "src/services/content/publicPageService.ts",
               "label": "Public page composition"
             },
             {
-              "path": "test/albumTrackNumberOrder.test.ts",
+              "path": "test/catalog/albumTrackNumberOrder.test.ts",
               "label": "Track Number ordering tests"
             }
           ]
@@ -601,15 +602,15 @@
           ],
           "sources": [
             {
-              "path": "test/listenerContent.integration.ts",
+              "path": "test/listener/listenerContent.integration.ts",
               "label": "Public projection integration coverage"
             },
             {
-              "path": "test/catalogCreatePublication.test.ts",
+              "path": "test/catalog/catalogCreatePublication.test.ts",
               "label": "Publication failure coverage"
             },
             {
-              "path": "test/catalogCreatePublication.integration.ts",
+              "path": "test/catalog/catalogCreatePublication.integration.ts",
               "label": "Publication integration coverage"
             }
           ],
@@ -644,11 +645,11 @@
               "label": "Auth routes"
             },
             {
-              "path": "src/services/authSessionService.ts",
+              "path": "src/services/auth/authSessionService.ts",
               "label": "Session lifecycle"
             },
             {
-              "path": "src/services/authCapabilitiesService.ts",
+              "path": "src/services/auth/authCapabilitiesService.ts",
               "label": "Configured capabilities"
             },
             {
@@ -695,19 +696,19 @@
           ],
           "sources": [
             {
-              "path": "src/services/accountDeletionService.ts",
+              "path": "src/services/account/accountDeletionService.ts",
               "label": "Account deletion"
             },
             {
-              "path": "src/services/sessionRoomLifecycleService.ts",
+              "path": "src/services/auth/sessionRoomLifecycleService.ts",
               "label": "Session and room lifecycle"
             },
             {
-              "path": "test/authPersistence.integration.ts",
+              "path": "test/auth/authPersistence.integration.ts",
               "label": "Persistent session verification"
             },
             {
-              "path": "test/authCredentialLifecycle.integration.ts",
+              "path": "test/auth/authCredentialLifecycle.integration.ts",
               "label": "Credential lifecycle integration"
             }
           ]
@@ -778,11 +779,11 @@
               "text": "Record recoverable ownership and pending lifecycle state before storing bytes. Publish only after storage and required content relationships are ready.",
               "sources": [
                 {
-                  "path": "src/services/audioStorageService.ts",
+                  "path": "src/services/audio/audioStorageService.ts",
                   "label": "Audio storage lifecycle"
                 },
                 {
-                  "path": "src/services/audioPublicationRecoveryService.ts",
+                  "path": "src/services/audio/audioPublicationRecoveryService.ts",
                   "label": "Publication recovery"
                 }
               ]
@@ -792,11 +793,11 @@
               "text": "Validate and upload the replacement, atomically promote its identity, then clean up the old object. Failed cleanup retains exact evidence for later reconciliation.",
               "sources": [
                 {
-                  "path": "src/services/mediaRepresentationService.ts",
+                  "path": "src/services/media/mediaRepresentationService.ts",
                   "label": "Media replacement"
                 },
                 {
-                  "path": "src/services/mediaRepresentationLifecycleService.ts",
+                  "path": "src/services/media/mediaRepresentationLifecycleService.ts",
                   "label": "Representation cleanup"
                 }
               ]
@@ -806,11 +807,11 @@
               "text": "Remove owned storage through the deletion lifecycle and clean references idempotently. Retain the final database evidence until storage cleanup is confirmed.",
               "sources": [
                 {
-                  "path": "src/services/contentReferenceService.ts",
+                  "path": "src/services/content/contentReferenceService.ts",
                   "label": "Content reference cleanup"
                 },
                 {
-                  "path": "src/services/contentReferenceReconciliationService.ts",
+                  "path": "src/services/content/contentReferenceReconciliationService.ts",
                   "label": "Reference reconciliation"
                 }
               ]
@@ -820,11 +821,11 @@
               "text": "Distinguish a known failure from an uncertain outcome. Audit first and reuse the documented retry identity; an audit does not authorize deleting unknown objects.",
               "sources": [
                 {
-                  "path": "src/services/audioReconciliationService.ts",
+                  "path": "src/services/audio/audioReconciliationService.ts",
                   "label": "Audio reconciliation"
                 },
                 {
-                  "path": "src/services/audioStorageRemediationService.ts",
+                  "path": "src/services/audio/audioStorageRemediationService.ts",
                   "label": "Explicit remediation"
                 }
               ]
@@ -847,7 +848,7 @@
           ],
           "sources": [
             {
-              "path": "src/services/mediaDeliveryService.ts",
+              "path": "src/services/media/mediaDeliveryService.ts",
               "label": "Range and stream delivery"
             },
             {
@@ -855,7 +856,7 @@
               "label": "Media admission"
             },
             {
-              "path": "src/services/roomAudioAnalysisService.ts",
+              "path": "src/services/roomAudio/roomAudioAnalysisService.ts",
               "label": "Room audio analysis"
             }
           ]
@@ -869,15 +870,15 @@
           ],
           "sources": [
             {
-              "path": "test/audioTrackLifecycle.integration.ts",
+              "path": "test/audio/audioTrackLifecycle.integration.ts",
               "label": "Storage lifecycle tests"
             },
             {
-              "path": "test/mediaRepresentation.integration.ts",
+              "path": "test/media/mediaRepresentation.integration.ts",
               "label": "Replacement integration tests"
             },
             {
-              "path": "test/roomAudioAnalysis.integration.ts",
+              "path": "test/roomAudio/roomAudioAnalysis.integration.ts",
               "label": "Room analysis integration tests"
             }
           ]
@@ -949,7 +950,7 @@
               "label": "Playlist persistence and outcomes"
             },
             {
-              "path": "src/services/playlistProjectionService.ts",
+              "path": "src/services/playlists/playlistProjectionService.ts",
               "label": "Safe Playlist projection"
             }
           ]
@@ -989,11 +990,11 @@
           ],
           "sources": [
             {
-              "path": "test/playlist.integration.ts",
+              "path": "test/playlists/playlist.integration.ts",
               "label": "Playlist contract integration"
             },
             {
-              "path": "test/playlistLifecycle.integration.ts",
+              "path": "test/playlists/playlistLifecycle.integration.ts",
               "label": "Playlist content lifecycle"
             },
             {
@@ -1080,7 +1081,7 @@
               "label": "Shared browser player"
             },
             {
-              "path": "src/services/roomAudioAnalysisService.ts",
+              "path": "src/services/roomAudio/roomAudioAnalysisService.ts",
               "label": "Source eligibility"
             }
           ]
@@ -1093,15 +1094,15 @@
           ],
           "sources": [
             {
-              "path": "test/roomLifecycle.integration.ts",
+              "path": "test/rooms/roomLifecycle.integration.ts",
               "label": "Room lifecycle integration"
             },
             {
-              "path": "test/roomRealtime.integration.ts",
+              "path": "test/rooms/roomRealtime.integration.ts",
               "label": "Realtime integration"
             },
             {
-              "path": "test/roomAuthority.integration.ts",
+              "path": "test/rooms/roomAuthority.integration.ts",
               "label": "Authority integration"
             },
             {
@@ -1186,7 +1187,7 @@
           },
           "sources": [
             {
-              "path": "docs/localization.md",
+              "path": "docs/features/localization.md",
               "label": "Localization workflow"
             },
             {
@@ -1368,12 +1369,12 @@
               "text": "getListenerAlbum accepts a 24-character hexadecimal ID and normalizes it. Its bounded MongoDB query requires a ready Album lifecycle, while explicitly supporting older records that have no lifecycleStatus. Missing and non-ready Albums return no projection.",
               "sources": [
                 {
-                  "path": "src/services/listenerContentService.ts",
+                  "path": "src/services/listener/listenerContentService.ts",
                   "label": "Album read",
                   "find": "export const getListenerAlbum"
                 },
                 {
-                  "path": "src/services/albumReferenceFenceService.ts",
+                  "path": "src/services/catalog/albumReferenceFenceService.ts",
                   "label": "Ready Album filter",
                   "find": "export const readyAlbumLifecycleFilter"
                 }
@@ -1384,7 +1385,7 @@
               "text": "When audioTrackIds is populated, the service normalizes and deduplicates its bounded ID list, fetches ready tracks, then restores declared order. It skips missing or non-ready entries and does not append reverse-linked tracks. Only a legacy Album without lifecycleStatus and with no declared IDs uses the albumId fallback, ordered by title and ID. A lifecycle-managed Album with an empty list stays empty.",
               "sources": [
                 {
-                  "path": "src/services/listenerContentService.ts",
+                  "path": "src/services/listener/listenerContentService.ts",
                   "label": "Track ordering and legacy fallback",
                   "find": "const declared = Array.isArray(album.audioTrackIds)"
                 },
@@ -1400,12 +1401,12 @@
               "text": "Catalog context resolves artwork and attribution. toAlbumSummary and toAudioTrackSummary explicitly construct { album, tracks } using listener fields. Storage keys, createdBy, lifecycle errors, and account data do not belong in that response. Each track has one mediaType and streamUrl.",
               "sources": [
                 {
-                  "path": "src/services/listenerContentService.ts",
+                  "path": "src/services/listener/listenerContentService.ts",
                   "label": "Album summary projection",
                   "find": "const toAlbumSummary ="
                 },
                 {
-                  "path": "src/services/listenerContentService.ts",
+                  "path": "src/services/listener/listenerContentService.ts",
                   "label": "Track summary projection",
                   "find": "const toAudioTrackSummary ="
                 },
@@ -1481,7 +1482,7 @@
           ],
           "sources": [
             {
-              "path": "test/listenerContent.integration.ts",
+              "path": "test/listener/listenerContent.integration.ts",
               "label": "Public ready-only endpoint integration",
               "find": "test('listener read layer preserves composition and exposes only ready safe DTOs'"
             },
@@ -1551,7 +1552,7 @@
             },
             {
               "title": "Update the durable explanation",
-              "text": "Update README or the existing operational document when commands, settings, routes, authentication, media, or deployment change. Keep proposal status distinct from shipped behavior; avoid one-off verification reports."
+              "text": "Update the README or the matching document under docs when commands, settings, routes, authentication, media, or deployment change. Keep proposal status distinct from shipped behavior; avoid one-off verification reports."
             },
             {
               "title": "Verify and review the final diff",
@@ -1619,7 +1620,7 @@
               "label": "Fixture compatibility tests"
             },
             {
-              "path": "docs/localization.md",
+              "path": "docs/features/localization.md",
               "label": "Shared localization workflow"
             }
           ]
@@ -1637,7 +1638,7 @@
               "label": "Handoff and repository hygiene"
             },
             {
-              "path": "docs/development-environment.md",
+              "path": "docs/development/environment.md",
               "label": "Environment-specific limits",
               "find": "## Windows and Linux gates"
             }

@@ -3,7 +3,7 @@ import { Request, Response } from 'express';
 import {
   LocalizationRepresentation,
   LocalizationService
-} from '../services/localizationService';
+} from '../services/platform/localizationService';
 
 const matchesIfNoneMatch = (header: string | undefined, etag: string) => {
   if (!header) return false;

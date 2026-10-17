@@ -1,5 +1,27 @@
 # Content Downloads, Track Actions, and Collection Page Items Plan
 
+<!-- @catalog -->
+**Contents**
+
+- [Status](#status)
+- [Objective](#objective)
+- [Current state](#current-state)
+- [Agreed product behavior](#agreed-product-behavior)
+- [Proposed user experience](#proposed-user-experience)
+  - [Album details](#album-details)
+  - [Track rows](#track-rows)
+  - [Offline Library and downloaded content](#offline-library-and-downloaded-content)
+  - [List presentation](#list-presentation)
+- [Implementation phases](#implementation-phases)
+  - [Phase 1: Define the page-item, pagination, and download contracts](#phase-1-define-the-page-item-pagination-and-download-contracts)
+  - [Phase 2: Build local download infrastructure in iOS](#phase-2-build-local-download-infrastructure-in-ios)
+  - [Phase 3: Add track actions to ContentDetails](#phase-3-add-track-actions-to-contentdetails)
+  - [Phase 4: Add unified offline Library and device-local collection pages](#phase-4-add-unified-offline-library-and-device-local-collection-pages)
+  - [Phase 5: Add album download orchestration](#phase-5-add-album-download-orchestration)
+  - [Phase 6: Test and document](#phase-6-test-and-document)
+- [Acceptance criteria](#acceptance-criteria)
+<!-- @end-catalog -->
+
 ## Status
 
 In progress. This document is implementation guidance, not the canonical product

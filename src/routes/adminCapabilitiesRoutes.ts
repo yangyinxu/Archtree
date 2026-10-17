@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAdmin, requireAuth, requireCurrentAccountViewer } from '../middleware/authMiddleware';
-import { getAdminCapabilities } from '../services/adminCapabilityService';
+import { getAdminCapabilities } from '../administration/adminCapabilityService';
 
 /** Private capability bootstrap verifies the current database-backed role and viewer. */
 export const createAdminCapabilitiesRouter = () => {

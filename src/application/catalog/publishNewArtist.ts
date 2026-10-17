@@ -1,5 +1,5 @@
 import type { Artist } from '../../models/artist';
-import { deleteCoverArt } from '../../services/imageStorageService';
+import { deleteCoverArt } from '../../services/image/imageStorageService';
 
 /** Artwork whose storage lifecycle is ready before the owner is published. */
 export type UploadedCoverArt = { imageId: string; coverArtUrl: string };

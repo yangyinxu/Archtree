@@ -2,7 +2,7 @@ import express, { Router } from 'express';
 
 import { createLocalizationController } from '../controllers/localizationController';
 import { publicReadRateLimit } from '../middleware/requestProtectionMiddleware';
-import { LocalizationService } from '../services/localizationService';
+import { LocalizationService } from '../services/platform/localizationService';
 
 /** Publishes reviewed localization artifacts without exposing arbitrary filesystem paths. */
 export const createLocalizationRouter = (generatedRoot?: string, compatibility: 'v1' | 'v2' = 'v1'): Router => {

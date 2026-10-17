@@ -4,16 +4,16 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AdminImportError, importEnabled, objectId, uuid } from '../administration/adminImportContract';
-import { importPrivateStorageReady } from '../administration/adminImportMediaTypes';
-import { createAdminImport, getAdminImport, listAdminImports, editAdminImport, analyzeAdminImport, adoptAdminImportSuggestions, decideAdminImportDuplicates, cancelAdminImportAnalysis, adminImportDuplicateCandidates } from '../administration/adminImportService';
+import { AdminImportError, importEnabled, objectId, uuid } from '../administration/import/adminImportContract';
+import { importPrivateStorageReady } from '../administration/import/adminImportMediaTypes';
+import { createAdminImport, getAdminImport, listAdminImports, editAdminImport, analyzeAdminImport, adoptAdminImportSuggestions, decideAdminImportDuplicates, cancelAdminImportAnalysis, adminImportDuplicateCandidates } from '../administration/import/adminImportService';
 import { requireAdmin, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
-import { runRequestWork, onRequestWorkComplete } from '../services/serverLifecycleService';
+import { runRequestWork, onRequestWorkComplete } from '../services/platform/serverLifecycleService';
 import { maxAudioUploadMb, requireUploadSize } from '../middleware/audioUpload';
-import { cleanupAdminImportAsset, importMediaMutationHeaders, uploadAdminImportAsset, selectAdminImportCover, previewAdminImportAsset, defaultImportObjectStorage, type ImportObjectStorage } from '../administration/adminImportStorage';
+import { cleanupAdminImportAsset, importMediaMutationHeaders, uploadAdminImportAsset, selectAdminImportCover, previewAdminImportAsset, defaultImportObjectStorage, type ImportObjectStorage } from '../administration/import/adminImportStorage';
 import { asyncHandler } from '../middleware/requestProtectionMiddleware';
 import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
-import { publishAdminImport, resumeAdminImportPublication, cancelAdminImportPublication } from '../administration/adminImportPublisher';
+import { publishAdminImport, resumeAdminImportPublication, cancelAdminImportPublication } from '../administration/import/adminImportPublisher';
 
 /** Mount behind app-level pre-body auth/origin/size guards; defense-in-depth guards remain here. */
 export function createAdminImportRouter(storage: ImportObjectStorage = defaultImportObjectStorage) {

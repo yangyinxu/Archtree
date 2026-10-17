@@ -1,6 +1,6 @@
 // Suggests a correction when a typed email domain looks like a misspelling of
 // a popular provider (`name@gmial.com` → `name@gmail.com`) on the
-// server-rendered Kashewt account pages; test/accountPages.test.ts covers its
+// server-rendered Kashewt account pages; test/account/accountPages.test.ts covers its
 // answers. It never blocks a request and changes the address only when the
 // person selects the suggestion.
 (() => {

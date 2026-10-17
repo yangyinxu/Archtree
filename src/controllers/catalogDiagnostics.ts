@@ -1,5 +1,5 @@
 import type { Response } from 'express';
-import { logMediaFailure, type MediaFailureCategory } from '../services/mediaDiagnosticsService';
+import { logMediaFailure, type MediaFailureCategory } from '../services/media/mediaDiagnosticsService';
 
 /** Correlates catalog and public media failures without logging filenames, IDs, or raw exceptions. */
 export const logCatalogFailure = (res: Response, category: MediaFailureCategory, error: unknown) => {
