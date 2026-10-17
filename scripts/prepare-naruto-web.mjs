@@ -56,18 +56,19 @@ export const validateNarutoWebDistribution = async (sourceDist, includeProvenanc
   }
   if (files.filter(file => file.startsWith('assets/')).some(file => !assets.has(file))) throw new Error('Unmanifested Naruto asset.');
   const zip = await readFile(path.join(sourceDist, 'naruto-mobile-chrome-extension.zip'));
-  validateNarutoExtensionArchive(zip);
+  const extensionVersion = validateNarutoExtensionArchive(zip);
   const digest = createHash('sha256');
   for (const filename of files.sort()) digest.update(filename).update('\0').update(await readFile(path.join(sourceDist, filename)));
   const distributionSha256 = digest.digest('hex');
   if (includeProvenance) {
     const provenance = JSON.parse(await readFile(path.join(sourceDist, 'release-source.json'), 'utf8'));
     if (provenance.schemaVersion !== 1 || provenance.protocolVersion !== 1 || provenance.basePath !== '/naruto/'
-      || provenance.distributionSha256 !== distributionSha256 || typeof provenance.sourceDirty !== 'boolean'
+      || provenance.distributionSha256 !== distributionSha256 || provenance.extensionVersion !== extensionVersion
+      || typeof provenance.sourceDirty !== 'boolean'
       || typeof provenance.sourceCommit !== 'string' || (provenance.sourceCommit && !/^[0-9a-f]{40}$/.test(provenance.sourceCommit))
       || await readFile(path.join(sourceDist, marker), 'utf8') !== 'v1\n') throw new Error('Naruto distribution provenance does not match the build.');
   }
-  return {files, distributionSha256};
+  return {files, distributionSha256, extensionVersion};
 };
 
 /** Copies only a verified hosted distribution, never desktop data or configuration. */
@@ -80,7 +81,7 @@ export const prepareNarutoWeb = async ({sourceRoot = path.resolve(repositoryRoot
     execFileSync(process.execPath, [process.env.npm_execpath, 'run', 'build:hosted'], {cwd: resolvedSource, stdio: 'inherit', windowsHide: true});
   }
   const sourceDist = path.join(resolvedSource, 'web', 'hosted-dist');
-  const {files, distributionSha256} = await validateNarutoWebDistribution(sourceDist);
+  const {files, distributionSha256, extensionVersion} = await validateNarutoWebDistribution(sourceDist);
   let commit = '', dirty = true;
   try {
     commit = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: resolvedSource, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']}).trim();
@@ -113,7 +114,7 @@ export const prepareNarutoWeb = async ({sourceRoot = path.resolve(repositoryRoot
       await mkdir(path.dirname(destination), {recursive: true});
       await cp(path.join(sourceDist, filename), destination, {errorOnExist: true});
     }
-    const provenance = {schemaVersion: 1, protocolVersion: 1, basePath: '/naruto/', sourceCommit: commit, sourceDirty: dirty, distributionSha256};
+    const provenance = {schemaVersion: 1, protocolVersion: 1, basePath: '/naruto/', sourceCommit: commit, sourceDirty: dirty, distributionSha256, extensionVersion};
     await writeFile(path.join(temporary, 'release-source.json'), `${JSON.stringify(provenance, null, 2)}\n`);
     await writeFile(path.join(temporary, marker), 'v1\n');
     await assertOwnedParent();
