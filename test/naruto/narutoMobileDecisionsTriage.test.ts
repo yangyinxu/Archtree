@@ -16,10 +16,12 @@ test('builds named independent questions with only Decisions-supported parameter
 test('high-confidence non-feedback is skipped; product feedback and uncertain skips are retained', () => {
   const response = decisionsResponse(['first', 'second'], {decision: 'skip', informationType: 'community_chatter'});
   assert.ok(parseDecisionsTriage(response, batch).every((r) => r.decision === 'skip'));
-  for (const confidence of [0.5, 0.949]) {
+  for (const confidence of [0.5, 0.849]) {
     const uncertain = decisionsResponse(['first', 'second'], {decision: 'skip', confidence, informationType: 'community_chatter'});
     assert.ok(parseDecisionsTriage(uncertain, batch).every((r) => r.decision === 'uncertain'));
   }
+  const confident = decisionsResponse(['first', 'second'], {decision: 'skip', confidence: 0.9, informationType: 'community_chatter'});
+  assert.ok(parseDecisionsTriage(confident, batch).every((r) => r.decision === 'skip'));
   const feedback = decisionsResponse(['first', 'second'], {decision: 'skip'});
   assert.ok(parseDecisionsTriage(feedback, batch).every((r) => r.decision === 'uncertain'));
   const contradictory = decisionsResponse(['first', 'second'], {decision: 'skip', informationType: 'community_chatter', confidence: 0.5});
@@ -40,7 +42,7 @@ test('refusals, invalid probabilities and low category confidence retain the aff
   invalidDistribution.answers[0].probabilities![0].probability = -1;
   assert.equal(parseDecisionsTriage(invalidDistribution, batch)[0].decision, 'uncertain');
   const uncertainCategory = base();
-  uncertainCategory.answers[2].confidence = 0.9;
+  uncertainCategory.answers[2].confidence = 0.8;
   assert.equal(parseDecisionsTriage(uncertainCategory, batch)[0].decision, 'uncertain');
 });
 

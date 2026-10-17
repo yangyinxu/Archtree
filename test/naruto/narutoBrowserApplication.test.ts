@@ -4,6 +4,7 @@
  * Tests
  *   - Naruto bundle errors and API namespaces stay separate from Finitude and auth
  *   - Naruto serves declared assets, extension download, and deep links without exposing build metadata
+ *   - Naruto names the extension download after the prepared extension version
  *   - login return destinations allow only the Naruto entry page
  * @end-catalog */
 
@@ -17,7 +18,8 @@ import { createApp } from '../../src/app';
 import { safeWebReturnTo } from '../../src/controllers/authController';
 
 /** Creates a temporary public bundle without relying on developer-generated assets. */
-const withBundle = async (available: boolean, run: (baseUrl: string) => Promise<void>) => {
+const withBundle = async (available: boolean, run: (baseUrl: string) => Promise<void>,
+  releaseSource = '{"private":"release metadata"}') => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-naruto-host-'));
   const narutoDistPath = path.join(temporaryRoot, 'naruto');
   const listenerDistPath = path.join(temporaryRoot, 'listener');
@@ -30,7 +32,7 @@ const withBundle = async (available: boolean, run: (baseUrl: string) => Promise<
       writeFile(path.join(narutoDistPath, 'assets', 'app-123.js'), 'export const naruto = true;'),
       writeFile(path.join(narutoDistPath, 'assets', 'app-123.css'), 'body { color: green; }'),
       writeFile(path.join(narutoDistPath, 'naruto-mobile-chrome-extension.zip'), Buffer.from('PK synthetic fixture')),
-      writeFile(path.join(narutoDistPath, 'release-source.json'), '{"private":"release metadata"}'),
+      writeFile(path.join(narutoDistPath, 'release-source.json'), releaseSource),
       writeFile(path.join(narutoDistPath, '.archtree-naruto-build'), 'internal marker'),
       writeFile(path.join(narutoDistPath, 'unlisted.js'), 'internal script'),
       writeFile(path.join(narutoDistPath, '.vite', 'manifest.json'), JSON.stringify({
@@ -114,6 +116,19 @@ test('Naruto serves declared assets, extension download, and deep links without 
     assert.equal(noCapture.status, 404);
     assert.doesNotMatch(await noCapture.text(), /Naruto browser fixture/);
   });
+});
+
+test('Naruto names the extension download after the prepared extension version', async () => {
+  await withBundle(true, async baseUrl => {
+    const extension = await fetch(`${baseUrl}/naruto/naruto-mobile-chrome-extension.zip`);
+    assert.equal(extension.status, 200);
+    assert.match(extension.headers.get('content-disposition') ?? '', /attachment; filename="naruto-mobile-chrome-extension-0\.1\.9\.zip"/);
+  }, JSON.stringify({extensionVersion: '0.1.9'}));
+  // A malformed version must never reach the header; the plain name is kept instead.
+  await withBundle(true, async baseUrl => {
+    const extension = await fetch(`${baseUrl}/naruto/naruto-mobile-chrome-extension.zip`);
+    assert.match(extension.headers.get('content-disposition') ?? '', /attachment; filename="naruto-mobile-chrome-extension\.zip"/);
+  }, JSON.stringify({extensionVersion: '0.1.9"; evil="1'}));
 });
 
 test('login return destinations allow only the Naruto entry page', () => {

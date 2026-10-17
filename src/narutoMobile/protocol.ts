@@ -18,7 +18,8 @@ export type NarutoMobileClassificationKind = 'triage' | 'detail';
 export interface NarutoMobileOpinionInput {
   opinionId: string;
   content: {
-    type: 'video' | 'dynamic';
+    // Naruto collector 0.1.9+ reads 专栏 articles alongside videos and dynamics.
+    type: 'video' | 'dynamic' | 'article';
     title: string;
     description: string;
     publishedAt: string | null;
@@ -121,7 +122,7 @@ const parseOpinionInput = (raw: unknown, index: number): NarutoMobileOpinionInpu
 
   const content = objectValue(item.content, `batch[${index}].content`);
   exactKeys(content, ['type', 'title', 'description', 'publishedAt'], `batch[${index}].content`);
-  if (content.type !== 'video' && content.type !== 'dynamic') {
+  if (content.type !== 'video' && content.type !== 'dynamic' && content.type !== 'article') {
     throw new NarutoMobileProtocolError(`batch[${index}].content.type is invalid.`);
   }
 

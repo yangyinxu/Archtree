@@ -114,9 +114,11 @@ npm run prepare:naruto-web -- D:\Documents\GitHub\naruto-mobile
 The helper runs the sibling's `npm run build:hosted`, validates the `/naruto/`
 Vite manifest and extension download, and copies only the hosted distribution
 to the ignored `naruto-web/dist/` directory. A distribution digest and source
-commit/dirty metadata accompany the build; desktop data, local configuration,
-and credentials are excluded. `/naruto/naruto-mobile-chrome-extension.zip`
-downloads the unpacked extension described by the UI's installation guide.
+commit/dirty metadata and the packaged extension version accompany the build;
+desktop data, local configuration, and credentials are excluded.
+`/naruto/naruto-mobile-chrome-extension.zip` downloads the unpacked extension
+described by the UI's installation guide, saved as
+`naruto-mobile-chrome-extension-<version>.zip` from that recorded version.
 Extension `0.1.2` adds bounded scrolling/waiting for lazy Bilibili comments and
 keeps incomplete sources retryable. Reload the updated extension and refresh the
 portal before continuing an older investigation; its first explicit resume
@@ -145,6 +147,11 @@ windows with `focused: false`. Parallel collector tabs share one dedicated
 window and the orange investigation group; delayed-comment retries change only
 that window's selected tab. The existing user window keeps its selection.
 Cleanup removes only owned tabs, so a user-added tab keeps its window open.
+Extension `0.1.9` enforces the selected content window itself rather than
+trusting Bilibili's search filter: each source needs a confirmed publish time
+inside the window, and undated sources are skipped with a warning. The retired
+动态 search is replaced by 专栏 article search, and the portal requires `0.1.9`
+before starting or resuming live collection.
 
 `npm run stage:eb-artifact` includes this separately prepared distribution when
 present and revalidates its provenance. Prepare it before staging any release
@@ -157,7 +164,7 @@ generated bundles and deployment archives must not be committed.
 ### Required Naruto source handoff on `develop`
 
 Current Naruto source handoff:
-[`d77c1f1630164151bf1e8b14fea05d5f1c035519`](https://github.com/yangyinxu/naruto-mobile/commit/d77c1f1630164151bf1e8b14fea05d5f1c035519).
+[`5991ac761e263df89447fc146951f18cd965bea1`](https://github.com/yangyinxu/naruto-mobile/commit/5991ac761e263df89447fc146951f18cd965bea1).
 
 Every push to `yangyinxu/naruto-mobile`'s `main` branch, including a
 documentation-only push, requires a matching Archtree update on `develop`.
@@ -173,8 +180,8 @@ The person or agent pushing Naruto is responsible for completing this handoff:
    unrelated work and leaving generated distributions ignored.
 3. Report both repository commits and the verification results. This is a
    required collaboration workflow; no CI job automatically synchronizes the
-   repositories. The README entry records the `develop` handoff and is not read
-   by the production release workflow.
+   repositories. This entry records the `develop` handoff and is not read by the
+   production release workflow.
 
 Before an authorized Archtree `main` release, set the Actions variable
 `NARUTO_SOURCE_COMMIT` to this same complete source SHA. A routine `develop`

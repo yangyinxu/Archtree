@@ -116,9 +116,13 @@ test('Naruto distribution excludes private configuration, unexpected files and u
 
 test('Naruto release provenance detects a modified distribution before artifact staging', async context => {
   const root = await fixture(context);
-  const {distributionSha256} = await validateNarutoWebDistribution(root);
+  const {distributionSha256, extensionVersion} = await validateNarutoWebDistribution(root);
+  assert.equal(extensionVersion, '0.1.0');
+  const provenance = {schemaVersion: 1, protocolVersion: 1, basePath: '/naruto/', sourceCommit: 'a'.repeat(40), sourceDirty: true, distributionSha256, extensionVersion};
   await writeFile(path.join(root, '.archtree-naruto-build'), 'v1\n');
-  await writeFile(path.join(root, 'release-source.json'), JSON.stringify({schemaVersion: 1, protocolVersion: 1, basePath: '/naruto/', sourceCommit: 'a'.repeat(40), sourceDirty: true, distributionSha256}));
+  await writeFile(path.join(root, 'release-source.json'), JSON.stringify({...provenance, extensionVersion: '0.0.9'}));
+  await assert.rejects(validateNarutoWebDistribution(root, true), /provenance/);
+  await writeFile(path.join(root, 'release-source.json'), JSON.stringify(provenance));
   await validateNarutoWebDistribution(root, true);
   await writeFile(path.join(root, 'assets', 'index-abcdefgh.js'), 'export const changed = true;');
   await assert.rejects(validateNarutoWebDistribution(root, true), /provenance/);
