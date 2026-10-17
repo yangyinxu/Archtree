@@ -6,8 +6,8 @@
  *              startAdminCatalogCoverWorker
  * Internal
  *   Types: CoverKind, CoverState, CoverOperation
- *   Functions: operations, fail, cleanupDefault, requireKind, feature, coverResult, currentApproval,
- *              effectiveActor, releaseSourcePin, requireDelivery, mutateCover, cleanupCancelledCover
+ *   Functions: operations, fail, cleanupDefault, requireKind, coverResult, currentApproval, effectiveActor,
+ *              releaseSourcePin, requireDelivery, mutateCover, cleanupCancelledCover
  *   Constants: terminalStates, unresolvedOperations, collections
  * @end-catalog */
 
@@ -15,7 +15,7 @@ import { checkAdminWorker, startAdminWorker, type AdminWorkTracker } from '../ad
 import { randomUUID } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDb } from '../../infrastructure/database';
-import { isAdminCatalogEditingEnabled, isAdminVisibilityEditingEnabled } from '../adminCapabilityService';
+import { isAdminVisibilityEditingEnabled } from '../adminCapabilityService';
 import { deleteCoverArt, updateCoverArtOwnerAndCleanup, maxCoverArtInputBytes } from '../../services/image/imageStorageService';
 import { adminCatalogItemRevision, AdminCatalogError, adminCatalogSnapshot, readAdminCatalogRecord, withCurrentAdministrator, type AdminCatalogKind } from './adminCatalogService';
 import { exact, objectId, record, uuid } from '../import/adminImportContract';
@@ -41,7 +41,6 @@ const collections = { artist: 'artists', album: 'albums', audioTrack: 'audioTrac
 const fail = (status: number, code: string): never => { throw new AdminCatalogError(status, code); };
 const cleanupDefault = (imageId: string, kind: CoverKind, ownerId: string) => deleteCoverArt(imageId, { expectedOwnerType: kind, expectedOwnerId: ownerId });
 const requireKind = (kind: AdminCatalogKind): CoverKind => kind === 'organization' ? fail(400, 'ADMIN_CATALOG_COVER_UNSUPPORTED') : kind;
-const feature = () => { if (!isAdminCatalogEditingEnabled()) fail(503, 'ADMIN_CATALOG_EDITING_UNAVAILABLE'); };
 const coverResult = (actor: string, op: CoverOperation, receiptId = op.operationId) => withCurrentAdministrator(actor, async session => {
     const owner = await readAdminCatalogRecord(op.kind, op.ownerId, session);
     if (!owner && op.state !== 'cancelled') fail(404, 'ADMIN_CATALOG_NOT_FOUND');
@@ -73,7 +72,7 @@ async function mutateCover(actor: string, rawKind: AdminCatalogKind, ownerId: st
         const prior = await operations().findOne({ actor, operationId }, { session });
         if (prior) { if (prior.fingerprint !== fingerprint) fail(409, 'ADMIN_CATALOG_IDEMPOTENCY_CONFLICT'); return prior; }
         if (await operations().findOne({ 'cancellation.actor': actor, 'cancellation.operationId': operationId }, { session })) fail(409, 'ADMIN_CATALOG_IDEMPOTENCY_CONFLICT');
-        feature(); if (!clear && (!importPrivateStorageReady() || !process.env.S3_BUCKET_NAME?.trim())) fail(503, 'ADMIN_IMPORT_STORAGE_UNAVAILABLE');
+        if (!clear && (!importPrivateStorageReady() || !process.env.S3_BUCKET_NAME?.trim())) fail(503, 'ADMIN_IMPORT_STORAGE_UNAVAILABLE');
         const owner = await readAdminCatalogRecord(kind, ownerId, session); if (!owner) return fail(404, 'ADMIN_CATALOG_NOT_FOUND');
         if (adminCatalogItemRevision(kind, owner) !== body.expectedRevision) fail(409, 'ADMIN_CATALOG_REVISION_CONFLICT');
         if (!clear) await requireDelivery(kind, owner, session);
@@ -205,7 +204,7 @@ export async function runAdminCatalogCoverOnce(dependencies: AdminCatalogCoverDe
             const current = await operations().findOne({ _id: op!._id, leaseOwner: worker, state: { $ne: 'cancelled' } }, { session });
             if (!current) return fail(409, 'ADMIN_CATALOG_COVER_ACTIVE');
             // An attached replacement needs no new publication authority to clean its detached old object.
-            if (current.stage !== 'attached') { feature(); currentApproval(current); }
+            if (current.stage !== 'attached') currentApproval(current);
         });
         if (op.stage !== 'attached' && op.target) {
             if (op.target.bucket !== process.env.S3_BUCKET_NAME?.trim() || !importPrivateStorageReady()) fail(503, 'ADMIN_IMPORT_STORAGE_UNAVAILABLE');
@@ -218,7 +217,7 @@ export async function runAdminCatalogCoverOnce(dependencies: AdminCatalogCoverDe
                     await withCurrentAdministrator(op.actor, async session => {
                         const current = await operations().findOne({ _id: op!._id, leaseOwner: worker, stage: 'reserved', state: { $ne: 'cancelled' } }, { session });
                         if (!current) return fail(409, 'ADMIN_CATALOG_COVER_ACTIVE');
-                        feature(); currentApproval(current);
+                        currentApproval(current);
                         await operations().updateOne({ _id: current._id, leaseOwner: worker }, { $set: { stage: 'sent', updatedAt: new Date() } }, { session });
                     });
                     checkAdminWorker(signal);
@@ -232,7 +231,7 @@ export async function runAdminCatalogCoverOnce(dependencies: AdminCatalogCoverDe
         if (op.stage !== 'attached') {
             const captured = op;
             const attach = () => withCurrentAdministrator(captured.actor, async session => {
-                checkAdminWorker(signal); feature(); const current = await operations().findOne({ _id: captured._id, leaseOwner: worker, stage: 'stored', state: { $ne: 'cancelled' } }, { session }); if (!current) return fail(409, 'ADMIN_CATALOG_COVER_ACTIVE'); currentApproval(current);
+                checkAdminWorker(signal); const current = await operations().findOne({ _id: captured._id, leaseOwner: worker, stage: 'stored', state: { $ne: 'cancelled' } }, { session }); if (!current) return fail(409, 'ADMIN_CATALOG_COVER_ACTIVE'); currentApproval(current);
                 const owner = await readAdminCatalogRecord(captured.kind, captured.ownerId, session); if (!owner || adminCatalogItemRevision(captured.kind, owner) !== captured.expectedRevision) fail(409, 'ADMIN_CATALOG_REVISION_CONFLICT');
                 if (captured.target) { await requireDelivery(captured.kind, owner, session); await getDb()!.collection('imageAssets').insertOne({ _id: new ObjectId(captured.imageId!), ownerType: captured.kind, ownerId: captured.ownerId, createdBy: captured.actor, originalFileName: captured.source!.filename, contentType: captured.source!.contentType, s3Key: captured.target.key, uploadStatus: 'ready', uploadUpdatedAt: new Date(), uploadError: null, uploadOutcomeUnknown: false, storageIdentity: captured.identity }, { session }); }
                 const update = captured.imageId ? { $set: { coverArtId: captured.imageId, coverArtUrl: `/content/images/${captured.imageId}` }, $inc: { adminRevision: 1 } } : { $unset: { coverArtId: '' }, $set: { coverArtUrl: '' }, $inc: { adminRevision: 1 } };

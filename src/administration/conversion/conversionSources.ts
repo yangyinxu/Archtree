@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDb } from '../../infrastructure/database';
-import { isAdminCatalogEditingEnabled } from '../adminCapabilityService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
 import { adminCatalogEditableFields, adminCatalogItemRevision, readAdminCatalogRecord, withCurrentAdministrator } from '../catalog/adminCatalogService';
@@ -14,7 +13,6 @@ export function conversionTrackSourceRevision(track: any): string {
         representation: track.mediaRepresentation ?? null })).digest('hex').slice(0, 32)}`;
 }
 export function conversionAlbumMembershipRevision(ids: readonly string[]) { return `cm_${conversionDigest(ids)}`; }
-export const requireConversionFeature = () => { if (!isAdminCatalogEditingEnabled()) conversionFail(503, 'ADMIN_CONVERSION_UNAVAILABLE'); };
 const requireId = (id: string) => { if (!conversionId(id)) conversionFail(400, 'ADMIN_CONVERSION_INVALID_INPUT'); };
 const members = (album: any): string[] => {
     const ids = album.audioTrackIds;
@@ -52,11 +50,11 @@ function albumDto(album: any, ids: string[]) {
         revision: adminCatalogItemRevision('album', album), membershipRevision: conversionAlbumMembershipRevision(ids) };
 }
 export const getConversionAlbumSource = (actor: string, albumId: string): Promise<ConversionSourceManifest> => withCurrentAdministrator(actor, async session => {
-    requireConversionFeature(); const { album, ids, tracks } = await readConversionAlbum(albumId, session);
+    const { album, ids, tracks } = await readConversionAlbum(albumId, session);
     return { schemaVersion: 1, album: albumDto(album, ids), tracks: tracks.map(source) };
 });
 export const getConversionTrackSource = (actor: string, trackId: string): Promise<ConversionSourceManifest> => withCurrentAdministrator(actor, async session => {
-    requireConversionFeature(); requireId(trackId); const track = await readAdminCatalogRecord('audioTrack', trackId, session);
+    requireId(trackId); const track = await readAdminCatalogRecord('audioTrack', trackId, session);
     if (!audio(track)) return conversionFail(404, 'ADMIN_CONVERSION_SOURCE_UNAVAILABLE');
     if (track!.albumId) {
         if (!conversionId(track!.albumId)) return conversionFail(409, 'ADMIN_CONVERSION_MEMBERSHIP_UNAVAILABLE');

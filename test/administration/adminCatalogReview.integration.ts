@@ -5,7 +5,7 @@
  *   Variables: harness, server, base, token, userToken
  * Tests
  *   - private routing rejects anonymous, ordinary users and mismatched viewer before body; current admin reads shared reviews
- *   - source snapshot retains actual names and missing naming evidence; create receipt replays across flag rollback/source changes
+ *   - source snapshot retains actual names and missing naming evidence; create receipt replays across source changes
  *   - zero-track Album supports metadata-only review; malformed, excessive, mixed Video and unavailable membership fail closed
  *   - review projects never enter legacy import inventory/read/mutations/asset/duplicate/publication protocols
  *   - source status distinguishes changed metadata and unavailable lifecycle and prevents apply without blocking private draft repair
@@ -59,7 +59,7 @@ before(async () => {
 });
 beforeEach(async () => {
     for (const name of ['users', 'authSessions', 'adminAlbumImports', 'adminImportAnalysisSlots', 'albums', 'artists', 'audioTracks']) await db().collection(name).deleteMany({});
-    process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true'; process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true';
+    process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true';
     const account = { _id: actor, email: 'review-admin@example.test', emailVerified: true, role: 'admin' }, ordinary = { _id: user, email: 'review-user@example.test', emailVerified: true, role: 'user' };
     await db().collection('users').insertMany([account, ordinary, { _id: other, role: 'admin' }]);
     token = (await createSession(account)).accessToken; userToken = (await createSession(ordinary)).accessToken;
@@ -68,7 +68,7 @@ beforeEach(async () => {
     await db().collection('audioTracks').insertMany([first, second].map((id, index) => ({ _id: id, title: `Track ${index + 1}`, originalFileName: index ? undefined : '01 - Original.mp3', trackNumber: index + 1, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: String(id), albumId: String(album), visibility: 'public', mediaType: 'audio', duration: '1:00', unrelated: 'retained' })));
     await initializeAdminImportStorage(db());
 });
-after(async () => { await new Promise<void>(resolve => server?.close(() => resolve())); await harness?.stop(); delete process.env.FINITUDE_ADMIN_IMPORTS_ENABLED; delete process.env.FINITUDE_ADMIN_CATALOG_ENABLED; });
+after(async () => { await new Promise<void>(resolve => server?.close(() => resolve())); await harness?.stop(); delete process.env.FINITUDE_ADMIN_IMPORTS_ENABLED; });
 
 test('private routing rejects anonymous, ordinary users and mismatched viewer before body; current admin reads shared reviews', async () => {
     const body = await createBody();
@@ -83,16 +83,15 @@ test('private routing rejects anonymous, ordinary users and mismatched viewer be
     await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } });
     assert.equal((await request(`/catalog-reviews/${value.item.id}`)).status, 403);
 });
-test('source snapshot retains actual names and missing naming evidence; create receipt replays across flag rollback/source changes', async () => {
+test('source snapshot retains actual names and missing naming evidence; create receipt replays across source changes', async () => {
     const body = await createBody(), a = await createCatalogReview(String(actor), body);
     assert.equal(a.item.draft.album.artistName, 'Existing Artist');
     assert.deepEqual(a.item.source.tracks.map(track => track.originalFileName), ['01 - Original.mp3', null]);
     const stored = await importCollection().findOne({ _id: new ObjectId(a.item.id) });
     assert.equal(stored!.manifest.rootLabel, ''); assert.deepEqual(stored!.manifest.files.map(file => file.relativePath), ['', '']);
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'false'; await db().collection('albums').updateOne({ _id: album }, { $set: { title: 'Changed' } });
+    await db().collection('albums').updateOne({ _id: album }, { $set: { title: 'Changed' } });
     const replay = await createCatalogReview(String(actor), body); assert.equal(replay.item.id, a.item.id); assert.equal(replay.item.sourceStatus, 'changed'); assert.equal(replay.item.capabilities.apply, false);
     await assert.rejects(createCatalogReview(String(actor), { ...body, albumId: String(first) }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
-    await assert.rejects(create(), code('ADMIN_CATALOG_EDITING_UNAVAILABLE'));
 });
 test('zero-track Album supports metadata-only review; malformed, excessive, mixed Video and unavailable membership fail closed', async () => {
     await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [] } });
@@ -165,7 +164,6 @@ test('explicit selected apply preserves unrelated metadata, Credits, assets, vis
     for (const field of ['visibility', 's3Key', 'originalFileName', 'albumId', 'duration', 'unrelated']) assert.deepEqual(updatedTrack![field], initialTrack![field]);
     assert.equal(updatedTrack!.title, 'Approved Track'); assert.equal((await db().collection('audioTracks').findOne({ _id: second }))!.title, 'Track 2');
     assert.equal((await db().collection('artists').findOne({ _id: artist }))!.name, 'Existing Artist');
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'false';
     assert.deepEqual(await applyCatalogReview(String(actor), review.item.id, body), result);
     await assert.rejects(applyCatalogReview(String(actor), review.item.id, { ...body, fields: [albumTitle] }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
     await assert.rejects(editCatalogReview(String(actor), review.item.id, { ...mutation(result.item.revision), draft: review.item.draft }), code('ADMIN_CATALOG_REVIEW_APPLIED'));

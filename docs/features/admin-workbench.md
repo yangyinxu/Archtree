@@ -3,8 +3,10 @@
 The private administrator API is mounted at `/api/admin/v1`. It uses the current
 persisted `admin` role, same-origin cookie mutation protection, bounded parsers,
 account-viewer fencing and `no-store` responses. `GET /capabilities` advertises
-admission independently of the normal listener DTOs. All flags below default
-closed and accept only the literal `true`:
+admission independently of the normal listener DTOs. Existing catalog edits,
+cover changes, existing-Album reviews and local MP3 conversion need only that
+role and have no deployment flag. The remaining flags below default closed and
+accept only the literal `true`:
 
 | Configuration | Purpose |
 | --- | --- |
@@ -13,21 +15,17 @@ closed and accept only the literal `true`:
 | `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` | Optional existing provider routing; never returned to clients |
 | `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
 | `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` | Operator assertion that the staging bucket denies public/CDN access |
-| `FINITUDE_ADMIN_CATALOG_ENABLED` | Admit versioned edits to existing catalog metadata |
-| `FINITUDE_ADMIN_VISIBILITY_ENABLED` | Admit explicit public/hidden changes |
+| `FINITUDE_ADMIN_VISIBILITY_ENABLED` | Admit explicit public/hidden changes (also requires `FINITUDE_HIDDEN_DELIVERY_ENFORCED`) |
 | `FINITUDE_HIDDEN_DELIVERY_ENFORCED` | Operator assertion that historical object URLs, S3 policies and CDN delivery deny hidden access |
 
-Signing in as an administrator does not enable catalog writes. When
-`FINITUDE_ADMIN_CATALOG_ENABLED` is closed, the catalog editor is read-only and
-cannot create a new existing-Album review. Readback and authorized recovery of
-previous operations remain available. An existing Album review needs no staging
-bucket; starting Luna also requires the imports flag and configured provider.
+An existing Album review needs no staging bucket; starting Luna also requires
+the imports flag and configured provider.
 
-For an explicitly enabled local administrator session, use the existing ignored
+For a local administrator session with imports enabled, use the existing ignored
 `.env` for provider configuration, then start the application with:
 
 ```sh
-npx --no-install cross-env FINITUDE_ADMIN_CATALOG_ENABLED=true FINITUDE_ADMIN_IMPORTS_ENABLED=true npm run dev
+npx --no-install cross-env FINITUDE_ADMIN_IMPORTS_ENABLED=true npm run dev
 ```
 
 Restart the running server after configuration changes and refresh the browser's
@@ -146,10 +144,8 @@ matching account-viewer identity:
   `POST` to the same path with `{slots: [uuid]}` checks only selected pending
   cache slots, allowing later members to progress under the bounded S3-read budget.
 
-`FINITUDE_ADMIN_CATALOG_ENABLED` advertises `localMp3Conversion` capability and
-admits new conversion operations. Turning it off does not prevent recovery of an
-already attached output or cleanup. No server encoding service or extra key is
-needed. Source files remain private authenticated media, not public S3 redirects.
+Every administrator may start conversion operations; no server encoding service
+or extra key is needed. Source files remain private authenticated media, not public S3 redirects.
 The isolated hashed conversion Worker alone receives `wasm-unsafe-eval`; the
 document keeps strict script policy. The LAME WASM module is bundled locally,
 with no runtime CDN fetch or COOP/COEP requirement.
@@ -252,8 +248,7 @@ Catalog review routes (relative to `/api/admin/v1`):
 - `POST /catalog-reviews`: `{operationId, albumId, expectedRevision}` captures a
   ready Album and up to 100 ready Audio members. Empty Albums are supported;
   malformed, missing, Video or inconsistent members are explicitly rejected.
-  Creation is controlled by `FINITUDE_ADMIN_CATALOG_ENABLED` and does not start
-  analysis. Original filenames are allowlisted basenames, never storage keys.
+  Creation does not start analysis. Original filenames are allowlisted basenames, never storage keys.
 - `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
   workbench pagination and private readback. `sourceStatus` distinguishes current,
   changed and unavailable sources. Old `/imports` routes exclude these projects;

@@ -20,7 +20,7 @@
  *   - a later definite rejection or SDK retry never erases an earlier potentially accepted PUT
  *   - unknown PUT history created during validation is read from the claimed operation before rejection classification
  *   - cancellation clears a reservation never dispatched to S3 even when storage is unavailable
- *   - approval expiry and rollout shutdown during the target HEAD prevent dispatch but preserve cancellation
+ *   - approval expiry during the target HEAD prevents dispatch but preserves cancellation
  *   - a stored output that was hidden during the response is discovered by readback recovery
  *   - publication failure retains the MP3 until an explicit publication-only recovery succeeds
  *   - an old conversion reconcile preserves a later Album move, its saved order and unrelated metadata
@@ -33,7 +33,7 @@
  *   - an external edit after storage can cancel only the unused exact output and preserves the original
  *   - a delete marker never hides a known output version from cancellation or confirms an uncertain version cleanup
  *   - cancel of an unknown absent PUT retains evidence; successful attachment cannot be undone by cancel
- *   - expired upload approvals and rollback flags stop new work while installed cleanup remains recoverable
+ *   - expired upload approvals stop new work while installed cleanup remains recoverable
  *   - new import disposal proof excludes unpublished stages, reused different bytes and missing S3 confirmation
  * @end-catalog */
 
@@ -72,7 +72,7 @@ const storage: ConversionObjectStorage = {
 };
 const dependencies: AdminConversionDependencies = { storage, validate: async () => ({ durationMs: 2034, sampleRate: 44100, channels: 2 }) };
 const db = () => getDb()!, code = (expected: string) => (error: any) => error.code === expected;
-const flags = ['FINITUDE_ADMIN_CATALOG_ENABLED', 'S3_BUCKET_NAME'] as const, previous = Object.fromEntries(flags.map(key => [key, process.env[key]]));
+const flags = ['S3_BUCKET_NAME'] as const, previous = Object.fromEntries(flags.map(key => [key, process.env[key]]));
 const currentTrack = (id = first) => db().collection('audioTracks').findOne({ _id: id });
 async function intent(id = first): Promise<ConversionIntent> {
     const source = await getConversionTrackSource(String(actor), String(id)), track = source.tracks[0];
@@ -95,7 +95,7 @@ before(async () => {
 });
 beforeEach(async () => {
     for (const collection of ['users', 'authSessions', 'albums', 'audioTracks', 'adminMp3ConversionOperations', 'adminAlbumImports', 'socialRooms', 'socialRoomOutbox']) await db().collection(collection).deleteMany({});
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.S3_BUCKET_NAME = 'synthetic-conversion-bucket';
+    process.env.S3_BUCKET_NAME = 'synthetic-conversion-bucket';
     const admin = { _id: actor, role: 'admin', emailVerified: true, email: 'conversion-admin@example.test' }, adminOther = { _id: other, role: 'admin', emailVerified: true, email: 'conversion-other@example.test' }, ordinary = { _id: user, role: 'user', emailVerified: true, email: 'conversion-user@example.test' };
     await db().collection('users').insertMany([admin, adminOther, ordinary]);
     token = (await createSession(admin)).accessToken; userToken = (await createSession(ordinary)).accessToken; otherToken = (await createSession(adminOther)).accessToken;
@@ -253,23 +253,17 @@ test('cancellation clears a reservation never dispatched to S3 even when storage
     assert.equal(reads, before); assert.equal(cancelled.operation.cleanupPending, false); assert.equal(cancelled.operation.issue, 'ADMIN_CONVERSION_CANCELLED');
     assert.equal((await currentTrack())!.s3Key, String(first)); assert.equal((await currentTrack())!.pendingS3Key, null); assert.deepEqual(deletes, []);
 });
-test('approval expiry and rollout shutdown during the target HEAD prevent dispatch but preserve cancellation', async () => {
-    for (const change of ['expiry', 'rollout'] as const) {
-        const body = await prepare();
-        const interrupted: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async head(target, versionId) {
-            const actual = await storage.head(target, versionId);
-            if (target.key.startsWith('audio/')) {
-                if (change === 'expiry') await db().collection('adminMp3ConversionOperations').updateOne({ actor: String(actor), operationId: body.operationId }, { $set: { grantExpiresAt: new Date(0) } });
-                else process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'false';
-            }
-            return actual;
-        } } };
-        await assert.rejects(upload(body, first, interrupted), code(change === 'expiry' ? 'ADMIN_CONVERSION_APPROVAL_EXPIRED' : 'ADMIN_CONVERSION_UNAVAILABLE'));
-        assert.equal(puts.length, 0); assert.ok((await currentTrack())!.pendingS3Key);
-        const cancelled = await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
-        assert.equal(cancelled.operation.cleanupPending, false); assert.equal((await currentTrack())!.pendingS3Key, null);
-        process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true';
-    }
+test('approval expiry during the target HEAD prevents dispatch but preserves cancellation', async () => {
+    const body = await prepare();
+    const interrupted: AdminConversionDependencies = { ...dependencies, storage: { ...storage, async head(target, versionId) {
+        const actual = await storage.head(target, versionId);
+        if (target.key.startsWith('audio/')) await db().collection('adminMp3ConversionOperations').updateOne({ actor: String(actor), operationId: body.operationId }, { $set: { grantExpiresAt: new Date(0) } });
+        return actual;
+    } } };
+    await assert.rejects(upload(body, first, interrupted), code('ADMIN_CONVERSION_APPROVAL_EXPIRED'));
+    assert.equal(puts.length, 0); assert.ok((await currentTrack())!.pendingS3Key);
+    const cancelled = await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
+    assert.equal(cancelled.operation.cleanupPending, false); assert.equal((await currentTrack())!.pendingS3Key, null);
 });
 test('a stored output that was hidden during the response is discovered by readback recovery', async () => {
     const body = await prepare(); hideOutput = true;
@@ -312,10 +306,6 @@ test('publication retry fences the exact output and existing current Album membe
     assert.equal(result.operation.ready, true); assert.equal((await currentTrack())!.publicationStatus, 'ready'); assert.equal(puts.length, 1);
     const before = await currentTrack();
     await db().collection('audioTracks').updateOne({ _id: first }, { $set: { publicationStatus: 'failed' } });
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'false';
-    const disabled = await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies);
-    assert.equal(disabled.operation.ready, false); assert.equal((await currentTrack())!.publicationStatus, 'failed');
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true';
     await db().collection('adminMp3ConversionOperations').updateOne({ actor: String(actor), operationId: body.operationId }, { $set: { grantExpiresAt: new Date(0) } });
     assert.equal((await reconcileConversionOperation(String(actor), String(first), body.operationId, dependencies)).operation.ready, false);
     assert.equal((await currentTrack())!.publicationStatus, 'failed'); assert.equal((await currentTrack())!.s3Key, before!.s3Key);
@@ -402,13 +392,12 @@ test('cancel of an unknown absent PUT retains evidence; successful attachment ca
     const otherBody = await prepare(undefined, second); rejectPut = false; await upload(otherBody, second);
     await assert.rejects(cancelConversionOperation(String(actor), String(second), otherBody.operationId, dependencies), code('ADMIN_CONVERSION_ALREADY_ATTACHED'));
 });
-test('expired upload approvals and rollback flags stop new work while installed cleanup remains recoverable', async () => {
+test('expired upload approvals stop new work while installed cleanup remains recoverable', async () => {
     const body = await prepare(); await db().collection('adminMp3ConversionOperations').updateOne({ actor: String(actor), operationId: body.operationId }, { $set: { grantExpiresAt: new Date(0) } });
     await assert.rejects(upload(body), code('ADMIN_CONVERSION_APPROVAL_EXPIRED')); assert.equal(puts.length, 0);
     await cancelConversionOperation(String(actor), String(first), body.operationId, dependencies);
-    const next = await prepare(); failCleanup = true; await upload(next); process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'false'; failCleanup = false;
+    const next = await prepare(); failCleanup = true; await upload(next); failCleanup = false;
     assert.equal((await reconcileConversionOperation(String(actor), String(first), next.operationId, dependencies)).operation.cleanupPending, false);
-    await assert.rejects(getConversionAlbumSource(String(actor), String(album)), code('ADMIN_CONVERSION_UNAVAILABLE'));
 });
 test('new import disposal proof excludes unpublished stages, reused different bytes and missing S3 confirmation', async () => {
     const body = await prepare(); await upload(body); const track = await currentTrack(), slotId = randomUUID(), projectId = new ObjectId(), publicationOperationId = randomUUID();

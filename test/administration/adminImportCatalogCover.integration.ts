@@ -46,7 +46,7 @@ class Storage implements ImportObjectStorage {
 }
 before(async () => { harness = await startMongoReplicaSet('archtree-admin-import-cover-test'); });
 beforeEach(async () => {
-    process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true'; process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'true'; process.env.ADMIN_IMPORT_S3_BUCKET_NAME = 'private-imports'; process.env.S3_BUCKET_NAME = 'catalog';
+    process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true'; process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'true'; process.env.ADMIN_IMPORT_S3_BUCKET_NAME = 'private-imports'; process.env.S3_BUCKET_NAME = 'catalog';
     for (const name of ['users', 'adminAlbumImports', 'adminImportAnalysisSlots', 'artists', 'imageAssets', 'adminCatalogCoverOperations']) await getDb()!.collection(name).deleteMany({});
     await getDb()!.collection('users').insertMany([{ _id: actor, role: 'admin', email: 'cover-admin@example.test' }, { _id: other, role: 'admin', email: 'other-cover-admin@example.test' }]);
     await getDb()!.collection('artists').insertOne({ _id: artist, name: 'Confirmed Artist', lifecycleStatus: 'ready', visibility: 'public', coverArtId: oldImage.toHexString(), coverArtUrl: `/content/images/${oldImage}` });

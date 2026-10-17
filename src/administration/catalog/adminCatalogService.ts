@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto';
 import { ObjectId, type ClientSession, type Document } from 'mongodb';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
-import { isAdminCatalogEditingEnabled, isAdminVisibilityEditingEnabled } from '../adminCapabilityService';
+import { isAdminVisibilityEditingEnabled } from '../adminCapabilityService';
 import { readyAlbumLifecycleFilter, touchReadyAlbumReferences } from '../../services/catalog/albumReferenceFenceService';
 import { orderedAlbumTrackIds } from '../../services/catalog/albumTrackLinkService';
 import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
@@ -118,7 +118,7 @@ export const adminCatalogSnapshot = async (kind: AdminCatalogKind, doc: any, ses
     return { kind, id: ownerId, revision: revision(stateForRevision(kind, doc)), visibility: visibility(doc.visibility), effectiveVisibility,
         fields: fields(kind, doc), coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
         mediaUrl: kind === 'audioTrack' ? `/api/admin/v1/catalog/audioTrack/${ownerId}/media` : null,
-        capabilities: { editing: isAdminCatalogEditingEnabled(), visibility: isAdminVisibilityEditingEnabled() } };
+        capabilities: { editing: true, visibility: isAdminVisibilityEditingEnabled() } };
 };
 
 export const getAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawId: string) => withCurrentAdministrator(actor, async session => {
@@ -200,7 +200,6 @@ export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawI
     const fingerprint = revision([kind, rawId, body]);
     return withCurrentAdministrator(actor, async session => {
         const previous = await replay(actor, body, fingerprint, session); if (previous) return previous;
-        if (!isAdminCatalogEditingEnabled()) fail(503, 'ADMIN_CATALOG_EDITING_UNAVAILABLE');
         const doc = await readAdminCatalogRecord(kind, rawId, session); if (!doc) return fail(404, 'ADMIN_CATALOG_NOT_FOUND');
         if (revision(stateForRevision(kind, doc)) !== body.expectedRevision) fail(409, 'ADMIN_CATALOG_REVISION_CONFLICT');
         if (desiredVisibility !== undefined && desiredVisibility !== visibility(doc.visibility)) {

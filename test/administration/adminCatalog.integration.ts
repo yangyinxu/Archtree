@@ -43,7 +43,7 @@ import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mo
 
 let harness: MongoReplicaSetHarness, server: Server, base = '', token = '', userToken = '';
 const admin = new ObjectId(), user = new ObjectId(), album = new ObjectId(), artist = new ObjectId(), track = new ObjectId();
-const flags = ['FINITUDE_ADMIN_CATALOG_ENABLED', 'FINITUDE_ADMIN_VISIBILITY_ENABLED', 'FINITUDE_HIDDEN_DELIVERY_ENFORCED', 'FINITUDE_ARTIST_FOLLOWS_ENABLED'] as const;
+const flags = ['FINITUDE_ADMIN_VISIBILITY_ENABLED', 'FINITUDE_HIDDEN_DELIVERY_ENFORCED', 'FINITUDE_ARTIST_FOLLOWS_ENABLED'] as const;
 const previous = Object.fromEntries(flags.map(key => [key, process.env[key]]));
 const db = () => getDb()!;
 const code = (expected: string) => (error: any) => error.code === expected;

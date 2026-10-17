@@ -2,12 +2,14 @@
 const enabled = (value: string | undefined) => value === 'true';
 
 export const isAdminImportsEnabled = () => enabled(process.env.FINITUDE_ADMIN_IMPORTS_ENABLED);
-export const isAdminCatalogEditingEnabled = () => enabled(process.env.FINITUDE_ADMIN_CATALOG_ENABLED);
-export const isAdminVisibilityEditingEnabled = () => isAdminCatalogEditingEnabled()
-    && enabled(process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED)
+/** Visibility changes stay gated because hiding is only safe once delivery enforcement is asserted. */
+export const isAdminVisibilityEditingEnabled = () => enabled(process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED)
     && enabled(process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED);
 
-/** Reports capabilities, never provider secrets or organization/project identifiers. */
+/**
+ * Reports capabilities, never provider secrets or organization/project identifiers.
+ * Catalog editing and local conversion need only the persisted admin role checked by the caller.
+ */
 export const getAdminCapabilities = () => ({
     schemaVersion: 1 as const,
     admin: true as const,
@@ -18,13 +20,13 @@ export const getAdminCapabilities = () => ({
         maxFiles: 100
     },
     catalog: {
-        editing: isAdminCatalogEditingEnabled(),
+        editing: true as const,
         visibility: isAdminVisibilityEditingEnabled()
     },
     localMp3Conversion: {
-        enabled: isAdminCatalogEditingEnabled(),
-        readSources: isAdminCatalogEditingEnabled(),
-        replace: isAdminCatalogEditingEnabled(),
+        enabled: true as const,
+        readSources: true as const,
+        replace: true as const,
         preset: 'mp3-320' as const,
         maxFiles: 100
     }
