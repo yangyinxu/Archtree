@@ -114,9 +114,11 @@ npm run prepare:naruto-web -- D:\Documents\GitHub\naruto-mobile
 The helper runs the sibling's `npm run build:hosted`, validates the `/naruto/`
 Vite manifest and extension download, and copies only the hosted distribution
 to the ignored `naruto-web/dist/` directory. A distribution digest and source
-commit/dirty metadata accompany the build; desktop data, local configuration,
-and credentials are excluded. `/naruto/naruto-mobile-chrome-extension.zip`
-downloads the unpacked extension described by the UI's installation guide.
+commit/dirty metadata and the packaged extension version accompany the build;
+desktop data, local configuration, and credentials are excluded.
+`/naruto/naruto-mobile-chrome-extension.zip` downloads the unpacked extension
+described by the UI's installation guide, saved as
+`naruto-mobile-chrome-extension-<version>.zip` from that recorded version.
 Extension `0.1.2` adds bounded scrolling/waiting for lazy Bilibili comments and
 keeps incomplete sources retryable. Reload the updated extension and refresh the
 portal before continuing an older investigation; its first explicit resume

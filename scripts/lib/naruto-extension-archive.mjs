@@ -54,9 +54,10 @@ const validateManifest = (data) => {
   const csp = value.content_security_policy?.extension_pages;
   if (typeof csp !== 'string' || csp.split(';').map(part => part.trim()).filter(Boolean).join('; ')
     !== "script-src 'self'; object-src 'none'") invalid('unsafe extension policy');
+  return value.version;
 };
 
-/** Fully decodes the three-file collector ZIP, verifying layout, sizes, CRCs, UTF-8 and permissions. */
+/** Fully decodes the three-file collector ZIP, verifying layout, sizes, CRCs, UTF-8 and permissions; returns its version. */
 export const validateNarutoExtensionArchive = (input) => {
   if (!(input instanceof Uint8Array)) invalid('invalid archive input');
   if (input.byteLength < 22 || input.byteLength > maximumArchiveBytes) invalid('archive size limit');
@@ -139,5 +140,5 @@ export const validateNarutoExtensionArchive = (input) => {
     previousEnd = descriptorEnd;
   }
   if (previousEnd !== centralOffset) invalid('unexpected local data');
-  validateManifest(data.get('manifest.json'));
+  return validateManifest(data.get('manifest.json'));
 };
