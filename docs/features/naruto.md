@@ -145,6 +145,11 @@ windows with `focused: false`. Parallel collector tabs share one dedicated
 window and the orange investigation group; delayed-comment retries change only
 that window's selected tab. The existing user window keeps its selection.
 Cleanup removes only owned tabs, so a user-added tab keeps its window open.
+Extension `0.1.9` enforces the selected content window itself rather than
+trusting Bilibili's search filter: each source needs a confirmed publish time
+inside the window, and undated sources are skipped with a warning. The retired
+动态 search is replaced by 专栏 article search, and the portal requires `0.1.9`
+before starting or resuming live collection.
 
 `npm run stage:eb-artifact` includes this separately prepared distribution when
 present and revalidates its provenance. Prepare it before staging any release
@@ -157,7 +162,7 @@ generated bundles and deployment archives must not be committed.
 ### Required Naruto source handoff on `develop`
 
 Current Naruto source handoff:
-[`d77c1f1630164151bf1e8b14fea05d5f1c035519`](https://github.com/yangyinxu/naruto-mobile/commit/d77c1f1630164151bf1e8b14fea05d5f1c035519).
+[`a702c39ad1dbc912dcb99da46b0e496a327f2ca1`](https://github.com/yangyinxu/naruto-mobile/commit/a702c39ad1dbc912dcb99da46b0e496a327f2ca1).
 
 Every push to `yangyinxu/naruto-mobile`'s `main` branch, including a
 documentation-only push, requires a matching Archtree update on `develop`.
