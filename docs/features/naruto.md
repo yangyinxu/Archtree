@@ -162,7 +162,7 @@ generated bundles and deployment archives must not be committed.
 ### Required Naruto source handoff on `develop`
 
 Current Naruto source handoff:
-[`a702c39ad1dbc912dcb99da46b0e496a327f2ca1`](https://github.com/yangyinxu/naruto-mobile/commit/a702c39ad1dbc912dcb99da46b0e496a327f2ca1).
+[`14f852435880ba65556ed894dfdbea177307f97f`](https://github.com/yangyinxu/naruto-mobile/commit/14f852435880ba65556ed894dfdbea177307f97f).
 
 Every push to `yangyinxu/naruto-mobile`'s `main` branch, including a
 documentation-only push, requires a matching Archtree update on `develop`.
@@ -178,8 +178,8 @@ The person or agent pushing Naruto is responsible for completing this handoff:
    unrelated work and leaving generated distributions ignored.
 3. Report both repository commits and the verification results. This is a
    required collaboration workflow; no CI job automatically synchronizes the
-   repositories. The README entry records the `develop` handoff and is not read
-   by the production release workflow.
+   repositories. This entry records the `develop` handoff and is not read by the
+   production release workflow.
 
 Before an authorized Archtree `main` release, set the Actions variable
 `NARUTO_SOURCE_COMMIT` to this same complete source SHA. A routine `develop`
