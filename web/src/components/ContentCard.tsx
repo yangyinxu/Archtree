@@ -22,7 +22,7 @@ import { LazyShareMusicButton } from '../features/social/LazyShareMusicButton';
 import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
 import { useVideoPreviewIntent } from './useVideoPreviewIntent';
 
-// The preview element and its styles load only once a mouse rests on a Video card.
+// The preview element loads only once a mouse rests on a Video card.
 const CardVideoPreview = lazy(() => import('./CardVideoPreview'));
 
 
@@ -84,7 +84,7 @@ export const ContentCard = ({
         <Artwork alt="" kind={item.contentType} sizes={artworkSizes} src={item.artworkUrl} />
         {preview.active && previewSource ? (
           <Suspense fallback={null}>
-            <CardVideoPreview onFailed={preview.onFailed} source={previewSource} />
+            <CardVideoPreview className={styles.videoPreview} onStop={preview.stop} source={previewSource} />
           </Suspense>
         ) : null}
         {showPlayReveal ? (

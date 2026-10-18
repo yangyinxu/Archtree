@@ -3,13 +3,14 @@
  *   Types: CardVideoPreviewProps
  *   Functions: CardVideoPreview
  * Internal
- *   Functions: isMediaFailure
- *   Constants: previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds, loopLeadSeconds
+ *   Types: NetworkInformationLike
+ *   Functions: videoPreviewAllowed, isMediaFailure
+ *   Constants: previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds, loopLeadSeconds,
+ *              slowConnectionTypes, failedSources
+ *   Variables: stopActivePreview
  * @end-catalog */
 
 import { useEffect, useRef, useState } from 'react';
-
-import styles from './CardVideoPreview.module.css';
 
 // Previews loop a short window from a little way into the video, where openings are rarely blank.
 const previewStartFraction = 0.2;
@@ -17,11 +18,35 @@ const previewMaximumStartSeconds = 30;
 const previewWindowSeconds = 8;
 // Restart slightly before the window or clip ends so the element never reaches its own end.
 const loopLeadSeconds = 0.1;
+const slowConnectionTypes = new Set(['slow-2g', '2g', '3g']);
+// A source that failed once is not retried in this page session, so a broken stream costs one request.
+const failedSources = new Set<string>();
+// Only one card previews at a time; a newly started preview stops the previous one.
+let stopActivePreview: (() => void) | null = null;
+
+type NetworkInformationLike = { saveData?: boolean; effectiveType?: string };
 
 export interface CardVideoPreviewProps {
+  /** Placement and reveal styles, owned by the card so the preview needs no stylesheet of its own. */
+  className: string;
   source: string;
-  onFailed: () => void;
+  /** Asks the card to unmount the preview: it is not allowed here, it failed, or the page hid. */
+  onStop: () => void;
 }
+
+/**
+ * Whether the device, page and listener settings allow a decorative hover preview right now. It runs
+ * here rather than in the card's hover hook so the shared listener bundle stays small; a disallowed
+ * preview unmounts before it requests any media.
+ */
+const videoPreviewAllowed = () => {
+  if (typeof window.matchMedia !== 'function' || document.visibilityState === 'hidden') return false;
+  if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return false;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  if (window.matchMedia('(forced-colors: active)').matches) return false;
+  const connection = (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
+  return !connection?.saveData && !slowConnectionTypes.has(connection?.effectiveType ?? '');
+};
 
 /** Only failures of the media itself count; an interrupted play() after teardown is not a failure. */
 const isMediaFailure = (error: unknown) => {
@@ -31,15 +56,22 @@ const isMediaFailure = (error: unknown) => {
 
 /**
  * A decorative, muted preview drawn over a Video card's artwork. It owns its own media element,
- * separate from the shared player, loops a bounded window, and releases its request on unmount.
+ * separate from the shared player, loops a bounded window, stops when the page hides or another card
+ * starts a preview, and releases its request on unmount.
  */
-export default function CardVideoPreview({ source, onFailed }: CardVideoPreviewProps) {
+export default function CardVideoPreview({ className, source, onStop }: CardVideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return undefined;
+    if (failedSources.has(source) || !videoPreviewAllowed()) {
+      onStop();
+      return undefined;
+    }
+    stopActivePreview?.();
+    stopActivePreview = onStop;
     let released = false;
     let start = 0;
     let end = previewWindowSeconds;
@@ -48,9 +80,14 @@ export default function CardVideoPreview({ source, onFailed }: CardVideoPreviewP
     video.disablePictureInPicture = true;
     if ('disableRemotePlayback' in video) video.disableRemotePlayback = true;
 
+    const fail = () => {
+      if (released) return;
+      failedSources.add(source);
+      onStop();
+    };
     const play = () => {
       video.play()?.catch?.((error: unknown) => {
-        if (!released && isMediaFailure(error)) onFailed();
+        if (isMediaFailure(error)) fail();
       });
     };
     const begin = () => {
@@ -73,8 +110,8 @@ export default function CardVideoPreview({ source, onFailed }: CardVideoPreviewP
       play();
     };
     const reveal = () => setReady(true);
-    const fail = () => {
-      if (!released) onFailed();
+    const stopWhenHidden = () => {
+      if (document.visibilityState === 'hidden') onStop();
     };
 
     video.addEventListener('loadedmetadata', begin);
@@ -82,26 +119,29 @@ export default function CardVideoPreview({ source, onFailed }: CardVideoPreviewP
     video.addEventListener('ended', restart);
     video.addEventListener('playing', reveal);
     video.addEventListener('error', fail);
+    document.addEventListener('visibilitychange', stopWhenHidden);
     video.src = source;
 
     return () => {
       released = true;
+      if (stopActivePreview === onStop) stopActivePreview = null;
       video.removeEventListener('loadedmetadata', begin);
       video.removeEventListener('timeupdate', loopWindow);
       video.removeEventListener('ended', restart);
       video.removeEventListener('playing', reveal);
       video.removeEventListener('error', fail);
+      document.removeEventListener('visibilitychange', stopWhenHidden);
       // Clearing the source aborts the in-flight range request instead of finishing the download.
       video.pause();
       video.removeAttribute('src');
       video.load();
     };
-  }, [onFailed, source]);
+  }, [onStop, source]);
 
   return (
     <video
       aria-hidden="true"
-      className={styles.preview}
+      className={className}
       data-ready={ready || undefined}
       data-video-preview=""
       muted

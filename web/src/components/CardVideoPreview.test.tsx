@@ -239,14 +239,17 @@ test.each([
   ['forced colors', { environment: { forcedColors: true } }],
   ['Save-Data', { environment: { saveData: true } }],
   ['a slow connection', { environment: { effectiveType: '3g' } }]
-] as const)('%s never starts a preview', async (_label, options) => {
+] as const)('%s never starts a preview or requests its media', async (_label, options) => {
   configure('environment' in options ? options.environment : {});
+  const setSource = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
   renderCards([videoTrack]);
 
   hover(card('Moving Light'), 'pointerType' in options ? options.pointerType : 'mouse');
   await restPastIntent();
 
   expect(previewIn(card('Moving Light'))).toBeNull();
+  // The lazy preview checks eligibility before it assigns a source, so no request ever starts.
+  expect(setSource).not.toHaveBeenCalled();
 });
 
 test('audio cards and the Video already playing in the shared player offer no preview', async () => {
@@ -293,9 +296,11 @@ test('a media error stops the preview and that source is not retried', async () 
   expect(previewIn(target)).toBeNull();
 
   fireEvent.pointerLeave(target);
+  const setSource = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
   hover(target);
   await restPastIntent();
   expect(previewIn(target)).toBeNull();
+  expect(setSource).not.toHaveBeenCalled();
 });
 
 test('hiding the page stops a running preview and prevents a pending one', async () => {
