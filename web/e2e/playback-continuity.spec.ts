@@ -61,7 +61,9 @@ const installMediaProbe = async (page: Page) => {
 };
 
 const readMediaProbe = (page: Page) => page.evaluate<MediaProbeSnapshot>(() => {
-  const mediaElements = (window as MediaProbeWindow).__finitudeE2EMediaElements ?? [];
+  // Card hover previews are separate decorative elements, not the shared player.
+  const mediaElements = ((window as MediaProbeWindow).__finitudeE2EMediaElements ?? [])
+    .filter((media) => !media.hasAttribute('data-video-preview'));
   const media = mediaElements[0];
   return {
     ariaHidden: media?.getAttribute('aria-hidden') ?? null,

@@ -31,7 +31,8 @@ remains independently scrollable. Player coverage includes persisted
 Shuffle/Repeat state, hover-only seek preview, release-time pointer seeking,
 keyboard seeking, 24 px seek hit targets, and axe scans of the expanded mobile
 player and shortcut-help layers. Video coverage must additionally verify one
-shared media element, automatic Audio browse and Video theater presentations,
+shared media element (decorative card hover previews are separate muted
+elements that never touch the player, and are excluded from that count), automatic Audio browse and Video theater presentations,
 Audio-to-Video and Video-to-Audio queue transitions, a full right-side Video
 queue, recoverable failure without a fabricated fallback, no media-mode switch,
 and no duplicate activity write. Responsive-shell coverage verifies the exact
