@@ -73,15 +73,46 @@ Section navigation retains account-fenced local work and does not dispatch a
 mutation. Saving sends only the values the administrator changed, each with
 the saved value the edit started from. A newer saved version that changed only
 other values carries the unsaved edits over; one that changed an edited value,
-or a refused stale save, loads the saved version for comparison. The Artist
-name field edits a draft's single Artist entry, keeping its key and role, and
-clearing it then typing again brings that saved entry back. Several entries
-show their byline read-only, each track edits its Disc Number, and the label
-is not edited here yet. Compact value comparisons keep source evidence
-expandable; publication recovery has its own status and actions. Confirmation
-windows show the frozen named target and proposed change before secondary
-explanations. Technical IDs remain available in Details rather than leading
-normal catalog and Page rows.
+or a refused stale save, loads the saved version for comparison. Compact value
+comparisons keep source evidence expandable; publication recovery has its own
+status and actions. Confirmation windows show the frozen named target and
+proposed change before secondary explanations. Technical IDs remain available
+in Details rather than leading normal catalog and Page rows.
+
+The Draft section lists the Artist entries in order. Each entry edits its
+name, its role (Primary or Featured) and, unless it is last, its join phrase,
+and has Move up, Move down and Remove buttons; Add Artist adds an empty
+primary entry at the end of the primary group, up to 20 entries. Primary
+entries always precede featured ones: a move never crosses that boundary, and
+changing a role moves the entry to the last primary or first featured
+position, keeping focus on its role. Every add, removal, move and role change
+is announced; a move names the entry and its new position and keeps focus on
+the moved entry, an added entry takes focus, and a removal moves focus to the
+nearest remaining entry; the same message twice in a row is announced again.
+A move keeps each join phrase in its position, so swapping the first two names
+of "A & B feat. C" gives "B & A feat. C"; a role change carries the entry's
+phrase with it, and the entry an add, removal, move or role change leaves last
+loses its phrase. A move, role change or join phrase edit keeps the entry's
+key and name, so its saved Artist decision still applies; a rename or removal
+drops that decision when saved, but clearing a name keeps the entry, so
+retyping the exact saved name keeps the decision. A MusicBrainz ID on an entry
+or the label stays only while its name matches the saved one
+case-insensitively. An edited entry list or label that the server would refuse
+(an empty name, a name repeated case-insensitively, where every entry sharing
+it is marked, control or invisible formatting characters left after trimming,
+more than 200 characters after normalization, an invalid join phrase) blocks
+Save with its message; an empty name is marked only after its field loses
+focus or a Save attempt, and unedited saved values are not checked. When no
+entry is primary, a note says publishing needs at least one primary entry;
+Save stays available. The entries save as one `album.artists` change. The
+label is one Organization name saved as `album.label`, and an empty label
+saves none. Each track edits its Disc Number beside its Track Number. Review
+shows an Artist suggestion as its byline followed by each entry with its role.
+A draft with several entries, a label or no primary entry saves normally, but
+Review offers it no Artist decision, and publishing several entries or a label
+is refused until a later release (see `POST /imports/:id/publish`). Saving
+duplicate decisions while Review offers no Artist decision drops the saved
+Artist decision; decide the Artist again after returning to one primary entry.
 
 The workbench is Web-only. Finitude iOS and Android expose listener features even
 for administrator accounts; they do not load administrator capabilities, private
@@ -326,7 +357,12 @@ Import routes (relative to `/api/admin/v1`):
   is never frozen, and only pending suggestions the editor shows hold the
   approval with `409 ADMIN_IMPORT_REVIEW_REQUIRED`. The approval freezes the Draft v2
   snapshot with `schemaVersion` 2 and makes every draft value the
-  administrator's own; the entry's join phrase is kept on its Credits.
+  administrator's own; the entry's join phrase is kept on its Credits. The Web
+  shows `ADMIN_IMPORT_PUBLICATION_UNSUPPORTED`, from this route or
+  `/decisions`, as its own message instead of a conflict: this release
+  publishes one primary Artist and no label, the saved draft is kept and
+  reread, no retry is offered, and keeping one primary entry, clearing the
+  label and deciding that Artist in Review makes it publishable.
 - `POST /imports/:id/cancel-publication`: explicit cancellation with
   `{operationId, expectedRevision, publicationOperationId}`. The new operation
   UUID binds the exact original publication UUID. An active worker lease or a

@@ -40,3 +40,4 @@ export const importSuggestionV2Schema = z.object({ ...suggestionShape, field: z.
 export type ImportDraftV2 = z.infer<typeof importDraftV2Schema>;
 export type ImportSuggestionV2 = z.infer<typeof importSuggestionV2Schema>;
 export type ImportArtistEntry = z.infer<typeof artistEntrySchema>;
+export type ImportLabelEntry = z.infer<typeof labelEntrySchema>;

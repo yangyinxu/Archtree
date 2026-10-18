@@ -1,4 +1,4 @@
-import type { ImportArtistEntry, ImportDetail, ImportDraftV2 } from './adminApi';
+import type { ImportArtistEntry, ImportDetail, ImportDraftV2, ImportLabelEntry } from './adminApi';
 export const viewer = 'aaaaaaaaaaaaaaaaaaaaaaaa';
 export const projectId = 'bbbbbbbbbbbbbbbbbbbbbbbb';
 export const slotId = '10000000-0000-4000-8000-000000000001';
@@ -17,8 +17,12 @@ export function detail(): ImportDetail {
     ], decisions: [], upload: { ready: 0, total: 2, available: false }, publication: 'notAvailable', capabilities: { analysis: true, upload: false, publish: false }, receipts: []
   };
 }
-/** One synthetic primary Artist entry; a fixed key keeps saved and edited drafts comparable. */
-export const artistEntry = (name: string, key = '30000000-0000-4000-8000-000000000001'): ImportArtistEntry => ({ key, name, role: 'primary', joinPhrase: null, musicBrainzId: null });
+/** One synthetic Artist entry, primary by default; a fixed key keeps saved and edited drafts comparable. */
+export const artistEntry = (name: string, key = '30000000-0000-4000-8000-000000000001', role: ImportArtistEntry['role'] = 'primary'): ImportArtistEntry => ({ key, name, role, joinPhrase: null, musicBrainzId: null });
+/** The fixed key of the nth synthetic Artist entry; entryKey(1) is artistEntry's default key. */
+export const entryKey = (n: number) => `30000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+/** A synthetic label Organization without a MusicBrainz ID. */
+export const labelEntry = (name: string): ImportLabelEntry => ({ name, musicBrainzId: null });
 /** Applies a field-patch body to a mocked saved draft the way the server writes it: each path's value replaces it whole. */
 export function applyDraftChanges(draft: ImportDraftV2, changes: { path: string; value: unknown }[]): ImportDraftV2 {
   const next = structuredClone(draft);
@@ -28,6 +32,22 @@ export function applyDraftChanges(draft: ImportDraftV2, changes: { path: string;
     holder[scope === 'album' ? first : second] = value;
   }
   return next;
+}
+/**
+ * A synthetic import project endpoint: a PATCH records its body, applies its changes as the server writes them and confirms a
+ * new revision; any other request reads the current project. `set` replaces the project, as another administrator's save would.
+ */
+export function fieldSaveEndpoint(initial: ImportDetail) {
+  let item = initial; const writes: Record<string, any>[] = [];
+  return {
+    writes, current: () => item, set: (next: ImportDetail) => { item = next; },
+    fetch: async (_path: string, init?: RequestInit) => {
+      if (init?.method !== 'PATCH') return json({ item, receipt: null });
+      const body = JSON.parse(String(init.body)); writes.push(body);
+      item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) };
+      return json({ item, receipt: { operationId: body.operationId, kind: 'edit', revision: item.revision } });
+    }
+  };
 }
 export const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json', 'X-Finitude-Account-Viewer': viewer } });
 export function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }

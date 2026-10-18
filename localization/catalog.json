@@ -1954,6 +1954,13 @@
       ],
       "variables": {}
     },
+    "admin.common.publication_unsupported": {
+      "description": "Administrator workbench: publishing or an Artist decision was refused because this release decides and publishes only one primary Artist entry without a label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.refresh": {
       "description": "Administrator workbench: common refresh.",
       "delivery": [
@@ -2663,8 +2670,165 @@
       ],
       "variables": {}
     },
+    "admin.entries.add": {
+      "description": "Administrator import editor: action adding an empty primary Artist entry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.added": {
+      "description": "Administrator import editor: status announced after an Artist entry is added at a position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "position": "number"
+      }
+    },
+    "admin.entries.byline": {
+      "description": "Administrator import editor: preview of the byline composed from the Artist entries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "byline": "string"
+      }
+    },
+    "admin.entries.empty": {
+      "description": "Administrator import editor: the draft has no Artist entries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.help": {
+      "description": "Administrator import editor: how Artist entries are ordered and moved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.limit": {
+      "description": "Administrator import editor: the Artist entry limit was reached.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.move_down": {
+      "description": "Administrator import editor: action moving an Artist entry one place later within its role group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.move_up": {
+      "description": "Administrator import editor: action moving an Artist entry one place earlier within its role group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.moved": {
+      "description": "Administrator import editor: status announced after an Artist entry moves.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "name": "string",
+        "position": "number"
+      }
+    },
+    "admin.entries.name_duplicate": {
+      "description": "Administrator import editor: validation error for an Artist entry name another entry already has.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.name_invalid": {
+      "description": "Administrator import editor: validation error for a name with control or invisible formatting characters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.name_required": {
+      "description": "Administrator import editor: validation error for an empty Artist entry name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.name_too_long": {
+      "description": "Administrator import editor: validation error for an Artist entry or label name longer than 200 characters after normalization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.no_primary": {
+      "description": "Administrator import editor: note that publishing needs at least one primary Artist entry, shown when every entry is featured.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.phrase_invalid": {
+      "description": "Administrator import editor: validation error for a join phrase the server would refuse.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.remove": {
+      "description": "Administrator import editor: action removing an Artist entry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.removed": {
+      "description": "Administrator import editor: status announced after an Artist entry is removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.entries.role_changed": {
+      "description": "Administrator import editor: status announced after an Artist entry changes role and group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "name": "string",
+        "position": "number",
+        "role": "string"
+      }
+    },
+    "admin.entries.unnamed": {
+      "description": "Administrator import editor: name of an Artist entry without a name, by position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "position": "number"
+      }
+    },
     "admin.field.artist_name": {
       "description": "Administrator workbench: field artistName.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.artists": {
+      "description": "Administrator workbench: field artists, the ordered Artist entries.",
       "delivery": [
         "runtime"
       ],
@@ -2707,6 +2871,20 @@
     },
     "admin.field.hidden": {
       "description": "Administrator workbench: field hidden.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.label": {
+      "description": "Administrator workbench: field label, the optional record label Organization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.label_help": {
+      "description": "Administrator workbench: help for the optional label field.",
       "delivery": [
         "runtime"
       ],

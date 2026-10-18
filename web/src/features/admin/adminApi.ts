@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { importDraftV2Schema, importSuggestionV2Schema, analysisSchema } from './adminNamingSchema';
 export { importDateSchema, analysisSchema, artistEntrySchema, labelEntrySchema, importDraftV2Schema, importSuggestionV2Schema } from './adminNamingSchema';
-export type { ImportDraftV2, ImportSuggestionV2, ImportArtistEntry } from './adminNamingSchema';
+export type { ImportDraftV2, ImportSuggestionV2, ImportArtistEntry, ImportLabelEntry } from './adminNamingSchema';
 // Catalog reviews keep the v1 draft; its runtime schemas are imported from reviewNamingSchema.ts directly.
 export type { ImportDraft, ImportSuggestion } from './reviewNamingSchema';
 export { ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH, ADMIN_IMPORT_RELOAD_REQUIRED, adminEndpointRequest, adminRequest, importPath } from './adminTransport';

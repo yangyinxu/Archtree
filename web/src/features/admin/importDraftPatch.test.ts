@@ -1,7 +1,8 @@
-import { applyChanges, artistByline, draftChanges, entriesByline, primaryArtistField, rebaseDraft, valueAt, withPrimaryArtistName } from './importDraftPatch';
-import { artistEntry, detail, slotId, slotTwo } from './adminFixtures.testSupport';
+import { applyChanges, artistByline, draftChanges, entriesByline, rebaseDraft, valueAt } from './importDraftPatch';
+import { moveArtistEntry, setArtistEntryPhrase, setArtistEntryRole } from './importArtistEntries';
+import { artistEntry, detail, entryKey, labelEntry, slotId, slotTwo } from './adminFixtures.testSupport';
 
-const second = '30000000-0000-4000-8000-000000000002', mbid = '30000000-0000-4000-9000-000000000003';
+const second = entryKey(2);
 
 test('a save sends only changed values, album values first and then tracks in saved order, each with its saved base', () => {
   const base = detail().draft, draft = structuredClone(base);
@@ -21,39 +22,6 @@ test('a byline joins names with each join phrase, or a comma without one, and ig
   expect(entriesByline([{ name: 'A', joinPhrase: null }, { name: 'B', joinPhrase: ' feat. ' }, { name: 'C', joinPhrase: ' & ' }])).toBe('A, B feat. C');
   const draft = detail().draft; draft.album.artists = [{ ...artistEntry('Lorem'), joinPhrase: '\u3001' }, artistEntry('Ipsum', second)];
   expect(artistByline(draft)).toBe('Lorem\u3001Ipsum');
-  expect(primaryArtistField(draft)).toEqual({ value: 'Lorem\u3001Ipsum', editable: false });
-});
-
-test('the Artist name field edits a single entry, creates one when empty and clears it, never touching several entries', () => {
-  const empty = detail().draft;
-  expect(primaryArtistField(empty)).toEqual({ value: '', editable: true });
-  const created = withPrimaryArtistName(empty, 'Lorem').album.artists;
-  expect(created).toEqual([{ key: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/), name: 'Lorem', role: 'primary', joinPhrase: null, musicBrainzId: null }]);
-  expect(withPrimaryArtistName(empty, '   ').album.artists).toEqual([]);
-  const single = detail().draft; single.album.artists = [{ ...artistEntry('Lorem'), role: 'featured', joinPhrase: ' & ', musicBrainzId: mbid }];
-  expect(primaryArtistField(single)).toEqual({ value: 'Lorem', editable: true });
-  // A rename keeps the key, role and phrase; the ID stays only while the name still matches case-insensitively.
-  expect(withPrimaryArtistName(single, 'LOREM').album.artists).toEqual([{ ...single.album.artists[0], name: 'LOREM' }]);
-  expect(withPrimaryArtistName(single, 'Ipsum').album.artists).toEqual([{ ...single.album.artists[0], name: 'Ipsum', musicBrainzId: null }]);
-  expect(withPrimaryArtistName(single, '').album.artists).toEqual([]);
-  expect(single.album.artists[0].name).toBe('Lorem');
-  const several = detail().draft; several.album.artists = [artistEntry('Lorem'), artistEntry('Ipsum', second)];
-  expect(withPrimaryArtistName(several, 'Other')).toBe(several);
-});
-
-test('clearing the single entry and typing again brings back the saved entry, so retyping its name changes nothing', () => {
-  const base = detail().draft; base.album.artists = [{ ...artistEntry('Synthetic Artist'), role: 'featured', joinPhrase: ' & ', musicBrainzId: mbid }];
-  const [saved] = base.album.artists, cleared = withPrimaryArtistName(base, '', saved);
-  expect(cleared.album.artists).toEqual([]);
-  // Each keystroke after clearing keeps the saved key, role and phrase; the ID returns once the name matches again.
-  const typing = withPrimaryArtistName(cleared, 'S', saved), retyped = withPrimaryArtistName(typing, 'Synthetic Artist', saved);
-  expect(typing.album.artists).toEqual([{ ...saved, name: 'S', musicBrainzId: null }]);
-  expect(retyped.album.artists).toEqual([saved]); expect(draftChanges(base, retyped)).toEqual([]);
-  expect(withPrimaryArtistName(cleared, 'SYNTHETIC artist', saved).album.artists).toEqual([{ ...saved, name: 'SYNTHETIC artist' }]);
-  expect(withPrimaryArtistName(cleared, 'Renamed', saved).album.artists).toEqual([{ ...saved, name: 'Renamed', musicBrainzId: null }]);
-  // Without a saved entry a new primary entry is created.
-  expect(withPrimaryArtistName(cleared, 'Renamed').album.artists[0]).toMatchObject({ name: 'Renamed', role: 'primary', joinPhrase: null, musicBrainzId: null });
-  expect(withPrimaryArtistName(cleared, 'Renamed').album.artists[0].key).not.toBe(saved.key);
 });
 
 test('a newer saved draft rebases unsaved edits path by path, and a changed edited path refuses the rebase', () => {
@@ -71,4 +39,29 @@ test('a newer saved draft rebases unsaved edits path by path, and a changed edit
   // Another value saved on an edited path keeps the conflict.
   expect(rebaseDraft(base, draft, applyChanges(other, [{ path: 'album.title', base: '', value: 'Theirs' }]))).toBeNull();
   expect(rebaseDraft(base, base, other)).toEqual(other);
+});
+
+test('a reorder, role change or phrase edit sends the whole entry list as one change, and a label edit sends only album.label', () => {
+  const base = detail().draft; base.album.artists = [{ ...artistEntry('Lorem'), joinPhrase: ' & ' }, artistEntry('Ipsum', second), artistEntry('Dolor', entryKey(3), 'featured')];
+  const saved = base.album.artists, edit = (artists: typeof saved) => draftChanges(base, { ...base, album: { ...base.album, artists } });
+  for (const artists of [moveArtistEntry(saved, second, -1), setArtistEntryRole(saved, second, 'featured'), setArtistEntryPhrase(saved, second, ' feat. ')]) {
+    expect(edit(artists)).toEqual([{ path: 'album.artists', base: saved, value: artists }]);
+  }
+  // A move swaps the names while each join phrase stays in its position.
+  expect(edit(moveArtistEntry(saved, second, -1))[0].value).toEqual([{ ...saved[1], joinPhrase: ' & ' }, { ...saved[0], joinPhrase: null }, saved[2]]);
+  const labelled = { ...base, album: { ...base.album, label: labelEntry('Lorem Records') } };
+  expect(draftChanges(base, labelled)).toEqual([{ path: 'album.label', base: null, value: labelEntry('Lorem Records') }]);
+  expect(draftChanges(labelled, base)).toEqual([{ path: 'album.label', base: labelEntry('Lorem Records'), value: null }]);
+});
+
+test('entry edits rebase over another administrator\'s label save but not over another entries save', () => {
+  const base = detail().draft; base.album.artists = [artistEntry('Lorem'), artistEntry('Ipsum', second)];
+  const draft = { ...base, album: { ...base.album, artists: moveArtistEntry(base.album.artists, second, -1) } };
+  const labelSaved = applyChanges(base, [{ path: 'album.label', base: null, value: labelEntry('Lorem Records') }]);
+  const rebased = rebaseDraft(base, draft, labelSaved)!;
+  expect(rebased.album).toMatchObject({ artists: draft.album.artists, label: labelEntry('Lorem Records') });
+  expect(draftChanges(labelSaved, rebased)).toEqual([{ path: 'album.artists', base: base.album.artists, value: draft.album.artists }]);
+  // Different entries saved elsewhere refuse the rebase, so the editor offers the saved version; the same entries do not.
+  expect(rebaseDraft(base, draft, applyChanges(base, [{ path: 'album.artists', base: base.album.artists, value: [artistEntry('Lorem')] }]))).toBeNull();
+  expect(draftChanges(draft, rebaseDraft(base, draft, applyChanges(base, [{ path: 'album.artists', base: base.album.artists, value: draft.album.artists }]))!)).toEqual([]);
 });

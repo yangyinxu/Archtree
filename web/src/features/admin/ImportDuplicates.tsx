@@ -19,8 +19,9 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
     queryFn: ({ signal }) => adminRequest(`${importPath(item.id)}/duplicate-candidates`, candidatesSchema, { signal }),
     enabled: requested, retry: false, gcTime: 0
   });
-  // This release decides one primary Artist entry without a label; other drafts publish only after S7a, so they show no Artist row.
-  const artist = item.draft.album.artists.length === 1 && !item.draft.album.label ? item.draft.album.artists[0] : null;
+  // This release decides one primary Artist entry without a label; other drafts publish only after S7a, and a draft without a
+  // primary entry cannot publish, so they show no Artist row.
+  const [only] = item.draft.album.artists, artist = item.draft.album.artists.length === 1 && !item.draft.album.label && only.role === 'primary' ? only : null;
   const decisions = (edits?.decisions ?? item.decisions).filter(decision => artist || decision.scope !== 'artist');
   const scopes = [...(artist ? [{ scope: 'artist' as const, slotId: null, label: artist.name }] : []), { scope: 'album' as const, slotId: null, label: item.draft.album.title }, ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, label: track.title }))];
   return <section className={styles.panel}>

@@ -1,0 +1,99 @@
+import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useLocalization } from '../../localization/LocalizationProvider';
+import type { MessageKey } from '../../localization/contract';
+import type { ImportArtistEntry, ImportDetail, ImportDraftV2, ImportLabelEntry } from './adminApi';
+import { useAdminText } from './AdminAccess';
+import styles from './adminStyles';
+import { ImportDraftEditor } from './ImportDraftEditor';
+import { draftChanges, entriesByline } from './importDraftPatch';
+import { ARTIST_ENTRY_LIMIT, addArtistEntry, artistEntryIssues, canMoveArtistEntry, labelFromInput, labelIssue, moveArtistEntry, removeArtistEntry, renameArtistEntry, setArtistEntryPhrase, setArtistEntryRole, type EntryIssue } from './importArtistEntries';
+
+/**
+ * The import project's Draft v2 editor: the shared draft fields, with ordered Artist entries and the label in place of the v1
+ * Artist name. An invalid edited value blocks Save through native constraint validation, so no request is sent.
+ */
+export function ImportDraftV2Editor({ draft, saved, filenames, disabled, onChange }: { draft: ImportDraftV2; saved: ImportDraftV2; filenames: ImportDetail['manifest']['files']; disabled: boolean; onChange: (draft: ImportDraftV2) => void }) {
+  const album = (patch: Partial<ImportDraftV2['album']>) => onChange({ ...draft, album: { ...draft.album, ...patch } });
+  // Only an edited value is checked, as the server parses only the paths a save changes.
+  const edited = new Set(draftChanges(saved, draft).map(change => change.path));
+  return <ImportDraftEditor draft={draft} filenames={filenames} disabled={disabled} onChange={onChange} artists={<>
+    <ArtistEntries entries={draft.album.artists} saved={saved.album.artists} validate={edited.has('album.artists')} onChange={artists => album({ artists })} />
+    <LabelField label={draft.album.label} saved={saved.album.label} validate={edited.has('album.label')} onChange={label => album({ label })} />
+  </>} />;
+}
+
+/**
+ * Ordered Artist entries edited without a pointer. Moves stay within a role group; each add, removal, move or role change is
+ * announced politely and keeps focus on the moved entry's control, or on the nearest remaining entry after a removal. An empty
+ * name blocks Save at once but is marked only after its field loses focus or a Save attempt, so a new entry is not announced
+ * as invalid when it takes focus.
+ */
+function ArtistEntries({ entries, saved, validate, onChange }: { entries: ImportArtistEntry[]; saved: ImportArtistEntry[]; validate: boolean; onChange: (entries: ImportArtistEntry[]) => void }) {
+  const t = useAdminText(), { t: shared } = useLocalization(), base = useId();
+  // The counter remounts the text, so a repeated message (two unnamed entries removed in turn) is announced again.
+  const [announcement, setAnnouncement] = useState({ text: '', n: 0 });
+  const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
+  const touch = (key: string) => setTouched(previous => previous.has(key) ? previous : new Set(previous).add(key));
+  const pendingFocus = useRef<string | null>(null);
+  // React may move a keyed row, which drops focus, so focus is restored by id once the edited entries render.
+  useLayoutEffect(() => { const id = pendingFocus.current; pendingFocus.current = null; if (id) document.getElementById(id)?.focus(); }, [entries]);
+  const id = (key: string, part: string) => `${base}-${key}-${part}`, addId = `${base}-add`, helpId = `${base}-help`, phraseHelpId = `${base}-phrase-help`, limitId = `${base}-limit`, primaryId = `${base}-primary`;
+  const roleText = (role: string) => shared(`catalog.credit.${role}` as MessageKey);
+  const label = (entry: ImportArtistEntry, index: number) => entry.name.trim() || t('entries.unnamed', { position: index + 1 });
+  const apply = (next: ImportArtistEntry[], focusId: string, message: string) => {
+    if (next === entries) return; pendingFocus.current = focusId; setAnnouncement(previous => ({ text: message, n: previous.n + 1 })); onChange(next);
+  };
+  const issues = validate ? artistEntryIssues(entries) : new Map<string, EntryIssue>(), count = entries.length;
+  // The publisher refuses a draft without a primary entry; the note explains it without blocking Save.
+  const noPrimary = count > 0 && !entries.some(entry => entry.role === 'primary');
+  return <fieldset className={styles.editor} aria-describedby={noPrimary ? `${helpId} ${primaryId}` : helpId}><legend>{t('field.artists')}</legend>
+    <p id={helpId} className={styles.muted}>{t('entries.help')}</p>
+    {count === 0 ? <p>{t('entries.empty')}</p> : <ol className={styles.entries}>{entries.map((entry, index) => {
+      const issue = issues.get(entry.key), name = label(entry, index), phrase = index < count - 1;
+      const nameMessage = issue?.name ? t(`entries.name_${issue.name}`) : '', phraseInvalid = phrase && issue?.phrase === 'invalid';
+      const nameShown = Boolean(issue?.name) && (issue?.name !== 'required' || touched.has(entry.key));
+      return <li className={styles.entry} key={entry.key}>
+        <label className={styles.field}>{t('field.artistName')}<input id={id(entry.key, 'name')} className={styles.input} aria-label={`${index + 1} · ${t('field.artistName')}`} value={entry.name} maxLength={200}
+          aria-invalid={nameShown || undefined} aria-describedby={nameShown ? id(entry.key, 'nameError') : undefined} ref={element => element?.setCustomValidity(nameMessage)}
+          onBlur={() => touch(entry.key)} onInvalid={() => touch(entry.key)} onChange={event => onChange(renameArtistEntry(entries, entry.key, event.target.value, saved))} /></label>
+        <label className={styles.field}>{t('catalog.role')}<select id={id(entry.key, 'role')} className={styles.input} aria-label={`${index + 1} · ${t('catalog.role')}`} value={entry.role} onChange={event => {
+          const role = event.target.value as ImportArtistEntry['role'], next = setArtistEntryRole(entries, entry.key, role);
+          apply(next, id(entry.key, 'role'), t('entries.role_changed', { name, role: roleText(role), position: next.findIndex(item => item.key === entry.key) + 1, count }));
+        }}><option value="primary">{roleText('primary')}</option><option value="featured">{roleText('featured')}</option></select></label>
+        {phrase && <label className={styles.field}>{t('catalog.join_phrase')}<input className={styles.input} aria-label={`${index + 1} · ${t('catalog.join_phrase')}`} maxLength={16} value={entry.joinPhrase ?? ''}
+          aria-invalid={phraseInvalid || undefined} aria-describedby={phraseInvalid ? `${phraseHelpId} ${id(entry.key, 'phraseError')}` : phraseHelpId} ref={element => element?.setCustomValidity(phraseInvalid ? t('entries.phrase_invalid') : '')}
+          onChange={event => onChange(setArtistEntryPhrase(entries, entry.key, event.target.value))} /></label>}
+        {([-1, 1] as const).map(direction => {
+          const part = direction < 0 ? 'up' : 'down', text = t(`entries.move_${part}`), allowed = canMoveArtistEntry(entries, index, direction);
+          // aria-disabled rather than disabled, so the moved entry's button keeps focus at either end of its group.
+          return <button key={part} id={id(entry.key, part)} type="button" className={styles.button} aria-label={`${text} · ${name}`} aria-disabled={!allowed || undefined}
+            onClick={() => { if (allowed) apply(moveArtistEntry(entries, entry.key, direction), id(entry.key, part), t('entries.moved', { name, position: index + direction + 1, count })); }}>{text}</button>;
+        })}
+        <button type="button" className={styles.button} aria-label={`${t('entries.remove')} · ${name}`} onClick={() => {
+          const target = entries[index + 1] ?? entries[index - 1];
+          apply(removeArtistEntry(entries, entry.key), target ? id(target.key, 'name') : addId, t('entries.removed', { name }));
+        }}>{t('entries.remove')}</button>
+        {nameShown && <p id={id(entry.key, 'nameError')} className={styles.error}>{nameMessage}</p>}
+        {phraseInvalid && <p id={id(entry.key, 'phraseError')} className={styles.error}>{t('entries.phrase_invalid')}</p>}
+      </li>;
+    })}</ol>}
+    {noPrimary && <p id={primaryId} className={styles.muted}>{t('entries.no_primary')}</p>}
+    {count > 1 && <><p id={phraseHelpId} className={styles.muted}>{t('catalog.join_phrase_help')}</p><p className={styles.meta}>{t('entries.byline', { byline: entriesByline(entries) })}</p></>}
+    <div className={styles.actions}><button id={addId} type="button" className={styles.button} disabled={count >= ARTIST_ENTRY_LIMIT} aria-describedby={count >= ARTIST_ENTRY_LIMIT ? limitId : undefined} onClick={() => {
+      const key = crypto.randomUUID(), next = addArtistEntry(entries, key);
+      apply(next, id(key, 'name'), t('entries.added', { position: next.findIndex(entry => entry.key === key) + 1 }));
+    }}>{t('entries.add')}</button>{count >= ARTIST_ENTRY_LIMIT && <span id={limitId}>{t('entries.limit')}</span>}</div>
+    <p className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{announcement.n > 0 && <span key={announcement.n}>{announcement.text}</span>}</p>
+  </fieldset>;
+}
+
+/** The optional label Organization; its help sits outside the label element so the accessible name stays "Label". */
+function LabelField({ label, saved, validate, onChange }: { label: ImportLabelEntry | null; saved: ImportLabelEntry | null; validate: boolean; onChange: (label: ImportLabelEntry | null) => void }) {
+  const t = useAdminText(), base = useId(), issue = validate ? labelIssue(label) : null, message = issue ? t(`entries.name_${issue}`) : '';
+  return <div className={styles.field}><label className={styles.field}>{t('field.label')}<input className={styles.input} maxLength={200} value={label?.name ?? ''}
+    aria-invalid={Boolean(issue) || undefined} aria-describedby={issue ? `${base}-help ${base}-error` : `${base}-help`} ref={element => element?.setCustomValidity(message)}
+    onChange={event => onChange(labelFromInput(event.target.value, saved))} /></label>
+    <p id={`${base}-help`} className={styles.muted}>{t('field.label_help')}</p>
+    {issue && <p id={`${base}-error`} className={styles.error}>{message}</p>}
+  </div>;
+}

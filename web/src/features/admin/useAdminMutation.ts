@@ -12,7 +12,9 @@ const assetFinished = (intent: Intent, item: ImportDetail) => {
   const asset = item.assets.find(asset => asset.slotId === decodeURIComponent(match[1]));
   return asset?.recovery?.operationId === intent.operationId && asset.recovery.kind === 'cleanup' && asset.state === 'deleted';
 };
-interface Snapshot { running: boolean; intent: Intent | null; error: 'unknown' | 'conflict' | 'error' | 'reload' | 'visibility_mismatch' | null; result: ImportResponse | null }
+interface Snapshot { running: boolean; intent: Intent | null; error: 'unknown' | 'conflict' | 'error' | 'reload' | 'visibility_mismatch' | 'publication_unsupported' | null; result: ImportResponse | null }
+// Several Artist entries or a label are decided and published only by a later release; kept out of adminTransport.ts, which every admin route loads.
+const ADMIN_IMPORT_PUBLICATION_UNSUPPORTED = 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED';
 /** One immutable intent survives navigation and lost responses; retries never invent a second paid job. Uploads use the upload queue. */
 export class AdminMutation {
   private state: Snapshot = { running: false, intent: null, error: null, result: null };
@@ -70,7 +72,9 @@ export class AdminMutation {
       const rejected = error instanceof ApiError && error.kind === 'http' && [400, 401, 403, 404, 409, 422].includes(error.status ?? 0);
       if (rejected) this.completion = null;
       const mismatch = error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH;
-      this.set({ running: false, intent: rejected ? null : intent, error: mismatch ? 'visibility_mismatch' : rejected ? (error instanceof ApiError && error.status === 409 ? 'conflict' : 'error') : 'unknown', result: null });
+      // A refused publication or Artist decision keeps the draft: it is no edit conflict, so nothing is retried; the page rereads the saved project.
+      const unsupported = error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === ADMIN_IMPORT_PUBLICATION_UNSUPPORTED;
+      this.set({ running: false, intent: rejected ? null : intent, error: mismatch ? 'visibility_mismatch' : unsupported ? 'publication_unsupported' : rejected ? (error instanceof ApiError && error.status === 409 ? 'conflict' : 'error') : 'unknown', result: null });
     }
   }
 }

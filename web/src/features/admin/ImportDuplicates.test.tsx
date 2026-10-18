@@ -5,7 +5,7 @@ import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import { ImportDuplicates } from './ImportDuplicates';
 import type { ImportDecision } from './adminApi';
-import { artistEntry, detail, json, session, slotId, slotTwo, viewer } from './adminFixtures.testSupport';
+import { artistEntry, detail, entryKey, json, session, slotId, slotTwo, viewer } from './adminFixtures.testSupport';
 
 /** Renders the duplicate panel for one project and returns the save callback. */
 function mount(item = detail()) {
@@ -34,10 +34,12 @@ test('a single Artist entry without a label is decided as the Artist row, named 
   expect(onSave).toHaveBeenCalledExactlyOnceWith([distinct('artist'), distinct('album')]);
 });
 
-test('several Artist entries or a label show no Artist row and never save an Artist decision', async () => {
+test('several Artist entries, a label or a single featured entry show no Artist row and never save an Artist decision', async () => {
   for (const change of [
     (item: ReturnType<typeof detail>) => { item.draft.album.artists = [artistEntry('Lorem'), { ...artistEntry('Ipsum', '30000000-0000-4000-8000-000000000002'), role: 'featured' }]; },
-    (item: ReturnType<typeof detail>) => { item.draft.album.artists = [artistEntry('Lorem')]; item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null }; }
+    (item: ReturnType<typeof detail>) => { item.draft.album.artists = [artistEntry('Lorem')]; item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null }; },
+    // Publishing needs a primary entry, so no decision is collected for a draft whose only entry is featured.
+    (item: ReturnType<typeof detail>) => { item.draft.album.artists = [artistEntry('Lorem', entryKey(1), 'featured')]; }
   ]) {
     // A saved Artist decision from before the entries changed is left out of the next save.
     const item = detail(); item.draft.album.title = 'Synthetic Album'; item.decisions = [distinct('artist'), distinct('track', slotId)]; change(item);

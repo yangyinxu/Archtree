@@ -4,7 +4,7 @@
  * Internal
  *   Types: EditorBuffer
  *   Functions: loadDraftEditor, saved, ImportProject
- *   Constants: ImportDraftEditor, ImportMedia, ImportReview, ImportDuplicates
+ *   Constants: ImportDraftV2Editor, ImportMedia, ImportReview, ImportDuplicates
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -12,7 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, importPath, responseSchema, type ImportDetail, type ImportDraftV2 } from './adminApi';
-import { artistByline, draftChanges, primaryArtistField, rebaseDraft, withPrimaryArtistName } from './importDraftPatch';
+import { artistByline, draftChanges, rebaseDraft } from './importDraftPatch';
 import { adminWorkspace } from './adminWorkspace';
 import { useAdminMutation } from './useAdminMutation';
 import { useImportUploadQueue } from './useImportUploadQueue';
@@ -20,8 +20,8 @@ import { ImportStages, MutationStatus, useOnline } from './AdminShared';
 import { AdminNav } from './AdminNav';
 import styles from './adminStyles';
 // The editor loads beside the project read (see ImportProject), keeping this route inside the initial JavaScript budget.
-const loadDraftEditor = () => import('./ImportDraftEditor');
-const ImportDraftEditor = lazy(() => loadDraftEditor().then(module => ({ default: module.ImportDraftEditor })));
+const loadDraftEditor = () => import('./ImportDraftV2Editor');
+const ImportDraftV2Editor = lazy(() => loadDraftEditor().then(module => ({ default: module.ImportDraftV2Editor })));
 const ImportMedia = lazy(() => import('./ImportMedia').then(module => ({ default: module.ImportMedia })));
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
 const ImportDuplicates = lazy(() => import('./ImportDuplicates').then(module => ({ default: module.ImportDuplicates })));
@@ -78,8 +78,9 @@ function ImportProject({ id }: { id: string }) {
     mutation.operation.acknowledge();
     void query.refetch();
   }, [mutation.result]);
-  // A refused save (another administrator changed a saved path) loads the newer saved draft, so the conflict panel offers it.
-  useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
+  // A refused save (another administrator changed a saved path) loads the newer saved draft, so the conflict panel offers it. An
+  // unsupported refusal rereads too: from /decisions it means another save added entries or a label this page does not show yet.
+  useEffect(() => { if (mutation.error === 'conflict' || mutation.error === 'publication_unsupported') void query.refetch(); }, [mutation.error]);
   useEffect(() => { if (editor) adminWorkspace.retain(bufferKey, editor, access); }, [editor]);
   useEffect(() => { adminWorkspace.retain(`stage:${id}`, stage, access); }, [stage]);
   // Keep candidate search state mounted after its first visit while deferring the initial review bundle.
@@ -122,9 +123,8 @@ function ImportProject({ id }: { id: string }) {
       <div hidden={stage !== 'draft'} role="tabpanel" id="import-panel-draft" aria-labelledby="import-tab-draft">
       <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict && changes.length) mutation.operation.run(path, 'PATCH', { expectedRevision: editor.revision, changes }); }}>
         <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2></header>
-        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDraftEditor draft={editor.draft} filenames={item.manifest.files} disabled={locked || publicationLocked}
-          artist={{ ...primaryArtistField(editor.draft), onChange: value => setEditor({ ...editor, draft: withPrimaryArtistName(editor.draft, value, editor.base.album.artists.length === 1 ? editor.base.album.artists[0] : undefined), dirty: true }) }}
-          onChange={draft => setEditor({ ...editor, draft: draft as ImportDraftV2, dirty: true })} /></Suspense>
+        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDraftV2Editor draft={editor.draft} saved={editor.base} filenames={item.manifest.files} disabled={locked || publicationLocked}
+          onChange={draft => setEditor({ ...editor, draft, dirty: true })} /></Suspense>
         <div className={styles.actions}><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || publicationLocked || !editor.dirty || conflict || !changes.length}>{t('action.save')}</button><span role="status">{t(editor.dirty ? 'common.unsaved' : 'common.saved')}</span></div>
       </form>
       <section className={styles.panel}>

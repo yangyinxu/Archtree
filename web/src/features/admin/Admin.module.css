@@ -35,6 +35,11 @@
 .field input[type=file]::file-selector-button { background:var(--color-surface-raised);border:1px solid var(--color-border-control);border-radius:.3rem;color:inherit;padding:.5rem; }
 .track { align-items:end;border-top:1px solid var(--color-border);padding-top:1rem; }
 .track>label+label { flex:0 0 5.5rem; }
+.entries { display:grid;gap:.75rem;list-style:none;margin:0;padding:0; }
+.entry { display:flex;flex-wrap:wrap;align-items:end;gap:.75rem;border-top:1px solid var(--color-border);padding-top:.75rem; }
+.entry>label { flex:1 1 10rem; }
+.entry>p { flex-basis:100%;margin:0; }
+.entry [aria-disabled=true] { cursor:default;opacity:.62; }
 .diff { display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.75rem;margin:.8rem 0; }
 .diff>div { background:var(--color-surface-low);border-radius:.35rem;padding:.65rem; }
 .diff pre { font:inherit;margin:.4rem 0 0; }

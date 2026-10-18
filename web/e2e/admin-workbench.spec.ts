@@ -16,6 +16,7 @@
  *   - one approval uploads files sequentially and leaving Admin view stops after the current file
  *   - files chosen without a folder need no folder name
  *   - a new import starts public, and the create request carries no draft
+ *   - Artist entries reorder by keyboard with an announced move and kept focus, save as one value, and reflow at 320, 768 and 1440 px
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -23,7 +24,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { applyDraftChanges, artistEntry, capabilities, detail, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
+import { applyDraftChanges, artistEntry, capabilities, detail, entryKey, labelEntry, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
 
 /** The file part of one queued multipart upload, so mocked assets carry the real length and SHA-256. */
 function uploadedFile(request: Request) {
@@ -515,4 +516,43 @@ test('a new import starts public, and the create request carries no draft', asyn
   await expect(visibility).toHaveValue('public');
   expect(await visibility.locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))).toEqual(['public', 'hidden']);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('Artist entries reorder by keyboard with an announced move and kept focus, save as one value, and reflow at 320, 768 and 1440 px', async ({ page }) => {
+  await setup(page);
+  let item = detail(); const artists = [{ ...artistEntry('Lorem'), joinPhrase: ' & ' }, artistEntry('Ipsum', entryKey(2)), artistEntry('Dolor', entryKey(3), 'featured')];
+  item.draft.album.artists = artists;
+  const writes: Array<Record<string, unknown>> = [], headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
+  // Only the project itself: its field saves apply as the server writes them, and every other admin path keeps setup's mock.
+  await page.route(`**/api/admin/v1/imports/${projectId}`, async route => {
+    if (route.request().method() !== 'PATCH') return route.fulfill({ json: { item, receipt: null }, headers });
+    const body = route.request().postDataJSON(); writes.push(body);
+    item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) };
+    return route.fulfill({ json: { item, receipt: { operationId: body.operationId, kind: 'edit', revision: item.revision } }, headers });
+  });
+  await page.goto(`/finitude/admin/imports/${projectId}`);
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const moveUp = page.getByRole('button', { name: 'Move up · Ipsum', exact: true });
+  await moveUp.focus(); await page.keyboard.press('Enter');
+  await expect(moveUp).toBeFocused(); await expect(moveUp).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByText('Ipsum moved to position 1 of 3.', { exact: true })).toBeAttached();
+  await expect(page.getByRole('textbox', { name: '1 · Artist name', exact: true })).toHaveValue('Ipsum');
+  await expect(page.getByRole('button', { name: 'Move up · Dolor', exact: true })).toHaveAttribute('aria-disabled', 'true');
+  await page.getByRole('textbox', { name: 'Label', exact: true }).fill('Lorem Records');
+  await page.getByRole('button', { name: 'Save', exact: true }).focus(); await page.keyboard.press('Enter');
+  await expect.poll(() => writes.length).toBe(1);
+  // The names swap while the " & " stays in first position.
+  const moved = [{ ...artists[1], joinPhrase: ' & ' }, { ...artists[0], joinPhrase: null }, artists[2]];
+  expect(writes[0].changes).toEqual([{ path: 'album.artists', base: artists, value: moved }, { path: 'album.label', base: null, value: labelEntry('Lorem Records') }]);
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+  // End at 1440 px, so the shared afterEach overflow check runs at the default desktop width.
+  for (const width of [320, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    for (const control of await page.getByRole('group', { name: 'Artists', exact: true }).locator('input, select, button').all()) {
+      const box = await control.boundingBox(); expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    }
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  }
 });

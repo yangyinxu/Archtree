@@ -67,7 +67,11 @@ after that file without restarting it on return. Files chosen without a folder
 show no folder field. The local MP3 conversion spec verifies that an import
 created from converted MP3s uploads through the same queue. The administrator
 workbench spec also checks that a new import's draft opens with Public
-visibility and that saving the draft sends only the changed fields.
+visibility and that saving the draft sends only the changed fields. It also
+moves an Artist entry with the keyboard, checking that the move is announced
+and keeps focus on the moved entry and that the reordered entries and a new
+label save as just `album.artists` and `album.label`, with axe scans and
+reflow at 320, 768 and 1440 px.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -361,6 +365,12 @@ player control still works.
   unconfirmed file is resent only under its original operation, and a file
   whose content changed is refused. Repeat at 320 CSS px with a screen reader
   and confirm progress and per-file results are announced.
+- As an administrator, use only the keyboard and a screen reader to add three
+  Artist entries to an import draft, move one up and down, make one Featured,
+  and set a join phrase, a label and a Disc Number, then save. Confirm each
+  move is announced with the entry's new position, focus stays on the moved
+  entry, no primary entry follows a featured one, and Publish explains that
+  several entries or a label cannot be published yet. Repeat at 320 CSS px.
 
 ## Media Session observations
 
