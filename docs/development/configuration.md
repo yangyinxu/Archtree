@@ -78,6 +78,13 @@ Required variables:
   `true` only after the required Artist Follow indexes and lifecycle checks
   pass. Disabling rejects new Follow with `503 ARTIST_FOLLOWS_DISABLED`; private
   status and Unfollow remain available and no relationship data is deleted.
+- `FINITUDE_MOTION_PREVIEWS_ENABLED`: defaults to `false` in every
+  environment. Set `true` only after the instance's FFmpeg reports the `h264`
+  decoder and the S3 role can read, write, and delete object versions under
+  `motion-preview/`. Enabling admits administrator preview uploads and public
+  preview delivery; disabling hides every preview at once without deleting
+  stored previews or their lifecycle evidence. See
+  [media lifecycle](../features/media-lifecycle.md#motion-preview).
 - `FINITUDE_PLAYLISTS_ENABLED`: set to `true` to expose Playlist APIs and Web
   entry points, or `false` for an emergency rollout stop without deleting
   Playlist or mutation-receipt data. An omitted value defaults to disabled in

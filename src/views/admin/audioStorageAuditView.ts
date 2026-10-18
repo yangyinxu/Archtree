@@ -2,9 +2,13 @@
  * Exports
  *   Functions: renderAudioStorageAuditPage
  * Internal
- *   Functions: formatDate, renderItems, soundtrackWorkspaceUrl
+ *   Functions: formatDate, renderItems, soundtrackWorkspaceUrl, motionPreviewPanelUrl, listOf,
+ *              staleReasonLabel, renderPanelRemediation, renderPreviewReference, renderPreviewObject,
+ *              renderMotionPreviewSection
+ *   Constants: staleReasonLabels, deletionOwnedRecommendation, investigateKeyRecommendation
  * @end-catalog */
 
+import type { MotionPreviewStaleReason } from '../../services/media/motionPreviewReconciliation';
 import { formatStorageSize } from '../../services/media/s3StorageService';
 import { isAudioObjectKeyForTrack } from '../../utils/audioStorageKey';
 import { escapeHtml } from '../html';
@@ -23,6 +27,139 @@ const renderItems = (items: any[], renderItem: (item: any) => string) => {
 
 const soundtrackWorkspaceUrl = (audioTrackId: unknown) =>
     `/content/manage?view=catalog&prefillType=audioTrack&prefillId=${encodeURIComponent(String(audioTrackId ?? ''))}#audio-track-update-card`;
+
+// The Motion preview panel (with its Reconcile action) lives only in the Finitude Web catalog editor.
+const motionPreviewPanelUrl = (audioTrackId: unknown) =>
+    `/finitude/admin/catalog/audioTrack/${encodeURIComponent(String(audioTrackId ?? ''))}`;
+
+const listOf = (value: unknown): any[] => (Array.isArray(value) ? value : []);
+
+const staleReasonLabels: Record<MotionPreviewStaleReason, string> = {
+    trackNotReady: 'MediaTrack upload is not ready',
+    notVideo: 'MediaTrack is no longer a Video',
+    sourceReplaced: 'Bound to a replaced Video'
+};
+
+const staleReasonLabel = (reason: unknown) => (
+    Object.prototype.hasOwnProperty.call(staleReasonLabels, String(reason))
+        ? staleReasonLabels[String(reason) as MotionPreviewStaleReason]
+        : 'No longer bound to the active Video'
+);
+
+const deletionOwnedRecommendation = 'MediaTrack deletion owns this preview and removes it by exact version. Retry the deletion from the audio section; the Motion preview panel refuses changes meanwhile.';
+
+/**
+ * Links an item to its Motion preview panel, unless MediaTrack deletion owns the preview: then the
+ * only recovery is retrying that deletion, which the panel would refuse.
+ */
+const renderPanelRemediation = (recommendation: string, audioTrackId: unknown, deletionOwned = false) => (
+    deletionOwned
+        ? `<div class="remediation"><p><strong>Recommended:</strong> ${escapeHtml(deletionOwnedRecommendation)}</p></div>`
+        : `<div class="remediation">
+          <p><strong>Recommended:</strong> ${escapeHtml(recommendation)}</p>
+          <div class="remediation-actions"><a class="button button--secondary" href="${escapeHtml(motionPreviewPanelUrl(audioTrackId))}">Open Motion preview panel</a></div>
+        </div>`
+);
+
+/** One recorded preview key (track, phase, key, status) with its bounded lifecycle error. */
+const renderPreviewReference = (reference: any, recommendation: string) => `<li>
+        <strong>MediaTrack ${escapeHtml(String(reference.audioTrackId ?? ''))}</strong>
+        <div class="item-meta">
+          <span>Phase: ${escapeHtml(String(reference.phase ?? 'unknown'))}</span>
+          <span>Key: <code>${escapeHtml(String(reference.s3Key ?? ''))}</code></span>
+          ${reference.status ? `<span>Status: ${escapeHtml(String(reference.status))}</span>` : ''}
+          ${reference.error ? `<span class="status-error">${escapeHtml(String(reference.error))}</span>` : ''}
+        </div>
+        ${renderPanelRemediation(recommendation, reference.audioTrackId, reference.deletionOwned === true)}
+      </li>`;
+
+const renderPreviewObject = (object: any, recommendation: string) => `<li>
+        <strong><code>${escapeHtml(String(object.key ?? ''))}</code></strong>
+        <div class="item-meta"><span>${escapeHtml(formatStorageSize(Number(object.size ?? 0)))}</span><span>Last modified: ${escapeHtml(formatDate(object.lastModified))}</span></div>
+        <div class="remediation"><p><strong>Recommended:</strong> ${escapeHtml(recommendation)}</p></div>
+      </li>`;
+
+const investigateKeyRecommendation = 'Investigate this record before changing it; never delete a preview object by key alone.';
+
+/**
+ * Renders the report-only motion preview audit. It offers no storage action of its own: every
+ * remediation runs through the MediaTrack's Motion preview panel, which re-checks lifecycle state.
+ */
+const renderMotionPreviewSection = (storage: any) => {
+    const summary = storage?.summary ?? {};
+    const count = (name: string) => Number(summary[name] ?? 0);
+    const metric = (icon: string, label: string, name: string, description: string) => (
+        `<div class="card"><i class="ph ${icon}" aria-hidden="true"></i><p class="eyebrow">${label}</p><h2>${count(name)}</h2><p>${description}</p></div>`
+    );
+
+    return `<div class="section-heading"><div><p class="eyebrow">Media namespace</p><h2>Motion preview storage</h2></div></div>
+    <p class="muted">The Motion preview panel opens in the Finitude Web catalog editor while motion previews are enabled.</p>
+    <section class="grid audit-metrics" aria-label="Motion preview storage summary">
+      ${metric('ph-database', 'MongoDB', 'databasePreviewTrackCount', 'Video MediaTracks with a preview')}
+      ${metric('ph-cloud', 'S3', 's3ObjectCount', 'Objects under <code>motion-preview/</code>')}
+      ${metric('ph-link-break', 'Orphaned', 'orphanedObjectCount', 'Unreferenced preview objects')}
+      ${metric('ph-file-x', 'Missing', 'missingObjectCount', 'Recorded keys absent from S3')}
+      ${metric('ph-warning', 'Incomplete', 'incompleteTrackCount', 'Pending uploads or cleanup')}
+      ${metric('ph-clock-counter-clockwise', 'Stale', 'staleTrackCount', 'Hidden previews awaiting retirement')}
+      ${metric('ph-key', 'Invalid keys', 'invalidStorageKeyCount', 'Recorded keys not bound to their MediaTrack')}
+      ${metric('ph-copy', 'Duplicate keys', 'duplicateStorageKeyCount', 'Keys recorded more than once')}
+      ${metric('ph-warning-octagon', 'Invalid objects', 'invalidStorageObjectCount', 'Unrecognized keys under <code>motion-preview/</code>')}
+    </section>
+
+    <section class="card" aria-labelledby="preview-orphans-heading">
+      <h3 id="preview-orphans-heading">Orphaned preview objects</h3>
+      ${renderItems(listOf(storage?.orphanedObjects), (object) => renderPreviewObject(object,
+          'Report-only. Confirm that no MediaTrack references this object before removing it deliberately; this audit offers no preview delete action.'))}
+    </section>
+
+    <section class="card" aria-labelledby="preview-missing-heading">
+      <h3 id="preview-missing-heading">Missing preview objects</h3>
+      ${renderItems(listOf(storage?.missingObjects), (reference) => renderPreviewReference(reference,
+          // A cleanup record whose object is already gone only needs Reconcile to clear it.
+          reference.phase === 'cleanup'
+              ? 'The detached object is already absent. Use Reconcile in the Motion preview panel to clear this cleanup record.'
+              : 'Remove the preview or upload a new one from the Motion preview panel.'))}
+    </section>
+
+    <section class="card" aria-labelledby="preview-incomplete-heading">
+      <h3 id="preview-incomplete-heading">Incomplete preview operations</h3>
+      ${renderItems(listOf(storage?.incompleteTracks), (track) => `<li>
+        <strong>MediaTrack ${escapeHtml(String(track.audioTrackId ?? ''))}</strong>
+        <div class="item-meta">
+          ${track.pending ? `<span>Pending upload: ${escapeHtml(String(track.pending.status || 'unknown'))}</span>` : ''}
+          ${track.pending?.outcomeUnknown === true ? '<span class="status-error">Write outcome unknown</span>' : ''}
+          ${track.pending?.leaseUntil ? `<span>Lease until: ${escapeHtml(formatDate(track.pending.leaseUntil))}</span>` : ''}
+          ${track.cleanup ? `<span>Cleanup: ${escapeHtml(String(track.cleanup.status || 'unknown'))}${track.cleanup.reason ? ` (${escapeHtml(String(track.cleanup.reason))})` : ''}</span>` : ''}
+        </div>
+        ${renderPanelRemediation('Use Reconcile in the Motion preview panel. A live upload must finish or its lease expire first.', track.audioTrackId, track.deletionOwned === true)}
+      </li>`)}
+    </section>
+
+    <section class="card" aria-labelledby="preview-stale-heading">
+      <h3 id="preview-stale-heading">Stale previews</h3>
+      ${renderItems(listOf(storage?.staleTracks), (track) => `<li>
+        <strong>MediaTrack ${escapeHtml(String(track.audioTrackId ?? ''))}</strong>
+        <div class="item-meta"><span>${escapeHtml(staleReasonLabel(track.reason))}</span><span>Upload: ${escapeHtml(String(track.uploadStatus || 'unknown'))}</span></div>
+        ${renderPanelRemediation('Use Reconcile in the Motion preview panel to retire this hidden preview.', track.audioTrackId)}
+      </li>`)}
+    </section>
+
+    <section class="card" aria-labelledby="preview-invalid-keys-heading">
+      <h3 id="preview-invalid-keys-heading">Invalid preview keys in MongoDB</h3>
+      ${renderItems(listOf(storage?.invalidStorageKeys), (reference) => renderPreviewReference(reference, investigateKeyRecommendation))}
+    </section>
+
+    <section class="card" aria-labelledby="preview-duplicate-keys-heading">
+      <h3 id="preview-duplicate-keys-heading">Duplicate preview keys in MongoDB</h3>
+      ${renderItems(listOf(storage?.duplicateStorageKeys), (reference) => renderPreviewReference(reference, investigateKeyRecommendation))}
+    </section>
+
+    <section class="card" aria-labelledby="preview-invalid-objects-heading">
+      <h3 id="preview-invalid-objects-heading">Invalid preview objects in S3</h3>
+      ${renderItems(listOf(storage?.invalidStorageObjects), (object) => renderPreviewObject(object,
+          'Investigate how this object was written before changing it; never delete it by key alone.'))}
+    </section>`;
+};
 
 /** Renders the read-only audit with explicit state-valid remediation choices. */
 export const renderAudioStorageAuditPage = (
@@ -217,6 +354,8 @@ export const renderAudioStorageAuditPage = (
         <a class="button button--secondary" href="${soundtrackWorkspaceUrl(track.audioTrackId)}">Open MediaTrack workspace</a>
       </li>`)}
     </section>
+
+    ${renderMotionPreviewSection(report.motionPreviewStorage)}
   </main>
   <script src="/assets/audio-storage-audit.js"></script>
 </body>

@@ -51,19 +51,25 @@ test('traverses real carousel overflow with controls and boundary keys', async (
 
   const firstCard = carousel.getByRole('listitem').first();
   const firstCardAction = firstCard.getByRole('link');
+  const firstCardArtwork = firstCardAction.locator('span').first();
   const firstCardTitle = firstCard.getByText('Quiet Hours 1', { exact: true });
-  const copyInsets = await Promise.all([
+  const [cardBox, artworkBox, titleBox] = await Promise.all([
     firstCardAction.boundingBox(),
+    firstCardArtwork.boundingBox(),
     firstCardTitle.boundingBox()
   ]);
-  expect(copyInsets[0]).not.toBeNull();
-  expect(copyInsets[1]).not.toBeNull();
-  const leftInset = copyInsets[1]!.x - copyInsets[0]!.x;
-  const rightInset = copyInsets[0]!.x + copyInsets[0]!.width - copyInsets[1]!.x - copyInsets[1]!.width;
-  expect(leftInset).toBeGreaterThanOrEqual(4);
-  expect(leftInset).toBeLessThanOrEqual(6);
-  expect(rightInset).toBeGreaterThanOrEqual(4);
-  expect(rightInset).toBeLessThanOrEqual(6);
+  expect(cardBox).not.toBeNull();
+  expect(artworkBox).not.toBeNull();
+  expect(titleBox).not.toBeNull();
+  // The padded card surface insets both artwork and copy, and the copy aligns with the artwork.
+  const leftInset = titleBox!.x - cardBox!.x;
+  const rightInset = cardBox!.x + cardBox!.width - titleBox!.x - titleBox!.width;
+  expect(leftInset).toBeGreaterThanOrEqual(10);
+  expect(leftInset).toBeLessThanOrEqual(13);
+  expect(rightInset).toBeGreaterThanOrEqual(10);
+  expect(rightInset).toBeLessThanOrEqual(13);
+  expect(Math.abs(titleBox!.x - artworkBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(titleBox!.x + titleBox!.width - artworkBox!.x - artworkBox!.width)).toBeLessThanOrEqual(1);
 
   const frame = carousel.locator('..');
   const next = page.getByRole('button', { name: `Show next items in ${sectionTitle}` });

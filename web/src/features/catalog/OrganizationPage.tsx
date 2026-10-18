@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
 
 import { listenerOrganizationQuery } from '../../api/listener';
+import { neutralArtworkTone, useMainPaneTone } from '../../artwork/useArtworkTone';
 import { PageSection } from '../../components/PageSection';
 import styles from './CatalogPages.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
@@ -11,6 +12,8 @@ export const OrganizationPage = () => {
   const { t } = useLocalization();
   const { organizationId = '' } = useParams();
   const organizationQuery = useQuery(listenerOrganizationQuery(organizationId));
+  // Organizations have no artwork; the neutral tone keeps their hero consistent with Artist heroes.
+  useMainPaneTone(neutralArtworkTone.pane);
 
   if (organizationQuery.isPending) {
     return <div className={styles.page}><div className={styles.state} aria-busy="true">{t('catalog.organization.loading')}</div></div>;

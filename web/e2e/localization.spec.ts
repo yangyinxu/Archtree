@@ -34,7 +34,7 @@ test('switches the complete listener from the bottom-left language control and p
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-Hans');
   await expect(page.getByRole('link', { name: '首页', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: '音乐库' })).toBeVisible();
-  await expect(page.getByRole('searchbox', {
+  await expect(page.getByRole('combobox', {
     name: '搜索音乐人、机构、专辑和媒体曲目'
   })).toBeVisible();
   expect(await page.evaluate(() => window.localStorage.getItem(

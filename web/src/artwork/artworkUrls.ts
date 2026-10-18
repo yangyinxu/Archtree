@@ -14,11 +14,14 @@ export interface MediaSessionArtworkSource {
   type?: string;
 }
 
-const managedArtworkPattern = /^\/content\/images\/[0-9a-fA-F]{24}$/;
+const managedArtworkPattern = /^\/content\/images\/([0-9a-fA-F]{24})$/;
+
+/** Returns the image id of an exact managed-image URL, or null for any other source. */
+export const managedArtworkId = (source: string) => managedArtworkPattern.exec(source)?.[1] ?? null;
 
 /** Derives only versioned, allowlisted variants from an exact managed-image URL. */
 const responsiveArtworkVariants = (source: string) => {
-  if (!managedArtworkPattern.test(source)) return [];
+  if (!managedArtworkId(source)) return [];
   return RESPONSIVE_ARTWORK_WIDTHS.map((width) => ({
     src: `${source}/v1/${width}.webp`,
     width

@@ -14,7 +14,7 @@ second process with `npm run dev:web`, then open
 prefix permanently redirect to the equivalent `/finitude` path. The Web build
 measures every initial route's unique compressed JavaScript and fails if any
 route exceeds the reviewed 150 KiB gzip budget. It also caps the complete
-emitted stylesheet payload at 32 KiB gzip, emitted fonts at 128 KiB, bundled
+emitted stylesheet payload at 35 KiB gzip, emitted fonts at 128 KiB, bundled
 images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
 continues to load through listener DTOs rather than being bundled into the app.
 Production CSS Modules use compact scoped identifiers; development and test
@@ -112,6 +112,11 @@ avatars remain private behind `/auth/avatar`. Finitude Web derives responsive
 `/content/images/:imageId/v1/:width.webp`. They are versioned, revalidated,
 CPU-concurrency bounded responses and never create extra S3 objects; the
 original image route remains the fallback and native-client contract.
+The Web listener also decodes the same-origin 96 px variant to derive the
+artwork tone of Album, Artist, Playlist, and hovered Home card surfaces. It
+decodes each image id once while that id stays among the 200 most recently
+sampled, and Home samples a card only after the pointer rests on it; a missing,
+cross-origin, or undecodable variant falls back to a neutral tone.
 The shared Web artwork component keeps both its bordered frame and decoded image
 square, including in WebKit; Artist portraits retain their circular crop.
 

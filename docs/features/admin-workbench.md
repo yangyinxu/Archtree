@@ -4,9 +4,11 @@ The private administrator API is mounted at `/api/admin/v1`. It uses the current
 persisted `admin` role, same-origin cookie mutation protection, bounded parsers,
 account-viewer fencing and `no-store` responses. `GET /capabilities` advertises
 admission independently of the normal listener DTOs. Existing catalog edits,
-visibility changes, cover changes, existing-Album reviews and local MP3
-conversion need only that role and have no deployment flag. The remaining flags below default closed and
-accept only the literal `true`:
+visibility changes, clearing a cover, existing-Album reviews and local MP3
+conversion need only that role and have no deployment flag. Choosing a new
+cover also requires `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` and its
+distinct `ADMIN_IMPORT_S3_BUCKET_NAME` staging bucket. The remaining flags below
+default closed and accept only the literal `true`:
 
 | Configuration | Purpose |
 | --- | --- |
@@ -15,6 +17,7 @@ accept only the literal `true`:
 | `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` | Optional existing provider routing; never returned to clients |
 | `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
 | `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` | Operator assertion that the staging bucket denies public/CDN access |
+| `FINITUDE_MOTION_PREVIEWS_ENABLED` | Show the Motion preview panel for Video MediaTracks and serve public motion previews |
 
 An existing Album review needs no staging bucket; starting Luna also requires
 the imports flag and configured provider.

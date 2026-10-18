@@ -142,6 +142,11 @@ class RoomMedia implements PlayerAudio {
 }
 
 let options: RoomPlaybackOptions;
+beforeAll(async () => {
+  // A cold runner can take longer to transform the lazily imported fallback (and the mocked API it
+  // wraps) than one dynamicImportSettled() covers; loading it once keeps every heartbeat's timing equal.
+  await import('./socialChangeFallback');
+});
 beforeEach(() => {
   roomSession.stop(); vi.useFakeTimers(); vi.clearAllMocks(); Socket.instances = []; refusalHook.beforeExplain = undefined;
   fallbackLoads.created = 0; fallbackLoads.hold = undefined;

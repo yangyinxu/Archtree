@@ -11,6 +11,7 @@ import { audioWithCoverArtUpload, imageUpload, maxImageUploadMb } from '../../mi
 import { maxVideoUploadMb, videoUpload } from '../../middleware/videoUpload';
 import * as soundtrackVideoController from '../../controllers/soundtrackVideoController';
 import * as mediaTrackController from '../../controllers/mediaTrackController';
+import * as motionPreviewController from '../../controllers/motionPreviewController';
 import { limitMediaConcurrencyFor } from '../../middleware/mediaDeliveryMiddleware';
 import { asyncHandler, attachRequestAbortSignal, publicReadRateLimit, uploadConcurrencyLimit } from '../../middleware/requestProtectionMiddleware';
 
@@ -26,6 +27,8 @@ router.delete('/audioTrack/:audioTrackId', requireAuth, requireAdmin, asyncHandl
 router.get('/audioTrack/aws/:audioTrackId', limitMediaConcurrencyFor('playback'), asyncHandler(audioTrackController.getAudioFile));
 router.head('/mediaTrack/stream/:mediaTrackId', limitMediaConcurrencyFor('playback'), asyncHandler(mediaTrackController.headMediaTrack));
 router.get('/mediaTrack/stream/:mediaTrackId', limitMediaConcurrencyFor('playback'), asyncHandler(mediaTrackController.streamMediaTrack));
+router.head('/mediaTrack/motion-preview/:mediaTrackId', limitMediaConcurrencyFor('motionPreview'), asyncHandler(motionPreviewController.headMotionPreview));
+router.get('/mediaTrack/motion-preview/:mediaTrackId', limitMediaConcurrencyFor('motionPreview'), asyncHandler(motionPreviewController.streamMotionPreview));
 router.head('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrencyFor('download'), asyncHandler(audioTrackController.headAudioTrackDownload));
 router.get('/audioTrack/download/:audioTrackId', requireAuth, limitMediaConcurrencyFor('download'), asyncHandler(audioTrackController.downloadAudioTrack));
 router.head('/audioTrack/stream/:audioTrackId', limitMediaConcurrencyFor('playback'), asyncHandler(audioTrackController.headAudioTrackStream));

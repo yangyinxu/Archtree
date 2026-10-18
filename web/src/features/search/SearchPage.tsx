@@ -2,7 +2,8 @@
  * Exports
  *   Functions: SearchPage
  * Internal
- *   Constants: suggestions
+ *   Types: ResultGroup
+ *   Constants: resultGroups, suggestions
  * @end-catalog */
 
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
@@ -12,7 +13,9 @@ import { Link } from 'react-router';
 import { listenerSearchQuery } from '../../api/listener';
 import { ContentCard } from '../../components/ContentCard';
 import { Icon } from '../../components/Icon';
+import filterStyles from '../../components/FilterChips.module.css';
 import { PageSection } from '../../components/PageSection';
+import sectionStyles from '../../components/PageSection.module.css';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
 import { LazyAddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
 import {
@@ -25,6 +28,15 @@ import { useSearchHistoryRecorder } from './useSearchHistoryRecorder';
 import styles from '../../styles/Pages.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
+
+type ResultGroup = 'artists' | 'organizations' | 'albums' | 'audioTracks';
+
+const resultGroups: Array<{ group: ResultGroup; labelKey: MessageKey }> = [
+  { group: 'artists', labelKey: 'common.label.artists' },
+  { group: 'organizations', labelKey: 'common.label.organizations' },
+  { group: 'albums', labelKey: 'common.label.albums' },
+  { group: 'audioTracks', labelKey: 'common.label.mediatracks' }
+];
 
 const suggestions: Array<{ query: string; labelKey: MessageKey }> = [
   { query: 'Ambient', labelKey: 'search.suggestion.ambient' },
@@ -54,7 +66,13 @@ export const SearchPage = () => {
     updateDraft
   } = useSearchQuery();
   const [history, setHistory] = useState<string[]>([]);
+  const [filter, setFilter] = useState<ResultGroup | null>(null);
   const results = useQuery(listenerSearchQuery(activeQuery));
+
+  // A new query starts from every result group again.
+  useEffect(() => {
+    setFilter(null);
+  }, [activeQuery]);
 
   useEffect(() => {
     if (!historyIsReady) {
@@ -87,6 +105,12 @@ export const SearchPage = () => {
     || results.data.albums.length
     || results.data.audioTracks.length
   ));
+  const availableGroups = results.data
+    ? resultGroups.filter(({ group }) => results.data[group].length > 0)
+    : [];
+  // A filter whose group vanished after a refetch falls back to every group.
+  const activeFilter = filter && availableGroups.some(({ group }) => group === filter) ? filter : null;
+  const shows = (group: ResultGroup) => activeFilter === null || activeFilter === group;
 
   return (
     <div className={styles.page}>
@@ -128,17 +152,30 @@ export const SearchPage = () => {
             </div>
           ) : (
             <div className={styles.resultGroups}>
-              {results.data.artists.length > 0 && (
+              {availableGroups.length > 1 && (
+                <div className={filterStyles.filters} role="group" aria-label={t('search.filters.label')}>
+                  <button type="button" aria-pressed={activeFilter === null} onClick={() => setFilter(null)}>
+                    {t('search.filter.all')}
+                  </button>
+                  {availableGroups.map(({ group, labelKey }) => (
+                    <button key={group} type="button" aria-pressed={activeFilter === group} onClick={() => setFilter(group)}>
+                      {t(labelKey)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {shows('artists') && results.data.artists.length > 0 && (
                 <section aria-labelledby="artist-results-title">
                   <h3 className={styles.resultHeading} id="artist-results-title">{t('common.label.artists')}</h3>
-                  <ul className={styles.resultGrid}>
+                  {/* Artist cards share the Album grid's padded-card geometry so artwork aligns with headings. */}
+                  <ul className={sectionStyles.grid}>
                     {results.data.artists.map((artist) => (
-                      <li key={artist.id}><ContentCard item={artist} /></li>
+                      <li className={sectionStyles.cardItem} key={artist.id}><ContentCard item={artist} /></li>
                     ))}
                   </ul>
                 </section>
               )}
-              {results.data.organizations.length > 0 && (
+              {shows('organizations') && results.data.organizations.length > 0 && (
                 <section aria-labelledby="organization-results-title">
                   <h3 className={styles.resultHeading} id="organization-results-title">{t('common.label.organizations')}</h3>
                   <ul className={styles.resultGrid}>
@@ -159,10 +196,10 @@ export const SearchPage = () => {
                   </ul>
                 </section>
               )}
-              {results.data.albums.length > 0 && (
+              {shows('albums') && results.data.albums.length > 0 && (
                 <PageSection id="search-albums" items={results.data.albums} presentation="grid" title={t('common.label.albums')} />
               )}
-              {results.data.audioTracks.length > 0 && (
+              {shows('audioTracks') && results.data.audioTracks.length > 0 && (
                 <PageSection
                   id="search-soundtracks"
                   items={results.data.audioTracks}

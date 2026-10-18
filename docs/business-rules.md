@@ -1035,6 +1035,17 @@ The wire protocol and operational bounds are documented in
   attribution unless an administrator explicitly selects promotion.
 - Tapping the Album Play button starts the Album queue and adds only the Album
   to Recently Played.
+- On Finitude Web, an Album card may also offer Play on hover-capable devices
+  without a touch pointer. It loads the same canonical ready-only Album queue,
+  starts it without leaving the current route, and follows the Album Play
+  button's Recently Played policy. An Album with no playable MediaTrack starts
+  nothing. A load that fails, or that does not finish within the browser's
+  roughly five-second user-intent window, leaves current playback unchanged and
+  is announced; it never starts playback later. A newer launch, a newer Album
+  card Play, or an account change during the load abandons it silently, and an
+  abandoned load never cancels another launch's Recently Played activity. While
+  listening-room playback owns the player, the launch is refused and the card
+  says so. Native clients need not offer an Album card Play action.
 - Explicitly tapping an individual MediaTrack in an Album list adds that
   MediaTrack, but not the Album, to Recently Played.
 - Using Next or Previous and automatic queue advancement inside an Album queue
@@ -1044,7 +1055,22 @@ The wire protocol and operational bounds are documented in
   Recently Played history.
 - A MediaTrack has exactly one ready media object and one active `mediaType`,
   either `audio` or `video`. Audio and Video are mutually exclusive media kinds,
-  not two selectable representations of the same MediaTrack.
+  not two selectable representations of the same MediaTrack. The optional
+  motion preview below is decoration derived from a Video, never a second
+  playable or selectable representation.
+- A Video MediaTrack may have at most one optional motion preview: a muted MP4
+  with one H.264 video track whose configuration declares Baseline, Main, or
+  High (8-bit 4:2:0) and no audio, at most 8.5 seconds long, 854 × 480 in both
+  its displayed and encoded size, and 4 MiB. It is never a queue item, never played by the shared player, never
+  downloadable or kept offline, creates no playback activity or telemetry, and
+  is shown only by Finitude Web. It is public only while motion previews are
+  enabled and it is bound to the exact active Video object of a ready,
+  published, publicly visible MediaTrack; replacing or deleting that Video
+  hides it at once, before any cleanup. The clip is prepared on the
+  administrator's device; the server only validates its complete structure and
+  decoding and stores it. A missing, invalid, or failed preview never changes
+  the outcome of an upload, replacement, publication, or deletion of the
+  MediaTrack itself.
 - The MediaTrack ID, metadata, Credits, artwork, Saved state, Playlist
   memberships, queue entry, and Recently Played identity remain unchanged when
   an administrator replaces Audio with Video or Video with Audio.
@@ -1058,7 +1084,9 @@ The wire protocol and operational bounds are documented in
   when there is one, and a publishable lifecycle state; the upload and
   publication outcomes are reported separately, and a failed publication never
   requires uploading the file again.
-- Public metadata exposes one `mediaType` and one stream URL. Stream `HEAD` and
+- Public metadata exposes one `mediaType` and one stream URL; a Web client may
+  additionally read the motion preview of a Video at its own preview route,
+  which exposes nothing else. Stream `HEAD` and
   `GET` require a ready/published database row and resolve the exact stored key
   allowed for that kind and MediaTrack ID. Pending, failed, deleting,
   delete-failed, detached, missing, wrong-kind, and orphan-only objects are not
@@ -1115,6 +1143,26 @@ The wire protocol and operational bounds are documented in
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player. Audio and Video
   MediaTracks use that same player.
+- On hover-capable Web devices with a fine pointer, a Video MediaTrack card may
+  show a short, muted, looping preview of that MediaTrack after a mouse rests on
+  it for about half a second. A preview is decoration, not playback: it uses its
+  own media element, never changes the shared player, queue, elapsed time,
+  Shuffle/Repeat state, or system media controls, and never records Recently
+  Played, listening status, telemetry, or social activity. Only one card
+  previews at a time; leaving the card, hiding the page, or the MediaTrack
+  becoming current playback stops it and releases its request. Previews are
+  skipped with Reduce Motion, forced colors, Save-Data, slow connections, and
+  touch or hover-less pointers, and a failed preview is not retried in that
+  page session. While motion previews are enabled, the card reads only the
+  MediaTrack's motion preview, loops that whole clip from its start, and a
+  Video without one keeps its artwork; while they are disabled, the card reads
+  the public stream, so its one request shares the listener's media delivery
+  limits until the preview stops. A card that cannot tell whether previews are
+  enabled shows no preview.
+- A Web MediaTrack card whose MediaTrack is currently playing offers Pause in
+  place of Play. Pause keeps the queue and elapsed time and adds no Recently
+  Played activity. Once paused, the card's Play action launches that MediaTrack
+  again under the normal standalone launch policy, matching Album track rows.
 - Web Shuffle changes only the upcoming order of ready items already present in
   the current queue. Enabling it keeps the current MediaTrack, elapsed time,
   and actual playback history in place; disabling it restores canonical queue
@@ -1588,6 +1636,23 @@ The wire protocol and operational bounds are documented in
 - Once a non-empty query is executed through either draft debounce or explicit
   submission, Search displays grouped Artist, Album, and MediaTrack results and
   does not display a Recent Content section.
+- On Finitude Web at tablet and desktop widths (768 px and wider), typing in the
+  shell search field on any route other than Search keeps the current route and
+  shows inline suggestions instead of opening Search: recent searches for an
+  empty field, otherwise a Search-for option followed by a bounded preview of
+  the grouped results. Draft-driven suggestions never add or reorder search
+  history. Submitting without a highlighted suggestion opens Search for the
+  query; the search button always opens Search for the query, and editing the
+  field clears any highlight. Choosing the Search-for option or any result is
+  an explicit selection and records the current normalized query; choosing a
+  recent search re-runs that historical query and moves it to the newest
+  position. Artist, Album, and Organization results open their details and
+  MediaTrack results use the shared playback queue. Narrower widths keep
+  opening the Search route, which remains the full-results destination and the
+  mobile Search tab; resizing alone never opens Search or records history.
+- On Finitude Web, the Search page may filter its grouped results by type. The
+  filter is presentation only, resets for each query, falls back to all groups
+  when its group disappears, and never changes the request or search history.
 - Artist results open Artist details, Album results open Album details, and MediaTrack results use the shared playback queue.
 - On native clients with device-local download support, valid downloaded Albums
   and MediaTracks may be shown when the server search endpoint is unavailable;
@@ -1906,6 +1971,23 @@ The wire protocol and operational bounds are documented in
 - The browser audio-storage audit explains the recommended action for each
   discrepancy and exposes only explicit, administrator-confirmed remediation.
   Generating or refreshing the report remains read-only.
+- Motion preview objects keep the same traceability: an upload records a
+  leased pending state before its never-reused key is written, an unknown
+  write outcome is resolved only through the exact object version, and
+  replacing, removing, or retiring a preview keeps the detached object as
+  cleanup evidence until its exact version is deleted. Recovery fences the
+  pending record before deleting its object, so a late write from that upload
+  can no longer publish it. MediaTrack deletion waits for a live preview
+  upload, resolves an expired upload's unknown outcome itself through the
+  exact object identified on its never-reused key (refusing only when that
+  object cannot be identified), and removes every recorded preview object
+  before the final metadata; it never depends on the preview rollout. Once
+  deletion begins, no preview operation changes the MediaTrack's preview
+  record. The audit reports orphaned, missing, incomplete, stale, and invalid
+  preview evidence; administrators recover a MediaTrack's unfinished preview
+  work explicitly. Preview evidence of a MediaTrack whose deletion has begun is
+  recovered only by retrying that deletion, never reported as stale preview
+  work.
 - An administrator may delete one exact S3-only audio object from the audit.
   The server revalidates the exact key immediately before deletion and refuses
   the action if any MediaTrack lifecycle field references the raw key or the

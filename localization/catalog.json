@@ -3027,6 +3027,143 @@
       ],
       "variables": {}
     },
+    "admin.motion_preview.attention": {
+      "description": "Shown when an earlier preview upload or cleanup needs attention that Reconcile can resolve.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.cleanup_pending": {
+      "description": "Status when a preview operation succeeded but an old object still needs deletion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.copy": {
+      "description": "Explains what a motion preview is and the accepted file profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.current": {
+      "description": "Facts about the current motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "height": "number",
+        "seconds": "string",
+        "width": "number"
+      }
+    },
+    "admin.motion_preview.error": {
+      "description": "Alert when a motion preview operation fails for a reason without a more specific message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_busy": {
+      "description": "Alert when another motion preview operation for this Video is still running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_changed": {
+      "description": "Alert when the preview or Video changed in another session and the panel reloaded its state.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_file": {
+      "description": "Alert when the chosen motion preview clip is rejected; repeats the accepted file profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_reconcile": {
+      "description": "Alert when unfinished preview work must be reconciled before this operation can run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.file": {
+      "description": "Label of the motion preview file input.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.none": {
+      "description": "Shown when the Video has no motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.outdated": {
+      "description": "Shown when the stored preview was made for an earlier Video and is hidden.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.reconcile": {
+      "description": "Button that recovers an unfinished preview upload or cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.reconciled": {
+      "description": "Status after preview reconciliation completes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.remove": {
+      "description": "Button that removes the current motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.removed": {
+      "description": "Status after a motion preview is removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.title": {
+      "description": "Heading of the administrator panel for a Video MediaTrack's motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.upload": {
+      "description": "Button that uploads the chosen motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.uploaded": {
+      "description": "Status after a motion preview upload succeeds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.organization.archive": {
       "description": "Archive",
       "delivery": [
@@ -4831,6 +4968,43 @@
         "title": "string"
       }
     },
+    "content.album.play_byline_label": {
+      "description": "Accessible label for the Play action on an Album card, including the Album's creator byline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "byline": "string",
+        "title": "string"
+      }
+    },
+    "content.album.play_failed": {
+      "description": "Polite status announced when an Album card's Play action cannot load the Album queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "content.album.play_label": {
+      "description": "Accessible label for the Play action on an Album card; names the Album so it differs from a same-titled MediaTrack's Play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "content.album.play_room_active": {
+      "description": "Polite status announced when an Album card's Play is refused because listening-room playback owns this device's player.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
     "content.artist.portrait_alt": {
       "description": "Alternative text for an Artist portrait image.",
       "delivery": [
@@ -4848,6 +5022,15 @@
       "variables": {
         "title": "string",
         "type": "string"
+      }
+    },
+    "content.pause.label": {
+      "description": "Accessible label for the Pause action on the media card whose MediaTrack is currently playing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
       }
     },
     "content.play.byline_label": {
@@ -8828,6 +9011,20 @@
       ],
       "variables": {}
     },
+    "search.filter.all": {
+      "description": "Search result filter that shows every result group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.filters.label": {
+      "description": "Accessible name of the Search result type filter group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "search.form.label": {
       "description": "Accessible label for the Search results form.",
       "delivery": [
@@ -8915,6 +9112,52 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "search.typeahead.hint_navigate": {
+      "description": "Keyboard hint in the typeahead header next to the up and down arrow keys.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.hint_submit": {
+      "description": "Keyboard hint in the typeahead header next to the Enter key.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.label": {
+      "description": "Accessible name of the shell search suggestion list shown while typing on wide layouts.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.recent": {
+      "description": "Secondary text on a typeahead option that repeats a recent search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.result_count": {
+      "description": "Polite status announcing how many typeahead suggestions are available.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "search.typeahead.search_for": {
+      "description": "Typeahead option that opens the full Search results for the typed query.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
     },
     "seek.position_label": {
       "description": "Accessible label for the playback position slider.",
