@@ -23,6 +23,9 @@ behavior contract.
 
 The Playwright suite runs the production `web/dist` bundle through Archtree's
 Express application and uses deterministic browser-only API and audio fixtures.
+Its parallel workers share that one process, so each forwards its own synthetic
+client address through the one trusted proxy hop and keeps its own per-IP rate
+windows, as separate listeners would; no production limit is reset or relaxed.
 It runs in bundled Chromium only, and covers critical/serious axe
 findings, keyboard skip navigation, reduced motion, direct route refreshes, and
 320 px, 768 px, and 1440 px reflow checks. It also verifies that wheel input
