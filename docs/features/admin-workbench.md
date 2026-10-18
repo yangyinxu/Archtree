@@ -14,6 +14,7 @@ closed and accept only the literal `true`:
 | `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
 | `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` | Operator assertion that the staging bucket denies public/CDN access |
 | `FINITUDE_ADMIN_CATALOG_ENABLED` | Admit versioned edits to existing catalog metadata |
+| `FINITUDE_MOTION_PREVIEWS_ENABLED` | With catalog editing, show the Motion preview panel for Video MediaTracks |
 | `FINITUDE_ADMIN_VISIBILITY_ENABLED` | Admit explicit public/hidden changes |
 | `FINITUDE_HIDDEN_DELIVERY_ENFORCED` | Operator assertion that historical object URLs, S3 policies and CDN delivery deny hidden access |
 

@@ -3,14 +3,18 @@
  *   Types: CardVideoPreviewProps
  *   Functions: CardVideoPreview
  * Internal
- *   Types: NetworkInformationLike
- *   Functions: videoPreviewAllowed, isMediaFailure
- *   Constants: previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds, loopLeadSeconds,
- *              slowConnectionTypes, failedSources
+ *   Types: NetworkInformationLike, PreviewVideoProps
+ *   Functions: videoPreviewAllowed, isMediaFailure, PreviewVideo
+ *   Constants: MotionPreviewSource, previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds,
+ *              loopLeadSeconds, slowConnectionTypes, failedSources
  *   Variables: stopActivePreview
  * @end-catalog */
 
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+
+// Loads only after eligibility passes, so a disallowed preview never reads the presentation flags.
+// A chunk that fails to load (an old tab after a deploy) simply shows no preview.
+const MotionPreviewSource = lazy(() => import('./MotionPreviewSource').catch(() => ({ default: () => null })));
 
 // Previews loop a short window from a little way into the video, where openings are rarely blank.
 const previewStartFraction = 0.2;
@@ -29,8 +33,18 @@ type NetworkInformationLike = { saveData?: boolean; effectiveType?: string };
 export interface CardVideoPreviewProps {
   /** Placement and reveal styles, owned by the card so the preview needs no stylesheet of its own. */
   className: string;
-  source: string;
+  mediaTrackId: string;
+  /** The public stream, used only while dedicated motion previews are disabled. */
+  streamUrl: string;
   /** Asks the card to unmount the preview: it is not allowed here, it failed, or the page hid. */
+  onStop: () => void;
+}
+
+interface PreviewVideoProps {
+  className: string;
+  source: string;
+  /** A dedicated clip is prepared as the preview, so it loops whole from its start. */
+  fromStart: boolean;
   onStop: () => void;
 }
 
@@ -55,17 +69,42 @@ const isMediaFailure = (error: unknown) => {
 };
 
 /**
+ * Mounts a Video card's hover preview once the device, page and listener settings allow it, then
+ * lets the presentation flags choose between the dedicated motion preview and the public stream.
+ * A disallowed preview asks the card to stop before it reads the flags or any media.
+ */
+export default function CardVideoPreview({ className, mediaTrackId, streamUrl, onStop }: CardVideoPreviewProps) {
+  const [allowed] = useState(videoPreviewAllowed);
+
+  useEffect(() => {
+    if (!allowed) onStop();
+  }, [allowed, onStop]);
+
+  if (!allowed) return null;
+  return (
+    <Suspense fallback={null}>
+      <MotionPreviewSource mediaTrackId={mediaTrackId} streamUrl={streamUrl}>
+        {(source, isClip) => (
+          <PreviewVideo className={className} fromStart={isClip} key={source} onStop={onStop} source={source} />
+        )}
+      </MotionPreviewSource>
+    </Suspense>
+  );
+}
+
+/**
  * A decorative, muted preview drawn over a Video card's artwork. It owns its own media element,
  * separate from the shared player, loops a bounded window, stops when the page hides or another card
  * starts a preview, and releases its request on unmount.
  */
-export default function CardVideoPreview({ className, source, onStop }: CardVideoPreviewProps) {
+function PreviewVideo({ className, source, fromStart, onStop }: PreviewVideoProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return undefined;
+    // Conditions can change while the presentation flags load, such as the page hiding.
     if (failedSources.has(source) || !videoPreviewAllowed()) {
       onStop();
       return undefined;
@@ -92,12 +131,15 @@ export default function CardVideoPreview({ className, source, onStop }: CardVide
     };
     const begin = () => {
       const duration = video.duration;
-      if (Number.isFinite(duration) && duration > 0) {
-        start = Math.min(duration * previewStartFraction, previewMaximumStartSeconds);
-        end = Math.min(start + previewWindowSeconds, duration);
-      } else {
+      if (!Number.isFinite(duration) || duration <= 0) {
         start = 0;
         end = previewWindowSeconds;
+      } else if (fromStart) {
+        start = 0;
+        end = duration;
+      } else {
+        start = Math.min(duration * previewStartFraction, previewMaximumStartSeconds);
+        end = Math.min(start + previewWindowSeconds, duration);
       }
       video.currentTime = start;
       play();
@@ -136,7 +178,7 @@ export default function CardVideoPreview({ className, source, onStop }: CardVide
       video.removeAttribute('src');
       video.load();
     };
-  }, [onStop, source]);
+  }, [fromStart, onStop, source]);
 
   return (
     <video

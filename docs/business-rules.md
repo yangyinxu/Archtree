@@ -1056,7 +1056,22 @@ The wire protocol and operational bounds are documented in
   Recently Played history.
 - A MediaTrack has exactly one ready media object and one active `mediaType`,
   either `audio` or `video`. Audio and Video are mutually exclusive media kinds,
-  not two selectable representations of the same MediaTrack.
+  not two selectable representations of the same MediaTrack. The optional
+  motion preview below is decoration derived from a Video, never a second
+  playable or selectable representation.
+- A Video MediaTrack may have at most one optional motion preview: a muted MP4
+  with one H.264 video track whose configuration declares Baseline, Main, or
+  High (8-bit 4:2:0) and no audio, at most 8.5 seconds long, 854 × 480 in both
+  its displayed and encoded size, and 4 MiB. It is never a queue item, never played by the shared player, never
+  downloadable or kept offline, creates no playback activity or telemetry, and
+  is shown only by Finitude Web. It is public only while motion previews are
+  enabled and it is bound to the exact active Video object of a ready,
+  published, publicly visible MediaTrack; replacing or deleting that Video
+  hides it at once, before any cleanup. The clip is prepared on the
+  administrator's device; the server only validates its complete structure and
+  decoding and stores it. A missing, invalid, or failed preview never changes
+  the outcome of an upload, replacement, publication, or deletion of the
+  MediaTrack itself.
 - The MediaTrack ID, metadata, Credits, artwork, Saved state, Playlist
   memberships, queue entry, and Recently Played identity remain unchanged when
   an administrator replaces Audio with Video or Video with Audio.
@@ -1070,7 +1085,9 @@ The wire protocol and operational bounds are documented in
   when there is one, and a publishable lifecycle state; the upload and
   publication outcomes are reported separately, and a failed publication never
   requires uploading the file again.
-- Public metadata exposes one `mediaType` and one stream URL. Stream `HEAD` and
+- Public metadata exposes one `mediaType` and one stream URL; a Web client may
+  additionally read the motion preview of a Video at its own preview route,
+  which exposes nothing else. Stream `HEAD` and
   `GET` require a ready/published database row and resolve the exact stored key
   allowed for that kind and MediaTrack ID. Pending, failed, deleting,
   delete-failed, detached, missing, wrong-kind, and orphan-only objects are not
@@ -1137,9 +1154,12 @@ The wire protocol and operational bounds are documented in
   becoming current playback stops it and releases its request. Previews are
   skipped with Reduce Motion, forced colors, Save-Data, slow connections, and
   touch or hover-less pointers, and a failed preview is not retried in that
-  page session. Until a dedicated motion preview exists, the preview reads the
-  MediaTrack's public stream, so its one request shares the listener's media
-  delivery limits until the preview stops.
+  page session. While motion previews are enabled, the card reads only the
+  MediaTrack's motion preview, loops that whole clip from its start, and a
+  Video without one keeps its artwork; while they are disabled, the card reads
+  the public stream, so its one request shares the listener's media delivery
+  limits until the preview stops. A card that cannot tell whether previews are
+  enabled shows no preview.
 - A Web MediaTrack card whose MediaTrack is currently playing offers Pause in
   place of Play. Pause keeps the queue and elapsed time and adds no Recently
   Played activity. Once paused, the card's Play action launches that MediaTrack
@@ -1952,6 +1972,23 @@ The wire protocol and operational bounds are documented in
 - The browser audio-storage audit explains the recommended action for each
   discrepancy and exposes only explicit, administrator-confirmed remediation.
   Generating or refreshing the report remains read-only.
+- Motion preview objects keep the same traceability: an upload records a
+  leased pending state before its never-reused key is written, an unknown
+  write outcome is resolved only through the exact object version, and
+  replacing, removing, or retiring a preview keeps the detached object as
+  cleanup evidence until its exact version is deleted. Recovery fences the
+  pending record before deleting its object, so a late write from that upload
+  can no longer publish it. MediaTrack deletion waits for a live preview
+  upload, resolves an expired upload's unknown outcome itself through the
+  exact object identified on its never-reused key (refusing only when that
+  object cannot be identified), and removes every recorded preview object
+  before the final metadata; it never depends on the preview rollout. Once
+  deletion begins, no preview operation changes the MediaTrack's preview
+  record. The audit reports orphaned, missing, incomplete, stale, and invalid
+  preview evidence; administrators recover a MediaTrack's unfinished preview
+  work explicitly. Preview evidence of a MediaTrack whose deletion has begun is
+  recovered only by retrying that deletion, never reported as stale preview
+  work.
 - An administrator may delete one exact S3-only audio object from the audit.
   The server revalidates the exact key immediately before deletion and refuses
   the action if any MediaTrack lifecycle field references the raw key or the

@@ -7,6 +7,7 @@
  *   - Album card Play is revealed by hover and remains visible in forced colors
  *   - the playing MediaTrack card keeps a Pause control and an accent title until paused
  *   - a mouse resting on a Video card plays a muted preview without touching the shared player
+ *   - with motion previews enabled, a Video card plays its dedicated clip instead of the stream
  *   - with a touch pointer
  *     - Album cards open the Album and offer no separate card Play
  * @end-catalog */
@@ -134,6 +135,26 @@ test('a mouse resting on a Video card plays a muted preview without touching the
   await videoCard.hover();
   await page.waitForTimeout(900);
   await expect(videoCard.locator('video[data-video-preview]')).toHaveCount(0);
+});
+
+test('with motion previews enabled, a Video card plays its dedicated clip instead of the stream', async ({ api, page }) => {
+  await installMediaCardHome(page);
+  await page.route('**/api/listener/v1/presentation-capabilities', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ contractVersion: 1, motionPreviews: true })
+  }));
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/finitude');
+
+  const videoCard = page.getByRole('main').locator('article').filter({
+    has: page.getByRole('button', { name: 'Play First Light by Finitude Ensemble' })
+  });
+  await videoCard.hover();
+  const preview = videoCard.locator('video[data-video-preview]');
+  await expect(preview).toHaveAttribute('data-ready', 'true');
+  expect(await preview.evaluate((video) => new URL((video as HTMLVideoElement).src).pathname))
+    .toBe('/content/mediaTrack/motion-preview/e2e-first-light');
+  expect(api.calls.filter((call) => call.pathname === '/content/mediaTrack/stream/e2e-first-light')).toHaveLength(0);
 });
 
 test.describe('with a touch pointer', () => {

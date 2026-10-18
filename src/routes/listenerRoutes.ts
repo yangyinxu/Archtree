@@ -20,6 +20,7 @@ const router: Router = express.Router();
 router.post('/telemetry', ingestListenerTelemetry);
 router.get('/personalization-capabilities', publicReadRateLimit, asyncHandler(listenerController.personalizationCapabilities));
 router.get('/capabilities', publicReadRateLimit, asyncHandler(listenerController.capabilities));
+router.get('/presentation-capabilities', publicReadRateLimit, asyncHandler(listenerController.presentationCapabilities));
 router.get(
     '/home',
     publicReadRateLimit,

@@ -6,7 +6,10 @@
  *   - missing and non-ready Soundtracks never receive an S3 delete or publication retry action
  *   - a storage-ready Video publication failure offers retry instead of re-upload
  *   - MongoDB-only rows with invalid storage identity do not receive direct deletion
+ *   - motion preview audit lists every evidence kind with escaped values and panel-only remediation
  *   - audit status messages are escaped and can communicate a failed remediation
+ *   - motion preview audit sends deletion-owned evidence to a deletion retry and labels every stale reason
+ *   - a malformed preview key keeps the investigate advice even while its MediaTrack is being deleted
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -120,9 +123,108 @@ test('MongoDB-only rows with invalid storage identity do not receive direct dele
     assert.match(html, /Stored S3 identity is invalid/);
 });
 
+test('motion preview audit lists every evidence kind with escaped values and panel-only remediation', () => {
+    const previewTrackId = '64c000000000000000000001';
+    const hostile = '<script>alert(1)</script>&x';
+    const html = renderAudioStorageAuditPage({
+        ...report,
+        motionPreviewStorage: {
+            summary: {
+                databasePreviewTrackCount: 4, s3ObjectCount: 5, orphanedObjectCount: 1, missingObjectCount: 1,
+                incompleteTrackCount: 1, staleTrackCount: 1,
+                invalidStorageKeyCount: 7, duplicateStorageKeyCount: 8, invalidStorageObjectCount: 9
+            },
+            orphanedObjects: [{ key: `motion-preview/orphan/${hostile}`, size: 2048 }],
+            missingObjects: [{ audioTrackId: previewTrackId, phase: 'active', s3Key: `missing-${hostile}`, status: 'ready', error: '' }],
+            incompleteTracks: [{
+                audioTrackId: previewTrackId,
+                pending: { status: 'failed', outcomeUnknown: true, leaseUntil: null },
+                cleanup: { status: 'deleteFailed', reason: `cleanup-${hostile}` }
+            }],
+            staleTracks: [{ audioTrackId: `stale-${hostile}`, uploadStatus: 'ready', reason: 'sourceReplaced' }],
+            invalidStorageKeys: [{ audioTrackId: previewTrackId, phase: 'pending', s3Key: `invalid-${hostile}`, status: 'failed', error: `error-${hostile}` }],
+            duplicateStorageKeys: [{ audioTrackId: previewTrackId, phase: 'cleanup', s3Key: `duplicate-${hostile}`, status: 'pending', error: '' }],
+            invalidStorageObjects: [{ key: `motion-preview/${hostile}`, size: 1 }]
+        }
+    }, 'admin@example.com');
+
+    for (const [count, label] of [[7, 'Invalid keys'], [8, 'Duplicate keys'], [9, 'Invalid objects']] as const) {
+        assert.match(html, new RegExp(`<p class="eyebrow">${label}</p><h2>${count}</h2>`));
+    }
+    for (const heading of ['Orphaned preview objects', 'Missing preview objects', 'Incomplete preview operations',
+        'Stale previews', 'Invalid preview keys in MongoDB', 'Duplicate preview keys in MongoDB', 'Invalid preview objects in S3']) {
+        assert.match(html, new RegExp(`>${heading}</h3>`));
+    }
+    const escaped = '&lt;script&gt;alert\\(1\\)&lt;/script&gt;&amp;x';
+    for (const prefix of ['motion-preview/orphan/', 'missing-', 'cleanup-', 'stale-', 'invalid-', 'error-', 'duplicate-']) {
+        assert.match(html, new RegExp(`${prefix}${escaped}`));
+    }
+    assert.doesNotMatch(html, /<script>alert/);
+    assert.match(html, /Pending upload: failed/);
+    assert.match(html, /Write outcome unknown/);
+    assert.match(html, /Bound to a replaced Video/);
+    assert.match(html, /Remove the preview or upload a new one/);
+    assert.match(html, /never delete a preview object by key alone/);
+    assert.match(html, /this audit offers no preview delete action/);
+    assert.match(html, new RegExp(`href="/finitude/admin/catalog/audioTrack/${previewTrackId}"`));
+    // The stale MediaTrack ID is URL-encoded in the panel link, never inserted raw.
+    assert.match(html, /href="\/finitude\/admin\/catalog\/audioTrack\/stale-%3Cscript%3E/);
+    // Preview evidence is report-only; the only storage forms remain the three audio ones from `report`.
+    assert.equal((html.match(/<form /g) ?? []).length, 3);
+});
+
 test('audit status messages are escaped and can communicate a failed remediation', () => {
     const html = renderAudioStorageAuditPage(report, 'admin@example.com', '<failed>', true);
     assert.match(html, /alert--error/);
     assert.match(html, /&lt;failed&gt;/);
     assert.doesNotMatch(html, /<failed>/);
+});
+
+test('motion preview audit sends deletion-owned evidence to a deletion retry and labels every stale reason', () => {
+    const owned = '64c000000000000000000002';
+    const ready = '64c000000000000000000003';
+    const html = renderAudioStorageAuditPage({
+        ...report,
+        motionPreviewStorage: {
+            summary: { missingObjectCount: 2, incompleteTrackCount: 1, staleTrackCount: 3 },
+            orphanedObjects: [],
+            missingObjects: [
+                { audioTrackId: owned, phase: 'active', s3Key: 'motion-preview/owned', status: 'ready', error: '', deletionOwned: true },
+                { audioTrackId: ready, phase: 'cleanup', s3Key: 'motion-preview/cleared', status: 'deleteFailed', error: '', deletionOwned: false }
+            ],
+            incompleteTracks: [{ audioTrackId: owned, deletionOwned: true, pending: null, cleanup: { status: 'deleteFailed', reason: 'replaced' } }],
+            staleTracks: [
+                { audioTrackId: ready, uploadStatus: 'pending', reason: 'trackNotReady' },
+                { audioTrackId: ready, uploadStatus: 'ready', reason: 'notVideo' },
+                { audioTrackId: ready, uploadStatus: 'ready', reason: 'unrecognized' }
+            ],
+            invalidStorageKeys: [],
+            duplicateStorageKeys: [],
+            invalidStorageObjects: []
+        }
+    }, 'admin@example.com');
+
+    // Deletion-owned items name the deletion retry and never link to a panel that would refuse them.
+    assert.equal((html.match(/MediaTrack deletion owns this preview/g) ?? []).length, 2);
+    assert.doesNotMatch(html, new RegExp(`href="/finitude/admin/catalog/audioTrack/${owned}"`));
+    assert.match(html, /The detached object is already absent/);
+    assert.match(html, new RegExp(`href="/finitude/admin/catalog/audioTrack/${ready}"`));
+    assert.match(html, /MediaTrack upload is not ready/);
+    assert.match(html, /MediaTrack is no longer a Video/);
+    assert.match(html, /No longer bound to the active Video/);
+    assert.match(html, /needs catalog editing and motion previews enabled/);
+});
+
+test('a malformed preview key keeps the investigate advice even while its MediaTrack is being deleted', () => {
+    const html = renderAudioStorageAuditPage({
+        ...report,
+        motionPreviewStorage: {
+            summary: { invalidStorageKeyCount: 1 },
+            orphanedObjects: [], missingObjects: [], incompleteTracks: [], staleTracks: [],
+            invalidStorageKeys: [{ audioTrackId: '64c000000000000000000004', phase: 'cleanup', s3Key: 'motion-preview/forged', status: 'deleteFailed', error: '', deletionOwned: false }],
+            duplicateStorageKeys: [], invalidStorageObjects: []
+        }
+    }, 'admin@example.com');
+    assert.match(html, /never delete a preview object by key alone/);
+    assert.doesNotMatch(html, /MediaTrack deletion owns this preview/);
 });

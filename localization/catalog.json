@@ -3027,6 +3027,143 @@
       ],
       "variables": {}
     },
+    "admin.motion_preview.attention": {
+      "description": "Shown when an earlier preview upload or cleanup needs attention that Reconcile can resolve.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.cleanup_pending": {
+      "description": "Status when a preview operation succeeded but an old object still needs deletion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.copy": {
+      "description": "Explains what a motion preview is and the accepted file profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.current": {
+      "description": "Facts about the current motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "height": "number",
+        "seconds": "string",
+        "width": "number"
+      }
+    },
+    "admin.motion_preview.error": {
+      "description": "Alert when a motion preview operation fails for a reason without a more specific message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_busy": {
+      "description": "Alert when another motion preview operation for this Video is still running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_changed": {
+      "description": "Alert when the preview or Video changed in another session and the panel reloaded its state.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_file": {
+      "description": "Alert when the chosen motion preview clip is rejected; repeats the accepted file profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_reconcile": {
+      "description": "Alert when unfinished preview work must be reconciled before this operation can run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.file": {
+      "description": "Label of the motion preview file input.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.none": {
+      "description": "Shown when the Video has no motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.outdated": {
+      "description": "Shown when the stored preview was made for an earlier Video and is hidden.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.reconcile": {
+      "description": "Button that recovers an unfinished preview upload or cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.reconciled": {
+      "description": "Status after preview reconciliation completes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.remove": {
+      "description": "Button that removes the current motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.removed": {
+      "description": "Status after a motion preview is removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.title": {
+      "description": "Heading of the administrator panel for a Video MediaTrack's motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.upload": {
+      "description": "Button that uploads the chosen motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.uploaded": {
+      "description": "Status after a motion preview upload succeeds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.organization.archive": {
       "description": "Archive",
       "delivery": [

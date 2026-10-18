@@ -220,7 +220,9 @@ artwork.
   control). It loops an 8 s window starting 20% in (at most 30 s), clamped to
   the clip's end, is hidden from assistive technology, stops on any press
   inside the card, and never starts with Reduce Motion, forced colors, touch,
-  Save-Data, or a hidden page.
+  Save-Data, or a hidden page. With motion previews enabled it plays the
+  dedicated preview clip, looping the whole clip from its start, and a Video
+  without one keeps its artwork.
 - Rows highlight across their complete surface, including trailing controls,
   without creating overlapping actions.
 - Primary play and pause glyphs are filled transport icons on the same solid

@@ -5,6 +5,7 @@
 
 - [Upload](#upload)
 - [One active media object](#one-active-media-object)
+- [Motion preview](#motion-preview)
 - [Delete](#delete)
 - [Reconciliation](#reconciliation)
 <!-- @end-catalog -->
@@ -64,7 +65,8 @@
   require `Content-Length`, use the shared bounded disk spool, and default to
   `MAX_VIDEO_UPLOAD_MB=512`.
 - A MediaTrack has exactly one externally playable object and records its
-  `mediaType` as `audio` or `video`. It never exposes both representations.
+  `mediaType` as `audio` or `video`. It never exposes both representations. A
+  Video's optional motion preview (below) is decoration, not a representation.
 - Replacement reserves and uploads a kind-bound pending key, atomically makes
   that object active, retains the former key and kind as cleanup evidence, and
   only then deletes the former S3 object. A failed replacement leaves the
@@ -75,12 +77,76 @@
   their objects stay traceable until the unified lifecycle safely promotes one
   object and confirms cleanup of the other.
 
+## Motion preview
+
+A Video MediaTrack may carry one muted hover preview for Finitude Web, behind
+`FINITUDE_MOTION_PREVIEWS_ENABLED` (default `false`). Its record is the embedded
+`motionPreview` state (`active`, `pending`, `cleanup`, `revision`), and its
+objects live under `motion-preview/<trackId>/<ObjectId>`, a namespace no audio
+or video classifier touches.
+
+- Admin-only API (also requires `FINITUDE_ADMIN_CATALOG_ENABLED`):
+  `GET|POST|DELETE /api/admin/v1/catalog/audioTrack/:id/motion-preview` and
+  `POST …/motion-preview/reconcile`. `GET` returns eligibility, an opaque
+  `sourceToken`, the current revision, and preview facts, never keys or
+  versions. `POST` is multipart: `motionPreviewFile` (at most 4 MiB),
+  `sourceToken`, and `expectedRevision`. `DELETE` takes `{"expectedRevision":n}`.
+  The editor's Motion preview panel drives all of them. It refuses a clip over
+  4 MiB or not MP4 before sending it, names the cause of a failure (a rejected
+  file, a change made in another session, another operation still running, or
+  needed reconciliation), and keeps its controls disabled until the refreshed
+  status arrives.
+- Validation reads the actual bytes: a progressive MP4 (moov before mdat, no
+  fragments or protection) with exactly one H.264 (`avc1`/`avc3`) video track
+  and no sound track, at most 8.5 s. Its single sample entry's coded size must
+  be within 854 × 480 like the track header's display size (they may differ for
+  non-square pixels), and its `avcC` must declare Baseline, Main, or
+  High with matching SPS profiles (a High record's 4:2:0 8-bit extension when
+  present). A bounded FFmpeg decode of the video stream follows (one at a time,
+  32 MiB allocations, frames capped at 442,368 pixels with SPS cropping
+  ignored, 20 s deadline), so a 720p or larger stream fails whatever its headers
+  claim. Only
+  explicit Video rows (`mediaType: "video"`) are eligible; a legacy prototype
+  row becomes eligible after its next replacement. A request for a missing or
+  ineligible track, another Video, or an older revision is refused before the
+  decode, so it never holds the decoder.
+- Upload reserves a 10-minute leased pending record, writes a never-reused key
+  with `If-None-Match: *`, records the exact version, then promotes it in one
+  compare-and-set bound to the active Video key. The previous preview stays
+  public until promotion and is then deleted by exact version; a failed delete
+  keeps it as `cleanup` evidence. A failed step fences the pending record
+  before deleting its own object, so a promote whose acknowledgement was lost
+  is never deleted while it may be live. An unknown write outcome is resolved
+  later by HEAD on that key (metadata must name the MediaTrack), the record is
+  fenced with the identified version, and that exact version is deleted; a
+  bucket without versioning addresses it as the `null` version. Object
+  metadata `ownerid` names the MediaTrack's shared provenance; the preview's
+  `updatedBy` records the uploading administrator and is not provenance.
+- Replacing the Video retires a preview made for the old source after the new
+  source is active (best effort; the public gate already hides it). Deleting
+  the MediaTrack waits for a live preview upload, resolves an expired unknown
+  outcome by the same HEAD rule (refusing with 503 only when the object cannot
+  be identified), and deletes every recorded preview object by version,
+  whatever the rollout flags. Preview writes never land once deletion begins.
+- Public delivery: `HEAD|GET /content/mediaTrack/motion-preview/:id`, with an
+  optional `?revision=pv_…`. It serves only a ready, published, visible Video
+  whose preview is bound to the current active key, matches the recorded
+  strong ETag, length, and version, answers `If-None-Match` with 304 without
+  storage I/O, re-authorizes while streaming, and returns a bare 404
+  otherwise. Responses are `private, no-cache`. The admission class
+  `motionPreview` never queues and never uses the playback reserve.
+- `GET /api/listener/v1/presentation-capabilities` returns
+  `{"contractVersion":1,"motionPreviews":boolean}` so the Web card chooses the
+  dedicated clip, or the public stream while previews are disabled. If the
+  card cannot read it, it shows no preview and does not ask again on every
+  hover.
+
 ## Delete
 
 - API: `DELETE /content/audioTrack/:audioTrackId`
 - Web: content manager delete action
 - MediaTrack metadata is retained until every matching active, pending,
-  cleanup, and legacy migration object has been deleted.
+  cleanup, legacy migration, and motion preview object has been deleted.
 - Failed deletions remain marked as `deleteFailed` for reconciliation.
 
 ## Reconciliation
@@ -94,6 +160,16 @@
   missing lifecycle keys, incomplete operations, invalid keys, and duplicates.
   `POST /admin/video-storage/orphan-delete` rechecks all nested active, pending,
   and cleanup references before deleting one exact report-confirmed orphan.
+- The report's `motionPreviewStorage` section lists `motion-preview/` objects,
+  orphaned and missing objects, incomplete (pending or cleanup) and stale
+  previews (each with a `reason`: `trackNotReady`, `notVideo`, or
+  `sourceReplaced`), invalid keys, and duplicates. A `deleting` or
+  `deleteFailed` MediaTrack is never stale preview work, and its missing or
+  incomplete evidence is marked `deletionOwned`: its deletion removes every
+  preview object, so the audit page sends it to a deletion retry. The section
+  is report-only; the audit page lists every item and links any other item to
+  the MediaTrack's Finitude Web Motion preview panel, whose Reconcile action
+  recovers it.
 - Admin-only MongoDB-only MediaTrack deletion:
   `POST /admin/audio-storage/missing-track-delete` with `audioTrackId` and
   `expectedS3Key`. It re-runs reconciliation, rejects stale storage identity,

@@ -3,7 +3,7 @@
  *   Functions: AdminCatalogEditor
  * Internal
  *   Types: CatalogBuffer
- *   Constants: CatalogCover, CatalogFields, CatalogReviewStart, CatalogEditConfirmation
+ *   Constants: CatalogCover, CatalogFields, CatalogReviewStart, CatalogEditConfirmation, MotionPreviewPanel
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -26,6 +26,7 @@ const CatalogCover = lazy(() => import('./CatalogCover').then(module => ({ defau
 const CatalogFields = lazy(() => import('./CatalogFields').then(module => ({ default: module.CatalogFields })));
 const CatalogReviewStart = lazy(() => import('./CatalogReviewStart').then(module => ({ default: module.CatalogReviewStart })));
 const CatalogEditConfirmation = lazy(() => import('./CatalogEditConfirmation').then(module => ({ default: module.CatalogEditConfirmation })));
+const MotionPreviewPanel = lazy(() => import('./MotionPreviewPanel').then(module => ({ default: module.MotionPreviewPanel })));
 
 interface CatalogBuffer { base: CatalogItem; fields: CatalogItem['fields']; visibility: 'public' | 'hidden'; dirty: boolean }
 /** Keeps a captured editing baseline separate from the latest saved artwork and presentation. */
@@ -101,6 +102,7 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
         {item.effectiveVisibility !== item.visibility && <p>{t('catalog.parent_hidden')}</p>}
         <button className={`${styles.button} ${styles.primary}`} disabled={locked || !edit.dirty || conflict || !draftPatch || !allowsPatch(draftPatch)}>{t('catalog.save')}</button>
       </form>
+      {kind === 'audioTrack' && item.capabilities.editing && <Suspense fallback={null}><MotionPreviewPanel id={id} /></Suspense>}
       {confirm && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogEditConfirmation snapshot={confirm}
         stale={confirmationStale} disabled={locked || conflict || confirm.item.revision !== query.data?.item.revision || !allowsPatch(confirm.patch)}
         onClose={() => setConfirm(null)} onConfirm={() => {
