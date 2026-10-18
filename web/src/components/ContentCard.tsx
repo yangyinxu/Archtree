@@ -3,8 +3,11 @@
  *   Types: ContentCardProps
  *   Functions: ContentCard
  *   Constants: defaultContentCardArtworkSizes
+ * Internal
+ *   Constants: CardVideoPreview
  * @end-catalog */
 
+import { lazy, Suspense } from 'react';
 import { Link } from 'react-router';
 import { Pause, Play } from 'lucide-react';
 
@@ -17,6 +20,10 @@ import { useLocalization } from '../localization/LocalizationProvider';
 import { playerStore, usePlayingTrackId } from '../player';
 import { LazyShareMusicButton } from '../features/social/LazyShareMusicButton';
 import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
+import { useVideoPreviewIntent } from './useVideoPreviewIntent';
+
+// The preview element and its styles load only once a mouse rests on a Video card.
+const CardVideoPreview = lazy(() => import('./CardVideoPreview'));
 
 
 export interface ContentCardProps {
@@ -66,10 +73,20 @@ export const ContentCard = ({
     item.contentType === 'audioTrack' ? item.duration : null
   ].filter(Boolean).join(' · ');
   const showPlayReveal = item.contentType === 'audioTrack' && Boolean(onPlay);
+  // Only a playable Video MediaTrack that is not already the current playback offers a preview.
+  const previewSource = item.contentType === 'audioTrack' && item.mediaType === 'video' && onPlay && !isPlaying
+    ? item.streamUrl
+    : null;
+  const preview = useVideoPreviewIntent(previewSource);
   const body = (
     <>
       <span className={styles.artworkFrame}>
         <Artwork alt="" kind={item.contentType} sizes={artworkSizes} src={item.artworkUrl} />
+        {preview.active && previewSource ? (
+          <Suspense fallback={null}>
+            <CardVideoPreview onFailed={preview.onFailed} source={previewSource} />
+          </Suspense>
+        ) : null}
         {showPlayReveal ? (
           <span aria-hidden="true" className={styles.playReveal}>
             {isPlaying
@@ -91,6 +108,8 @@ export const ContentCard = ({
       // Lets a page tint itself with the hovered card's artwork tone.
       data-artwork-src={item.artworkUrl || undefined}
       data-playback-state={isPlaying ? 'playing' : undefined}
+      onPointerEnter={preview.onPointerEnter}
+      onPointerLeave={preview.onPointerLeave}
     >
       {item.contentType === 'audioTrack' ? (
         onPlay ? (

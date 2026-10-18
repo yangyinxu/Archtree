@@ -6,6 +6,7 @@
  *   - Album card Play stays hidden at rest, appears on keyboard focus, and starts the Album without leaving Home
  *   - Album card Play is revealed by hover and remains visible in forced colors
  *   - the playing MediaTrack card keeps a Pause control and an accent title until paused
+ *   - a mouse resting on a Video card plays a muted preview without touching the shared player
  *   - with a touch pointer
  *     - Album cards open the Album and offer no separate card Play
  * @end-catalog */
@@ -24,7 +25,8 @@ const trackCardHome = {
   title: 'Media card room',
   sections: [
     { id: 'media-card-albums', title: 'Albums to start', presentation: 'carousel', items: [albumFixture] },
-    { id: 'media-card-tracks', title: 'MediaTracks to start', presentation: 'carousel', items: [trackFixtures[1]] }
+    // First Light is a Video MediaTrack, so its card offers the hover preview.
+    { id: 'media-card-tracks', title: 'MediaTracks to start', presentation: 'carousel', items: [trackFixtures[1], trackFixtures[0]] }
   ]
 } satisfies ListenerHome;
 
@@ -101,6 +103,38 @@ test('the playing MediaTrack card keeps a Pause control and an accent title unti
   await pauseCard.click();
   await expect(main.getByRole('button', { name: 'Play Night Window by Finitude Ensemble' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Pause Night Window' })).toHaveCount(0);
+});
+
+test('a mouse resting on a Video card plays a muted preview without touching the shared player', async ({ api, page }) => {
+  await installMediaCardHome(page);
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/finitude');
+
+  const main = page.getByRole('main');
+  const videoCard = main.locator('article').filter({
+    has: page.getByRole('button', { name: 'Play First Light by Finitude Ensemble' })
+  });
+  await videoCard.hover();
+  const preview = videoCard.locator('video[data-video-preview]');
+  await expect(preview).toHaveAttribute('data-ready', 'true');
+  await expect(preview).toHaveAttribute('aria-hidden', 'true');
+  expect(await preview.evaluate((video) => {
+    const media = video as HTMLVideoElement;
+    return { muted: media.muted, paused: media.paused, path: new URL(media.src).pathname };
+  })).toEqual({ muted: true, paused: false, path: '/content/mediaTrack/stream/e2e-first-light' });
+
+  // The preview is decoration: no queue, no Now Playing, no activity.
+  await expect(page.getByRole('region', { name: 'Now playing' }).getByText('Nothing playing')).toBeVisible();
+  expect(api.calls.filter((call) => call.pathname === '/content/me/recently-played')).toHaveLength(0);
+
+  await page.mouse.move(0, 0);
+  await expect(preview).toHaveCount(0);
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await videoCard.hover();
+  await page.waitForTimeout(900);
+  await expect(videoCard.locator('video[data-video-preview]')).toHaveCount(0);
 });
 
 test.describe('with a touch pointer', () => {

@@ -1127,6 +1127,18 @@ The wire protocol and operational bounds are documented in
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player. Audio and Video
   MediaTracks use that same player.
+- On hover-capable Web devices with a fine pointer, a Video MediaTrack card may
+  show a short, muted, looping preview of that MediaTrack after a mouse rests on
+  it for about half a second. A preview is decoration, not playback: it uses its
+  own media element, never changes the shared player, queue, elapsed time,
+  Shuffle/Repeat state, or system media controls, and never records Recently
+  Played, listening status, telemetry, or social activity. Only one card
+  previews at a time; leaving the card, hiding the page, or the MediaTrack
+  becoming current playback stops it and releases its request. Previews are
+  skipped with Reduce Motion, forced colors, Save-Data, slow connections, and
+  touch or hover-less pointers, and a failed preview is not retried in that
+  page session. Until a dedicated motion preview exists, the preview reads the
+  MediaTrack's public stream.
 - A Web MediaTrack card whose MediaTrack is currently playing offers Pause in
   place of Play. Pause keeps the queue and elapsed time and adds no Recently
   Played activity. Once paused, the card's Play action launches that MediaTrack
