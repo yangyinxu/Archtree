@@ -4831,6 +4831,43 @@
         "title": "string"
       }
     },
+    "content.album.play_byline_label": {
+      "description": "Accessible label for the Play action on an Album card, including the Album's creator byline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "byline": "string",
+        "title": "string"
+      }
+    },
+    "content.album.play_failed": {
+      "description": "Polite status announced when an Album card's Play action cannot load the Album queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "content.album.play_label": {
+      "description": "Accessible label for the Play action on an Album card; names the Album so it differs from a same-titled MediaTrack's Play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "content.album.play_room_active": {
+      "description": "Polite status announced when an Album card's Play is refused because listening-room playback owns this device's player.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
     "content.artist.portrait_alt": {
       "description": "Alternative text for an Artist portrait image.",
       "delivery": [
@@ -4848,6 +4885,15 @@
       "variables": {
         "title": "string",
         "type": "string"
+      }
+    },
+    "content.pause.label": {
+      "description": "Accessible label for the Pause action on the media card whose MediaTrack is currently playing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
       }
     },
     "content.play.byline_label": {

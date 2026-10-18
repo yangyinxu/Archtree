@@ -16,9 +16,9 @@
   font-family: var(--font-display);
   font-size: var(--type-section-title);
   font-weight: 750;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
   line-height: 1.2;
-  margin: 0 0 var(--space-8);
+  margin: 0 0 var(--space-2);
 }
 
 .carousel,
@@ -30,16 +30,20 @@
 }
 
 .carouselFrame {
-  --carousel-card-width: clamp(10.5rem, 16vw, 13rem);
+  /* Cards add their inset on both sides, so the artwork keeps the clamped width. */
+  --carousel-card-width: calc(clamp(10.5rem, 16vw, 13rem) + 2 * var(--card-inset));
 
   isolation: isolate;
+  /* Bleed by the card inset so artwork aligns with the heading and hover surfaces are not clipped. */
+  margin-inline: calc(-1 * var(--card-inset));
   min-width: 0;
   position: relative;
 }
 
 .carousel {
   display: grid;
-  gap: var(--space-5);
+  /* Keep the 24 px artwork-to-artwork rhythm once each card adds its own inset. */
+  gap: calc(var(--space-5) - 2 * var(--card-inset));
   grid-auto-columns: var(--carousel-card-width);
   grid-auto-flow: column;
   overflow-x: auto;
@@ -95,11 +99,11 @@
 }
 
 .carouselControlPrevious {
-  inset-inline-start: var(--space-2);
+  inset-inline-start: calc(var(--card-inset) + var(--space-2));
 }
 
 .carouselControlNext {
-  inset-inline-end: var(--space-2);
+  inset-inline-end: calc(var(--card-inset) + var(--space-2));
 }
 
 .carouselFrame:hover .carouselControl,
@@ -126,10 +130,12 @@
 }
 
 .grid {
-  column-gap: var(--space-5);
+  /* Padded cards bleed outward and keep the 168 px artwork minimum, so column counts are unchanged. */
+  column-gap: calc(var(--space-5) - 2 * var(--card-inset));
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 10.5rem), 1fr));
-  row-gap: var(--space-8);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(10.5rem + 2 * var(--card-inset))), 1fr));
+  margin-inline: calc(-1 * var(--card-inset));
+  row-gap: calc(var(--space-6) - 2 * var(--card-inset));
 }
 
 .list {
@@ -216,12 +222,12 @@
 
 @media (max-width: 480px) {
   .carouselFrame {
-    --carousel-card-width: min(72vw, 17.5rem);
+    --carousel-card-width: calc(min(72vw, 17.5rem) + 2 * var(--card-inset));
   }
 
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.75rem), 1fr));
-    row-gap: var(--space-5);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(8.75rem + 2 * var(--card-inset))), 1fr));
+    row-gap: calc(var(--space-5) - 2 * var(--card-inset));
   }
 }
 

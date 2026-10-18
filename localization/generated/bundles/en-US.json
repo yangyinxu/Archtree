@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-00B0rIVzyNxHvt62YQHEcJFj1Tkln7Fe-KCcIcxM_Sw",
+  "revision": "sha256-XvfSYV8776DSS30IO8gjlqK2R8gf0GLRyweeqXO4lSU",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.checking": "Checking your account…",
@@ -684,8 +684,13 @@
     "common.state.loading_more": "Loading more…",
     "common.state.unavailable": "Unavailable",
     "content.album.cover_alt": "{title} cover",
+    "content.album.play_byline_label": "Play album {title} by {byline}",
+    "content.album.play_failed": "{title} could not start. Try again.",
+    "content.album.play_label": "Play album {title}",
+    "content.album.play_room_active": "A listening room is playing on this device. Leave the room to play {title} here.",
     "content.artist.portrait_alt": "{name} portrait",
     "content.link.label": "{title}, {type}",
+    "content.pause.label": "Pause {title}",
     "content.play.byline_label": "Play {title} by {byline}",
     "content.play.label": "Play {title}",
     "content.title.unknown_artist": "Unknown artist",

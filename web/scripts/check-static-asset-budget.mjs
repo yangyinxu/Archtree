@@ -4,7 +4,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 export const staticAssetBudgets = Object.freeze({
-  cssGzipBytes: 32 * 1024,
+  // Raised from 32 KiB for the reviewed media-card polish (padded hover surfaces and card Play).
+  cssGzipBytes: 33 * 1024,
   fontBytes: 128 * 1024,
   imageBytes: 256 * 1024,
   individualImageBytes: 128 * 1024

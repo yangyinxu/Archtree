@@ -1036,6 +1036,17 @@ The wire protocol and operational bounds are documented in
   attribution unless an administrator explicitly selects promotion.
 - Tapping the Album Play button starts the Album queue and adds only the Album
   to Recently Played.
+- On Finitude Web, an Album card may also offer Play on hover-capable devices
+  without a touch pointer. It loads the same canonical ready-only Album queue,
+  starts it without leaving the current route, and follows the Album Play
+  button's Recently Played policy. An Album with no playable MediaTrack starts
+  nothing. A load that fails, or that does not finish within the browser's
+  roughly five-second user-intent window, leaves current playback unchanged and
+  is announced; it never starts playback later. A newer launch, a newer Album
+  card Play, or an account change during the load abandons it silently, and an
+  abandoned load never cancels another launch's Recently Played activity. While
+  listening-room playback owns the player, the launch is refused and the card
+  says so. Native clients need not offer an Album card Play action.
 - Explicitly tapping an individual MediaTrack in an Album list adds that
   MediaTrack, but not the Album, to Recently Played.
 - Using Next or Previous and automatic queue advancement inside an Album queue
@@ -1116,6 +1127,10 @@ The wire protocol and operational bounds are documented in
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player. Audio and Video
   MediaTracks use that same player.
+- A Web MediaTrack card whose MediaTrack is currently playing offers Pause in
+  place of Play. Pause keeps the queue and elapsed time and adds no Recently
+  Played activity. Once paused, the card's Play action launches that MediaTrack
+  again under the normal standalone launch policy, matching Album track rows.
 - Web Shuffle changes only the upcoming order of ready items already present in
   the current queue. Enabling it keeps the current MediaTrack, elapsed time,
   and actual playback history in place; disabling it restores canonical queue
