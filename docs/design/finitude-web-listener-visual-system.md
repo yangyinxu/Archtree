@@ -217,9 +217,10 @@ artwork.
   `aria-current`, and pauses on activation.
 - A Video MediaTrack card that a mouse rests on for 500 ms fades a muted,
   `object-fit: cover` preview over its artwork (300 ms, under the Play
-  control). It loops an 8 s window starting 20% in (at most 30 s), is hidden
-  from assistive technology, and never appears with Reduce Motion, forced
-  colors, touch, or Save-Data.
+  control). It loops an 8 s window starting 20% in (at most 30 s), clamped to
+  the clip's end, is hidden from assistive technology, stops on any press
+  inside the card, and never starts with Reduce Motion, forced colors, touch,
+  Save-Data, or a hidden page.
 - Rows highlight across their complete surface, including trailing controls,
   without creating overlapping actions.
 - Primary play and pause glyphs are filled transport icons on the same solid

@@ -1138,7 +1138,8 @@ The wire protocol and operational bounds are documented in
   skipped with Reduce Motion, forced colors, Save-Data, slow connections, and
   touch or hover-less pointers, and a failed preview is not retried in that
   page session. Until a dedicated motion preview exists, the preview reads the
-  MediaTrack's public stream.
+  MediaTrack's public stream, so its one request shares the listener's media
+  delivery limits until the preview stops.
 - A Web MediaTrack card whose MediaTrack is currently playing offers Pause in
   place of Play. Pause keeps the queue and elapsed time and adds no Recently
   Played activity. Once paused, the card's Play action launches that MediaTrack

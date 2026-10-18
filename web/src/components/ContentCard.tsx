@@ -108,8 +108,7 @@ export const ContentCard = ({
       // Lets a page tint itself with the hovered card's artwork tone.
       data-artwork-src={item.artworkUrl || undefined}
       data-playback-state={isPlaying ? 'playing' : undefined}
-      onPointerEnter={preview.onPointerEnter}
-      onPointerLeave={preview.onPointerLeave}
+      ref={preview.cardRef}
     >
       {item.contentType === 'audioTrack' ? (
         onPlay ? (

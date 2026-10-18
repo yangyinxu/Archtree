@@ -2,18 +2,22 @@
  * Internal
  *   Types: Environment
  *   Classes: TestPointerEvent
- *   Functions: configure, renderCards, card, hover, restPastIntent, previewIn, previewMounted
+ *   Functions: trackWithSource, configure, renderCards, card, hover, restPastIntent, previewIn, previewMounted,
+ *              loadMetadata
  *   Constants: videoTrack
  * Tests
  *   - a mouse resting on a Video card starts a muted preview that never touches the shared player
+ *   - the preview starts 20% in, and short videos loop from that point instead of the opening
  *   - leaving the card releases the preview request, and a quick pass never starts one
+ *   - leaving before playback starts is not a failure, so the card previews again later
+ *   - pressing anything inside the card, such as Share, stops its preview
  *   - audio cards and the Video already playing in the shared player offer no preview
  *   - only one card previews at a time
- *   - a failed preview stops and is not retried for that source
- *   - hiding the page stops a running preview
+ *   - a media error stops the preview and that source is not retried
+ *   - hiding the page stops a running preview and prevents a pending one
  * @end-catalog */
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
 import type { AudioTrackSummary } from '../api/contentSchemas';
@@ -34,14 +38,20 @@ const videoTrack: AudioTrackSummary = {
   streamUrl: '/content/mediaTrack/stream/video-1'
 };
 
+/** Each test uses its own source because failed sources are remembered for the page session. */
+const trackWithSource = (id: string, title: string): AudioTrackSummary => ({
+  ...videoTrack, id, title, streamUrl: `/content/mediaTrack/stream/${id}`
+});
+
 interface Environment {
   hover?: boolean;
   reducedMotion?: boolean;
+  forcedColors?: boolean;
   saveData?: boolean;
   effectiveType?: string;
 }
 
-/** JSDOM has no PointerEvent, so pointerType would never reach React's pointer handlers. */
+/** JSDOM has no PointerEvent, so pointerType would never reach the native pointer listeners. */
 class TestPointerEvent extends MouseEvent {
   readonly pointerType: string;
 
@@ -52,12 +62,17 @@ class TestPointerEvent extends MouseEvent {
 }
 
 /** Configures media queries and network hints, and stubs media playback that JSDOM lacks. */
-const configure = ({ hover = true, reducedMotion = false, saveData = false, effectiveType = '4g' }: Environment = {}) => {
+const configure = ({
+  hover = true, reducedMotion = false, forcedColors = false, saveData = false, effectiveType = '4g'
+}: Environment = {}) => {
   vi.stubGlobal('PointerEvent', TestPointerEvent);
+  const queries: Record<string, boolean> = {
+    '(hover: hover) and (pointer: fine)': hover,
+    '(prefers-reduced-motion: reduce)': reducedMotion,
+    '(forced-colors: active)': forcedColors
+  };
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
-    matches: query === '(hover: hover) and (pointer: fine)'
-      ? hover
-      : query === '(prefers-reduced-motion: reduce)' ? reducedMotion : false,
+    matches: queries[query] ?? false,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn()
   })));
@@ -81,17 +96,26 @@ const renderCards = (items: AudioTrackSummary[]) => render(
 
 const card = (title: string) => screen.getByRole('button', { name: new RegExp(`Play ${title}`) }).closest('article')!;
 const hover = (element: Element, pointerType = 'mouse') => fireEvent.pointerEnter(element, { pointerType });
-/** Waits past the 500 ms hover-intent delay and lets the lazy preview chunk resolve. */
+/** Waits past the 500 ms hover-intent delay. */
 const restPastIntent = () => act(() => new Promise((resolve) => setTimeout(resolve, 600)));
 const previewIn = (element: Element) => element.querySelector('video[data-video-preview]') as HTMLVideoElement | null;
-/** The lazy preview chunk can take longer than the intent delay on its first load. */
 const previewMounted = async (element: Element) => {
   await waitFor(() => expect(previewIn(element)).not.toBeNull());
   return previewIn(element)!;
 };
+const loadMetadata = (video: HTMLVideoElement, duration: number) => {
+  Object.defineProperty(video, 'duration', { configurable: true, value: duration });
+  fireEvent(video, new Event('loadedmetadata'));
+};
+
+beforeAll(async () => {
+  // Warm the lazy chunk so every test, run alone or together, sees the same mount timing.
+  await import('./CardVideoPreview');
+});
 
 afterEach(() => {
   Reflect.deleteProperty(navigator, 'connection');
+  Reflect.deleteProperty(document, 'visibilityState');
 });
 
 test('a mouse resting on a Video card starts a muted preview that never touches the shared player', async () => {
@@ -105,32 +129,58 @@ test('a mouse resting on a Video card starts a muted preview that never touches 
   await restPastIntent();
 
   const video = await previewMounted(card('Moving Light'));
-  expect(video!.muted).toBe(true);
-  expect(video!).toHaveAttribute('aria-hidden', 'true');
-  expect(video!.getAttribute('src')).toBe('/content/mediaTrack/stream/video-1');
+  expect(video.muted).toBe(true);
+  expect(video).toHaveAttribute('aria-hidden', 'true');
+  expect(video).not.toHaveAttribute('loop');
+  expect(video.getAttribute('src')).toBe('/content/mediaTrack/stream/video-1');
 
-  Object.defineProperty(video!, 'duration', { configurable: true, value: 200 });
-  fireEvent(video!, new Event('loadedmetadata'));
-  expect(video!.currentTime).toBe(30);
+  loadMetadata(video, 200);
+  expect(video.currentTime).toBe(30);
   expect(media.play).toHaveBeenCalledTimes(1);
-  expect(video!).not.toHaveAttribute('data-ready');
-  fireEvent(video!, new Event('playing'));
-  expect(video!).toHaveAttribute('data-ready');
+  expect(video).not.toHaveAttribute('data-ready');
+  fireEvent(video, new Event('playing'));
+  expect(video).toHaveAttribute('data-ready');
 
-  // The preview loops an eight-second window rather than playing on.
-  video!.currentTime = 39;
-  fireEvent(video!, new Event('timeupdate'));
-  expect(video!.currentTime).toBe(30);
+  // A long video loops an eight-second window capped at 30 s in.
+  video.currentTime = 37.95;
+  fireEvent(video, new Event('timeupdate'));
+  expect(video.currentTime).toBe(30);
 
   expect(launch).not.toHaveBeenCalled();
   expect(notePlaybackIntent).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
+test('the preview starts 20% in, and short videos loop from that point instead of the opening', async () => {
+  configure();
+  renderCards([trackWithSource('sixty', 'Sixty Seconds'), trackWithSource('short', 'Short Clip')]);
+
+  hover(card('Sixty Seconds'));
+  await restPastIntent();
+  const sixty = await previewMounted(card('Sixty Seconds'));
+  loadMetadata(sixty, 60);
+  expect(sixty.currentTime).toBe(12);
+  sixty.currentTime = 19.95;
+  fireEvent(sixty, new Event('timeupdate'));
+  expect(sixty.currentTime).toBe(12);
+
+  hover(card('Short Clip'));
+  await restPastIntent();
+  const short = await previewMounted(card('Short Clip'));
+  loadMetadata(short, 5);
+  expect(short.currentTime).toBe(1);
+  short.currentTime = 4.95;
+  fireEvent(short, new Event('timeupdate'));
+  expect(short.currentTime).toBe(1);
+  short.currentTime = 5;
+  fireEvent(short, new Event('ended'));
+  expect(short.currentTime).toBe(1);
+});
+
 test('leaving the card releases the preview request, and a quick pass never starts one', async () => {
   const { media } = configure();
-  renderCards([videoTrack]);
-  const target = card('Moving Light');
+  renderCards([trackWithSource('leave', 'Leaving Light')]);
+  const target = card('Leaving Light');
 
   hover(target);
   fireEvent.pointerLeave(target);
@@ -149,10 +199,44 @@ test('leaving the card releases the preview request, and a quick pass never star
   expect(media.load).toHaveBeenCalled();
 });
 
+test('leaving before playback starts is not a failure, so the card previews again later', async () => {
+  const { media } = configure();
+  let rejectPlay!: (error: Error) => void;
+  media.play.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectPlay = reject; }));
+  renderCards([trackWithSource('interrupted', 'Interrupted Light')]);
+  const target = card('Interrupted Light');
+
+  hover(target);
+  await restPastIntent();
+  loadMetadata(await previewMounted(target), 120);
+  fireEvent.pointerLeave(target);
+  // The browser rejects the pending play() once the source is cleared.
+  await act(async () => { rejectPlay(new DOMException('The play() request was interrupted', 'AbortError')); });
+
+  hover(target);
+  await restPastIntent();
+  expect(await previewMounted(target)).not.toBeNull();
+});
+
+test('pressing anything inside the card, such as Share, stops its preview', async () => {
+  configure();
+  renderCards([trackWithSource('share', 'Shared Light')]);
+  const target = card('Shared Light');
+
+  hover(target);
+  await restPastIntent();
+  await previewMounted(target);
+  // Share opens a portaled dialog, whose overlay React would treat as still inside the card.
+  fireEvent.pointerDown(await within(target).findByRole('button', { name: /Share Shared Light/ }));
+
+  expect(previewIn(target)).toBeNull();
+});
+
 test.each([
   ['a touch pointer', { pointerType: 'touch' }],
   ['a device without hover', { environment: { hover: false } }],
   ['Reduce Motion', { environment: { reducedMotion: true } }],
+  ['forced colors', { environment: { forcedColors: true } }],
   ['Save-Data', { environment: { saveData: true } }],
   ['a slow connection', { environment: { effectiveType: '3g' } }]
 ] as const)('%s never starts a preview', async (_label, options) => {
@@ -183,29 +267,29 @@ test('audio cards and the Video already playing in the shared player offer no pr
 
 test('only one card previews at a time', async () => {
   configure();
-  renderCards([videoTrack, { ...videoTrack, id: 'video-2', title: 'Second Motion', streamUrl: '/content/mediaTrack/stream/video-2' }]);
+  renderCards([trackWithSource('first', 'First Motion'), trackWithSource('second', 'Second Motion')]);
 
-  hover(card('Moving Light'));
+  hover(card('First Motion'));
   await restPastIntent();
-  expect(previewIn(card('Moving Light'))).not.toBeNull();
+  await previewMounted(card('First Motion'));
 
   // A second hover without a pointerleave (e.g. a card that scrolled under the pointer).
   hover(card('Second Motion'));
   await restPastIntent();
 
-  expect(previewIn(card('Moving Light'))).toBeNull();
-  expect(previewIn(card('Second Motion'))).not.toBeNull();
+  await previewMounted(card('Second Motion'));
+  expect(previewIn(card('First Motion'))).toBeNull();
   expect(document.querySelectorAll('video[data-video-preview]')).toHaveLength(1);
 });
 
-test('a failed preview stops and is not retried for that source', async () => {
+test('a media error stops the preview and that source is not retried', async () => {
   configure();
-  renderCards([{ ...videoTrack, id: 'broken', title: 'Broken Motion', streamUrl: '/content/mediaTrack/stream/broken' }]);
+  renderCards([trackWithSource('broken', 'Broken Motion')]);
   const target = card('Broken Motion');
 
   hover(target);
   await restPastIntent();
-  fireEvent(previewIn(target)!, new Event('error'));
+  fireEvent(await previewMounted(target), new Event('error'));
   expect(previewIn(target)).toBeNull();
 
   fireEvent.pointerLeave(target);
@@ -214,20 +298,23 @@ test('a failed preview stops and is not retried for that source', async () => {
   expect(previewIn(target)).toBeNull();
 });
 
-test('hiding the page stops a running preview', async () => {
+test('hiding the page stops a running preview and prevents a pending one', async () => {
   configure();
-  renderCards([{ ...videoTrack, id: 'hidden', title: 'Hidden Motion', streamUrl: '/content/mediaTrack/stream/hidden' }]);
-  const target = card('Hidden Motion');
+  renderCards([trackWithSource('hidden', 'Hidden Motion'), trackWithSource('pending', 'Pending Motion')]);
+  const running = card('Hidden Motion');
 
-  hover(target);
+  hover(running);
   await restPastIntent();
-  expect(previewIn(target)).not.toBeNull();
-
+  await previewMounted(running);
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
-  try {
-    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
-    expect(previewIn(target)).toBeNull();
-  } finally {
-    Reflect.deleteProperty(document, 'visibilityState');
-  }
+  act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(previewIn(running)).toBeNull();
+
+  // A hover begun while visible does not start once the tab hides during the intent delay.
+  Reflect.deleteProperty(document, 'visibilityState');
+  const pending = card('Pending Motion');
+  hover(pending);
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+  await restPastIntent();
+  expect(previewIn(pending)).toBeNull();
 });

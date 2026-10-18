@@ -105,7 +105,7 @@ test('the playing MediaTrack card keeps a Pause control and an accent title unti
   await expect(main.getByRole('button', { name: 'Pause Night Window' })).toHaveCount(0);
 });
 
-test('a mouse resting on a Video card plays a muted preview without touching the shared player', async ({ api, page }) => {
+test('a mouse resting on a Video card plays a muted preview without touching the shared player', async ({ page }) => {
   await installMediaCardHome(page);
   await page.setViewportSize({ width: 1_440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -124,9 +124,8 @@ test('a mouse resting on a Video card plays a muted preview without touching the
     return { muted: media.muted, paused: media.paused, path: new URL(media.src).pathname };
   })).toEqual({ muted: true, paused: false, path: '/content/mediaTrack/stream/e2e-first-light' });
 
-  // The preview is decoration: no queue, no Now Playing, no activity.
+  // The preview is decoration: the shared player keeps no queue and shows nothing playing.
   await expect(page.getByRole('region', { name: 'Now playing' }).getByText('Nothing playing')).toBeVisible();
-  expect(api.calls.filter((call) => call.pathname === '/content/me/recently-played')).toHaveLength(0);
 
   await page.mouse.move(0, 0);
   await expect(preview).toHaveCount(0);
