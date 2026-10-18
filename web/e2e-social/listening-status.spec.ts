@@ -52,9 +52,12 @@ const playing = async (page: Page, title: string) => {
 /** SPA navigation retains the one actual player and its captured source identity. */
 const playCatalog = async (page: Page, title: string) => {
   await page.getByRole('link', { name: 'Search', exact: true }).click();
+  // The route syncs the field to its URL when it commits, so type only once Search is shown.
+  await expect(page.getByRole('heading', { name: 'Search', level: 1, exact: true })).toBeVisible();
   // Wide layouts drive the Search route from the shell field; the page field is the phone layout's.
   const input = page.locator('#shell-search');
   await input.fill(title); await input.press('Enter');
+  await expect(page).toHaveURL((url) => url.pathname.endsWith('/search') && url.searchParams.get('q') === title);
   await page.getByRole('button', { name: `Play ${title}`, exact: true }).click();
   await playing(page, title);
   await page.getByRole('link', { name: 'Together', exact: true }).click();
