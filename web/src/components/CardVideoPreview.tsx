@@ -5,15 +5,15 @@
  * Internal
  *   Types: NetworkInformationLike, PreviewVideoProps
  *   Functions: videoPreviewAllowed, isMediaFailure, PreviewVideo
- *   Constants: previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds, loopLeadSeconds,
- *              slowConnectionTypes, failedSources
+ *   Constants: MotionPreviewSource, previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds,
+ *              loopLeadSeconds, slowConnectionTypes, failedSources
  *   Variables: stopActivePreview
  * @end-catalog */
 
-import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
-import { motionPreviewUrl, presentationCapabilitiesQuery } from '../api/presentationCapabilities';
+// Loads only after eligibility passes, so a disallowed preview never reads the presentation flags.
+const MotionPreviewSource = lazy(() => import('./MotionPreviewSource'));
 
 // Previews loop a short window from a little way into the video, where openings are rarely blank.
 const previewStartFraction = 0.2;
@@ -66,21 +66,25 @@ const isMediaFailure = (error: unknown) => {
 };
 
 /**
- * Chooses the preview source: the dedicated muted clip when the server serves motion previews (a
- * track without one simply shows its artwork), otherwise the MediaTrack's public stream. Eligibility
- * is checked first, so a disallowed preview reads neither the presentation flags nor any media.
+ * Mounts a Video card's hover preview once the device, page and listener settings allow it, then
+ * lets the presentation flags choose between the dedicated motion preview and the public stream.
+ * A disallowed preview asks the card to stop before it reads the flags or any media.
  */
 export default function CardVideoPreview({ className, mediaTrackId, streamUrl, onStop }: CardVideoPreviewProps) {
   const [allowed] = useState(videoPreviewAllowed);
-  const capabilities = useQuery({ ...presentationCapabilitiesQuery(), enabled: allowed });
 
   useEffect(() => {
     if (!allowed) onStop();
   }, [allowed, onStop]);
 
-  if (!allowed || capabilities.isPending) return null;
-  const source = capabilities.data?.motionPreviews ? motionPreviewUrl(mediaTrackId) : streamUrl;
-  return <PreviewVideo className={className} key={source} onStop={onStop} source={source} />;
+  if (!allowed) return null;
+  return (
+    <Suspense fallback={null}>
+      <MotionPreviewSource mediaTrackId={mediaTrackId} streamUrl={streamUrl}>
+        {(source) => <PreviewVideo className={className} key={source} onStop={onStop} source={source} />}
+      </MotionPreviewSource>
+    </Suspense>
+  );
 }
 
 /**

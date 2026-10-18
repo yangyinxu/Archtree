@@ -125,8 +125,8 @@ const loadMetadata = (video: HTMLVideoElement, duration: number) => {
 };
 
 beforeAll(async () => {
-  // Warm the lazy chunk so every test, run alone or together, sees the same mount timing.
-  await import('./CardVideoPreview');
+  // Warm the lazy chunks so every test, run alone or together, sees the same mount timing.
+  await Promise.all([import('./CardVideoPreview'), import('./MotionPreviewSource')]);
 });
 
 afterEach(() => {
