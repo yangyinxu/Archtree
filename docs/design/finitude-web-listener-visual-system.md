@@ -230,37 +230,53 @@ artwork.
 
 - Derivation: the client decodes the managed, same-origin 96 px WebP variant,
   picks the most prominent color family (vivid hues outweigh a slightly larger
-  grey field), and adjusts it in OKLCH. Chroma is capped at 0.16, lightness is
-  floored at 0.28 so dark artwork still shows, and only lightness is lowered,
-  keeping hue, until the contrast rule holds. Tones are cached per image id.
+  grey field), and adjusts it in OKLCH. Color families are scored as sliding
+  30° hue windows, so a shaded color is never split across a bin edge and
+  outvoted by a smaller one. Chroma is capped at 0.16, lightness is floored at
+  0.28 so dark artwork still shows, and only lightness is lowered, keeping hue,
+  until the contrast rule holds. Tones are cached per image id for the 200 most
+  recently sampled images.
 - Fallback: missing, failed, transparent, cross-origin, and non-managed
   artwork use the neutral tone, never an error state.
 - Contrast: each artwork yields two tones. The hero tone keeps primary white
   text at 4.5:1 or more; the darker pane tone also keeps muted `#b3b3b3` text at
   4.5:1 or more. Hero-tone surfaces carry only primary white text and accent
-  controls; muted, subtle, and accent-green text appear only on pane-tone or
-  darker surfaces. Darkening veils may only lower a tone's lightness.
+  controls. Pane-tone surfaces carry only primary, muted, and accent text;
+  subtle `#8f8f8f` text falls to about 3:1 there and appears only on the plain
+  panel or darker. Darkening veils may only lower a tone's lightness.
 - Main pane: the top 20.5 rem (about 330 px) of the central pane is a gradient
   from the pane tone into the `#121212` panel that scrolls with the content.
   The color is a registered, non-inheriting `--tone-color` property, so tone
   changes interpolate over 600 ms (immediately with reduced motion) without
   restyling the page. Routes that set no tone keep the panel color, which makes
-  the gradient invisible. Album, Artist, and Playlist use their artwork's tone
-  and Organization uses the neutral tone.
+  the gradient invisible. Artist and Playlist use their artwork's tone and
+  Organization uses the neutral tone. Album leaves the main pane untinted
+  because its opaque header paints the tone itself; a pane gradient taller than
+  a short header would show as a band below it.
 - Home: the pane starts at the neutral tone and follows the hovered or
-  keyboard-focused media card, returning to the focused card or the neutral
-  tone 150 ms after the pointer leaves the cards. Touch pointers do not change
-  it.
+  keyboard-focused (`:focus-visible`) media card; the hovered card wins. A card
+  whose tone is not yet known is sampled only after the pointer or focus rests
+  on it for 150 ms, so sweeping across a shelf samples just the card it stops
+  on. The tone returns to the focused card or the neutral tone 150 ms after
+  the pointer leaves the cards. Touch pointers, and focus from a tap or click,
+  do not change it.
 - Album header: the hero tone sits under a black veil that deepens to 45% and
   then fades into the panel below the actions. Its eyebrow and metadata are
-  primary white. The title steps down in size as its length grows (CJK and
-  full-width characters count double) and clamps to three lines; its `title`
-  attribute keeps the complete title.
+  primary white. The title fits its column: it starts at a size estimated from
+  its length (CJK and full-width characters count double) and steps down until
+  it fits within three lines at the current width, fitting again when the
+  central pane resizes. The smallest step never clamps, so the complete title
+  is always readable without the `title` tooltip.
 - Compact header: once the Album header has scrolled under the top of the
   central pane, a sticky 4 rem bar on the pane tone fades in with the title and
-  a Play control named for the Album. While hidden it is inert and removed from
-  the accessibility tree, and its title is presentational because the hero
-  heading names the page.
+  a Play control named "Play album {title}" (with the byline when there is
+  one), so it never shares a name with a title track's Play. While the bar
+  shows, the central pane reserves its height as scroll padding, so keyboard
+  focus never scrolls under it (WCAG 2.4.11). While hidden it is inert and
+  removed from the accessibility tree; if it hides while its Play has focus,
+  focus moves to the header's Play first. Its title is presentational because
+  the hero heading names the page. In forced colors the bar keeps a
+  `CanvasText` bottom border.
 
 ## Motion
 

@@ -2,8 +2,7 @@
  * Exports
  *   Functions: AlbumPage
  * Internal
- *   Functions: heroTitleSize
- *   Constants: creditRoleKeys, wideCharacter
+ *   Constants: creditRoleKeys
  * @end-catalog */
 
 import { useMemo, useRef, type CSSProperties } from 'react';
@@ -15,13 +14,14 @@ import type { LibraryTarget } from '../../api/contentSchemas';
 import { listenerAlbumQuery, saveStatusesQuery } from '../../api/listener';
 import { contentByline } from '../../api/contentSchemas';
 import { browserSessionQuery } from '../../api/session';
-import { neutralArtworkTone, useArtworkTone, useMainPaneTone } from '../../artwork/useArtworkTone';
+import { neutralArtworkTone, useArtworkTone } from '../../artwork/useArtworkTone';
 import { Artwork } from '../../components/Artwork';
 import { Icon } from '../../components/Icon';
 import { SaveButton } from '../../components/SaveButton';
 import { launchAlbumPlayback } from '../playback/launchPlayback';
 import { LazyAddTrackToPlaylistButton as AddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
 import { CompactCatalogHeader } from './CompactCatalogHeader';
+import { useFittedHeroTitle } from './useFittedHeroTitle';
 import styles from './CatalogPages.module.css';
 import { LazyRoomTrackButton } from '../social/LazyRoomTrackButton';
 import { useLocalization } from '../../localization/LocalizationProvider';
@@ -43,16 +43,6 @@ const creditRoleKeys: Record<string, MessageKey> = {
   legacyUnspecified: 'catalog.credit.credit'
 };
 
-/** CJK, Hangul, and full-width characters take about two Latin character widths. */
-const wideCharacter = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
-
-/** Steps the hero title down as it grows, so long titles stay within their three-line clamp. */
-const heroTitleSize = (title: string) => {
-  let length = 0;
-  for (const character of title) length += wideCharacter.test(character) ? 2 : 1;
-  return length > 56 ? 'xsmall' : length > 32 ? 'small' : length > 18 ? 'medium' : undefined;
-};
-
 /** Renders one expanded Album and launches its canonical ready-only queue. */
 export const AlbumPage = () => {
   const { t } = useLocalization();
@@ -62,8 +52,12 @@ export const AlbumPage = () => {
   const viewerId = session.data?.user.id;
   const albumQuery = useQuery(listenerAlbumQuery(albumId));
   const heroRef = useRef<HTMLElement>(null);
+  const heroPlayRef = useRef<HTMLButtonElement>(null);
+  // The opaque header paints its own tone, so the main pane stays untinted beneath it: a pane
+  // gradient taller than a short header would otherwise show as a band below it.
   const tone = useArtworkTone(albumQuery.data?.album.artworkUrl) ?? neutralArtworkTone;
-  useMainPaneTone(tone.pane);
+  const title = albumQuery.data?.album.title || t('content.title.untitled_album');
+  const titleFit = useFittedHeroTitle(albumQuery.data ? title : null);
   const targets = useMemo<LibraryTarget[]>(() => {
     if (!albumQuery.data) return [];
     return [
@@ -101,16 +95,19 @@ export const AlbumPage = () => {
 
   const { album, tracks } = albumQuery.data;
   const albumTarget: LibraryTarget = { contentType: 'album', contentId: album.id };
-  const title = album.title || t('content.title.untitled_album');
+  const byline = contentByline(album);
   const play = () => { void launchAlbumPlayback(album.id, tracks, viewerId); };
 
   return (
     <>
       <CompactCatalogHeader
+        heroPlayRef={heroPlayRef}
         heroRef={heroRef}
         onPlay={play}
         playDisabled={tracks.length === 0}
-        playLabel={t('content.play.label', { title })}
+        playLabel={byline
+          ? t('content.album.play_byline_label', { title, byline })
+          : t('content.album.play_label', { title })}
         title={title}
         tone={tone.pane}
       />
@@ -128,9 +125,9 @@ export const AlbumPage = () => {
             />
             <div className={styles.heroCopy}>
               <p className={styles.eyebrow}>{t('common.label.album')}</p>
-              <h1 className={styles.albumTitle} data-title-size={heroTitleSize(title)} title={title}>{title}</h1>
+              <h1 className={styles.albumTitle} data-title-size={titleFit.initialSize} ref={titleFit.ref} title={title}>{title}</h1>
               <p className={styles.metadata}>
-                {[contentByline(album), album.releaseDate?.year
+                {[byline, album.releaseDate?.year
                   ? String(album.releaseDate.year)
                   : t('common.label.album'), t('catalog.album.track_count', { count: tracks.length })]
                   .filter(Boolean)
@@ -145,6 +142,7 @@ export const AlbumPage = () => {
               className={styles.playButton}
               disabled={tracks.length === 0}
               onClick={play}
+              ref={heroPlayRef}
               type="button"
             >
               <Icon name="play" />

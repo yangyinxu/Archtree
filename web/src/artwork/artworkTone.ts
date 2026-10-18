@@ -2,10 +2,10 @@
  * Exports
  *   Functions: contrastRatio, rgbToOklab, artworkToneFromOklab, dominantArtworkColor, sampleArtworkTone
  * Internal
- *   Types: Rgb, Lab
+ *   Types: Rgb, Lab, ColorSum
  *   Functions: toLinear, toChannel, luminance, contrast, parseHex, toHex, oklchToLinear, inGamut, oklchToRgb,
- *              toneForText
- *   Constants: white, mutedText, minimumContrast, maximumChroma, minimumLightness, sampleSize
+ *              toneForText, emptySum, addSum
+ *   Constants: white, mutedText, minimumContrast, maximumChroma, minimumLightness, sampleSize, hueBins
  * @end-catalog */
 
 import type { ArtworkTone } from './useArtworkTone';
@@ -129,31 +129,53 @@ export const artworkToneFromOklab = ([lightness, a, b]: Lab): ArtworkTone => {
   };
 };
 
+/** Weighted OKLab sums for one group of pixels. */
+interface ColorSum {
+  weight: number;
+  l: number;
+  a: number;
+  b: number;
+}
+
+const emptySum = (): ColorSum => ({ weight: 0, l: 0, a: 0, b: 0 });
+
+const addSum = (total: ColorSum, part: ColorSum) => {
+  total.weight += part.weight;
+  total.l += part.l;
+  total.a += part.a;
+  total.b += part.b;
+};
+
+/** Ten-degree hue bins; a colour family is scored over a 30° window of three neighbouring bins. */
+const hueBins = 36;
+
 /**
- * Finds the artwork's most prominent colour family. Near-grey pixels share one bin and chromatic
- * pixels fall into twelve 30° hue bins weighted by chroma, so a vivid subject can outweigh a
- * slightly larger grey field. Transparent pixels are ignored.
+ * Finds the artwork's most prominent colour family. Near-grey pixels share one bin; chromatic
+ * pixels are weighted by chroma and grouped by hue, so a vivid subject can outweigh a slightly
+ * larger grey field. Families are scored as sliding 30° windows across the hue circle, so a shaded
+ * colour that straddles a bin edge (sRGB red sits right on one) is never split in two and outvoted
+ * by a smaller colour. Transparent pixels are ignored.
  */
 export const dominantArtworkColor = (pixels: Uint8ClampedArray): Lab | null => {
-  const bins = new Map<number, { weight: number; l: number; a: number; b: number }>();
+  const neutral = emptySum();
+  const bins = Array.from({ length: hueBins }, emptySum);
   for (let index = 0; index + 3 < pixels.length; index += 4) {
     if (pixels[index + 3] < 128) continue;
     const [l, a, b] = rgbToOklab([pixels[index], pixels[index + 1], pixels[index + 2]]);
     const chroma = Math.hypot(a, b);
-    const key = chroma < 0.04 ? -1 : Math.floor(((Math.atan2(b, a) + Math.PI) / (2 * Math.PI)) * 12) % 12;
     const weight = 1 + chroma * 8;
-    const bin = bins.get(key) ?? { weight: 0, l: 0, a: 0, b: 0 };
-    bin.weight += weight;
-    bin.l += l * weight;
-    bin.a += a * weight;
-    bin.b += b * weight;
-    bins.set(key, bin);
+    const bin = chroma < 0.04
+      ? neutral
+      : bins[Math.floor(((Math.atan2(b, a) + Math.PI) / (2 * Math.PI)) * hueBins) % hueBins];
+    addSum(bin, { weight, l: l * weight, a: a * weight, b: b * weight });
   }
-  let best: { weight: number; l: number; a: number; b: number } | undefined;
-  for (const bin of bins.values()) {
-    if (!best || bin.weight > best.weight) best = bin;
+  let best = neutral;
+  for (let center = 0; center < hueBins; center += 1) {
+    const window = emptySum();
+    for (const offset of [-1, 0, 1]) addSum(window, bins[(center + offset + hueBins) % hueBins]);
+    if (window.weight > best.weight) best = window;
   }
-  return best ? [best.l / best.weight, best.a / best.weight, best.b / best.weight] : null;
+  return best.weight > 0 ? [best.l / best.weight, best.a / best.weight, best.b / best.weight] : null;
 };
 
 /**

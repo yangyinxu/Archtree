@@ -83,6 +83,19 @@ test('lets a vivid subject outweigh a slightly larger grey field and ignores tra
   expect(Math.atan2(b, a)).toBeCloseTo(Math.atan2(blueB, blueA), 2);
 });
 
+test.each([
+  ['red across the 30° hue', [220, 10, 10], [235, 45, 20]],
+  ['orange across the 60° hue', [255, 128, 0], [255, 150, 20]],
+  ['magenta across the -30° hue', [235, 0, 235], [250, 30, 205]]
+] as const)('keeps a shaded %s family together against a smaller blue field', (_name, shade, highlight) => {
+  const [, a, b] = dominantArtworkColor(pixels([shade, 165], [highlight, 165], [[40, 70, 200], 246]))!;
+  const [, blueA, blueB] = rgbToOklab([40, 70, 200]);
+  const [, shadeA, shadeB] = rgbToOklab(shade);
+  const angle = (x: number, y: number) => Math.atan2(y, x);
+  expect(Math.abs(angle(a, b) - angle(shadeA, shadeB))).toBeLessThan(0.25);
+  expect(Math.abs(angle(a, b) - angle(blueA, blueB))).toBeGreaterThan(1);
+});
+
 test('falls back to the grey family for monochrome artwork and to null without opaque pixels', () => {
   const [, a, b] = dominantArtworkColor(pixels([[40, 40, 40], 10], [[200, 200, 200], 10]))!;
   expect(Math.hypot(a, b)).toBeLessThan(0.01);

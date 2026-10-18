@@ -112,10 +112,11 @@ avatars remain private behind `/auth/avatar`. Finitude Web derives responsive
 `/content/images/:imageId/v1/:width.webp`. They are versioned, revalidated,
 CPU-concurrency bounded responses and never create extra S3 objects; the
 original image route remains the fallback and native-client contract.
-The Web listener also decodes the same-origin 96 px variant, at most once per
-image id per page session, to derive the artwork tone of Album, Artist,
-Playlist, and hovered Home card surfaces; a missing, cross-origin, or
-undecodable variant falls back to a neutral tone.
+The Web listener also decodes the same-origin 96 px variant to derive the
+artwork tone of Album, Artist, Playlist, and hovered Home card surfaces. It
+decodes each image id once while that id stays among the 200 most recently
+sampled, and Home samples a card only after the pointer rests on it; a missing,
+cross-origin, or undecodable variant falls back to a neutral tone.
 The shared Web artwork component keeps both its bordered frame and decoded image
 square, including in WebKit; Artist portraits retain their circular crop.
 

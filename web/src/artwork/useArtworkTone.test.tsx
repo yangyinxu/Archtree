@@ -5,6 +5,7 @@
  * Tests
  *   - samples the 96 px variant once per image id and serves later reads from the cache
  *   - settles failed, unreadable, and transparent artwork to a cached neutral tone
+ *   - evicts the oldest image once 200 tones are cached, so only that image is sampled again
  *   - useArtworkTone reports a pending sample as null, then the tone, and reuses it at once
  *   - useArtworkTone ignores a sample that finishes after the artwork changed
  *   - useMainPaneTone tints the shell main pane while mounted and switches without a gap
@@ -73,6 +74,23 @@ test('settles failed, unreadable, and transparent artwork to a cached neutral to
   }
   await loadArtworkTone(managed('b1'));
   expect(sample).toHaveBeenCalledTimes(3);
+});
+
+test('evicts the oldest image once 200 tones are cached, so only that image is sampled again', async () => {
+  sample.mockResolvedValue(redTone);
+  const sources = Array.from({ length: 201 }, (_, index) => managed(`e${index.toString(16).padStart(3, '0')}`));
+
+  for (const source of sources) await loadArtworkTone(source);
+  expect(sample).toHaveBeenCalledTimes(201);
+  expect(peekArtworkTone(sources[0])).toBeUndefined();
+  expect(peekArtworkTone(sources[1])).toEqual(redTone);
+  expect(peekArtworkTone(sources[200])).toEqual(redTone);
+
+  await loadArtworkTone(sources[200]);
+  expect(sample).toHaveBeenCalledTimes(201);
+  await loadArtworkTone(sources[0]);
+  expect(sample).toHaveBeenCalledTimes(202);
+  expect(sample).toHaveBeenLastCalledWith(`${sources[0]}/v1/96.webp`);
 });
 
 test('useArtworkTone reports a pending sample as null, then the tone, and reuses it at once', async () => {
