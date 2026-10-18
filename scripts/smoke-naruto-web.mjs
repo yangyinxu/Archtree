@@ -7,7 +7,7 @@
  * @end-catalog */
 
 import assert from 'node:assert/strict';
-import {mkdir, mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -108,6 +108,7 @@ try {
   let bilibiliRequests = 0;
   let loginBlocked = extensionMode;
   const publishedAt = new Date(Date.now() - 86_400_000).toISOString();
+  const articleEpoch = Math.floor(Date.parse(publishedAt) / 1000);
   await context.route('**/*', async route => {
     const url = route.request().url();
     if (url.startsWith(`${origin}/`)) {
@@ -129,15 +130,23 @@ try {
           data: {isLogin: true, uname: 'Synthetic Bilibili account', mid: 12345678}})});
       }
       if (parsed.hostname === 'search.bilibili.com') {
+        // The extension searches videos and articles; the article search reads only /read/cv links.
         const links = parsed.pathname === '/video'
           ? [0, 1, 2].map(index => `<div><a href="https://www.bilibili.com/video/BVFixture${index}" title="火影忍者手游 Fixture video ${index}">火影忍者手游 Fixture video ${index}</a></div>`).join('')
-          : '<div><a href="https://www.bilibili.com/opus/1234567890123">火影忍者手游 Fixture dynamic</a></div>';
+          : parsed.pathname === '/article'
+            ? '<div><a href="https://www.bilibili.com/read/cv20000001" title="火影忍者手游 Fixture article">火影忍者手游 Fixture article</a></div>'
+            : '';
         return route.fulfill({contentType: 'text/html; charset=utf-8', body: `<!doctype html><meta charset="utf-8"><title>Synthetic Bilibili search</title>${links}`});
       }
-      const title = parsed.pathname.includes('/opus/') ? '火影忍者手游 Fixture dynamic' : '火影忍者手游 Fixture video';
+      const article = /^\/read\/cv\d+$/.test(parsed.pathname);
+      const title = article ? '火影忍者手游 Fixture article' : '火影忍者手游 Fixture video';
+      // An article page confirms its publish time through readInfo page state, which the extension reads in the main world.
+      const published = article
+        ? `<script>window.__INITIAL_STATE__ = {readInfo: {publish_time: ${articleEpoch}}};</script>`
+        : `<meta itemprop="datePublished" content="${publishedAt}">`;
       return route.fulfill({contentType: 'text/html; charset=utf-8', body: `<!doctype html><meta charset="utf-8"><title>${title}_哔哩哔哩</title>
         <meta property="og:description" content="Synthetic public game context">
-        <meta itemprop="datePublished" content="${publishedAt}">
+        ${published}
         <div id="commentapp">
           <div class="reply-item" data-rpid="1001"><a class="user-name" href="https://space.bilibili.com/123456789012345678">Fixture author</a><span class="reply-content">技能后摇太长，无法反打</span><span class="like">12</span><time>1天前</time></div>
           <div class="sub-reply-item" data-rpid="1002" data-parent-id="1001"><span class="user-name">Fixture reply author</span><span class="sub-reply-content">我也遇到同样的问题</span><span class="like">2</span></div>
@@ -223,6 +232,9 @@ try {
     assert.equal(stored[0].manifest.analysis.mode, 'ai');
     assert.equal(stored[0].manifest.analysis.strongOpinions, 4);
     assert.equal(stored[0].contents.length, 4);
+    assert.deepEqual(stored[0].contents.map(item => item.type).sort(), ['article', 'video', 'video', 'video']);
+    assert.equal(stored[0].contents.find(item => item.type === 'article').publishedAt, new Date(articleEpoch * 1000).toISOString(),
+      'The article source keeps the exact publish time from its readInfo page state.');
     assert.equal(stored[0].opinions.length, 12);
     assert.equal(stored[0].opinions.some(item => item.parentSourceRecordId === '1001'), true);
     assert.equal(stored[0].cache.length, 12);
