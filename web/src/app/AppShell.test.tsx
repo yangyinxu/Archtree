@@ -506,7 +506,8 @@ test('previews a debounced global search but records it only on submission', asy
 
 test('expands the compact global Search before submitting it', async () => {
   const user = userEvent.setup();
-  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
+  // Only the compact phone layout matches; wide-layout typeahead stays off.
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query === '(max-width: 479px)' })));
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClient.setQueryData(browserSessionQueryKey, null);
   queryClient.setQueryData(listenerCapabilitiesQueryKey, { playlists: true });

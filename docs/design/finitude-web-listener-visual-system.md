@@ -307,6 +307,13 @@ announced even when its spinner is static.
 - Home is content-first and preserves configured section type and order.
 - Search shares one draft/URL/history state between shell and page
   presentations, retains IME safety, and has no separate text Search button.
+  At 768 px and wider, the shell field is an ARIA 1.2 combobox away from the
+  Search route: a raised suggestion panel under the field shows arrow-key and
+  Enter hints, 48 px artwork rows (circular for Artists), an active row on the
+  strong hover surface, and polite count, loading, empty, and error status.
+  The Search route hides its duplicate page field at those widths, keeps live
+  results driven by the shell field, and offers pill type filters shared with
+  Library. Phones keep the page field and the Search tab.
 - Library remains the complete server-backed Saved Album/Soundtrack union with
   existing filters, sorts, pagination, and signed-out behavior.
 - Album and Artist use artwork-led tonal headers and dense release/track

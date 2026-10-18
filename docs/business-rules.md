@@ -1617,6 +1617,23 @@ The wire protocol and operational bounds are documented in
 - Once a non-empty query is executed through either draft debounce or explicit
   submission, Search displays grouped Artist, Album, and MediaTrack results and
   does not display a Recent Content section.
+- On Finitude Web at tablet and desktop widths (768 px and wider), typing in the
+  shell search field on any route other than Search keeps the current route and
+  shows inline suggestions instead of opening Search: recent searches for an
+  empty field, otherwise a Search-for option followed by a bounded preview of
+  the grouped results. Draft-driven suggestions never add or reorder search
+  history. Submitting without a highlighted suggestion opens Search for the
+  query; the search button always opens Search for the query, and editing the
+  field clears any highlight. Choosing the Search-for option or any result is
+  an explicit selection and records the current normalized query; choosing a
+  recent search re-runs that historical query and moves it to the newest
+  position. Artist, Album, and Organization results open their details and
+  MediaTrack results use the shared playback queue. Narrower widths keep
+  opening the Search route, which remains the full-results destination and the
+  mobile Search tab; resizing alone never opens Search or records history.
+- On Finitude Web, the Search page may filter its grouped results by type. The
+  filter is presentation only, resets for each query, falls back to all groups
+  when its group disappears, and never changes the request or search history.
 - Artist results open Artist details, Album results open Album details, and MediaTrack results use the shared playback queue.
 - On native clients with device-local download support, valid downloaded Albums
   and MediaTracks may be shown when the server search endpoint is unavailable;

@@ -5,7 +5,7 @@
  *          .panelTitle, .panelCopy, .searchForm, .chipList, .chip, .searchResults, .resultGroups,
  *          .resultHeading, .resultGrid, .organizationResult, .compactState, .textButton, .formCard, .error,
  *          .identityMeta, .view, .viewButton, .workbenchLink, .menu
- * Media queries: (forced-colors: active); (max-width: 640px); (max-width:767px)
+ * Media queries: (min-width: 768px); (forced-colors: active); (max-width: 640px); (max-width:767px)
  * @end-catalog */
 
 .page {
@@ -205,6 +205,13 @@
   transition:
     border-color var(--motion-fast) var(--ease-standard),
     box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+/* Wide layouts drive Search from the shell field, so the page omits its duplicate field. */
+@media (min-width: 768px) {
+  .searchForm {
+    display: none;
+  }
 }
 
 .searchForm:focus-within {
