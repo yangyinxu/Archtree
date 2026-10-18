@@ -1,0 +1,15 @@
+{
+  "source": "musicbrainz",
+  "synthetic": true,
+  "description": "A 200 answer with text/html",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/00000000-0000-4000-8000-000000000012?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "bodyText": "<html></html>"
+    }
+  ]
+}

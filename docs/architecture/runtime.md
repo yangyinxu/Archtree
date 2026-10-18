@@ -217,6 +217,18 @@ introduced, explicitly design shared abuse limits and measure the aggregate medi
 and provider budget. A shared cache, queue, CDN, or worker service is not introduced
 without a measured requirement and a compatible ready/deletion/revocation contract.
 
+Administrator metadata lookup is the one deployment-wide bound that the confirmed
+rules require: each source's request spacing and concurrency apply across every
+instance. The gates live in the MongoDB collection `adminMetadataLookupGates`, one
+`_id`-keyed document per source (`musicbrainz`, `itunes`, `coverartarchive`) with
+its next allowed start and expiring leases, decided on the database clock and
+written outside transactions. The collection holds no account data and needs no
+secondary index, so `requiredIndexRevision` is unchanged; a lease that is never
+released expires after 30 seconds. Startup does not create
+`adminMetadataLookupGates`; the first acquisition upserts each source document by
+`_id`, so the application account needs insert/update on that collection. The
+lookup response cache stays process-local.
+
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per
 process and eight per client; active limits and playback reserves do not increase.

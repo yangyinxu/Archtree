@@ -1,0 +1,31 @@
+{
+  "source": "musicbrainz",
+  "synthetic": true,
+  "description": "503 three times without Retry-After",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/00000000-0000-4000-8000-000000000002?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 503,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "bodyText": "busy"
+    },
+    {
+      "url": "https://musicbrainz.org/ws/2/release/00000000-0000-4000-8000-000000000002?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 503,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "bodyText": "busy"
+    },
+    {
+      "url": "https://musicbrainz.org/ws/2/release/00000000-0000-4000-8000-000000000002?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 503,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "bodyText": "busy"
+    }
+  ]
+}

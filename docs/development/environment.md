@@ -257,7 +257,12 @@ that tests spawn load nothing, and replaces `DB_CONN_STRING`, `DB_NAME`,
 `S3_BUCKET_NAME`, `AWS_ENDPOINT_URL`, and `AWS_EC2_METADATA_DISABLED` with
 synthetic loopback values, including values exported in the terminal;
 `AWS_SESSION_TOKEN` is removed. An unmocked database or AWS call therefore fails
-against `127.0.0.1:9`. The runner also preloads
+against `127.0.0.1:9`. `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` is blanked, so
+metadata lookup stays unavailable even when the terminal sets a contact. The
+metadata lookup tests also install `test/support/networkGuard.ts`, which
+refuses `fetch`, DNS queries and socket connections to any non-loopback host;
+they read recorded responses only from `test/fixtures/metadataLookup/`. The
+runner also preloads
 `test/support/syntheticMxResolver.ts`, so the authentication-email domain check
 answers from a synthetic MX resolver and no test queries real DNS. Suites that
 need real services start their own disposable MongoDB and S3-compatible

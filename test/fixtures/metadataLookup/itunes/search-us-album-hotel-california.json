@@ -1,0 +1,269 @@
+{
+  "source": "itunes",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "iTunes album search (us): Hotel California Eagles",
+  "exchanges": [
+    {
+      "url": "https://itunes.apple.com/search?term=Hotel+California+Eagles&country=us&media=music&entity=album&limit=25",
+      "status": 200,
+      "headers": {
+        "content-type": "text/javascript; charset=utf-8"
+      },
+      "body": {
+        "resultCount": 25,
+        "results": [
+          {
+            "wrapperType": "collection",
+            "collectionId": 635770200,
+            "artistName": "Eagles",
+            "collectionName": "Hotel California",
+            "trackCount": 9,
+            "releaseDate": "1976-12-08T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/88/16/2c/88162c3d-46db-8321-61f3-3a47404cfe76/075596050920.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 635829435,
+            "artistName": "Eagles",
+            "collectionName": "Their Greatest Hits 1971-1975",
+            "trackCount": 10,
+            "releaseDate": "1976-02-17T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/f0/c7/c8/f0c7c8f4-4319-d357-ddaf-566ef8e2194e/081227979379.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 636866317,
+            "artistName": "Eagles",
+            "collectionName": "The Very Best of Eagles",
+            "trackCount": 33,
+            "releaseDate": "2003-10-21T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/88/90/0d/88900ddb-b23e-c1e6-8147-20eb92340076/081227397128.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1293903288,
+            "artistName": "Eagles",
+            "collectionName": "Hotel California (40th Anniversary Expanded Edition)",
+            "trackCount": 19,
+            "releaseDate": "1976-12-08T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/8f/f0/88/8ff088ee-bd18-8a27-1bb6-c0e44ad91cb6/603497862542.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1453924216,
+            "artistName": "Eagles",
+            "collectionName": "Hell Freezes Over (Remastered) [Live]",
+            "trackCount": 15,
+            "releaseDate": "1994-11-08T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/88/13/c7/8813c795-1794-e1a0-bea6-79e01866d98b/00602577302473.rgb.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 635774271,
+            "artistName": "Eagles",
+            "collectionName": "The Long Run",
+            "trackCount": 10,
+            "releaseDate": "1979-09-24T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/9a/54/6e/9a546e8b-f994-8d1f-a94b-d2d642dee4ce/075596056021.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1443821648,
+            "artistName": "Tyga",
+            "collectionName": "Hotel California (Deluxe Version)",
+            "trackCount": 19,
+            "releaseDate": "2013-01-01T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music118/v4/50/d3/c9/50d3c9ee-266f-e895-95c1-4a42fc35bab9/00602537382392.rgb.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 635829971,
+            "artistName": "Eagles",
+            "collectionName": "One of These Nights",
+            "trackCount": 9,
+            "releaseDate": "1975-06-10T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/db/d5/c4/dbd5c44a-a30f-08ff-256b-1e9b2ed6d4cd/075596032926.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 635807463,
+            "artistName": "Eagles",
+            "collectionName": "Eagles Greatest Hits, Vol. 2",
+            "trackCount": 10,
+            "releaseDate": "1982-11-13T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music124/v4/8f/00/02/8f0002fe-a3a4-0452-bd2f-653de29095ea/075596020527.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1853086865,
+            "artistName": "Our Last Night",
+            "collectionName": "Hotel California (Rock) - Single",
+            "trackCount": 1,
+            "releaseDate": "2016-06-28T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/d3/5f/c1/d35fc121-38c8-4895-52e4-b26bd681dcac/5052917022472.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1577198710,
+            "artistName": "Lofi Fruits Music & Chill Fruits Music",
+            "collectionName": "Hotel California - Single",
+            "trackCount": 1,
+            "releaseDate": "2020-09-18T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/5b/da/5b/5bda5b7e-4e9b-650c-c303-0e5d6e424739/5059594588345.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1887719630,
+            "artistName": "Son & Water",
+            "collectionName": "Hotel California - Single",
+            "trackCount": 1,
+            "releaseDate": "2026-04-03T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/16/9a/95/169a954a-fddb-be9b-38d9-9c69522c5faf/16140.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 6784985341,
+            "artistName": "AFRO GROOVE",
+            "collectionName": "Hotel California - Single",
+            "trackCount": 1,
+            "releaseDate": "2026-06-26T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/55/4f/bd/554fbd1f-db66-3096-c171-779e57df6e58/artwork.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 6787581116,
+            "artistName": "ReStyleHits",
+            "collectionName": "Hotel California (Cover song) - Single",
+            "trackCount": 1,
+            "releaseDate": "2026-07-14T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/e8/fd/19/e8fd1968-28d8-2887-1f48-bac7bd94b443/1187361.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1839163484,
+            "artistName": "BxXxRock",
+            "collectionName": "Hotel California (Eagles Cover Tune by BxXxRock) - Single",
+            "trackCount": 1,
+            "releaseDate": "2025-09-05T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/46/aa/85/46aa851a-8844-c26c-ebe7-bf12a6e8ab2d/artwork.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1716529934,
+            "artistName": "Michael Forster",
+            "collectionName": "Hotel California (Arr. for Piano) - Single",
+            "trackCount": 1,
+            "releaseDate": "2024-01-19T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/e2/e9/58/e2e95810-0380-1949-0dd2-7f8ed1413aea/196871617895.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 635800390,
+            "artistName": "Eagles",
+            "collectionName": "Desperado",
+            "trackCount": 11,
+            "releaseDate": "1973-04-17T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/f5/ef/50/f5ef504b-c66a-6645-621c-c279468cc28f/075596062725.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1192319820,
+            "artistName": "Global Karaoke",
+            "collectionName": "Hotel California (In the Style of the Eagles) [Karaoke Version] - Single",
+            "trackCount": 1,
+            "releaseDate": "2016-12-26T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music111/v4/31/d6/8c/31d68c3d-d37d-802b-58a1-e256d2e73afb/191061213666.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 409983012,
+            "artistName": "Pat the Cat",
+            "collectionName": "Hotel California - Single",
+            "trackCount": 1,
+            "releaseDate": "2010-11-12T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music/fe/a1/26/mzi.fcqvjboc.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1714484149,
+            "artistName": "Big Mountain",
+            "collectionName": "Hotel California (Live at Sugarshack Sessions) - Single",
+            "trackCount": 1,
+            "releaseDate": "2023-11-10T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/bd/57/31/bd573189-51d1-c7be-cb32-757ff75f9233/197999387066_cover.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 193434857,
+            "artistName": "Eagles",
+            "collectionName": "Eagles Live",
+            "trackCount": 15,
+            "releaseDate": "1980-11-07T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Features114/v4/e4/6c/3d/e46c3d30-9a32-b984-ee6f-ea473723a651/contsched.tidyyafg.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 635791801,
+            "artistName": "Eagles",
+            "collectionName": "Eagles",
+            "trackCount": 10,
+            "releaseDate": "1972-06-01T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/8f/e7/f4/8fe7f417-d464-8879-b00e-3d4965a9cfd1/075596062329.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1727004939,
+            "artistName": "PHURS, BOOTY LEAK & Catching Sunrises",
+            "collectionName": "Hotel California - Single",
+            "trackCount": 1,
+            "releaseDate": "2024-07-12T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/7e/e0/b9/7ee0b91b-0e59-5641-8787-ddc50392b2ca/5063440519889_cover.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1521729134,
+            "artistName": "Eagles",
+            "collectionName": "Live from the Forum MMXVIII",
+            "trackCount": 33,
+            "releaseDate": "2020-10-16T07:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/cc/bd/65/ccbd65fa-1cf0-6356-4bf8-40a0cba1ed76/603497847617.jpg/100x100bb.jpg"
+          },
+          {
+            "wrapperType": "collection",
+            "collectionId": 1440717897,
+            "artistName": "Creed",
+            "collectionName": "Greatest Hits",
+            "trackCount": 13,
+            "releaseDate": "2004-01-01T08:00:00Z",
+            "country": "USA",
+            "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/d5/b4/ef/d5b4ef8a-a68f-223b-df91-16294395ffce/00601501410321.rgb.jpg/100x100bb.jpg"
+          }
+        ]
+      }
+    }
+  ]
+}

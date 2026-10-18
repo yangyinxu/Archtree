@@ -1,0 +1,14 @@
+{
+  "source": "coverartarchive",
+  "synthetic": true,
+  "description": "A redirect to the archive item of a different MBID",
+  "exchanges": [
+    {
+      "url": "https://coverartarchive.org/release/00000000-0000-4000-8000-000000000022",
+      "status": 307,
+      "headers": {
+        "location": "https://archive.org/download/mbid-00000000-0000-4000-8000-000000000099/index.json"
+      }
+    }
+  ]
+}

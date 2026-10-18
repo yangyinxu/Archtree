@@ -1,0 +1,393 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Pandora Call recording search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/249c032d-00b2-4702-bae4-8efe787276f1?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "249c032d-00b2-4702-bae4-8efe787276f1",
+        "title": "Singularity Live",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "理芽",
+            "joinphrase": "×",
+            "artist": {
+              "id": "a0481942-9b3c-4327-b955-7ea3304749a8",
+              "name": "理芽"
+            }
+          },
+          {
+            "name": "ヰ世界情緒",
+            "joinphrase": "",
+            "artist": {
+              "id": "0e51b3c5-28c3-4608-aea1-ce01eca91dd2",
+              "name": "ヰ世界情緒"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "14f94c4f-abd7-4bf3-88e5-8112370dd0f2",
+          "primary-type": "Album",
+          "secondary-types": [
+            "Live"
+          ],
+          "first-release-date": "2022-11-23"
+        },
+        "date": "2022-11-23",
+        "country": "XW",
+        "barcode": "4582648561762",
+        "label-info": [
+          {
+            "catalog-number": "KTR-0073",
+            "label": {
+              "id": "e9767400-432a-43d0-9275-0c883060b5be",
+              "name": "KAMITSUBAKI RECORD"
+            }
+          }
+        ],
+        "cover-art-archive": {
+          "front": true
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "Digital Media",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "君の望み、君の願い",
+                "length": 340533,
+                "recording": {
+                  "id": "7373aadf-2c23-40d4-a433-151070ef2644",
+                  "length": 340533,
+                  "isrcs": [
+                    "JPY392200621"
+                  ]
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "少年漫画",
+                "length": 187000,
+                "recording": {
+                  "id": "9014d9bd-d6f8-4de6-bd7a-6b8bf4781fee",
+                  "length": 187000,
+                  "isrcs": [
+                    "JPY392200622"
+                  ]
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "霞がついてくる",
+                "length": 225293,
+                "recording": {
+                  "id": "8552e047-32be-4384-89ca-ce9e3f359676",
+                  "length": 225293,
+                  "isrcs": [
+                    "JPY392200623"
+                  ]
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "ディメンション",
+                "length": 232720,
+                "recording": {
+                  "id": "793b714c-d3b8-40a8-8b18-8584e6fcc5d0",
+                  "length": 232720,
+                  "isrcs": [
+                    "JPY392200624"
+                  ]
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "マボロシのまち",
+                "length": 248906,
+                "recording": {
+                  "id": "81c3dbda-2278-439b-8281-1978d429e9bf",
+                  "length": 248906,
+                  "isrcs": [
+                    "JPY392200625"
+                  ]
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "生きていく光は",
+                "length": 238000,
+                "recording": {
+                  "id": "8c427bcf-8975-4573-960a-d5250b32cc86",
+                  "length": 238000,
+                  "isrcs": [
+                    "JPY392200626"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "異星にいこうね",
+                "length": 168000,
+                "recording": {
+                  "id": "8d8c0895-9acd-4bed-9ce2-a779494aacfc",
+                  "length": 168000,
+                  "isrcs": [
+                    "JPY392200627"
+                  ]
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "パンドラコール",
+                "length": 229000,
+                "recording": {
+                  "id": "092ffaa7-efa1-4831-9570-99f709dbfc40",
+                  "length": 229000,
+                  "isrcs": [
+                    "JPY392200628"
+                  ]
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "ヰ世界の宝石譚",
+                "length": 244000,
+                "recording": {
+                  "id": "a7d038c5-6088-4423-8c1f-89d255a89524",
+                  "length": 244000,
+                  "isrcs": [
+                    "JPY392200629"
+                  ]
+                }
+              },
+              {
+                "position": 10,
+                "number": "10",
+                "title": "シリウスの心臓",
+                "length": 323000,
+                "recording": {
+                  "id": "610f4579-1f89-4fa6-a36d-6a63b2a55f17",
+                  "length": 323000,
+                  "isrcs": [
+                    "JPY392200630"
+                  ]
+                }
+              },
+              {
+                "position": 11,
+                "number": "11",
+                "title": "ARCADIA",
+                "length": 429000,
+                "recording": {
+                  "id": "8211fc49-5a5d-47c6-949e-479fd8dde0f6",
+                  "length": 429000,
+                  "isrcs": [
+                    "JPY392200631"
+                  ]
+                }
+              },
+              {
+                "position": 12,
+                "number": "12",
+                "title": "ジュブナイル",
+                "length": 222000,
+                "recording": {
+                  "id": "bfb04cd7-0932-4c60-b574-eebc95c66716",
+                  "length": 222000,
+                  "isrcs": [
+                    "JPY392200632"
+                  ]
+                }
+              },
+              {
+                "position": 13,
+                "number": "13",
+                "title": "甘美な無法",
+                "length": 258000,
+                "recording": {
+                  "id": "ba0be957-8057-4c4e-b61f-2e643c44a42d",
+                  "length": 258000,
+                  "isrcs": [
+                    "JPY392200633"
+                  ]
+                }
+              },
+              {
+                "position": 14,
+                "number": "14",
+                "title": "生きているより楽しそう",
+                "length": 242000,
+                "recording": {
+                  "id": "60ff5680-d63a-4983-91ba-0d1600972976",
+                  "length": 242000,
+                  "isrcs": [
+                    "JPY392200634"
+                  ]
+                }
+              },
+              {
+                "position": 15,
+                "number": "15",
+                "title": "デイネイ",
+                "length": 225000,
+                "recording": {
+                  "id": "988c9d23-9564-49e8-aee1-4c82b7006acb",
+                  "length": 225000,
+                  "isrcs": [
+                    "JPY392200635"
+                  ]
+                }
+              },
+              {
+                "position": 16,
+                "number": "16",
+                "title": "NEUROMANCE",
+                "length": 271000,
+                "recording": {
+                  "id": "00f3edd0-e4e0-417a-a478-7641dba18095",
+                  "length": 271000,
+                  "isrcs": [
+                    "JPY392200636"
+                  ]
+                }
+              },
+              {
+                "position": 17,
+                "number": "17",
+                "title": "どくどく",
+                "length": 209000,
+                "recording": {
+                  "id": "df183eaa-ef65-4443-9d46-346c14e82fa9",
+                  "length": 209000,
+                  "isrcs": [
+                    "JPY392200637"
+                  ]
+                }
+              },
+              {
+                "position": 18,
+                "number": "18",
+                "title": "食虫植物",
+                "length": 216000,
+                "recording": {
+                  "id": "4aec1140-6468-410f-87fd-e29c2b719b20",
+                  "length": 216000,
+                  "isrcs": [
+                    "JPY392200638"
+                  ]
+                }
+              },
+              {
+                "position": 19,
+                "number": "19",
+                "title": "舞",
+                "length": 211000,
+                "recording": {
+                  "id": "768ab549-bd60-4852-bf25-0ede40ccbba3",
+                  "length": 211000,
+                  "isrcs": [
+                    "JPY392200639"
+                  ]
+                }
+              },
+              {
+                "position": 20,
+                "number": "20",
+                "title": "ファンファーレ",
+                "length": 211000,
+                "recording": {
+                  "id": "0c8f6619-720a-4add-a30b-e02105c5d2bb",
+                  "length": 210813,
+                  "isrcs": [
+                    "JPY392200640"
+                  ]
+                }
+              },
+              {
+                "position": 21,
+                "number": "21",
+                "title": "ピルグリム",
+                "length": 279000,
+                "recording": {
+                  "id": "e2a73972-6f19-42a3-b982-4a7ba85ff889",
+                  "length": 279000,
+                  "isrcs": [
+                    "JPY392200641"
+                  ]
+                }
+              },
+              {
+                "position": 22,
+                "number": "22",
+                "title": "泡沫",
+                "length": 244000,
+                "recording": {
+                  "id": "4e4f0c80-15f2-454c-8512-40c768c30a12",
+                  "length": 244000,
+                  "isrcs": [
+                    "JPY392200642"
+                  ]
+                }
+              },
+              {
+                "position": 23,
+                "number": "23",
+                "title": "不的",
+                "length": 290000,
+                "recording": {
+                  "id": "ead831d1-ff50-4402-899b-c2c99370c000",
+                  "length": 290000,
+                  "isrcs": [
+                    "JPY392200643"
+                  ]
+                }
+              },
+              {
+                "position": 24,
+                "number": "24",
+                "title": "変身",
+                "length": 297000,
+                "recording": {
+                  "id": "8c279258-b563-44ff-b871-33788bee6bd0",
+                  "length": 297000,
+                  "isrcs": [
+                    "JPY392200644"
+                  ]
+                }
+              },
+              {
+                "position": 25,
+                "number": "25",
+                "title": "玩具",
+                "length": 210000,
+                "recording": {
+                  "id": "c2edb9c7-925d-4ae8-86f3-0847cf5296cb",
+                  "length": 210000,
+                  "isrcs": [
+                    "JPY392200645"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

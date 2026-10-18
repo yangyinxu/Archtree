@@ -6,6 +6,7 @@ be completed solely through application code.
 <!-- @catalog -->
 **Contents**
 
+- [Administrator Metadata Lookup Rollout](#administrator-metadata-lookup-rollout)
 - [Artist Follow and New Releases Rollout](#artist-follow-and-new-releases-rollout)
 - [Production HTTPS for Authentication](#production-https-for-authentication)
 - [Web-only Audio Social Launch](#web-only-audio-social-launch)
@@ -16,6 +17,19 @@ be completed solely through application code.
   - [Enable for testing](#enable-for-testing)
   - [After the test window](#after-the-test-window)
 <!-- @end-catalog -->
+
+## Administrator Metadata Lookup Rollout
+
+Status: The metadata source layer is a dark launch; no route, capability or
+worker uses it yet.
+
+- [ ] Set `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` in production to an operator
+      email address or https URL before metadata lookup is enabled for
+      administrators. Lookup stays unavailable, and sends nothing, without it.
+- [ ] During release verification of metadata lookup, confirm the fixed iTunes
+      storefronts (`jp`, `us`, `kr`, `tw`) and the source rates (MusicBrainz at
+      least 1.1 seconds apart, iTunes 3 seconds apart, Cover Art Archive two at
+      once).
 
 ## Artist Follow and New Releases Rollout
 

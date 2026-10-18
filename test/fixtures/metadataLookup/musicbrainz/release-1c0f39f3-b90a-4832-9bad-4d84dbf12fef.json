@@ -1,0 +1,346 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Hotel California search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/1c0f39f3-b90a-4832-9bad-4d84dbf12fef?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "1c0f39f3-b90a-4832-9bad-4d84dbf12fef",
+        "title": "Hotel California",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "Eagles",
+            "joinphrase": "",
+            "artist": {
+              "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+              "name": "Eagles"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+          "primary-type": "Album",
+          "secondary-types": [],
+          "first-release-date": "1976-12-08"
+        },
+        "date": "2017-11-24",
+        "country": "XW",
+        "barcode": "603497862542",
+        "label-info": [
+          {
+            "catalog-number": null,
+            "label": {
+              "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+              "name": "Asylum Records"
+            }
+          },
+          {
+            "catalog-number": null,
+            "label": {
+              "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+              "name": "Elektra"
+            }
+          }
+        ],
+        "cover-art-archive": {
+          "front": true
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "Digital Media",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Hotel California",
+                "length": 391376,
+                "recording": {
+                  "id": "40bd0203-bc3f-4b15-9ab3-ceeb2ef35d7a",
+                  "length": 390266,
+                  "isrcs": [
+                    "USEE11300195",
+                    "USEE11300353",
+                    "USEE19900323"
+                  ]
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "New Kid in Town",
+                "length": 304926,
+                "recording": {
+                  "id": "eb5641b3-196d-45ba-9edf-1d37671bd3b8",
+                  "length": 304000,
+                  "isrcs": [
+                    "USEE11300196",
+                    "USEE11300354",
+                    "USEE19900324"
+                  ]
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "Life in the Fast Lane",
+                "length": 286220,
+                "recording": {
+                  "id": "eb5550c8-9d31-4270-9dac-1f11566a3805",
+                  "length": 286093,
+                  "isrcs": [
+                    "USEE11300197",
+                    "USEE11300355",
+                    "USEE19900325"
+                  ]
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "Wasted Time",
+                "length": 296172,
+                "recording": {
+                  "id": "826c84b4-b625-4ba9-847d-8fb1a31a2d21",
+                  "length": 296172,
+                  "isrcs": [
+                    "USEE11300198",
+                    "USEE11300356",
+                    "USEE19900326"
+                  ]
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Wasted Time (reprise)",
+                "length": 83427,
+                "recording": {
+                  "id": "1f2ce3df-edbf-4da9-84a6-688ca7adbb37",
+                  "length": 83266,
+                  "isrcs": [
+                    "USEE11300203",
+                    "USEE11300357",
+                    "USEE19900327"
+                  ]
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "Victim of Love",
+                "length": 250089,
+                "recording": {
+                  "id": "898fe0ff-71a7-40b1-913c-9157a34ba16e",
+                  "length": 249293,
+                  "isrcs": [
+                    "USEE11300199",
+                    "USEE11300358",
+                    "USEE19900328"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "Pretty Maids All in a Row",
+                "length": 239494,
+                "recording": {
+                  "id": "e1de5771-92f0-4a7d-a796-b0c6b66c7cf4",
+                  "length": 238533,
+                  "isrcs": [
+                    "USEE11300200",
+                    "USEE11300359",
+                    "USEE19900329"
+                  ]
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "Try and Love Again",
+                "length": 311069,
+                "recording": {
+                  "id": "dacd1802-bd44-4843-957d-7b51b8b0e764",
+                  "length": 310693,
+                  "isrcs": [
+                    "USEE11300201",
+                    "USEE11300360",
+                    "USEE19900330"
+                  ]
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "The Last Resort",
+                "length": 444912,
+                "recording": {
+                  "id": "887f7e1c-5eb1-4f3b-9c12-8e54a6ebedbd",
+                  "length": 448546,
+                  "isrcs": [
+                    "USEE11300202",
+                    "USEE11300361",
+                    "USEE19900331"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "position": 2,
+            "format": "Digital Media",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Take It Easy (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 286587,
+                "recording": {
+                  "id": "b5151ff9-069b-4eb9-b7a8-eb8e0282a8bc",
+                  "length": 287000,
+                  "isrcs": [
+                    "USRH11703165",
+                    "USRH11703340"
+                  ]
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "Take It to the Limit (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 318587,
+                "recording": {
+                  "id": "617cdb04-bf40-4e8f-9266-9e4756e544a1",
+                  "length": 318586,
+                  "isrcs": [
+                    "USRH11703173",
+                    "USRH11703342"
+                  ]
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "New Kid in Town (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 292733,
+                "recording": {
+                  "id": "9585ca40-aef2-4e6c-bfc1-dd274da2ece9",
+                  "length": 292733,
+                  "isrcs": [
+                    "USRH11703172",
+                    "USRH11703344"
+                  ]
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "James Dean (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 229787,
+                "recording": {
+                  "id": "cc6bfafb-468f-4792-8886-5fc46849f982",
+                  "length": 229786,
+                  "isrcs": [
+                    "USRH11703170",
+                    "USRH11703346"
+                  ]
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Good Day in Hell (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 328773,
+                "recording": {
+                  "id": "0360a728-8af4-4a0a-9016-203dee46a34d",
+                  "length": 328773,
+                  "isrcs": [
+                    "USRH11703164",
+                    "USRH11703348"
+                  ]
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "Witchy Woman (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 260019,
+                "recording": {
+                  "id": "2ed03e82-d3e7-4a9b-906c-e5bc1135cb2b",
+                  "length": 260000,
+                  "isrcs": [
+                    "USRH11703163",
+                    "USRH11703350"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "Funk #49 (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 243715,
+                "recording": {
+                  "id": "8fd52260-6ed5-4f9c-b6a2-beeccc679baa",
+                  "length": 243706,
+                  "isrcs": [
+                    "USRH11703169",
+                    "USRH11703352"
+                  ]
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "One of These Nights (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 232200,
+                "recording": {
+                  "id": "5afadbf6-5775-45f4-b22d-2e7d46e89832",
+                  "length": 232000,
+                  "isrcs": [
+                    "USRH11703174",
+                    "USRH11703354"
+                  ]
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "Hotel California (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 409429,
+                "recording": {
+                  "id": "87fb315f-826d-4424-a45b-29dd9fd166a2",
+                  "length": 409520,
+                  "isrcs": [
+                    "USRH11703166",
+                    "USRH11703356"
+                  ]
+                }
+              },
+              {
+                "position": 10,
+                "number": "10",
+                "title": "Already Gone (live at the Los Angeles Forum, 10/20–22/76)",
+                "length": 313296,
+                "recording": {
+                  "id": "77454c08-eb7e-4dc8-a6aa-af64f719e128",
+                  "length": 315000,
+                  "isrcs": [
+                    "USRH11703162",
+                    "USRH11703358"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

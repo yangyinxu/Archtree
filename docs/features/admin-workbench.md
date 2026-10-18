@@ -7,12 +7,13 @@ admission independently of the normal listener DTOs. Existing catalog edits,
 visibility changes, clearing a cover, existing-Album reviews and local MP3
 conversion need only that role and have no deployment flag. Choosing a new
 cover also requires `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` and its
-distinct `ADMIN_IMPORT_S3_BUCKET_NAME` staging bucket. The remaining flags below
-default closed and accept only the literal `true`:
+distinct `ADMIN_IMPORT_S3_BUCKET_NAME` staging bucket. The remaining settings
+below default closed; the flags among them accept only the literal `true`:
 
 | Configuration | Purpose |
 | --- | --- |
 | `FINITUDE_ADMIN_IMPORTS_ENABLED` | Admit new import projects, analysis and publication steps |
+| `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` | Operator contact (email or https URL) sent in the User-Agent of MusicBrainz and Cover Art Archive requests, never to iTunes; lookup is unavailable without it (not a flag) |
 | `OPENAI_API_KEY` | Reuse the existing Naruto Mobile server provider configuration for `gpt-6-luna` |
 | `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` | Optional existing provider routing; never returned to clients |
 | `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
@@ -82,6 +83,7 @@ previews, import/catalog/Page editors or upload controls.
 **Contents**
 
 - [Device-local MP3 conversion](#device-local-mp3-conversion)
+- [Metadata lookup](#metadata-lookup)
 <!-- @end-catalog -->
 
 ## Device-local MP3 conversion
@@ -400,3 +402,91 @@ receipt. A null revision is accepted only when the owner is absent or non-ready.
 Attached changes and active worker leases cannot be cancelled. Unused target
 cleanup retains its source pin and storage evidence until confirmed; cancelled
 cleanup can be reconciled by any current administrator without reattaching it.
+
+## Metadata lookup
+
+The metadata source layer is a dark launch: no route, capability, worker or Web
+control uses it yet, so nothing is sent to any service. It lives in
+`src/administration/lookup/`.
+
+- **Sources and hosts.** MusicBrainz (`https://musicbrainz.org/ws/2/` only), the
+  iTunes Search API (`https://itunes.apple.com/search` and `/lookup`, in the
+  fixed storefronts `jp`, `us`, `kr` and `tw`, ordered by the query's script)
+  and Cover Art Archive listings. A listing starts at
+  `coverartarchive.org/release/<mbid>` and may redirect only to
+  `archive.org/download/mbid-<mbid>/index.json` and then to the same item on an
+  `ia….us.archive.org` or `dn….ca.archive.org` storage node, all bound to the
+  requested MBID. Any other destination is refused before DNS.
+- **User-Agent.** MusicBrainz and Cover Art Archive requests, including the
+  archive.org hops, send `Finitude/1.0 ( <contact> )` built from
+  `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT`: 3 to 200 printable ASCII characters
+  without parentheses, quotes, backslashes or angle brackets, forming an email
+  address or a credential-free `https:` URL on port 443. iTunes Search API
+  requests send `Finitude/1.0` alone, because Apple asks for no contact. Lookup
+  is unavailable, and sends nothing, while imports are disabled or the contact
+  is missing or invalid. The contact is never logged.
+- **Pinned fetcher.** `src/administration/adminPinnedHttps.ts`, shared with the
+  legacy artwork proxy above. Every hop must be HTTPS on port 443 to a DNS name,
+  without credentials or a fragment, whatever the caller's destination policy
+  allows. Every DNS answer must be public unicast; the socket is pinned to one
+  checked answer and TLS verifies the original hostname. At most three
+  redirects are followed, every hop is re-checked, and loops or duplicate
+  `Location` fields are refused. Only `Accept`, `Accept-Encoding: identity` and
+  `User-Agent` are sent: no cookie, authorization or referrer.
+- **Bounds.** One deadline covers DNS, every hop and the body: 10 seconds for
+  MusicBrainz and Cover Art Archive, 8 seconds for iTunes. Bodies are capped at
+  2 MiB (MusicBrainz), 1 MiB (iTunes) and 256 KiB (listings).
+- **Deployment-wide gates.** `adminMetadataLookupGates` holds one `_id`-keyed
+  document per source with its next allowed start and expiring leases, decided
+  on the MongoDB clock and written outside transactions. MusicBrainz requests
+  start at least 1.1 seconds apart with one in flight, iTunes requests at least
+  3 seconds apart, and Cover Art Archive admits two at once; a lease expires
+  after 30 seconds. Automatic lookups wait for a slot (wait mode), polling about
+  once per interval while a lease is held, and report the source as
+  `unavailable` after 60 seconds. A submitted lookup (busy mode) sleeps out only
+  its own request spacing, so its consecutive requests are paced rather than
+  refused. It is reported as `busy` when another request holds the source, when
+  a backoff pushed the next start further than one interval, or when another
+  lookup took the slot it waited for. A 503 or 429 answer (iTunes also 403)
+  pushes the source's next start by its Retry-After (1 to 30 seconds) or by 2
+  then 5 seconds; wait mode makes at most three attempts in one call. A gate
+  command is bounded to 2 seconds and a release to 1 second, an abort cancels a
+  pending command at once, and a grant whose reply was lost is released again.
+  A database failure fails closed before anything is sent.
+- **Validation.** Responses need an allowlisted content type, identity encoding,
+  complete UTF-8 and the complete JSON parser (duplicate keys and nesting deeper
+  than 20 rejected), then an allowlisted shape. Unknown fields are dropped;
+  wrong types, out-of-bound values, lone surrogates and impossible dates reject
+  the whole response. MBIDs, barcodes (GTIN check digit, all-zero rejected),
+  ISRCs, iTunes IDs and Cover Art Archive image IDs are format-checked before
+  they are sent or compared. A failure is reported as `unavailable`,
+  `invalidResponse`, `rateLimited`, `busy`, `cancelled` or `notConfigured`,
+  never as an empty result.
+- **Cache.** Validated answers, including 404 answers, stay in a process-local
+  LRU of 128 entries, 8 MiB and 15 minutes. Failures are never cached.
+- **Discarded links.** iTunes preview, track, collection and artist links never
+  enter the response shape, so they never reach evidence or fixtures. A
+  100-pixel iTunes artwork URL survives only on `is1-ssl.mzstatic.com` through
+  `is5-ssl.mzstatic.com`, as internal evidence. Cover Art Archive listings yield
+  image IDs, flags, types and sizes, never URLs.
+- **Planning and ranking.** Both are pure. The planner turns embedded
+  identifiers shared by every file (release MBID, barcode, catalogue number and,
+  for one file, an ISRC), then album or song text, then a cleaned folder name
+  into at most six MusicBrainz queries. It never accepts file names. Submitted
+  text is only normalized (NFC, collapsed whitespace), so a link, a name over
+  200 characters or a control or format character is reported instead of
+  planned; tag and folder text has format characters removed and control
+  characters turned into spaces. Ranking
+  pairs files with tracks by Disc Number, Track Number and upload order, or by
+  upload order alone when Disc Numbers are missing and Track Numbers repeat.
+  Discs are counted and numbered among the media that have tracks, so a DVD
+  without a tracklist is not a disc. A candidate matches when the track count,
+  any known disc count and every duration agree within 3 seconds, plus 1 second
+  for legacy `m:ss` durations. A candidate with any unknown local or
+  MusicBrainz duration is unverified and never preselected.
+- **Fixtures.** `npm run record:metadata-lookup-fixtures -- --live` re-records
+  the trimmed public responses in `test/fixtures/metadataLookup/`. It contacts
+  the live services with a recorder User-Agent and the contract rates, so only
+  an operator runs it; tests and CI never do. Lookup tests install
+  `test/support/networkGuard.ts`, which fails any non-loopback DNS query,
+  socket or `fetch`.

@@ -13,5 +13,8 @@
 # Canonical localization sources and generated bundles are validated byte-for-byte.
 /localization/**/*.json text eol=lf
 
+# Metadata lookup fixtures are checked as LF JSON by metadataLookupClients.test.ts.
+/test/fixtures/metadataLookup/** text eol=lf
+
 # Preserve the original formatting of this bundled third-party license.
 web/public/licenses/mp3/LGPL-2.0.txt -whitespace

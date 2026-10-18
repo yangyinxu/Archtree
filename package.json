@@ -34,6 +34,7 @@
     "analyze:room-audio": "tsx scripts/analyze-room-audio.ts",
     "backfill:room-audio-analysis": "tsx scripts/backfill-room-audio-analysis.ts",
     "migrate:catalog-credits": "tsx scripts/migrate-catalog-credits.ts",
+    "record:metadata-lookup-fixtures": "tsx scripts/record-metadata-lookup-fixtures.ts",
     "stage:eb-artifact": "node scripts/check-runtime.mjs --linux && node scripts/stage-eb-artifact.mjs",
     "start": "cross-env NODE_ENV=production tsx src/app.ts",
     "dev": "cross-env NODE_ENV=develop tsx src/app.ts",
