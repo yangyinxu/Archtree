@@ -8983,6 +8983,20 @@
       ],
       "variables": {}
     },
+    "search.filter.all": {
+      "description": "Search result filter that shows every result group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.filters.label": {
+      "description": "Accessible name of the Search result type filter group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "search.form.label": {
       "description": "Accessible label for the Search results form.",
       "delivery": [
@@ -9070,6 +9084,52 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "search.typeahead.hint_navigate": {
+      "description": "Keyboard hint in the typeahead header next to the up and down arrow keys.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.hint_submit": {
+      "description": "Keyboard hint in the typeahead header next to the Enter key.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.label": {
+      "description": "Accessible name of the shell search suggestion list shown while typing on wide layouts.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.recent": {
+      "description": "Secondary text on a typeahead option that repeats a recent search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.result_count": {
+      "description": "Polite status announcing how many typeahead suggestions are available.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "search.typeahead.search_for": {
+      "description": "Typeahead option that opens the full Search results for the typed query.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
     },
     "seek.position_label": {
       "description": "Accessible label for the playback position slider.",

@@ -18,6 +18,7 @@ import { listenerCapabilitiesQuery } from '../../api/listenerCapabilities';
 import { browserSessionQuery } from '../../api/session';
 import { useSectionAuthentication, SectionError } from './LibrarySectionState';
 import { useLocalization } from '../../localization/LocalizationProvider';
+import filterStyles from '../../components/FilterChips.module.css';
 import styles from './LibraryPage.module.css';
 
 const PlaylistSummaryList = lazy(() => import('../playlists/PlaylistSummaryList').then((module) => ({ default: module.PlaylistSummaryList })));
@@ -71,7 +72,7 @@ const SavedSection = ({ viewerId, preview }: { viewerId: string; preview: boolea
           </select>
         </label>
       </div>
-      <div className={styles.filters} role="group" aria-label={t('library.filters.label')}>
+      <div className={filterStyles.filters} role="group" aria-label={t('library.filters.label')}>
         <button type="button" aria-pressed={type === ''} onClick={() => setType('')}>{t('library.filter.all')}</button>
         <button type="button" aria-pressed={type === 'album'} onClick={() => setType('album')}>{t('common.label.albums')}</button>
         <button type="button" aria-pressed={type === 'audioTrack'} onClick={() => setType('audioTrack')}>{t('common.label.songs')}</button>

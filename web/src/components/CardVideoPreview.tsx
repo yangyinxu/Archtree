@@ -3,15 +3,17 @@
  *   Types: CardVideoPreviewProps
  *   Functions: CardVideoPreview
  * Internal
- *   Functions: isMediaFailure, PreviewVideo
- *   Constants: previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds, loopLeadSeconds
+ *   Types: NetworkInformationLike, PreviewVideoProps
+ *   Functions: videoPreviewAllowed, isMediaFailure, PreviewVideo
+ *   Constants: previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds, loopLeadSeconds,
+ *              slowConnectionTypes, failedSources
+ *   Variables: stopActivePreview
  * @end-catalog */
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
 import { motionPreviewUrl, presentationCapabilitiesQuery } from '../api/presentationCapabilities';
-import styles from './CardVideoPreview.module.css';
 
 // Previews loop a short window from a little way into the video, where openings are rarely blank.
 const previewStartFraction = 0.2;
@@ -19,24 +21,43 @@ const previewMaximumStartSeconds = 30;
 const previewWindowSeconds = 8;
 // Restart slightly before the window or clip ends so the element never reaches its own end.
 const loopLeadSeconds = 0.1;
+const slowConnectionTypes = new Set(['slow-2g', '2g', '3g']);
+// A source that failed once is not retried in this page session, so a broken stream costs one request.
+const failedSources = new Set<string>();
+// Only one card previews at a time; a newly started preview stops the previous one.
+let stopActivePreview: (() => void) | null = null;
+
+type NetworkInformationLike = { saveData?: boolean; effectiveType?: string };
 
 export interface CardVideoPreviewProps {
+  /** Placement and reveal styles, owned by the card so the preview needs no stylesheet of its own. */
+  className: string;
   mediaTrackId: string;
   /** The public stream, used only while dedicated motion previews are disabled. */
   streamUrl: string;
-  onFailed: () => void;
+  /** Asks the card to unmount the preview: it is not allowed here, it failed, or the page hid. */
+  onStop: () => void;
+}
+
+interface PreviewVideoProps {
+  className: string;
+  source: string;
+  onStop: () => void;
 }
 
 /**
- * Chooses the preview source: the dedicated muted clip when the server serves motion previews (a
- * track without one simply shows its artwork), otherwise the MediaTrack's public stream.
+ * Whether the device, page and listener settings allow a decorative hover preview right now. It runs
+ * here rather than in the card's hover hook so the shared listener bundle stays small; a disallowed
+ * preview unmounts before it requests any media.
  */
-export default function CardVideoPreview({ mediaTrackId, streamUrl, onFailed }: CardVideoPreviewProps) {
-  const capabilities = useQuery(presentationCapabilitiesQuery());
-  if (capabilities.isPending) return null;
-  const source = capabilities.data?.motionPreviews ? motionPreviewUrl(mediaTrackId) : streamUrl;
-  return <PreviewVideo key={source} onFailed={onFailed} source={source} />;
-}
+const videoPreviewAllowed = () => {
+  if (typeof window.matchMedia !== 'function' || document.visibilityState === 'hidden') return false;
+  if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return false;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  if (window.matchMedia('(forced-colors: active)').matches) return false;
+  const connection = (navigator as Navigator & { connection?: NetworkInformationLike }).connection;
+  return !connection?.saveData && !slowConnectionTypes.has(connection?.effectiveType ?? '');
+};
 
 /** Only failures of the media itself count; an interrupted play() after teardown is not a failure. */
 const isMediaFailure = (error: unknown) => {
@@ -45,16 +66,42 @@ const isMediaFailure = (error: unknown) => {
 };
 
 /**
- * A decorative, muted preview drawn over a Video card's artwork. It owns its own media element,
- * separate from the shared player, loops a bounded window, and releases its request on unmount.
+ * Chooses the preview source: the dedicated muted clip when the server serves motion previews (a
+ * track without one simply shows its artwork), otherwise the MediaTrack's public stream. Eligibility
+ * is checked first, so a disallowed preview reads neither the presentation flags nor any media.
  */
-function PreviewVideo({ source, onFailed }: { source: string; onFailed: () => void }) {
+export default function CardVideoPreview({ className, mediaTrackId, streamUrl, onStop }: CardVideoPreviewProps) {
+  const [allowed] = useState(videoPreviewAllowed);
+  const capabilities = useQuery({ ...presentationCapabilitiesQuery(), enabled: allowed });
+
+  useEffect(() => {
+    if (!allowed) onStop();
+  }, [allowed, onStop]);
+
+  if (!allowed || capabilities.isPending) return null;
+  const source = capabilities.data?.motionPreviews ? motionPreviewUrl(mediaTrackId) : streamUrl;
+  return <PreviewVideo className={className} key={source} onStop={onStop} source={source} />;
+}
+
+/**
+ * A decorative, muted preview drawn over a Video card's artwork. It owns its own media element,
+ * separate from the shared player, loops a bounded window, stops when the page hides or another card
+ * starts a preview, and releases its request on unmount.
+ */
+function PreviewVideo({ className, source, onStop }: PreviewVideoProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return undefined;
+    // Conditions can change while the presentation flags load, such as the page hiding.
+    if (failedSources.has(source) || !videoPreviewAllowed()) {
+      onStop();
+      return undefined;
+    }
+    stopActivePreview?.();
+    stopActivePreview = onStop;
     let released = false;
     let start = 0;
     let end = previewWindowSeconds;
@@ -63,9 +110,14 @@ function PreviewVideo({ source, onFailed }: { source: string; onFailed: () => vo
     video.disablePictureInPicture = true;
     if ('disableRemotePlayback' in video) video.disableRemotePlayback = true;
 
+    const fail = () => {
+      if (released) return;
+      failedSources.add(source);
+      onStop();
+    };
     const play = () => {
       video.play()?.catch?.((error: unknown) => {
-        if (!released && isMediaFailure(error)) onFailed();
+        if (isMediaFailure(error)) fail();
       });
     };
     const begin = () => {
@@ -88,8 +140,8 @@ function PreviewVideo({ source, onFailed }: { source: string; onFailed: () => vo
       play();
     };
     const reveal = () => setReady(true);
-    const fail = () => {
-      if (!released) onFailed();
+    const stopWhenHidden = () => {
+      if (document.visibilityState === 'hidden') onStop();
     };
 
     video.addEventListener('loadedmetadata', begin);
@@ -97,26 +149,29 @@ function PreviewVideo({ source, onFailed }: { source: string; onFailed: () => vo
     video.addEventListener('ended', restart);
     video.addEventListener('playing', reveal);
     video.addEventListener('error', fail);
+    document.addEventListener('visibilitychange', stopWhenHidden);
     video.src = source;
 
     return () => {
       released = true;
+      if (stopActivePreview === onStop) stopActivePreview = null;
       video.removeEventListener('loadedmetadata', begin);
       video.removeEventListener('timeupdate', loopWindow);
       video.removeEventListener('ended', restart);
       video.removeEventListener('playing', reveal);
       video.removeEventListener('error', fail);
+      document.removeEventListener('visibilitychange', stopWhenHidden);
       // Clearing the source aborts the in-flight range request instead of finishing the download.
       video.pause();
       video.removeAttribute('src');
       video.load();
     };
-  }, [onFailed, source]);
+  }, [onStop, source]);
 
   return (
     <video
       aria-hidden="true"
-      className={styles.preview}
+      className={className}
       data-ready={ready || undefined}
       data-video-preview=""
       muted

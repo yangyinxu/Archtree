@@ -25,7 +25,8 @@ test('keeps the wide-shell Tab order deterministic through navigation and Librar
     page.getByRole('button', { name: 'Go back' }),
     page.getByRole('button', { name: 'Go forward' }),
     page.getByRole('button', { name: 'Submit search' }),
-    page.getByRole('searchbox', { name: 'Search artists, organizations, albums, and MediaTracks' }).first(),
+    // Wide layouts make the shell field a typeahead combobox away from the Search route.
+    page.getByRole('combobox', { name: 'Search artists, organizations, albums, and MediaTracks' }),
     page.getByRole('link', { name: 'Log in' }).first(),
     sidebar.getByRole('link', { name: 'Home' }),
     sidebar.getByRole('link', { name: 'Search' }),
@@ -110,7 +111,7 @@ test('does not intercept playback shortcuts while typing and restores help focus
   const player = page.getByRole('region', { name: 'Now playing' });
   const controls = player.getByRole('group', { name: 'Playback controls' });
   await expect(controls.getByRole('button', { name: 'Pause' })).toBeVisible();
-  const search = page.getByRole('searchbox', { name: 'Search artists, organizations, albums, and MediaTracks' }).first();
+  const search = page.getByRole('combobox', { name: 'Search artists, organizations, albums, and MediaTracks' });
   await search.pressSequentially('ambient ');
   await expect(search).toHaveValue('ambient ');
   await expect(controls.getByRole('button', { name: 'Pause' })).toBeVisible();

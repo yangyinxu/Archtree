@@ -16,6 +16,7 @@
  *   - a media error stops the preview and that source is not retried
  *   - hiding the page stops a running preview and prevents a pending one
  *   - with dedicated motion previews enabled, the card reads the preview clip and never the full stream
+ *   - a disallowed preview never reads the presentation flags
  * @end-catalog */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -91,10 +92,15 @@ const configure = ({
   return { media, fetchMock };
 };
 
-/** Renders cards with seeded rollout flags and the server's motion-preview presentation flag. */
-const renderCards = (items: AudioTrackSummary[], motionPreviews = false) => {
+/**
+ * Renders cards with seeded rollout flags and the server's motion-preview presentation flag; `null`
+ * leaves the presentation flags unloaded, so reading them would reach the stubbed fetch.
+ */
+const renderCards = (items: AudioTrackSummary[], motionPreviews: boolean | null = false) => {
   const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
-  client.setQueryData(presentationCapabilitiesQueryKey, { contractVersion: 1, motionPreviews });
+  if (motionPreviews !== null) {
+    client.setQueryData(presentationCapabilitiesQueryKey, { contractVersion: 1, motionPreviews });
+  }
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   return render(
     <MemoryRouter>
@@ -249,14 +255,17 @@ test.each([
   ['forced colors', { environment: { forcedColors: true } }],
   ['Save-Data', { environment: { saveData: true } }],
   ['a slow connection', { environment: { effectiveType: '3g' } }]
-] as const)('%s never starts a preview', async (_label, options) => {
+] as const)('%s never starts a preview or requests its media', async (_label, options) => {
   configure('environment' in options ? options.environment : {});
+  const setSource = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
   renderCards([videoTrack]);
 
   hover(card('Moving Light'), 'pointerType' in options ? options.pointerType : 'mouse');
   await restPastIntent();
 
   expect(previewIn(card('Moving Light'))).toBeNull();
+  // The lazy preview checks eligibility before it assigns a source, so no request ever starts.
+  expect(setSource).not.toHaveBeenCalled();
 });
 
 test('audio cards and the Video already playing in the shared player offer no preview', async () => {
@@ -303,9 +312,11 @@ test('a media error stops the preview and that source is not retried', async () 
   expect(previewIn(target)).toBeNull();
 
   fireEvent.pointerLeave(target);
+  const setSource = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
   hover(target);
   await restPastIntent();
   expect(previewIn(target)).toBeNull();
+  expect(setSource).not.toHaveBeenCalled();
 });
 
 test('hiding the page stops a running preview and prevents a pending one', async () => {
@@ -346,4 +357,15 @@ test('with dedicated motion previews enabled, the card reads the preview clip an
   hover(target);
   await restPastIntent();
   expect(previewIn(target)).toBeNull();
+});
+
+test('a disallowed preview never reads the presentation flags', async () => {
+  const { fetchMock } = configure({ reducedMotion: true });
+  renderCards([trackWithSource('unread', 'Unread Light')], null);
+
+  hover(card('Unread Light'));
+  await restPastIntent();
+
+  expect(previewIn(card('Unread Light'))).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
 });
