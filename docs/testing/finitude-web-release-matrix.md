@@ -40,7 +40,10 @@ Library rail, delayed Now Playing dismissal, the narrow Album hero, and player
 identity while the real Now Playing control closes and restores the pane.
 Search coverage verifies cancellable debounced result previews without history
 writes, explicit history commits, and committed query restoration through
-browser Back and Forward.
+browser Back and Forward on the narrow page field. At 1440 px it verifies the
+shell typeahead: inline suggestions on the current route, arrow-key highlight
+kept in view, Enter on a highlight, Enter and Escape without one, recent
+searches, result-type filters, and axe scans with the suggestion list open.
 
 The Engineering Guide browser spec verifies its hosted login return destination,
 then reads the same generated bundle through the loopback documentation preview.
@@ -272,11 +275,18 @@ player control still works.
 
 - Navigate Home, Search, Library authentication state, Album, Artist, Account,
   and browser back/forward using only the keyboard.
-- In both Search fields, type and delete without submitting, confirm results
-  update after the debounce while Recent searches remains unchanged, then use
-  Enter or the mobile-keyboard Search action and confirm only that final query
-  is recorded. Repeat with a Chinese or Japanese IME and verify composition
-  text is not searched or submitted before the candidate is committed.
+- On a phone width, in the Search page field, type and delete without
+  submitting, confirm results update after the debounce while Recent searches
+  remains unchanged, then use Enter or the mobile-keyboard Search action and
+  confirm only that final query is recorded. Repeat with a Chinese or Japanese
+  IME and verify composition text is not searched or submitted before the
+  candidate is committed.
+- At 768 px and wider, type in the shell field on Home: confirm suggestions
+  appear without leaving Home, arrow keys highlight and scroll them, Enter
+  opens a highlight or otherwise full results, Escape closes and then clears,
+  typing after a highlight clears it, and a screen reader announces the
+  active option and the suggestion count. Repeat with an IME and confirm arrow
+  and Escape keys stay with the composition.
 - Confirm focus is visible, follows route changes sensibly, remains trapped in
   modal dialogs, and returns to the invoking control when a dialog closes.
 - Start Album playback, select an individual MediaTrack, use Previous/Next,

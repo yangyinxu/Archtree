@@ -106,6 +106,9 @@ export const SearchQueryProvider = ({ children }: { children: ReactNode }) => {
   const [typeaheadQuery, setTypeaheadQuery] = useState('');
   const [isComposing, setIsComposing] = useState(false);
   const previewTimer = useRef<number | null>(null);
+  const wasTypeahead = useRef(typeaheadActive);
+  // The draft left in the field when a wide layout narrows; it is not a new edit to search for.
+  const narrowedDraft = useRef<string | null>(null);
 
   const cancelPendingPreview = useCallback(() => {
     if (previewTimer.current !== null) {
@@ -119,10 +122,23 @@ export const SearchQueryProvider = ({ children }: { children: ReactNode }) => {
     setIsComposing(false);
   }, [activeQuery, location.pathname]);
 
+  // Declared before the preview effect so the narrowing is recorded before it runs.
+  useEffect(() => {
+    if (wasTypeahead.current && !typeaheadActive && !isSearchRoute) {
+      narrowedDraft.current = normalizeQuery(draftQuery);
+    }
+    wasTypeahead.current = typeaheadActive;
+    // Only layout changes matter here; draft edits are handled by the preview effect.
+  }, [typeaheadActive]);
+
   useEffect(() => {
     cancelPendingPreview();
     if (isComposing) return;
     const normalized = normalizeQuery(draftQuery);
+    if (!typeaheadActive && !isSearchRoute && narrowedDraft.current !== null) {
+      if (normalized === narrowedDraft.current) return;
+      narrowedDraft.current = null;
+    }
     if (typeaheadActive) {
       // Wide layouts stay on the current route; the shell previews this draft inline instead.
       if (normalized === typeaheadQuery) return;

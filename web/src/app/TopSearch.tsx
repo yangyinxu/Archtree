@@ -2,6 +2,7 @@
  * Exports
  *   Functions: TopSearch
  * Internal
+ *   Functions: normalizeQuery, isComposingKey
  *   Constants: SearchTypeahead
  * @end-catalog */
 
@@ -24,9 +25,19 @@ import { useSearchQuery } from '../features/search/SearchQueryProvider';
 import { useSearchHistoryRecorder } from '../features/search/useSearchHistoryRecorder';
 import { useLocalization } from '../localization/LocalizationProvider';
 import styles from './AppShell.module.css';
+import { focusMainContent } from './focusMainContent';
 
-// The suggestion panel loads on first use so the always-present shell stays light.
-const SearchTypeahead = lazy(() => import('../features/search/SearchTypeahead'));
+// The suggestion panel loads on first use so the always-present shell stays light. A failed
+// chunk renders nothing: Enter still opens full Search results without the panel.
+const SearchTypeahead = lazy(() => import('../features/search/SearchTypeahead')
+  .catch(() => ({ default: () => null })));
+
+const normalizeQuery = (query: string) => query.trim();
+
+/** Ignores keys that belong to an active IME composition. */
+const isComposingKey = (event: KeyboardEvent<HTMLInputElement>) => (
+  event.nativeEvent.isComposing || event.keyCode === 229
+);
 
 /**
  * Owns the shell search field. On wide layouts away from the Search route it is an ARIA 1.2
@@ -48,15 +59,17 @@ export default function TopSearch() {
   } = useSearchQuery();
   const { t } = useLocalization();
   const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(-1);
-  const [optionCount, setOptionCount] = useState(0);
-  const options = useRef<TypeaheadOption[]>([]);
+  // The highlight follows a suggestion's stable key, so new results never silently retarget it.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  // Rendered order (ids and keys) lives in state; the latest activation callbacks live in a ref.
+  const [options, setOptions] = useState<Array<Pick<TypeaheadOption, 'id' | 'key'>>>([]);
+  const latestOptions = useRef<TypeaheadOption[]>([]);
   const showTypeahead = typeaheadActive && open;
-  const expanded = showTypeahead && optionCount > 0;
-
-  useEffect(() => {
-    setActiveIndex(-1);
-  }, [typeaheadQuery]);
+  const expanded = showTypeahead && options.length > 0;
+  const activeIndex = activeKey === null ? -1 : options.findIndex((option) => option.key === activeKey);
+  const activeOption = activeIndex >= 0 ? options[activeIndex] : undefined;
+  // A highlight belongs to the list built for the debounced query; edits since then void it.
+  const listMatchesDraft = normalizeQuery(draftQuery) === typeaheadQuery;
 
   useEffect(() => {
     if (!typeaheadActive) setOpen(false);
@@ -64,55 +77,75 @@ export default function TopSearch() {
 
   const close = useCallback(() => {
     setOpen(false);
-    setActiveIndex(-1);
+    setActiveKey(null);
   }, []);
 
   const registerOptions = useCallback((next: TypeaheadOption[]) => {
-    options.current = next;
-    setOptionCount(next.length);
-    setActiveIndex((index) => (index < next.length ? index : -1));
+    latestOptions.current = next;
+    setOptions((current) => (
+      current.length === next.length && current.every((option, index) => option.key === next[index].key)
+        ? current
+        : next.map(({ id, key }) => ({ id, key }))
+    ));
+    setActiveKey((key) => (key !== null && next.some((option) => option.key === key) ? key : null));
   }, []);
 
-  // A chosen suggestion has moved on (opened a route or started playback), so release the field.
-  const finishSuggestion = useCallback(() => {
+  // Playback keeps the listener in the field; a navigation moves focus to the new page content.
+  const finishSuggestion = useCallback((outcome: 'navigated' | 'played') => {
     close();
-    input.current?.blur();
+    if (outcome === 'navigated') focusMainContent();
   }, [close]);
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (isComposing) return;
-    const highlighted = showTypeahead && activeIndex >= 0 ? options.current[activeIndex] : undefined;
-    if (highlighted) {
-      highlighted.activate();
-      return;
-    }
+  const commitDraftSearch = () => {
     close();
     const normalized = commitDraft();
     if (normalized) recordSubmittedQuery(normalized);
   };
 
+  // Form submission (the search button, or Enter without a current highlight) opens full results.
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isComposing) return;
+    commitDraftSearch();
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) {
-      event.preventDefault();
+    if (isComposing || isComposingKey(event)) {
+      // Enter confirms an IME candidate and arrows move within it; neither belongs to Search.
+      if (event.key === 'Enter') event.preventDefault();
       return;
     }
     if (!typeaheadActive) return;
+    if (event.key === 'Enter') {
+      const highlighted = activeOption && showTypeahead && listMatchesDraft
+        ? latestOptions.current.find((option) => option.key === activeOption.key)
+        : undefined;
+      if (highlighted) {
+        // Enter on a highlight chooses it instead of submitting the form.
+        event.preventDefault();
+        highlighted.activate();
+      }
+      return;
+    }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       if (!open) {
         setOpen(true);
         return;
       }
-      const count = options.current.length;
-      if (count === 0) return;
-      setActiveIndex((index) => {
-        if (event.key === 'ArrowDown') return (index + 1) % count;
-        return index <= 0 ? count - 1 : index - 1;
-      });
-    } else if (event.key === 'Escape' && open) {
+      if (options.length === 0) return;
+      const next = event.key === 'ArrowDown'
+        ? (activeIndex + 1) % options.length
+        : activeIndex <= 0 ? options.length - 1 : activeIndex - 1;
+      setActiveKey(options[next].key);
+    } else if (event.key === 'Escape') {
+      // First Escape closes the list; a second clears the field without reopening it.
       event.preventDefault();
-      close();
+      if (open) {
+        close();
+      } else if (draftQuery) {
+        updateDraft('');
+      }
     }
   };
 
@@ -146,7 +179,7 @@ export default function TopSearch() {
       </button>
       <label className="visually-hidden" htmlFor="shell-search">{t('shell.search.field_label')}</label>
       <input
-        aria-activedescendant={expanded && activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+        aria-activedescendant={expanded && activeOption ? activeOption.id : undefined}
         aria-autocomplete={typeaheadActive ? 'list' : undefined}
         aria-controls={expanded ? listboxId : undefined}
         aria-expanded={typeaheadActive ? expanded : undefined}
@@ -156,10 +189,14 @@ export default function TopSearch() {
         name="q"
         onChange={(event) => {
           updateDraft(event.currentTarget.value);
+          setActiveKey(null);
           if (typeaheadActive) setOpen(true);
         }}
         onCompositionEnd={(event) => finishComposition(event.currentTarget.value)}
-        onCompositionStart={startComposition}
+        onCompositionStart={() => {
+          setActiveKey(null);
+          startComposition();
+        }}
         onFocus={() => {
           if (typeaheadActive) setOpen(true);
         }}
@@ -173,9 +210,9 @@ export default function TopSearch() {
       {showTypeahead && (
         <Suspense fallback={null}>
           <SearchTypeahead
-            activeIndex={activeIndex}
+            activeKey={activeOption?.key ?? null}
             listboxId={listboxId}
-            onActiveIndexChange={setActiveIndex}
+            onActiveKeyChange={setActiveKey}
             onDone={finishSuggestion}
             onOptionsChange={registerOptions}
             query={typeaheadQuery}

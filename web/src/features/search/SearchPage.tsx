@@ -108,7 +108,9 @@ export const SearchPage = () => {
   const availableGroups = results.data
     ? resultGroups.filter(({ group }) => results.data[group].length > 0)
     : [];
-  const shows = (group: ResultGroup) => filter === null || filter === group;
+  // A filter whose group vanished after a refetch falls back to every group.
+  const activeFilter = filter && availableGroups.some(({ group }) => group === filter) ? filter : null;
+  const shows = (group: ResultGroup) => activeFilter === null || activeFilter === group;
 
   return (
     <div className={styles.page}>
@@ -152,11 +154,11 @@ export const SearchPage = () => {
             <div className={styles.resultGroups}>
               {availableGroups.length > 1 && (
                 <div className={filterStyles.filters} role="group" aria-label={t('search.filters.label')}>
-                  <button type="button" aria-pressed={filter === null} onClick={() => setFilter(null)}>
+                  <button type="button" aria-pressed={activeFilter === null} onClick={() => setFilter(null)}>
                     {t('search.filter.all')}
                   </button>
                   {availableGroups.map(({ group, labelKey }) => (
-                    <button key={group} type="button" aria-pressed={filter === group} onClick={() => setFilter(group)}>
+                    <button key={group} type="button" aria-pressed={activeFilter === group} onClick={() => setFilter(group)}>
                       {t(labelKey)}
                     </button>
                   ))}

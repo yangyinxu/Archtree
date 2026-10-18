@@ -9,8 +9,6 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   left: 0;
-  max-height: min(34rem, calc(100dvh - 10rem));
-  overflow-y: auto;
   padding: var(--space-2);
   position: absolute;
   right: 0;
@@ -39,9 +37,12 @@
   margin-left: auto;
 }
 
+/* The list, not the panel, scrolls so the keyboard hint row stays in view. */
 .listbox {
   list-style: none;
   margin: 0;
+  max-height: min(31rem, calc(100dvh - 13rem));
+  overflow-y: auto;
   padding: 0;
 }
 
@@ -55,8 +56,10 @@
   padding: var(--space-2);
 }
 
+/* The accent bar gives the active descendant a cue well above 3:1 against the panel. */
 .option[aria-selected="true"] {
   background: var(--color-surface-active);
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 
 .thumb {

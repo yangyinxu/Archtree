@@ -1,4 +1,5 @@
 import { catalogIds } from './fixtures/catalog';
+import { expectNoUnownedAxeViolations } from './support/accessibility';
 import { expect, test } from './support/test';
 
 const fieldName = 'Search artists, organizations, albums, and MediaTracks';
@@ -19,11 +20,18 @@ test('wide-layout typeahead previews results on the current route and opens a hi
   await expect(listbox).toBeVisible();
   await expect(field).toHaveAttribute('aria-expanded', 'true');
   await expect(listbox.getByRole('option', { name: /Quiet Hours/ })).toBeVisible();
+  await expectNoUnownedAxeViolations(page, 'search-typeahead-results');
   await expect(page).toHaveURL(/\/finitude\/?$/);
   expect(api.calls.some((call) => call.pathname === '/api/listener/v1/search' && call.search === '?q=Night')).toBe(true);
   expect(await storedHistory(page)).toBeNull();
 
-  // Search for, Artist, Album.
+  // Moving past the first option keeps the active row inside the scrolling list.
+  await field.press('ArrowUp');
+  const lastOption = listbox.getByRole('option').last();
+  await expect(lastOption).toHaveAttribute('aria-selected', 'true');
+  await expect(lastOption).toBeInViewport();
+
+  // From the last option, ArrowDown wraps through Search for and Artist to the Album.
   await field.press('ArrowDown');
   await field.press('ArrowDown');
   await field.press('ArrowDown');
@@ -62,4 +70,5 @@ test('Enter without a highlight opens full results, and Escape closes suggestion
   await page.getByRole('combobox', { name: fieldName }).focus();
   const recent = page.getByRole('listbox', { name: 'Search suggestions' });
   await expect(recent.getByRole('option', { name: /Dawn/ })).toBeVisible();
+  await expectNoUnownedAxeViolations(page, 'search-typeahead-recent');
 });

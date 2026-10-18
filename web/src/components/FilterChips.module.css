@@ -52,4 +52,12 @@
   .filters button {
     border-color: CanvasText;
   }
+
+  /* System colors flatten the accent fill, so the pressed filter uses Highlight instead. */
+  .filters button[aria-pressed='true'] {
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
 }
