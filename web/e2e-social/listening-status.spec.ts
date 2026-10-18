@@ -52,7 +52,8 @@ const playing = async (page: Page, title: string) => {
 /** SPA navigation retains the one actual player and its captured source identity. */
 const playCatalog = async (page: Page, title: string) => {
   await page.getByRole('link', { name: 'Search', exact: true }).click();
-  const input = page.locator('#page-search');
+  // Wide layouts drive the Search route from the shell field; the page field is the phone layout's.
+  const input = page.locator('#shell-search');
   await input.fill(title); await input.press('Enter');
   await page.getByRole('button', { name: `Play ${title}`, exact: true }).click();
   await playing(page, title);
