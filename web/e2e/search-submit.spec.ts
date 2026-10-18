@@ -1,6 +1,8 @@
 import { expect, test } from './support/test';
 
 test('previews debounced searches but records only explicit submissions', async ({ api, page }) => {
+  // The in-page Search field belongs to the narrow layout; wide layouts use the shell typeahead.
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/finitude/search');
 
   const search = page.getByRole('main').getByRole('search', { name: 'Search results' });

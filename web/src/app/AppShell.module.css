@@ -151,6 +151,8 @@
 .search {
   align-items: center;
   background: var(--color-surface-raised);
+  /* Anchors the inline typeahead panel. */
+  position: relative;
   border: 1px solid transparent;
   border-radius: 999px;
   display: grid;

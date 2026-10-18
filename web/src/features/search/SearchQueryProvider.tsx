@@ -3,8 +3,10 @@
  *   Functions: SearchQueryProvider, useSearchQuery
  * Internal
  *   Types: SearchRouteState, SearchQueryContextValue
- *   Functions: normalizeQuery, matchesSearchPath, queryFromLocation, isSearchPreview, searchDestination
- *   Constants: searchDebounceMilliseconds, searchPath, SearchQueryContext
+ *   Functions: normalizeQuery, matchesSearchPath, queryFromLocation, isSearchPreview, searchDestination,
+ *              readTypeaheadLayout, useTypeaheadLayout
+ *   Constants: searchDebounceMilliseconds, typeaheadDebounceMilliseconds, searchPath, typeaheadMediaQuery,
+ *              SearchQueryContext
  * @end-catalog */
 
 import {
@@ -20,7 +22,10 @@ import {
 import { matchPath, useLocation, useNavigate } from 'react-router';
 
 const searchDebounceMilliseconds = 300;
+const typeaheadDebounceMilliseconds = 200;
 const searchPath = '/search';
+// Tablet and desktop widths keep the route and show inline typeahead; phones open the Search tab.
+const typeaheadMediaQuery = '(min-width: 768px)';
 
 type SearchRouteState = {
   searchPreview?: boolean;
@@ -28,6 +33,10 @@ type SearchRouteState = {
 
 type SearchQueryContextValue = {
   activeQuery: string;
+  /** True when the shell search previews results inline instead of opening the Search route. */
+  typeaheadActive: boolean;
+  /** Debounced, normalized draft for inline typeahead; empty while typeahead is inactive. */
+  typeaheadQuery: string;
   cancelPendingPreview: () => void;
   commitDraft: () => string;
   draftQuery: string;
@@ -63,6 +72,25 @@ const searchDestination = (query: string) => (
   query ? `${searchPath}?q=${encodeURIComponent(query)}` : searchPath
 );
 
+const readTypeaheadLayout = () => typeof window !== 'undefined'
+  && typeof window.matchMedia === 'function'
+  && Boolean(window.matchMedia(typeaheadMediaQuery)?.matches);
+
+/** Tracks whether the viewport is wide enough for inline shell typeahead. */
+const useTypeaheadLayout = () => {
+  const [matches, setMatches] = useState(readTypeaheadLayout);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia(typeaheadMediaQuery);
+    const update = () => setMatches(Boolean(query?.matches));
+    update();
+    if (typeof query?.addEventListener !== 'function') return undefined;
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return matches;
+};
+
 /** Shares one debounced Search draft across the shell and route-level inputs. */
 export const SearchQueryProvider = ({ children }: { children: ReactNode }) => {
   const location = useLocation();
@@ -73,7 +101,9 @@ export const SearchQueryProvider = ({ children }: { children: ReactNode }) => {
   );
   const isSearchRoute = matchesSearchPath(location.pathname);
   const isPreview = isSearchRoute && isSearchPreview(location.state);
+  const typeaheadActive = useTypeaheadLayout() && !isSearchRoute;
   const [draftQuery, setDraftQuery] = useState(activeQuery);
+  const [typeaheadQuery, setTypeaheadQuery] = useState('');
   const [isComposing, setIsComposing] = useState(false);
   const previewTimer = useRef<number | null>(null);
 
@@ -93,6 +123,15 @@ export const SearchQueryProvider = ({ children }: { children: ReactNode }) => {
     cancelPendingPreview();
     if (isComposing) return;
     const normalized = normalizeQuery(draftQuery);
+    if (typeaheadActive) {
+      // Wide layouts stay on the current route; the shell previews this draft inline instead.
+      if (normalized === typeaheadQuery) return;
+      previewTimer.current = window.setTimeout(() => {
+        previewTimer.current = null;
+        setTypeaheadQuery(normalized);
+      }, normalized ? typeaheadDebounceMilliseconds : 0);
+      return cancelPendingPreview;
+    }
     if ((isSearchRoute && normalized === activeQuery) || (!isSearchRoute && !normalized)) return;
 
     previewTimer.current = window.setTimeout(() => {
@@ -110,7 +149,9 @@ export const SearchQueryProvider = ({ children }: { children: ReactNode }) => {
     isComposing,
     isPreview,
     isSearchRoute,
-    navigate
+    navigate,
+    typeaheadActive,
+    typeaheadQuery
   ]);
 
   const updateDraft = useCallback((value: string) => setDraftQuery(value), []);
@@ -144,6 +185,8 @@ export const SearchQueryProvider = ({ children }: { children: ReactNode }) => {
     isComposing,
     isPreview,
     startComposition,
+    typeaheadActive,
+    typeaheadQuery: typeaheadActive ? typeaheadQuery : '',
     updateDraft
   }), [
     activeQuery,
@@ -154,6 +197,8 @@ export const SearchQueryProvider = ({ children }: { children: ReactNode }) => {
     isComposing,
     isPreview,
     startComposition,
+    typeaheadActive,
+    typeaheadQuery,
     updateDraft
   ]);
 
