@@ -1,6 +1,8 @@
 import { expect, test } from './support/test';
 
 test('highlights the complete Search bar when its input receives focus', async ({ page }) => {
+  // The in-page Search bar is shown on the narrow layout; wide layouts search from the shell.
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/finitude/search');
 
   const searchBar = page.getByRole('search', { name: 'Search results' });
