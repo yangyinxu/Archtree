@@ -11,9 +11,8 @@
  *   Constants: importPurposeFilter, adminImportIndexes, importCandidateProjection
  * Internal
  *   Types: Receipt, Chunk, Analysis
- *   Functions: notFound, conflict, isActive, admit, idValue, importCapabilities, response, valueAt,
- *              suggestionPath, acceptDraftV2Suggestion, candidate, readyCandidate, boundedTags,
- *              reserveDailyAnalysisAttempt
+ *   Functions: notFound, conflict, isActive, admit, idValue, importCapabilities, response, suggestionPath,
+ *              acceptDraftV2Suggestion, candidate, readyCandidate, boundedTags, reserveDailyAnalysisAttempt
  *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, importPolicy, mutation,
  *              slotBoundKinds, importRevisionFreeKinds, readOnlyProjectKinds, mutate, filters,
  *              candidateProjection, candidateCollection
@@ -41,18 +40,29 @@ type Chunk = { index: number; slots: string[]; album: boolean; hash: string; sta
 type Analysis = { state: ImportAnalysisState; generation: number; operationId: string | null; actorId: string | null; grantExpiresAt: Date | null; baseline: ImportDraft | ImportDraftV2 | null; tags?: { slotId: string; tags: ImportEmbeddedTags }[]; chunks: Chunk[]; issue: ImportIssue; leaseOwner: string | null; leaseUntil: Date | null };
 export type AdminImportDocument = {
     purpose?: 'import' | 'catalogReview' | null; catalogSource?: CatalogReviewSource; catalogEvidence?: Record<string, string>; catalogApplied?: CatalogReviewApplied;
-    /** Absent, null or 1 is a v1 draft; 2 is Draft v2 (import projects only); any other value is read-only here. */
+    /** Absent, null or 1 is a v1 draft; 2 is Draft v2 (imports and catalog reviews); any other value is read-only here. */
     draftVersion?: number | null; draftOrigins?: ImportDraftOrigins;
     _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft | ImportDraftV2; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number;
     suggestions: (ImportSuggestion | ImportSuggestionV2)[]; decisions: (ImportDuplicateDecision | ImportDecisionV2)[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
-/** A Draft v2 document: an import project written by this release or converted at its first admitted change. */
+/** A Draft v2 document: an import project or catalog review written by this release, or converted at its first admitted change. */
 export const isDraftV2Document = (doc: AdminImportDocument) => doc.draftVersion === DRAFT_V2;
 export const importCollection = () => getDb()!.collection<AdminImportDocument>('adminAlbumImports');
 const collection = importCollection;
 /** Legacy documents have no purpose; explicit review projects never enter old import surfaces. */
 export const importPurposeFilter = { purpose: { $in: ['import', null] as const } };
 export const isImportProject = (doc: AdminImportDocument) => doc.purpose == null || doc.purpose === 'import';
-export type AdminProjectPolicy<T> = { purpose: 'import' | 'catalogReview'; response: (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null, session: ClientSession) => T | Promise<T> };
+/** What differs between the two project protocols that share mutateAdminProject and adoption. */
+export type AdminProjectPolicy<T> = {
+    purpose: 'import' | 'catalogReview'; response: (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null, session: ClientSession) => T | Promise<T>;
+    /** A body only an editor predating this release sends; it is refused with a reload request right after receipt lookup. */
+    reloadRequired?: (kind: ProjectReceipt['kind'], body: Record<string, unknown>) => boolean;
+    /** Stores a format-1 project in this release's format before an admitted change (never on a replay or read-only kind). */
+    convert?: (doc: AdminImportDocument) => void;
+    /** Draft paths no suggestion may write: adopting a suggestion for one is invalid input (rejecting it stays allowed). */
+    readOnlyPaths?: ReadonlySet<ImportDraftPath>;
+    /** The part of a draft the 48 KB cap measures (the whole draft when absent); read-only context that is never edited is left out. */
+    cappedDraft?: (draft: ImportDraftV2) => ImportDraftV2;
+};
 
 export const importDigest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const digest = importDigest;
@@ -139,7 +149,8 @@ const response = (doc: AdminImportDocument, actor: string, receipt: ProjectRecei
     if (!isImportProject(doc) || receipt?.kind === 'apply') throw notFound();
     return { item: adminImportDetail(doc, actor), receipt: receipt ? { operationId: receipt.operationId, kind: receipt.kind, revision: receipt.revision } : null };
 };
-const importPolicy: AdminProjectPolicy<AdminImportResponse> = { purpose: 'import', response };
+// A whole-draft import save comes from an editor that predates Draft v2 field saves.
+const importPolicy: AdminProjectPolicy<AdminImportResponse> = { purpose: 'import', response, reloadRequired: (kind, body) => kind === 'edit' && hasOwn(body, 'draft'), convert: convertLegacyImportProject };
 export function parseAdminProjectMutation(raw: unknown, extra: string[]) { const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...extra]); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) return invalidImport(); return body as typeof body & { operationId: string; expectedRevision: number }; }
 
 const mutation = parseAdminProjectMutation;
@@ -161,10 +172,13 @@ export async function mutateAdminProject<T>(actor: string, id: string, body: Rec
         const doc = await collection().findOne({ _id, ...(policy.purpose === 'import' ? importPurposeFilter : { purpose: policy.purpose }) }, { session }); if (!doc) throw notFound();
         const prior = [...doc.receipts, ...(doc.recoveryReceipts ?? []), ...(doc.automaticReceipts ?? [])].find(receipt => receipt.operationId === body.operationId);
         if (prior) { if (prior.hash !== hash || (prior.actorId !== actor && kind !== 'cleanup')) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return policy.response(doc, actor, prior, session); }
-        // A project saved in a newer draft format is read-only here; only recovery and stopping work are admitted. A whole-draft
-        // import save comes from an editor that predates Draft v2: it is refused before any other check, so it always asks for a reload.
-        if ((!importDraftWritable(doc) && !readOnlyProjectKinds.has(kind)) || (policy.purpose === 'import' && kind === 'edit' && hasOwn(body, 'draft'))) throw conflict('ADMIN_IMPORT_RELOAD_REQUIRED');
-        if (!(policy.purpose === 'import' ? importRevisionFreeKinds : slotBoundKinds).has(kind) && doc.revision !== body.expectedRevision) throw conflict();
+        // A project saved in a newer draft format is read-only here; only recovery and stopping work are admitted. A body only an
+        // editor predating this release sends is refused before any other check, so it always asks for a reload.
+        if ((!importDraftWritable(doc) && !readOnlyProjectKinds.has(kind)) || policy.reloadRequired?.(kind, body)) throw conflict('ADMIN_IMPORT_RELOAD_REQUIRED');
+        // A review binds to its last administrator receipt: worker ticks advance the revision without one, so automation never makes
+        // an administrator's change stale, while any revision seen before another administrator's change still conflicts.
+        const adminRevision = policy.purpose === 'catalogReview' ? doc.receipts[doc.receipts.length - 1]?.revision ?? doc.revision : doc.revision;
+        if (!(policy.purpose === 'import' ? importRevisionFreeKinds : slotBoundKinds).has(kind) && (body.expectedRevision < adminRevision || body.expectedRevision > doc.revision)) throw conflict();
         if (doc.catalogApplied) throw conflict('ADMIN_CATALOG_REVIEW_APPLIED');
         const publication = doc.media?.publication;
         if (publication && !['cleanup', 'cancel-publication'].includes(kind)
@@ -173,8 +187,9 @@ export async function mutateAdminProject<T>(actor: string, id: string, body: Rec
         const recovery = kind === 'cleanup' || kind === 'cancel-publication';
         if ((recovery ? doc.recoveryReceipts?.length ?? 0 : doc.receipts.length) >= LIMITS.receipts) throw conflict('ADMIN_IMPORT_OPERATION_LIMIT');
         const observed = doc.revision;
-        // A v1 import becomes Draft v2 with its first admitted change; a refused change aborts the transaction, conversion included.
-        if (policy.purpose === 'import' && !readOnlyProjectKinds.has(kind)) convertLegacyImportProject(doc);
+        // A format-1 project is stored in this release's format with its first admitted change other than stopping work or recovery;
+        // a refused change aborts the transaction, conversion included.
+        if (!readOnlyProjectKinds.has(kind)) policy.convert?.(doc);
         await change(doc, session); doc.revision++; doc.updatedAt = new Date();
         const receipt: Receipt = { operationId: body.operationId, kind, revision: doc.revision, actorId: actor, hash, at: doc.updatedAt }; if (kind === 'adopt') receipt.selection = { generation: body.generation as number, acceptedIds: [...body.selectedIds as string[]], rejectedIds: [...body.rejectIds as string[]] }; if (recovery) (doc.recoveryReceipts ??= []).push(receipt); else doc.receipts.push(receipt);
         // A concurrent writer is a transaction WriteConflict, which withTransaction retries against fresh state.
@@ -272,18 +287,20 @@ export function analyzeAdminProject<T>(actor: string, id: string, raw: unknown, 
 }
 export const cancelAdminImportAnalysis = (actor: string, id: string, raw: unknown) => mutate(actor, id, mutation(raw, []), 'cancel-analysis', async doc => { if (isActive(doc)) doc.analysis.state = 'cancelled'; });
 
-function valueAt(draft: ImportDraft, suggestion: ImportSuggestion) { return suggestion.scope === 'album' ? draft.album[suggestion.field as 'title' | 'artistName' | 'releaseDate'] : draft.tracks.find(track => track.slotId === suggestion.slotId)![suggestion.field as 'title' | 'trackNumber']; }
 /** The Draft v2 path a suggestion proposes a value for, or null for a field Draft v2 does not suggest. */
 function suggestionPath(suggestion: ImportSuggestion | ImportSuggestionV2): ImportDraftPath | null {
     if (suggestion.scope === 'album') return ['title', 'artists', 'releaseDate'].includes(suggestion.field) ? `album.${suggestion.field as 'title' | 'artists' | 'releaseDate'}` : null;
     return typeof suggestion.slotId === 'string' && ['title', 'trackNumber'].includes(suggestion.field) ? `tracks.${suggestion.slotId}.${suggestion.field as 'title' | 'trackNumber'}` : null;
 }
-/** Accepts one suggestion into a Draft v2 project: its baseline must still be the current value, and the value becomes the administrator's own. */
+/**
+ * Accepts one suggestion into a Draft v2 project: its baseline must still be the current value. In an import the value becomes the
+ * administrator's own; a catalog review records no value origins (automation never writes its draft).
+ */
 function acceptDraftV2Suggestion(doc: AdminImportDocument, draft: ImportDraftV2, suggestion: ImportSuggestion | ImportSuggestionV2) {
     const path = suggestionPath(suggestion); if (!path) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
     if (!sameDraftValue(draftValueAt(draft, path), suggestion.baseline)) throw conflict('ADMIN_IMPORT_FIELD_CONFLICT');
     let value: unknown; try { value = parseDraftValue(path, suggestion.value, draft); } catch { throw conflict('ADMIN_IMPORT_SUGGESTION_STALE'); }
-    setDraftValue(draft, path, value); markAdministratorValues(doc.draftOrigins ??= {}, [path]);
+    setDraftValue(draft, path, value); if (isImportProject(doc)) markAdministratorValues(doc.draftOrigins ??= {}, [path]);
 }
 export const adoptAdminImportSuggestions = (actor: string, id: string, raw: unknown) => adoptAdminProjectSuggestions(actor, id, raw, importPolicy);
 export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: unknown, policy: AdminProjectPolicy<T>) {
@@ -294,22 +311,18 @@ export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: 
         if (doc.analysis.generation !== body.generation) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
         const targets = [...selected, ...rejected].map(id => doc.suggestions.find(s => s.id === id && s.generation === body.generation && s.decision === 'pending'));
         if (targets.some(s => !s)) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
-        // Imports are Draft v2 here (converted on admission); catalog reviews keep the v1 draft.
-        const draft = isDraftV2Document(doc) ? storedDraftV2(doc) : null, before = draft && structuredClone(draft);
+        // Every admitted project is Draft v2 here: policy.convert stored a format-1 project before this change.
+        const draft = storedDraftV2(doc), before = structuredClone(draft);
         for (const suggestion of targets as (ImportSuggestion | ImportSuggestionV2)[]) {
             if (selected.includes(suggestion.id)) {
-                if (draft) acceptDraftV2Suggestion(doc, draft, suggestion);
-                else {
-                    const v1 = doc.draft as ImportDraft, legacy = suggestion as ImportSuggestion;
-                    if (digest(valueAt(v1, legacy)) !== digest(legacy.baseline)) throw conflict('ADMIN_IMPORT_FIELD_CONFLICT');
-                    if (legacy.scope === 'album') (v1.album as unknown as Record<string, unknown>)[legacy.field] = legacy.value;
-                    else (v1.tracks.find(track => track.slotId === legacy.slotId)! as unknown as Record<string, unknown>)[legacy.field] = legacy.value;
-                }
+                const path = suggestionPath(suggestion); if (path && policy.readOnlyPaths?.has(path)) invalidImport();
+                acceptDraftV2Suggestion(doc, draft, suggestion);
                 suggestion.decision = 'accepted';
             } else suggestion.decision = 'rejected';
         }
-        if (draft) { if (!draftWithinSizeLimit(before, draft)) invalidImport(); doc.decisions = retainBoundDecisions(doc.decisions, draft); }
-        else doc.draft = parseDraft(doc.draft, doc.manifest);
+        const capped = policy.cappedDraft ?? ((value: ImportDraftV2) => value);
+        if (!draftWithinSizeLimit(capped(before), capped(draft))) invalidImport();
+        doc.decisions = retainBoundDecisions(doc.decisions, draft);
     }, policy);
 }
 

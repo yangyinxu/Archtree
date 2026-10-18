@@ -1,0 +1,86 @@
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
+import { CatalogReviewDraftEditor } from './CatalogReviewDraftEditor';
+import { catalogReview, legacyCatalogReview, slotId, slotTwo } from './catalogReviewFixtures.testSupport';
+import type { ImportDraftV2 } from './adminNamingSchema';
+
+afterEach(cleanup);
+
+const href = '/admin/catalog/album/111111111111111111111111';
+function mount(item = catalogReview(), disabled = false) {
+  const onChange = vi.fn<(draft: ImportDraftV2) => void>();
+  item.draft.album.artists = [{ ...item.draft.album.artists[0], joinPhrase: ' & ' }, { key: '50000000-0000-4000-8000-000000000002', name: 'Synthetic guest', role: 'featured', joinPhrase: null, musicBrainzId: null }];
+  item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null };
+  const filenames = item.source.tracks.map(track => ({ slotId: track.slotId, relativePath: track.originalFileName ?? 'Original filename not retained' }));
+  render(<MemoryRouter><CatalogReviewDraftEditor draft={item.draft} source={item.source} filenames={filenames} disabled={disabled} manageAlbumHref={href} onChange={onChange} /></MemoryRouter>);
+  return { item, onChange };
+}
+
+test('every edit returns the whole draft with the Artist entries, label and visibility untouched', () => {
+  const saved = catalogReview(); saved.draft.tracks[0].discNumber = 1;
+  const { item, onChange } = mount(saved);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Edited Album' } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Year' }), { target: { value: '2024' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '1 · Title' }), { target: { value: 'Edited track' } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: '2 · Disc number' }), { target: { value: '3' } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: '1 · Disc number' }), { target: { value: '' } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: '2 · Track number' }), { target: { value: '7' } });
+  const drafts = onChange.mock.calls.map(([draft]) => draft);
+  expect(drafts).toHaveLength(6);
+  for (const draft of drafts) expect({ artists: draft.album.artists, label: draft.album.label, visibility: draft.album.visibility })
+    .toEqual({ artists: item.draft.album.artists, label: item.draft.album.label, visibility: item.draft.album.visibility });
+  expect(drafts[0].album.title).toBe('Edited Album');
+  expect(drafts[1].album.releaseDate).toEqual({ year: 2024, month: null, day: null });
+  expect(drafts[2].tracks).toEqual([{ ...item.draft.tracks[0], title: 'Edited track' }, item.draft.tracks[1]]);
+  expect(drafts[3].tracks[1]).toEqual({ ...item.draft.tracks[1], slotId: slotTwo, discNumber: 3 });
+  expect(drafts[4].tracks[0]).toEqual({ ...item.draft.tracks[0], slotId, discNumber: null });
+  expect(drafts[5].tracks[1].trackNumber).toBe(7);
+});
+
+test('the ordered Credits, join phrases and label are read-only context with links to the original Album', () => {
+  mount();
+  expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveAttribute('readonly');
+  expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveValue('Synthetic catalog Artist & Synthetic guest');
+  expect(within(screen.getByRole('list', { name: 'Credits' })).getAllByRole('listitem').map(value => value.textContent))
+    .toEqual(['Synthetic catalog Artist · Primary · Join phrase “ & ”', 'Synthetic guest · Featured']);
+  expect(screen.getByRole('textbox', { name: 'Label' })).toHaveAttribute('readonly');
+  expect(screen.getByRole('combobox', { name: 'Visibility' })).toBeDisabled();
+  expect(screen.getByRole('link', { name: 'Edit attribution in original Album' })).toHaveAttribute('href', href);
+  expect(screen.getByRole('link', { name: 'Edit visibility in original Album' })).toHaveAttribute('href', href);
+});
+
+test('a review without Credits or a label shows neither list nor label field', () => {
+  const item = catalogReview(); item.draft.album.artists = []; item.draft.album.label = null;
+  render(<MemoryRouter><CatalogReviewDraftEditor draft={item.draft} source={item.source} filenames={[]} disabled={false} manageAlbumHref={href} onChange={vi.fn()} /></MemoryRouter>);
+  expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveValue('');
+  expect(screen.queryByRole('list', { name: 'Credits' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: 'Label' })).not.toBeInTheDocument();
+});
+
+test('a review created before Credits were captured shows its earlier Artist name alone, never as Credits', () => {
+  const item = legacyCatalogReview(), onChange = vi.fn<(draft: ImportDraftV2) => void>();
+  item.draft.album.artists = [{ ...item.draft.album.artists[0], name: 'Synthetic earlier Artist name' }];
+  render(<MemoryRouter><CatalogReviewDraftEditor draft={item.draft} source={item.source} filenames={[]} disabled={false} manageAlbumHref={href} onChange={onChange} /></MemoryRouter>);
+  expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveValue('Synthetic earlier Artist name');
+  expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveAttribute('readonly');
+  expect(screen.queryByRole('list', { name: 'Credits' })).not.toBeInTheDocument();
+  expect(screen.getByText(/Changing that Album requires creating a new review/)).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Edit attribution in original Album' })).toHaveAttribute('href', href);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Edited Album' } });
+  expect(onChange.mock.calls[0][0].album.artists).toEqual(item.draft.album.artists);
+});
+
+test('a Disc Number input appears only on a track whose source captured one', () => {
+  const item = legacyCatalogReview(); item.source.tracks[1] = { ...item.source.tracks[1], discNumber: 2 };
+  mount(item);
+  expect(screen.queryByRole('spinbutton', { name: '1 · Disc number' })).not.toBeInTheDocument();
+  expect(screen.getByRole('spinbutton', { name: '2 · Disc number' })).toBeInTheDocument();
+  expect(screen.getByRole('spinbutton', { name: '1 · Track number' })).toBeInTheDocument();
+});
+
+test('a disabled editor locks every field while the original Album links stay available', () => {
+  mount(catalogReview(), true);
+  for (const control of [...screen.getAllByRole('textbox'), ...screen.getAllByRole('spinbutton'), screen.getByRole('combobox', { name: 'Visibility' })]) expect(control).toBeDisabled();
+  expect(screen.getByRole('link', { name: 'Edit attribution in original Album' })).toHaveAttribute('href', href);
+  expect(screen.getByRole('link', { name: 'Edit visibility in original Album' })).toHaveAttribute('href', href);
+});

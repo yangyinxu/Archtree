@@ -3,8 +3,8 @@
  *   Functions: AdminCatalogReviewPage
  * Internal
  *   Types: ReviewBuffer, Stage
- *   Functions: ReviewProject
- *   Constants: valueText, ImportReview, CatalogReviewEmptyState, CatalogReviewApply, CatalogReviewConfirmation
+ *   Functions: entriesText, ReviewProject
+ *   Constants: ImportReview, CatalogReviewEmptyState, CatalogReviewApply, CatalogReviewConfirmation
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -13,9 +13,10 @@ import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { AdminNav } from './AdminNav';
 import { adminEndpointRequest } from './adminTransport';
-import type { ImportDraft } from './reviewNamingSchema';
+import type { ImportArtistEntry, ImportDraftV2 } from './adminNamingSchema';
 import { adminWorkspace } from './adminWorkspace';
-import { ImportDraftEditor } from './ImportDraftEditor';
+import { CatalogReviewDraftEditor } from './CatalogReviewDraftEditor';
+import { entriesByline } from './artistEntriesByline';
 import { reviewValueText } from './reviewValueText';
 import { reviewChanges, reviewFieldKey, reviewResponseSchema, type CatalogReview } from './catalogReviewApi';
 import type { Confirmation } from './CatalogReviewConfirmation';
@@ -23,9 +24,10 @@ import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 
-interface ReviewBuffer { draft: ImportDraft; revision: number; dirty: boolean; suggestions: string[]; fields: string[] }
+interface ReviewBuffer { draft: ImportDraftV2; revision: number; dirty: boolean; suggestions: string[]; fields: string[] }
 type Stage = 'draft' | 'review' | 'apply';
-const valueText = reviewValueText;
+/** Artist entries read as their byline; an empty list reads as no value. */
+const entriesText = (value: unknown) => Array.isArray(value) && value.length ? entriesByline(value as ImportArtistEntry[]) : reviewValueText(null);
 // Review is loaded only when requested; its selections remain in the parent account-fenced buffer.
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
 const CatalogReviewEmptyState = lazy(() => import('./CatalogReviewEmptyState').then(module => ({ default: module.CatalogReviewEmptyState })));
@@ -75,7 +77,8 @@ function ReviewProject({ id }: { id: string }) {
   const item = confirmed;
   const active = Boolean(item && ['queued', 'running'].includes(item.analysis.state));
   const locked = mutation.running || Boolean(mutation.intent) || !online || item?.state === 'applied';
-  const conflict = Boolean(editor?.dirty && item && editor.revision !== item.revision);
+  // As on the server, only another administrator change makes a local edit stale: analysis progress adds no receipt.
+  const conflict = Boolean(editor?.dirty && item && (editor.revision < (item.receipts.at(-1)?.revision ?? item.revision) || editor.revision > item.revision));
   const savedOnly = locked || Boolean(editor?.dirty) || conflict || active;
   const canAnalyze = Boolean(item && !savedOnly && item.sourceStatus === 'current' && item.capabilities.analysis
     && item.analysis.generation < 2 && item.analysis.issue !== 'providerOutcomeUnknown');
@@ -140,20 +143,21 @@ function ReviewProject({ id }: { id: string }) {
         <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) mutation.command.run(path, { expectedRevision: editor.revision, draft: editor.draft }); }}>
           <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || !editor.dirty || conflict}>{t('catalog_review.save_draft')}</button></header>
           <p role="status" className={styles.meta}>{t(editor.dirty ? 'common.unsaved' : 'catalog_review.draft_saved')}</p>
-          <ImportDraftEditor draft={editor.draft} filenames={filenames} disabled={locked} artistReadOnly visibilityReadOnly manageAlbumHref={originalHref} onChange={draft => setEditor({ ...editor, draft, dirty: true })} />
+          <CatalogReviewDraftEditor draft={editor.draft} source={item.source} filenames={filenames} disabled={locked} manageAlbumHref={originalHref} onChange={draft => setEditor({ ...editor, draft, dirty: true })} />
         </form>
       </div>
       <div hidden={stage !== 'review'} role="tabpanel" id="catalog-review-panel-review" aria-labelledby="catalog-review-tab-review">
-        {stage === 'review' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportReview draft={editor.draft} filenames={filenames} suggestions={item.suggestions.filter(value => value.field !== 'artistName')}
+        {stage === 'review' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportReview draft={editor.draft} filenames={filenames} suggestions={item.suggestions.filter(value => value.field !== 'artists')}
           selected={editor.suggestions} onSelect={suggestions => setEditor({ ...editor, suggestions })} disabled={savedOnly} draftCopy={t('catalog_review.review_copy')}
           emptyContent={<CatalogReviewEmptyState item={item} changeCount={changes.length} onNavigate={selectStage} />}
           onAdopt={selectedIds => mutate('adopt', { generation: item.analysis.generation, selectedIds, rejectIds: [] })}
           onReject={rejectIds => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds })} /></Suspense>}
-        {item.suggestions.some(value => value.field === 'artistName') && <section className={styles.panel}><h2>{t('field.artistName')}</h2><p>{t('catalog_review.artist_hint')}</p>
-          {item.suggestions.filter(value => value.field === 'artistName').map(value => <article key={value.id} className={styles.card}>
-            <div className={styles.diff}><div><strong>{t('review.baseline')}</strong><pre>{valueText(value.baseline)}</pre></div>
-              <div><strong>{t('review.current')}</strong><pre>{valueText(editor.draft.album.artistName)}</pre></div>
-              <div><strong>{t('review.suggested')}</strong><pre>{valueText(value.value)}</pre></div></div>
+        {/* Artist suggestions are identity hints for the original Album's Credits: they can be kept, never adopted. */}
+        {item.suggestions.some(value => value.field === 'artists') && <section className={styles.panel}><h2>{t('field.artistName')}</h2><p>{t('catalog_review.artist_hint')}</p>
+          {item.suggestions.filter(value => value.field === 'artists').map(value => <article key={value.id} className={styles.card}>
+            <div className={styles.diff}><div><strong>{t('review.baseline')}</strong><pre>{entriesText(value.baseline)}</pre></div>
+              <div><strong>{t('review.current')}</strong><pre>{entriesText(editor.draft.album.artists)}</pre></div>
+              <div><strong>{t('review.suggested')}</strong><pre>{entriesText(value.value)}</pre></div></div>
             {value.decision === 'pending' && <button className={styles.button} type="button" disabled={savedOnly}
               onClick={() => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds: [value.id] })}>{t('action.keep')}</button>}
           </article>)}</section>}

@@ -67,3 +67,13 @@ test('the confirmation summary presents the supplied old and new values without 
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });
+
+test('a saved Disc Number difference is selectable as a Track Disc number change with its frozen old and new values', () => {
+  const item = catalogReview(); item.suggestions = []; item.draft.tracks[0].discNumber = 2;
+  const { onConfirm } = mount(item, reviewChanges(item));
+  const disc = screen.getByRole('checkbox', { name: 'Update Track · Synthetic first track · Disc number' });
+  expect(within(disc.closest('article')!).getByText('—')).toBeVisible();
+  expect(within(disc.closest('article')!).getByText('2')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Update original Album (1)' }));
+  expect(onConfirm).toHaveBeenCalledWith([{ scope: 'track', slotId, field: 'discNumber' }]);
+});

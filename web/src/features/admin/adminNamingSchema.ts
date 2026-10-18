@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
 /**
- * Shared bounded naming/review values, independent of import media and publication DTOs, and the import project's Draft v2.
- * The v1 draft and suggestion that catalog reviews keep live in reviewNamingSchema.ts, outside the import route's bundle.
+ * Shared bounded naming/review values, independent of import media and publication DTOs, and the Draft v2 that import projects
+ * and catalog reviews share. The frozen v1 draft and suggestion live in reviewNamingSchema.ts, outside the import route's bundle.
  */
 export const uuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 const uuid = uuidSchema;
@@ -23,7 +23,7 @@ export const suggestionShape = { id: z.string().min(1).max(200), generation: int
 export const scalarSuggestionValue = (field: string, entry: unknown) => field === 'releaseDate' ? entry === null || date.safeParse(entry).success
   : field === 'trackNumber' ? entry === null || typeof entry === 'number' && entry >= 1 && entry <= 9999 : typeof entry === 'string';
 
-// Draft v2 of an import project.
+// Draft v2 of an import project or catalog review.
 const musicBrainzId = z.string().regex(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
 const name = z.string().min(1).max(200);
 export const artistEntrySchema = z.object({ key: uuid, name, role: z.enum(['primary', 'featured']), joinPhrase: z.string().min(1).max(16).nullable(), musicBrainzId: musicBrainzId.nullable() }).strict();

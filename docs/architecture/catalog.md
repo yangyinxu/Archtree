@@ -427,6 +427,10 @@ revisions stay unchanged.
   with `discNumberSource: 'admin-import'`; an unknown one, and every track of
   a format-1 approval, stores neither key. An append to an existing Album
   re-derives the whole order from the stored numbers of every member.
+- An applied existing-Album review writes a selected Disc Number as a catalog
+  edit does (`discNumberSource: 'admin-catalog'`, or neither key for a cleared
+  one) and re-derives the Album order in the same transaction. Only a Track
+  whose review captured its Disc Number can receive one.
 - Replacing a MediaTrack's media keeps its stored Disc and Track Numbers.
 - Listener v1, including Search, and legacy public responses never carry
   `discNumber`, `discNumberSource` or `trackNumber`. Clients see disc order
@@ -469,3 +473,5 @@ legacy uploads, ignored tags and publication retry. The MongoDB suites
 membership writes, outcome-unknown confirmation, an import append and a
 Draft v2 import's Disc Numbers, and `test/listener/listenerDtoShape.test.ts`
 keeps both numbers out of listener and legacy public responses.
+`test/administration/adminCatalogReview.integration.ts` covers an applied
+review's Disc Numbers and Album order committing with its receipt.

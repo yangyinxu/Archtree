@@ -28,8 +28,8 @@ import chinese from '../../localization/locales/zh-Hans.json' with { type: 'json
 import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
-import { albumId, catalogAlbum, catalogReview, reviewId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
-import type { CatalogReview } from '../src/features/admin/catalogReviewApi';
+import { albumId, catalogAlbum, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import type { CatalogReview, ReviewField } from '../src/features/admin/catalogReviewApi';
 import type { CatalogItem, CatalogKind } from '../src/features/admin/catalogApi';
 
 const shots = process.env.FINITUDE_CATALOG_E2E_SCREENSHOTS_DIR ?? '/tmp/finitude-first-use-fixed-20261014';
@@ -192,9 +192,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         return route.fulfill({ json: receipt(body, 'adopt'), headers });
       }
       expect(path.endsWith('/apply')).toBe(true);
-      expect(body.fields).toEqual([{ scope: 'album', slotId: null, field: 'title' }]);
+      // Each test asserts its own selected fields through api.writes; only a selected Album title changes the mocked Album.
       expect(review.sourceStatus).toBe('current');
-      album = { ...album, revision: `cr_${'c'.repeat(43)}`, fields: { ...album.fields, title: review.draft.album.title } };
+      const fields = body.fields as ReviewField[];
+      album = { ...album, revision: `cr_${'c'.repeat(43)}`, fields: { ...album.fields, ...(fields.some(value => value.scope === 'album' && value.field === 'title') ? { title: review.draft.album.title } : {}) } };
       review = { ...review, revision: review.revision + 1, state: 'applied', capabilities: { analysis: false, apply: false },
         applied: { operationId: body.operationId, at: '2026-10-14T00:00:00.000Z', fields: body.fields } };
       return route.fulfill({ json: receipt(body, 'apply'), headers });
@@ -642,6 +643,7 @@ for (const variant of localizedViewports) {
     await capture(page, '09-apply-confirmation', width, false); await reflow(page);
     await application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
     await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
+    expect(api.writes.filter(value => value.path.endsWith('/apply')).map(value => value.body.fields)).toEqual([[{ scope: 'album', slotId: null, field: 'title' }]]);
     expect(api.album().id).toBe(albumId); expect(api.album().fields.title).toBe('Reviewed synthetic Album');
     expect(api.review().source.tracks.find(value => value.slotId === slotTwo)?.trackNumber).toBeNull();
     expect(api.writes.some(value => /\/imports|\/publish|\/assets\//.test(value.path))).toBe(false);
@@ -676,10 +678,10 @@ for (const width of [1280, 390]) {
     item.source.tracks = Array.from({ length: 100 }, (_, index) => ({
       slotId: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
       id: (index + 1).toString(16).padStart(24, '0'), revision: item.source.album.revision,
-      title: `Synthetic track ${index + 1}`, trackNumber: index + 1,
+      title: `Synthetic track ${index + 1}`, discNumber: null, trackNumber: index + 1,
       originalFileName: `${String(index + 1).padStart(2, '0')} Synthetic.mp3`
     }));
-    item.draft.tracks = item.source.tracks.map(({ slotId, title, trackNumber }) => ({ slotId, title, trackNumber }));
+    item.draft.tracks = item.source.tracks.map(({ slotId, title, trackNumber }) => ({ slotId, title, discNumber: null, trackNumber }));
     item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 };
     item.suggestions = [];
     await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
@@ -692,6 +694,53 @@ for (const width of [1280, 390]) {
     expect((await start.boundingBox())!.y).toBeLessThan((await firstTrack.boundingBox())!.y);
     await reflow(page);
     expect(api.writes).toEqual([]);
+  });
+}
+
+for (const width of [320, 768, 1440]) {
+  test(`read-only Credits and label context stay readable while a captured Disc Number is edited and applied at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    const api = await setup(page); api.ready();
+    const item = api.review(), guest = 'Synthetic guest — 夜间录音与海岸回声 / a long credited name for careful administration';
+    item.draft.album.artists = [{ key: '50000000-0000-4000-8000-000000000001', name: 'Synthetic catalog Artist', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: null },
+      { key: '50000000-0000-4000-8000-000000000002', name: guest, role: 'featured', joinPhrase: null, musicBrainzId: null }];
+    item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null };
+    const context = structuredClone(item.draft.album);
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const artist = page.getByRole('textbox', { name: label('admin.field.artist_name'), exact: true });
+    await expect(artist).toHaveValue(`Synthetic catalog Artist feat. ${guest}`); await expect(artist).toHaveAttribute('readonly', '');
+    await expect(page.getByRole('list', { name: label('admin.catalog.credits'), exact: true }).getByRole('listitem')).toHaveText([
+      `Synthetic catalog Artist · ${label('catalog.credit.primary')} · ${label('admin.catalog.join_phrase_value', { phrase: ' feat. ' })}`, `${guest} · ${label('catalog.credit.featured')}`]);
+    const labelField = page.getByRole('textbox', { name: label('admin.organization.label'), exact: true });
+    await expect(labelField).toHaveValue('Synthetic Label'); await expect(labelField).toHaveAttribute('readonly', '');
+    await expect(page.getByRole('combobox', { name: label('admin.field.visibility'), exact: true })).toBeDisabled();
+    await page.getByRole('spinbutton', { name: `1 · ${label('admin.field.disc_number')}`, exact: true }).fill('2');
+    await page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }).click();
+    await expect(page.getByText(label('admin.catalog_review.draft_saved'), { exact: true })).toBeVisible();
+    // The save is the whole Draft v2 with the read-only context unchanged.
+    const saved = api.writes.filter(value => value.method === 'PATCH').map(value => value.body.draft as CatalogReview['draft']);
+    expect(saved).toHaveLength(1);
+    expect({ artists: saved[0].album.artists, label: saved[0].album.label, visibility: saved[0].album.visibility }).toEqual({ artists: context.artists, label: context.label, visibility: context.visibility });
+    expect(saved[0].tracks.map(track => track.discNumber)).toEqual([2, null]);
+    await capture(page, '25-review-credits-context', width); await reflow(page);
+    await page.getByRole('tab', { name: label('admin.catalog_review.apply_tab') }).click();
+    const discChange = label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_track'), target: 'Synthetic first track', field: label('admin.field.disc_number') });
+    await page.getByRole('checkbox', { name: discChange, exact: true }).check();
+    await reflow(page);
+    await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
+    const application = page.getByRole('dialog', { name: label('admin.catalog_review.apply_confirm') });
+    const summary = application.getByRole('heading', { name: discChange, exact: true }).locator('..');
+    await expect(summary.getByText(label('admin.catalog_review.original_value'), { exact: true })).toBeVisible();
+    await expect(summary.getByText(label('admin.catalog_review.saved_value'), { exact: true })).toBeVisible();
+    await expect(summary.getByText('—', { exact: true })).toBeVisible();
+    await expect(summary.getByText('2', { exact: true })).toBeVisible();
+    expect(api.writes.filter(value => value.path.endsWith('/apply'))).toHaveLength(0);
+    await capture(page, '26-disc-apply-confirmation', width, false); await reflow(page);
+    await application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
+    await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
+    expect(api.writes.filter(value => value.path.endsWith('/apply')).map(value => value.body.fields)).toEqual([[{ scope: 'track', slotId, field: 'discNumber' }]]);
+    expect(api.album().fields.title).toBe('Synthetic catalog Album');
+    await reflow(page);
   });
 }
 

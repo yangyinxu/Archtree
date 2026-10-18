@@ -755,8 +755,10 @@ The wire protocol and operational bounds are documented in
   provider-call limits of imports. Opening a project or editing its private draft
   never starts paid analysis. Luna suggestions do not change the catalog. An
   administrator can independently review suggestions and manually edit the
-  private Album title/date and Track titles/numbers, then explicitly select saved
-  fields for a separate catalog confirmation.
+  private Album title/date and Track titles, Disc Numbers and Track Numbers,
+  then explicitly select saved fields for a separate catalog confirmation. The
+  ordered Artist Credits with their join phrases and the label are read-only
+  review context.
 - Applying an existing-Album review validates every captured catalog revision,
   membership, readiness and filename/media identity. A replacement or external
   edit prevents applying the stale project, rather than silently rebasing it.

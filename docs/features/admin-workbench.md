@@ -465,7 +465,9 @@ a confirmed newer item.
 Analysis uses retained original
 filenames and saved metadata; absent historical folder/file evidence stays empty.
 No media is uploaded, copied or published by this workflow. Artist attribution,
-artwork and visibility remain separate catalog edits.
+artwork and visibility remain separate catalog edits: the review draft shows the
+Album's ordered Artist Credits, their join phrases and its label read-only, and
+offers a Disc Number field only for Tracks whose review captured one.
 
 Catalog review routes (relative to `/api/admin/v1`):
 
@@ -473,20 +475,54 @@ Catalog review routes (relative to `/api/admin/v1`):
   ready Album and up to 100 ready Audio members. Empty Albums are supported;
   malformed, missing, Video or inconsistent members are explicitly rejected.
   Creation does not start analysis. Original filenames are allowlisted basenames, never storage keys.
+  Each source Track also captures its Disc Number, or `null` when it stores
+  none. The review is stored as Draft v2 with read-only context from the
+  Album's Credits: the ready, named primary and featured Artist Credits in
+  stored order (at most 20, a repeated name once at its first Credit, as in the
+  catalog byline), each keeping its join phrase only while the next stored
+  Credit is also shown, and the first ready, named label Credit. A draft whose
+  editable values exceed 48 KB is refused with `400
+  ADMIN_IMPORT_INVALID_INPUT` and nothing is stored; the read-only context is
+  not counted, because it cannot be shortened from the review.
 - `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
   workbench pagination and private readback. `sourceStatus` distinguishes current,
   changed and unavailable sources. Old `/imports` routes exclude these projects;
-  strict native import DTOs are unchanged.
+  strict native import DTOs are unchanged. The detail's `draft` and
+  `suggestions` are Draft v2, as for imports, and each `source.tracks` entry
+  carries its captured `discNumber`. A review saved in format 1 reads as Draft
+  v2: its Artist name as one primary entry, no label, unknown Disc Numbers and
+  no `discNumber` key on its source tracks. Its first admitted change other
+  than `/cancel-analysis` stores that view and captures nothing new. The Web
+  editor shows that converted name alone, never as a Credits list, because it
+  may not be any Credit of the Album.
 - `PATCH /catalog-reviews/:id` and `POST` to `/analyze`, `/adopt` or
   `/cancel-analysis`: save/review privately with the original UUID and numeric
   revision. Analysis uses the existing import flag, provider and shared budgets;
   viewing, editing or creating a project does not dispatch a provider request.
+  Every review change binds `expectedRevision` to the last administrator
+  change: any revision from that receipt's to the current one is admitted, so
+  analysis progress, which adds no receipt, never makes a save or stop stale,
+  while a revision from before another administrator's change returns
+  `409 ADMIN_IMPORT_REVISION_CONFLICT`.
+  A PATCH body is `{operationId, expectedRevision, draft}` with the whole Draft
+  v2. Its `artists`, `label` and `visibility` must equal what the review shows,
+  and so must the `discNumber` of a track whose source captured none, or the
+  save returns `400 ADMIN_IMPORT_INVALID_INPUT`. The 48 KB cap binds only a
+  save or adoption that grows the editable values. A v1 draft body (an Album
+  `artistName`) returns `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt
+  lookup, before the revision, applied and limit checks. `/adopt` refuses selecting an Artist
+  suggestion with `400 ADMIN_IMPORT_INVALID_INPUT`; rejecting one is allowed.
   Reviews read through the same allowlist and read-only rule as imports: a
   review saved in a newer format offers neither analysis nor apply, and refuses
   edit, analyze, adopt and apply with `409 ADMIN_IMPORT_RELOAD_REQUIRED`, while
   `/cancel-analysis` stays admitted.
 - `POST /catalog-reviews/:id/apply`: `{operationId, expectedRevision, fields}`
-  selects saved Album `title`/`releaseDate` or Track `title`/`trackNumber` paths.
+  selects saved Album `title`/`releaseDate` or Track
+  `title`/`discNumber`/`trackNumber` paths. A Track `discNumber` is accepted
+  only where the source captured one (otherwise `400
+  ADMIN_IMPORT_INVALID_INPUT` before any write). It is written with
+  `discNumberSource: 'admin-catalog'`, or `null` removes both keys, as a
+  catalog edit does, and a Disc or Track Number re-derives the Album order.
   Revisions, membership, readiness and internal filename/media evidence are
   checked in the same transaction as metadata/order updates and the receipt.
   Stale sources reject the whole operation. Applied projects become read-only;
@@ -573,8 +609,10 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
   `schemaVersion` are absent, `null` or `1` for the original format. This
   release writes `draftVersion` 2 for import projects and `schemaVersion` 2 for
   their approvals, reads formats 1 and 2, and treats 3 and higher, or any value
-  that is not a positive whole number, as newer. Catalog reviews stay format 1,
-  so a format-2 review is newer here. An approval is format 1 only with a v1
+  that is not a positive whole number, as newer. Catalog reviews are written as
+  format 2 too: a format-1 review is shown converted and stored as format 2 at
+  its first admitted change other than stopping analysis, and 3 or higher is
+  newer. An approval is format 1 only with a v1
   snapshot (a string `artistName`, no artist entries and no Disc Numbers), and
   format 2 only with a Draft v2 snapshot of one primary Artist entry, no label
   and a `discNumber` field (a Disc Number or null) on every track; anything
@@ -603,14 +641,16 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
   classifying objects.
 - **Allowlisted DTOs.** Import responses copy only the Draft v2 fields of the
   draft and suggestions and the v1 fields everywhere else: decisions, assets
-  and their tags, publication state and receipts. Review responses and the
-  workbench inventory copy only v1 fields, so a Draft v2 project's row shows
-  its first primary Artist as `artistName`. Fields and values a later release
-  adds are dropped; an unknown state reads as needs attention; and a newer
-  format offers no `capabilities`. An open tab of this release therefore keeps
-  parsing a newer format instead of asking for a reload, while a tab opened
-  before this release fails its strict schema on a Draft v2 response and shows
-  the reload-required state.
+  and their tags, publication state and receipts. Review responses copy the
+  Draft v2 fields of the draft and suggestions, the source with a Disc Number
+  only on a track that captured one, and applied Track `discNumber` fields.
+  The import workbench inventory copies only v1 fields, so a Draft v2 project's
+  row shows its first primary Artist as `artistName`. Fields and values a
+  later release adds are dropped; an unknown state reads as needs attention;
+  and a newer format offers no `capabilities`. An open tab of this release
+  therefore keeps parsing a newer format instead of asking for a reload, while
+  a tab opened before this release fails its strict schema on a Draft v2
+  response and shows the reload-required state.
 - **Draft v2 view.** The same module presents a v1 project as Draft v2:
   `artistName` becomes one primary entry with a deterministic per-project key,
   label and Disc Numbers are unknown, and every value counts as the
@@ -630,6 +670,13 @@ Later stages raise the oldest release that is safe to roll back to:
   before refuses this release's field saves as invalid input and never replays
   them, so after a rollback reload open workbench tabs before retrying a save
   whose response was lost.
+- This release stores catalog reviews as Draft v2, at creation or at their
+  first admitted change. The oldest release that reads Draft v2 imports (the
+  floor above) keeps such reviews read-only: it never dispatches their
+  analysis, so stop a queued or running analysis there (stopping stays
+  admitted), and it omits applied Disc Number fields from the applied list.
+  Reviews this release neither created nor changed stay format 1 and editable
+  there.
 - After extended tag evidence is stored, never roll back below this release:
   its allowlist drops the added tag fields.
 - After metadata lookup jobs run, never roll back below the release before

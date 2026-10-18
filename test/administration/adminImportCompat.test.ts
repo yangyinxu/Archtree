@@ -11,13 +11,13 @@
  *   - a v1 artist decision binds to the legacy entry and its name; other decisions carry no entry
  *   - publication snapshots map into the view while the stored v1 snapshot stays unchanged
  *   - the v1 draft projection is a deep copy of every v1 draft and keeps stored track order
- *   - draft and publication format versions accept only absent, null or a positive safe integer; format 1 is writable, and format 2 for imports only
+ *   - draft and publication format versions accept only absent, null or a positive safe integer; formats 1 and 2 are writable for imports and reviews
  *   - an approval is format 1 only with a v1 snapshot, so a newer snapshot without a recorded format fails closed
  *   - a Draft v2 project projects onto only v1 DTO fields and offers no analysis, upload or publication
  *   - unknown publication and analysis states degrade to needs attention without inventing recovery or identities
  *   - an unrecognized draft format still projects one valid v1 draft per manifest slot
  *   - assets outside the v1 slots, states, lifecycles or identities are hidden from a v1 client
- *   - catalog review sources and applied evidence keep only v1 fields, and applied evidence is never dropped
+ *   - catalog review sources keep known fields and a captured Disc Number, applied evidence keeps disc fields and is never dropped
  *   - the Draft v2 editor view keeps only readable entries, label and values, one track per slot in stored order, and never throws
  *   - the Draft v2 suggestion view maps legacy Artist names, keeps readable album Artist suggestions whole and drops any other
  * @end-catalog */
@@ -35,8 +35,8 @@ import { uuid } from '../../src/administration/import/adminImportContract';
 import { importPublicationSupported, importPublicationVersion } from '../../src/administration/import/adminImportMediaTypes';
 import { adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
-    importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetVisible,
-    legacyCatalogAppliedView, legacyCatalogSourceView, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
+    catalogReviewAppliedView, catalogReviewSourceDisc, catalogReviewSourceView, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View,
+    importSuggestionsV2View, legacyArtistEntryKey, legacyAssetVisible, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
 } from '../../src/administration/import/adminImportDraftCompat';
 import type { CatalogReviewApplied, CatalogReviewSource } from '../../src/administration/catalog/adminCatalogReviewContract';
 import { loadImportFixture } from '../support/adminImportFixtures';
@@ -175,21 +175,20 @@ test('the v1 draft projection is a deep copy of every v1 draft and keeps stored 
     assert.deepEqual([artists([{ name: 'Guest', role: 'featured' }, { name: 'Primary', role: 'primary' }]), artists([{ name: 'Guest', role: 'featured' }]), artists([])], ['Primary', 'Guest', '']);
 });
 
-test('draft and publication format versions accept only absent, null or a positive safe integer; format 1 is writable, and format 2 for imports only', () => {
+test('draft and publication format versions accept only absent, null or a positive safe integer; formats 1 and 2 are writable for imports and reviews', () => {
     const cases: [unknown, number | null][] = [[undefined, 1], [null, 1], [1, 1], [2, 2], [3, 3], ['1', null], [0, null], [-1, null], [1.5, null], [Number.NaN, null]];
     const { snapshot } = load('v1-publication-preparing.json').media!.publication!;
     for (const [value, expected] of cases) {
         const doc = value === undefined ? {} : { draftVersion: value }, publication = value === undefined ? { snapshot } : { schemaVersion: value, snapshot };
         assert.equal(importDraftVersion(doc), expected, String(value)); assert.equal(importDraftWritable(doc), expected === 1 || expected === 2, String(value));
-        // Catalog reviews stay format 1 in this release; a Draft v2 review was written by a newer release.
-        assert.equal(importDraftWritable({ ...doc, purpose: 'catalogReview' }), expected === 1, String(value));
-        for (const purpose of ['import', null]) assert.equal(importDraftWritable({ ...doc, purpose }), expected === 1 || expected === 2, `${String(value)} ${purpose}`);
+        // This release writes Draft v2 catalog reviews too, so format 2 is writable whatever the purpose.
+        for (const purpose of ['import', null, 'catalogReview']) assert.equal(importDraftWritable({ ...doc, purpose }), expected === 1 || expected === 2, `${String(value)} ${purpose}`);
         // A v1 snapshot is format 1 only: a format-2 approval must freeze a Draft v2 snapshot.
         assert.equal(importPublicationVersion(publication), expected, String(value)); assert.equal(importPublicationSupported(publication), expected === 1, String(value));
         const view = importProjectV2View({ ...load('v1-draft.json'), ...doc } as AdminImportDocument);
         assert.equal(view === null, expected === null || expected > 2, String(value));
     }
-    assert.deepEqual(writableDraftFilter, { $or: [{ draftVersion: { $in: [null, 1] } }, { draftVersion: 2, purpose: { $ne: 'catalogReview' } }] });
+    assert.deepEqual(writableDraftFilter, { draftVersion: { $in: [null, 1, 2] } });
 });
 
 test('an approval is format 1 only with a v1 snapshot, so a newer snapshot without a recorded format fails closed', () => {
@@ -256,18 +255,38 @@ test('assets outside the v1 slots, states, lifecycles or identities are hidden f
     }
 });
 
-test('catalog review sources and applied evidence keep only v1 fields, and applied evidence is never dropped', () => {
+test('catalog review sources keep known fields and a captured Disc Number, applied evidence keeps disc fields and is never dropped', () => {
     const slot = '00000009-0000-4000-a000-0000000000d1', slotTwo = '00000009-0000-4000-a000-0000000000d2', revision = `cr_${'a'.repeat(43)}`;
     const v1: CatalogReviewSource = { album: { id: '0000000000000000000000d1', revision, title: 'Synthetic Album', releaseDate: { year: 2020, month: null, day: null }, visibility: 'hidden' },
         tracks: [{ slotId: slot, id: '0000000000000000000000d2', revision, title: 'Synthetic Track', trackNumber: 1, originalFileName: '01 - Synthetic Track.mp3' }, { slotId: slotTwo, id: '0000000000000000000000d3', revision, title: 'Second', trackNumber: null, originalFileName: null }] };
-    assert.deepEqual(legacyCatalogSourceView(v1), v1);
+    // A review created before Disc Numbers were captured shows no disc; a captured disc (a number or null) is kept.
+    assert.deepEqual(catalogReviewSourceView(v1), v1);
+    const captured = { ...v1, tracks: [{ ...v1.tracks[0], discNumber: 2 }, { ...v1.tracks[1], discNumber: null }] };
+    assert.deepEqual(catalogReviewSourceView(captured), captured);
     const later = { album: { ...v1.album, discCount: 2 }, tracks: [{ ...v1.tracks[0], discNumber: 2, futureField: true }, { ...v1.tracks[1], originalFileName: 'folder/name.mp3' }] } as unknown as CatalogReviewSource;
-    assert.deepEqual(legacyCatalogSourceView(later), { ...v1, tracks: [v1.tracks[0], { ...v1.tracks[1], originalFileName: null }] });
+    assert.deepEqual(catalogReviewSourceView(later), { ...v1, tracks: [{ ...v1.tracks[0], discNumber: 2 }, { ...v1.tracks[1], originalFileName: null }] });
+    // An invalid stored disc reads as not captured, never as another value.
+    for (const discNumber of [0, 1000, 1.5, '1', undefined, {}]) {
+        assert.equal(catalogReviewSourceDisc({ ...v1.tracks[0], discNumber }), null, String(discNumber));
+        assert.equal('discNumber' in catalogReviewSourceView({ ...v1, tracks: [{ ...v1.tracks[0], discNumber }] }).tracks[0], false, String(discNumber));
+    }
+    assert.deepEqual([catalogReviewSourceDisc({ discNumber: 999 }), catalogReviewSourceDisc({ discNumber: null }), catalogReviewSourceDisc({}), catalogReviewSourceDisc(Object.create({ discNumber: 1 })), catalogReviewSourceDisc(null)],
+        [{ value: 999 }, { value: null }, null, null, null]);
     const applied = { operationId: '00000009-0000-4000-8000-0000000000d4', at: '2026-11-01T09:00:00.000Z', fields: [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'discNumber' },
-        { scope: 'album', slotId: null, field: 'title' }, { scope: 'label', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'trackNumber', extra: true }], extra: 1 } as unknown as CatalogReviewApplied;
-    assert.deepEqual(legacyCatalogAppliedView(applied, new Set([slot, slotTwo])), { operationId: applied.operationId, at: applied.at, fields: [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'trackNumber' }] });
-    assert.deepEqual(legacyCatalogAppliedView({ ...applied, fields: 'x' } as unknown as CatalogReviewApplied), { operationId: applied.operationId, at: applied.at, fields: [] });
-    assert.equal(legacyCatalogAppliedView(undefined), null);
+        { scope: 'album', slotId: null, field: 'title' }, { scope: 'album', slotId: null, field: 'discNumber' }, { scope: 'label', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'trackNumber', extra: true },
+        { scope: 'track', slotId: slot, field: 'artists' }], extra: 1 } as unknown as CatalogReviewApplied;
+    assert.deepEqual(catalogReviewAppliedView(applied, new Set([slot, slotTwo])), { operationId: applied.operationId, at: applied.at,
+        fields: [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'discNumber' }, { scope: 'track', slotId: slot, field: 'trackNumber' }] });
+    assert.deepEqual(catalogReviewAppliedView({ ...applied, fields: 'x' } as unknown as CatalogReviewApplied), { operationId: applied.operationId, at: applied.at, fields: [] });
+    assert.equal(catalogReviewAppliedView(undefined), null);
+    // At most 2 + 3 per file fields are shown.
+    const many = Array.from({ length: 110 }, (_, index) => ['title', 'discNumber', 'trackNumber'].map(field => ({ scope: 'track', slotId: `00000009-0000-4000-a000-${String(index).padStart(12, '0')}`, field }))).flat();
+    assert.equal(catalogReviewAppliedView({ ...applied, fields: [...applied.fields, ...many] } as unknown as CatalogReviewApplied)!.fields.length, 302);
+    // Views never throw on malformed stored data.
+    for (const raw of [null, 'x', [], { album: null, tracks: 'x' }, { album: [], tracks: [null, 1, { slotId: 'bad' }] }]) {
+        assert.doesNotThrow(() => catalogReviewSourceView(raw)); assert.deepEqual(catalogReviewSourceView(raw).tracks, [], JSON.stringify(raw));
+        assert.doesNotThrow(() => catalogReviewAppliedView(raw as unknown as CatalogReviewApplied));
+    }
 });
 
 test('the Draft v2 editor view keeps only readable entries, label and values, one track per slot in stored order, and never throws', () => {

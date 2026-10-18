@@ -73,6 +73,9 @@ and keeps focus on the moved entry and that the reordered entries and a new
 label save as just `album.artists` and `album.label`, with axe scans and
 reflow at 320, 768 and 1440 px.
 
+The catalog reviews spec checks that an existing-Album review shows the Album's
+Artist Credits and label read-only and applies a Disc Number change.
+
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
 tests, both production builds, and E2E TypeScript. The focused Audio/Video

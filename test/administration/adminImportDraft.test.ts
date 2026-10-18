@@ -20,7 +20,7 @@
  *   - an Artist decision stays bound while its entry keeps its key and name; reordering, roles and phrases keep it
  *   - a Luna Artist name becomes a one-entry primary Artist suggestion against the Draft v2 baseline
  *   - a legacy project converts to its Draft v2 view without touching its approval, histories, assets or analysis progress
- *   - the import detail shows Draft v2 values and only entry-bound decisions, and offers work for format 1 and 2 imports only
+ *   - the import detail shows Draft v2 values and only entry-bound decisions, and offers work for format 1 and 2 projects only
  *   - an approval is format 2 only with one primary Artist entry, no label and a discNumber field (a Disc Number or null) on every track
  *   - every value path a draft has is addressable, so an absent origin always means the administrator
  *   - name and title bounds hold for the stored NFC form, so a saved value is never dropped from the editor view
@@ -294,7 +294,7 @@ test('a legacy project converts to its Draft v2 view without touching its approv
     for (const doc of [{ ...load('v1-draft.json'), purpose: 'catalogReview' as const }, loadV2(), { ...loadV2(), draftVersion: 3 }]) { const copy = JSON.stringify(doc); convertLegacyImportProject(doc); assert.equal(JSON.stringify(doc), copy); }
 });
 
-test('the import detail shows Draft v2 values and only entry-bound decisions, and offers work for format 1 and 2 imports only', () => {
+test('the import detail shows Draft v2 values and only entry-bound decisions, and offers work for format 1 and 2 projects only', () => {
     for (const name of v1Fixtures) {
         const doc = load(name), detail = adminImportDetail(doc, actor, true), legacy = adminImportDto(doc, actor, true), view = importProjectV2View(doc)!;
         const { draft: _a, suggestions: _b, decisions: _c, ...shared } = detail, { draft: _d, suggestions: _e, decisions: _f, ...v1 } = legacy;
@@ -318,8 +318,9 @@ test('the import detail shows Draft v2 values and only entry-bound decisions, an
     assert.deepEqual([newer.draft, newer.capabilities], [item.draft, { analysis: false, upload: false, publish: false }]);
     const garbage = adminImportDetail({ ...load('v1-draft.json'), draftVersion: 3, draft: { album: 'x', tracks: 'y' } } as unknown as AdminImportDocument, actor, true);
     const empty = defaultDraftV2(garbage.manifest); assert.deepEqual(garbage.draft, { ...empty, album: { ...empty.album, visibility: 'hidden' } });
-    // A Draft v2 catalog review was written by a newer release: no work through this projection either.
-    assert.deepEqual(adminImportDetail({ ...doc, purpose: 'catalogReview' }, actor, true).capabilities, { analysis: false, upload: false, publish: false });
+    // This release writes Draft v2 catalog reviews: the same work as the import is offered, and a newer format offers none.
+    assert.deepEqual(adminImportDetail({ ...doc, purpose: 'catalogReview' }, actor, true).capabilities, item.capabilities);
+    assert.deepEqual(adminImportDetail({ ...doc, purpose: 'catalogReview', draftVersion: 3 }, actor, true).capabilities, { analysis: false, upload: false, publish: false });
 });
 
 test('an approval is format 2 only with one primary Artist entry, no label and a discNumber field (a Disc Number or null) on every track', () => {

@@ -7,7 +7,7 @@
  *              importSuggestionsV2View, legacyDecisionView, legacyDecisionsView, legacyAssetVisible,
  *              legacyTagsView, legacyAssetsView, legacySelectedCover, legacyAnalysisState, legacyAnalysisIssue,
  *              legacyAnalysisView, legacyPublicationState, legacyPublishedView, legacyPublicationView,
- *              legacyReceiptsView, legacyCatalogSourceView, legacyCatalogAppliedView
+ *              legacyReceiptsView, catalogReviewSourceDisc, catalogReviewSourceView, catalogReviewAppliedView
  *   Constants: writableDraftFilter, LEGACY_IMPORT_RECEIPT_KINDS, LEGACY_REVIEW_RECEIPT_KINDS
  *   Re-exports: ImportArtistEntry, ImportLabelEntry, ImportDraftV2, ImportValueOrigin, ImportDraftOrigins,
  *               ImportSuggestionV2, ImportDecisionV2
@@ -28,9 +28,9 @@ import { createHash } from 'node:crypto';
 import { ADMIN_IMPORT_LIMITS as LIMITS, objectId, parseImportDate, uuid, type AdminImportDetail, type ImportAnalysisState, type ImportDate, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportValue } from './adminImportContract';
 import { importFormatVersion, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { normalizeMusicBrainzId } from '../lookup/lookupIdentifiers';
-import { originKey, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportLabelEntry, type ImportSuggestionV2 } from './adminImportDraft';
+import { hasOwn, originKey, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportLabelEntry, type ImportSuggestionV2 } from './adminImportDraft';
 import type { AdminImportDocument } from './adminImportService';
-import type { CatalogReviewApplied, CatalogReviewField, CatalogReviewSource } from '../catalog/adminCatalogReviewContract';
+import { CATALOG_REVIEW_MAX_FIELDS, type CatalogReviewApplied, type CatalogReviewField, type CatalogReviewSource } from '../catalog/adminCatalogReviewContract';
 
 type Loose = Record<string, unknown>;
 const isRecord = (value: unknown): value is Loose => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -45,14 +45,14 @@ const oneOf = <T extends string>(value: unknown, values: readonly T[]): value is
 /** Absent or null is the original format 1; anything but a positive safe integer is unrecognized (null). */
 export const importDraftVersion = (doc: { draftVersion?: unknown }): number | null => importFormatVersion(doc.draftVersion);
 /**
- * Format 1 is writable everywhere; this release also writes Draft v2 import projects, while catalog reviews stay format 1.
- * A newer format admits recovery and stopping work only.
+ * Formats 1 and 2 are writable for import projects and catalog reviews alike; this release writes Draft v2 for both. A newer
+ * format admits recovery and stopping work only.
  */
 export const importDraftWritable = (doc: { draftVersion?: unknown; purpose?: unknown }) => {
-    const version = importDraftVersion(doc); return version === 1 || (version === 2 && doc.purpose !== 'catalogReview');
+    const version = importDraftVersion(doc); return version === 1 || version === 2;
 };
-/** Mongo filter matching exactly the documents importDraftWritable accepts. Its top-level $or collides with others: use it only inside $and. */
-export const writableDraftFilter = { $or: [{ draftVersion: { $in: [null, 1] } }, { draftVersion: 2, purpose: { $ne: 'catalogReview' as const } }] };
+/** Mongo filter matching exactly the documents importDraftWritable accepts (an absent draftVersion matches null). */
+export const writableDraftFilter = { draftVersion: { $in: [null, 1, 2] } };
 
 // Forward view (v1 -> Draft v2). The Draft v2 types live in adminImportDraft.ts and are re-exported here.
 export type { ImportArtistEntry, ImportLabelEntry, ImportDraftV2, ImportValueOrigin, ImportDraftOrigins, ImportSuggestionV2, ImportDecisionV2 } from './adminImportDraft';
@@ -111,8 +111,8 @@ export function importProjectV2View(doc: AdminImportDocument): ImportProjectV2Vi
     };
 }
 
-// Backward projection onto the v1 admin contract. It mirrors the strict Web schemas (adminApi.ts,
-// adminNamingSchema.ts, catalogReviewApi.ts), so an open v1 tab degrades instead of failing to parse.
+// Backward projection onto the v1 admin contract. It mirrors the strict Web schemas (adminApi.ts, adminNamingSchema.ts), so an
+// open v1 tab degrades instead of failing to parse. Catalog review sources and applied fields follow catalogReviewApi.ts.
 export const LEGACY_IMPORT_RECEIPT_KINDS: ReadonlySet<string> = new Set<ImportReceipt['kind']>(['create', 'edit', 'analyze', 'adopt', 'decisions', 'cancel-analysis', 'cancel-publication', 'upload', 'publish', 'cleanup', 'select-cover']);
 export const LEGACY_REVIEW_RECEIPT_KINDS: ReadonlySet<string> = new Set(['create', 'edit', 'analyze', 'adopt', 'cancel-analysis', 'apply']);
 const analysisStates = ['idle', 'queued', 'running', 'complete', 'cancelled', 'needsAttention'] as const;
@@ -289,24 +289,32 @@ export const legacyReceiptsView = (receipts: readonly { operationId: string; kin
 
 const validFilename = (value: unknown): value is string => typeof value === 'string' && value.length >= 1 && value.length <= 255 && value.trim() === value && value !== '.' && value !== '..'
     && ![...value].some(char => { const code = char.codePointAt(0)!; return code <= 0x1f || (code >= 0x7f && code <= 0x9f) || (code >= 0xd800 && code <= 0xdfff) || char === '\\' || char === '/' || char === ':'; });
-/** The frozen review source with v1 fields only; later per-track fields such as Disc Numbers are dropped. */
-export function legacyCatalogSourceView(raw: CatalogReviewSource): CatalogReviewSource {
+/** A source track's captured Disc Number: its own `discNumber` key, null or 1 to 999; anything else was not captured (null). */
+export function catalogReviewSourceDisc(track: unknown): { value: number | null } | null {
+    if (!isRecord(track) || !hasOwn(track, 'discNumber')) return null;
+    const value = track.discNumber;
+    return value === null ? { value: null } : discView(value) === null ? null : { value: value as number };
+}
+/** The frozen review source with known fields only; a Disc Number appears only on a track that captured one. */
+export function catalogReviewSourceView(raw: unknown): CatalogReviewSource {
     const source: Loose = isRecord(raw) ? raw : {}, album: Loose = isRecord(source.album) ? source.album : {}, seen = new Set<string>(), tracks: CatalogReviewSource['tracks'] = [];
     for (const track of list(source.tracks)) {
         if (!isRecord(track) || !uuid(track.slotId) || seen.has(track.slotId) || tracks.length >= LIMITS.files) continue;
-        seen.add(track.slotId); tracks.push({ slotId: track.slotId, id: String(track.id), revision: String(track.revision), title: text(track.title, 300), trackNumber: position(track.trackNumber), originalFileName: validFilename(track.originalFileName) ? track.originalFileName : null });
+        const disc = catalogReviewSourceDisc(track); seen.add(track.slotId);
+        tracks.push({ slotId: track.slotId, id: String(track.id), revision: String(track.revision), title: text(track.title, 300), ...(disc ? { discNumber: disc.value } : {}),
+            trackNumber: position(track.trackNumber), originalFileName: validFilename(track.originalFileName) ? track.originalFileName : null });
     }
     return { album: { id: String(album.id), revision: String(album.revision), title: text(album.title, 300), releaseDate: date(album.releaseDate), visibility: oneOf(album.visibility, ['public', 'hidden'] as const) ? album.visibility : 'hidden' }, tracks };
 }
 const reviewField = (value: unknown, slots?: ReadonlySet<string>): value is CatalogReviewField => isRecord(value) && (value.scope === 'album'
     ? value.slotId === null && oneOf(value.field, ['title', 'releaseDate'] as const)
-    : value.scope === 'track' && uuid(value.slotId) && (!slots || slots.has(value.slotId)) && oneOf(value.field, ['title', 'trackNumber'] as const));
+    : value.scope === 'track' && uuid(value.slotId) && (!slots || slots.has(value.slotId)) && oneOf(value.field, ['title', 'discNumber', 'trackNumber'] as const));
 /** Applied evidence is never dropped: an applied review must keep showing that it was applied. */
-export function legacyCatalogAppliedView(raw: CatalogReviewApplied | undefined, slots?: ReadonlySet<string>): CatalogReviewApplied | null {
+export function catalogReviewAppliedView(raw: unknown, slots?: ReadonlySet<string>): CatalogReviewApplied | null {
     if (raw === undefined || raw === null) return null;
     const applied: Loose = isRecord(raw) ? raw : {}, seen = new Set<string>(), fields: CatalogReviewField[] = [];
     for (const value of list(applied.fields)) {
-        if (!reviewField(value, slots) || seen.has(`${value.scope}:${value.slotId}:${value.field}`) || fields.length >= 202) continue;
+        if (!reviewField(value, slots) || seen.has(`${value.scope}:${value.slotId}:${value.field}`) || fields.length >= CATALOG_REVIEW_MAX_FIELDS) continue;
         seen.add(`${value.scope}:${value.slotId}:${value.field}`); fields.push({ scope: value.scope, slotId: value.slotId, field: value.field });
     }
     return { operationId: String(applied.operationId), at: String(applied.at), fields };
