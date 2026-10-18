@@ -155,7 +155,8 @@ gate) and `web/e2e-social/` (social and rooms gate).
   Markdown. Vendored, generated, fixture, and JSON files are exempt.
 - Run `npm run catalog:generate` after editing such a file. `npm test` runs
   `npm run catalog:check` and fails on a missing or stale catalog. Never edit a
-  catalog by hand.
+  catalog by hand. Both commands accept CRLF (Windows) and LF working copies,
+  keep each file's line endings, and write nothing if any file fails to parse.
 - A catalog is a navigation aid, not permission to grow a file. Split a module
   when it passes roughly 800 lines or mixes responsibilities, along the
   boundaries its catalog already shows.
