@@ -21,6 +21,8 @@
   detached worktrees when isolation is needed.
 - Commit only intended changes, preserve unrelated work, and push only when
   the user authorizes it.
+- Write commit messages and pull request titles and descriptions in English.
+  Quote non-English text only as a literal value, such as a UI label.
 
 ## Business Rules
 
@@ -77,8 +79,10 @@
 
 - Prefer updating existing documentation over adding Markdown files. Keep only
   necessary, durable documents; do not retain one-off assessment or verification
-  reports. Write all new Markdown documentation in English. Temporary plan files
-  must follow the planning lifecycle above and be removed when complete.
+  reports. Write all documentation and code comments in English, quoting
+  non-English text only as a literal value such as a UI label, localized
+  string, or fixture text. Temporary plan files must follow the planning
+  lifecycle above and be removed when complete.
 
 - When a change affects setup, dependencies, commands, configuration,
   environment variables, endpoints, authentication, media behavior, or
