@@ -24,6 +24,8 @@
  *   - definite refusals fail or refuse only their own file while the queue continues, and each 409 refreshes the project once
  *   - a staged copy still being removed is refused without a request, and a receipt for another operation stays unknown
  *   - Resume while uploading adds nothing, and an explicit retry joins the running queue once
+ *   - a project saved by a newer release refuses the upload before admission and stops the queue for a reload
+ *   - a reload refusal met while reconciling keeps that upload unknown and stops before any bytes are sent
  *   - a publication lock met while reconciling keeps that upload unknown and stops before any bytes are sent
  *   - reopening stops reconciling at a permission failure and never retries later uploads
  *   - a Resume during reopen reconciliation waits for it and then sends only the files still incomplete
@@ -310,6 +312,24 @@ test('Resume while uploading adds nothing, and an explicit retry joins the runni
   expect(queue.getSnapshot().files[slotTwo].state).toBe('queued'); gate.resolve(); await settle(queue);
   expect(server.uploads().map(request => request.slot)).toEqual([slotId, slotTwo]); expect(server.max()).toBe(1);
   expect(Object.values(queue.getSnapshot().files).map(value => value.state)).toEqual(['ready', 'ready']);
+});
+
+test('a project saved by a newer release refuses the upload before admission and stops the queue for a reload', async () => {
+  const item = project(), server = serve(item, () => ({ status: 409, code: 'ADMIN_IMPORT_RELOAD_REQUIRED' }));
+  const queue = importUploadQueue(item.id); queue.start(item, files(), adminWorkspace.capture()); await settle(queue);
+  expect(server.uploads()).toHaveLength(1); expect(queue.getSnapshot().stopped).toBe('reload');
+  // A definite refusal before admission: the file failed and no further file is sent.
+  expect(queue.getSnapshot().files[slotId]).toMatchObject({ state: 'failed', code: 'ADMIN_IMPORT_RELOAD_REQUIRED' }); expect(queue.getSnapshot().files[slotTwo].state).toBe('stopped');
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
+});
+test('a reload refusal met while reconciling keeps that upload unknown and stops before any bytes are sent', async () => {
+  const item = project(); item.assets = [asset(slotId, 'unknown')];
+  const server = serve(item, seen => seen.reconcile ? { status: 409, code: 'ADMIN_IMPORT_RELOAD_REQUIRED' } : undefined), queue = importUploadQueue(item.id);
+  queue.start(item, files(), adminWorkspace.capture()); await settle(queue);
+  // A refused reconciliation proves nothing about the earlier upload, so its original intent is kept.
+  expect(server.uploads()).toHaveLength(0); expect(queue.getSnapshot().stopped).toBe('reload');
+  expect(queue.getSnapshot().files[slotId]).toMatchObject({ state: 'unknown', operationId: original }); expect(queue.getSnapshot().files[slotTwo].state).toBe('stopped');
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
 });
 
 test('a publication lock met while reconciling keeps that upload unknown and stops before any bytes are sent', async () => {

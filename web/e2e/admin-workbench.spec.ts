@@ -15,6 +15,7 @@
  *   - administrator placement layout reflows at 390px and a 200 percent equivalent viewport
  *   - one approval uploads files sequentially and leaving Admin view stops after the current file
  *   - files chosen without a folder need no folder name
+ *   - a new import starts public, and the create request carries no draft
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -499,4 +500,19 @@ test('files chosen without a folder need no folder name', async ({ page }) => {
   await expect.poll(() => server.uploads.length).toBe(1);
   expect(server.created[0].manifest).toMatchObject({ rootLabel: '', files: [{ filename: 'Song.mp3', relativePath: 'Song.mp3', byteLength: 120 }] });
   await expect(page.getByRole('heading', { name: 'Untitled Album', exact: true })).toBeVisible();
+});
+
+test('a new import starts public, and the create request carries no draft', async ({ page }) => {
+  await setup(page); const server = await createRoutes(page);
+  await page.goto('/finitude/admin/imports/new'); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByText('A new import is public by default. You can change its visibility before publishing.')).toBeVisible();
+  await page.locator('input[type=file]').nth(1).setInputFiles([{ name: 'Song.mp3', mimeType: 'audio/mpeg', buffer: Buffer.alloc(120, 7) }]);
+  await page.getByRole('button', { name: 'Create import and upload files' }).click();
+  await expect.poll(() => server.created.length).toBe(1); expect(server.created[0]).not.toHaveProperty('draft');
+  await expect(page.getByRole('heading', { name: 'Untitled Album', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Draft', exact: true }).click();
+  const visibility = page.getByRole('combobox', { name: 'Visibility' });
+  await expect(visibility).toHaveValue('public');
+  expect(await visibility.locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))).toEqual(['public', 'hidden']);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

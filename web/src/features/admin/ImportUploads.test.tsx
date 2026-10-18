@@ -7,6 +7,7 @@
  *   - Resume needs a local file and stays disabled while uploads are locked or offline
  *   - Retry upload is offered only to the starter of an unknown upload, and Check again reconciles without bytes
  *   - while a file uploads, the live status names it, rows show their queue state and the controls wait
+ *   - a project saved by a newer release refuses the upload and the stopped queue offers its own Reload
  * @end-catalog */
 
 import type { ComponentProps } from 'react';
@@ -134,4 +135,21 @@ test.each([
   fireEvent.click(screen.getByRole('button', { name: 'Resume upload' }));
   await act(async () => { await vi.waitFor(() => expect(queue.getSnapshot().running).toBe(false)); });
   expect(posts).toBe(1); expect(screen.getByText(message)).toBeVisible();
+  // An outdated response sets the shared reload request, whose navigation alert offers the reload instead.
+  expect(screen.queryByRole('button', { name: 'Reload page' })).not.toBeInTheDocument();
+});
+
+test('a project saved by a newer release refuses the upload and the stopped queue offers its own Reload', async () => {
+  const item = project(); let posts = 0;
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method !== 'POST') return json({ item, receipt: null });
+    posts++; return json({ code: 'ADMIN_IMPORT_RELOAD_REQUIRED' }, 409);
+  }));
+  keep(files()); mount(item); const queue = importUploadQueue(projectId);
+  fireEvent.click(screen.getByRole('button', { name: 'Resume upload' }));
+  await act(async () => { await vi.waitFor(() => expect(queue.getSnapshot().running).toBe(false)); });
+  // The refusal precedes admission: the queue stops after one file, and the shared reload request stays unset.
+  expect(posts).toBe(1); expect(queue.getSnapshot().stopped).toBe('reload'); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
+  expect(screen.getByText('The administrator workbench was updated. Reload the page to continue; unsaved edits on this page are not kept.')).toBeVisible();
+  expect(screen.getAllByRole('button', { name: 'Reload page' })).toHaveLength(1);
 });

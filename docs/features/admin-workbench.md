@@ -83,6 +83,8 @@ previews, import/catalog/Page editors or upload controls.
 **Contents**
 
 - [Device-local MP3 conversion](#device-local-mp3-conversion)
+- [Import format compatibility](#import-format-compatibility)
+  - [Rollback floors](#rollback-floors)
 - [Metadata lookup](#metadata-lookup)
 <!-- @end-catalog -->
 
@@ -173,8 +175,21 @@ Import routes (relative to `/api/admin/v1`):
   folder evidence is rejected. Rolling back below this release keeps every
   staged record readable, but analysis of a folderless import then sends an
   empty folder label and no longer rejects folder-sourced suggestions; re-run
-  such an analysis after rolling forward.
-- `GET /imports/:id`, `PATCH /imports/:id`: read/save a private draft.
+  such an analysis after rolling forward. Without `draft`, the stored draft is
+  empty with public visibility, while the create receipt still fingerprints the
+  frozen hidden empty draft of earlier releases, so a retry admitted before this
+  release replays its original, unchanged project. Rolling back restores the
+  hidden default for new imports only; saved projects keep their visibility.
+  An explicit draft identical to the frozen hidden empty draft has the same
+  create fingerprint as a body without `draft`; a retry that switches between
+  the two replays the stored project rather than failing with
+  `ADMIN_IMPORT_OPERATION_CONFLICT`.
+- `GET /imports/:id`, `PATCH /imports/:id`: read/save a private draft. A project
+  saved in a newer draft format is read-only here: every change except staged
+  cleanup, reconciliation of an admitted upload, `/cancel-publication`,
+  `/resume-publication` and `/cancel-analysis` returns
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED` before admission and writes nothing, while
+  a replay of a stored receipt still returns that receipt.
 - `POST /imports/:id/analyze`, `/adopt`, `/decisions`, `/cancel-analysis`:
   persisted analysis and selective review with `{operationId, expectedRevision}`.
 - `GET /imports/:id/duplicate-candidates`: bounded candidates; a name match is
@@ -213,7 +228,13 @@ Import routes (relative to `/api/admin/v1`):
 - `GET /imports/:id/assets/:slotId/preview`: protected staged artwork preview.
 - `POST /imports/:id/publish`: explicit reviewed approval, then asynchronous
   fixed-identity publication; `/resume-publication` reconciles that approval's
-  original operation ID rather than creating another Album.
+  original operation ID rather than creating another Album. Appending to an
+  existing Album whose visibility differs from the draft's returns
+  `409 ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH` and writes no approval, receipt
+  or revision; a stale Album reports `ADMIN_IMPORT_DUPLICATE_STALE` first.
+  The Web then asks the administrator to match that Album's visibility, save
+  and approve again. Rolled back below this release, the same mismatch reports
+  `409 ADMIN_IMPORT_DUPLICATE_STALE` instead.
 - `POST /imports/:id/cancel-publication`: explicit cancellation with
   `{operationId, expectedRevision, publicationOperationId}`. The new operation
   UUID binds the exact original publication UUID. An active worker lease or a
@@ -266,7 +287,10 @@ it is offered its original-intent retry, which reconciles first and then
 resends the original key, `If-Match` and bytes. A selection without folders
 hides the folder field. An administrator response that fails the Web bundle's
 strict schema, as after a deployment, shows a reload-required state instead of
-an error or an automatic retry.
+an error or an automatic retry. A `409 ADMIN_IMPORT_RELOAD_REQUIRED` refusal
+fails that file before admission and stops the queue with a reload request and
+a Reload button beside the uploads; for other changes it shows that request and
+button on the refused action only.
 
 The analysis worker admits two active projects globally and one per initiating
 admin, uses 24-hour grants and 120-second leases, and checkpoints every provider
@@ -329,6 +353,10 @@ Catalog review routes (relative to `/api/admin/v1`):
   `/cancel-analysis`: save/review privately with the original UUID and numeric
   revision. Analysis uses the existing import flag, provider and shared budgets;
   viewing, editing or creating a project does not dispatch a provider request.
+  Reviews read through the same allowlist and read-only rule as imports: a
+  review saved in a newer format offers neither analysis nor apply, and refuses
+  edit, analyze, adopt and apply with `409 ADMIN_IMPORT_RELOAD_REQUIRED`, while
+  `/cancel-analysis` stays admitted.
 - `POST /catalog-reviews/:id/apply`: `{operationId, expectedRevision, fields}`
   selects saved Album `title`/`releaseDate` or Track `title`/`trackNumber` paths.
   Revisions, membership, readiness and internal filename/media evidence are
@@ -405,6 +433,71 @@ receipt. A null revision is accepted only when the owner is absent or non-ready.
 Attached changes and active worker leases cannot be cancelled. Unused target
 cleanup retains its source pin and storage evidence until confirmed; cancelled
 cleanup can be reconciled by any current administrator without reattaching it.
+
+## Import format compatibility
+
+Stored import and review projects carry format numbers, so a release can read
+what a later release wrote and never acts on a format it does not know. The
+reads live in `src/administration/import/adminImportDraftCompat.ts`.
+
+- **Format numbers.** A project's `draftVersion` and a publication approval's
+  `schemaVersion` are absent, `null` or `1` for the format this release
+  writes, and this release writes neither field. Any other value is a newer or
+  unrecognized format. An approval whose snapshot is not a v1 draft (a string
+  `artistName`, no artist entries and no Disc Numbers) is also treated as a
+  newer format. A later release must write `schemaVersion` 2 or higher for any
+  approval whose snapshot is not a v1 draft, and `draftVersion` 2 or higher for
+  any draft that is not a v1 draft.
+- **Read-only newer drafts.** A project saved in a newer draft format admits
+  only staged cleanup and upload reconciliation, publication recovery and
+  cancellation, and analysis cancellation, plus replays of stored receipts.
+  Every other change, including an upload, cover selection or approval, returns
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED` before admission. Its analysis is never
+  claimed or sent to the provider and does not count against this release's
+  analysis concurrency, so neither a queued analysis nor a chunk a newer
+  release left in flight blocks other projects; it waits for a release that
+  knows the format. An upload admitted earlier still completes and can be
+  reconciled, but no new embedded-cover staging is admitted, and the project
+  cannot become the source of an existing-catalog cover; releasing an existing
+  cover pin stays admitted.
+- **Unknown approvals.** An approval in a newer format is never copied,
+  committed or cleaned here. A preparing approval becomes needs attention
+  without minting identities, tagged `unsupportedVersion` unless the newer
+  release recorded its own issue, which is kept. Resuming it copies, commits
+  and deletes nothing, and cancelling it keeps cleanup pending with every copy
+  record retained, which also keeps a new approval blocked. While such an
+  approval is unresolved, in any state but complete or cancelled with confirmed
+  cleanup, audio and image storage reconciliation fails closed instead of
+  classifying objects.
+- **Allowlisted DTOs.** Import and review responses copy only the v1 fields at
+  every level: drafts, suggestions, decisions, assets and their tags,
+  publication state and receipts. Fields and values a later release adds are
+  dropped. A newer draft shows as its v1 projection, with its first primary
+  Artist as `artistName` and no label or Disc Numbers; an unknown state reads
+  as needs attention; and `capabilities` are all `false`. An open v1 tab
+  therefore keeps parsing instead of asking for a reload.
+- **Draft v2 view.** The same module presents a v1 project as the Draft v2 view
+  later stages adopt: `artistName` becomes one primary entry with a
+  deterministic per-project key, label and Disc Numbers are unknown, and every
+  value counts as the administrator's own. The view is computed on read and
+  never written back.
+
+### Rollback floors
+
+Later stages raise the oldest release that is safe to roll back to:
+
+- After Draft v2 projects or multi-artist and label approvals are saved, never
+  roll back below this release. It is the first that keeps such projects
+  read-only and holds their approvals in needs attention instead of misreading
+  them.
+- After extended tag evidence is stored, never roll back below this release:
+  its allowlist drops the added tag fields.
+- After metadata lookup jobs run, never roll back below the release before
+  them, which ignores their records.
+- After MusicBrainz IDs are stored, never roll back below the release before
+  them; its index stays, and listener DTOs already drop unknown fields.
+- Credit join phrases and Disc Numbers have their own floor in the
+  [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
 ## Metadata lookup
 

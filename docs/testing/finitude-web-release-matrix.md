@@ -62,7 +62,9 @@ An unknown outcome is reconciled without bytes and then retried with its
 original operation, and switching to User view during an upload stops the queue
 after that file without restarting it on return. Files chosen without a folder
 show no folder field. The local MP3 conversion spec verifies that an import
-created from converted MP3s uploads through the same queue.
+created from converted MP3s uploads through the same queue. The administrator
+workbench spec also checks that a new import's draft opens with Public
+visibility.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration

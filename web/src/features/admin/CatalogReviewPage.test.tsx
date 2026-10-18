@@ -13,6 +13,7 @@
  *   - selected suggestion adoption and independent rejection preserve manual values and exclude Artist identity hints
  *   - catalog application confirms only selected saved fields and invalidates projections only after its receipt
  *   - a newer saved revision invalidates an open Apply confirmation rather than rebasing its field selection
+ *   - a review saved by a newer release refuses a save with a reload request and no retry
  *   - changing review routes cannot show or retry another project unknown intent
  *   - same-revision refresh and stage changes retain Apply selection, but a newer saved value requires selecting it again
  *   - a delayed successful Save cannot overwrite a newer observed revision or erase its conflict when refresh fails
@@ -315,6 +316,19 @@ test('a newer saved revision invalidates an open Apply confirmation rather than 
   expect(within(screen.getByRole('dialog')).queryByText('Another administrator revision')).not.toBeInTheDocument();
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Update original Album \(/ }));
   expect(writes).toEqual([]);
+});
+
+test('a review saved by a newer release refuses a save with a reload request and no retry', async () => {
+  const writes: string[] = [], message = 'The administrator workbench was updated. Reload the page to continue; unsaved edits on this page are not kept.';
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') { writes.push(path); return reviewJson({ code: 'ADMIN_IMPORT_RELOAD_REQUIRED' }, 409); }
+    return reviewJson({ item: catalogReview(), receipt: null });
+  }));
+  mountPage(); fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A private correction' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
+  expect(await screen.findByText(message)).toBeVisible(); expect(screen.getByRole('button', { name: 'Reload page' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false); expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]);
 });
 
 test('changing review routes cannot show or retry another project unknown intent', async () => {

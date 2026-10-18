@@ -16,8 +16,10 @@ export interface ImportAsset {
     recovery: { operationId: string; expectedRevision: number; kind: 'upload' | 'cleanup'; actorId: string };
 }
 export interface ImportPublication {
+    /** Frozen approval format; absent means 1, the only format this release copies, commits or cleans. */
+    schemaVersion?: number;
     operationId: string; actorId: string; approvedRevision: number; snapshot: ImportDraft; decisions: ImportDuplicateDecision[];
-    state: 'preparing' | 'needsAttention' | 'complete' | 'cancelled'; issue: 'storageUnknown' | 'permissionLost' | 'catalogConflict' | 'configurationUnavailable' | null;
+    state: 'preparing' | 'needsAttention' | 'complete' | 'cancelled'; issue: 'storageUnknown' | 'permissionLost' | 'catalogConflict' | 'configurationUnavailable' | 'unsupportedVersion' | null;
     cleanupPending?: boolean;
     cancellation?: { operationId: string; actorId: string };
     grantExpiresAt: Date; artistId: string; newArtist: boolean; albumId: string; newAlbum: boolean; albumRevision: string | null; coverId: string | null;
@@ -26,6 +28,21 @@ export interface ImportPublication {
     bucket: string; leaseOwner: string | null; leaseUntil: Date | null;
 }
 export interface ImportMedia { assets: ImportAsset[]; assetHistory?: ImportAsset[]; selectedCoverSlotId?: string | null; publication?: ImportPublication; publicationHistory?: ImportPublication[] }
+/** Stored format number: absent or null is the original format 1; anything but a positive safe integer is unrecognized (null). */
+export const importFormatVersion = (value: unknown): number | null => value === undefined || value === null ? 1 : Number.isSafeInteger(value) && (value as number) > 0 ? value as number : null;
+export const importPublicationVersion = (publication: { schemaVersion?: unknown }): number | null => importFormatVersion(publication.schemaVersion);
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+/**
+ * Only a format-1 approval may be copied, committed or cleaned by this release; any other stays needs attention.
+ * It fails closed on shape too: the snapshot must be a v1 draft (a string artistName, no artist entries, no Disc
+ * Numbers), so an approval a later release froze without recording its format is never misread as format 1.
+ */
+export const importPublicationSupported = (publication: { schemaVersion?: unknown; snapshot?: unknown }) => {
+    if (importPublicationVersion(publication) !== 1 || !isRecord(publication.snapshot)) return false;
+    const { album, tracks } = publication.snapshot;
+    return isRecord(album) && typeof album.artistName === 'string' && !('artists' in album)
+        && Array.isArray(tracks) && tracks.every(track => isRecord(track) && !('discNumber' in track));
+};
 /** A missing object proves failure only once no PUT can still land: lease released/expired and transfer deadline passed. */
 export const importUploadSettled = (asset: ImportAsset, now: Date) =>
     (!asset.leaseUntil || asset.leaseUntil <= now) &&

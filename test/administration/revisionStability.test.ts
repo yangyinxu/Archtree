@@ -26,8 +26,8 @@ import { ObjectId } from 'mongodb';
 // adminCatalogService loads the database module first; importing adminImportService before it
 // trips the existing database-index import cycle.
 import { adminCatalogItemRevision, type AdminCatalogKind } from '../../src/administration/catalog/adminCatalogService';
-import { defaultDraft, parseManifest } from '../../src/administration/import/adminImportContract';
-import { importCandidateProjection, importCandidateRevision, importDigest } from '../../src/administration/import/adminImportService';
+import { defaultDraft, legacyDefaultDraftV1, parseManifest } from '../../src/administration/import/adminImportContract';
+import { importCandidateProjection, importCandidateRevision, importCreateHash, importDigest } from '../../src/administration/import/adminImportService';
 
 /** Shared with revisionStability.integration.ts so the unit and service checks pin one copy of the create goldens. */
 const draftlessCreate = JSON.parse(readFileSync(new URL('../fixtures/revisionStability/draftless-import-create.json', import.meta.url), 'utf8'));
@@ -128,6 +128,12 @@ test('a draftless create keeps its import identity and receipt hash, so pre-depl
     // The unit gate has no MongoDB, so this rebuilds the identity and receipts[0].hash with the inputs
     // createAdminImport hashes for a draftless body. It cannot see a change to which inputs the service
     // hashes; revisionStability.integration.ts pins the values the real createAdminImport persists.
+    // Since the public default, a draftless create stores defaultDraft but still fingerprints the frozen
+    // hidden legacyDefaultDraftV1, so both the old recipe and importCreateHash must reproduce the golden.
     assert.equal(new ObjectId(importDigest({ actor, operationId: body.operationId }).slice(0, 24)).toHexString(), importId, 'import identity');
-    assert.equal(importDigest({ kind: 'create', manifest, draft: defaultDraft(manifest), operationId: body.operationId }), createReceiptHash, 'create receipt hash');
+    assert.equal(importDigest({ kind: 'create', manifest, draft: legacyDefaultDraftV1(manifest), operationId: body.operationId }), createReceiptHash, 'create receipt hash (pre-public recipe)');
+    assert.equal(importCreateHash(manifest, undefined, body.operationId), createReceiptHash, 'create receipt hash (importCreateHash)');
+    // The stored default is public, and hashing it would not replay a retry admitted before the change.
+    assert.equal(defaultDraft(manifest).album.visibility, 'public');
+    assert.notEqual(importCreateHash(manifest, defaultDraft(manifest), body.operationId), createReceiptHash, 'stored public default is not the fingerprint');
 });

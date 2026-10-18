@@ -19,6 +19,7 @@
  *   - ambiguous provider outcome persists and blocks paid replay but allows explicit manual apply
  *   - permission loss and expired analysis grants prevent new provider calls and catalog writes
  *   - separate review inventory supports scoped pagination/counts and terminal applied filtering
+ *   - a review saved in a newer draft format reads through the v1 allowlist and admits only stopping its analysis
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -240,4 +241,33 @@ test('separate review inventory supports scoped pagination/counts and terminal a
     assert.equal((await listCatalogReviews(String(other), { startedByMe: 'true' })).counts.all, 0);
     await apply(await edit(a, draft => { draft.album.title = 'Finished'; }));
     const completed = await listCatalogReviews(String(actor), { filter: 'completed' }); assert.equal(completed.items.length, 1); assert.equal(completed.counts.awaitingReview, 2);
+});
+test('a review saved in a newer draft format reads through the v1 allowlist and admits only stopping its analysis', async () => {
+    let review = await create(); review = await analyzeCatalogReview(String(actor), review.item.id, mutation(1), provider);
+    assert.equal(review.item.capabilities.apply, true);
+    const id = review.item.id, _id = new ObjectId(id), saved = (await importCollection().findOne({ _id }))!, revision = review.item.revision + 1;
+    // A newer release stored a Draft v2, a per-track Disc Number in the frozen source and a receipt kind this release does not know.
+    const newer = { album: { title: 'Newer private title', artists: [{ key: randomUUID(), name: 'Existing Artist', role: 'primary', joinPhrase: null, musicBrainzId: null }], label: { name: 'Synthetic Label', musicBrainzId: null },
+        releaseDate: saved.draft.album.releaseDate, visibility: saved.draft.album.visibility }, tracks: saved.draft.tracks.map(track => ({ ...track, discNumber: 1 })) };
+    await db().collection('adminAlbumImports').updateOne({ _id }, { $set: { draftVersion: 2, revision, draft: newer, 'catalogSource.tracks.0.discNumber': 2 },
+        $push: { receipts: { operationId: randomUUID(), kind: 'patch', revision, actorId: String(actor), hash: 'f'.repeat(64), at: new Date() } } } as any);
+    const before = await importCollection().findOne({ _id }), read = await current(id), json = JSON.stringify(read);
+    assert.deepEqual(read.item.draft, { album: { title: 'Newer private title', artistName: 'Existing Artist', releaseDate: saved.draft.album.releaseDate, visibility: 'hidden' }, tracks: saved.draft.tracks });
+    assert.deepEqual(read.item.source, saved.catalogSource); assert.equal(read.item.revision, revision);
+    assert.deepEqual(read.item.receipts.map(receipt => receipt.kind), ['create', 'analyze']);
+    assert.deepEqual(read.item.capabilities, { analysis: false, apply: false }); assert.equal(read.item.analysis.state, 'queued');
+    for (const sentinel of ['Synthetic Label', 'musicBrainzId', 'discNumber', 'joinPhrase', '"artists"', 'patch', 'draftVersion']) assert.equal(json.includes(sentinel), false, sentinel);
+    assert.deepEqual((await listCatalogReviews(String(other), {})).items.map(item => [item.id, item.title]), [[id, 'Newer private title']]);
+    // Its queued analysis is never claimed, and every change of draft or catalog is refused before any write.
+    assert.equal(await runAdminImportWorkerOnce(provider), false);
+    for (const work of [
+        () => edit(read, draft => { draft.album.title = 'A v1 edit'; }),
+        () => analyzeCatalogReview(String(actor), id, mutation(revision), provider),
+        () => adoptCatalogReview(String(actor), id, { ...mutation(revision), generation: 1, selectedIds: ['a'.repeat(24)], rejectIds: [] }),
+        () => apply(read)
+    ]) await assert.rejects(work(), code('ADMIN_IMPORT_RELOAD_REQUIRED'));
+    assert.deepEqual(await importCollection().findOne({ _id }), before); assert.equal((await db().collection('albums').findOne({ _id: album }))!.title, 'Existing Album');
+    const cancelled = await cancelCatalogReviewAnalysis(String(other), id, mutation(revision));
+    assert.deepEqual([cancelled.item.analysis.state, cancelled.receipt!.kind, cancelled.item.revision], ['cancelled', 'cancel-analysis', revision + 1]);
+    const after = await importCollection().findOne({ _id }); assert.equal(after!.draftVersion, 2); assert.deepEqual(after!.draft, before!.draft); assert.deepEqual(after!.catalogSource, before!.catalogSource);
 });

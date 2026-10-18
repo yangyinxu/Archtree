@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { draftSchema, suggestionSchema, analysisSchema } from './adminNamingSchema';
 export { importDateSchema, draftSchema, suggestionSchema, analysisSchema } from './adminNamingSchema';
 export type { ImportDraft, ImportSuggestion } from './adminNamingSchema';
-export { adminEndpointRequest, adminRequest, importPath } from './adminTransport';
+export { ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH, ADMIN_IMPORT_RELOAD_REQUIRED, adminEndpointRequest, adminRequest, importPath } from './adminTransport';
 export type { AdminGuard } from './adminTransport';
 
 const id = z.string().regex(/^[a-f0-9]{24}$/);

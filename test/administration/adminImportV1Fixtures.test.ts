@@ -29,7 +29,7 @@ import { after, before, test } from 'node:test';
 import { ObjectId } from 'mongodb';
 // The database module loads first; importing adminImportService before it trips the index import cycle.
 import '../../src/infrastructure/database';
-import { defaultDraft, parseDraft, parseManifest, uuid } from '../../src/administration/import/adminImportContract';
+import { legacyDefaultDraftV1, parseDraft, parseManifest, uuid } from '../../src/administration/import/adminImportContract';
 import { validateAnalysisSuggestions } from '../../src/administration/import/adminImportProvider';
 import { adminImportDto, importCandidateProjection, importCandidateRevision, importDigest, isImportProject, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { importAssetTarget } from '../../src/administration/import/adminImportStorage';
@@ -128,7 +128,8 @@ test('a created v1 draft keeps one artistName string, track titles and numbers, 
 
 test('a completed v1 analysis keeps its baseline and leaves the artistName suggestion pending', () => {
     const doc = load('v1-analysis-pending-artist-name.json'), item = dto(doc), { analysis } = doc, baseline = analysis.baseline!;
-    assert.deepEqual(baseline, defaultDraft(doc.manifest));
+    // The baseline is the draftless default of its time (hidden); defaultDraft is public since S5, so compare the frozen value.
+    assert.deepEqual(baseline, legacyDefaultDraftV1(doc.manifest));
     assert.deepEqual(item.analysis, { state: 'complete', generation: 1, operationId: '00000002-0000-4000-8000-000000000002', completedChunks: 2, totalChunks: 2, attemptsUsed: 2, maxAttempts: 22, issue: null });
     const pending = item.suggestions.filter(suggestion => suggestion.decision === 'pending');
     assert.deepEqual(pending.map(({ scope, slotId, field, baseline, value, source }) => ({ scope, slotId, field, baseline, value, source })), [{ scope: 'album', slotId: null, field: 'artistName', baseline: '', value: 'Synthetic Artist', source: 'folder' }]);

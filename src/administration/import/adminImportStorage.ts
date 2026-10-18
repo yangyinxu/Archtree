@@ -26,6 +26,7 @@ import { getAdminImport, importCollection, importPurposeFilter, importDigest, mu
 import { importPrivateStorageReady, importSourcesLocked, importUploadSettled, type ImportAsset } from './adminImportMediaTypes';
 import { adminWorkerSignal } from '../adminWorkerLifecycle';
 import { extractImportArtwork } from './adminImportArtwork';
+import { importDraftWritable } from './adminImportDraftCompat';
 
 export type ImportObjectIdentity = { etag: string; versionId: string | null };
 export interface ImportObjectTarget { bucket: string; key: string; sha256: string; byteLength: number; contentType: string; importId: string; slotId: string; operationId: string }
@@ -175,6 +176,8 @@ async function stageEmbeddedArtwork(actor: string, id: string, audioSlotId: stri
             const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id) }, { session }); if (!doc) return false;
             const prior = [...doc.receipts, ...(doc.recoveryReceipts ?? []), ...(doc.automaticReceipts ?? [])].find(receipt => receipt.operationId === operationId);
             if (prior) return prior.hash === hash;
+            // A project saved in a newer draft format admits no new automatic staging; an admitted one still completes.
+            if (!importDraftWritable(doc)) return false;
             const assets = doc.media?.assets ?? [];
             if (importSourcesLocked(doc.media) || !assets.some(asset => asset.slotId === audioSlotId && asset.operationId === audioOperationId && asset.state === 'ready')
                 // A legacy per-file candidate keeps its own lifecycle; identical images are staged once.

@@ -27,7 +27,10 @@ export function ImportUploads({ item, uploads, onReselect }: { item: ImportDetai
     <h3 id={`uploads-${item.id}`}>{t('upload.title')}</h3>
     <p>{t('upload.progress', { completed: item.manifest.files.length - incomplete.length, total: item.manifest.files.length })}</p>
     <p role="status">{uploads.running && current ? t('upload.current', { name: current }) : ''}</p>
-    {uploads.stopped && <p role="alert">{t(uploads.stopped === 'reload' ? 'common.reload' : `upload.stopped_${uploads.stopped}`)}</p>}
+    {uploads.stopped && <div role="alert"><p>{t(uploads.stopped === 'reload' ? 'common.reload' : `upload.stopped_${uploads.stopped}`)}</p>
+      {/* A server refusal leaves the shared reload request unset, so only this stop offers the reload; otherwise the navigation does. */}
+      {uploads.stopped === 'reload' && !access.reloadRequired && <button type="button" className={styles.button} onClick={() => window.location.reload()}>{t('common.reload_action')}</button>}
+    </div>}
     {incomplete.length > 0 && <>
       <div className={styles.actions}>
         <button type="button" className={`${styles.button} ${styles.primary}`} disabled={uploads.running || locked || !incomplete.some(file => local[file.slotId])}

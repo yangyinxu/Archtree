@@ -81,4 +81,10 @@ export function parseDraft(value: unknown, manifest: ImportManifest): ImportDraf
     const result = { album: { title: cleanText(album.title, 300, true), artistName: cleanText(album.artistName, 200, true), releaseDate: parseImportDate(album.releaseDate), visibility: album.visibility as 'public' | 'hidden' }, tracks };
     if (Buffer.byteLength(JSON.stringify(result)) > 48_000) return invalidImport(); return result;
 }
-export const defaultDraft = (manifest: ImportManifest): ImportDraft => ({ album: { title: '', artistName: '', releaseDate: null, visibility: 'hidden' }, tracks: manifest.files.map(file => ({ slotId: file.slotId, title: '', trackNumber: null })) });
+/** Draft a draftless create stores: empty values, unknown numbers and public visibility (owner rule). */
+export const defaultDraft = (manifest: ImportManifest): ImportDraft => ({ album: { title: '', artistName: '', releaseDate: null, visibility: 'public' }, tracks: manifest.files.map(file => ({ slotId: file.slotId, title: '', trackNumber: null })) });
+/**
+ * Frozen pre-public default and the explicit "no draft" marker a draftless create hashes. Never edit it: every
+ * draftless create receipt, including those admitted before the public default, digests exactly this value.
+ */
+export const legacyDefaultDraftV1 = (manifest: ImportManifest): ImportDraft => ({ album: { title: '', artistName: '', releaseDate: null, visibility: 'hidden' }, tracks: manifest.files.map(file => ({ slotId: file.slotId, title: '', trackNumber: null })) });

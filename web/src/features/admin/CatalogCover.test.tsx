@@ -11,6 +11,7 @@
  *   - a confirmed cancellation cannot reopen an obsolete approval from a delayed operations read
  *   - editing disabled retains an explicit current-revision cancellation and its cleanup receipt
  *   - a capability change invalidates an already open new cover approval before any write
+ *   - a source import saved by a newer release refuses the cover change with a reload request and no retry
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -127,4 +128,20 @@ test.each(['offline','running'] as const)('historical recovery still obeys the %
   vi.stubGlobal('fetch',vi.fn(async()=>json({items:[{operationId,startedByMe:true,state:'needsAttention',cleanupPending:false}]})));
   mount(vi.fn(),item,{disabled:fence==='running',approvalDisabled:true});
   expect(await screen.findByRole('button',{name:'Resume operation'})).toBeDisabled();expect(screen.getByRole('button',{name:'Cancel approval'})).toBeDisabled();
+});
+
+test('a source import saved by a newer release refuses the cover change with a reload request and no retry', async () => {
+  const source=detail();source.assets=[{slotId:'cover',state:'ready',byteLength:3,sha256:'a'.repeat(64),contentType:'image/jpeg',tags:null,recovery:{operationId,expectedRevision:1,kind:'upload',startedByMe:true}}];const writes:string[]=[];
+  vi.stubGlobal('fetch',vi.fn(async(path:string,init:RequestInit)=>{
+    if(init.method==='POST'){writes.push(path);return json({code:'ADMIN_IMPORT_RELOAD_REQUIRED'},409);}
+    if(path.endsWith('/cover-operations'))return json({items:[]});
+    if(path.includes('/imports?')){const {manifest,draft:_draft,suggestions,decisions:_decisions,capabilities:_capabilities,receipts:_receipts,assets:_assets,published:_published,publicationRecovery:_recovery,selectedCoverSlotId:_selected,...common}=source;return json({items:[{...common,title:'Synthetic source',rootLabel:manifest.rootLabel,artistName:'',visibility:'public',pendingSuggestions:suggestions.length}],counts:{all:1,analyzing:0,awaitingReview:1,needsAttention:0,completed:0},nextCursor:null});}
+    return json({item:source,receipt:null});
+  }));
+  const confirmed=mount();await waitFor(()=>expect(screen.getByRole('button',{name:'Choose from import projects'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Choose from import projects'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Synthetic source'}));fireEvent.click(await screen.findByRole('button',{name:/Use this image/}));fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Replace catalog cover'}));
+  // The refusal precedes admission: only this action offers a reload, and nothing is left to retry.
+  expect(await screen.findByText('The administrator workbench was updated. Reload the page to continue; unsaved edits on this page are not kept.')).toBeVisible();
+  expect(screen.getByRole('button',{name:'Reload page'})).toBeVisible();expect(screen.queryByRole('button',{name:'Retry original operation'})).not.toBeInTheDocument();
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);expect(confirmed).not.toHaveBeenCalled();expect(writes).toEqual([`/api/admin/v1/catalog/artist/${item.id}/cover`]);
 });

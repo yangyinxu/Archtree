@@ -21,7 +21,7 @@ export function ImportDraftEditor({ draft, filenames, disabled, onChange, artist
         }} /></label>)}
     </fieldset>
     <div className={styles.field}><label className={styles.field}>{t('field.visibility')}<select className={styles.input} value={draft.album.visibility} disabled={disabled || visibilityReadOnly} onChange={event => album({ visibility: event.target.value as 'public' | 'hidden' })}>
-      <option value="hidden">{t('field.hidden')}</option><option value="public">{t('field.public')}</option>
+      <option value="public">{t('field.public')}</option><option value="hidden">{t('field.hidden')}</option>
     </select></label>{visibilityReadOnly && manageAlbumHref && <Link className={styles.meta} to={manageAlbumHref}>{t('catalog_review.edit_visibility')}</Link>}</div>
     {draft.tracks.map((track, index) => <div className={styles.track} key={track.slotId}>
       <span title={filenames.find(file => file.slotId === track.slotId)?.relativePath}>{index + 1}</span>

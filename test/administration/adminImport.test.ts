@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { AdminImportError, defaultDraft, parseDraft, parseImportDate, parseManifest } from '../../src/administration/import/adminImportContract';
+import { AdminImportError, defaultDraft, legacyDefaultDraftV1, parseDraft, parseImportDate, parseManifest } from '../../src/administration/import/adminImportContract';
 import { ImportProviderError, OpenAiImportAnalysisProvider, analysisContext, parseImportJson, validateAnalysisSuggestions, type AnalysisInput } from '../../src/administration/import/adminImportProvider';
 
 const slotId = randomUUID();
@@ -20,8 +20,10 @@ test('naming manifest accepts safe relative context and rejects path escape, con
     invalid(() => parseManifest({ ...manifest, rootLabel: 'absolute/path' }));
     invalid(() => parseManifest({ ...manifest, files: [{ ...manifest.files[0], filename: '\ud800' }] }));
 });
-test('draft retains exact slots, explicit nullable numbers, hidden default and calendar precision', () => {
-    const draft = defaultDraft(manifest); assert.equal(draft.album.visibility, 'hidden'); assert.deepEqual(parseDraft(draft, manifest), draft);
+test('draft retains exact slots, explicit nullable numbers, public default and calendar precision', () => {
+    const draft = defaultDraft(manifest); assert.equal(draft.album.visibility, 'public'); assert.deepEqual(parseDraft(draft, manifest), draft);
+    // The frozen pre-public default differs only in visibility and is still a valid draft for fingerprinting.
+    const legacy = legacyDefaultDraftV1(manifest); assert.deepEqual(legacy, { ...draft, album: { ...draft.album, visibility: 'hidden' } }); assert.deepEqual(parseDraft(legacy, manifest), legacy);
     for (const date of [{ year: 2023, month: 2, day: 29 }, { year: 2024, month: null, day: 3 }, { year: 2024, month: 1 }, { year: '2024', month: 1, day: 1 }]) invalid(() => parseImportDate(date));
     assert.deepEqual(parseImportDate({ year: 2024, month: 2, day: 29 }), { year: 2024, month: 2, day: 29 });
     assert.deepEqual(parseImportDate({ year: 2024, month: null, day: null }), { year: 2024, month: null, day: null });

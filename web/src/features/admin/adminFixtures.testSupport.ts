@@ -9,7 +9,7 @@ export function detail(): ImportDetail {
   return {
     id: projectId, revision: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true,
     manifest: { rootLabel: 'Synthetic Album', files: [{ slotId, filename: '01 First.mp3', relativePath: 'Synthetic Album/01 First.mp3', byteLength: 100 }, { slotId: slotTwo, filename: '02 Second.mp3', relativePath: 'Synthetic Album/02 Second.mp3', byteLength: 200 }] },
-    draft: { album: { title: '', artistName: '', releaseDate: null, visibility: 'hidden' }, tracks: [{ slotId, title: '', trackNumber: null }, { slotId: slotTwo, title: '', trackNumber: null }] },
+    draft: { album: { title: '', artistName: '', releaseDate: null, visibility: 'public' }, tracks: [{ slotId, title: '', trackNumber: null }, { slotId: slotTwo, title: '', trackNumber: null }] },
     analysis: { state: 'complete', generation: 1, operationId: '20000000-0000-4000-8000-000000000001', completedChunks: 2, totalChunks: 2, attemptsUsed: 2, maxAttempts: 22, issue: null },
     assets: [], selectedCoverSlotId: null, published: null, publicationRecovery: null, suggestions: [
       { id: 'cccccccccccccccccccccccc', generation: 1, scope: 'album', slotId: null, field: 'title', baseline: '', value: 'Suggested Album', source: 'folder', evidence: 'Synthetic Album', decision: 'pending' },

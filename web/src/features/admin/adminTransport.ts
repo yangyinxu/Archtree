@@ -5,6 +5,13 @@ import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 export type AdminGuard = ReturnType<typeof adminWorkspace.capture>;
 export { ADMIN_RELOAD_REQUIRED };
+/**
+ * Server refusals, unlike the client-side ADMIN_RELOAD_REQUIRED (a strict-parse failure of this bundle): the project was
+ * saved in a newer format and is read-only for this release, or an append's visibility differs from the target Album.
+ * They live here, beside the transport, so a command hook can read them without loading the import schemas.
+ */
+export const ADMIN_IMPORT_RELOAD_REQUIRED = 'ADMIN_IMPORT_RELOAD_REQUIRED';
+export const ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH = 'ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH';
 
 /**
  * Read results belong to a view generation; admitted writes may finish while that same account uses User view.

@@ -11,7 +11,7 @@
 import { ApiError } from '../../api/client';
 import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 import { adminRequest, importPath, type AdminGuard } from './adminTransport';
-import { responseSchema, type ImportDetail, type ImportResponse } from './adminApi';
+import { ADMIN_IMPORT_RELOAD_REQUIRED, responseSchema, type ImportDetail, type ImportResponse } from './adminApi';
 import { liveAsset, uploadPublicationLocked } from './importUploadRules';
 
 /** One administrator approval uploads every selected file sequentially; each file keeps its own intent and outcome. */
@@ -186,6 +186,8 @@ export class ImportUploadQueue {
     if (!(error instanceof ApiError) || error.kind !== 'http') { await this.refresh(guard); return { status: status('unknown', operationId), stop: 'interrupted' }; }
     if (error.status === 409) await this.refresh(guard);
     const code = error.code ?? null;
+    // A project saved by a newer release refuses uploads before admission, so this file may later be retried as a new intent.
+    if (error.status === 409 && code === ADMIN_IMPORT_RELOAD_REQUIRED) return { status: status(reconciling ? 'unknown' : 'failed', operationId, code), stop: 'reload' };
     if (error.status === 409 && code === 'ADMIN_IMPORT_PUBLICATION_LOCKED') return { status: status(reconciling ? 'unknown' : 'failed', operationId, code), stop: 'publication' };
     if (error.status === 409 && code === 'ADMIN_IMPORT_OPERATION_LIMIT') return { status: status('failed', operationId, code), stop: 'limit' };
     if (error.status === 503 && code === 'ADMIN_IMPORT_STORAGE_UNAVAILABLE') return { status: status('failed', operationId, code), stop: 'unavailable' };

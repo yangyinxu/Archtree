@@ -22,6 +22,7 @@ import { adminCatalogEditableFields, adminCatalogItemRevision, readAdminCatalogR
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, cleanText, exact, invalidImport, objectId, parseDraft, record, uuid, type ImportDate, type ImportDraft, type ImportManifest, type ImportWorkbenchFilter } from '../import/adminImportContract';
 import { adminImportDto, adoptAdminProjectSuggestions, analyzeAdminProject, idleAnalysis, importCollection, importDigest, mutateAdminProject, parseAdminProjectMutation, withImportAdmin, type AdminImportDocument, type AdminProjectPolicy, type ProjectReceipt } from '../import/adminImportService';
 import { OpenAiImportAnalysisProvider, type ImportAnalysisProvider } from '../import/adminImportProvider';
+import { importDraftWritable, LEGACY_REVIEW_RECEIPT_KINDS, legacyCatalogAppliedView, legacyCatalogSourceView, legacyReceiptsView } from '../import/adminImportDraftCompat';
 import type { CatalogReviewDetail, CatalogReviewField, CatalogReviewReceipt, CatalogReviewResponse, CatalogReviewSource, CatalogReviewWorkbench } from './adminCatalogReviewContract';
 
 const fail = (status: number, code: string): never => { throw new AdminImportError(status, code); };
@@ -32,16 +33,20 @@ const reviewId = (id: string) => objectId(id) ? new ObjectId(id) : missing();
 const currentRevision = (value: unknown): value is string => typeof value === 'string' && /^cr_[A-Za-z0-9_-]{43}$/.test(value);
 const publicReceipt = ({ operationId, kind, revision }: ProjectReceipt): CatalogReviewReceipt => ({ operationId, kind: kind as CatalogReviewReceipt['kind'], revision });
 
-/** DTOs deliberately omit upload/publication/duplicate and storage identities from this separate protocol. */
+/**
+ * DTOs deliberately omit upload/publication/duplicate and storage identities from this separate protocol. Every nested
+ * value is read through the same v1 allowlist as imports, and a newer-format review is read-only: it offers no analysis or apply.
+ */
 export async function catalogReviewDto(doc: AdminImportDocument, actor: string, session: ClientSession): Promise<CatalogReviewDetail> {
     if (doc.purpose !== 'catalogReview' || !doc.catalogSource) return missing();
-    const shared = adminImportDto(doc, actor), sourceStatus = await catalogReviewSourceStatus(doc, session);
+    const shared = adminImportDto(doc, actor), sourceStatus = await catalogReviewSourceStatus(doc, session), source = legacyCatalogSourceView(doc.catalogSource);
     return {
         id: shared.id, revision: shared.revision, createdAt: shared.createdAt, updatedAt: shared.updatedAt,
         startedByMe: shared.startedByMe, sourceStatus, state: doc.catalogApplied ? 'applied' : 'reviewing',
-        source: doc.catalogSource, draft: doc.draft, analysis: shared.analysis, suggestions: shared.suggestions,
-        capabilities: { analysis: !doc.catalogApplied && shared.capabilities.analysis, apply: !doc.catalogApplied && sourceStatus === 'current' },
-        applied: doc.catalogApplied ?? null, receipts: doc.receipts.map(publicReceipt)
+        // A review never changes visibility, so its draft always shows the frozen source visibility.
+        source, draft: { ...shared.draft, album: { ...shared.draft.album, visibility: source.album.visibility } }, analysis: shared.analysis, suggestions: shared.suggestions,
+        capabilities: { analysis: !doc.catalogApplied && shared.capabilities.analysis, apply: importDraftWritable(doc) && !doc.catalogApplied && sourceStatus === 'current' },
+        applied: legacyCatalogAppliedView(doc.catalogApplied, new Set(source.tracks.map(track => track.slotId))), receipts: legacyReceiptsView(doc.receipts, LEGACY_REVIEW_RECEIPT_KINDS) as CatalogReviewReceipt[]
     };
 }
 const response = async (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null, session: ClientSession): Promise<CatalogReviewResponse> => ({ item: await catalogReviewDto(doc, actor, session), receipt: receipt ? publicReceipt(receipt) : null });
@@ -208,6 +213,6 @@ export async function listCatalogReviews(actor: string, query: Record<string, un
         for (const [name, selector] of Object.entries(filters)) counts[name as ImportWorkbenchFilter] = await importCollection().countDocuments({ $and: [base, selector] }, { session, maxTimeMS: 3_000 });
         const docs = await importCollection().find({ $and: [base, filters[filter as ImportWorkbenchFilter], page] }, { session }).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).maxTimeMS(3_000).toArray();
         const more = docs.length > limit; docs.splice(limit); const last = docs[docs.length - 1];
-        return { counts, items: docs.map(doc => { const item = adminImportDto(doc, actor); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, state: doc.catalogApplied ? 'applied' as const : 'reviewing' as const, analysis: item.analysis, albumId: doc.catalogSource!.album.id, title: item.draft.album.title, pendingSuggestions: item.suggestions.filter(value => value.decision === 'pending').length }; }), nextCursor: more && last ? Buffer.from(JSON.stringify({ id: String(last._id), at: last.createdAt.toISOString(), scope })).toString('base64url') : null };
+        return { counts, items: docs.map(doc => { const item = adminImportDto(doc, actor); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, state: doc.catalogApplied ? 'applied' as const : 'reviewing' as const, analysis: item.analysis, albumId: legacyCatalogSourceView(doc.catalogSource!).album.id, title: item.draft.album.title, pendingSuggestions: item.suggestions.filter(value => value.decision === 'pending').length }; }), nextCursor: more && last ? Buffer.from(JSON.stringify({ id: String(last._id), at: last.createdAt.toISOString(), scope })).toString('base64url') : null };
     });
 }

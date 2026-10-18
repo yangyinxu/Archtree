@@ -7,11 +7,14 @@
  *   - refresh retains unsaved changes until explicitly loading a newer saved version
  *   - A to B route owns a new mutation and cannot show or retry the earlier project
  *   - file-only intake needs no folder name and Create starts one sequential upload per file
+ *   - the New import page explains the public default and creates the import without a draft
  *   - folder intake keeps the editable folder name
  *   - an upload that bumps the revision keeps unsaved edits without a conflict
  *   - a view change between Create and its confirmation stops the queue before any file is sent, and Resume uploads them
  *   - a Create confirmed after leaving its page still starts the approved uploads, and New import later opens a fresh form
  *   - an outdated save response asks for a page reload and offers no retry of the original intent
+ *   - a project saved by a newer release refuses a save with a reload request for that action only
+ *   - an append into an Album of different visibility explains the mismatch instead of a generic conflict
  *   - cancelled publication cleanup permits manual review while analysis and source mutations stay blocked
  *   - stage navigation keeps private edits and selected suggestions without a mutation
  *   - workbench refresh stays in its header while personal filtering remains with search
@@ -71,7 +74,7 @@ test('manual edits save only the private draft and never start analysis or publi
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   await waitFor(() => expect(screen.getByText('Saved to private draft')).toBeVisible());
   expect(writes).toHaveLength(1); expect(writes[0].path).toBe(`/api/admin/v1/imports/${projectId}`);
-  expect(writes[0].body).toMatchObject({ expectedRevision: 1, draft: { album: { title: 'Human title', visibility: 'hidden' } } });
+  expect(writes[0].body).toMatchObject({ expectedRevision: 1, draft: { album: { title: 'Human title', visibility: 'public' } } });
 });
 
 test('refresh retains unsaved changes until explicitly loading a newer saved version', async () => {
@@ -131,6 +134,17 @@ test('file-only intake needs no folder name and Create starts one sequential upl
   expect(JSON.stringify(server.created[0])).not.toContain('synthetic bytes');
   expect(server.uploads.map(path => path.split('/').at(-1))).toEqual(server.created[0].manifest.files.map((file: { slotId: string }) => file.slotId)); expect(server.max()).toBe(1);
   await screen.findByRole('heading', { name: 'Untitled Album' }); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+test('the New import page explains the public default and creates the import without a draft', async () => {
+  const server = createServer(); mount('/admin/imports/new');
+  expect(await screen.findByText('A new import is public by default. You can change its visibility before publishing.')).toBeVisible();
+  fireEvent.change(document.querySelectorAll('input[type=file]')[1], { target: { files: [new File(['synthetic bytes'], 'Song.mp3', { type: 'audio/mpeg' })] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create import and upload files' }));
+  await waitFor(() => expect(server.created).toHaveLength(1)); expect(server.created[0]).not.toHaveProperty('draft');
+  // The heading renders before the project loads, so wait for the Draft editor itself.
+  const visibility = await screen.findByRole('combobox', { name: 'Visibility' });
+  expect(visibility).toHaveValue('public');
+  expect(within(visibility).getAllByRole('option').map(option => option.getAttribute('value'))).toEqual(['public', 'hidden']);
 });
 test('folder intake keeps the editable folder name', async () => {
   const server = createServer(); mount('/admin/imports/new'); const picker = document.querySelectorAll('input[type=file]')[0];
@@ -211,6 +225,35 @@ test('an outdated save response asks for a page reload and offers no retry of th
   await waitFor(() => expect(screen.getAllByRole('button', { name: 'Reload page' })).toHaveLength(2));
   expect(screen.getAllByText(message)).toHaveLength(2); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(true);
   expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument(); expect(patches).toHaveLength(1);
+});
+
+test('a project saved by a newer release refuses a save with a reload request for that action only', async () => {
+  const item = detail(), patches: string[] = [], message = 'The administrator workbench was updated. Reload the page to continue; unsaved edits on this page are not kept.';
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method !== 'PATCH') return json({ item, receipt: null });
+    patches.push(JSON.parse(String(init.body)).operationId); return json({ code: 'ADMIN_IMPORT_RELOAD_REQUIRED' }, 409);
+  }));
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Human title' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  // Only the save status offers the reload: the bundle itself is current, so the navigation alert stays hidden.
+  await waitFor(() => expect(screen.getAllByRole('button', { name: 'Reload page' })).toHaveLength(1));
+  expect(screen.getAllByText(message)).toHaveLength(1); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument(); expect(patches).toHaveLength(1);
+});
+test('an append into an Album of different visibility explains the mismatch instead of a generic conflict', async () => {
+  const item = detail(); item.capabilities.publish = true; item.publication = 'notStarted'; const publishes: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (init.method === 'POST' && path.endsWith('/publish')) { publishes.push(path); return json({ code: 'ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH' }, 409); }
+    return json({ item, receipt: null });
+  }));
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.click(await screen.findByRole('tab', { name: 'Publish' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Publish Album' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' }));
+  expect(await screen.findByText("This import adds tracks to an existing Album whose visibility is different. Set this import's visibility to match that Album, save it, then approve publishing again.")).toBeVisible();
+  expect(screen.queryByText('This project changed elsewhere. Refresh its saved version and compare your changes before trying again.')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument(); expect(publishes).toHaveLength(1);
 });
 
 test('cancelled publication cleanup permits manual review while analysis and source mutations stay blocked', async () => {

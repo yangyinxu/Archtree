@@ -1,0 +1,486 @@
+{
+  "_id": {
+    "$oid": "b8fe89a0a6b4501d5db35e13"
+  },
+  "draftVersion": 2,
+  "actorId": "0000000000000000000000a1",
+  "revision": 6,
+  "createdAt": {
+    "$date": "2026-11-01T09:01:00Z"
+  },
+  "updatedAt": {
+    "$date": "2026-11-01T09:06:00Z"
+  },
+  "manifest": {
+    "rootLabel": "Synthetic Primary - Synthetic Compat Album",
+    "files": [
+      {
+        "slotId": "00000009-0000-4000-a000-000000000001",
+        "filename": "01 - Synthetic Opening.mp3",
+        "relativePath": "Disc 1/01 - Synthetic Opening.mp3",
+        "byteLength": 4096
+      },
+      {
+        "slotId": "00000009-0000-4000-a000-000000000002",
+        "filename": "01 - Synthetic Reprise.mp3",
+        "relativePath": "Disc 2/01 - Synthetic Reprise.mp3",
+        "byteLength": null
+      }
+    ]
+  },
+  "draft": {
+    "album": {
+      "title": "Synthetic Compat Album",
+      "artists": [
+        {
+          "key": "00000009-0000-4000-8000-0000000000e1",
+          "name": "Synthetic Primary",
+          "role": "primary",
+          "joinPhrase": " feat. ",
+          "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"
+        },
+        {
+          "key": "00000009-0000-4000-8000-0000000000e2",
+          "name": "Synthetic Guest",
+          "role": "featured",
+          "joinPhrase": null,
+          "musicBrainzId": null
+        }
+      ],
+      "label": {
+        "name": "Synthetic Label",
+        "musicBrainzId": null
+      },
+      "releaseDate": {
+        "year": 2026,
+        "month": 3,
+        "day": null
+      },
+      "visibility": "public",
+      "futureAlbumField": "future album value"
+    },
+    "tracks": [
+      {
+        "slotId": "00000009-0000-4000-a000-000000000001",
+        "title": "Synthetic Opening",
+        "discNumber": 1,
+        "trackNumber": 1
+      },
+      {
+        "slotId": "00000009-0000-4000-a000-000000000002",
+        "title": "Synthetic Reprise",
+        "discNumber": 2,
+        "trackNumber": 1
+      }
+    ]
+  },
+  "draftOrigins": {
+    "album.title": "administrator",
+    "album.artists": "automatic",
+    "album.label": "automatic",
+    "album.releaseDate": "automatic",
+    "album.visibility": "administrator",
+    "tracks.00000009-0000-4000-a000-000000000001.title": "automatic",
+    "tracks.00000009-0000-4000-a000-000000000001.discNumber": "automatic",
+    "tracks.00000009-0000-4000-a000-000000000001.trackNumber": "automatic",
+    "tracks.00000009-0000-4000-a000-000000000002.title": "administrator",
+    "tracks.00000009-0000-4000-a000-000000000002.discNumber": "automatic",
+    "tracks.00000009-0000-4000-a000-000000000002.trackNumber": "automatic"
+  },
+  "analysis": {
+    "state": "queued",
+    "generation": 1,
+    "operationId": "00000009-0000-4000-8000-000000000004",
+    "actorId": "0000000000000000000000a1",
+    "grantExpiresAt": {
+      "$date": "2099-01-01T00:00:00Z"
+    },
+    "baseline": {
+      "album": {
+        "title": "Synthetic Compat Album",
+        "artists": [
+          {
+            "key": "00000009-0000-4000-8000-0000000000e1",
+            "name": "Synthetic Primary",
+            "role": "primary",
+            "joinPhrase": " feat. ",
+            "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"
+          }
+        ],
+        "label": null,
+        "releaseDate": null,
+        "visibility": "public"
+      },
+      "tracks": [
+        {
+          "slotId": "00000009-0000-4000-a000-000000000001",
+          "title": "Synthetic Opening",
+          "discNumber": 1,
+          "trackNumber": 1
+        },
+        {
+          "slotId": "00000009-0000-4000-a000-000000000002",
+          "title": "Synthetic Reprise",
+          "discNumber": 2,
+          "trackNumber": 1
+        }
+      ]
+    },
+    "tags": [],
+    "chunks": [
+      {
+        "index": 0,
+        "slots": [],
+        "album": true,
+        "hash": "912ddbf9c8d5d81fa38533fa802d1e91417b12202565fb23ced50f5a0b0786cf",
+        "state": "complete",
+        "attemptId": "00000009-0000-4000-8000-000000000040",
+        "startedAt": {
+          "$date": "2026-11-01T09:04:00Z"
+        },
+        "completedAt": {
+          "$date": "2026-11-01T09:04:30Z"
+        }
+      },
+      {
+        "index": 1,
+        "slots": [
+          "00000009-0000-4000-a000-000000000001",
+          "00000009-0000-4000-a000-000000000002"
+        ],
+        "album": false,
+        "hash": "7fe8f70cb6cd7de4528c5fd0e0c82fe0b50c9d02a0991137f469aef352169385",
+        "state": "pending",
+        "attemptId": null,
+        "startedAt": null,
+        "completedAt": null
+      }
+    ],
+    "issue": null,
+    "leaseOwner": null,
+    "leaseUntil": null
+  },
+  "analysisHistory": [],
+  "attemptsUsed": 1,
+  "suggestions": [
+    {
+      "scope": "album",
+      "slotId": null,
+      "field": "artists",
+      "baseline": [
+        {
+          "key": "00000009-0000-4000-8000-0000000000e1",
+          "name": "Synthetic Primary",
+          "role": "primary",
+          "joinPhrase": " feat. ",
+          "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"
+        }
+      ],
+      "value": [
+        {
+          "key": "00000009-0000-4000-8000-0000000000e1",
+          "name": "Synthetic Primary",
+          "role": "primary",
+          "joinPhrase": " feat. ",
+          "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"
+        },
+        {
+          "key": "00000009-0000-4000-8000-0000000000e2",
+          "name": "Synthetic Guest",
+          "role": "featured",
+          "joinPhrase": null,
+          "musicBrainzId": null
+        }
+      ],
+      "source": "context",
+      "evidence": "Selected root: Synthetic Primary - Synthetic Compat Album",
+      "id": "1841aae643a83f45acba69f4",
+      "generation": 1,
+      "decision": "pending"
+    },
+    {
+      "scope": "album",
+      "slotId": null,
+      "field": "title",
+      "baseline": "Synthetic Compat Album",
+      "value": "Synthetic Compat Album (Deluxe)",
+      "source": "folder",
+      "evidence": "Selected root: Synthetic Primary - Synthetic Compat Album",
+      "id": "6d91973d95b005647626d360",
+      "generation": 1,
+      "decision": "pending"
+    },
+    {
+      "scope": "track",
+      "slotId": "00000009-0000-4000-a000-000000000001",
+      "field": "title",
+      "baseline": "Synthetic Opening",
+      "value": "Synthetic Opening Theme",
+      "source": "lookup",
+      "evidence": "Synthetic lookup evidence",
+      "id": "705aa07dda352ef898aeac55",
+      "generation": 1,
+      "decision": "pending"
+    }
+  ],
+  "decisions": [
+    {
+      "scope": "artist",
+      "slotId": null,
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null,
+      "entryKey": "00000009-0000-4000-8000-0000000000e1",
+      "boundName": "Synthetic Primary"
+    },
+    {
+      "scope": "artist",
+      "slotId": null,
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null,
+      "entryKey": "00000009-0000-4000-8000-0000000000e2",
+      "boundName": "Synthetic Guest"
+    },
+    {
+      "scope": "label",
+      "slotId": null,
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null,
+      "entryKey": null,
+      "boundName": "Synthetic Label"
+    },
+    {
+      "scope": "album",
+      "slotId": null,
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null,
+      "entryKey": null,
+      "boundName": null
+    },
+    {
+      "scope": "track",
+      "slotId": "00000009-0000-4000-a000-000000000001",
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null,
+      "entryKey": null,
+      "boundName": null
+    },
+    {
+      "scope": "track",
+      "slotId": "00000009-0000-4000-a000-000000000002",
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null,
+      "entryKey": null,
+      "boundName": null
+    }
+  ],
+  "receipts": [
+    {
+      "operationId": "00000009-0000-4000-8000-000000000001",
+      "kind": "create",
+      "revision": 1,
+      "hash": "9c80b14ccd728e1dca894347276226f55ac191c6058534a3d653da89d9d347f7",
+      "actorId": "0000000000000000000000a1",
+      "at": {
+        "$date": "2026-11-01T09:01:00Z"
+      }
+    },
+    {
+      "operationId": "00000009-0000-4000-8000-000000000002",
+      "kind": "edit",
+      "revision": 2,
+      "actorId": "0000000000000000000000a1",
+      "hash": "28d9d0be91fa5f309740587b523a700a0c7f72d0a5ca915bcd826078a3093f4a",
+      "at": {
+        "$date": "2026-11-01T09:02:00Z"
+      }
+    },
+    {
+      "operationId": "00000009-0000-4000-8000-000000000003",
+      "kind": "upload",
+      "revision": 3,
+      "actorId": "0000000000000000000000a1",
+      "hash": "d31efb42d8b7fb1607d274d444d84f798e408261021e4dfe18f3bac1dd4fc565",
+      "at": {
+        "$date": "2026-11-01T09:03:00Z"
+      }
+    },
+    {
+      "operationId": "00000009-0000-4000-8000-000000000004",
+      "kind": "analyze",
+      "revision": 4,
+      "actorId": "0000000000000000000000a1",
+      "hash": "c852d83b8649769e4e51250269cb8b393e79f4b0cdfbd2c82c46df003ce59626",
+      "at": {
+        "$date": "2026-11-01T09:04:00Z"
+      }
+    },
+    {
+      "operationId": "00000009-0000-4000-8000-000000000005",
+      "kind": "patch",
+      "revision": 6,
+      "actorId": "0000000000000000000000a1",
+      "hash": "5b83c67ea3fc2761e24d8dcfd8b64d13343c41c594e558ff288d6819b04daa18",
+      "at": {
+        "$date": "2026-11-01T09:06:00Z"
+      },
+      "path": "album.title"
+    }
+  ],
+  "automaticReceipts": [
+    {
+      "operationId": "00000009-0000-4000-8000-000000000030",
+      "kind": "upload",
+      "revision": 5,
+      "actorId": "0000000000000000000000a1",
+      "hash": "f06698916d8cc535173bf79394b13e9fd619d6ebf04a6a6947790dbdfbe40eb5",
+      "at": {
+        "$date": "2026-11-01T09:05:00Z"
+      }
+    }
+  ],
+  "media": {
+    "assets": [
+      {
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "versionId": "stage-version",
+        "etag": "\"stage-etag\"",
+        "updatedAt": {
+          "$date": "2026-11-01T09:03:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": "04:11",
+        "format": "MP3",
+        "representation": null,
+        "tags": {
+          "title": "Synthetic Opening",
+          "album": "Synthetic Compat Album",
+          "artists": [
+            "Synthetic Primary",
+            "Synthetic Guest"
+          ],
+          "year": 2026,
+          "trackNumber": 1,
+          "albumArtist": "Synthetic Primary",
+          "label": "Synthetic Label",
+          "discNumber": 1,
+          "identifiers": {
+            "musicBrainzReleaseId": "00000009-0000-4000-8000-0000000000f2"
+          }
+        },
+        "slotId": "00000009-0000-4000-a000-000000000001",
+        "operationId": "00000009-0000-4000-8000-000000000003",
+        "sha256": "719b383821e6441a28fd740b613e025e2e8cae1240f47297cef590f888c1cb31",
+        "byteLength": 4096,
+        "contentType": "audio/mpeg",
+        "filename": "01 - Synthetic Opening.mp3",
+        "state": "ready",
+        "recovery": {
+          "operationId": "00000009-0000-4000-8000-000000000003",
+          "expectedRevision": 2,
+          "kind": "upload",
+          "actorId": "0000000000000000000000a1"
+        },
+        "key": "imports/b8fe89a0a6b4501d5db35e13/00000009-0000-4000-a000-000000000001/00000009-0000-4000-8000-000000000003"
+      },
+      {
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "versionId": "stage-version",
+        "etag": "\"stage-etag\"",
+        "updatedAt": {
+          "$date": "2026-11-01T09:03:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": null,
+        "format": null,
+        "representation": null,
+        "tags": null,
+        "slotId": "embedded-00000009-0000-4000-a000-000000000001",
+        "operationId": "00000009-0000-4000-8000-000000000030",
+        "sha256": "59353ff2c987657686b1510ce52d67a888c1704ffc9c4185ddf33dd1caeae2b4",
+        "byteLength": 3073,
+        "contentType": "image/jpeg",
+        "filename": "embedded.jpeg",
+        "state": "ready",
+        "recovery": {
+          "operationId": "00000009-0000-4000-8000-000000000030",
+          "expectedRevision": 4,
+          "kind": "upload",
+          "actorId": "0000000000000000000000a1"
+        },
+        "key": "imports/b8fe89a0a6b4501d5db35e13/embedded-00000009-0000-4000-a000-000000000001/00000009-0000-4000-8000-000000000030"
+      },
+      {
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "versionId": "stage-version",
+        "etag": "\"stage-etag\"",
+        "updatedAt": {
+          "$date": "2026-11-01T09:03:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": null,
+        "format": null,
+        "representation": null,
+        "tags": null,
+        "slotId": "lookup-00000009-0000-4000-a000-0000000000c1",
+        "operationId": "00000009-0000-4000-8000-000000000031",
+        "sha256": "fa3cd46a2d6e2667bc8e72e2c85be49cf614b535f47cd0cb7a6ddd7661edb747",
+        "byteLength": 2048,
+        "contentType": "image/jpeg",
+        "filename": "lookup.jpeg",
+        "state": "staging",
+        "recovery": {
+          "operationId": "00000009-0000-4000-8000-000000000031",
+          "expectedRevision": 5,
+          "kind": "upload",
+          "actorId": "0000000000000000000000a1"
+        },
+        "key": "imports/b8fe89a0a6b4501d5db35e13/lookup-00000009-0000-4000-a000-0000000000c1/00000009-0000-4000-8000-000000000031"
+      },
+      {
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "versionId": "stage-version",
+        "etag": "\"stage-etag\"",
+        "updatedAt": {
+          "$date": "2026-11-01T09:03:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": null,
+        "format": null,
+        "representation": null,
+        "tags": null,
+        "slotId": "embedded-00000009-0000-4000-a000-000000000002",
+        "operationId": "00000009-0000-4000-8000-000000000032",
+        "sha256": "068c0888dc6ff2536166ef2bb77ae71d2e51754e6b478e5f45dda7b87cc071d0",
+        "byteLength": 1024,
+        "contentType": "image/png",
+        "filename": "embedded.png",
+        "state": "ready",
+        "recovery": {
+          "operationId": "00000009-0000-4000-8000-000000000032",
+          "expectedRevision": 5,
+          "kind": "automatic",
+          "actorId": "0000000000000000000000a1"
+        },
+        "key": "imports/b8fe89a0a6b4501d5db35e13/embedded-00000009-0000-4000-a000-000000000002/00000009-0000-4000-8000-000000000032"
+      }
+    ],
+    "selectedCoverSlotId": "lookup-00000009-0000-4000-a000-0000000000c1"
+  },
+  "futureTopLevel": {
+    "note": "future top-level value"
+  }
+}

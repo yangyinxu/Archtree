@@ -10,6 +10,7 @@
  *   - multipart Unicode filename and image preview remain bounded behind exact cookie viewer and current admin
  *   - publication cancellation uses the guarded private route and a new immutable approval-bound receipt
  *   - reconcile route requires authentication and current admin before JSON parsing and is no-store
+ *   - a project saved in a newer draft format answers a change with the bounded reload code and still admits stopping work
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -89,7 +90,7 @@ test('multipart Unicode filename and image preview remain bounded behind exact c
 test('publication cancellation uses the guarded private route and a new immutable approval-bound receipt', async () => {
     const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), publicationOperationId = randomUUID();
     await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(created.item.id) }, { $set: { 'media.publication': {
-        operationId: publicationOperationId, actorId: actor.toHexString(), state: 'needsAttention', tracks: [], cover: null,
+        operationId: publicationOperationId, actorId: actor.toHexString(), state: 'needsAttention', snapshot: created.item.draft, tracks: [], cover: null,
         leaseOwner: null, leaseUntil: new Date(Date.now() + 60_000), grantExpiresAt: new Date(0)
     } } });
     const path = `/api/admin/v1/imports/${created.item.id}/cancel-publication`, intent = { operationId: randomUUID(), expectedRevision: 1, publicationOperationId };
@@ -124,4 +125,15 @@ test('reconcile route requires authentication and current admin before JSON pars
     const reconciled = await request(path, 'POST', { operationId }); assert.equal(reconciled.status, 200); assert.equal(reconciled.headers.get('cache-control'), 'no-store');
     const result = await reconciled.json(); assert.equal(result.receipt.kind, 'upload'); assert.equal(result.receipt.operationId, operationId); assert.equal(result.item.assets[0].state, 'ready');
     assert.equal(JSON.stringify(result).includes('synthetic-private'), false);
+});
+
+test('a project saved in a newer draft format answers a change with the bounded reload code and still admits stopping work', async () => {
+    const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), path = `/api/admin/v1/imports/${created.item.id}`;
+    await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(created.item.id) }, { $set: { draftVersion: 2 } });
+    const refused = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 1, draft: created.item.draft });
+    assert.equal(refused.status, 409); assert.equal(refused.headers.get('cache-control'), 'no-store'); assert.deepEqual(await refused.json(), { code: 'ADMIN_IMPORT_RELOAD_REQUIRED' });
+    const read = await request(path); assert.equal(read.status, 200); assert.equal((await read.json()).item.revision, 1);
+    const stopped = await request(`${path}/cancel-analysis`, 'POST', { operationId: randomUUID(), expectedRevision: 1 });
+    assert.equal(stopped.status, 200); const result = await stopped.json(); assert.equal(result.receipt.kind, 'cancel-analysis'); assert.equal(result.item.revision, 2);
+    assert.equal(JSON.stringify(result).includes('draftVersion'), false);
 });

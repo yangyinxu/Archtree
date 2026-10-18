@@ -2024,6 +2024,13 @@
       ],
       "variables": {}
     },
+    "admin.common.visibility_mismatch": {
+      "description": "Administrator workbench: publishing an append was refused because the import visibility differs from the existing Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.conversion.cancel_upload": {
       "description": "Web administrator conversion cancel_upload.",
       "delivery": [
@@ -2835,6 +2842,13 @@
     },
     "admin.import.root_help": {
       "description": "Administrator workbench: import root help.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.visibility_default": {
+      "description": "Administrator workbench: new imports are public by default and their visibility can be changed before publishing.",
       "delivery": [
         "runtime"
       ],

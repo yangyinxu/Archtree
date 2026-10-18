@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import { ApiError } from '../../api/client';
 import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
-import { adminRequest, responseSchema, type ImportDetail, type ImportResponse } from './adminApi';
+import { ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH, ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, responseSchema, type ImportDetail, type ImportResponse } from './adminApi';
 
 interface Intent { path: string; method: string; body?: BodyInit; headers?: Record<string, string>; operationId: string }
 type AssetRecovery = { operationId: string; expectedRevision: number; startedByMe: boolean; kind: 'upload' | 'cleanup' };
@@ -12,7 +12,7 @@ const assetFinished = (intent: Intent, item: ImportDetail) => {
   const asset = item.assets.find(asset => asset.slotId === decodeURIComponent(match[1]));
   return asset?.recovery?.operationId === intent.operationId && asset.recovery.kind === 'cleanup' && asset.state === 'deleted';
 };
-interface Snapshot { running: boolean; intent: Intent | null; error: 'unknown' | 'conflict' | 'error' | 'reload' | null; result: ImportResponse | null }
+interface Snapshot { running: boolean; intent: Intent | null; error: 'unknown' | 'conflict' | 'error' | 'reload' | 'visibility_mismatch' | null; result: ImportResponse | null }
 /** One immutable intent survives navigation and lost responses; retries never invent a second paid job. Uploads use the upload queue. */
 export class AdminMutation {
   private state: Snapshot = { running: false, intent: null, error: null, result: null };
@@ -65,9 +65,12 @@ export class AdminMutation {
       if (!adminWorkspace.current(this.owner, false)) return;
       // An outdated bundle cannot read the result, so it offers a reload instead of resending the intent.
       if (error instanceof ApiError && error.code === ADMIN_RELOAD_REQUIRED) { this.completion = null; this.set({ running: false, intent: null, error: 'reload', result: null }); return; }
+      // A project saved by a newer release refuses this change before admission; only this action asks for a reload.
+      if (error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === ADMIN_IMPORT_RELOAD_REQUIRED) { this.completion = null; this.set({ running: false, intent: null, error: 'reload', result: null }); return; }
       const rejected = error instanceof ApiError && error.kind === 'http' && [400, 401, 403, 404, 409, 422].includes(error.status ?? 0);
       if (rejected) this.completion = null;
-      this.set({ running: false, intent: rejected ? null : intent, error: rejected ? (error instanceof ApiError && error.status === 409 ? 'conflict' : 'error') : 'unknown', result: null });
+      const mismatch = error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH;
+      this.set({ running: false, intent: rejected ? null : intent, error: mismatch ? 'visibility_mismatch' : rejected ? (error instanceof ApiError && error.status === 409 ? 'conflict' : 'error') : 'unknown', result: null });
     }
   }
 }

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-Q-oVvKfhmFnlstmkMT_0-WMoJAaOBnUbIKbsibooZKo",
+  "revision": "sha256-SV81Xn4e0KGGNCxPSvwcIaIUIjHomkXlVKF7d2o3UdQ",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.checking": "Checking your account…",
@@ -287,6 +287,7 @@
     "admin.common.unknown": "The outcome is unconfirmed. Retry the same operation or refresh its saved status.",
     "admin.common.unsaved": "Unsaved changes",
     "admin.common.untitled": "Untitled Album",
+    "admin.common.visibility_mismatch": "This import adds tracks to an existing Album whose visibility is different. Set this import's visibility to match that Album, save it, then approve publishing again.",
     "admin.conversion.cancel_upload": "Abandon this unconfirmed replacement",
     "admin.conversion.cancelled": "Replacement abandoned; source and local MP3 kept. Pending server cleanup can still be reconciled.",
     "admin.conversion.capture": "Create local conversion task",
@@ -403,6 +404,7 @@
     "admin.import.no_upload": "Audio upload and publication are unavailable. You can continue reviewing the draft.",
     "admin.import.root": "Folder or Album context",
     "admin.import.root_help": "This name, prefilled from the selected folder, is used as Album context. Only the selected folder hierarchy is included.",
+    "admin.import.visibility_default": "A new import is public by default. You can change its visibility before publishing.",
     "admin.issue.budget_exhausted": "This project reached its analysis limit. Continue reviewing or editing the saved draft.",
     "admin.issue.grant_expired": "Analysis permission expired. Review its confirmed status before continuing.",
     "admin.issue.permission_lost": "Analysis stopped because its initiating administrator no longer has permission.",

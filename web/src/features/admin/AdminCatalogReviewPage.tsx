@@ -102,6 +102,7 @@ function ReviewProject({ id }: { id: string }) {
     {query.isPending && <p role="status">{t('common.loading')}</p>}
     {query.isError && <p role="alert" className={styles.error}>{t('common.error')}</p>}
     {mutation.error && <div role="alert" className={styles.error}><p>{t(`common.${mutation.error}`)}</p>
+      {mutation.error === 'reload' && <button className={styles.button} type="button" onClick={() => window.location.reload()}>{t('common.reload_action')}</button>}
       {mutation.intent && <button className={styles.button} type="button" disabled={mutation.running || !online} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}
     </div>}
     {item && editor && <>

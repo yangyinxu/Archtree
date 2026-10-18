@@ -4,7 +4,7 @@
  *              resumeAdminImportPublication, startAdminImportPublisher
  * Internal
  *   Functions: conflict, ready, credits, date, currentApproval, target, cleanupCancelledPublication,
- *              commitPublication
+ *              commitPublication, commitLegacyPublication
  *   Constants: candidateProjection
  * @end-catalog */
 
@@ -22,7 +22,7 @@ import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { sortTrackIdsByDiscAndTrackNumber, sortTrackIdsByEmbeddedTrackNumber } from '../../services/catalog/albumTrackLinkService';
 import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
 import { getAdminImport, importCandidateProjection, importCollection, importPurposeFilter, importCandidateRevision, mutateAdminImport, touchImportAdmin, withImportAdmin } from './adminImportService';
-import { importPrivateStorageReady, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
+import { importPrivateStorageReady, importPublicationSupported, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
 
 const conflict = () => new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CONFLICT');
@@ -55,7 +55,9 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         let existingAlbum: any = null;
         if (albumDecision.action === 'reuse') {
             existingAlbum = await getDb()!.collection('albums').findOne({ _id: new ObjectId(albumDecision.candidateId!), ...readyAlbumLifecycleFilter }, { session, projection: candidateProjection });
-            if (!existingAlbum || importCandidateRevision(existingAlbum) !== albumDecision.candidateRevision || (existingAlbum.visibility ?? 'public') !== doc.draft.album.visibility || artistDecision.action !== 'reuse' || !Array.isArray(existingAlbum.credits) || !existingAlbum.credits.some((credit: any) => credit.subjectType === 'artist' && credit.role === 'primary' && credit.subjectId === artistDecision.candidateId)) throw new AdminImportError(409, 'ADMIN_IMPORT_DUPLICATE_STALE');
+            if (!existingAlbum || importCandidateRevision(existingAlbum) !== albumDecision.candidateRevision || artistDecision.action !== 'reuse' || !Array.isArray(existingAlbum.credits) || !existingAlbum.credits.some((credit: any) => credit.subjectType === 'artist' && credit.role === 'primary' && credit.subjectId === artistDecision.candidateId)) throw new AdminImportError(409, 'ADMIN_IMPORT_DUPLICATE_STALE');
+            // Temporary until appends take the target Album's visibility (S7a); a stale Album is reported first.
+            if ((existingAlbum.visibility ?? 'public') !== doc.draft.album.visibility) throw new AdminImportError(409, 'ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH');
             if (!Array.isArray(existingAlbum.audioTrackIds) || existingAlbum.audioTrackIds.length > 5000) throw new AdminImportError(409, 'ADMIN_IMPORT_TARGET_TOO_LARGE');
         }
         const selected = doc.draft.tracks.filter(track => doc.decisions.find(decision => decision.scope === 'track' && decision.slotId === track.slotId)?.action !== 'skip');
@@ -100,7 +102,8 @@ export async function cancelAdminImportPublication(actor: string, id: string, ra
         if (publication.state === 'cancelled') throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CANCELLED');
         if (publication.leaseUntil && publication.leaseUntil > new Date()) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_ACTIVE');
         publication.state = 'cancelled'; publication.cancellation = { operationId: body.operationId as string, actorId: actor };
-        publication.cleanupPending = publication.tracks.some(track => !track.reused) || Boolean(publication.cover);
+        // An approval in a newer format cannot prove here that nothing was copied, so its cleanup stays pending.
+        publication.cleanupPending = importPublicationSupported(publication) ? publication.tracks.some(track => !track.reused) || Boolean(publication.cover) : true;
         publication.leaseOwner = null; publication.leaseUntil = null;
     });
     await runAdminImportPublicationOnce(storage, id, undefined, body.publicationOperationId as string, actor);
@@ -173,6 +176,15 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
             ...(onlyId ? [{ 'media.publication.state': 'cancelled', 'media.publication.cleanupPending': true }] : [])] },
         { $or: [{ 'media.publication.leaseUntil': null }, { 'media.publication.leaseUntil': { $lte: now } }] }] }, { $set: { 'media.publication.leaseOwner': worker, 'media.publication.leaseUntil': new Date(Date.now() + 300_000) } }, { returnDocument: 'after' });
     const doc = claim.value; if (!doc?.media?.publication) return false; const id = doc._id.toHexString(), publication = doc.media.publication;
+    if (!importPublicationSupported(publication)) {
+        // A newer release froze this approval: never copy, commit, mint identities or delete its objects here. It leaves
+        // preparing for needs attention; an issue the newer release recorded is kept, and only a missing one is tagged.
+        const transition = publication.state === 'preparing', tag = transition || publication.issue == null;
+        await importCollection().updateOne({ _id: doc._id, 'media.publication.operationId': publication.operationId, 'media.publication.leaseOwner': worker },
+            { $set: { ...(transition ? { 'media.publication.state': 'needsAttention' } : {}), ...(tag ? { 'media.publication.issue': 'unsupportedVersion' } : {}),
+                'media.publication.leaseOwner': null, 'media.publication.leaseUntil': null, ...(transition || tag ? { updatedAt: new Date() } : {}) }, ...(transition || tag ? { $inc: { revision: 1 } } : {}) });
+        return true;
+    }
     if (publication.state === 'cancelled') {
         try { await cleanupCancelledPublication(id, worker, publication, cleanupActor ?? publication.cancellation?.actorId ?? publication.actorId, storage, signal); }
         catch { await importCollection().updateOne({ _id: doc._id, 'media.publication.operationId': publication.operationId, 'media.publication.leaseOwner': worker, 'media.publication.state': 'cancelled' },
@@ -222,14 +234,22 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
             });
         }
         checkAdminWorker(signal);
-        if (!issue) await commitPublication(id, worker, signal);
-    } catch (error) { issue = error instanceof AdminImportError && error.status === 403 ? 'permissionLost' : error instanceof AdminImportError && error.status === 409 ? 'catalogConflict' : 'storageUnknown'; }
+        if (!issue) await commitPublication(id, worker, signal, publication);
+    } catch (error) {
+        issue = error instanceof AdminImportError && error.code === 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED' ? 'unsupportedVersion'
+            : error instanceof AdminImportError && error.status === 403 ? 'permissionLost' : error instanceof AdminImportError && error.status === 409 ? 'catalogConflict' : 'storageUnknown';
+    }
     if (issue) await importCollection().updateOne({ _id: doc._id, 'media.publication.leaseOwner': worker, 'media.publication.state': { $nin: ['complete', 'cancelled'] } }, { $set: { 'media.publication.state': 'needsAttention', 'media.publication.issue': issue, 'media.publication.leaseOwner': null, 'media.publication.leaseUntil': null, updatedAt: new Date() }, $inc: { revision: 1 } });
     return true;
 }
 
-/** Catalog graph and publication receipt commit together; S3 work never holds a Mongo transaction. */
-async function commitPublication(id: string, worker: string, signal?: AbortSignal) {
+/** Commits by approval format; only format 1 exists in this release, and any other is refused before a catalog write. */
+async function commitPublication(id: string, worker: string, signal: AbortSignal | undefined, publication: ImportPublication) {
+    if (!importPublicationSupported(publication)) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED');
+    await commitLegacyPublication(id, worker, signal);
+}
+/** Format-1 commit, unchanged: catalog graph and publication receipt commit together; S3 work never holds a Mongo transaction. */
+async function commitLegacyPublication(id: string, worker: string, signal?: AbortSignal) {
     const session = getDatabaseClient().startSession();
     try {
         await session.withTransaction(async () => {

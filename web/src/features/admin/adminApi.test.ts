@@ -9,12 +9,15 @@
  *   - an unknown publication cancellation retries its immutable intent and retains the original publication approval
  *   - an outdated strict schema asks for a reload, while a receipt mismatch stays an unconfirmed retryable intent
  *   - AdminMutation and AdminCommand show a reload state with no retryable intent for an outdated response
+ *   - a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent
+ *   - an append visibility mismatch is its own definite refusal, distinct from a revision conflict
+ *   - a project saved by a newer release reaches this bundle as a valid v1 projection, and its refusal codes are distinct
  * @end-catalog */
 
 import { z } from 'zod';
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
-import { adminRequest, detailSchema, responseSchema } from './adminApi';
+import { ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH, ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, detailSchema, responseSchema } from './adminApi';
 import { ADMIN_RELOAD_REQUIRED } from './adminTransport';
 import { AdminCommand } from './useAdminCommand';
 import { AdminMutation } from './useAdminMutation';
@@ -136,4 +139,53 @@ test('AdminMutation and AdminCommand show a reload state with no retryable inten
   const command = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); command.run('/catalog/album/item', { fields: {} });
   await vi.waitFor(() => expect(command.getSnapshot().error).toBe('reload'));
   expect(command.getSnapshot().intent).toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(true);
+});
+
+test('a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: ADMIN_IMPORT_RELOAD_REQUIRED }, 409)));
+  const operation = new AdminMutation(); operation.run('/item', 'PATCH', { expectedRevision: 1 });
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('reload'));
+  expect(operation.getSnapshot().intent).toBeNull(); expect(operation.getSnapshot().running).toBe(false);
+  const command = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); command.run('/catalog/album/item', { fields: {} });
+  await vi.waitFor(() => expect(command.getSnapshot().error).toBe('reload'));
+  // Unlike an unreadable response, the bundle is current, so the whole workbench is not marked outdated.
+  expect(command.getSnapshot().intent).toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
+});
+
+test('an append visibility mismatch is its own definite refusal, distinct from a revision conflict', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH }, 409)));
+  const operation = new AdminMutation(); operation.run('/item/publish', 'POST', { expectedRevision: 1 });
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('visibility_mismatch'));
+  expect(operation.getSnapshot().intent).toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'ADMIN_IMPORT_REVISION_CONFLICT' }, 409)));
+  const other = new AdminMutation(); other.run('/item/publish', 'POST', { expectedRevision: 1 });
+  await vi.waitFor(() => expect(other.getSnapshot().error).toBe('conflict'));
+});
+
+test('a project saved by a newer release reaches this bundle as a valid v1 projection, and its refusal codes are distinct', () => {
+  // The server's projection of the synthetic Draft v2 fixture (test/fixtures/adminImportCompat/v2-draft-project.json).
+  const degraded = {
+    id: "b8fe89a0a6b4501d5db35e13",
+    revision: 6,
+    createdAt: "2026-11-01T09:01:00.000Z",
+    updatedAt: "2026-11-01T09:06:00.000Z",
+    startedByMe: true,
+    manifest: {"rootLabel":"Synthetic Primary - Synthetic Compat Album","files":[{"slotId":"00000009-0000-4000-a000-000000000001","filename":"01 - Synthetic Opening.mp3","relativePath":"Disc 1/01 - Synthetic Opening.mp3","byteLength":4096},{"slotId":"00000009-0000-4000-a000-000000000002","filename":"01 - Synthetic Reprise.mp3","relativePath":"Disc 2/01 - Synthetic Reprise.mp3","byteLength":null}]},
+    draft: {"album":{"title":"Synthetic Compat Album","artistName":"Synthetic Primary","releaseDate":{"year":2026,"month":3,"day":null},"visibility":"public"},"tracks":[{"slotId":"00000009-0000-4000-a000-000000000001","title":"Synthetic Opening","trackNumber":1},{"slotId":"00000009-0000-4000-a000-000000000002","title":"Synthetic Reprise","trackNumber":1}]},
+    analysis: {"state":"queued","generation":1,"operationId":"00000009-0000-4000-8000-000000000004","completedChunks":1,"totalChunks":2,"attemptsUsed":1,"maxAttempts":22,"issue":null},
+    suggestions: [{"scope":"album","slotId":null,"field":"title","baseline":"Synthetic Compat Album","value":"Synthetic Compat Album (Deluxe)","source":"folder","evidence":"Selected root: Synthetic Primary - Synthetic Compat Album","id":"6d91973d95b005647626d360","generation":1,"decision":"pending"}],
+    decisions: [{"scope":"artist","slotId":null,"action":"create-distinct","candidateId":null,"candidateRevision":null},{"scope":"album","slotId":null,"action":"create-distinct","candidateId":null,"candidateRevision":null},{"scope":"track","slotId":"00000009-0000-4000-a000-000000000001","action":"create-distinct","candidateId":null,"candidateRevision":null},{"scope":"track","slotId":"00000009-0000-4000-a000-000000000002","action":"create-distinct","candidateId":null,"candidateRevision":null}],
+    upload: {"ready":1,"total":2,"available":true},
+    publication: "notStarted",
+    publicationRecovery: null,
+    published: null,
+    assets: [{"slotId":"00000009-0000-4000-a000-000000000001","state":"ready","byteLength":4096,"sha256":"719b383821e6441a28fd740b613e025e2e8cae1240f47297cef590f888c1cb31","contentType":"audio/mpeg","tags":{"title":"Synthetic Opening","album":"Synthetic Compat Album","artists":["Synthetic Primary","Synthetic Guest"],"year":2026,"trackNumber":1},"recovery":{"operationId":"00000009-0000-4000-8000-000000000003","expectedRevision":2,"kind":"upload","startedByMe":true}},{"slotId":"embedded-00000009-0000-4000-a000-000000000001","state":"ready","byteLength":3073,"sha256":"59353ff2c987657686b1510ce52d67a888c1704ffc9c4185ddf33dd1caeae2b4","contentType":"image/jpeg","tags":null,"recovery":{"operationId":"00000009-0000-4000-8000-000000000030","expectedRevision":4,"kind":"upload","startedByMe":true}}],
+    selectedCoverSlotId: null,
+    capabilities: {"analysis":false,"upload":false,"publish":false},
+    receipts: [{"operationId":"00000009-0000-4000-8000-000000000001","kind":"create","revision":1},{"operationId":"00000009-0000-4000-8000-000000000002","kind":"edit","revision":2},{"operationId":"00000009-0000-4000-8000-000000000003","kind":"upload","revision":3},{"operationId":"00000009-0000-4000-8000-000000000004","kind":"analyze","revision":4}]
+  };
+  expect(detailSchema.safeParse(degraded).success).toBe(true);
+  expect(responseSchema.safeParse({ item: degraded, receipt: null }).success).toBe(true);
+  expect([ADMIN_IMPORT_RELOAD_REQUIRED, ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH]).toEqual(['ADMIN_IMPORT_RELOAD_REQUIRED', 'ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH']);
+  expect(ADMIN_IMPORT_RELOAD_REQUIRED).not.toBe(ADMIN_RELOAD_REQUIRED);
 });

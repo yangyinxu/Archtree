@@ -1458,6 +1458,8 @@ The wire protocol and operational bounds are documented in
 - Embedded images are validated and completely decoded like other covers and
   staged under the same staged-upload lifecycle; identical ones are staged
   once, and each import stages a bounded number of them.
+- A new import's visibility defaults to public and can be changed before
+  publishing.
 - Publication is a separate explicit approval of the reviewed draft and duplicate
   decisions. It freezes the approval snapshot, rechecks current role, revisions,
   memberships, visibility and asset readiness, and reports confirmed per-item
