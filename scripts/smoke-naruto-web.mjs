@@ -174,7 +174,7 @@ try {
     assert.equal(sessionProbe.status, 200, `Synthetic cookie/session setup failed: ${sessionProbe.message}`);
     assert.equal(sessionProbe.userId, userId);
   }
-  await page.getByRole('heading', {name: /把社区声音/}).waitFor();
+  await page.getByRole('heading', {name: '调查关键词', exact: true}).waitFor();
   assert.equal(await page.getByLabel('Archtree 密码').count(), 0);
   await page.screenshot({path: path.join(evidence, screenshotName('home')), fullPage: true});
   if (extensionMode) {
