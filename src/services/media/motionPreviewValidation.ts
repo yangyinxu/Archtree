@@ -5,8 +5,9 @@
  *   Functions: inspectMotionPreviewContainer, validateMotionPreviewFile
  * Internal
  *   Types: Box
- *   Functions: invalid, readBoxes, only, allowOnly
- *   Constants: compatibleBrands, defaultValidationDependencies
+ *   Functions: invalid, readBoxes, only, allowOnly, withinPreviewBounds, inspectAvcConfiguration,
+ *              inspectVisualSampleEntry
+ *   Constants: compatibleBrands, browserProfiles, visualSampleEntryHeaderLength, defaultValidationDependencies
  * @end-catalog */
 
 import { createHash } from 'node:crypto';
@@ -72,6 +73,69 @@ const allowOnly = (boxes: Box[], allowed: readonly string[]) => {
 
 const compatibleBrands = new Set(['isom', 'iso2', 'iso4', 'iso5', 'iso6', 'mp41', 'mp42', 'avc1', 'M4V ']);
 
+/** One bound for both orientations: the longer side within the width, the shorter within the height. */
+const withinPreviewBounds = (width: number, height: number) => {
+    const longer = Math.max(width, height);
+    const shorter = Math.min(width, height);
+    return shorter > 0 && longer <= MOTION_PREVIEW_MAX_WIDTH && shorter <= MOTION_PREVIEW_MAX_HEIGHT;
+};
+
+// Baseline, Main and High are the profiles every browser decodes; High is 8-bit 4:2:0 by definition,
+// so High 10, 4:2:2 and 4:4:4 clips that FFmpeg would accept never reach Safari or Firefox.
+const browserProfiles = new Set([66, 77, 100]);
+
+/**
+ * Checks an AVCDecoderConfigurationRecord: version 1, a browser profile, a legal NAL length size, and
+ * at least one complete SPS NAL whose own profile_idc is the declared one. Every read stays inside
+ * the record, and both parameter-set counts are bounded by their field widths.
+ */
+const inspectAvcConfiguration = (record: Buffer) => {
+    if (record.length < 6 || record[0] !== 1 || !browserProfiles.has(record[1])) throw invalid();
+    // lengthSizeMinusOne may be 0, 1 or 3; a 3-byte NAL length is not allowed.
+    if ((record[4] & 0x03) === 2) throw invalid();
+    let offset = 6;
+    const parameterSet = () => {
+        if (record.length - offset < 2) throw invalid();
+        const length = record.readUInt16BE(offset);
+        offset += 2;
+        if (length === 0 || record.length - offset < length) throw invalid();
+        offset += length;
+        return record.subarray(offset - length, offset);
+    };
+    const sequenceSets = record[5] & 0x1f;
+    if (sequenceSets === 0) throw invalid();
+    for (let index = 0; index < sequenceSets; index += 1) {
+        const sps = parameterSet();
+        // forbidden_zero_bit clear and nal_unit_type 7, then profile_idc, constraint flags, level_idc.
+        if (sps.length < 4 || (sps[0] & 0x9f) !== 0x07 || sps[1] !== record[1]) throw invalid();
+    }
+    if (offset >= record.length) throw invalid();
+    const pictureSets = record[offset];
+    offset += 1;
+    for (let index = 0; index < pictureSets; index += 1) parameterSet();
+    // A High record may end with chroma format and bit depths; when present they must be 4:2:0 8-bit.
+    if (record[1] === 100 && record.length - offset >= 4) {
+        const chromaFormat = record[offset] & 0x03;
+        const lumaDepthMinus8 = record[offset + 1] & 0x07;
+        const chromaDepthMinus8 = record[offset + 2] & 0x07;
+        if (chromaFormat !== 1 || lumaDepthMinus8 !== 0 || chromaDepthMinus8 !== 0) throw invalid();
+    }
+};
+
+// The fixed VisualSampleEntry fields end at byte 78; width and height are the 16-bit values at 24 and 26.
+const visualSampleEntryHeaderLength = 78;
+
+/**
+ * Checks the one avc1/avc3 VisualSampleEntry: its coded size must itself be within the preview
+ * bounds, so a small tkhd cannot front a large stream (it need not equal the display size, which
+ * differs for non-square pixels), and its one avcC must describe a browser-decodable profile.
+ */
+const inspectVisualSampleEntry = (entry: Buffer) => {
+    if (entry.length < visualSampleEntryHeaderLength) throw invalid();
+    if (!withinPreviewBounds(entry.readUInt16BE(24), entry.readUInt16BE(26))) throw invalid();
+    inspectAvcConfiguration(only(readBoxes(entry.subarray(visualSampleEntryHeaderLength), 16), 'avcC'));
+};
+
 /** Container facts proven by the box walk; decoding is verified separately. */
 export interface MotionPreviewContainer {
     durationMs: number;
@@ -81,7 +145,8 @@ export interface MotionPreviewContainer {
 
 /**
  * Walks the complete MP4 structure: a progressive (moov before mdat) file with exactly one track,
- * which is H.264 video, no sound, no fragments or protection, and bounded duration and size.
+ * which is Baseline, Main or High H.264 video, no sound, no fragments or protection, and bounded
+ * duration and display and coded size. The decoder separately caps the frames the stream produces.
  */
 export const inspectMotionPreviewContainer = (data: Buffer): MotionPreviewContainer => {
     const top = readBoxes(data, 16);
@@ -115,9 +180,8 @@ export const inspectMotionPreviewContainer = (data: Buffer): MotionPreviewContai
     if (![0, 1].includes(trackVersion) || trackHeader.length < (trackVersion === 0 ? 84 : 96)) throw invalid();
     const width = trackHeader.readUInt32BE(trackVersion === 0 ? 76 : 88) / 65536;
     const height = trackHeader.readUInt32BE(trackVersion === 0 ? 80 : 92) / 65536;
-    const longer = Math.max(width, height);
-    const shorter = Math.min(width, height);
-    if (!(shorter > 0) || longer > MOTION_PREVIEW_MAX_WIDTH || shorter > MOTION_PREVIEW_MAX_HEIGHT) throw invalid();
+    // The display size may be fractional (a non-square sample aspect); the coded size is bounded exactly.
+    if (!withinPreviewBounds(Math.round(width), Math.round(height))) throw invalid();
 
     const media = readBoxes(only(track, 'mdia'));
     const handler = only(media, 'hdlr');
@@ -125,9 +189,12 @@ export const inspectMotionPreviewContainer = (data: Buffer): MotionPreviewContai
     const sampleTable = readBoxes(only(readBoxes(only(media, 'minf')), 'stbl'));
     const descriptions = only(sampleTable, 'stsd');
     if (descriptions.length < 16 || descriptions.readUInt32BE(4) !== 1) throw invalid();
-    const codec = descriptions.toString('latin1', 12, 16);
-    if (codec !== 'avc1' && codec !== 'avc3') throw invalid();
+    // Exactly one sample entry and nothing after it, so no second description can switch formats.
+    const [entry] = readBoxes(descriptions.subarray(8), 1);
+    if (entry.type !== 'avc1' && entry.type !== 'avc3') throw invalid();
+    inspectVisualSampleEntry(entry.data);
 
+    // Listeners see the display size, so that is what is recorded.
     return { durationMs, width: Math.round(width), height: Math.round(height) };
 };
 

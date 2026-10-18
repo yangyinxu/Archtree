@@ -19,6 +19,8 @@ export const presentationCapabilitiesQuery = () => queryOptions({
     retryAuthentication: false
   }),
   retry: false,
+  // A failed read shows no previews; later hovers do not re-request it until the query is collected.
+  retryOnMount: false,
   staleTime: 5 * 60_000
 });
 

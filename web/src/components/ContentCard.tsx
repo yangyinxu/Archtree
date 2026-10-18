@@ -22,8 +22,9 @@ import { LazyShareMusicButton } from '../features/social/LazyShareMusicButton';
 import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
 import { useVideoPreviewIntent } from './useVideoPreviewIntent';
 
-// The preview element loads only once a mouse rests on a Video card.
-const CardVideoPreview = lazy(() => import('./CardVideoPreview'));
+// The preview element loads only once a mouse rests on a Video card; a chunk that fails to load
+// (an old tab after a deploy) shows no preview instead of the route's error page.
+const CardVideoPreview = lazy(() => import('./CardVideoPreview').catch(() => ({ default: () => null })));
 
 
 export interface ContentCardProps {

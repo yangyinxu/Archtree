@@ -7,7 +7,8 @@ export interface MotionPreviewSourceProps {
   mediaTrackId: string;
   /** The public stream, used only while dedicated motion previews are disabled. */
   streamUrl: string;
-  children: (source: string) => ReactNode;
+  /** Receives the chosen source and whether it is the dedicated clip rather than the full stream. */
+  children: (source: string, isClip: boolean) => ReactNode;
 }
 
 /**
@@ -19,6 +20,10 @@ export interface MotionPreviewSourceProps {
  */
 export default function MotionPreviewSource({ mediaTrackId, streamUrl, children }: MotionPreviewSourceProps) {
   const capabilities = useQuery(presentationCapabilitiesQuery());
-  if (capabilities.isPending) return null;
-  return children(capabilities.data?.motionPreviews ? motionPreviewUrl(mediaTrackId) : streamUrl);
+  // Unknown flags (still loading, or a failed read) show no preview rather than guessing: the public
+  // stream is read only when the server says dedicated previews are disabled.
+  if (!capabilities.data) return null;
+  return capabilities.data.motionPreviews
+    ? children(motionPreviewUrl(mediaTrackId), true)
+    : children(streamUrl, false);
 }

@@ -3028,7 +3028,7 @@
       "variables": {}
     },
     "admin.motion_preview.attention": {
-      "description": "Shown when an earlier preview upload or cleanup needs reconciliation.",
+      "description": "Shown when an earlier preview upload or cleanup needs attention that Reconcile can resolve.",
       "delivery": [
         "runtime"
       ],
@@ -3060,7 +3060,35 @@
       }
     },
     "admin.motion_preview.error": {
-      "description": "Alert when a motion preview operation fails.",
+      "description": "Alert when a motion preview operation fails for a reason without a more specific message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_busy": {
+      "description": "Alert when another motion preview operation for this Video is still running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_changed": {
+      "description": "Alert when the preview or Video changed in another session and the panel reloaded its state.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_file": {
+      "description": "Alert when the chosen motion preview clip is rejected; repeats the accepted file profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_reconcile": {
+      "description": "Alert when unfinished preview work must be reconciled before this operation can run.",
       "delivery": [
         "runtime"
       ],

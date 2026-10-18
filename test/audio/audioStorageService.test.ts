@@ -27,7 +27,7 @@
  *   - failed promotion retains the uploaded exact version when its cleanup fails
  *   - replacement stops before PUT when analysis attached newer exact-version cleanup evidence after the initial read
  *   - Soundtrack deletion removes every motion preview object by exact version before metadata finalization
- *   - Soundtrack deletion waits for a live preview upload and refuses an unreconciled preview outcome
+ *   - Soundtrack deletion waits for a live preview upload and resolves an expired unknown outcome by HEAD
  *   - media replacement retires a preview made for the replaced source without changing the upload result
  * @end-catalog */
 
@@ -748,27 +748,70 @@ test('Soundtrack deletion removes every motion preview object by exact version b
     ]);
 });
 
-test('Soundtrack deletion waits for a live preview upload and refuses an unreconciled preview outcome', async () => {
-    const calls: string[] = [];
-    const dependencies = deletionDependencies(calls, []);
-    dependencies.findTrack = async () => ({
+test('Soundtrack deletion waits for a live preview upload and resolves an expired unknown outcome by HEAD', async () => {
+    const pendingKey = previewKey(stalePendingId);
+    const trackWith = (pending: Record<string, unknown>) => async () => ({
         coverArtId: 'cover-art-id', s3Key: replacementKey,
         motionPreview: { active: null, cleanup: null, revision: 1, pending: {
-            status: 'uploading', s3Key: previewKey(stalePendingId), versionId: null, outcomeUnknown: true,
-            leaseUntil: new Date(Date.now() + 60_000)
+            s3Key: pendingKey, versionId: null, outcomeUnknown: true, ...pending
         } }
     });
-    await assert.rejects(deleteAudioObjectAndTrack(trackId, dependencies), (error: any) => error?.statusCode === 409);
+    const expired = { status: 'failed', leaseUntil: new Date(Date.now() - 60_000) };
+    const run = async (
+        pending: Record<string, unknown>,
+        head: AudioTrackDeletionDependencies['headMotionPreviewObject'],
+        id = trackId
+    ) => {
+        const calls: string[] = [];
+        const dependencies = deletionDependencies(calls, []);
+        dependencies.findTrack = trackWith(pending);
+        dependencies.headMotionPreviewObject = head;
+        dependencies.deleteAudioObject = async (key, versionId) => {
+            calls.push(`delete-audio-object:${key}${versionId ? `@${versionId}` : ''}`);
+        };
+        return { calls, deletion: deleteAudioObjectAndTrack(id, dependencies) };
+    };
 
-    dependencies.findTrack = async () => ({
-        coverArtId: 'cover-art-id', s3Key: replacementKey,
-        motionPreview: { active: null, cleanup: null, revision: 1, pending: {
-            status: 'failed', s3Key: previewKey(stalePendingId), versionId: null, outcomeUnknown: true,
-            leaseUntil: new Date(Date.now() - 60_000)
-        } }
+    const live = await run({ status: 'uploading', leaseUntil: new Date(Date.now() + 60_000) }, async () => {
+        assert.fail('a live upload is never resolved by HEAD');
     });
-    await assert.rejects(deleteAudioObjectAndTrack(trackId, dependencies), (error: any) => error?.statusCode === 503);
-    assert.deepEqual(calls, []);
+    await assert.rejects(live.deletion, (error: any) => error?.statusCode === 409);
+    assert.deepEqual(live.calls, []);
+
+    // Resolution never consults the preview rollout flag, so a disabled rollout cannot block deletion.
+    const previous = process.env.FINITUDE_MOTION_PREVIEWS_ENABLED;
+    process.env.FINITUDE_MOTION_PREVIEWS_ENABLED = 'false';
+    try {
+        const landed = await run(expired, async (key) => {
+            assert.equal(key, pendingKey);
+            return { VersionId: 'landed-version', Metadata: { trackid: trackId } };
+        });
+        await landed.deletion;
+        assert.ok(landed.calls.includes(`delete-audio-object:${pendingKey}@landed-version`));
+        assert.ok(landed.calls.includes('delete-track'));
+
+        // Object metadata names the lowercase id, whatever case the deletion request used.
+        const uppercase = await run(expired, async () => ({ VersionId: 'landed-version', Metadata: { trackid: trackId } }), trackId.toUpperCase());
+        await uppercase.deletion;
+        assert.ok(uppercase.calls.includes(`delete-audio-object:${pendingKey}@landed-version`));
+
+        const absent = await run(expired, async () => null);
+        await absent.deletion;
+        assert.equal(absent.calls.some((call) => call.includes(pendingKey)), false);
+        assert.ok(absent.calls.includes('delete-track'));
+    } finally {
+        if (previous === undefined) delete process.env.FINITUDE_MOTION_PREVIEWS_ENABLED;
+        else process.env.FINITUDE_MOTION_PREVIEWS_ENABLED = previous;
+    }
+
+    for (const head of [
+        async () => ({ VersionId: 'foreign-version', Metadata: { trackid: 'someone-else' } }),
+        async () => { throw new Error('S3 unavailable'); }
+    ]) {
+        const refused = await run(expired, head);
+        await assert.rejects(refused.deletion, (error: any) => error?.statusCode === 503);
+        assert.deepEqual(refused.calls, []);
+    }
 });
 
 test('media replacement retires a preview made for the replaced source without changing the upload result', async () => {

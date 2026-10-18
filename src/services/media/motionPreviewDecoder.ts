@@ -4,8 +4,8 @@
  *   Classes: MotionPreviewDecodeError, UndecodableMotionPreviewError
  *   Functions: decodeMotionPreviewVideo
  * Internal
- *   Functions: missingRuntimeCapability
- *   Constants: maximumActiveDecodes, decodeTimeoutMs, durationToleranceMs
+ *   Functions: alignUp, missingRuntimeCapability
+ *   Constants: maximumActiveDecodes, decodeTimeoutMs, durationToleranceMs, maximumDecodedPixels
  *   Variables: activeDecodes
  * @end-catalog */
 
@@ -14,11 +14,26 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
+import { MOTION_PREVIEW_MAX_HEIGHT, MOTION_PREVIEW_MAX_WIDTH } from '../../models/motionPreview';
+
 // Previews are uploaded by hand, so one decode at a time keeps the small instance's memory bounded.
 let activeDecodes = 0;
 const maximumActiveDecodes = 1;
 const decodeTimeoutMs = 20_000;
 const durationToleranceMs = 150;
+
+const alignUp = (value: number, alignment: number) => Math.ceil(value / alignment) * alignment;
+
+/**
+ * Pixel budget for FFmpeg's `max_pixels`, which bounds the frames the stream really decodes whatever
+ * the container claims. FFmpeg compares it with the width rounded up to its SIMD stride (64 at most),
+ * and `ignorecrop` leaves whole 16-pixel macroblocks, so the largest legitimate clip in either
+ * orientation fits (480 × 854 is the larger case: 512 × 864) while 720p and above still fail.
+ */
+const maximumDecodedPixels = Math.max(
+    alignUp(alignUp(MOTION_PREVIEW_MAX_WIDTH, 16), 64) * alignUp(MOTION_PREVIEW_MAX_HEIGHT, 16),
+    alignUp(alignUp(MOTION_PREVIEW_MAX_HEIGHT, 16), 64) * alignUp(MOTION_PREVIEW_MAX_WIDTH, 16)
+);
 
 export type MotionPreviewDecodeErrorCode = 'decoder_unavailable' | 'decode_timeout' | 'decode_failed' | 'decoder_busy';
 
@@ -76,9 +91,12 @@ export const decodeMotionPreviewVideo = async (
             await writeFile(input, file.buffer, { mode: 0o600, signal });
         }
         if (!isAbsolute(input)) throw new MotionPreviewDecodeError('decode_failed');
+        // Decoder options precede -i. SPS cropping is ignored so a large coded frame cannot shrink
+        // its checked size by cropping; an oversized frame then fails as an ordinary decode error.
         const args = [
             '-hide_banner', '-nostdin', '-loglevel', 'error', '-nostats', '-xerror', '-max_error_rate', '0',
-            '-max_alloc', '33554432', '-threads', '1', '-filter_threads', '1',
+            '-max_alloc', '33554432', '-max_pixels', String(maximumDecodedPixels), '-flags2', '+ignorecrop',
+            '-threads', '1', '-filter_threads', '1',
             '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov', '-max_streams', '1',
             '-err_detect', 'crccheck+bitstream+buffer+explode', '-f', 'mov', '-i', input,
             '-map', '0:v:0', '-an', '-sn', '-dn', '-threads', '1', '-progress', 'pipe:1', '-f', 'null', '-'

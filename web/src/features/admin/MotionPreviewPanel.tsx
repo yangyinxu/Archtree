@@ -2,7 +2,9 @@
  * Exports
  *   Functions: MotionPreviewPanel
  * Internal
- *   Types: Outcome
+ *   Types: Failure, Outcome
+ *   Functions: failureOf
+ *   Constants: maxBytes
  * @end-catalog */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,7 +15,31 @@ import { useAdminAccess, useAdminText } from './AdminAccess';
 import styles from './adminStyles';
 import { motionPreviewApi, type MotionPreviewStatus } from './motionPreviewApi';
 
-type Outcome = 'uploaded' | 'removed' | 'reconciled' | 'cleanupPending' | 'error';
+type Failure = 'errorFile' | 'errorChanged' | 'errorBusy' | 'errorReconcile' | 'error';
+type Outcome = 'uploaded' | 'removed' | 'reconciled' | 'cleanupPending' | Failure;
+
+/** Mirrors the server's MOTION_PREVIEW_MAX_BYTES so an oversized clip is refused before any upload. */
+const maxBytes = 4 * 1024 * 1024;
+
+/** Maps the server's fixed failure codes to the few messages an administrator can act on. */
+const failureOf = (error: unknown): Failure => {
+  if (!(error instanceof ApiError) || error.kind !== 'http') return 'error';
+  // The size gate answers 413 without a code, so status alone identifies a too-large request.
+  if (error.status === 413 || error.code === 'ADMIN_MOTION_PREVIEW_INVALID') return 'errorFile';
+  if (error.status === 429) return 'errorBusy';
+  switch (error.code) {
+    case 'ADMIN_MOTION_PREVIEW_STALE_REVISION':
+    case 'ADMIN_MOTION_PREVIEW_SOURCE_CHANGED':
+      return 'errorChanged';
+    case 'ADMIN_MOTION_PREVIEW_BUSY':
+    case 'ADMIN_MOTION_PREVIEW_CLEANUP_PENDING':
+      return 'errorBusy';
+    case 'ADMIN_MOTION_PREVIEW_RECONCILIATION_REQUIRED':
+      return 'errorReconcile';
+    default:
+      return 'error';
+  }
+};
 
 /**
  * Lets an administrator attach, replace, remove, or reconcile the muted motion preview of one
@@ -24,6 +50,7 @@ export function MotionPreviewPanel({ id }: { id: string }) {
   const access = useAdminAccess();
   const client = useQueryClient();
   const file = useRef<HTMLInputElement>(null);
+  const [selected, setSelected] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const queryKey = ['admin-motion-preview', access.viewerId, access.epoch, access.generation, id];
@@ -38,29 +65,48 @@ export function MotionPreviewPanel({ id }: { id: string }) {
   const data: MotionPreviewStatus | undefined = status.data;
   if (data && !data.eligible && !data.active && !data.pending && !data.cleanup) return null;
 
+  /** Resolves true on success. Controls stay busy until the refetched revision is on screen. */
   const run = async (work: () => Promise<{ cleanupPending: boolean }>, done: Outcome) => {
     setBusy(true);
     setOutcome(null);
+    let succeeded = false;
     try {
       const result = await work();
+      succeeded = true;
       setOutcome(result.cleanupPending ? 'cleanupPending' : done);
-    } catch {
-      setOutcome('error');
+    } catch (error) {
+      const failure = failureOf(error);
+      // Reconcile itself reporting that reconciliation is needed means it could not finish this time.
+      setOutcome(done === 'reconciled' && failure === 'errorReconcile' ? 'error' : failure);
+    }
+    try {
+      // Re-enabling before the refetch lands would let a quick Remove send the old revision.
+      await client.invalidateQueries({ queryKey });
     } finally {
       setBusy(false);
-      await client.invalidateQueries({ queryKey });
+    }
+    return succeeded;
+  };
+
+  const upload = async () => {
+    if (!selected || !data) return;
+    // Some systems report no type for an .mp4 file; the server checks the bytes either way.
+    const mp4 = selected.type === 'video/mp4' || (selected.type === '' && /\.mp4$/i.test(selected.name));
+    if (selected.size > maxBytes || !mp4) {
+      setOutcome('errorFile');
+      return;
+    }
+    // A failed upload keeps the choice so the administrator can retry the same clip.
+    if (await run(() => motionPreviewApi.upload(id, selected, data), 'uploaded')) {
+      if (file.current) file.current.value = '';
+      setSelected(null);
     }
   };
 
-  const upload = () => {
-    const selected = file.current?.files?.[0];
-    if (!selected || !data) return;
-    void run(() => motionPreviewApi.upload(id, selected, data), 'uploaded').then(() => {
-      if (file.current) file.current.value = '';
-    });
-  };
-
   const needsAttention = Boolean(data?.pending || data?.cleanup);
+  // Reconcile also retires a preview made for an earlier Video, which the audit recommends.
+  const canReconcile = needsAttention || Boolean(data?.active && !data.active.current);
+  const failed = outcome !== null && outcome.startsWith('error');
   return (
     <section className={styles.panel} aria-labelledby="motion-preview-title">
       <header className={styles.sectionHeader}><h2 id="motion-preview-title">{t('motionPreview.title')}</h2></header>
@@ -87,6 +133,7 @@ export function MotionPreviewPanel({ id }: { id: string }) {
             accept="video/mp4"
             className={styles.input}
             disabled={busy || !data.eligible}
+            onChange={(event) => { setSelected(event.currentTarget.files?.[0] ?? null); }}
             ref={file}
             type="file"
           />
@@ -94,8 +141,8 @@ export function MotionPreviewPanel({ id }: { id: string }) {
         <div className={styles.actions}>
           <button
             className={`${styles.button} ${styles.primary}`}
-            disabled={busy || !data.eligible || !data.sourceToken || Boolean(data.pending?.leaseActive)}
-            onClick={upload}
+            disabled={busy || !selected || !data.eligible || !data.sourceToken || Boolean(data.pending?.leaseActive)}
+            onClick={() => { void upload(); }}
             type="button"
           >
             {t('motionPreview.upload')}
@@ -110,7 +157,7 @@ export function MotionPreviewPanel({ id }: { id: string }) {
               {t('motionPreview.remove')}
             </button>
           )}
-          {needsAttention && (
+          {canReconcile && (
             <button
               className={styles.button}
               disabled={busy || Boolean(data.pending?.leaseActive)}
@@ -123,8 +170,8 @@ export function MotionPreviewPanel({ id }: { id: string }) {
         </div>
       </>}
       {outcome && (
-        <p role={outcome === 'error' ? 'alert' : 'status'} className={outcome === 'error' ? styles.notice : undefined}>
-          {t(`motionPreview.${outcome === 'cleanupPending' ? 'cleanup_pending' : outcome}`)}
+        <p role={failed ? 'alert' : 'status'} className={failed ? styles.notice : undefined}>
+          {t(`motionPreview.${outcome}`)}
         </p>
       )}
     </section>

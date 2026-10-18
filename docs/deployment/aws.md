@@ -204,7 +204,8 @@ analysis keeps its 90-second deadline and 512-MiB temporary-file limit. Keep
 `TMPDIR=/var/tmp` so temporary analysis files use the EBS disk.
 
 Motion preview validation adds one single-threaded video decode at a time (32 MiB
-allocations, 20-second deadline) for administrator uploads of at most 4 MiB.
+allocations, frames capped at 442,368 pixels, 20-second deadline) for
+administrator uploads of at most 4 MiB.
 Before setting `FINITUDE_MOTION_PREVIEWS_ENABLED=true`, confirm
 `/usr/local/bin/ffmpeg -hide_banner -decoders` lists `h264`, and that the
 instance role allows `s3:GetObject`, `s3:GetObjectVersion`, `s3:PutObject`,

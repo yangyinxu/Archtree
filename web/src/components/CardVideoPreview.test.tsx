@@ -17,6 +17,8 @@
  *   - hiding the page stops a running preview and prevents a pending one
  *   - with dedicated motion previews enabled, the card reads the preview clip and never the full stream
  *   - a disallowed preview never reads the presentation flags
+ *   - a failed presentation-flag read shows no preview, never the stream, and is not re-requested per hover
+ *   - a dedicated clip loops whole from its start, unlike the full stream
  * @end-catalog */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -368,4 +370,44 @@ test('a disallowed preview never reads the presentation flags', async () => {
 
   expect(previewIn(card('Unread Light'))).toBeNull();
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test('a failed presentation-flag read shows no preview, never the stream, and is not re-requested per hover', async () => {
+  const { fetchMock } = configure();
+  fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+  const setSource = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
+  renderCards([trackWithSource('unknown', 'Unknown Flags')], null);
+  const target = card('Unknown Flags');
+
+  hover(target);
+  await restPastIntent();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  await act(async () => { await Promise.resolve(); });
+  expect(previewIn(target)).toBeNull();
+
+  fireEvent.pointerLeave(target);
+  hover(target);
+  await restPastIntent();
+  expect(previewIn(target)).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(setSource).not.toHaveBeenCalled();
+});
+
+test('a dedicated clip loops whole from its start, unlike the full stream', async () => {
+  configure();
+  renderCards([trackWithSource('whole', 'Whole Clip')], true);
+  const target = card('Whole Clip');
+
+  hover(target);
+  await restPastIntent();
+  const video = await previewMounted(target);
+  loadMetadata(video, 6.4);
+  expect(video.currentTime).toBe(0);
+
+  video.currentTime = 6.35;
+  fireEvent(video, new Event('timeupdate'));
+  expect(video.currentTime).toBe(0);
+  video.currentTime = 6.4;
+  fireEvent(video, new Event('ended'));
+  expect(video.currentTime).toBe(0);
 });

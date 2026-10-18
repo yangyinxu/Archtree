@@ -7,6 +7,7 @@
  *   - motion preview management is administrator-only, viewer-bound, and hidden while disabled
  *   - an uploaded preview is stored, bound to the active Video, and served only while that Video is active
  *   - removing a preview deletes its exact version and requires the current revision
+ *   - once MediaTrack deletion begins, a preview removal never changes the record its fence compares
  *   - malformed uploads and inputs are refused before any storage write
  * @end-catalog */
 
@@ -175,6 +176,20 @@ test('removing a preview deletes its exact version and requires the current revi
     const stored = await db().collection('audioTracks').findOne({ _id: track });
     assert.equal(stored?.motionPreview.active, null);
     assert.equal(stored?.motionPreview.cleanup, null);
+});
+
+test('once MediaTrack deletion begins, a preview removal never changes the record its fence compares', async () => {
+    const status = await (await request('GET')).json();
+    await request('POST', adminToken, String(admin), clipForm(status.sourceToken, status.revision));
+    const current = await (await request('GET')).json();
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { uploadStatus: 'deleting' } });
+    const fenced = (await db().collection('audioTracks').findOne({ _id: track }))!.motionPreview;
+
+    const removed = await request('DELETE', adminToken, String(admin), JSON.stringify({ expectedRevision: current.revision }));
+    assert.equal(removed.status, 409);
+    assert.deepEqual((await db().collection('audioTracks').findOne({ _id: track }))!.motionPreview, fenced);
+    assert.equal(objects.size, 1);
+    assert.deepEqual(deletes, []);
 });
 
 test('malformed uploads and inputs are refused before any storage write', async () => {

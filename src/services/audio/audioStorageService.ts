@@ -21,7 +21,12 @@ import { cleanupDeletedContentReferences } from '../content/contentReferenceServ
 import { normalizeUtf8Text } from '../../utils/textEncoding';
 import { prepareMediaRepresentation } from '../media/mediaRepresentationService';
 import { updateMediaTrackStorageState } from '../media/mediaRepresentationLifecycleService';
-import { retireStaleMotionPreview } from '../media/motionPreviewLifecycleService';
+import {
+    headMotionPreviewObject,
+    resolvePendingMotionPreviewObject,
+    retireStaleMotionPreview,
+    type MotionPreviewHeadResult
+} from '../media/motionPreviewLifecycleService';
 import { motionPreviewLifecycleKeys } from '../../utils/motionPreviewStorageKey';
 import { isAudioObjectKeyForTrack } from '../../utils/audioStorageKey';
 import { readyVideoObjectKey, videoObjectKeysForTrack } from '../../utils/videoStorageKey';
@@ -189,6 +194,8 @@ export interface AudioTrackDeletionDependencies {
         audioTrackId: string,
         expected: Record<string, unknown>
     ) => Promise<{ deletedCount: number }>;
+    /** Identifies an expired preview upload's unknown outcome; a missing object is null. */
+    headMotionPreviewObject?: (s3Key: string) => Promise<MotionPreviewHeadResult | null>;
 }
 
 const defaultAudioTrackDeletionDependencies: AudioTrackDeletionDependencies = {
@@ -829,8 +836,25 @@ export const deleteAudioObjectAndTrack = async (
     if (previewPending?.status === 'uploading' && new Date(previewPending.leaseUntil).getTime() > Date.now()) {
         throw storageMutationConflict(`MediaTrack ${audioTrackId} has a motion preview upload in progress.`);
     }
+    // An expired upload's unknown outcome is resolved here by HEAD on its never-reused key, so
+    // deletion never depends on the preview rollout flag or panel; only an unidentifiable object
+    // still refuses it.
+    let previewState = track.motionPreview ?? null;
     if (previewPending?.outcomeUnknown === true) {
-        throw uploadLifecycleFailure(new Error('The motion preview upload requires explicit S3 version reconciliation before deletion.'), true, true);
+        let resolved: { key: string; versionId: string | null } | null;
+        try {
+            resolved = await resolvePendingMotionPreviewObject(
+                previewPending,
+                audioTrackId,
+                deletion.headMotionPreviewObject ?? ((key) => headMotionPreviewObject(key))
+            );
+        } catch {
+            throw uploadLifecycleFailure(new Error('The motion preview upload requires explicit S3 version reconciliation before deletion.'), true, true);
+        }
+        previewState = {
+            ...previewState,
+            pending: resolved ? { ...previewPending, versionId: resolved.versionId, outcomeUnknown: false } : null
+        };
     }
     const storageIdentity = {
         s3Key: track.s3Key,
@@ -862,7 +886,7 @@ export const deleteAudioObjectAndTrack = async (
             track.videoAsset,
             audioTrackId
         );
-        previewObjects = motionPreviewLifecycleKeys(track.motionPreview, audioTrackId);
+        previewObjects = motionPreviewLifecycleKeys(previewState, audioTrackId);
     } catch (error) {
         await deletion.updateTrackWhere(audioTrackId, {
             ...storageIdentity,

@@ -5,6 +5,7 @@
  * Tests
  *   - preview keys are bound to their track and live outside every audio and video classifier
  *   - the public gate needs the flag, an explicit Video, a complete preview, and the exact active source
+ *   - pending replacement work and retained cleanup never hide a valid active preview
  *   - a gate failure, revision mismatch, or revalidation never reaches storage
  *   - reconciliation classifies orphaned, missing, incomplete, stale, invalid, and duplicate preview evidence
  * @end-catalog */
@@ -31,7 +32,7 @@ const enabled = { FINITUDE_MOTION_PREVIEWS_ENABLED: 'true' } as NodeJS.ProcessEn
 const active = (overrides: Record<string, unknown> = {}) => ({
     status: 'ready', revision: `pv_${'1'.repeat(32)}`, s3Key: previewKey, versionId: 'v1', etag: '"etag-1"',
     byteLength: 900_000, contentType: 'video/mp4', durationMs: 6000, width: 854, height: 480,
-    sha256: 'a'.repeat(64), source: { s3Key: videoKey }, createdBy: 'admin', updatedAt: new Date(), ...overrides
+    sha256: 'a'.repeat(64), source: { s3Key: videoKey }, updatedBy: 'admin', updatedAt: new Date(), ...overrides
 });
 
 const track = (overrides: Record<string, unknown> = {}, previewOverrides: Record<string, unknown> = {}) => ({
@@ -75,6 +76,19 @@ test('the public gate needs the flag, an explicit Video, a complete preview, and
         track({ motionPreview: null })
     ]) {
         assert.equal(publicMotionPreviewForTrack(hidden, enabled), null);
+    }
+});
+
+test('pending replacement work and retained cleanup never hide a valid active preview', () => {
+    const pendingKey = `motion-preview/${trackId}/64b0000000000000000000ff`;
+    for (const work of [
+        { pending: { status: 'uploading', s3Key: pendingKey, versionId: null, outcomeUnknown: true } },
+        { pending: { status: 'failed', s3Key: pendingKey, versionId: 'v2', outcomeUnknown: false } },
+        { cleanup: { status: 'deleteFailed', s3Key: pendingKey, versionId: 'v0', reason: 'replaced' } }
+    ]) {
+        const busy = track();
+        Object.assign(busy.motionPreview, work);
+        assert.equal(publicMotionPreviewForTrack(busy, enabled)?.s3Key, previewKey);
     }
 });
 

@@ -13,7 +13,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 // Loads only after eligibility passes, so a disallowed preview never reads the presentation flags.
-const MotionPreviewSource = lazy(() => import('./MotionPreviewSource'));
+// A chunk that fails to load (an old tab after a deploy) simply shows no preview.
+const MotionPreviewSource = lazy(() => import('./MotionPreviewSource').catch(() => ({ default: () => null })));
 
 // Previews loop a short window from a little way into the video, where openings are rarely blank.
 const previewStartFraction = 0.2;
@@ -42,6 +43,8 @@ export interface CardVideoPreviewProps {
 interface PreviewVideoProps {
   className: string;
   source: string;
+  /** A dedicated clip is prepared as the preview, so it loops whole from its start. */
+  fromStart: boolean;
   onStop: () => void;
 }
 
@@ -81,7 +84,9 @@ export default function CardVideoPreview({ className, mediaTrackId, streamUrl, o
   return (
     <Suspense fallback={null}>
       <MotionPreviewSource mediaTrackId={mediaTrackId} streamUrl={streamUrl}>
-        {(source) => <PreviewVideo className={className} key={source} onStop={onStop} source={source} />}
+        {(source, isClip) => (
+          <PreviewVideo className={className} fromStart={isClip} key={source} onStop={onStop} source={source} />
+        )}
       </MotionPreviewSource>
     </Suspense>
   );
@@ -92,7 +97,7 @@ export default function CardVideoPreview({ className, mediaTrackId, streamUrl, o
  * separate from the shared player, loops a bounded window, stops when the page hides or another card
  * starts a preview, and releases its request on unmount.
  */
-function PreviewVideo({ className, source, onStop }: PreviewVideoProps) {
+function PreviewVideo({ className, source, fromStart, onStop }: PreviewVideoProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
 
@@ -126,12 +131,15 @@ function PreviewVideo({ className, source, onStop }: PreviewVideoProps) {
     };
     const begin = () => {
       const duration = video.duration;
-      if (Number.isFinite(duration) && duration > 0) {
-        start = Math.min(duration * previewStartFraction, previewMaximumStartSeconds);
-        end = Math.min(start + previewWindowSeconds, duration);
-      } else {
+      if (!Number.isFinite(duration) || duration <= 0) {
         start = 0;
         end = previewWindowSeconds;
+      } else if (fromStart) {
+        start = 0;
+        end = duration;
+      } else {
+        start = Math.min(duration * previewStartFraction, previewMaximumStartSeconds);
+        end = Math.min(start + previewWindowSeconds, duration);
       }
       video.currentTime = start;
       play();
@@ -170,7 +178,7 @@ function PreviewVideo({ className, source, onStop }: PreviewVideoProps) {
       video.removeAttribute('src');
       video.load();
     };
-  }, [onStop, source]);
+  }, [fromStart, onStop, source]);
 
   return (
     <video

@@ -24,7 +24,8 @@ export interface MotionPreviewActive {
     height: number;
     sha256: string;
     source: MotionPreviewSource;
-    createdBy: string;
+    /** The administrator who last uploaded the clip; not shared-catalog provenance. */
+    updatedBy: string;
     updatedAt: Date;
 }
 

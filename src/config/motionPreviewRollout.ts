@@ -3,4 +3,5 @@
  * preview at once but keeps stored previews and their lifecycle evidence for later reconciliation.
  */
 export const isMotionPreviewEnabled = (environment: NodeJS.ProcessEnv = process.env) =>
-    environment.FINITUDE_MOTION_PREVIEWS_ENABLED?.trim().toLowerCase() === 'true';
+    // Like the admin workbench and Social/Rooms gates, only the exact literal enables it.
+    environment.FINITUDE_MOTION_PREVIEWS_ENABLED === 'true';
