@@ -65,7 +65,7 @@ const spyGate = (inner: MetadataLookupRateGate = immediateGate()) => {
         async acquire(source, mode, signal) {
             record.acquisitions++;
             const lease = await inner.acquire(source, mode, signal);
-            return { release: async (outcome?: { backoffMs?: number }) => { record.releases.push(outcome); await lease.release(outcome); } } satisfies LookupGateLease;
+            return { sent: () => lease.sent(), release: async (outcome?: { backoffMs?: number }) => { record.releases.push(outcome); await lease.release(outcome); } } satisfies LookupGateLease;
         }
     };
     return { gate, record };

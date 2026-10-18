@@ -8,6 +8,7 @@
  *   - production transport pins one answer for both lookup forms, verifies TLS and sends exactly three headers
  *   - a refused redirect destination fails before a second DNS lookup or connection and destroys the redirect body
  *   - destinations see hops 0..n, more than three redirects fail and loops fail
+ *   - beforeSend runs once per hop, after its DNS answer and right before its request
  *   - a duplicate, missing or unsafe Location fails on the first hop
  *   - declared and streamed byte caps hold and an empty or truncated body fails
  *   - a stalled DNS lookup and a stalled body both end at the one shared deadline
@@ -129,6 +130,21 @@ test('destinations see hops 0..n, more than three redirects fail and loops fail'
         lookup: async () => [address], request: async () => { requests++; return response(302, { location: `/clamped-${requests}` }); }
     }));
     assert.equal(requests, 4, 'maximumRedirects is clamped to three');
+});
+
+test('beforeSend runs once per hop, after its DNS answer and right before its request', async () => {
+    const events: string[] = [];
+    let requests = 0;
+    await openPinnedHttps(start, new AbortController().signal, policy({ beforeSend: () => events.push('beforeSend') }), {
+        lookup: async () => { events.push('lookup'); return [address]; },
+        request: async () => { events.push('request'); requests++; return requests === 1 ? response(302, { location: '/next' }) : response(200, {}, '{}'); }
+    });
+    assert.deepEqual(events, ['lookup', 'beforeSend', 'request', 'lookup', 'beforeSend', 'request']);
+    events.length = 0;
+    await assert.rejects(openPinnedHttps(start, new AbortController().signal, policy({ beforeSend: () => events.push('beforeSend') }), {
+        lookup: async () => [{ address: '10.0.0.1', family: 4 }], request: async () => assert.fail('a private answer is never connected')
+    }), /SYNTHETIC_PINNED_FAILURE/);
+    assert.deepEqual(events, [], 'a refused answer is never marked as sent');
 });
 
 test('a duplicate, missing or unsafe Location fails on the first hop', async () => {

@@ -15,6 +15,8 @@
  *   - a 503 answer through the MusicBrainz client pushes the shared gate, so the other instance waits out the Retry-After
  *   - a stale release after expiry never frees the lease another instance now holds
  *   - a release without backoff never shortens the shared spacing, and each source has its own document
+ *   - a grant whose reply arrives late still keeps the next start one interval after the holder could send
+ *   - spacing counts from the holder's latest send, so a slow DNS answer inside the lease cannot bring the next request closer
  *   - a grant that returns after the caller aborted is released, and the acquire is cancelled
  *   - an applied grant whose reply is lost is released before the acquire fails, so no orphan lease blocks the source
  *   - a release that never completes returns within one second and leaves the lease to expire
@@ -229,6 +231,41 @@ test('a release without backoff never shortens the shared spacing, and each sour
     for (const lease of held) await lease.release();
     const ids = (await getDb()!.collection(adminMetadataLookupGateCollection).find({}).toArray()).map(document => String(document._id)).sort();
     assert.deepEqual(ids, ['coverartarchive', 'itunes', 'musicbrainz']);
+});
+
+test('a grant whose reply arrives late still keeps the next start one interval after the holder could send', async () => {
+    // The update is applied at once, but its reply reaches this instance 150 ms later, as on a slow write.
+    const slow = createMongoLookupRateGate(proxiedDb(getDb()!, {
+        findOneAndUpdate: async (inner, ...args) => {
+            const result = await (inner.findOneAndUpdate as (...values: unknown[]) => Promise<unknown>).apply(inner, args);
+            await delay(150);
+            return result;
+        }
+    }), { rates });
+    const lease = await slow.acquire('musicbrainz', 'wait', open());
+    const holderStart = Date.now();
+    await delay(200); // longer than the remaining spacing, so only the release decides the next start
+    await lease.release();
+    const next = await createMongoLookupRateGate(secondDb, { rates }).acquire('musicbrainz', 'wait', open());
+    const spacing = Date.now() - holderStart;
+    await next.release();
+    // Without the release push the next start follows the release (about 200 ms); counting the hold
+    // twice would put it about 600 ms after the holder's start.
+    assert.ok(spacing >= 400 - 20 && spacing < 400 + 150, `next start ${spacing} ms after the late holder's start`);
+});
+
+test('spacing counts from the holder\'s latest send, so a slow DNS answer inside the lease cannot bring the next request closer', async () => {
+    const lease = await createMongoLookupRateGate(getDb()!, { rates }).acquire('musicbrainz', 'wait', open());
+    await delay(300); // DNS for the first hop
+    lease.sent();
+    const sentAt = Date.now();
+    await delay(50);
+    await lease.release();
+    lease.sent(); // after release it changes nothing
+    const next = await createMongoLookupRateGate(secondDb, { rates }).acquire('musicbrainz', 'wait', open());
+    const spacing = Date.now() - sentAt;
+    await next.release();
+    assert.ok(spacing >= 400 - 20 && spacing < 400 + 150, `next start ${spacing} ms after the holder's send`);
 });
 
 test('a grant that returns after the caller aborted is released, and the acquire is cancelled', async () => {

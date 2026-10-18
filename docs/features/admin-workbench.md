@@ -641,8 +641,14 @@ control uses it yet, so nothing is sent to any service. It lives in
   on the MongoDB clock and written outside transactions. MusicBrainz requests
   start at least 1.1 seconds apart with one in flight, iTunes requests at least
   3 seconds apart, and Cover Art Archive admits two at once; a lease expires
-  after 30 seconds. Automatic lookups wait for a slot (wait mode), polling about
-  once per interval while a lease is held, and report the source as
+  after 30 seconds. Spacing counts from each holder's latest send, after DNS and
+  once per redirect hop (or, before it sends, from its grant's arrival): its
+  release moves the next start to at least one interval after that moment, the
+  database time of the release minus the time since, so a grant whose reply
+  arrives late (a slow write) or a slow DNS answer cannot bring the next request
+  closer. That bound needs one holder at a time, so a source with spacing must
+  have concurrency 1. Automatic lookups wait for a slot (wait mode), polling
+  about once per interval while a lease is held, and report the source as
   `unavailable` after 60 seconds. A submitted lookup (busy mode) sleeps out only
   its own request spacing, so its consecutive requests are paced rather than
   refused. It is reported as `busy` when another request holds the source, when
@@ -651,8 +657,8 @@ control uses it yet, so nothing is sent to any service. It lives in
   pushes the source's next start by its Retry-After (1 to 30 seconds) or by 2
   then 5 seconds; wait mode makes at most three attempts in one call. A gate
   command is bounded to 2 seconds and a release to 1 second, an abort cancels a
-  pending command at once, and a grant whose reply was lost is released again.
-  A database failure fails closed before anything is sent.
+  pending command at once, and a grant whose reply was lost is released again. A
+  database failure fails closed before anything is sent.
 - **Validation.** Responses need an allowlisted content type, identity encoding,
   complete UTF-8 and the complete JSON parser (duplicate keys and nesting deeper
   than 20 rejected), then an allowlisted shape. Unknown fields are dropped;

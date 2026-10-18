@@ -11,6 +11,7 @@
  *   - 429 is rate limited like 503; an HTTP-date Retry-After sets the backoff and an unusable one falls back to the schedule
  *   - a gate refusal propagates unchanged and nothing is resolved or sent
  *   - cached answers are deep-frozen, shared by reference and keyed by source and exact URL
+ *   - each attempt marks its lease as sent after DNS and before the request, so spacing counts from the send
  *   - every call in this file released exactly the leases it acquired
  * @end-catalog */
 
@@ -39,20 +40,23 @@ const lookupRequest = (overrides: Partial<LookupJsonRequest<unknown>> = {}): Loo
     emptyStatuses: [404], emptyValue: null, parse: value => ({ parsed: JSON.parse(JSON.stringify(value)) }), ...overrides
 });
 
-type GateRecord = { acquisitions: number; releases: ({ backoffMs?: number } | undefined)[] };
+type GateRecord = { acquisitions: number; sends: number; releases: ({ backoffMs?: number } | undefined)[] };
 type Harness = { gate: GateRecord; sets: string[]; sleeps: number[]; dependencies: LookupClientDependencies };
 const harnesses: Harness[] = [];
 /** Real request path with a counting gate, a recording cache and an instant sleep. */
 const harness = (transport: PinnedHttpsTransport, overrides: Partial<LookupClientDependencies> = {}): Harness => {
     // Pacing is the gate's own concern (tested elsewhere); here every slot is granted at once and the
     // spy records the backoff each release pushes.
-    const inner: MetadataLookupRateGate = { acquire: async () => ({ release: async () => undefined }) };
-    const record = { acquisitions: 0, releases: [] as ({ backoffMs?: number } | undefined)[] };
+    const inner: MetadataLookupRateGate = { acquire: async () => ({ sent: () => undefined, release: async () => undefined }) };
+    const record = { acquisitions: 0, sends: 0, releases: [] as ({ backoffMs?: number } | undefined)[] };
     const gate: MetadataLookupRateGate = {
         async acquire(source, mode, signal) {
             record.acquisitions++;
             const lease = await inner.acquire(source, mode, signal);
-            return { release: async outcome => { record.releases.push(outcome); await lease.release(outcome); } } satisfies LookupGateLease;
+            return {
+                sent: () => { record.sends++; lease.sent(); },
+                release: async outcome => { record.releases.push(outcome); await lease.release(outcome); }
+            } satisfies LookupGateLease;
         }
     };
     const cached = createLookupResponseCache();
@@ -236,6 +240,26 @@ test('cached answers are deep-frozen, shared by reference and keyed by source an
     assert.equal(bounded.get('nan'), undefined); assert.equal(bounded.get('infinite'), undefined);
     bounded.set('a', 1, 6); bounded.set('a', 2, 6); bounded.set('b', 3, 4);
     assert.deepEqual([bounded.get('a'), bounded.get('b')], [{ value: 2 }, { value: 3 }], 'replacing a key releases its old byte count');
+});
+
+test('each attempt marks its lease as sent after DNS and before the request, so spacing counts from the send', async () => {
+    const events: string[] = [];
+    const fake = fixtureTransport([answer(503, { 'content-type': 'application/json', 'retry-after': '1' }), answer(200, { 'content-type': 'application/json' })]);
+    const current = harness({
+        lookup: async (hostname, signal) => { events.push('lookup'); return fake.transport.lookup!(hostname, signal); },
+        request: async (...values) => { events.push('request'); return fake.transport.request!(...values); }
+    });
+    const inner = current.dependencies.gate;
+    current.dependencies.gate = { acquire: async (source, mode, signal) => {
+        const lease = await inner.acquire(source, mode, signal);
+        return { sent: () => { events.push('sent'); lease.sent(); }, release: outcome => lease.release(outcome) };
+    } };
+    assert.deepEqual(await run(current), { parsed: { ok: true } });
+    assert.deepEqual(events, ['lookup', 'sent', 'request', 'lookup', 'sent', 'request']);
+    assert.equal(current.gate.sends, 2);
+    const refused = harness({ lookup: async () => [{ address: '10.0.0.1', family: 4 }], request: async () => assert.fail('a private answer is never connected') });
+    await assert.rejects(run(refused), failure('unavailable'));
+    assert.equal(refused.gate.sends, 0, 'nothing sent, nothing marked');
 });
 
 test('every call in this file released exactly the leases it acquired', () => {

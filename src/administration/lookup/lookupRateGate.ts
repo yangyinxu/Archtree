@@ -5,7 +5,8 @@
  *   Constants: adminMetadataLookupGateCollection
  * Internal
  *   Types: GateDocument, Sleep, RateOverrides, Refusal
- *   Functions: clamp, defaultSleep, rateFor, settleWithin, afterRefusal, waitOrCancel, handleRefusal
+ *   Functions: clamp, defaultSleep, rateFor, assertSpacedSingleHolder, settleWithin, afterRefusal,
+ *              waitOrCancel, handleRefusal
  *   Constants: gateCommandMs, releaseWaitMs
  * @end-catalog */
 
@@ -26,8 +27,15 @@ import {
  * one lookup's consecutive requests are paced rather than refused, and reports `busy` when another
  * request holds the source, a backoff pushed it back further than one interval, or another caller
  * took the slot it waited for. A lease that is never released (crash, unknown outcome) expires.
+ * A grant's reply can arrive well after the database decided it (a slow write, or the collection's
+ * first-time creation), and DNS runs inside the lease, so release also keeps the next start one
+ * interval after the holder's latest send (or, without one, its grant's arrival): the database time
+ * of the release minus the time since. That bound needs one holder at a time, so a source with
+ * spacing must have concurrency 1.
  */
 export interface LookupGateLease {
+    /** Marks that the holder is sending a request now (once per redirect hop); spacing counts from the latest mark. */
+    sent(): void;
     /** Idempotent, never throws and waits at most one second; `backoffMs` pushes the source's next start (Retry-After). */
     release(outcome?: { backoffMs?: number }): Promise<void>;
 }
@@ -50,6 +58,13 @@ const releaseWaitMs = 1000;
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, Number.isFinite(value) ? value : maximum));
 const defaultSleep: Sleep = (ms, signal) => delay(ms, undefined, { signal }).then(() => undefined);
 const rateFor = (rates: RateOverrides | undefined, source: MetadataLookupSource) => rates?.[source] ?? METADATA_LOOKUP_RATES[source];
+/** Spacing is kept from the one holder's own send, so a spaced source admits one request at a time. */
+const assertSpacedSingleHolder = (rates: RateOverrides | undefined) => {
+    for (const source of Object.keys(METADATA_LOOKUP_RATES) as MetadataLookupSource[]) {
+        const rate = rateFor(rates, source);
+        if (rate.intervalMs > 0 && rate.concurrency !== 1) throw new Error(`Metadata lookup source ${source} with spacing must have concurrency 1.`);
+    }
+};
 
 /** Waits for `work` at most `ms`; the work keeps running on its own and its failure is ignored. */
 const settleWithin = async (work: Promise<unknown>, ms: number) => {
@@ -96,6 +111,7 @@ const handleRefusal = async (source: MetadataLookupSource, mode: LookupGateMode,
 
 /** Deployment-wide gate on the shared database. Its documents are written only outside transactions. */
 export const createMongoLookupRateGate = (db: Db, options: { rates?: RateOverrides; sleep?: Sleep } = {}): MetadataLookupRateGate => {
+    assertSpacedSingleHolder(options.rates);
     const sleep = options.sleep ?? defaultSleep;
     const gates = (): Collection<GateDocument> => db.collection<GateDocument>(adminMetadataLookupGateCollection);
 
@@ -125,12 +141,12 @@ export const createMongoLookupRateGate = (db: Db, options: { rates?: RateOverrid
         }
     };
 
-    /** Removes only the lease with this id; it never shortens the next start. */
-    const release = async (source: MetadataLookupSource, id: string, backoffMs: number) => {
+    /** Removes only the lease with this id and moves the next start to at least `$$NOW + pushMs`; it never shortens it. */
+    const release = async (source: MetadataLookupSource, id: string, pushMs: number) => {
         await gates().updateOne({ _id: source }, [{ $set: {
             leases: { $filter: { input: { $ifNull: ['$leases', []] }, as: 'lease',
                 cond: { $and: [{ $ne: ['$$lease.id', id] }, { $gt: ['$$lease.expiresAt', '$$NOW'] }] } } },
-            nextAt: { $max: [{ $ifNull: ['$nextAt', new Date(0)] }, { $add: ['$$NOW', backoffMs] }] }
+            nextAt: { $max: [{ $ifNull: ['$nextAt', new Date(0)] }, { $add: ['$$NOW', pushMs] }] }
         } }], { maxTimeMS: 1000 });
     };
 
@@ -162,14 +178,18 @@ export const createMongoLookupRateGate = (db: Db, options: { rates?: RateOverrid
                     throw new MetadataLookupSourceError(source, 'unavailable');
                 }
                 if (document.leases.some(lease => lease?.id === id)) {
+                    // The holder sends no earlier than this reply; a monotonic duration needs no shared clock.
+                    let sentAt = performance.now();
                     let released = false;
                     const lease: LookupGateLease = {
+                        sent() { if (!released) sentAt = performance.now(); },
                         async release(outcome) {
                             if (released) return;
                             released = true;
                             const backoffMs = clamp(Math.round(outcome?.backoffMs ?? 0), 0, 60_000);
+                            const heldMs = Math.max(0, Math.floor(performance.now() - sentAt));
                             // A failed or slow release leaves the lease to expire after leaseMs; no answer waits for it.
-                            await settleWithin(release(source, id, backoffMs), releaseWaitMs);
+                            await settleWithin(release(source, id, Math.max(backoffMs, rate.intervalMs - heldMs)), releaseWaitMs);
                         }
                     };
                     if (signal.aborted) { await lease.release(); throw new MetadataLookupSourceError(source, 'cancelled'); }
@@ -190,6 +210,7 @@ export const createMongoLookupRateGate = (db: Db, options: { rates?: RateOverrid
  * because it does not bound other application instances.
  */
 export const createProcessLookupRateGate = (options: { rates?: RateOverrides; now?: () => number; sleep?: Sleep } = {}): MetadataLookupRateGate => {
+    assertSpacedSingleHolder(options.rates);
     const now = options.now ?? Date.now;
     const sleep = options.sleep ?? defaultSleep;
     const state = new Map<MetadataLookupSource, { nextAt: number; leases: Map<string, number> }>();
@@ -208,13 +229,15 @@ export const createProcessLookupRateGate = (options: { rates?: RateOverrides; no
                     const id = randomUUID();
                     current.leases.set(id, time + rate.leaseMs);
                     current.nextAt = time + rate.intervalMs;
+                    let sentAt = time;
                     let released = false;
                     return {
+                        sent() { if (!released) sentAt = now(); },
                         async release(outcome) {
                             if (released) return;
                             released = true;
                             current.leases.delete(id);
-                            current.nextAt = Math.max(current.nextAt, now() + clamp(Math.round(outcome?.backoffMs ?? 0), 0, 60_000));
+                            current.nextAt = Math.max(current.nextAt, now() + clamp(Math.round(outcome?.backoffMs ?? 0), 0, 60_000), sentAt + rate.intervalMs);
                         }
                     };
                 }

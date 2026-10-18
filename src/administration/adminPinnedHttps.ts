@@ -39,6 +39,8 @@ export type PinnedHttpsPolicy = {
     /** Clamped to [0, 3]. */
     maximumRedirects: number;
     failure: () => Error;
+    /** Called after each hop's DNS answer, right before its request is opened (a rate gate counts spacing from here). */
+    beforeSend?: () => void;
 };
 
 const blocked = new BlockList();
@@ -196,6 +198,7 @@ export const openPinnedHttps = async (url: URL, signal: AbortSignal, policy: Pin
             signal.throwIfAborted();
             const addresses = await withAbort(lookup(target.hostname, signal), signal, policy.failure);
             if (!Array.isArray(addresses) || !addresses.length || addresses.length > 32 || !addresses.every(isPublicUnicastAddress)) throw policy.failure();
+            policy.beforeSend?.();
             const response = await withAbort(send(target, addresses[0], signal, headers), signal, policy.failure);
             if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
                 response.body.destroy();

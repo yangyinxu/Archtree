@@ -97,7 +97,7 @@ export async function requestLookupJson<T>(request: LookupJsonRequest<T>, option
         try {
             const deadline = AbortSignal.any([options.signal, AbortSignal.timeout(request.deadlineMs)]);
             let response: PinnedHttpsResponse;
-            try { ({ response } = await openPinnedHttps(request.url, deadline, policy, dependencies.transport)); }
+            try { ({ response } = await openPinnedHttps(request.url, deadline, { ...policy, beforeSend: () => lease.sent() }, dependencies.transport)); }
             catch { throw fail(options.signal.aborted ? 'cancelled' : 'unavailable'); }
             if (response.statusCode === 200) {
                 const encoding = response.headers['content-encoding'];

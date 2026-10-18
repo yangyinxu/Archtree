@@ -9,6 +9,7 @@
  *   - busy mode is busy while another request holds the source and after a push longer than one interval
  *   - busy mode is busy when another caller takes the slot it waited for
  *   - concurrency 1 holds a second request until the first lease is released; concurrency 2 admits two
+ *   - the next start is one interval after the holder's latest send, and a spaced source must admit one at a time
  *   - a wait-mode caller behind a held MusicBrainz lease polls once per interval, not every two seconds
  *   - a wait-mode acquisition gives up as unavailable within the total wait bound
  *   - an abort while waiting is cancelled and a pre-aborted signal never acquires
@@ -112,6 +113,22 @@ test('concurrency 1 holds a second request until the first lease is released; co
     await leases[0].release();
     leases.push(await coverArt.acquire('coverartarchive', 'busy', open()));
     for (const lease of leases) await lease.release();
+});
+
+test('the next start is one interval after the holder\'s latest send, and a spaced source must admit one at a time', async () => {
+    const fake = clock();
+    const gate = createProcessLookupRateGate({ now: fake.now, sleep: fake.sleep });
+    const lease = await gate.acquire('musicbrainz', 'wait', open());
+    fake.state.now += 300; // DNS inside the lease
+    lease.sent();
+    const sentAt = fake.state.now;
+    fake.state.now += 50;
+    await lease.release();
+    lease.sent(); // after release it changes nothing
+    await (await gate.acquire('musicbrainz', 'wait', open())).release();
+    assert.equal(fake.state.now - sentAt, 1100);
+    assert.throws(() => createProcessLookupRateGate({ rates: { itunes: { intervalMs: 3000, concurrency: 2, leaseMs: 30_000 } } }), /concurrency 1/);
+    for (const rate of Object.values(METADATA_LOOKUP_RATES)) assert.ok(rate.intervalMs === 0 || rate.concurrency === 1);
 });
 
 test('a wait-mode caller behind a held MusicBrainz lease polls once per interval, not every two seconds', async () => {
