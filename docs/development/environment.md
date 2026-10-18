@@ -31,6 +31,17 @@ Canonical localization JSON uses LF even in Windows checkouts with
 two-space JSON and duplicate-key checks enabled; do not regenerate locale content
 just to repair checkout line endings.
 
+`.gitattributes` also pins `.ebextensions/*.config` to LF, because Elastic
+Beanstalk reads them as YAML on Linux and the artifact stager copies the working
+tree. Git does not rewrite files checked out before a rule changed, so a checkout
+that still holds CRLF copies fails the deployment tests until those files are
+checked out again:
+
+```sh
+rm .ebextensions/*.config
+git checkout -- .ebextensions
+```
+
 ```sh
 node --version
 npm ci
