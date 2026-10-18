@@ -15,6 +15,7 @@
  *   - unverified evidence and confirmed defects share the report-wide findings limit
  *   - the read-only deletion audit retains orphaned failed/expired receipts and legacy owners
  *   - an incomplete receipt scan never invents a legacy deletion from an unseen active receipt
+ *   - an invalid stored join phrase is reported by creditId without invalidating the Credit list
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -229,4 +230,23 @@ test('an incomplete receipt scan never invents a legacy deletion from an unseen 
     const report = await reconcileContentReferences();
     assert.deepEqual(report.catalogDeletionFindings, []);
     assert.equal(report.truncated, true);
+});
+
+test('an invalid stored join phrase is reported by creditId without invalidating the Credit list', async () => {
+    process.env.MAX_RECONCILIATION_OBJECTS = '10';
+    const artist = id(3), organization = id(4), track = id(20);
+    await getDb()!.collection('artists').insertOne({ _id: artist, albumIds: [], lifecycleStatus: 'ready' });
+    await getDb()!.collection('organizations').insertOne({ _id: organization, lifecycleStatus: 'ready' });
+    await getDb()!.collection('audioTracks').insertOne({
+        _id: track, artistIds: [artist.toHexString()], attributionStatus: 'documented',
+        credits: [{ ...credit('artist', artist), joinPhrase: 'x\u200By' }, { ...credit('organization', organization, 1), joinPhrase: ' / ' }]
+    });
+    const before = await fixtureSnapshot();
+    const report = await reconcileContentReferences();
+    assert.equal(report.readOnly, true);
+    assert.deepEqual(report.catalogCreditFindings, [{
+        ownerType: 'audioTrack', ownerId: track.toHexString(), reason: 'invalidJoinPhrase', creditId: 'synthetic_credit_0'
+    }]);
+    assert.deepEqual(report.catalogCreditUnverified, []);
+    assert.equal(await fixtureSnapshot(), before);
 });

@@ -24,6 +24,7 @@ import {
     legacyTrackArtistIdsFromCredits,
     migratedCatalogCreditId,
     normalizeCatalogCredits,
+    normalizeStoredCatalogCredits,
     validateAttribution
 } from '../../models/catalogCredit';
 import {
@@ -87,13 +88,18 @@ const albumReferenceValues = (albumId: string) => [
     ObjectId.createFromHexString(albumId)
 ];
 
+/**
+ * Reads an owner's current Credits for a rebuild. Stored lists are read tolerantly, so an
+ * invalid stored join phrase is dropped (and repaired by the strict write) instead of blocking
+ * the edit; valid phrases stay on their Credits.
+ */
 const legacyCreditsForUnmigratedOwner = async (
     session: ClientSession,
     ownerType: CatalogCreditOwnerType,
     ownerId: string,
     owner: any
 ) => {
-    if (Array.isArray(owner.credits)) return normalizeCatalogCredits(owner.credits);
+    if (Array.isArray(owner.credits)) return normalizeStoredCatalogCredits(owner.credits);
     if (ownerType === 'audioTrack') {
         const artistIds = [...new Set<string>((Array.isArray(owner.artistIds) ? owner.artistIds : [])
             .map((value: unknown) => String(value ?? '').trim().toLowerCase())
@@ -168,9 +174,13 @@ const confirmCatalogCreditMutation = async (result: CatalogCreditMutationResult)
     );
     if (!owner || owner.creditRevision !== result.creditRevision
         || owner.attributionStatus !== result.attributionStatus) return false;
+    // Read like every other stored list, so an invalid stored phrase counts as absent: a no-op
+    // result (a duplicate add) built from the same tolerant read then confirms. A real write
+    // stores strictly normalized Credits and moves creditRevision, and the fixed key order makes
+    // any missing, extra or changed valid phrase fail the comparison.
     let storedCredits: CatalogCredit[];
     try {
-        storedCredits = normalizeCatalogCredits(owner.credits);
+        storedCredits = normalizeStoredCatalogCredits(owner.credits);
     } catch {
         return false;
     }
@@ -627,7 +637,8 @@ export const removeCatalogCredit = async (
                 { session, projection: { credits: 1 } }
             );
             if (!owner) throw new CatalogCreditConflictError('The Credit owner is unavailable.');
-            const existing = Array.isArray(owner.credits) ? normalizeCatalogCredits(owner.credits) : [];
+            // Remaining Credits keep their valid phrases; an invalid stored phrase is dropped.
+            const existing = Array.isArray(owner.credits) ? normalizeStoredCatalogCredits(owner.credits) : [];
             const retained = existing.filter((credit) => credit.creditId !== creditId);
             return replaceCatalogCreditsWithinTransaction(
                 session,
@@ -654,7 +665,8 @@ export const reorderCatalogCredits = async (
                 { session, projection: { credits: 1 } }
             );
             if (!owner) throw new CatalogCreditConflictError('The Credit owner is unavailable.');
-            const existing = Array.isArray(owner.credits) ? normalizeCatalogCredits(owner.credits) : [];
+            // Each phrase moves with its Credit; an invalid stored phrase is dropped.
+            const existing = Array.isArray(owner.credits) ? normalizeStoredCatalogCredits(owner.credits) : [];
             const byId = new Map(existing.map((credit) => [credit.creditId, credit]));
             if (orderedCreditIds.length !== existing.length
                 || new Set(orderedCreditIds).size !== existing.length

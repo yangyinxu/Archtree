@@ -200,25 +200,23 @@ const listenerLegacyTrackKeyPaths = [
 ];
 
 /**
- * Today's legacy public Credit is `{ ...credit, name }` over the normalized stored Credit, so it
- * carries `creditId`, which `PublicCatalogCredit` does not declare. Stored extras such as
- * joinPhrase are dropped only because normalizeCatalogCredits rebuilds each Credit. S1 narrows
- * this projection to an explicit allowlist and is expected to update this constant (and the
- * matching `credits[].creditId` paths in the two legacy public lists below), nothing else
+ * The legacy public Credit is an explicit allowlist of the five fields `PublicCatalogCredit`
+ * declares. S1 narrowed it from `{ ...credit, name }`, which also carried `creditId`; stored
+ * extras such as joinPhrase and musicBrainzId, and the internal creditId, must never appear
  * (asserted in 'legacy public Album, MediaTrack and Artist key sets ignore unknown stored fields').
  */
-const legacyPublicCreditKeys = ['creditId', 'name', 'order', 'role', 'subjectId', 'subjectType'];
+const legacyPublicCreditKeys = ['name', 'order', 'role', 'subjectId', 'subjectType'];
 
 const legacyPublicAlbumKeyPaths = [
     '_id', 'attributionStatus', 'audioTrackIds', 'coverArtUrl', 'credits',
-    'credits[].creditId', 'credits[].name', 'credits[].order', 'credits[].role', 'credits[].subjectId',
+    'credits[].name', 'credits[].order', 'credits[].role', 'credits[].subjectId',
     'credits[].subjectType', 'displayByline', 'releaseDate', 'releaseDate.day', 'releaseDate.month',
     'releaseDate.year', 'title'
 ];
 
 const legacyPublicDocumentedTrackKeyPaths = [
     '_id', 'albumId', 'artistIds', 'attributionStatus', 'coverArtUrl', 'credits',
-    'credits[].creditId', 'credits[].name', 'credits[].order', 'credits[].role', 'credits[].subjectId',
+    'credits[].name', 'credits[].order', 'credits[].role', 'credits[].subjectId',
     'credits[].subjectType', 'displayByline', 'displayCoverArtUrl', 'duration', 'format', 'format.bitrate',
     'format.type', 'genres', 'mediaType', 'releaseDate', 'releaseDate.year', 'streamUrl', 'title'
 ];

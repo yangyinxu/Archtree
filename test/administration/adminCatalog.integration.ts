@@ -21,6 +21,7 @@
  *   - legacy external artwork failures stay private and never reveal the source or error details
  *   - a Track Number edit reorders existing members atomically and rejects invalid dates
  *   - hidden Follow targets and inherited releases are excluded before dynamic limits
+ *   - a PATCH cannot write a join phrase, while stored phrases survive Credit edits by creditId
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -325,4 +326,48 @@ test('hidden Follow targets and inherited releases are excluded before dynamic l
     await assert.rejects(followArtist(admin.toHexString(), artist.toHexString()), code('ARTIST_UNAVAILABLE'));
     const resolved = await Carousel.resolveCarousel({ mode: 'artist', artistConfig: { artistId: artist.toHexString(), contentType: 'album', sort: 'titleAsc', limit: 20 } });
     assert.deepEqual(resolved.items, []); assert.equal(resolved.artistConfig, undefined);
+});
+
+test('a PATCH cannot write a join phrase, while stored phrases survive Credit edits by creditId', async () => {
+    const guest = new ObjectId();
+    await db().collection('artists').insertOne({ _id: guest, name: 'Synthetic Guest', lifecycleStatus: 'ready', albumIds: [] });
+    const primary = { creditId: 'synthetic_primary', subjectType: 'artist', subjectId: artist.toHexString(), role: 'primary', order: 0 };
+    const featured = { creditId: 'synthetic_featured', subjectType: 'artist', subjectId: guest.toHexString(), role: 'featured', order: 1 };
+    const fiveKeys = ['creditId', 'subjectType', 'subjectId', 'role', 'order'];
+    const item = async () => (await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item;
+
+    const unchanged = await db().collection('albums').findOne({ _id: album });
+    const rejected = await request(`/api/admin/v1/catalog/album/${album}`, {
+        operationId: randomUUID(), expectedRevision: (await item()).revision,
+        fields: { credits: [{ ...primary, joinPhrase: ' & ' }, featured], attributionStatus: 'documented' }
+    });
+    assert.equal(rejected.status, 400);
+    assert.deepEqual(await rejected.json(), { code: 'ADMIN_CATALOG_INVALID_INPUT' });
+    assert.deepEqual(await db().collection('albums').findOne({ _id: album }), unchanged);
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments({}), 0);
+
+    // Seed phrases directly, as a rollback from the phrase editor would leave them.
+    await db().collection('albums').updateOne({ _id: album }, {
+        $set: { credits: [{ ...primary, joinPhrase: ' & ' }, featured], attributionStatus: 'documented', creditRevision: 1 }
+    });
+    await db().collection('artists').updateOne({ _id: artist }, { $set: { albumIds: [album.toHexString()] } });
+    const seeded = await item();
+    assert.deepEqual((seeded.fields.credits as Array<Record<string, unknown>>).map((credit) => Object.keys(credit)), [fiveKeys, fiveKeys]);
+
+    await editAdminCatalogItem(admin.toHexString(), 'album', album.toHexString(), {
+        operationId: randomUUID(), expectedRevision: seeded.revision,
+        fields: { credits: [primary, { ...featured, role: 'primary' }], attributionStatus: 'documented' }
+    });
+    const stored = (await db().collection('albums').findOne({ _id: album }))!.credits as Array<Record<string, unknown>>;
+    assert.deepEqual(stored.map((credit) => [credit.creditId, credit.role, credit.joinPhrase]), [
+        ['synthetic_primary', 'primary', ' & '],
+        ['synthetic_featured', 'primary', undefined]
+    ]);
+    assert.equal('joinPhrase' in stored[1], false);
+
+    const edited = await item();
+    await db().collection('albums').updateOne({ _id: album }, { $set: { 'credits.0.joinPhrase': ' / ' } });
+    const rawChange = await item();
+    assert.notEqual(rawChange.revision, edited.revision);
+    assert.deepEqual(rawChange.fields, edited.fields);
 });

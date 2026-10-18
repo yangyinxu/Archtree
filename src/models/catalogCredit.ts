@@ -3,13 +3,17 @@
  *   Types: CatalogCreditSubjectType, CatalogCreditRole, AttributionStatus, CatalogCredit,
  *          ArtistAlbumCreditSection
  *   Classes: CatalogCreditValidationError
- *   Functions: createCatalogCreditId, migratedCatalogCreditId, creditsForLegacyArtistIds,
- *              mergeLegacyArtistIdsIntoCredits, normalizeCatalogCredits, validateAttribution,
+ *   Functions: normalizeJoinPhrase, storedJoinPhrase, createCatalogCreditId, migratedCatalogCreditId,
+ *              creditsForLegacyArtistIds, mergeLegacyArtistIdsIntoCredits, normalizeCatalogCredits,
+ *              normalizeStoredCatalogCredits, invalidStoredJoinPhraseCreditIds, withoutJoinPhrase,
+ *              retainStoredJoinPhrases, inheritedAlbumPrimaryCredits, validateAttribution,
  *              legacyTrackArtistIdsFromCredits, legacyAlbumArtistIdsFromCredits, classifyArtistAlbumCredit
- *   Constants: catalogCreditSubjectTypes, catalogCreditRoles
+ *   Constants: catalogCreditSubjectTypes, catalogCreditRoles, maximumJoinPhraseLength
  * Internal
- *   Functions: normalizedSubjectType, normalizedRole, normalizedSubjectId, normalizedCreditId
- *   Constants: artistRoles, organizationRoles, creditIdPattern, objectIdPattern
+ *   Functions: normalizedSubjectType, normalizedRole, normalizedSubjectId, normalizedCreditId,
+ *              normalizeCreditList
+ *   Constants: artistRoles, organizationRoles, creditIdPattern, objectIdPattern, loneSurrogatePattern,
+ *              forbiddenJoinPhrasePattern, visibleCharacterPattern, fusingEdgePattern
  * @end-catalog */
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -39,7 +43,16 @@ export interface CatalogCredit {
     subjectId: string;
     role: CatalogCreditRole;
     order: number;
+    /**
+     * Presentation-only text joining this Credit's name to the next byline name; absent means
+     * `, `. Never sent to clients. The key is omitted, never undefined, when no phrase is set,
+     * so phrase-free Credits keep their stored bytes and revisions.
+     */
+    joinPhrase?: string;
 }
+
+/** Longest accepted join phrase, in UTF-16 code units after NFC normalization. */
+export const maximumJoinPhraseLength = 16;
 
 const artistRoles = new Set<CatalogCreditRole>([
     'primary',
@@ -59,6 +72,19 @@ const organizationRoles = new Set<CatalogCreditRole>([
 ]);
 const creditIdPattern = /^[A-Za-z0-9_-]{8,100}$/;
 const objectIdPattern = /^[0-9a-f]{24}$/;
+const loneSurrogatePattern = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+// Controls, invisible formatting characters, line or paragraph separators, private-use and
+// unassigned code points (noncharacters included), and characters that render as blanks: the
+// grapheme joiner, the Hangul and Khmer fillers, and the braille blank.
+const forbiddenJoinPhrasePattern =
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\u034F\u115F\u1160\u17B4\u17B5\u2800\u3164\uFFA0]/u;
+// A character that renders by itself: not whitespace, a combining mark, or default-ignorable.
+const visibleCharacterPattern = /[^\p{White_Space}\p{M}\p{Default_Ignorable_Code_Point}]/u;
+// Edges that would fuse with the neighboring name into one grapheme: a leading mark (variation
+// selectors included), emoji modifier, regional indicator, or Hangul medial or final jamo, and
+// a trailing regional indicator or Hangul initial jamo.
+const fusingEdgePattern =
+    /^[\p{M}\p{Emoji_Modifier}\p{Regional_Indicator}\u1160-\u11FF\uD7B0-\uD7FF]|[\p{Regional_Indicator}\u1100-\u115F\uA960-\uA97F]$/u;
 
 export class CatalogCreditValidationError extends Error {
     readonly statusCode = 400;
@@ -93,6 +119,37 @@ const normalizedCreditId = (value: unknown) => {
         throw new CatalogCreditValidationError('Credit creditId is invalid.');
     }
     return creditId;
+};
+
+/**
+ * Strictly validates one join phrase for a write; undefined means absent. The phrase is NFC
+ * normalized, must contain a visible character, must not contain a control, format, line or
+ * paragraph separator, private-use, unassigned or blank-rendering character or a lone
+ * surrogate, must not begin or end with a character that fuses with the neighboring name, and
+ * fits within 16 UTF-16 units. Surrounding spaces are kept because they are part of the
+ * presentation (` & ` versus `、`).
+ */
+export const normalizeJoinPhrase = (value: unknown): string | undefined => {
+    if (value === undefined) return undefined;
+    const invalid = () => new CatalogCreditValidationError('Credit joinPhrase is invalid.');
+    if (typeof value !== 'string' || loneSurrogatePattern.test(value)) throw invalid();
+    const phrase = value.normalize('NFC');
+    if (forbiddenJoinPhrasePattern.test(phrase)
+        || fusingEdgePattern.test(phrase)
+        || !visibleCharacterPattern.test(phrase)
+        || phrase.length > maximumJoinPhraseLength) {
+        throw invalid();
+    }
+    return phrase;
+};
+
+/** Reads a stored join phrase; one that fails validation is dropped, so the byline shows `, `. */
+export const storedJoinPhrase = (value: unknown): string | undefined => {
+    try {
+        return normalizeJoinPhrase(value);
+    } catch {
+        return undefined;
+    }
 };
 
 /** Creates an opaque stable ID for new interactive Credits. */
@@ -133,7 +190,9 @@ export const mergeLegacyArtistIdsIntoCredits = (
     existingValue: unknown,
     artistIds: readonly string[]
 ) => {
-    const existing = Array.isArray(existingValue) ? normalizeCatalogCredits(existingValue) : [];
+    // Read tolerantly so an invalid stored phrase cannot block the edit; retained Credits keep
+    // their valid phrases.
+    const existing = Array.isArray(existingValue) ? normalizeStoredCatalogCredits(existingValue) : [];
     const requestedArtistIds = [...new Set(artistIds.map((id) => id.trim().toLowerCase()))];
     const retainedOrganizations = existing.filter((credit) => credit.subjectType === 'organization');
     const retainedArtists = existing.filter((credit) => credit.subjectType === 'artist'
@@ -161,10 +220,11 @@ export const mergeLegacyArtistIdsIntoCredits = (
     ]);
 };
 
-/** Validates and canonicalizes one complete ordered Credit list. */
-export const normalizeCatalogCredits = (
+/** Validates one ordered Credit list, reading each join phrase with the given policy. */
+const normalizeCreditList = (
     value: unknown,
-    maximumCredits: number = 50
+    maximumCredits: number,
+    phraseOf: (value: unknown) => string | undefined
 ): CatalogCredit[] => {
     if (!Array.isArray(value)) {
         throw new CatalogCreditValidationError('Credits must be an array.');
@@ -186,12 +246,17 @@ export const normalizeCatalogCredits = (
                 `Credit role ${role} is not valid for ${subjectType} subjects.`
             );
         }
+        const creditId = normalizedCreditId(source.creditId);
+        const subjectId = normalizedSubjectId(source.subjectId);
+        // Read after the structural fields so their error precedence is unchanged.
+        const joinPhrase = phraseOf(source.joinPhrase);
         return {
-            creditId: normalizedCreditId(source.creditId),
+            creditId,
             subjectType,
-            subjectId: normalizedSubjectId(source.subjectId),
+            subjectId,
             role,
-            order: index
+            order: index,
+            ...(joinPhrase === undefined ? {} : { joinPhrase })
         } satisfies CatalogCredit;
     });
 
@@ -209,6 +274,101 @@ export const normalizeCatalogCredits = (
         seenRelationships.add(relationship);
     }
     return normalized;
+};
+
+/**
+ * Validates and canonicalizes one complete ordered Credit list for a write, including each
+ * join phrase. Unknown fields are dropped and key order is fixed, so two normalized lists are
+ * JSON-equal exactly when they hold the same Credits and phrases.
+ */
+export const normalizeCatalogCredits = (
+    value: unknown,
+    maximumCredits: number = 50
+): CatalogCredit[] => normalizeCreditList(value, maximumCredits, normalizeJoinPhrase);
+
+/**
+ * Reads a stored Credit list with the same structural checks but drops each join phrase that
+ * fails validation instead of rejecting the list, so a bad phrase never hides attribution.
+ */
+export const normalizeStoredCatalogCredits = (
+    value: unknown,
+    maximumCredits: number = 50
+): CatalogCredit[] => normalizeCreditList(value, maximumCredits, storedJoinPhrase);
+
+/** Lists the valid creditIds of stored Credits whose join phrase is present but invalid. */
+export const invalidStoredJoinPhraseCreditIds = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((raw): string[] => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+        const source = raw as Record<string, unknown>;
+        if (source.joinPhrase === undefined) return [];
+        try {
+            normalizeJoinPhrase(source.joinPhrase);
+            return [];
+        } catch {
+            const creditId = String(source.creditId ?? '').trim();
+            return creditIdPattern.test(creditId) ? [creditId] : [];
+        }
+    });
+};
+
+/** Returns the Credit's five structural fields in canonical key order, without a join phrase. */
+export const withoutJoinPhrase = (credit: CatalogCredit): CatalogCredit => ({
+    creditId: credit.creditId,
+    subjectType: credit.subjectType,
+    subjectId: credit.subjectId,
+    role: credit.role,
+    order: credit.order
+});
+
+/**
+ * Carries stored join phrases into a proposed list by creditId for an editor that cannot see
+ * phrases yet. Elements that are not objects with a known string creditId pass through
+ * unchanged for normalization to judge. S1 only: S2b replaces this with explicit phrase editing.
+ */
+export const retainStoredJoinPhrases = (
+    proposed: unknown,
+    stored: readonly CatalogCredit[]
+): unknown => {
+    if (!Array.isArray(proposed)) return proposed;
+    const phrases = new Map(stored.flatMap((credit): Array<[string, string]> =>
+        credit.joinPhrase === undefined ? [] : [[credit.creditId, credit.joinPhrase]]));
+    return proposed.map((element) => {
+        if (!element || typeof element !== 'object' || Array.isArray(element)) return element;
+        const creditId = (element as Record<string, unknown>).creditId;
+        const joinPhrase = typeof creditId === 'string' ? phrases.get(creditId.trim()) : undefined;
+        return joinPhrase === undefined ? element : { ...element, joinPhrase };
+    });
+};
+
+/**
+ * Materializes a new MediaTrack's inherited Album primary-Artist Credits in Album order with
+ * their valid join phrases. A phrase is kept only when the Album Credit right after it is also
+ * inherited: a phrase joins its name to the next stored Credit, so copying it past a skipped
+ * Credit would join two inherited names with text meant for another one (for example `feat.`
+ * written before a featured Artist would then precede the next primary Artist). The last
+ * inherited phrase is therefore always cleared.
+ */
+export const inheritedAlbumPrimaryCredits = (
+    audioTrackId: string,
+    albumCredits: unknown
+): CatalogCredit[] => {
+    if (!Array.isArray(albumCredits)) return [];
+    const isInherited = (raw: any) => raw?.subjectType === 'artist' && raw?.role === 'primary';
+    return albumCredits.flatMap((raw: any, index): CatalogCredit[] => {
+        if (!isInherited(raw)) return [];
+        const joinPhrase = isInherited(albumCredits[index + 1]) ? storedJoinPhrase(raw.joinPhrase) : undefined;
+        return [{
+            creditId: migratedCatalogCreditId(
+                'audioTrack', audioTrackId, 'artist', String(raw.subjectId), 'primary'
+            ),
+            subjectType: 'artist',
+            subjectId: String(raw.subjectId),
+            role: 'primary',
+            order: 0,
+            ...(joinPhrase === undefined ? {} : { joinPhrase })
+        }];
+    });
 };
 
 /** Enforces the publication invariant without manufacturing an unknown subject. */

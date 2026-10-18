@@ -563,6 +563,11 @@
             {
               "path": "src/services/catalog/catalogCreditService.ts",
               "label": "Credit mutations"
+            },
+            {
+              "path": "src/services/catalog/catalogByline.ts",
+              "label": "Shared Credit bylines",
+              "find": "export const composeCatalogByline"
             }
           ]
         },
@@ -1414,6 +1419,11 @@
                   "path": "src/contracts/listenerV1.ts",
                   "label": "Album response contract",
                   "find": "export interface ListenerAlbum {"
+                },
+                {
+                  "path": "src/services/catalog/catalogByline.ts",
+                  "label": "Byline composition",
+                  "find": "export const composeCatalogByline"
                 }
               ]
             }

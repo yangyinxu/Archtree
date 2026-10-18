@@ -21,7 +21,7 @@ import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferen
 import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { catalogSearchFilter, withCatalogSearchUpdate } from '../../utils/catalogSearch';
-import { normalizeCatalogCredits } from '../../models/catalogCredit';
+import { normalizeStoredCatalogCredits, retainStoredJoinPhrases, withoutJoinPhrase, type CatalogCredit } from '../../models/catalogCredit';
 import { organizationTypes } from '../../models/organization';
 import { replaceCatalogCreditsWithinTransaction } from '../../services/catalog/catalogCreditService';
 import { requireCatalogCreditWrites } from '../../config/catalogCreditRollout';
@@ -72,7 +72,8 @@ export const adminCatalogEditableFields = (kind: AdminCatalogKind, doc: any): Re
     if (kind === 'artist') return { name: text(doc.name, 200), bio: text(doc.bio, 10_000, true), birthDate: date(doc.birthDate) };
     if (kind === 'organization') return { name: text(doc.name, 200), description: text(doc.description, 10_000, true), organizationType: organizationTypes.includes(doc.organizationType) ? doc.organizationType : 'other' };
     let credits = null;
-    try { if (Array.isArray(doc.credits)) credits = normalizeCatalogCredits(doc.credits); } catch { /* Private editor exposes a repairable absent list. */ }
+    // The editor's strict Credit schema has no join phrase yet (S2b); stored phrases still change the revision through rawMetadata.
+    try { if (Array.isArray(doc.credits)) credits = normalizeStoredCatalogCredits(doc.credits).map(withoutJoinPhrase); } catch { /* Private editor exposes a repairable absent list. */ }
     return { title: text(doc.title, 300), releaseDate: date(doc.releaseDate), credits,
         attributionStatus: doc.attributionStatus === 'documented' ? 'documented' : 'unknown',
         ...(kind === 'audioTrack' ? { trackNumber: Number.isInteger(doc.trackNumber) && doc.trackNumber > 0 && doc.trackNumber <= 9999 ? doc.trackNumber : null } : {}) };
@@ -155,6 +156,8 @@ const parseFields = (kind: AdminCatalogKind, value: unknown) => {
         }
         else if (key === 'trackNumber') { if (value !== null && (!Number.isInteger(value) || Number(value) < 1 || Number(value) > 9999)) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
         else if (key === 'organizationType') { if (!organizationTypes.includes(value as any)) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
+        // Join phrases stay unwritable here until explicit phrase editing ships (S2b).
+        else if (key === 'credits') { if (Array.isArray(value) && value.some(credit => credit && typeof credit === 'object' && hasOwn(credit, 'joinPhrase'))) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
         else output[key] = value;
     }
     if (hasOwn(output, 'credits') !== hasOwn(output, 'attributionStatus')) fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
@@ -204,7 +207,10 @@ export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawI
         const actualPatch = { ...patch };
         if (hasOwn(actualPatch, 'credits')) {
             requireCatalogCreditWrites();
-            await replaceCatalogCreditsWithinTransaction(session, kind as 'album' | 'audioTrack', rawId, actualPatch.credits, actualPatch.attributionStatus, Number(doc.creditRevision ?? 0));
+            // The editor cannot see phrases yet, so keep each stored phrase on its creditId instead of erasing it.
+            let stored: CatalogCredit[] = [];
+            try { stored = Array.isArray(doc.credits) ? normalizeStoredCatalogCredits(doc.credits) : []; } catch { /* A structurally broken list has no phrases to keep. */ }
+            await replaceCatalogCreditsWithinTransaction(session, kind as 'album' | 'audioTrack', rawId, retainStoredJoinPhrases(actualPatch.credits, stored), actualPatch.attributionStatus, Number(doc.creditRevision ?? 0));
             delete actualPatch.credits; delete actualPatch.attributionStatus;
         }
         await getDb()!.collection(configs[kind].collection).updateOne({ _id: doc._id, ...configs[kind].ready }, {

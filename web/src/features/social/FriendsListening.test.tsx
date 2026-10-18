@@ -4,6 +4,7 @@
  *   Constants: mocks, socialId, profile
  * Tests
  *   - reads listening friends from the server without sending friend IDs and shows their current card and artwork
+ *   - a friend card shows plain Artist names joined by commas, without a join phrase
  *   - a later read updates the nickname and invitation
  *   - read failure hides cached private metadata and invitation controls
  *   - a removed friend disappears on the next read and account changes discard cached statuses immediately
@@ -45,6 +46,12 @@ test('reads listening friends from the server without sending friend IDs and sho
   expect(within(row).getByText('Artist')).toBeInTheDocument();
   expect(row.querySelector('img')).toHaveAttribute('alt', '');
   expect(await screen.findByRole('button', { name: 'Explicit invitation' })).toHaveAttribute('data-peer-alias', 'Current Alice');
+});
+test('a friend card shows plain Artist names joined by commas, without a join phrase', async () => {
+  const listening = item();
+  mocks.friends.mockResolvedValue({ items: [{ ...listening, track: { ...listening.track, artistNames: ['Lorem', 'Ipsum'] } }], nextCursor: null });
+  show(); await screen.findByText('Current Alice is listening');
+  expect(within(screen.getByRole('listitem')).getByText('Lorem, Ipsum')).toBeInTheDocument();
 });
 test('a later read updates the nickname and invitation', async () => {
   show(); await screen.findByText('Current Alice is listening');

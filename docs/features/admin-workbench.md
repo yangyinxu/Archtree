@@ -285,7 +285,13 @@ conflicts: `GET /catalog/:kind`, `GET/PATCH /catalog/:kind/:id`, where `kind` is
 `artist`, `album`, `audioTrack` or `organization`. A patch contains
 `{operationId, expectedRevision, fields?, visibility?}`. Credits and attribution
 must be supplied together; memberships and storage keys are never editable
-fields. Track Number edits recompute the parent's automatic order atomically.
+fields. Snapshot Credits have exactly the five fields `creditId`,
+`subjectType`, `subjectId`, `role` and `order`. A patched Credit that carries
+a `joinPhrase` key returns `400 ADMIN_CATALOG_INVALID_INPUT` before any
+transaction or receipt, and other extra keys are ignored. A Credit
+replacement keeps each stored join phrase on its `creditId`, and stored phrases
+still change the revision.
+Track Number edits recompute the parent's automatic order atomically.
 `GET /pages/:slug` and `PATCH /pages/:slug/items/:itemId` address one Page
 placement, preserving reusable definitions and order. Each placement includes
 bounded `name`, `sourceMode` (`manual`, `dynamic` or null) and `referenceStatus`

@@ -1,4 +1,4 @@
-import { normalizeCatalogCredits } from '../../models/catalogCredit';
+import { normalizeStoredCatalogCredits } from '../../models/catalogCredit';
 
 interface SubjectWindow {
     knownIds: ReadonlySet<string>;
@@ -15,8 +15,9 @@ export const planCreditSubjectLookups = (
     const artistIds = new Set<string>();
     const organizationIds = new Set<string>();
     for (const owner of owners) {
-        let credits: ReturnType<typeof normalizeCatalogCredits>;
-        try { credits = normalizeCatalogCredits(owner.credits); } catch { continue; }
+        // Tolerant read: an invalid join phrase must not suppress this owner's subject lookups.
+        let credits: ReturnType<typeof normalizeStoredCatalogCredits>;
+        try { credits = normalizeStoredCatalogCredits(owner.credits); } catch { continue; }
         for (const credit of credits) {
             const window = credit.subjectType === 'artist' ? artists : organizations;
             const targets = credit.subjectType === 'artist' ? artistIds : organizationIds;

@@ -17,6 +17,12 @@ Product behavior remains defined in [business-rules.md](../business-rules.md).
   - [Credit evidence and completeness](#credit-evidence-and-completeness)
   - [Report fields](#report-fields)
   - [Verification](#verification-2)
+- [Credit join phrases and bylines](#credit-join-phrases-and-bylines)
+  - [Join phrase storage](#join-phrase-storage)
+  - [Byline composition](#byline-composition)
+  - [Content Manager inheritance](#content-manager-inheritance)
+  - [Phrase successors before phrase writes](#phrase-successors-before-phrase-writes)
+  - [Verification](#verification-3)
 <!-- @end-catalog -->
 
 ## Catalog application and presentation boundaries
@@ -48,6 +54,10 @@ no new client behavior or native-client requirement.
   deletion, reference fences, Credits, and guided-release operation recovery.
   An atomic operation stays in one transaction instead of being split among
   new HTTP modules.
+- `models/catalogCredit.ts` owns Credit and join-phrase validation, and
+  `services/catalog/catalogByline.ts` is the only byline composer. Listener v1,
+  legacy public catalog and Library projections resolve subject names and call
+  it; see [Credit join phrases and bylines](#credit-join-phrases-and-bylines).
 - `views/contentManager/managePageView.ts` renders supplied page data;
   `src/public/content-manager-base.css` owns the extracted styles and loads before
   the existing `content-manager.css` visual overrides. Rendering does not
@@ -216,9 +226,12 @@ window and is not a full-catalog capacity guarantee.
 
 - `catalogCreditFindings`: confirmed Credit defects. Entries contain `ownerType`
   (`album` or the compatibility name `audioTrack`), `ownerId`, `reason`, and where
-  applicable `creditId` / `subjectId`. Reasons remain `invalidOrder`,
-  `invalidCreditState`, `missingSubject`, `unavailableSubject`, and
-  `legacyProjectionMismatch`.
+  applicable `creditId` / `subjectId`. Reasons are `invalidOrder`,
+  `invalidCreditState`, `missingSubject`, `unavailableSubject`,
+  `legacyProjectionMismatch`, and `invalidJoinPhrase`. An `invalidJoinPhrase`
+  entry names the `creditId` whose stored join phrase fails write validation;
+  reads present that phrase as `, `, so it never makes the Credit list
+  `invalidCreditState`.
 - `catalogCreditUnverified`: Credit checks that could not establish completeness.
   Entries contain `ownerType`, `ownerId`, `reason`, and optional `subjectId`.
   Reasons are `subjectLookupBudgetExceeded` and
@@ -242,7 +255,8 @@ Credit checks do not mutate or complete deletion receipts.
 ### Verification
 
 `test/catalog/catalogCreditAudit.test.ts` covers shared target budgeting, deduplication,
-complete/known windows, malformed Credit state, and exhausted budgets.
+complete/known windows, malformed Credit state, invalid join phrases, and
+exhausted budgets.
 `test/catalog/catalogCreditAudit.integration.ts` exercises the actual Mongo queries with
 one-record windows, subjects outside the window, real missing/unavailable subjects,
 mixed-case/ObjectId membership forms, subject/target/row truncation, per-Album
@@ -251,3 +265,115 @@ It also preserves orphaned failed/expired deletion receipts and prevents legacy
 deletion guesses when the receipt window is incomplete.
 Existing Catalog Credit and content-reference cleanup integration suites remain
 required compatibility checks.
+
+## Credit join phrases and bylines
+
+Product behavior is defined in [business-rules.md](../business-rules.md) under
+Catalog Visibility and Administration and Album and MediaTrack Playback. This
+section records how the server implements it.
+
+### Join phrase storage
+
+`CatalogCredit.joinPhrase` is optional. A Credit without a phrase stores no
+key, so canonical JSON and the revisions of existing records stay
+byte-for-byte unchanged.
+
+- A valid phrase is NFC-normalized, has at least one visible character and at
+  most 16 UTF-16 code units, and contains no Cc, Cf, Zl, Zp, private-use or
+  unassigned character, no blank-rendering character such as a Hangul filler
+  or the braille blank, and no unpaired surrogate. It does not begin with a
+  combining mark, variation selector, emoji modifier, regional indicator or
+  Hangul medial or final jamo, and does not end with a regional indicator or
+  Hangul initial jamo, because those would fuse with the neighboring name into
+  one grapheme. Surrounding spaces are kept, so `、`, `&` and `feat.` are
+  valid with or without spaces on either side.
+- Stored Credits are read leniently. Public and listener reads, Artist page
+  classification, the reference audit, the Credit service's reads before a
+  rebuild and outcome-unknown confirmation treat an invalid phrase as absent
+  and keep the Credit, so the byline shows `, ` in its place and the Credit
+  list stays visible. The audit also reports it as `invalidJoinPhrase`.
+- Administrator catalog requests still reject `joinPhrase`, and Content
+  Manager requests cannot set one, so no stored Credit gains one yet. Every
+  rebuild of an existing Credit list (Credit service additions, removal and
+  reordering, Content Manager role changes, legacy artist-ID edits and
+  administrator Credit edits) keeps each valid phrase with its `creditId`; a
+  full replacement stores the phrases its caller supplies. Album publication,
+  the Credit migration and new MediaTrack saves build new lists, whose only
+  phrases are inherited ones (see
+  [Content Manager inheritance](#content-manager-inheritance)). Outcome-unknown
+  confirmation compares phrases, so retrying the same intent stays idempotent.
+- Listener v1 and legacy public Credits carry neither `joinPhrase` nor
+  `creditId`; see
+  [Native client compatibility](listener.md#native-client-compatibility).
+
+### Byline composition
+
+`src/services/catalog/catalogByline.ts` builds every server byline: listener
+v1 summaries, legacy public projections and Library creators. Library creators
+composed from legacy Artist names, for unmigrated owners or while
+`CATALOG_CREDIT_READS_ENABLED=false`, keep their earlier comma-joined
+presentation, including a repeated name, and apply the same length cap.
+
+1. Credits are taken in Credit order. A Credit whose subject is missing, not
+   ready or hidden is omitted but keeps its position.
+2. The byline names the primary, featured and performer Credits; without any,
+   the Organization Credits; otherwise every remaining Credit. Explicit
+   `unknown` attribution yields `Attribution not documented`.
+3. A repeated name is shown once, at its first position.
+4. A name is followed by its Credit's phrase only when the next shown name
+   belongs to the next Credit in the full list; otherwise `, ` joins the two
+   names. The last name has no trailing phrase.
+5. A byline is at most 500 UTF-16 code units, including its trailing `…`. A
+   byline that fits is never shortened. A longer one ends after the last whole
+   name that fits, followed by `…`. When even the first name followed by `…`
+   does not fit, that name is cut at a grapheme boundary and followed by `…`,
+   so a first name of exactly 500 units followed by more names keeps 499
+  units.
+
+The legacy byline and the listener byline of the same owner are identical.
+Plain-name fields such as `artistNames`, Search projections, Artist page
+sections, Organization Releases and Follow eligibility ignore phrases.
+
+### Content Manager inheritance
+
+A MediaTrack that inherits the Album's primary Artist Credits copies them in
+Album order. An inherited Credit keeps its join phrase only when the Album
+Credit right after it is inherited too; otherwise the phrase is cleared,
+because it was written before a name the MediaTrack does not carry. For Album
+Credits `A` (phrase `feat.`), featured `X` and primary `B`, the MediaTrack
+therefore reads `A, B`, and a performer selected during the upload cannot
+render as `A feat. C`. The last inherited Credit never keeps a phrase. Role
+changes and reordering in the Content Manager Credit editor keep each phrase
+with its Credit.
+
+### Phrase successors before phrase writes
+
+A stored phrase stays with its `creditId`, not with the name it was written
+before. No write path stores a phrase yet, so the cases below are latent, but
+each can make a phrase introduce a different name and must be settled before
+join-phrase writes ship:
+
+- A legacy artist-ID edit rebuilds the list as retained Artists, added
+  Artists, then Organizations, so resubmitting the same Artists can move a
+  label from between two Artists to the end, and the phrase that introduced
+  the label then introduces the second Artist.
+- Removing a Credit, directly or by deleting its Artist, leaves the previous
+  Credit's phrase before the next remaining Credit. For Album Credits `A`
+  (phrase `feat.`), featured `X` and primary `B`, removing `X` gives
+  `A feat. B`.
+- An addition, an Album promotion or a primary-Artist addition appends after
+  the last Credit, whose unused phrase then applies to the new name.
+
+### Verification
+
+`test/catalog/catalogCredit.test.ts` covers phrase validation, NFC
+normalization and byte-identical JSON without a phrase.
+`test/catalog/catalogByline.test.ts` covers selection, omission, repeated
+names and the length cap, and replays its results through the native
+validator ports. `test/catalog/soundtrackCreditProposal.test.ts` covers the
+Content Manager upload proposal and its byline.
+`test/catalog/publicCatalogService.test.ts` pins the five-field legacy
+Credit. The MongoDB suites `test/catalog/catalogCredit.integration.ts`,
+`test/listener/listenerContent.integration.ts` and
+`test/listener/artistFollows.integration.ts` cover phrase preservation,
+inheritance, lenient reads and Follow eligibility.

@@ -12,8 +12,9 @@ import { catalogDeletionRecoveryReason } from '../catalog/catalogDeletionLeaseSe
 import { planCreditSubjectLookups } from '../catalog/catalogCreditAudit';
 import {
     legacyAlbumArtistIdsFromCredits,
+    invalidStoredJoinPhraseCreditIds,
     legacyTrackArtistIdsFromCredits,
-    normalizeCatalogCredits,
+    normalizeStoredCatalogCredits,
     validateAttribution
 } from '../../models/catalogCredit';
 
@@ -1091,13 +1092,18 @@ export const reconcileContentReferences = async () => {
             credit?.order !== index)) {
             appendFinding(catalogCreditFindings, { ownerType, ownerId, reason: 'invalidOrder' });
         }
-        let credits: ReturnType<typeof normalizeCatalogCredits>;
+        // Read tolerantly, as listener projections do: an invalid join phrase is reported below
+        // without hiding the structurally valid Credit list or its subject findings.
+        let credits: ReturnType<typeof normalizeStoredCatalogCredits>;
         try {
-            credits = normalizeCatalogCredits(rawCredits);
+            credits = normalizeStoredCatalogCredits(rawCredits);
             validateAttribution(owner.attributionStatus, credits);
         } catch {
             appendFinding(catalogCreditFindings, { ownerType, ownerId, reason: 'invalidCreditState' });
             return;
+        }
+        for (const creditId of invalidStoredJoinPhraseCreditIds(rawCredits)) {
+            appendFinding(catalogCreditFindings, { ownerType, ownerId, reason: 'invalidJoinPhrase', creditId });
         }
         for (const credit of credits) {
             const readySubjects = credit.subjectType === 'artist'

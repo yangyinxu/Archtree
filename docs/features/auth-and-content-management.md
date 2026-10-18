@@ -404,6 +404,10 @@ sign-in attempts.
   carousels share the Artist detail classification and rollout switches, apply
   ready lifecycle and role precedence before the result limit, and use legacy
   relationships only for records without canonical Credits.
+- A Credit may store a join phrase for server bylines; the Content Manager
+  neither shows nor sets one. Role changes, reordering, removal and legacy
+  artist-ID edits keep every valid stored phrase on its Credit and drop an
+  invalid one.
 - Manual Carousel and Grid/List additions, reorder operations, and moves read
   their current contents inside the same MongoDB transaction as the reference
   fences and writes. Concurrent appends preserve both edits and the 500-item
@@ -415,7 +419,9 @@ sign-in attempts.
 - Single and bulk Content Manager Audio MediaTrack creation records original filenames
   and a pending upload state before sending files to S3. They accept Artist Credits,
   Organization Credits, inherited Album primary Artists, or an explicitly
-  undocumented attribution state.
+  undocumented attribution state. Inherited primary Credits keep their Album
+  order; each keeps its join phrase only when the next Album Credit is
+  inherited too, so a phrase never introduces a name it was not written for.
 - The legacy `/content/audioTrack` creation endpoint continues to require an
   existing Artist during the compatibility window and can be disabled with
   the Catalog Credit legacy-write cutover switch.

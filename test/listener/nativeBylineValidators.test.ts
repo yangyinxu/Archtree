@@ -6,7 +6,7 @@
  *   Constants: accepted, rejected, onlyAndroidAccepts, onlyIosAccepts, albumId, mediaTrackId, choir, trio,
  *              quartet, brass, strings, studio, choirNamesake, padded, celeste, gamma, longAlpha, longBeta,
  *              longGamma, zwjName, records, publishing, distribution, longLabel, longPublisher, voices,
- *              representativeScenarios
+ *              representativeScenarios, joinPhraseScenarios
  *   Variables: seededRows
  * Tests
  *   - ported validators accept exactly the limit and reject one more
@@ -16,17 +16,20 @@
  *   - empty, whitespace-only and padded text is rejected while inner spaces are kept
  *   - an unpaired surrogate never decodes on iOS but counts as one code point on Android
  *   - every current server byline builder yields the same byline, accepted by both native clients
+ *   - join-phrase bylines are identical on every builder and accepted by both native clients
  *   - known gaps: current bylines that a native client rejects
  * @end-catalog */
 
 /**
  * Baseline for native byline compatibility. The first tests pin the ported iOS and Android
  * display-text validators (test/support/nativeDisplayTextValidators.ts) on Unicode edge cases.
- * The replay tests run every server builder that composes `displayByline` today and require
- * identical bylines that both clients accept, so a later byline change (join phrases,
- * multi-artist Credits, truncation) cannot silently make a Listener page or Album-details
- * response undecodable on one platform. Short expected bylines are literals captured from the
- * pre-change builders; long ones are pinned by code-point count.
+ * The replay tests run every server builder that composes `displayByline` and require
+ * identical bylines that both clients accept, so a byline change (join phrases, multi-artist
+ * Credits, truncation) cannot silently make a Listener page or Album-details response
+ * undecodable on one platform. Short expected bylines are literals captured from the pre-change
+ * builders; long ones are pinned by code-point count. S1 changed only the overflow case, which
+ * now ends after the last whole name that fits followed by an ellipsis, and added
+ * join-phrase replays.
  * Every invisible or combining character is written as an escape so editors cannot alter it.
  */
 import assert from 'node:assert/strict';
@@ -130,7 +133,8 @@ type CreditRole = 'primary' | 'featured' | 'performer' | 'composer' | 'producer'
 interface Subject { subjectType: 'artist' | 'organization'; subjectId: string; name: string }
 interface BylineScenario {
     title: string;
-    credits: Array<[Subject, CreditRole]>;
+    /** Subject, role and an optional stored join phrase (which may be invalid). */
+    credits: Array<[Subject, CreditRole, string?]>;
     attributionStatus?: 'documented' | 'unknown';
     byline: string;
     codePoints?: number;
@@ -227,6 +231,38 @@ const representativeScenarios: BylineScenario[] = [
         credits: voices.map((voice): [Subject, CreditRole] => [voice, 'primary']),
         byline: voices.map((voice) => voice.name).join(', '),
         codePoints: 498
+    },
+    {
+        // Joined, the names take 604 code points, so the byline keeps the last whole name that
+        // fits followed by U+2026. Android (CatalogRepository.kt:696) counts code points.
+        title: 'three 200-character primary names end after the last whole name',
+        credits: [[longAlpha, 'primary'], [longBeta, 'primary'], [longGamma, 'primary']],
+        byline: `${longAlpha.name}, ${longBeta.name}\u2026`,
+        codePoints: 403
+    }
+];
+
+/** Bylines with stored join phrases; an invalid phrase (U+200B) is presented as `, `. */
+const joinPhraseScenarios: BylineScenario[] = [
+    {
+        title: 'ampersand without spaces',
+        credits: [[choir, 'primary', '&'], [trio, 'primary']],
+        byline: 'Northwind Choir&Ipsum Trio'
+    },
+    {
+        title: 'ideographic comma',
+        credits: [[choir, 'primary', '\u3001'], [trio, 'primary']],
+        byline: 'Northwind Choir\u3001Ipsum Trio'
+    },
+    {
+        title: 'featured phrase before a featured Credit, label omitted',
+        credits: [[choir, 'primary', ' & '], [trio, 'primary', ' feat. '], [brass, 'featured'], [records, 'label']],
+        byline: 'Northwind Choir & Ipsum Trio feat. Sitamet Brass'
+    },
+    {
+        title: 'an invalid stored phrase falls back to a comma',
+        credits: [[choir, 'primary', 'x\u200By'], [trio, 'primary']],
+        byline: 'Northwind Choir, Ipsum Trio'
     }
 ];
 
@@ -310,11 +346,12 @@ const withSyntheticCatalog = async (t: TestContext, run: () => Promise<void>) =>
  */
 const replayBylineBuilders = async (scenario: BylineScenario) => {
     const attributionStatus = scenario.attributionStatus ?? 'documented';
-    const credits = scenario.credits.map(([subject, role], index) => ({
+    const credits = scenario.credits.map(([subject, role, joinPhrase], index) => ({
         creditId: `credit_${String(index + 1).padStart(3, '0')}`,
         subjectType: subject.subjectType,
         subjectId: subject.subjectId,
-        role
+        role,
+        ...(joinPhrase === undefined ? {} : { joinPhrase })
     }));
     const subjects = [...new Map(scenario.credits.map(([subject]) => [subject.subjectId, subject])).values()];
     const album = {
@@ -367,18 +404,23 @@ test('every current server byline builder yields the same byline, accepted by bo
     });
 });
 
+test('join-phrase bylines are identical on every builder and accepted by both native clients', async (t) => {
+    await withSyntheticCatalog(t, async () => {
+        for (const scenario of joinPhraseScenarios) {
+            for (const projection of await replayBylineBuilders(scenario)) {
+                const label = `${scenario.title}: ${projection.surface}`;
+                assert.equal(projection.byline, scenario.byline, label);
+                for (const name of projection.creditNames) {
+                    assert.deepEqual(nativeDisplayTextVerdict(name, nativeCreditNameLimit), accepted, label);
+                }
+            }
+            assert.deepEqual(bylineVerdict(scenario.byline), accepted, scenario.title);
+        }
+    });
+});
+
 test('known gaps: current bylines that a native client rejects', async (t) => {
     await withSyntheticCatalog(t, async () => {
-        // The builders join every byline name without a length cap, so three names at the
-        // 200-character Credit-name limit produce 604 code points, which both clients reject.
-        // docs/business-rules.md plans truncation within 500 characters; that stage must update this
-        // case, and count code points because Android (CatalogRepository.kt:696) is the binding limit.
-        const overflow: BylineScenario = {
-            title: 'three 200-character primary names',
-            credits: [[longAlpha, 'primary'], [longBeta, 'primary'], [longGamma, 'primary']],
-            byline: [longAlpha, longBeta, longGamma].map((subject) => subject.name).join(', '),
-            codePoints: 604
-        };
         // Administrator catalog text strips only C0 and C1 controls, so the ZWJ (Cf) in an emoji
         // sequence reaches the byline and the Credit name; iOS rejects both, Android accepts them.
         // A stage that strips or rejects Cf in Credit names must update this case.
@@ -387,12 +429,6 @@ test('known gaps: current bylines that a native client rejects', async (t) => {
             credits: [[zwjName, 'primary'], [trio, 'featured']],
             byline: 'Pixel \u{1F469}\u200D\u{1F4BB} Collective, Ipsum Trio'
         };
-        for (const projection of await replayBylineBuilders(overflow)) {
-            assert.equal(projection.byline, overflow.byline, projection.surface);
-        }
-        assert.equal(Array.from(overflow.byline).length, overflow.codePoints);
-        assert.deepEqual(bylineVerdict(overflow.byline), rejected);
-
         for (const projection of await replayBylineBuilders(formatCharacter)) {
             assert.equal(projection.byline, formatCharacter.byline, projection.surface);
         }

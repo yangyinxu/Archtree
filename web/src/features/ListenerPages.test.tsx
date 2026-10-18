@@ -5,6 +5,7 @@
  * Tests
  *   - Album Play and explicit soundtrack selection share the ordered Album queue
  *   - Album marks the actively playing track and pauses it without relaunching the queue
+ *   - Album detail shows the server byline and lists the label among its Credits
  *   - Organization page renders its public metadata and credited releases
  *   - Search renders grouped public results and keeps content actions canonical
  *   - Search retry refreshes results without adding or reordering history
@@ -19,7 +20,7 @@
 
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
@@ -183,6 +184,36 @@ test('Album marks the actively playing track and pauses it without relaunching t
 
   expect(pause).toHaveBeenCalledOnce();
   expect(launch).not.toHaveBeenCalled();
+});
+
+test('Album detail shows the server byline and lists the label among its Credits', async () => {
+  const guestId = '64b000000000000000000005';
+  const credited = {
+    ...album,
+    artistNames: ['Finite Ensemble', 'Guest Voice'],
+    // Join phrases reach Web only through this server byline, never through Credits.
+    displayByline: 'Finite Ensemble & Guest Voice',
+    attributionStatus: 'documented',
+    credits: [
+      { subjectType: 'artist', subjectId: artist.id, name: 'Finite Ensemble', role: 'primary', order: 0 },
+      { subjectType: 'artist', subjectId: guestId, name: 'Guest Voice', role: 'primary', order: 1 },
+      { subjectType: 'organization', subjectId: organization.id, name: 'Finite Records', role: 'label', order: 2 }
+    ]
+  };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ album: credited, tracks: [track] })));
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  expect(await screen.findByRole('heading', { name: 'Night Geometry' })).toBeInTheDocument();
+  expect(screen.getByText('Finite Ensemble & Guest Voice · 2026 · 1 MediaTrack')).toBeInTheDocument();
+  const credits = screen.getByRole('region', { name: 'Credits' });
+  const label = within(credits).getByRole('link', { name: /Finite Records/ });
+  expect(label).toHaveAttribute('href', `/organizations/${organization.id}`);
+  expect(within(label).getByText('Label')).toBeInTheDocument();
+  expect(within(credits).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+    `/artists/${artist.id}`,
+    `/artists/${guestId}`,
+    `/organizations/${organization.id}`
+  ]);
 });
 
 test('Organization page renders its public metadata and credited releases', async () => {

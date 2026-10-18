@@ -9,9 +9,9 @@
  *   Constants: readyPublicAudioFilter
  * Internal
  *   Functions: normalizedText, objectIdString, toObjectId, storedObjectIdValues, uniqueObjectIdStrings,
- *              publicDate, publicFormat, validCredits, loadCreditSubjectNames, publicCreditFields,
- *              loadVisibleAlbumIds, findReadyDeclaredTracks, findReadyFallbackTracksForAlbum,
- *              loadFallbackTrackIdsByAlbum, loadReadyAlbumTrackIds
+ *              publicDate, publicFormat, loadCreditSubjectNames, resolvedCredits, publicDisplayByline,
+ *              publicCreditFields, loadVisibleAlbumIds, findReadyDeclaredTracks,
+ *              findReadyFallbackTracksForAlbum, loadFallbackTrackIdsByAlbum, loadReadyAlbumTrackIds
  *   Constants: artistProjection, organizationProjection, albumProjection, audioTrackProjection, queryTimeoutMs,
  *              maximumRelatedIds, maximumAlbumTracks, fallbackAlbumLookupConcurrency, objectIdPattern
  * @end-catalog */
@@ -36,10 +36,11 @@ import {
 } from './albumReferenceFenceService';
 import {
     AttributionStatus,
-    CatalogCreditRole,
-    normalizeCatalogCredits,
-    validateAttribution
+    CatalogCredit,
+    CatalogCreditRole
 } from '../../models/catalogCredit';
+import { validStoredCredits } from './artistAlbumClassificationService';
+import { catalogDisplayByline, toBylineCredit } from './catalogByline';
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
 
 export interface PublicSimpleDate {
@@ -222,20 +223,8 @@ const publicFormat = (value: unknown): PublicAudioTrack['format'] => {
     return Number.isFinite(bitrate) && bitrate >= 0 ? { type, bitrate } : { type };
 };
 
-const validCredits = (owner: any) => {
-    if (!catalogCreditRollout().readsEnabled) return null;
-    if (!Array.isArray(owner?.credits)) return null;
-    try {
-        const credits = normalizeCatalogCredits(owner.credits);
-        validateAttribution(owner.attributionStatus, credits);
-        return credits;
-    } catch {
-        return null;
-    }
-};
-
 const loadCreditSubjectNames = async (owners: any[]) => {
-    const credits = owners.flatMap((owner) => validCredits(owner) ?? []);
+    const credits = owners.flatMap((owner) => validStoredCredits(owner) ?? []);
     const artistIds = uniqueObjectIdStrings(credits
         .filter((credit) => credit.subjectType === 'artist').map((credit) => credit.subjectId));
     const organizationIds = uniqueObjectIdStrings(credits
@@ -256,22 +245,39 @@ const loadCreditSubjectNames = async (owners: any[]) => {
     ]);
 };
 
+/** Pairs each valid stored Credit with its ready subject name, or '' when the subject is hidden. */
+const resolvedCredits = (credits: readonly CatalogCredit[], subjectNames?: ReadonlyMap<string, string>) =>
+    credits.map((credit) => ({
+        credit,
+        name: subjectNames?.get(`${credit.subjectType}:${credit.subjectId}`) ?? ''
+    }));
+
+/** Builds the legacy byline with the shared composer so it always equals the listener byline. */
+const publicDisplayByline = (
+    owner: any,
+    resolved: ReadonlyArray<{ credit: CatalogCredit; name: string }>
+) => catalogDisplayByline(
+    owner.attributionStatus as AttributionStatus,
+    resolved.map(({ credit, name }) => toBylineCredit(credit, name))
+);
+
+/**
+ * Projects Credit fields through an explicit allowlist matching PublicCatalogCredit, so stored
+ * internals such as creditId or a join phrase never reach the legacy public response.
+ */
 const publicCreditFields = (owner: any, subjectNames?: ReadonlyMap<string, string>) => {
-    const credits = validCredits(owner);
+    const credits = validStoredCredits(owner);
     if (!credits) return {};
-    const projected = credits.flatMap((credit): PublicCatalogCredit[] => {
-        const name = subjectNames?.get(`${credit.subjectType}:${credit.subjectId}`);
-        return name ? [{ ...credit, name }] : [];
-    });
-    const preferred = projected.filter((credit) => ['primary', 'featured', 'performer']
-        .includes(credit.role));
-    const institutional = projected.filter((credit) => credit.subjectType === 'organization');
-    const byline = preferred.length > 0 ? preferred : institutional.length > 0 ? institutional : projected;
+    const resolved = resolvedCredits(credits, subjectNames);
     return {
-        credits: projected,
-        displayByline: owner.attributionStatus === 'unknown'
-            ? 'Attribution not documented'
-            : [...new Set(byline.map((credit) => credit.name))].join(', '),
+        credits: resolved.flatMap(({ credit, name }): PublicCatalogCredit[] => name ? [{
+            subjectType: credit.subjectType,
+            subjectId: credit.subjectId,
+            name,
+            role: credit.role,
+            order: credit.order
+        }] : []),
+        displayByline: publicDisplayByline(owner, resolved),
         attributionStatus: owner.attributionStatus as AttributionStatus
     };
 };
@@ -281,7 +287,8 @@ export const resolvePublicCatalogBylines = async (owners: any[]) => {
     const subjectNames = await loadCreditSubjectNames(owners);
     return new Map(owners.flatMap((owner): Array<[string, string]> => {
         const id = String(owner?._id ?? '');
-        const byline = publicCreditFields(owner, subjectNames).displayByline;
+        const credits = validStoredCredits(owner);
+        const byline = credits ? publicDisplayByline(owner, resolvedCredits(credits, subjectNames)) : '';
         return id && byline ? [[id, byline]] : [];
     }));
 };

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "sourceDigest": "b7c0bf487232568647feda00fd70b04e1646dfc77fe0134ed3df2d3f6fd5e4e4",
+  "sourceDigest": "b8017d9049763303d568789685c4643675e71ad00f798403cd2b10348cfbb467",
   "messages": {
     "ui.site.name": "Archtree 工程指南",
     "ui.site.title": "Archtree 工程指南",
@@ -215,6 +215,7 @@
     "page.modules.catalog.section.read-path.sources.1.label": "旧版公开读取逻辑",
     "page.modules.catalog.section.read-path.sources.2.label": "媒体与 Credit DTO",
     "page.modules.catalog.section.read-path.sources.3.label": "Credit 修改逻辑",
+    "page.modules.catalog.section.read-path.sources.4.label": "共享的 Credit 署名生成逻辑",
     "page.modules.catalog.section.write-path.title": "把发布与引用关系一起看",
     "page.modules.catalog.section.write-path.body.0": "内容创建、封面归属和关系更新都有恢复流程。除控制器外，还要检查发布服务和防止引用并发冲突的服务。上传可能成功，而后续关联步骤失败，这种状态必须仍可恢复。",
     "page.modules.catalog.section.write-path.body.1": "Album 中的条目顺序根据文件内嵌 Track Number 生成，并采用确定性的兜底排序。读取层保留已声明的顺序，不根据数据库返回顺序重新排列。",
@@ -450,6 +451,7 @@
     "page.flows.read-album.section.server.steps.4.sources.0.label": "专辑摘要投影",
     "page.flows.read-album.section.server.steps.4.sources.1.label": "曲目摘要投影",
     "page.flows.read-album.section.server.steps.4.sources.2.label": "专辑响应契约",
+    "page.flows.read-album.section.server.steps.4.sources.3.label": "署名组合逻辑",
     "page.flows.read-album.section.client.title": "回到 Web 客户端",
     "page.flows.read-album.section.client.steps.0.title": "6. 在运行时校验响应",
     "page.flows.read-album.section.client.steps.0.text": "getListenerAlbum 将 ID 编码到同源路径中，并携带 listenerAlbumSchema 调用 apiRequest。解析器校验已知字段与枚举值，同时移除新增的未知响应字段。格式不正确的数据会产生 invalid-response 错误，不会未经检查就进入页面状态。",

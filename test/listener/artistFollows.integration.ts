@@ -21,6 +21,7 @@
  *   - the complete canonical Credit list must be valid before the release limit is applied
  *   - invalid Album attribution or Credits cannot consume limit one or suppress a valid canonical member
  *   - a ready unlisted track keeps its release even when its referenced Album independently qualifies
+ *   - a join phrase never changes Follow eligibility or the Discography section
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -33,6 +34,7 @@ import { createApp } from '../../src/app';
 import { getDb } from '../../src/infrastructure/database';
 import { followArtist, unfollowArtist, artistFollowStatuses } from '../../src/services/listener/artistFollowService';
 import { resolveFollowedArtistReleases, followedReleaseWindow } from '../../src/services/listener/followedArtistReleasesService';
+import { getListenerArtist } from '../../src/services/listener/listenerContentService';
 import { deleteArtistAndReferences } from '../../src/services/catalog/artistLifecycleService';
 import { deleteListenerAccountData } from '../../src/services/account/accountDeletionService';
 import { cleanupDeletedContentReferences } from '../../src/services/content/contentReferenceService';
@@ -327,4 +329,25 @@ test('a ready unlisted track keeps its release even when its referenced Album in
     const items = await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now);
     assert.equal(items.length, 5); assert.ok(items.some(item => item.contentId === unlisted.toHexString()));
     assert.ok(golden.albumFamilyTrackIds.every((id: string) => !items.some(item => item.contentId === id)));
+});
+
+test('a join phrase never changes Follow eligibility or the Discography section', async () => {
+    const db = getDb()!, a = golden.followedArtists[0], b = golden.followedArtists[1];
+    await followArtist(uid.toHexString(), b.id);
+    const albumId = new ObjectId(), memberId = new ObjectId();
+    // `feat.` comes before a primary Credit; only the role makes the second Artist primary.
+    const albumCredits = (joinPhrase: unknown) => [{ ...credit(a.id, 'primary', 0), joinPhrase }, credit(b.id, 'primary', 1)];
+    await db.collection('albums').insertOne({
+        _id: albumId, title: 'Synthetic phrase release', lifecycleStatus: 'ready', releaseDate: today,
+        audioTrackIds: [memberId.toHexString()], attributionStatus: 'documented', credits: albumCredits(' feat. ')
+    });
+    await db.collection('audioTracks').insertOne(readyTrack(memberId, { albumId: albumId.toHexString(), credits: [credit(a.id, 'composer')] }));
+    // A valid phrase and an invalid one (U+200B) must give the same eligibility and section.
+    for (const [joinPhrase, byline] of [[' feat. ', `${a.name} feat. ${b.name}`], ['x\u200By', `${a.name}, ${b.name}`]]) {
+        await db.collection('albums').updateOne({ _id: albumId }, { $set: { credits: albumCredits(joinPhrase) } });
+        const items = await resolveFollowedArtistReleases(uid.toHexString(), 20, true, now);
+        assert.deepEqual(items.map(row => [row.contentType, row.contentId, row.reason.artist.id]), [['album', albumId.toHexString(), b.id]], joinPhrase);
+        const artist = await getListenerArtist(b.id);
+        assert.deepEqual(artist?.discography.map(album => [album.id, album.displayByline]), [[albumId.toHexString(), byline]], joinPhrase);
+    }
 });

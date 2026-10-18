@@ -827,6 +827,18 @@ The wire protocol and operational bounds are documented in
   (such as a label, publisher, distributor, archive, broadcaster, or studio).
   An Organization is never represented as an Artist merely to satisfy content
   validation.
+- A Credit may carry a short join phrase, such as `、`, `&` or `feat.` with
+  any surrounding spaces, that connects its name to the next name in a byline.
+  A join phrase is visible text without control or invisible formatting
+  characters. Join phrases are presentation only: they never set or change a
+  Credit's subject, role or order, Artist page sections, Organization
+  Releases, Follow eligibility, Search or legacy projections. A name after
+  `feat.` is featured only when its Credit role is featured. Public Credit
+  lists, including legacy content responses, expose only allowlisted fields,
+  never a join phrase or an internal Credit identifier, so join phrases reach
+  listeners only through server bylines. A stored join phrase that fails
+  validation is presented as `, ` and never hides the Credit list or changes
+  Follow eligibility.
 - Album and MediaTrack Credits are independent. A MediaTrack participant does
   not silently become an Album primary Artist. Adding a MediaTrack primary
   Artist who is not already an Album primary Artist requires an explicit
@@ -1030,9 +1042,29 @@ The wire protocol and operational bounds are documented in
   server-maintained legacy Artist relationship as a compatibility fallback;
   it must not infer or persist Album Credits from component MediaTracks.
 - MediaTrack attribution is derived from its own ordered Credits, including
-  inherited Album primary Credits materialized by the server at creation time.
-  Adding or changing a MediaTrack Credit later does not silently mutate Album
-  attribution unless an administrator explicitly selects promotion.
+  inherited Album primary Credits, with their order and join phrases,
+  materialized by the server at creation time. Adding or changing a MediaTrack
+  Credit later does not silently mutate Album attribution unless an
+  administrator explicitly selects promotion.
+- Web, iOS and Android show one server-built byline for an Album or
+  MediaTrack. It names the primary, featured and performer Credits in Credit
+  order; without them, the Organization Credits; otherwise every remaining
+  Credit. A label therefore stays out of the byline of an Album with a
+  primary, featured or performer Credit. Explicit unknown attribution shows
+  that attribution is not documented.
+- Each name in a byline is followed by its Credit's join phrase, or by `, `
+  when none is set, and the last name has no trailing phrase. A repeated name
+  appears once, at its first position. When Credits between two shown names
+  are omitted because they are hidden, repeated or outside the byline's roles,
+  those two names are joined by `, `, so an omitted name never leaves a stray
+  or misleading separator. The server keeps each byline within 500
+  characters, ending after the last whole name that fits followed by `…`.
+- Surfaces that show plain Artist names instead of a server byline, such as
+  Playlist rows, Web friend listening and Web music shares, keep their existing
+  presentation without join phrases. Offline presentation of an earlier Album
+  download keeps the byline and MediaTrack order saved with it. Finitude Web
+  lists the label among an Album's Credits; showing it on iOS and Android
+  Album details requires a separate product decision.
 - Tapping the Album Play button starts the Album queue and adds only the Album
   to Recently Played.
 - On Finitude Web, an Album card may also offer Play on hover-capable devices

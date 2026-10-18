@@ -6,6 +6,7 @@
  *   - rare substring lookup examines candidates rather than the entire indexed catalog
  *   - backfill is read-only by default, bounded, source-fenced and retryable
  *   - every catalog model maintains candidate metadata on insert and rename, including cover CAS paths
+ *   - stored join phrases never become searchable text
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -111,5 +112,30 @@ test('every catalog model maintains candidate metadata on insert and rename, inc
     } finally {
         if (previous === undefined) delete process.env.CATALOG_SEARCH_INDEX_ENABLED;
         else process.env.CATALOG_SEARCH_INDEX_ENABLED = previous;
+    }
+});
+
+test('stored join phrases never become searchable text', async () => {
+    const db = getDb()!;
+    const [primaryId, guestId, albumId] = [new ObjectId(), new ObjectId(), new ObjectId()];
+    await db.collection('artists').insertMany([
+        { _id: primaryId, name: 'Phrase Lead', albumIds: [], lifecycleStatus: 'ready', ...catalogSearchProjection('Phrase Lead') },
+        { _id: guestId, name: 'Phrase Guest', albumIds: [], lifecycleStatus: 'ready', ...catalogSearchProjection('Phrase Guest') }
+    ]);
+    await db.collection('albums').insertOne({
+        _id: albumId, title: 'Phrase Release', lifecycleStatus: 'ready', audioTrackIds: [], attributionStatus: 'documented',
+        credits: [
+            { creditId: 'search_phrase_lead', subjectType: 'artist', subjectId: primaryId.toHexString(), role: 'primary', order: 0, joinPhrase: ' feat. ' },
+            { creditId: 'search_phrase_guest', subjectType: 'artist', subjectId: guestId.toHexString(), role: 'featured', order: 1 }
+        ],
+        ...catalogSearchProjection('Phrase Release')
+    });
+    // The phrase reaches the byline of a title match, which proves it is stored and read.
+    const titleMatch = await searchListenerContent('Phrase Release', 20);
+    assert.deepEqual(titleMatch.albums.map(album => [album.id, album.displayByline]), [[albumId.toHexString(), 'Phrase Lead feat. Phrase Guest']]);
+    for (const result of [await searchListenerContent('feat', 20), await searchPublicCatalog('feat', 20)]) {
+        for (const key of ['artists', 'organizations', 'albums', 'audioTracks']) {
+            assert.deepEqual((result as any)[key] ?? [], [], key);
+        }
     }
 });

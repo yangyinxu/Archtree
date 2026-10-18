@@ -47,6 +47,7 @@ import {
 } from '../catalog/albumReferenceFenceService';
 import { AttributionStatus } from '../../models/catalogCredit';
 import { artistAlbumSection, validStoredCredits } from '../catalog/artistAlbumClassificationService';
+import { catalogDisplayByline, toBylineCredit } from '../catalog/catalogByline';
 import { Carousel } from '../../models/carousel';
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
 import { pageItemIdentity } from '../../utils/pageItemIdentity';
@@ -463,31 +464,26 @@ const createCatalogContext = async (
 const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
     const credits = validStoredCredits(owner);
     if (!credits) return {};
-    const publicCredits = credits.flatMap((credit): ListenerCatalogCredit[] => {
-        const subject = credit.subjectType === 'artist'
-            ? context.artistsById.get(credit.subjectId)
-            : context.organizationsById.get(credit.subjectId);
-        const name = normalizeText(subject?.name);
-        return name ? [{
-            subjectType: credit.subjectType,
-            subjectId: credit.subjectId,
-            name,
-            role: credit.role,
-            order: credit.order
-        }] : [];
-    });
-    const preferredRoles = new Set(['primary', 'featured', 'performer']);
-    const preferred = publicCredits.filter((credit) => preferredRoles.has(credit.role));
-    const institutional = publicCredits.filter((credit) => credit.subjectType === 'organization');
-    const bylineCredits = preferred.length > 0
-        ? preferred
-        : institutional.length > 0 ? institutional : publicCredits;
-    const displayByline = owner.attributionStatus === 'unknown'
-        ? 'Attribution not documented'
-        : [...new Set(bylineCredits.map((credit) => credit.name))].join(', ');
+    const resolved = credits.map((credit) => ({
+        credit,
+        name: normalizeText((credit.subjectType === 'artist'
+            ? context.artistsById
+            : context.organizationsById).get(credit.subjectId)?.name)
+    }));
+    // Credits keep the v1 allowlist; join phrases reach listeners only through displayByline.
+    const publicCredits = resolved.flatMap(({ credit, name }): ListenerCatalogCredit[] => name ? [{
+        subjectType: credit.subjectType,
+        subjectId: credit.subjectId,
+        name,
+        role: credit.role,
+        order: credit.order
+    }] : []);
     return {
         credits: publicCredits,
-        displayByline,
+        displayByline: catalogDisplayByline(
+            owner.attributionStatus as AttributionStatus,
+            resolved.map(({ credit, name }) => toBylineCredit(credit, name))
+        ),
         attributionStatus: owner.attributionStatus as AttributionStatus
     };
 };

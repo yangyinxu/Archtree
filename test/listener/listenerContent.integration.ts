@@ -15,6 +15,7 @@
  *   - shared-content authorization runs before the application body parser
  *   - optional-auth Home reads return 401 for a presented Bearer token that fails verification
  *   - legacy expanded Home hydrates referenced posts outside the default Feed page safely
+ *   - stored join phrases shape both Album bylines while Credits stay allowlisted
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -92,7 +93,10 @@ const expectSafe = (payload: unknown) => {
         'uploadStatus',
         'uploadUpdatedAt',
         'uploadError',
-        'originalFileName'
+        'originalFileName',
+        // Credit internals reach listeners only through server bylines.
+        'joinPhrase',
+        'creditId'
     ]) {
         assert.equal(keys.has(forbidden), false, `response exposed ${forbidden}`);
     }
@@ -836,4 +840,45 @@ test('legacy expanded Home hydrates referenced posts outside the default Feed pa
     ]);
     assert.equal(JSON.stringify(payload.page).includes(ids.post.toString()), true);
     assert.deepEqual(Object.keys(payload.page).sort(), ['items', 'slug', 'title']);
+});
+
+test('stored join phrases shape both Album bylines while Credits stay allowlisted', async () => {
+    const db = getDb()!;
+    const [alphaId, betaId, gammaId, albumId] = [new ObjectId(), new ObjectId(), new ObjectId(), new ObjectId()];
+    const credit = (creditId: string, subjectId: ObjectId, role: string, joinPhrase?: string) => ({
+        creditId, subjectType: 'artist', subjectId: subjectId.toString(), role, order: 0,
+        ...(joinPhrase === undefined ? {} : { joinPhrase })
+    });
+    await db.collection('artists').insertMany([
+        { _id: alphaId, name: 'Phrase Alpha', albumIds: [] },
+        { _id: betaId, name: 'Phrase Beta', albumIds: [] },
+        { _id: gammaId, name: 'Phrase Gamma', albumIds: [] }
+    ]);
+    // Beta's stored phrase is invalid (U+200B), so it is presented as a comma.
+    await db.collection('albums').insertOne({
+        _id: albumId,
+        title: 'Phrase Album',
+        audioTrackIds: [],
+        attributionStatus: 'documented',
+        credits: [
+            credit('phrase_alpha_credit', alphaId, 'primary', ' & '),
+            credit('phrase_beta_credit', betaId, 'primary', 'x\u200By'),
+            credit('phrase_gamma_credit', gammaId, 'featured')
+        ]
+    });
+    const creditKeys = ['name', 'order', 'role', 'subjectId', 'subjectType'];
+
+    const listenerResponse = await fetch(`${baseUrl}/api/listener/v1/albums/${albumId}`);
+    assert.equal(listenerResponse.status, 200);
+    const listener: any = await listenerResponse.json();
+    assert.equal(listener.album.displayByline, 'Phrase Alpha & Phrase Beta, Phrase Gamma');
+    assert.deepEqual(listener.album.credits.map((item: any) => Object.keys(item).sort()), [creditKeys, creditKeys, creditKeys]);
+    expectSafe(listener);
+
+    const legacyResponse = await fetch(`${baseUrl}/content/album/${albumId}`);
+    assert.equal(legacyResponse.status, 200);
+    const legacy: any = await legacyResponse.json();
+    assert.equal(legacy.album.displayByline, 'Phrase Alpha & Phrase Beta, Phrase Gamma');
+    assert.deepEqual(legacy.album.credits.map((item: any) => Object.keys(item).sort()), [creditKeys, creditKeys, creditKeys]);
+    expectSafe(legacy);
 });

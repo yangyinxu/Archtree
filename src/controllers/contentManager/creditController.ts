@@ -17,7 +17,8 @@ import { normalizeUtf8Text } from '../../utils/textEncoding';
 import {
     catalogCreditRoles,
     catalogCreditSubjectTypes,
-    createCatalogCreditId
+    createCatalogCreditId,
+    normalizeStoredCatalogCredits
 } from '../../models/catalogCredit';
 import { Organization, organizationTypes } from '../../models/organization';
 import { deleteUnreferencedOrganization } from '../../services/catalog/organizationLifecycleService';
@@ -220,7 +221,7 @@ const loadCreditOwner = (ownerType: 'album' | 'audioTrack', ownerId: string) => 
     ? Album.findById(ownerId)
     : AudioTrack.findById(ownerId);
 
-/** Changes one Credit role while preserving its stable ID and order. */
+/** Changes one Credit role while preserving its stable ID, order and join phrase. */
 export const updateCatalogCreditRoleWeb = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authReq = req as AuthenticatedRequest;
@@ -234,14 +235,16 @@ export const updateCatalogCreditRoleWeb = async (req: Request, res: Response, ne
             return creditOwnerRedirect(res, ownerType, ownerId, 'Choose a valid Credit role.');
         }
         const owner: any = await loadCreditOwner(ownerType, ownerId);
-        const credits = Array.isArray(owner?.credits) ? owner.credits : [];
-        if (!credits.some((credit: any) => credit.creditId === creditId)) {
+        // Rebuild from the tolerant stored read: valid phrases stay by creditId, an invalid one
+        // is dropped (and so repaired), and a structurally broken list fails as a 400.
+        const credits = Array.isArray(owner?.credits) ? normalizeStoredCatalogCredits(owner.credits) : [];
+        if (!credits.some((credit) => credit.creditId === creditId)) {
             return creditOwnerRedirect(res, ownerType, ownerId, 'Credit not found. Reload and try again.');
         }
         await replaceCatalogCredits(
             ownerType,
             ownerId,
-            credits.map((credit: any) => credit.creditId === creditId ? { ...credit, role } : credit),
+            credits.map((credit) => credit.creditId === creditId ? { ...credit, role } : credit),
             'documented',
             Number.isInteger(owner.creditRevision) ? owner.creditRevision : 0
         );

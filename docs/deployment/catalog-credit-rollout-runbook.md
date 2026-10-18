@@ -70,3 +70,19 @@ restarts the observation window.
 
 Do not unset checkpoints, delete Credits, rewrite compatibility arrays, or
 remove Organization records as part of rollback.
+
+With `CATALOG_CREDIT_READS_ENABLED=false`, Library creators come from the legacy
+Artist relationships and keep their earlier comma-joined presentation,
+including a repeated name. They use the same 500-character byline cap as
+Credit bylines, ending after the last whole name that fits followed by `…`.
+
+## Join phrase rollback floor
+
+The first release with Credit join phrases only reads and preserves them.
+Administrator catalog requests still reject them and Content Manager requests
+cannot set them, so no stored Credit carries one and rolling that release back
+loses nothing. Once a later release accepts join-phrase writes, do not roll
+back below the first join-phrase release: earlier code rebuilds every Credit
+without its phrase, so any Credit write there would silently drop stored
+phrases. Setting `CATALOG_CREDIT_READS_ENABLED=false` hides phrases from
+bylines without removing them.
