@@ -20,18 +20,23 @@
  *   - legacy internal image paths still require exact ready image ownership and never bypass invalid explicit IDs
  *   - legacy external artwork failures stay private and never reveal the source or error details
  *   - a Track Number edit reorders existing members atomically and rejects invalid dates
+ *   - a Track Number edit re-derives the Album order within Disc Numbers
  *   - hidden Follow targets and inherited releases are excluded before dynamic limits
- *   - a PATCH cannot write a join phrase, while stored phrases survive Credit edits by creditId
+ *   - a PATCH writes, changes and clears join phrases, including on a label Credit
+ *   - a join phrase PATCH with an unknown commit outcome replays its receipt
+ *   - a Disc Number edit re-derives the parent order in the same transaction
+ *   - Disc and Track Numbers saved together reorder once, and an unassigned MediaTrack stores its disc without an Album write
+ *   - concurrent Disc Number edits in one Album serialize and the final order reflects both
  * @end-catalog */
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import { after, before, beforeEach, test } from 'node:test';
-import { ObjectId } from 'mongodb';
+import { ClientSession, ObjectId } from 'mongodb';
 import { createApp } from '../../src/app';
 import { getDb } from '../../src/infrastructure/database';
-import { editAdminCatalogItem, editAdminPageItem, getAdminCatalogItem, getAdminPage, listAdminCatalog } from '../../src/administration/catalog/adminCatalogService';
+import { adminCatalogItemRevision, editAdminCatalogItem, editAdminPageItem, getAdminCatalogItem, getAdminPage, listAdminCatalog } from '../../src/administration/catalog/adminCatalogService';
 import { createSession } from '../../src/services/auth/authSessionService';
 import { getListenerAlbum } from '../../src/services/listener/listenerContentService';
 import { followArtist } from '../../src/services/listener/artistFollowService';
@@ -58,7 +63,7 @@ before(async () => {
     const address = server.address(); assert.ok(address && typeof address !== 'string'); base = `http://127.0.0.1:${address.port}`;
 });
 beforeEach(async () => {
-    for (const name of ['users', 'authSessions', 'artists', 'albums', 'audioTracks', 'imageAssets', 'pages', 'carousels', 'contentCollections', 'artistFollows', 'adminCatalogMutations']) await db().collection(name).deleteMany({});
+    for (const name of ['users', 'authSessions', 'artists', 'albums', 'audioTracks', 'imageAssets', 'pages', 'carousels', 'contentCollections', 'artistFollows', 'adminCatalogMutations', 'organizations']) await db().collection(name).deleteMany({});
     for (const key of flags) process.env[key] = 'true';
     const adminUser = { _id: admin, role: 'admin', emailVerified: true, email: 'catalog-admin@example.test' }, ordinary = { _id: user, role: 'user', emailVerified: true, email: 'catalog-user@example.test' };
     await db().collection('users').insertMany([adminUser, ordinary]);
@@ -315,6 +320,18 @@ test('a Track Number edit reorders existing members atomically and rejects inval
     assert.equal(invalid.status, 400);
 });
 
+test('a Track Number edit re-derives the Album order within Disc Numbers', async () => {
+    const second = new ObjectId(), third = new ObjectId();
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { discNumber: 2, discNumberSource: 'embedded', trackNumber: 1 } });
+    await db().collection('audioTracks').insertMany([second, third].map((_id, index) => ({ _id, title: `Synthetic disc one ${index + 2}`, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: _id.toHexString(), albumId: album.toHexString(), discNumber: 1, discNumberSource: 'embedded', trackNumber: index + 2 })));
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [second, third, track].map(id => id.toHexString()) } });
+    const initial = (await getAdminCatalogItem(admin.toHexString(), 'audioTrack', third.toHexString())).item;
+    await editAdminCatalogItem(admin.toHexString(), 'audioTrack', third.toHexString(), { operationId: randomUUID(), expectedRevision: initial.revision, fields: { trackNumber: 1 } });
+    // Track Number alone would tie disc 2 Track 1 with the edited track; disc 1 stays first.
+    assert.deepEqual((await db().collection('albums').findOne({ _id: album }))?.audioTrackIds, [third, second, track].map(id => id.toHexString()));
+    assert.equal((await db().collection('audioTracks').findOne({ _id: third }))?.discNumber, 1);
+});
+
 test('hidden Follow targets and inherited releases are excluded before dynamic limits', async () => {
     await followArtist(user.toHexString(), artist.toHexString());
     const now = new Date(), releaseDate = { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
@@ -328,46 +345,176 @@ test('hidden Follow targets and inherited releases are excluded before dynamic l
     assert.deepEqual(resolved.items, []); assert.equal(resolved.artistConfig, undefined);
 });
 
-test('a PATCH cannot write a join phrase, while stored phrases survive Credit edits by creditId', async () => {
-    const guest = new ObjectId();
+test('a PATCH writes, changes and clears join phrases, including on a label Credit', async () => {
+    const guest = new ObjectId(), label = new ObjectId();
     await db().collection('artists').insertOne({ _id: guest, name: 'Synthetic Guest', lifecycleStatus: 'ready', albumIds: [] });
+    await db().collection('organizations').insertOne({ _id: label, name: 'Synthetic Label', organizationType: 'label', lifecycleStatus: 'ready', referenceRevision: 0 });
     const primary = { creditId: 'synthetic_primary', subjectType: 'artist', subjectId: artist.toHexString(), role: 'primary', order: 0 };
     const featured = { creditId: 'synthetic_featured', subjectType: 'artist', subjectId: guest.toHexString(), role: 'featured', order: 1 };
-    const fiveKeys = ['creditId', 'subjectType', 'subjectId', 'role', 'order'];
+    const labelCredit = { creditId: 'synthetic_label', subjectType: 'organization', subjectId: label.toHexString(), role: 'label', order: 2 };
     const item = async () => (await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item;
+    const patch = async (credits: unknown[]) => editAdminCatalogItem(admin.toHexString(), 'album', album.toHexString(), {
+        operationId: randomUUID(), expectedRevision: (await item()).revision, fields: { credits, attributionStatus: 'documented' }
+    });
 
+    const before = await db().collection('albums').findOne({ _id: album });
+    const saved = await patch([{ ...primary, joinPhrase: ' & ' }, featured, { ...labelCredit, joinPhrase: ' / ' }]);
+    const stored = await db().collection('albums').findOne({ _id: album });
+    assert.deepEqual(stored!.credits, [{ ...primary, joinPhrase: ' & ' }, featured, { ...labelCredit, joinPhrase: ' / ' }]);
+    assert.equal(stored!.creditRevision, Number(before!.creditRevision ?? 0) + 1);
+    assert.deepEqual((await db().collection('artists').findOne({ _id: artist }))?.albumIds, [album.toHexString()]);
+    // The label is not part of the byline, so its phrase never shows.
+    assert.equal((await getListenerAlbum(album.toHexString()))?.album.displayByline, 'Synthetic Artist & Synthetic Guest');
+    const snapshotCredits = (saved as any).item.fields.credits as Array<Record<string, unknown>>;
+    assert.deepEqual(snapshotCredits.map((credit) => 'joinPhrase' in credit), [true, false, true]);
+
+    // A complete replacement without the key stores no phrase.
+    await patch([primary, featured, labelCredit]);
+    const cleared = (await db().collection('albums').findOne({ _id: album }))!.credits as Array<Record<string, unknown>>;
+    assert.deepEqual(cleared.map((credit) => 'joinPhrase' in credit), [false, false, false]);
+
+    // Invalid input and non-administrators change nothing and leave no receipt.
     const unchanged = await db().collection('albums').findOne({ _id: album });
-    const rejected = await request(`/api/admin/v1/catalog/album/${album}`, {
+    const receipts = await db().collection('adminCatalogMutations').countDocuments({});
+    const invalid = await request(`/api/admin/v1/catalog/album/${album}`, {
+        operationId: randomUUID(), expectedRevision: (await item()).revision,
+        fields: { credits: [{ ...primary, joinPhrase: '' }, featured], attributionStatus: 'documented' }
+    });
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await invalid.json(), { code: 'ADMIN_CATALOG_INVALID_INPUT' });
+    const forbidden = await request(`/api/admin/v1/catalog/album/${album}`, {
         operationId: randomUUID(), expectedRevision: (await item()).revision,
         fields: { credits: [{ ...primary, joinPhrase: ' & ' }, featured], attributionStatus: 'documented' }
-    });
-    assert.equal(rejected.status, 400);
-    assert.deepEqual(await rejected.json(), { code: 'ADMIN_CATALOG_INVALID_INPUT' });
+    }, userToken);
+    assert.equal(forbidden.status, 403);
     assert.deepEqual(await db().collection('albums').findOne({ _id: album }), unchanged);
-    assert.equal(await db().collection('adminCatalogMutations').countDocuments({}), 0);
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments({}), receipts);
+});
 
-    // Seed phrases directly, as a rollback from the phrase editor would leave them.
-    await db().collection('albums').updateOne({ _id: album }, {
-        $set: { credits: [{ ...primary, joinPhrase: ' & ' }, featured], attributionStatus: 'documented', creditRevision: 1 }
+test('a join phrase PATCH with an unknown commit outcome replays its receipt', async t => {
+    const guest = new ObjectId();
+    await db().collection('artists').insertOne({ _id: guest, name: 'Synthetic Guest', lifecycleStatus: 'ready', albumIds: [] });
+    const credits = [
+        { creditId: 'synthetic_primary', subjectType: 'artist', subjectId: artist.toHexString(), role: 'primary', order: 0, joinPhrase: ' feat. ' },
+        { creditId: 'synthetic_featured', subjectType: 'artist', subjectId: guest.toHexString(), role: 'featured', order: 1 }
+    ];
+    const initial = (await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item;
+    const body = { operationId: randomUUID(), expectedRevision: initial.revision, fields: { credits, attributionStatus: 'documented' } };
+    const original = ClientSession.prototype.withTransaction;
+    let lost = true;
+    // Commits for real once, then reports an unknown commit result; later transactions run normally.
+    t.mock.method(ClientSession.prototype, 'withTransaction', async function (this: ClientSession, ...args: Parameters<ClientSession['withTransaction']>) {
+        const result = await original.apply(this, args);
+        if (lost) {
+            lost = false;
+            throw Object.assign(new Error('Synthetic unknown commit result'), { hasErrorLabel: (label: string) => label === 'UnknownTransactionCommitResult' });
+        }
+        return result;
     });
-    await db().collection('artists').updateOne({ _id: artist }, { $set: { albumIds: [album.toHexString()] } });
-    const seeded = await item();
-    assert.deepEqual((seeded.fields.credits as Array<Record<string, unknown>>).map((credit) => Object.keys(credit)), [fiveKeys, fiveKeys]);
+    await assert.rejects(editAdminCatalogItem(admin.toHexString(), 'album', album.toHexString(), body));
+    const committed = await db().collection('albums').findOne({ _id: album });
+    assert.equal(committed!.creditRevision, 1);
+    const replayed = await editAdminCatalogItem(admin.toHexString(), 'album', album.toHexString(), body) as any;
+    assert.equal(replayed.receipt.operationId, body.operationId);
+    assert.equal(replayed.item.fields.credits[0].joinPhrase, ' feat. ');
+    assert.equal((await db().collection('albums').findOne({ _id: album }))!.creditRevision, 1);
+    await assert.rejects(editAdminCatalogItem(admin.toHexString(), 'album', album.toHexString(), {
+        ...body, fields: { credits: [{ ...credits[0], joinPhrase: ' & ' }, credits[1]], attributionStatus: 'documented' }
+    }), code('ADMIN_CATALOG_IDEMPOTENCY_CONFLICT'));
+});
 
-    await editAdminCatalogItem(admin.toHexString(), 'album', album.toHexString(), {
-        operationId: randomUUID(), expectedRevision: seeded.revision,
-        fields: { credits: [primary, { ...featured, role: 'primary' }], attributionStatus: 'documented' }
-    });
-    const stored = (await db().collection('albums').findOne({ _id: album }))!.credits as Array<Record<string, unknown>>;
-    assert.deepEqual(stored.map((credit) => [credit.creditId, credit.role, credit.joinPhrase]), [
-        ['synthetic_primary', 'primary', ' & '],
-        ['synthetic_featured', 'primary', undefined]
+test('a Disc Number edit re-derives the parent order in the same transaction', async () => {
+    const second = new ObjectId(), third = new ObjectId();
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { trackNumber: 1 } });
+    await db().collection('audioTracks').insertMany([second, third].map((_id, index) => ({ _id, title: `Synthetic track ${index + 2}`, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: _id.toHexString(), albumId: album.toHexString(), trackNumber: index + 2 })));
+    const order = [track, second, third].map(id => id.toHexString());
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: order } });
+    const trackItem = async () => (await getAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString())).item;
+    const albumRevision = async () => (await db().collection('albums').findOne({ _id: album }))!.adminRevision ?? 0;
+
+    // A disc-less snapshot names the field without changing the stored revision.
+    const initial = await trackItem();
+    assert.equal(initial.fields.discNumber, null);
+    assert.equal(initial.revision, adminCatalogItemRevision('audioTrack', await db().collection('audioTracks').findOne({ _id: track })));
+
+    const startingAlbumRevision = await albumRevision();
+    const body = { operationId: randomUUID(), expectedRevision: initial.revision, fields: { discNumber: 2 } };
+    await editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), body);
+    assert.deepEqual((await db().collection('albums').findOne({ _id: album }))?.audioTrackIds, [second, third, track].map(id => id.toHexString()));
+    const moved = await db().collection('audioTracks').findOne({ _id: track });
+    assert.deepEqual([moved!.discNumber, moved!.discNumberSource], [2, 'admin-catalog']);
+    assert.equal(await albumRevision(), startingAlbumRevision + 1);
+    // Replaying the same intent returns the receipt without another write.
+    await editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), body);
+    assert.equal(await albumRevision(), startingAlbumRevision + 1);
+
+    // A stale snapshot conflicts before any reorder.
+    await assert.rejects(editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), { operationId: randomUUID(), expectedRevision: initial.revision, fields: { discNumber: null } }), code('ADMIN_CATALOG_REVISION_CONFLICT'));
+    assert.equal(await albumRevision(), startingAlbumRevision + 1);
+
+    // Out-of-range values are rejected over HTTP without a receipt.
+    const receipts = await db().collection('adminCatalogMutations').countDocuments({});
+    for (const discNumber of [0, 1000]) {
+        const response = await request(`/api/admin/v1/catalog/audioTrack/${track}`, { operationId: randomUUID(), expectedRevision: (await trackItem()).revision, fields: { discNumber } });
+        assert.equal(response.status, 400);
+    }
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments({}), receipts);
+
+    // Clearing removes both keys and restores the single-disc order.
+    await editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), { operationId: randomUUID(), expectedRevision: (await trackItem()).revision, fields: { discNumber: null } });
+    const clearedTrack = await db().collection('audioTracks').findOne({ _id: track });
+    assert.equal('discNumber' in clearedTrack!, false); assert.equal('discNumberSource' in clearedTrack!, false);
+    assert.deepEqual((await db().collection('albums').findOne({ _id: album }))?.audioTrackIds, order);
+
+    // A parent whose membership needs repair rejects the edit and rolls the disc back.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [...order, 'not-a-canonical-id'] } });
+    await assert.rejects(editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), { operationId: randomUUID(), expectedRevision: (await trackItem()).revision, fields: { discNumber: 3 } }), code('ADMIN_CATALOG_MEMBERSHIP_REPAIR_REQUIRED'));
+    assert.equal('discNumber' in (await db().collection('audioTracks').findOne({ _id: track }))!, false);
+});
+
+test('Disc and Track Numbers saved together reorder once, and an unassigned MediaTrack stores its disc without an Album write', async () => {
+    const second = new ObjectId(), third = new ObjectId(), loose = new ObjectId();
+    const ready = (_id: ObjectId, albumId: string, extra: Record<string, unknown>) => ({ _id, title: `Synthetic track ${_id}`, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: _id.toHexString(), albumId, ...extra });
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { trackNumber: 3 } });
+    await db().collection('audioTracks').insertMany([
+        ready(second, album.toHexString(), { discNumber: 2, discNumberSource: 'embedded', trackNumber: 2 }),
+        ready(third, album.toHexString(), { trackNumber: 5 }),
+        ready(loose, '', { trackNumber: 1 })
     ]);
-    assert.equal('joinPhrase' in stored[1], false);
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [track, third, second].map(id => id.toHexString()) } });
+    const albumBefore = await db().collection('albums').findOne({ _id: album });
 
-    const edited = await item();
-    await db().collection('albums').updateOne({ _id: album }, { $set: { 'credits.0.joinPhrase': ' / ' } });
-    const rawChange = await item();
-    assert.notEqual(rawChange.revision, edited.revision);
-    assert.deepEqual(rawChange.fields, edited.fields);
+    // Disc alone would give [third, second, track] and Track alone [track, third, second].
+    const initial = (await getAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString())).item;
+    const saved = await editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), { operationId: randomUUID(), expectedRevision: initial.revision, fields: { discNumber: 2, trackNumber: 1 } }) as any;
+    assert.deepEqual([saved.item.fields.discNumber, saved.item.fields.trackNumber], [2, 1]);
+    const albumAfter = await db().collection('albums').findOne({ _id: album });
+    assert.deepEqual(albumAfter?.audioTrackIds, [third, track, second].map(id => id.toHexString()));
+    assert.equal(albumAfter?.adminRevision, Number(albumBefore?.adminRevision ?? 0) + 1);
+
+    const looseItem = (await getAdminCatalogItem(admin.toHexString(), 'audioTrack', loose.toHexString())).item;
+    await editAdminCatalogItem(admin.toHexString(), 'audioTrack', loose.toHexString(), { operationId: randomUUID(), expectedRevision: looseItem.revision, fields: { discNumber: 4 } });
+    const stored = await db().collection('audioTracks').findOne({ _id: loose });
+    assert.deepEqual([stored!.discNumber, stored!.discNumberSource, stored!.albumId], [4, 'admin-catalog', '']);
+    assert.deepEqual(await db().collection('albums').findOne({ _id: album }), albumAfter);
+});
+
+test('concurrent Disc Number edits in one Album serialize and the final order reflects both', async () => {
+    const otherAdmin = new ObjectId(), second = new ObjectId(), third = new ObjectId();
+    await db().collection('users').insertOne({ _id: otherAdmin, role: 'admin', emailVerified: true, email: 'catalog-admin-2@example.test' });
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { trackNumber: 1 } });
+    await db().collection('audioTracks').insertMany([second, third].map((_id, index) => ({ _id, title: `Synthetic track ${index + 2}`, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: _id.toHexString(), albumId: album.toHexString(), trackNumber: index + 2 })));
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [track, second, third].map(id => id.toHexString()) } });
+    const startingRevision = Number((await db().collection('albums').findOne({ _id: album }))?.adminRevision ?? 0);
+    const [first, next] = await Promise.all([track, second].map(async id => (await getAdminCatalogItem(admin.toHexString(), 'audioTrack', id.toHexString())).item));
+
+    // Separate administrators share only the Album fence, so one transaction retries and re-reads the rows.
+    const results = await Promise.allSettled([
+        editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), { operationId: randomUUID(), expectedRevision: first.revision, fields: { discNumber: 3 } }),
+        editAdminCatalogItem(otherAdmin.toHexString(), 'audioTrack', second.toHexString(), { operationId: randomUUID(), expectedRevision: next.revision, fields: { discNumber: 2 } })
+    ]);
+    assert.deepEqual(results.map(result => result.status), ['fulfilled', 'fulfilled']);
+    const parent = await db().collection('albums').findOne({ _id: album });
+    assert.deepEqual(parent?.audioTrackIds, [third, second, track].map(id => id.toHexString()));
+    assert.equal(parent?.adminRevision, startingRevision + 2);
 });

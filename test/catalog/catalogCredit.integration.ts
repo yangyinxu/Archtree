@@ -19,14 +19,26 @@
  *   - canonical Album attribution with an unavailable Artist does not reveal stale legacy attribution
  *   - Credit read rollback uses only the Album compatibility relationship
  *   - Organization releases resolve publicly and deletion is blocked until Credits are removed
- *   - Content Manager role changes and reorders keep join phrases by creditId
+ *   - Content Manager role changes keep join phrases and a reorder keeps only phrases whose next Credit is unchanged
  *   - a Content Manager role change succeeds over an invalid stored phrase and repairs it
- *   - removing a Credit keeps the phrases of the remaining Credits
- *   - a legacy artist-ID edit keeps the phrases of retained Credits
+ *   - removing a Credit clears the phrase that introduced it and keeps the others
+ *   - a legacy artist-ID edit keeps only phrases whose next Credit is unchanged
  *   - Content Manager uploads inherit Album primary phrases and clear the last inherited phrase
  *   - outcome-unknown confirmation compares stored join phrases
  *   - outcome-unknown confirmation of a no-op add reads an invalid stored phrase as absent
- *   - same-intent Credit retries keep join phrases and a stale reorder retry conflicts
+ *   - same-intent Credit retries keep join phrases, a reorder clears a moved phrase, and a stale reorder retry conflicts
+ *   - adding a Credit clears the phrase of the previous last Credit
+ *   - a promoted MediaTrack Credit clears the previous last phrase on the track and the Album
+ *   - deleting an Artist clears the phrase that introduced its Credit
+ *   - the Content Manager join phrase form sets, clears and validates one phrase
+ *   - a Content Manager join phrase form rendered before a reorder asks for a reload
+ *   - an unconfirmed Content Manager join phrase write reaches the error handler
+ *   - a confirmed unknown Content Manager join phrase commit redirects as a success
+ *   - the Content Manager join phrase form edits a MediaTrack Credit list
+ *   - removing an Album primary Artist clears the phrase that introduced it
+ *   - primary Album membership edits keep a phrase only while the same Credit follows it
+ *   - deleting an Artist clears introducing phrases on Albums and MediaTracks and leaves other owners untouched
+ *   - deleting an Artist leaves malformed non-object Credit elements unchanged on Albums and MediaTracks
  *   - a phrase on a label Credit leaves Organization Releases and the label byline unchanged
  * @end-catalog */
 
@@ -43,12 +55,17 @@ import {
     removeAlbumPrimaryArtistCredit,
     removeCatalogCredit,
     reorderCatalogCredits,
+    replaceArtistPrimaryAlbumCredits,
     replaceCatalogCredits
 } from '../../src/services/catalog/catalogCreditService';
 import {
     reorderCatalogCreditWeb,
+    updateCatalogCreditJoinPhraseWeb,
     updateCatalogCreditRoleWeb
 } from '../../src/controllers/contentManager/creditController';
+import { Album } from '../../src/models/album';
+import { renderManagePage } from '../../src/views/contentManager/managePageView';
+import { cleanupDeletedContentReferences } from '../../src/services/content/contentReferenceService';
 import { proposedSoundtrackCredits } from '../../src/controllers/contentManager/mediaController';
 import { mergeLegacyArtistIdsIntoCredits } from '../../src/models/catalogCredit';
 import { AudioFormat, AudioTrack } from '../../src/models/audioTrack';
@@ -461,8 +478,8 @@ test('Organization releases resolve publicly and deletion is blocked until Credi
     assert.equal(await getDb()!.collection('organizations').findOne({ _id: organizationId }), null);
 });
 
-// Join phrases. No writer accepts a phrase yet (S2b); these tests store them through internal
-// rebuilds or directly, as a rollback from S2b would leave them.
+// Join phrases. Explicit replacements store exactly the phrases they carry; every other rebuild
+// keeps a phrase only while the same Credit still follows it.
 const phraseCredit = (creditId: string, subjectId: ObjectId, role: string, joinPhrase?: string) => ({
     creditId,
     subjectType: 'artist',
@@ -510,12 +527,13 @@ const runCreditForm = async (
     return decodeURIComponent(redirect);
 };
 
-test('Content Manager role changes and reorders keep join phrases by creditId', async () => {
-    const { artistId, featuredId, thirdId, albumId } = await seedPhraseCast();
+test('Content Manager role changes keep join phrases and a reorder keeps only phrases whose next Credit is unchanged', async () => {
+    const { artistId, featuredId, thirdId, performerId, albumId } = await seedPhraseCast();
     await replaceCatalogCredits('album', albumId.toHexString(), [
         phraseCredit('phrase_primary', artistId, 'primary', ' & '),
-        phraseCredit('phrase_second', featuredId, 'primary', ' feat. '),
-        phraseCredit('phrase_third', thirdId, 'featured')
+        phraseCredit('phrase_second', featuredId, 'primary'),
+        phraseCredit('phrase_third', thirdId, 'featured', ' feat. '),
+        phraseCredit('phrase_performer', performerId, 'performer')
     ], 'documented');
 
     assert.match(await runCreditForm(updateCatalogCreditRoleWeb, {
@@ -523,19 +541,25 @@ test('Content Manager role changes and reorders keep join phrases by creditId', 
     }), /Credit role updated successfully\./);
     assert.deepEqual(phrasesById(await storedCredits('albums', albumId)), [
         ['phrase_primary', 'primary', ' & '],
-        ['phrase_second', 'primary', ' feat. '],
-        ['phrase_third', 'performer', undefined]
+        ['phrase_second', 'primary', undefined],
+        ['phrase_third', 'performer', ' feat. '],
+        ['phrase_performer', 'performer', undefined]
     ]);
 
+    // Moving Primary down changes the Credit after it, so its phrase is cleared; Third is still
+    // followed by Performer and keeps its phrase.
     assert.match(await runCreditForm(reorderCatalogCreditWeb, {
         ownerType: 'album', ownerId: albumId.toHexString(), creditId: 'phrase_primary', direction: 'down'
     }), /Credit order updated successfully\./);
-    assert.deepEqual(phrasesById(await storedCredits('albums', albumId)), [
-        ['phrase_second', 'primary', ' feat. '],
-        ['phrase_primary', 'primary', ' & '],
-        ['phrase_third', 'performer', undefined]
+    const reordered = await storedCredits('albums', albumId);
+    assert.deepEqual(phrasesById(reordered), [
+        ['phrase_second', 'primary', undefined],
+        ['phrase_primary', 'primary', undefined],
+        ['phrase_third', 'performer', ' feat. '],
+        ['phrase_performer', 'performer', undefined]
     ]);
-    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Featured feat. Primary & Third');
+    assert.equal('joinPhrase' in reordered[1], false);
+    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Featured, Primary, Third feat. Performer');
 });
 
 test('a Content Manager role change succeeds over an invalid stored phrase and repairs it', async () => {
@@ -557,22 +581,24 @@ test('a Content Manager role change succeeds over an invalid stored phrase and r
     assert.equal('joinPhrase' in credits[0], false);
 });
 
-test('removing a Credit keeps the phrases of the remaining Credits', async () => {
-    const { artistId, featuredId, thirdId, albumId } = await seedPhraseCast();
+test('removing a Credit clears the phrase that introduced it and keeps the others', async () => {
+    const { artistId, featuredId, thirdId, performerId, albumId } = await seedPhraseCast();
     await replaceCatalogCredits('album', albumId.toHexString(), [
         phraseCredit('phrase_primary', artistId, 'primary', ' & '),
         phraseCredit('phrase_second', featuredId, 'primary', ' feat. '),
-        phraseCredit('phrase_third', thirdId, 'featured')
+        phraseCredit('phrase_third', thirdId, 'featured', ' / '),
+        phraseCredit('phrase_performer', performerId, 'performer')
     ], 'documented');
     await removeCatalogCredit('album', albumId.toHexString(), 'phrase_second', 'unknown', 1);
     assert.deepEqual(phrasesById(await storedCredits('albums', albumId)), [
-        ['phrase_primary', 'primary', ' & '],
-        ['phrase_third', 'featured', undefined]
+        ['phrase_primary', 'primary', undefined],
+        ['phrase_third', 'featured', ' / '],
+        ['phrase_performer', 'performer', undefined]
     ]);
-    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Primary & Third');
+    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Primary, Third / Performer');
 });
 
-test('a legacy artist-ID edit keeps the phrases of retained Credits', async () => {
+test('a legacy artist-ID edit keeps only phrases whose next Credit is unchanged', async () => {
     const { artistId, featuredId, organizationId, performerId, trackId } = await seedPhraseCast();
     await replaceCatalogCredits('audioTrack', trackId.toHexString(), [
         phraseCredit('phrase_primary', artistId, 'primary', ' & '),
@@ -590,9 +616,11 @@ test('a legacy artist-ID edit keeps the phrases of retained Credits', async () =
         [artistId.toHexString(), performerId.toHexString()]
     );
     await replaceCatalogCredits('audioTrack', trackId.toHexString(), credits, 'documented', 1);
+    // The primary is now followed by the added performer, so its phrase is cleared; the label
+    // stays last and keeps its phrase.
     assert.deepEqual((await storedCredits('audioTracks', trackId)).map((credit) =>
         [credit.subjectId, credit.role, credit.joinPhrase]), [
-        [artistId.toHexString(), 'primary', ' & '],
+        [artistId.toHexString(), 'primary', undefined],
         [performerId.toHexString(), 'legacyUnspecified', undefined],
         [organizationId.toHexString(), 'label', ' / ']
     ]);
@@ -695,7 +723,7 @@ test('outcome-unknown confirmation of a no-op add reads an invalid stored phrase
     assert.equal(stored?.credits[1].joinPhrase, 'x\u200By');
 });
 
-test('same-intent Credit retries keep join phrases and a stale reorder retry conflicts', async () => {
+test('same-intent Credit retries keep join phrases, a reorder clears a moved phrase, and a stale reorder retry conflicts', async () => {
     const { artistId, featuredId, albumId } = await seedPhraseCast();
     const first = await replaceCatalogCredits('album', albumId.toHexString(), [
         phraseCredit('phrase_primary', artistId, 'primary', ' & '),
@@ -715,8 +743,348 @@ test('same-intent Credit retries keep join phrases and a stale reorder retry con
     );
     assert.deepEqual(phrasesById(await storedCredits('albums', albumId)), [
         ['phrase_second', 'primary', undefined],
-        ['phrase_primary', 'primary', ' & ']
+        ['phrase_primary', 'primary', undefined]
     ]);
+});
+
+test('adding a Credit clears the phrase of the previous last Credit', async () => {
+    const { artistId, featuredId, thirdId, albumId } = await seedPhraseCast();
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary', ' & '),
+        phraseCredit('phrase_second', featuredId, 'primary', ' / ')
+    ], 'documented');
+    const added = await addCatalogCredit('album', albumId.toHexString(), phraseCredit('phrase_third', thirdId, 'featured'), 1);
+    assert.equal(added.creditRevision, 2);
+    const credits = await storedCredits('albums', albumId);
+    assert.deepEqual(phrasesById(credits), [
+        ['phrase_primary', 'primary', ' & '],
+        ['phrase_second', 'primary', undefined],
+        ['phrase_third', 'featured', undefined]
+    ]);
+    assert.equal('joinPhrase' in credits[1], false);
+    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Primary & Featured, Third');
+});
+
+test('a promoted MediaTrack Credit clears the previous last phrase on the track and the Album', async () => {
+    const { artistId, featuredId, thirdId, albumId, trackId } = await seedPhraseCast();
+    await getDb()!.collection('audioTracks').updateOne({ _id: trackId }, { $set: { albumId: albumId.toHexString() } });
+    for (const [ownerType, ownerId] of [['album', albumId], ['audioTrack', trackId]] as const) {
+        await replaceCatalogCredits(ownerType, ownerId.toHexString(), [
+            phraseCredit(`${ownerType}_primary`, artistId, 'primary', ' & '),
+            phraseCredit(`${ownerType}_second`, featuredId, 'primary', ' / ')
+        ], 'documented');
+    }
+    await addSoundtrackCredit(trackId.toHexString(), phraseCredit('track_promoted', thirdId, 'primary'), true, 1);
+    for (const [collection, ownerId] of [['albums', albumId], ['audioTracks', trackId]] as const) {
+        assert.deepEqual((await storedCredits(collection, ownerId)).map((credit) => [credit.subjectId, credit.joinPhrase]), [
+            [artistId.toHexString(), ' & '],
+            [featuredId.toHexString(), undefined],
+            [thirdId.toHexString(), undefined]
+        ], collection);
+    }
+});
+
+test('deleting an Artist clears the phrase that introduced its Credit', async () => {
+    const { artistId, featuredId, thirdId, albumId } = await seedPhraseCast();
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary', ' feat. '),
+        phraseCredit('phrase_removed', featuredId, 'featured', ' & '),
+        phraseCredit('phrase_third', thirdId, 'primary')
+    ], 'documented');
+    await cleanupDeletedContentReferences('artist', featuredId.toHexString());
+    const album = await getDb()!.collection('albums').findOne({ _id: albumId });
+    assert.deepEqual(album!.credits.map((credit: any) => [credit.creditId, credit.order, credit.joinPhrase]), [
+        ['phrase_primary', 0, undefined],
+        ['phrase_third', 1, undefined]
+    ]);
+    assert.equal('joinPhrase' in album!.credits[0], false);
+    assert.equal(album!.creditRevision, 2);
+    assert.equal(album!.attributionStatus, 'documented');
+});
+
+test('the Content Manager join phrase form sets, clears and validates one phrase', async (t) => {
+    const { artistId, featuredId, thirdId, albumId } = await seedPhraseCast();
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary'),
+        phraseCredit('phrase_second', featuredId, 'primary', ' & '),
+        phraseCredit('phrase_third', thirdId, 'featured')
+    ], 'documented');
+    // Each submit carries the Credit revision the page would have been rendered with.
+    let creditRevision = '1';
+    const form = (creditId: string, joinPhrase: unknown) => ({ ownerType: 'album', ownerId: albumId.toHexString(), creditId, joinPhrase, creditRevision }) as Record<string, string>;
+
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, form('phrase_primary', ' feat. ')), /Credit join phrase updated successfully\./);
+    creditRevision = '2';
+    assert.deepEqual(phrasesById(await storedCredits('albums', albumId)), [
+        ['phrase_primary', 'primary', ' feat. '],
+        ['phrase_second', 'primary', ' & '],
+        ['phrase_third', 'featured', undefined]
+    ]);
+    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Primary feat. Featured & Third');
+
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, form('phrase_second', '')), /Credit join phrase cleared\./);
+    const cleared = await storedCredits('albums', albumId);
+    assert.equal('joinPhrase' in cleared[1], false);
+    assert.equal(cleared[0].joinPhrase, ' feat. ');
+    const revision = (await getDb()!.collection('albums').findOne({ _id: albumId }))!.creditRevision;
+    assert.equal(revision, 3);
+    creditRevision = String(revision);
+
+    // Invalid values, a repeated field and an unknown Credit write nothing.
+    for (const value of [`x${String.fromCharCode(0x200b)}y`, 'a'.repeat(17), ' ', [' & ', ' / ']]) {
+        assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, form('phrase_primary', value)), /A join phrase is at most 16 characters/);
+    }
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, form('missing_credit', ' & ')), /Credit not found\. Reload and try again\./);
+    assert.equal((await getDb()!.collection('albums').findOne({ _id: albumId }))!.creditRevision, revision);
+
+    // A change committed between the controller's read and the write still conflicts in the
+    // transaction: the read and the page agree on an older revision than the stored one.
+    const current = await getDb()!.collection('albums').findOne({ _id: albumId });
+    t.mock.method(Album, 'findById', async () => ({ ...current, creditRevision: revision - 1 }));
+    creditRevision = String(revision - 1);
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, form('phrase_primary', ' / ')), /Credits changed concurrently\. Reload and try again\./);
+    assert.equal((await storedCredits('albums', albumId))[0].joinPhrase, ' feat. ');
+    assert.equal((await getDb()!.collection('albums').findOne({ _id: albumId }))!.creditRevision, revision);
+});
+
+test('a Content Manager join phrase form rendered before a reorder asks for a reload', async () => {
+    const { artistId, featuredId, thirdId, albumId } = await seedPhraseCast();
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary'),
+        phraseCredit('phrase_featured', featuredId, 'featured'),
+        phraseCredit('phrase_third', thirdId, 'primary')
+    ], 'documented');
+    // Read the hidden fields from the page the administrator would have open.
+    const html = renderManagePage({
+        userId: new ObjectId().toHexString(),
+        userEmail: 'stale-phrase@example.test',
+        maxAudioBatchFiles: 1,
+        organizationTypes: ['label'],
+        isAdmin: true,
+        managerView: 'catalog',
+        prefillAlbumId: albumId.toHexString(),
+        prefillAlbum: await getDb()!.collection('albums').findOne({ _id: albumId })
+    });
+    const renderedForm = [...html.matchAll(
+        /<form method="POST" action="\/content\/manage\/credits\/update-join-phrase">([\s\S]*?)<\/form>/g
+    )].map((match) => Object.fromEntries([...match[1].matchAll(/<input type="hidden" name="(\w+)" value="([^"]*)"/g)]
+        .map((field) => [field[1], field[2]])))
+        .find((fields) => fields.creditId === 'phrase_primary');
+    assert.equal(renderedForm?.creditRevision, '1');
+
+    // Another administrator moves Third up, so the next name after Primary is now Third.
+    await reorderCatalogCredits('album', albumId.toHexString(), ['phrase_primary', 'phrase_third', 'phrase_featured'], 1);
+    const before = await getDb()!.collection('albums').findOne({ _id: albumId });
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, { ...renderedForm, joinPhrase: ' feat. ' }), /Credits changed concurrently\. Reload and try again\./);
+
+    // A missing or malformed revision, and a malformed owner ID, also write nothing.
+    const withoutRevision = Object.fromEntries(Object.entries(renderedForm!).filter(([key]) => key !== 'creditRevision'));
+    for (const creditRevision of [undefined, '', '-1', '2.0', '1e1', ' 2', '9'.repeat(16), ['2', '2']]) {
+        const body = { ...withoutRevision, joinPhrase: ' feat. ', ...(creditRevision === undefined ? {} : { creditRevision }) };
+        assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, body as Record<string, string>), /Credits changed concurrently\. Reload and try again\./, String(creditRevision));
+    }
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, {
+        ...renderedForm, ownerId: 'not-an-object-id', creditRevision: '2', joinPhrase: ' feat. '
+    }), /Credit not found\. Reload and try again\./);
+    assert.deepEqual(await getDb()!.collection('albums').findOne({ _id: albumId }), before);
+    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Primary, Third, Featured');
+
+    // After a reload the current revision is accepted and the phrase introduces the new next name.
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, { ...renderedForm, creditRevision: '2', joinPhrase: ' feat. ' }), /Credit join phrase updated successfully\./);
+    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Primary feat. Third, Featured');
+});
+
+test('an unconfirmed Content Manager join phrase write reaches the error handler', async (t) => {
+    const { artistId, featuredId, albumId } = await seedPhraseCast();
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary'),
+        phraseCredit('phrase_second', featuredId, 'primary')
+    ], 'documented');
+    const original = ClientSession.prototype.withTransaction;
+    // Commits, then changes the stored phrase so confirmation cannot match, then reports an unknown result.
+    t.mock.method(ClientSession.prototype, 'withTransaction', async function (
+        this: ClientSession,
+        ...args: Parameters<ClientSession['withTransaction']>
+    ) {
+        await original.apply(this, args);
+        await getDb()!.collection('albums').updateOne({ _id: albumId }, { $set: { 'credits.0.joinPhrase': ' / ' } });
+        throw Object.assign(new Error('Synthetic unknown commit result'), {
+            hasErrorLabel: (label: string) => label === 'UnknownTransactionCommitResult'
+        });
+    });
+    let forwarded: unknown;
+    await updateCatalogCreditJoinPhraseWeb(
+        { auth: { role: 'admin', userId: new ObjectId().toHexString() }, body: { ownerType: 'album', ownerId: albumId.toHexString(), creditId: 'phrase_primary', joinPhrase: ' & ', creditRevision: '1' } } as any,
+        { redirect: () => { throw new Error('An unknown outcome must not redirect as success.'); } } as any,
+        (error: unknown) => { forwarded = error; }
+    );
+    assert.ok(forwarded instanceof CatalogCreditOutcomeUnknownError);
+});
+
+test('a confirmed unknown Content Manager join phrase commit redirects as a success', async (t) => {
+    const { artistId, featuredId, albumId } = await seedPhraseCast();
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary'),
+        phraseCredit('phrase_second', featuredId, 'primary')
+    ], 'documented');
+    const original = ClientSession.prototype.withTransaction;
+    // Commits for real, then loses the reply; the confirmation read finds the exact phrase.
+    t.mock.method(ClientSession.prototype, 'withTransaction', async function (
+        this: ClientSession,
+        ...args: Parameters<ClientSession['withTransaction']>
+    ) {
+        await original.apply(this, args);
+        throw Object.assign(new Error('Synthetic unknown commit result'), {
+            hasErrorLabel: (label: string) => label === 'UnknownTransactionCommitResult'
+        });
+    });
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, {
+        ownerType: 'album', ownerId: albumId.toHexString(), creditId: 'phrase_primary', joinPhrase: ' & ', creditRevision: '1'
+    }), /Credit join phrase updated successfully\./);
+    t.mock.restoreAll();
+    const album = await getDb()!.collection('albums').findOne({ _id: albumId });
+    assert.equal(album!.credits[0].joinPhrase, ' & ');
+    assert.equal(album!.creditRevision, 2);
+});
+
+test('the Content Manager join phrase form edits a MediaTrack Credit list', async () => {
+    const { artistId, featuredId, trackId } = await seedPhraseCast();
+    await replaceCatalogCredits('audioTrack', trackId.toHexString(), [
+        phraseCredit('track_primary', artistId, 'primary'),
+        phraseCredit('track_featured', featuredId, 'featured')
+    ], 'documented');
+    const form = (joinPhrase: string, creditRevision: string) => ({
+        ownerType: 'audioTrack', ownerId: trackId.toHexString(), creditId: 'track_primary', joinPhrase, creditRevision
+    });
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, form(' feat. ', '1')), /Credit join phrase updated successfully\./);
+    const track = await getDb()!.collection('audioTracks').findOne({ _id: trackId });
+    assert.deepEqual(phrasesById(track!.credits), [
+        ['track_primary', 'primary', ' feat. '],
+        ['track_featured', 'featured', undefined]
+    ]);
+    assert.equal(track!.creditRevision, 2);
+    // The legacy artistIds projection is rebuilt from the same list and is unaffected by phrases.
+    assert.deepEqual(track!.artistIds, [artistId.toHexString(), featuredId.toHexString()]);
+    assert.match(await runCreditForm(updateCatalogCreditJoinPhraseWeb, form('', '2')), /Credit join phrase cleared\./);
+    assert.equal('joinPhrase' in (await storedCredits('audioTracks', trackId))[0], false);
+});
+
+test('removing an Album primary Artist clears the phrase that introduced it', async () => {
+    const { artistId, featuredId, thirdId, albumId } = await seedPhraseCast();
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary', ' feat. '),
+        phraseCredit('phrase_second', featuredId, 'primary', ' & '),
+        phraseCredit('phrase_third', thirdId, 'featured')
+    ], 'documented');
+    await removeAlbumPrimaryArtistCredit(albumId.toHexString(), featuredId.toHexString(), 1);
+    const credits = await storedCredits('albums', albumId);
+    assert.deepEqual(phrasesById(credits), [
+        ['phrase_primary', 'primary', undefined],
+        ['phrase_third', 'featured', undefined]
+    ]);
+    assert.equal('joinPhrase' in credits[0], false);
+    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Primary, Third');
+    assert.deepEqual((await getDb()!.collection('artists').findOne({ _id: featuredId }))!.albumIds, []);
+});
+
+test('primary Album membership edits keep a phrase only while the same Credit follows it', async () => {
+    const { artistId, featuredId, thirdId, albumId } = await seedPhraseCast();
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary', ' & '),
+        phraseCredit('phrase_second', featuredId, 'primary', ' / ')
+    ], 'documented');
+
+    // Adding Third's primary membership appends its Credit, so the previous last phrase is cleared.
+    await replaceArtistPrimaryAlbumCredits(thirdId.toHexString(), [albumId.toHexString()]);
+    assert.deepEqual((await storedCredits('albums', albumId)).map((credit) => [credit.subjectId, credit.joinPhrase]), [
+        [artistId.toHexString(), ' & '],
+        [featuredId.toHexString(), undefined],
+        [thirdId.toHexString(), undefined]
+    ]);
+    assert.equal((await getDb()!.collection('albums').findOne({ _id: albumId }))!.creditRevision, 2);
+
+    // Re-saving the same membership is a no-op that keeps every phrase and the revision.
+    await replaceArtistPrimaryAlbumCredits(artistId.toHexString(), [albumId.toHexString()]);
+    assert.equal((await getDb()!.collection('albums').findOne({ _id: albumId }))!.creditRevision, 2);
+    assert.equal((await storedCredits('albums', albumId))[0].joinPhrase, ' & ');
+
+    // Removing Featured's membership changes the Credit after Primary, so its phrase is cleared.
+    await replaceArtistPrimaryAlbumCredits(featuredId.toHexString(), []);
+    const credits = await storedCredits('albums', albumId);
+    assert.deepEqual(credits.map((credit) => [credit.subjectId, credit.order, credit.joinPhrase]), [
+        [artistId.toHexString(), 0, undefined],
+        [thirdId.toHexString(), 1, undefined]
+    ]);
+    assert.equal('joinPhrase' in credits[0], false);
+    assert.equal((await getListenerAlbum(albumId.toHexString()))?.album.displayByline, 'Primary, Third');
+});
+
+test('deleting an Artist clears introducing phrases on Albums and MediaTracks and leaves other owners untouched', async () => {
+    const { artistId, featuredId, thirdId, albumId, trackId } = await seedPhraseCast();
+    const otherAlbumId = new ObjectId();
+    await getDb()!.collection('albums').insertOne({
+        _id: otherAlbumId, title: 'Unrelated Album', lifecycleStatus: 'ready', referenceRevision: 0
+    });
+    // The removed Artist appears twice in a row on the Album and last on the MediaTrack.
+    await replaceCatalogCredits('album', albumId.toHexString(), [
+        phraseCredit('phrase_primary', artistId, 'primary', ' & '),
+        phraseCredit('phrase_removed_primary', featuredId, 'primary', ' / '),
+        phraseCredit('phrase_removed_performer', featuredId, 'performer', ' feat. '),
+        phraseCredit('phrase_third', thirdId, 'featured', ' x ')
+    ], 'documented');
+    await replaceCatalogCredits('audioTrack', trackId.toHexString(), [
+        phraseCredit('track_primary', artistId, 'primary', ' feat. '),
+        phraseCredit('track_removed', featuredId, 'featured')
+    ], 'documented');
+    await replaceCatalogCredits('album', otherAlbumId.toHexString(), [
+        phraseCredit('other_primary', artistId, 'primary', ' & '),
+        phraseCredit('other_third', thirdId, 'primary')
+    ], 'documented');
+    const otherBefore = await getDb()!.collection('albums').findOne({ _id: otherAlbumId });
+
+    await cleanupDeletedContentReferences('artist', featuredId.toHexString());
+
+    const album = await getDb()!.collection('albums').findOne({ _id: albumId });
+    assert.deepEqual(album!.credits.map((credit: any) => [credit.creditId, credit.order, credit.joinPhrase]), [
+        ['phrase_primary', 0, undefined],
+        ['phrase_third', 1, ' x ']
+    ]);
+    assert.equal(album!.creditRevision, 2);
+    const track = await getDb()!.collection('audioTracks').findOne({ _id: trackId });
+    assert.deepEqual(track!.credits.map((credit: any) => [credit.creditId, credit.order, credit.joinPhrase]), [
+        ['track_primary', 0, undefined]
+    ]);
+    assert.equal('joinPhrase' in track!.credits[0], false);
+    assert.equal(track!.attributionStatus, 'documented');
+    assert.deepEqual(await getDb()!.collection('albums').findOne({ _id: otherAlbumId }), otherBefore);
+});
+
+test('deleting an Artist leaves malformed non-object Credit elements unchanged on Albums and MediaTracks', async () => {
+    const { artistId, featuredId, thirdId, albumId, trackId } = await seedPhraseCast();
+    // Legacy or damaged lists can hold non-object elements that no strict write would accept.
+    const credits = [
+        { ...phraseCredit('malformed_primary', artistId, 'primary', ' feat. '), order: 0 },
+        { ...phraseCredit('malformed_removed', featuredId, 'featured'), order: 1 },
+        null,
+        'legacy-credit',
+        { ...phraseCredit('malformed_third', thirdId, 'primary'), order: 4 }
+    ];
+    await getDb()!.collection('albums').updateOne({ _id: albumId }, { $set: { credits, attributionStatus: 'documented', creditRevision: 3 } });
+    await getDb()!.collection('audioTracks').updateOne({ _id: trackId }, { $set: { credits, attributionStatus: 'documented', creditRevision: 3 } });
+
+    await cleanupDeletedContentReferences('artist', featuredId.toHexString());
+
+    for (const [collection, ownerId] of [['albums', albumId], ['audioTracks', trackId]] as const) {
+        const owner = await getDb()!.collection(collection).findOne({ _id: ownerId });
+        assert.deepEqual(owner!.credits, [
+            { creditId: 'malformed_primary', subjectType: 'artist', subjectId: artistId.toHexString(), role: 'primary', order: 0 },
+            null,
+            'legacy-credit',
+            { creditId: 'malformed_third', subjectType: 'artist', subjectId: thirdId.toHexString(), role: 'primary', order: 3 }
+        ], collection);
+        assert.equal(owner!.creditRevision, 4, collection);
+        assert.equal(owner!.attributionStatus, 'documented', collection);
+    }
 });
 
 test('a phrase on a label Credit leaves Organization Releases and the label byline unchanged', async () => {

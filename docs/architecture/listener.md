@@ -89,6 +89,10 @@ builder, `src/services/catalog/catalogByline.ts`, keeps every byline within
 rewrite stored names: a name with a Cf character, such as an emoji ZWJ
 sequence, or a Credit name over 200 characters still fails native validation.
 
+Disc Numbers add no field either. Listener v1 carries neither Disc nor Track
+Number, so a multi-disc Album reaches clients only as the order of
+`Album.audioTrackIds`, and clients number its rows by position.
+
 The legacy public catalog (`publicCatalogService.ts`) projects each Credit as
 exactly the five fields that `PublicCatalogCredit` declares: `subjectType`,
 `subjectId`, `name`, `role` and `order`. Earlier releases spread the stored

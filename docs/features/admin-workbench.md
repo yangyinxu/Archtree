@@ -236,10 +236,11 @@ missing or unsupported values select Albums. Detail return links retain that
 category. Organizations use a name mark, matching listener details, and do not
 gain artwork upload controls.
 Direct catalog saves also confirm the frozen partial patch with per-field saved
-and proposed values, including coupled Credits and attribution. A newer catalog
-revision disables the open confirmation and shows its recovery instruction;
-cancelling preserves unsaved edits. Offline or failed reads do not report a
-revision change without a confirmed newer item.
+and proposed values, including coupled Credits with their join phrases and
+attribution, and a MediaTrack's Disc Number. A newer catalog revision disables
+the open confirmation and shows its recovery instruction; cancelling preserves
+unsaved edits. Offline or failed reads do not report a revision change without
+a confirmed newer item.
 Analysis uses retained original
 filenames and saved metadata; absent historical folder/file evidence stays empty.
 No media is uploaded, copied or published by this workflow. Artist attribution,
@@ -275,6 +276,11 @@ MongoDB transaction. An unresolved object never loses its import evidence.
 Stopping the server stops new steps and awaits admitted worker work before
 closing MongoDB. Required indexes and the global admission record initialize
 with normal server startup.
+Imported Album order follows the catalog rule: Disc Number, then Track Number,
+then MediaTrack ID. Import drafts carry no Disc Number yet, so imported
+MediaTracks store none and order as disc 1. Appending to an existing Album
+re-derives its whole order from the stored numbers of all its MediaTracks, so
+existing disc groupings are kept.
 Audio/artwork reconciliation includes unresolved canonical copy reservations
 from import and cover operations before reporting orphan candidates. Completed
 history does not mask later unreferenced objects; unresolved cleanup evidence
@@ -285,13 +291,22 @@ conflicts: `GET /catalog/:kind`, `GET/PATCH /catalog/:kind/:id`, where `kind` is
 `artist`, `album`, `audioTrack` or `organization`. A patch contains
 `{operationId, expectedRevision, fields?, visibility?}`. Credits and attribution
 must be supplied together; memberships and storage keys are never editable
-fields. Snapshot Credits have exactly the five fields `creditId`,
-`subjectType`, `subjectId`, `role` and `order`. A patched Credit that carries
-a `joinPhrase` key returns `400 ADMIN_CATALOG_INVALID_INPUT` before any
-transaction or receipt, and other extra keys are ignored. A Credit
-replacement keeps each stored join phrase on its `creditId`, and stored phrases
-still change the revision.
-Track Number edits recompute the parent's automatic order atomically.
+fields. Snapshot Credits have the five fields `creditId`, `subjectType`,
+`subjectId`, `role` and `order`, plus `joinPhrase` only when a valid phrase is
+stored; an invalid stored phrase reads as absent but still changes the
+revision. A patched Credit list is a complete replacement, phrases included: a
+Credit without the `joinPhrase` key stores none, and a present but invalid
+phrase (including `null` or `''`) returns `400 ADMIN_CATALOG_INVALID_INPUT`
+before any transaction or receipt. Other extra Credit keys are ignored, and
+Organization Credits such as labels accept phrases too. MediaTrack snapshots
+always include `discNumber` (1–999, or `null` when none is stored). A patch may
+set it to a whole number from 1 to 999 or to `null`, which removes the stored
+Disc Number; any other value returns `400 ADMIN_CATALOG_INVALID_INPUT`. A Disc
+Number enters the revision only when one is stored, so records without one keep
+their earlier revisions. A Web bundle from before this release rejects
+`discNumber` and `joinPhrase`, so reload open workbench tabs after deploying.
+Disc and Track Number edits recompute the parent's automatic order in the same
+transaction as the receipt.
 `GET /pages/:slug` and `PATCH /pages/:slug/items/:itemId` address one Page
 placement, preserving reusable definitions and order. Each placement includes
 bounded `name`, `sourceMode` (`manual`, `dynamic` or null) and `referenceStatus`

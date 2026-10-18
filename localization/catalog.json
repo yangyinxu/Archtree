@@ -1512,7 +1512,7 @@
       "variables": {}
     },
     "admin.catalog.automatic_order": {
-      "description": "Track numbers determine Album order automatically. Saving a number updates the linked Album order.",
+      "description": "Disc and track numbers determine Album order automatically. A track without a disc number belongs to disc 1. Saving a number updates the linked Album order.",
       "delivery": [
         "runtime"
       ],
@@ -1673,6 +1673,29 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog.join_phrase": {
+      "description": "Label for the text shown between a Credit name and the next name in a byline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.join_phrase_help": {
+      "description": "Help text for Credit join phrase inputs in the catalog editor.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.join_phrase_value": {
+      "description": "Confirmation value naming the join phrase stored after one Credit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "phrase": "string"
+      }
     },
     "admin.catalog.library": {
       "description": "Library",
@@ -2649,6 +2672,13 @@
     },
     "admin.field.description": {
       "description": "Description",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.disc_number": {
+      "description": "Administrator workbench: field discNumber.",
       "delivery": [
         "runtime"
       ],

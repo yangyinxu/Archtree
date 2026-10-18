@@ -25,6 +25,7 @@ import {
     catalogSectionForSelection
 } from './managementNavigation';
 import { contentId, uniqueStrings } from '../../utils/catalogValues';
+import { storedJoinPhrase } from '../../models/catalogCredit';
 
 const toCsvInput = (value: unknown) => {
     if (!Array.isArray(value)) {
@@ -153,6 +154,9 @@ const renderCreditEditor = (
             : 'Album attribution';
     };
     const credits = Array.isArray(owner?.credits) ? owner.credits : [];
+    // The phrase form carries the rendered Credit revision, so a list changed after this page was
+    // drawn (for example a reorder that gives a phrase a different next name) asks for a reload.
+    const creditRevision = Number.isInteger(owner?.creditRevision) ? owner.creditRevision : 0;
     const creditItems = credits.length > 0
         ? `<ol class="linked-content catalog-credits">${credits.map((credit: any, index: number) => {
             const subjectType = credit.subjectType === 'organization' ? 'organization' : 'artist';
@@ -164,7 +168,12 @@ const renderCreditEditor = (
                 : artistCreditRoleOptions;
             const roleSelect = roleOptions.map(([value, roleLabel]) => `<option value="${value}"${credit.role === value ? ' selected' : ''}>${roleLabel}</option>`).join('');
             const hidden = `<input type="hidden" name="ownerType" value="${ownerType}" /><input type="hidden" name="ownerId" value="${escapeHtml(ownerId)}" /><input type="hidden" name="creditId" value="${escapeHtml(String(credit.creditId ?? ''))}" />`;
-            return `<li><span><strong>${escapeHtml(label)}</strong>, position ${index + 1}<small class="placement-preview">Public placement: ${escapeHtml(placementFor(credit))}</small></span><form method="POST" action="/content/manage/credits/update-role">${hidden}<label>Role<select name="role">${roleSelect}</select></label><button class="button--secondary" type="submit">Update Role</button></form><form method="POST" action="/content/manage/credits/reorder">${hidden}<button class="button--secondary" name="direction" value="up" type="submit"${index === 0 ? ' disabled' : ''}>Move Up</button><button class="button--secondary" name="direction" value="down" type="submit"${index === credits.length - 1 ? ' disabled' : ''}>Move Down</button></form><form method="POST" action="/content/manage/credits/remove">${hidden}<button class="button--secondary" type="submit">Remove Credit</button></form></li>`;
+            // A join phrase sits between this name and the next, so the last Credit has none to edit;
+            // an invalid stored phrase renders empty because bylines already ignore it.
+            const joinPhraseForm = index < credits.length - 1
+                ? `<form method="POST" action="/content/manage/credits/update-join-phrase">${hidden}<input type="hidden" name="creditRevision" value="${creditRevision}" /><label>Join phrase before the next name<input type="text" name="joinPhrase" maxlength="16" value="${escapeHtml(storedJoinPhrase(credit.joinPhrase) ?? '')}" /></label><button class="button--secondary" type="submit">Update Join Phrase</button></form>`
+                : '';
+            return `<li><span><strong>${escapeHtml(label)}</strong>, position ${index + 1}<small class="placement-preview">Public placement: ${escapeHtml(placementFor(credit))}</small></span><form method="POST" action="/content/manage/credits/update-role">${hidden}<label>Role<select name="role">${roleSelect}</select></label><button class="button--secondary" type="submit">Update Role</button></form>${joinPhraseForm}<form method="POST" action="/content/manage/credits/reorder">${hidden}<button class="button--secondary" name="direction" value="up" type="submit"${index === 0 ? ' disabled' : ''}>Move Up</button><button class="button--secondary" name="direction" value="down" type="submit"${index === credits.length - 1 ? ' disabled' : ''}>Move Down</button></form><form method="POST" action="/content/manage/credits/remove">${hidden}<button class="button--secondary" type="submit">Remove Credit</button></form></li>`;
         }).join('')}</ol>`
         : `<p class="empty-linked-content">${owner?.attributionStatus === 'unknown'
             ? 'Attribution is explicitly not documented.'
@@ -188,7 +197,7 @@ const renderCreditEditor = (
         : ''}
       <button type="submit" data-reference-submit disabled>Add Credit</button>
     </form>`;
-    return `<section class="credit-editor"><h3>Credits</h3><p class="muted">Credits control public attribution. A MediaTrack participant is not silently promoted to an Album primary Artist.</p>${creditItems}<details><summary>Add Artist Credit</summary>${addForm('artist', artistCreditRoleOptions)}</details><details><summary>Add Organization Credit</summary>${addForm('organization', organizationCreditRoleOptions)}</details><form method="POST" action="/content/manage/credits/mark-unknown" data-confirm-attribution-unknown><input type="hidden" name="ownerType" value="${ownerType}" /><input type="hidden" name="ownerId" value="${escapeHtml(ownerId)}" /><button class="button--secondary" type="submit">Mark attribution as not documented</button></form></section>`;
+    return `<section class="credit-editor"><h3>Credits</h3><p class="muted">Credits control public attribution. A MediaTrack participant is not silently promoted to an Album primary Artist.</p>${credits.length > 1 ? '<p class="muted">Leave a join phrase empty for a comma. Moving, adding or removing a Credit clears a join phrase whose next name changes.</p>' : ''}${creditItems}<details><summary>Add Artist Credit</summary>${addForm('artist', artistCreditRoleOptions)}</details><details><summary>Add Organization Credit</summary>${addForm('organization', organizationCreditRoleOptions)}</details><form method="POST" action="/content/manage/credits/mark-unknown" data-confirm-attribution-unknown><input type="hidden" name="ownerType" value="${ownerType}" /><input type="hidden" name="ownerId" value="${escapeHtml(ownerId)}" /><button class="button--secondary" type="submit">Mark attribution as not documented</button></form></section>`;
 };
 
 /** Renders already-resolved management data; it never loads inventory or mutates content. */
@@ -844,7 +853,7 @@ export const renderManagePage = (params: {
         <label>Title<input name="title" required /></label>
         <label>Cover art (optional)<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
         <label>MediaTrack membership IDs (optional)<input name="audioTrackIds" placeholder="Comma separated canonical IDs" /></label>
-        <p class="drag-help">Album order is derived from each file's embedded Track Number and cannot be arranged manually.</p>
+        <p class="drag-help">Album order is derived from each MediaTrack's Disc and Track Numbers and cannot be arranged manually.</p>
         <label>Release date<input name="releaseDate" type="date" /></label>
         <button type="submit">Create Album</button>
       </form>
@@ -1036,7 +1045,7 @@ export const renderManagePage = (params: {
                 <label>Replacement cover art<input type="file" name="coverArtFile" accept="image/jpeg,image/png,image/webp" /></label>
                 <label><input type="checkbox" name="removeCoverArt" value="true" /> Remove current cover art</label>
                 <label>MediaTrack membership IDs<input name="audioTrackIds" value="${escapeHtml(toCsvInput(prefillAlbum?.audioTrackIds))}" placeholder="Comma separated canonical IDs" /></label>
-                <p class="drag-help">Membership can be changed here; order always comes from each file's embedded Track Number.</p>
+                <p class="drag-help">Membership can be changed here; order always comes from each file's Disc and Track Numbers.</p>
                 <label>Release date<input name="releaseDate" value="${escapeHtml(toDateInputValue(prefillAlbum?.releaseDate))}" type="date" /></label>
         <button type="submit">Update Album</button>
       </form></section>

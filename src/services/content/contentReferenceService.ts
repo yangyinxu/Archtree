@@ -180,17 +180,54 @@ export const cleanupDeletedContentReferences = async (
 
     if (type === 'artist') {
         operations.push(db.collection('artistFollows').deleteMany({ artistId: { $in: referenceIds } }));
+        const isRemovedArtistCredit = (credit: string) => ({ $and: [
+            { $eq: [`${credit}.subjectType`, 'artist'] },
+            { $in: [`${credit}.subjectId`, referenceIds] }
+        ] });
         const removeArtistCreditPipeline = [
+            // A join phrase joins its name to the next one, so a Credit whose next Credit is being
+            // removed loses its phrase (`A feat. X, B` becomes `A, B`), as every other Credit
+            // rebuild does. Non-object elements pass through untouched. $unsetField needs
+            // MongoDB 5.0, so the key is filtered out through an object round trip instead.
+            {
+                $set: {
+                    credits: {
+                        $map: {
+                            input: { $range: [0, { $size: '$credits' }] },
+                            as: 'index',
+                            in: {
+                                $let: {
+                                    vars: {
+                                        credit: { $arrayElemAt: ['$credits', '$$index'] },
+                                        next: { $arrayElemAt: ['$credits', { $add: ['$$index', 1] }] }
+                                    },
+                                    in: {
+                                        $cond: [
+                                            { $and: [
+                                                { $eq: [{ $type: '$$credit' }, 'object'] },
+                                                isRemovedArtistCredit('$$next')
+                                            ] },
+                                            { $arrayToObject: { $filter: {
+                                                input: { $objectToArray: '$$credit' },
+                                                as: 'field',
+                                                cond: { $ne: ['$$field.k', 'joinPhrase'] }
+                                            } } },
+                                            '$$credit'
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             {
                 $set: {
                     credits: {
                         $filter: {
                             input: '$credits',
                             as: 'credit',
-                            cond: { $not: [{ $and: [
-                                { $eq: ['$$credit.subjectType', 'artist'] },
-                                { $in: ['$$credit.subjectId', referenceIds] }
-                            ] }] }
+                            cond: { $not: [isRemovedArtistCredit('$$credit')] }
                         }
                     }
                 }
@@ -201,11 +238,19 @@ export const cleanupDeletedContentReferences = async (
                         $map: {
                             input: { $range: [0, { $size: '$credits' }] },
                             as: 'index',
+                            // Only object Credits are renumbered: $mergeObjects would turn a null
+                            // element into a bare `{ order }` and fails the whole update on a string.
                             in: {
-                                $mergeObjects: [
-                                    { $arrayElemAt: ['$credits', '$$index'] },
-                                    { order: '$$index' }
-                                ]
+                                $let: {
+                                    vars: { credit: { $arrayElemAt: ['$credits', '$$index'] } },
+                                    in: {
+                                        $cond: [
+                                            { $eq: [{ $type: '$$credit' }, 'object'] },
+                                            { $mergeObjects: ['$$credit', { order: '$$index' }] },
+                                            '$$credit'
+                                        ]
+                                    }
+                                }
                             }
                         }
                     },

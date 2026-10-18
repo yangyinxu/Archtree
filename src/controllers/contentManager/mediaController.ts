@@ -225,6 +225,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             audioTrackObjectId
         );
         track.trackNumber = embeddedTrackNumber(audioMetadata?.common?.track?.no);
+        track.setEmbeddedDiscNumber(audioMetadata?.common?.disk?.no);
         track.credits = credits;
         track.attributionStatus = attributionUnknown ? 'unknown' : 'documented';
         track.creditRevision = 1;
@@ -899,6 +900,7 @@ export const bulkUploadAudioTracksWeb = async (req: Request, res: Response, next
                 audioTrackObjectId
             );
             track.trackNumber = embeddedTrackNumber(metadata?.common?.track?.no);
+            track.setEmbeddedDiscNumber(metadata?.common?.disk?.no);
             track.credits = credits;
             track.attributionStatus = attributionUnknown ? 'unknown' : 'documented';
             track.creditRevision = 1;

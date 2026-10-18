@@ -29,6 +29,16 @@ export const embeddedTrackNumber = (value: unknown) => {
         : undefined;
 };
 
+/** Accepts only bounded positive whole-number disc positions (1–999) from embedded or stored metadata. */
+export const embeddedDiscNumber = (value: unknown) => {
+    return typeof value === 'number'
+        && Number.isSafeInteger(value)
+        && value > 0
+        && value <= 999
+        ? value
+        : undefined;
+};
+
 export const formatDuration = (durationInSeconds: unknown) => {
     const totalSeconds = Math.round(Number(durationInSeconds));
     if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {

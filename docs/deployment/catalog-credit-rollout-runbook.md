@@ -76,13 +76,24 @@ Artist relationships and keep their earlier comma-joined presentation,
 including a repeated name. They use the same 500-character byline cap as
 Credit bylines, ending after the last whole name that fits followed by `…`.
 
-## Join phrase rollback floor
+## Join phrase and Disc Number rollback floor
 
-The first release with Credit join phrases only reads and preserves them.
-Administrator catalog requests still reject them and Content Manager requests
-cannot set them, so no stored Credit carries one and rolling that release back
-loses nothing. Once a later release accepts join-phrase writes, do not roll
-back below the first join-phrase release: earlier code rebuilds every Credit
-without its phrase, so any Credit write there would silently drop stored
-phrases. Setting `CATALOG_CREDIT_READS_ENABLED=false` hides phrases from
-bylines without removing them.
+The first release with Credit join phrases only reads and preserves them; no
+request can set one, so rolling that release back loses nothing. The later
+release that accepts join-phrase writes (administrator catalog edits and the
+Content Manager phrase form) also stores Disc Numbers. Once it ships, do not
+roll back below the first join-phrase release: earlier code rebuilds every
+Credit without its phrase, so any Credit write there would silently drop
+stored phrases. While rolled back to it, phrases and Disc Numbers stay, but:
+
+- Album membership writes order by Track Number only, so a membership write
+  to a multi-disc Album interleaves its discs until the next membership write
+  or number edit after rolling forward restores disc order.
+- Credit rebuilds keep each phrase on its `creditId` instead of applying the
+  [phrase successor rule](../architecture/catalog.md#phrase-successors), so
+  recheck bylines whose Credits were removed, added or reordered meanwhile.
+- Catalog requests reject phrases and Disc Numbers, revisions omit both (so
+  reviews of such records go stale), and uploads store no Disc Number.
+
+Setting `CATALOG_CREDIT_READS_ENABLED=false` hides phrases from bylines without
+removing them.

@@ -12,6 +12,7 @@
  *   - legacy file replacement without metadata revision change invalidates filename evidence and apply
  *   - manual edit and provider checkpoint preserve baseline conflict; individual adoption changes only private saved values
  *   - explicit selected apply preserves unrelated metadata, Credits, assets, visibility and membership; receipt and order commit together
+ *   - applying selected Track Numbers re-derives the Album order within Disc Numbers
  *   - concurrent private edits have one winner; concurrent application from separate projects cannot overwrite the first
  *   - late apply transaction failure rolls back prior Track updates, Album ordering and the review receipt
  *   - review/import share account admission and daily provider budgets; stopped in-flight work still occupies its slot
@@ -167,6 +168,19 @@ test('explicit selected apply preserves unrelated metadata, Credits, assets, vis
     assert.deepEqual(await applyCatalogReview(String(actor), review.item.id, body), result);
     await assert.rejects(applyCatalogReview(String(actor), review.item.id, { ...body, fields: [albumTitle] }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
     await assert.rejects(editCatalogReview(String(actor), review.item.id, { ...mutation(result.item.revision), draft: review.item.draft }), code('ADMIN_CATALOG_REVIEW_APPLIED'));
+});
+test('applying selected Track Numbers re-derives the Album order within Disc Numbers', async () => {
+    // Track Number alone would put `second` (now 1) before `first` (now 5); disc 1 still precedes disc 2.
+    await db().collection('audioTracks').updateOne({ _id: first }, { $set: { discNumber: 1, discNumberSource: 'embedded' } });
+    await db().collection('audioTracks').updateOne({ _id: second }, { $set: { discNumber: 2, discNumberSource: 'embedded' } });
+    let review = await create();
+    review = await edit(review, draft => { draft.tracks[0].trackNumber = 5; draft.tracks[1].trackNumber = 1; });
+    const fields: CatalogReviewField[] = review.item.source.tracks.map(track => ({ scope: 'track', slotId: track.slotId, field: 'trackNumber' }));
+    const result = await applyCatalogReview(String(actor), review.item.id, { ...mutation(review.item.revision), fields });
+    assert.equal(result.item.state, 'applied');
+    assert.deepEqual((await db().collection('albums').findOne({ _id: album }))!.audioTrackIds, [String(first), String(second)]);
+    const [firstTrack, secondTrack] = await Promise.all([first, second].map(id => db().collection('audioTracks').findOne({ _id: id })));
+    assert.deepEqual([firstTrack!.trackNumber, firstTrack!.discNumber, secondTrack!.trackNumber, secondTrack!.discNumber], [5, 1, 1, 2]);
 });
 test('concurrent private edits have one winner; concurrent application from separate projects cannot overwrite the first', async () => {
     const a = await create(), b = await create();

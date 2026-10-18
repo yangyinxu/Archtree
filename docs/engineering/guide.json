@@ -576,7 +576,7 @@
           "title": "Follow publication and references together",
           "body": [
             "Catalog creation, artwork ownership, and relationship updates have recovery paths. Inspect publication and reference-fence services alongside the controller. A successful upload can precede a failed linking step and must remain recoverable.",
-            "Album membership order derives from embedded Track Numbers, with deterministic fallback ordering. The read layer preserves declared order; it does not invent a new order from query results.",
+            "Album membership order derives from Disc Numbers, then Track Numbers, with a missing Disc Number ordering as disc 1 and deterministic fallback ordering. The read layer preserves declared order; it does not invent a new order from query results.",
             "Configured Home sections use persisted Carousel, Grid, and List definitions. A personalized section resolves against its authorized viewer and must not become a shared cached account response."
           ],
           "sources": [
@@ -595,7 +595,7 @@
             },
             {
               "path": "test/catalog/albumTrackNumberOrder.test.ts",
-              "label": "Track Number ordering tests"
+              "label": "Disc and Track Number ordering tests"
             }
           ]
         },

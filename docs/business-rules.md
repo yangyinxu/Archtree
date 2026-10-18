@@ -601,7 +601,7 @@ The wire protocol and operational bounds are documented in
   CJK and emoji fallbacks. It does not download, bundle, or hotlink Spotify's
   proprietary typefaces.
 - In an Album MediaTrack list, the actively playing row uses the Web accent for
-  its title and replaces the Track Number with animated music bars. Highlighting
+  its title and replaces the row number with animated music bars. Highlighting
   that row by pointer or keyboard replaces the bars with the Pause action;
   Reduce Motion keeps the indicator static.
 - This presentation contract is Web-only. Finitude retains its own name, mark,
@@ -715,8 +715,10 @@ The wire protocol and operational bounds are documented in
   and local media conversion are available through the Web workbench.
 - Existing catalog edits are separate from import review. They preserve unrelated
   metadata, memberships, and storage references, reject stale snapshots, and
-  use the canonical Credit and artwork lifecycle. Track Number changes update
-  the assigned Album's automatic order in the same transaction.
+  use the canonical Credit and artwork lifecycle. Join phrases and label
+  Credits are edited through that same Credit lifecycle. Disc Number and Track
+  Number changes update the assigned Album's automatic order in the same
+  transaction.
 - Web manual catalog confirmation shows the captured saved and proposed values
   for every field in its partial update, including visibility and coupled Credit
   attribution changes. Dates retain their known precision; an unavailable Credit
@@ -807,12 +809,16 @@ The wire protocol and operational bounds are documented in
   every file keeps an independent lifecycle outcome and the selected batch is
   never buffered or submitted as one aggregate media request.
 - Audio MediaTrack creation persists a valid positive whole-number Track
-  Number from embedded file metadata, including single and bulk uploads. Every
-  Album membership write derives the complete
-  persisted `Album.audioTrackIds` order from those numbers; administrators
-  cannot manually order Album MediaTracks. Missing or invalid numbers follow
-  numbered tracks, and duplicate or missing-number ties use canonical
-  MediaTrack ID order so request order cannot change the result.
+  Number from embedded file metadata, including single and bulk uploads, and a
+  valid positive whole-number Disc Number when the file carries one.
+  Existing catalog edits may also set a Disc Number.
+  Every Album membership write derives the complete persisted
+  `Album.audioTrackIds` order by Disc Number, then Track Number; administrators
+  cannot manually order Album MediaTracks. A missing Disc Number orders as
+  disc 1, so an Album without Disc Numbers keeps its order. Missing or invalid
+  Track Numbers follow numbered tracks on the same disc, and duplicate or
+  missing-number ties use canonical MediaTrack ID order so request order cannot
+  change the result.
 - The guided Artist release workflow may create or reuse an Artist, create and
   link an Album through a primary Credit, and optionally create or reuse a
   dynamic Artist Album Carousel and attach it to a Page. A dynamic Artist
@@ -1037,6 +1043,10 @@ The wire protocol and operational bounds are documented in
   queue items, and reverse-linked tracks are not silently appended. Legacy
   Albums with no declared IDs may fall back to ready MediaTracks whose
   `albumId` references that Album, using a deterministic order.
+- Web, iOS and Android number Album MediaTrack rows by their position in that
+  canonical order across the whole Album. Listener clients receive no Disc or
+  Track Number, so a multi-disc Album plays and downloads in disc order without
+  disc headers or per-disc numbering.
 - Album attribution is derived from its ordered, role-bearing Credits. During
   migration only, a client that receives no canonical Credits may display the
   server-maintained legacy Artist relationship as a compatibility fallback;

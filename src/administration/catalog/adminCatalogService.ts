@@ -7,8 +7,9 @@
  *              listAdminCatalog, editAdminCatalogItem, getAdminPage, editAdminPageItem
  * Internal
  *   Types: CatalogReceipt
- *   Functions: hasOwn, fail, id, record, exact, date, text, visibility, revision, stateForRevision,
- *              parseFields, assertHiddenDelivery, receipts, parseMutation, replay, receipt, pageSnapshot
+ *   Functions: hasOwn, fail, id, record, exact, date, text, visibility, revision, hasStoredDiscNumber,
+ *              storedDiscNumber, stateForRevision, parseFields, assertHiddenDelivery, receipts, parseMutation,
+ *              replay, receipt, pageSnapshot
  *   Constants: configs, fields
  * @end-catalog */
 
@@ -21,7 +22,8 @@ import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferen
 import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { catalogSearchFilter, withCatalogSearchUpdate } from '../../utils/catalogSearch';
-import { normalizeStoredCatalogCredits, retainStoredJoinPhrases, withoutJoinPhrase, type CatalogCredit } from '../../models/catalogCredit';
+import { normalizeJoinPhrase, normalizeStoredCatalogCredits } from '../../models/catalogCredit';
+import { embeddedDiscNumber } from '../../services/audio/audioMetadataService';
 import { organizationTypes } from '../../models/organization';
 import { replaceCatalogCreditsWithinTransaction } from '../../services/catalog/catalogCreditService';
 import { requireCatalogCreditWrites } from '../../config/catalogCreditRollout';
@@ -68,19 +70,24 @@ const visibility = (value: unknown) => value === undefined ? 'public' : value ==
 
 /** A metadata hash detects edits through legacy writers as well as this new API. */
 const revision = (value: unknown) => `cr_${createHash('sha256').update(JSON.stringify(value)).digest('base64url')}`;
+/** Only a stored Disc Number enters the revision, so records without one keep their earlier revisions byte for byte. */
+const hasStoredDiscNumber = (doc: any) => doc.discNumber !== undefined && doc.discNumber !== null;
+/** An invalid stored Disc Number is a repairable empty field. */
+const storedDiscNumber = (value: unknown) => embeddedDiscNumber(value) ?? null;
 export const adminCatalogEditableFields = (kind: AdminCatalogKind, doc: any): Record<string, unknown> => {
     if (kind === 'artist') return { name: text(doc.name, 200), bio: text(doc.bio, 10_000, true), birthDate: date(doc.birthDate) };
     if (kind === 'organization') return { name: text(doc.name, 200), description: text(doc.description, 10_000, true), organizationType: organizationTypes.includes(doc.organizationType) ? doc.organizationType : 'other' };
     let credits = null;
-    // The editor's strict Credit schema has no join phrase yet (S2b); stored phrases still change the revision through rawMetadata.
-    try { if (Array.isArray(doc.credits)) credits = normalizeStoredCatalogCredits(doc.credits).map(withoutJoinPhrase); } catch { /* Private editor exposes a repairable absent list. */ }
+    // Valid stored join phrases are editable fields; an invalid one reads as absent but still changes the revision through rawMetadata.
+    try { if (Array.isArray(doc.credits)) credits = normalizeStoredCatalogCredits(doc.credits); } catch { /* Private editor exposes a repairable absent list. */ }
     return { title: text(doc.title, 300), releaseDate: date(doc.releaseDate), credits,
         attributionStatus: doc.attributionStatus === 'documented' ? 'documented' : 'unknown',
-        ...(kind === 'audioTrack' ? { trackNumber: Number.isInteger(doc.trackNumber) && doc.trackNumber > 0 && doc.trackNumber <= 9999 ? doc.trackNumber : null } : {}) };
+        ...(kind === 'audioTrack' ? { trackNumber: Number.isInteger(doc.trackNumber) && doc.trackNumber > 0 && doc.trackNumber <= 9999 ? doc.trackNumber : null } : {}),
+        ...(kind === 'audioTrack' && hasStoredDiscNumber(doc) ? { discNumber: storedDiscNumber(doc.discNumber) } : {}) };
 };
 const fields = adminCatalogEditableFields;
 const stateForRevision = (kind: AdminCatalogKind, doc: any) => ({
-    fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
+    fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType, ...(hasStoredDiscNumber(doc) ? [doc.discNumber] : [])], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
     coverArtUrl: doc.coverArtUrl ?? null, artistIds: doc.artistIds ?? null, albumId: doc.albumId ?? null,
     audioTrackIds: doc.audioTrackIds ?? null, creditRevision: doc.creditRevision ?? null,
     adminRevision: doc.adminRevision ?? 0, lifecycleStatus: doc.lifecycleStatus ?? null,
@@ -115,8 +122,9 @@ export const adminCatalogSnapshot = async (kind: AdminCatalogKind, doc: any, ses
     }
     const ownerId = String(doc._id);
     const artwork = adminCatalogArtworkSource(doc);
+    // The snapshot always names discNumber for a MediaTrack (null when none is stored) so the editor can set one.
     return { kind, id: ownerId, revision: revision(stateForRevision(kind, doc)), visibility: visibility(doc.visibility), effectiveVisibility,
-        fields: fields(kind, doc), coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
+        fields: kind === 'audioTrack' ? { ...fields(kind, doc), discNumber: storedDiscNumber(doc.discNumber) } : fields(kind, doc), coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
         mediaUrl: kind === 'audioTrack' ? `/api/admin/v1/catalog/audioTrack/${ownerId}/media` : null,
         capabilities: { editing: true, visibility: true } };
 };
@@ -141,7 +149,7 @@ export const listAdminCatalog = (actor: string, kind: AdminCatalogKind, query: R
 const parseFields = (kind: AdminCatalogKind, value: unknown) => {
     const input = record(value);
     const permitted = kind === 'artist' ? ['name', 'bio', 'birthDate'] : kind === 'organization' ? ['name', 'description', 'organizationType']
-        : ['title', 'releaseDate', 'credits', 'attributionStatus', ...(kind === 'audioTrack' ? ['trackNumber'] : [])];
+        : ['title', 'releaseDate', 'credits', 'attributionStatus', ...(kind === 'audioTrack' ? ['trackNumber', 'discNumber'] : [])];
     exact(input, permitted);
     const output: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(input)) {
@@ -155,9 +163,17 @@ const parseFields = (kind: AdminCatalogKind, value: unknown) => {
             output[key] = parsed ? { year: parsed.year, ...(parsed.month === null ? {} : { month: parsed.month }), ...(parsed.day === null ? {} : { day: parsed.day }) } : {};
         }
         else if (key === 'trackNumber') { if (value !== null && (!Number.isInteger(value) || Number(value) < 1 || Number(value) > 9999)) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
+        else if (key === 'discNumber') { if (value !== null && embeddedDiscNumber(value) === undefined) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
         else if (key === 'organizationType') { if (!organizationTypes.includes(value as any)) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
-        // Join phrases stay unwritable here until explicit phrase editing ships (S2b).
-        else if (key === 'credits') { if (Array.isArray(value) && value.some(credit => credit && typeof credit === 'object' && hasOwn(credit, 'joinPhrase'))) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
+        // A present join phrase must be valid: an absent key means none, and null, empty, blank, overlong or invisible text is rejected before any transaction or receipt.
+        else if (key === 'credits') {
+            if (Array.isArray(value)) for (const credit of value) {
+                if (credit && typeof credit === 'object' && hasOwn(credit, 'joinPhrase')) {
+                    try { normalizeJoinPhrase((credit as Record<string, unknown>).joinPhrase); } catch { fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); }
+                }
+            }
+            output[key] = value;
+        }
         else output[key] = value;
     }
     if (hasOwn(output, 'credits') !== hasOwn(output, 'attributionStatus')) fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
@@ -207,17 +223,20 @@ export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawI
         const actualPatch = { ...patch };
         if (hasOwn(actualPatch, 'credits')) {
             requireCatalogCreditWrites();
-            // The editor cannot see phrases yet, so keep each stored phrase on its creditId instead of erasing it.
-            let stored: CatalogCredit[] = [];
-            try { stored = Array.isArray(doc.credits) ? normalizeStoredCatalogCredits(doc.credits) : []; } catch { /* A structurally broken list has no phrases to keep. */ }
-            await replaceCatalogCreditsWithinTransaction(session, kind as 'album' | 'audioTrack', rawId, retainStoredJoinPhrases(actualPatch.credits, stored), actualPatch.attributionStatus, Number(doc.creditRevision ?? 0));
+            // An explicit full replacement: the patch stores exactly the join phrases it carries.
+            await replaceCatalogCreditsWithinTransaction(session, kind as 'album' | 'audioTrack', rawId, actualPatch.credits, actualPatch.attributionStatus, Number(doc.creditRevision ?? 0));
             delete actualPatch.credits; delete actualPatch.attributionStatus;
         }
+        const discChanged = hasOwn(actualPatch, 'discNumber'), discNumber = actualPatch.discNumber;
+        delete actualPatch.discNumber;
+        // Clearing a Disc Number removes both keys rather than storing null, so the record orders as disc 1 and keeps no stale source.
         await getDb()!.collection(configs[kind].collection).updateOne({ _id: doc._id, ...configs[kind].ready }, {
-            $set: { ...withCatalogSearchUpdate(actualPatch, configs[kind].field), ...(desiredVisibility !== undefined ? { visibility: desiredVisibility } : {}), updatedAt: new Date() },
+            $set: { ...withCatalogSearchUpdate(actualPatch, configs[kind].field), ...(desiredVisibility !== undefined ? { visibility: desiredVisibility } : {}),
+                ...(discChanged && discNumber !== null ? { discNumber, discNumberSource: 'admin-catalog' } : {}), updatedAt: new Date() },
+            ...(discChanged && discNumber === null ? { $unset: { discNumber: '', discNumberSource: '' } } : {}),
             $inc: { adminRevision: 1, referenceRevision: 1 }
         }, { session });
-        if (kind === 'audioTrack' && hasOwn(actualPatch, 'trackNumber') && doc.albumId) {
+        if (kind === 'audioTrack' && (hasOwn(actualPatch, 'trackNumber') || discChanged) && doc.albumId) {
             const albumId = String(doc.albumId).toLowerCase();
             await touchReadyAlbumReferences([albumId], session);
             const parent = await readAdminCatalogRecord('album', albumId, session);

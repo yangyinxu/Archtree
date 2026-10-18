@@ -17,6 +17,7 @@
  *   - manual artwork has private exact-version preview and explicit selection; deleted candidates cannot preview
  *   - private artwork rechecks role after bytes arrive, withholding late response after revocation
  *   - append adds only new members, preserves existing metadata and protected old tracks, and same-album reuse is no replacement
+ *   - append keeps the target Album disc order and imported tracks store no Disc Number
  *   - append revalidates reviewed Album after storage copy and refuses concurrent catalog edits
  *   - verified byte candidates bind SHA to current object version and identify only matching manifest slots
  *   - append rejects hidden draft into public target without changing draft visibility
@@ -170,6 +171,19 @@ test('append adds only new members, preserves existing metadata and protected ol
     const reused = await appendProject(storage, existing, true), priorCopies = storage.copies;
     await publishAdminImport(actor.toHexString(), reused.item.id, mutation(reused.item.revision)); await runAdminImportPublicationOnce(storage);
     assert.equal((await getAdminImport(actor.toHexString(), reused.item.id)).item.publication, 'complete'); assert.equal(storage.copies, priorCopies); assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 2);
+});
+test('append keeps the target Album disc order and imported tracks store no Disc Number', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), albumId = new ObjectId(existing.albumId), discTwoId = new ObjectId();
+    // The target Album holds (disc 1, Track 1) and (disc 2, Track 1); the import's draft Track Number is 4.
+    await getDb()!.collection('audioTracks').updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { discNumber: 1, discNumberSource: 'embedded', trackNumber: 1 } });
+    await getDb()!.collection('audioTracks').insertOne({ _id: discTwoId, title: 'Synthetic Disc Two Opener', artistIds: [existing.artistId], albumId: existing.albumId, uploadStatus: 'ready', s3Key: discTwoId.toHexString(), mediaType: 'audio', publicationStatus: 'ready', visibility: 'public', discNumber: 2, discNumberSource: 'embedded', trackNumber: 1 });
+    await getDb()!.collection('albums').updateOne({ _id: albumId }, { $push: { audioTrackIds: discTwoId.toHexString() } as any });
+    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage);
+    const result = (await getAdminImport(actor.toHexString(), project.item.id)).item; assert.equal(result.publication, 'complete');
+    const appendedId = result.published!.trackIds[0];
+    assert.deepEqual((await getDb()!.collection('albums').findOne({ _id: albumId }))!.audioTrackIds, [existing.trackIds[0], appendedId, discTwoId.toHexString()]);
+    const appended = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(appendedId) });
+    assert.equal(appended!.trackNumber, 4); assert.equal('discNumber' in appended!, false); assert.equal('discNumberSource' in appended!, false);
 });
 test('append revalidates reviewed Album after storage copy and refuses concurrent catalog edits', async () => {
     const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));

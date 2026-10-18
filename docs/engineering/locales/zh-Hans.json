@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "sourceDigest": "b8017d9049763303d568789685c4643675e71ad00f798403cd2b10348cfbb467",
+  "sourceDigest": "5c47c72f1a6121a612f58519e615f6dc9d0383a00c91a09427ad10678417494c",
   "messages": {
     "ui.site.name": "Archtree 工程指南",
     "ui.site.title": "Archtree 工程指南",
@@ -218,12 +218,12 @@
     "page.modules.catalog.section.read-path.sources.4.label": "共享的 Credit 署名生成逻辑",
     "page.modules.catalog.section.write-path.title": "把发布与引用关系一起看",
     "page.modules.catalog.section.write-path.body.0": "内容创建、封面归属和关系更新都有恢复流程。除控制器外，还要检查发布服务和防止引用并发冲突的服务。上传可能成功，而后续关联步骤失败，这种状态必须仍可恢复。",
-    "page.modules.catalog.section.write-path.body.1": "Album 中的条目顺序根据文件内嵌 Track Number 生成，并采用确定性的兜底排序。读取层保留已声明的顺序，不根据数据库返回顺序重新排列。",
+    "page.modules.catalog.section.write-path.body.1": "Album 中的条目顺序先按 Disc Number、再按 Track Number 生成，缺少 Disc Number 时视为第 1 碟，并采用确定性的兜底排序。读取层保留已声明的顺序，不根据数据库返回顺序重新排列。",
     "page.modules.catalog.section.write-path.body.2": "Home 配置区块使用持久化的 Carousel、Grid 和 List 定义。个性化区块按经过授权的查看账号解析，不能把某个账号的响应放入共享缓存。",
     "page.modules.catalog.section.write-path.sources.0.label": "Album 发布",
     "page.modules.catalog.section.write-path.sources.1.label": "Album 成员关系写入",
     "page.modules.catalog.section.write-path.sources.2.label": "公开页面组合",
-    "page.modules.catalog.section.write-path.sources.3.label": "Track Number 排序测试",
+    "page.modules.catalog.section.write-path.sources.3.label": "Disc Number 与 Track Number 排序测试",
     "page.modules.catalog.section.checks.title": "结合测试阅读实现",
     "page.modules.catalog.section.checks.body.0": "通过 listenerContent.integration.ts 查看仅返回已就绪内容的公开读取契约，通过 catalogCreatePublication 测试了解发布部分成功的处理。关系、删除和生命周期变更还需要 MongoDB 集成验证。",
     "page.modules.catalog.section.checks.items.0.title": "跟踪 Album 请求",

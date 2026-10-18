@@ -21,8 +21,12 @@ Product behavior remains defined in [business-rules.md](../business-rules.md).
   - [Join phrase storage](#join-phrase-storage)
   - [Byline composition](#byline-composition)
   - [Content Manager inheritance](#content-manager-inheritance)
-  - [Phrase successors before phrase writes](#phrase-successors-before-phrase-writes)
+  - [Phrase successors](#phrase-successors)
   - [Verification](#verification-3)
+- [Album track order](#album-track-order)
+  - [Disc Number storage](#disc-number-storage)
+  - [Sort key](#sort-key)
+  - [Verification](#verification-4)
 <!-- @end-catalog -->
 
 ## Catalog application and presentation boundaries
@@ -46,10 +50,14 @@ no new client behavior or native-client requirement.
   imports business functions from an HTTP Controller.
 - `repositories/catalog/` owns each creation transaction and confirmation of an
   uncertain insert. A transaction fences ready referenced content and the active
-  provenance account, establishes Album membership in Track Number order, and
-  inserts the owner. `Artist.save()` / `Album.save()` retain their existing
-  calling contract by delegating to those repositories. Read/update/delete Model
-  APIs stay intact; this is not a migration of every Model to a new abstraction.
+  provenance account, establishes Album membership in Disc Number, then Track
+  Number order, and inserts the owner. `Artist.save()` / `Album.save()` retain
+  their existing calling contract by delegating to those repositories.
+  Read/update/delete Model APIs stay intact; this is not a migration of every
+  Model to a new abstraction.
+- `services/catalog/albumTrackLinkService.ts` derives every persisted
+  `Album.audioTrackIds` list by Disc Number, then Track Number, then MediaTrack
+  ID; see [Album track order](#album-track-order).
 - Existing lifecycle and relationship services continue to own replacement,
   deletion, reference fences, Credits, and guided-release operation recovery.
   An atomic operation stays in one transaction instead of being split among
@@ -292,14 +300,14 @@ byte-for-byte unchanged.
   rebuild and outcome-unknown confirmation treat an invalid phrase as absent
   and keep the Credit, so the byline shows `, ` in its place and the Credit
   list stays visible. The audit also reports it as `invalidJoinPhrase`.
-- Administrator catalog requests still reject `joinPhrase`, and Content
-  Manager requests cannot set one, so no stored Credit gains one yet. Every
-  rebuild of an existing Credit list (Credit service additions, removal and
-  reordering, Content Manager role changes, legacy artist-ID edits and
-  administrator Credit edits) keeps each valid phrase with its `creditId`; a
-  full replacement stores the phrases its caller supplies. Album publication,
-  the Credit migration and new MediaTrack saves build new lists, whose only
-  phrases are inherited ones (see
+- Two writers store phrases explicitly. The administrator catalog `PATCH`
+  replaces the whole Credit list and stores exactly the phrases it carries,
+  rejecting a present but invalid one before any transaction. The Content
+  Manager phrase form (`POST /content/manage/credits/update-join-phrase`) sets
+  or clears one Credit's phrase and keeps the others. Every other rebuild of an
+  existing list applies the [successor rule](#phrase-successors). Album
+  publication, the Credit migration and new MediaTrack saves build new lists,
+  whose only phrases are inherited ones (see
   [Content Manager inheritance](#content-manager-inheritance)). Outcome-unknown
   confirmation compares phrases, so retrying the same intent stays idempotent.
 - Listener v1 and legacy public Credits carry neither `joinPhrase` nor
@@ -343,31 +351,45 @@ because it was written before a name the MediaTrack does not carry. For Album
 Credits `A` (phrase `feat.`), featured `X` and primary `B`, the MediaTrack
 therefore reads `A, B`, and a performer selected during the upload cannot
 render as `A feat. C`. The last inherited Credit never keeps a phrase. Role
-changes and reordering in the Content Manager Credit editor keep each phrase
-with its Credit.
+changes keep each phrase; other rebuilds follow
+[Phrase successors](#phrase-successors).
 
-### Phrase successors before phrase writes
+### Phrase successors
 
-A stored phrase stays with its `creditId`, not with the name it was written
-before. No write path stores a phrase yet, so the cases below are latent, but
-each can make a phrase introduce a different name and must be settled before
-join-phrase writes ship:
+A phrase joins its name to the next one, so a rebuild keeps a Credit's phrase
+only while the same Credit still follows it. For Album Credits `A` (phrase
+`feat.`), featured `X` and primary `B`, removing `X` gives `A, B`, not
+`A feat. B`.
 
-- A legacy artist-ID edit rebuilds the list as retained Artists, added
-  Artists, then Organizations, so resubmitting the same Artists can move a
-  label from between two Artists to the end, and the phrase that introduced
-  the label then introduces the second Artist.
-- Removing a Credit, directly or by deleting its Artist, leaves the previous
-  Credit's phrase before the next remaining Credit. For Album Credits `A`
-  (phrase `feat.`), featured `X` and primary `B`, removing `X` gives
-  `A feat. B`.
-- An addition, an Album promotion or a primary-Artist addition appends after
-  the last Credit, whose unused phrase then applies to the new name.
+- `keepJoinPhrasesWithSuccessors` in `models/catalogCredit.ts` compares each
+  rebuilt Credit's next `creditId` with its next `creditId` in the stored list
+  and clears the phrase when they differ. A Credit that stays last keeps its
+  phrase, and a Credit new to the list keeps the phrase it was given.
+- `services/catalog/catalogCreditService.ts` applies it to additions (the
+  previous last Credit loses its phrase), MediaTrack additions and their
+  Album promotion, removals, reordering, primary-Album membership edits and
+  Album primary-Artist removal. `mergeLegacyArtistIdsIntoCredits` applies it
+  to legacy artist-ID rebuilds, which can move a label to the end.
+- Artist deletion (`services/content/contentReferenceService.ts`) removes the
+  Artist's Credits in an update pipeline whose first stage clears the phrase of
+  every Credit whose next element is being removed. The stage filters the key
+  through `$objectToArray`, because `$unsetField` needs MongoDB 5.0. Both it
+  and the final renumbering stage pass non-object elements through untouched.
+- Role changes keep `creditId` and order, so every phrase stays. The explicit
+  replacements, the administrator `PATCH` and the Content Manager phrase form,
+  store exactly the phrases they are given.
+- The Web catalog editor mirrors the rule locally: it shows no phrase input
+  for the last Credit, removing a Credit clears the phrase before it, and adding
+  one clears the previous last Credit's phrase.
 
 ### Verification
 
 `test/catalog/catalogCredit.test.ts` covers phrase validation, NFC
-normalization and byte-identical JSON without a phrase.
+normalization, byte-identical JSON without a phrase and the successor rule.
+`test/administration/adminCatalogCredits.test.ts` covers editable phrases,
+their revisions and synchronous `PATCH` validation, and
+`test/content/contentManagerCreditEditor.test.ts` covers the Content Manager
+phrase forms.
 `test/catalog/catalogByline.test.ts` covers selection, omission, repeated
 names and the length cap, and replays its results through the native
 validator ports. `test/catalog/soundtrackCreditProposal.test.ts` covers the
@@ -375,5 +397,74 @@ Content Manager upload proposal and its byline.
 `test/catalog/publicCatalogService.test.ts` pins the five-field legacy
 Credit. The MongoDB suites `test/catalog/catalogCredit.integration.ts`,
 `test/listener/listenerContent.integration.ts` and
-`test/listener/artistFollows.integration.ts` cover phrase preservation,
-inheritance, lenient reads and Follow eligibility.
+`test/listener/artistFollows.integration.ts` cover phrase writes and
+successors (including Artist deletion and the Content Manager phrase form),
+inheritance, lenient reads and Follow eligibility;
+`test/administration/adminCatalog.integration.ts` covers administrator phrase
+writes, label phrases and receipt replay after an unknown commit.
+
+## Album track order
+
+Product behavior is defined in [business-rules.md](../business-rules.md) under
+Catalog Visibility and Administration and Album and MediaTrack Playback. This
+section records how the server implements it.
+
+### Disc Number storage
+
+`AudioTrack.discNumber` is an optional whole number from 1 to 999, and
+`discNumberSource` records where it came from. A MediaTrack without a Disc
+Number stores neither key, so existing records and their administrator catalog
+revisions stay unchanged.
+
+- Content Manager single and bulk uploads and the legacy
+  `/content/audioTrack` upload read `common.disk.no` through
+  `AudioTrack.setEmbeddedDiscNumber`, which keeps only a value that
+  `embeddedDiscNumber` in `services/audio/audioMetadataService.ts` accepts. A
+  missing, non-integer or out-of-range value is ignored for that file only,
+  and the upload continues without a Disc Number. The number is stored with
+  the upload record, so a publication retry keeps it.
+- Import drafts carry no Disc Number yet, so import publication stores none.
+  An append to an existing Album re-derives the whole order from the stored
+  numbers of every member.
+- Replacing a MediaTrack's media keeps its stored Disc and Track Numbers.
+- Listener v1, including Search, and legacy public responses never carry
+  `discNumber`, `discNumberSource` or `trackNumber`. Clients see disc order
+  only as the order of `Album.audioTrackIds`.
+
+### Sort key
+
+`sortTrackIdsByDiscAndTrackNumber` in
+`services/catalog/albumTrackLinkService.ts` is the one comparator for every
+persisted `Album.audioTrackIds` order:
+
+1. Disc Number ascending; a missing or invalid Disc Number counts as disc 1.
+2. Track Number ascending within a disc; a missing or invalid Track Number
+   follows every numbered track on the same disc.
+3. MediaTrack ID ascending, so duplicates and request order never change the
+   result.
+
+`orderedAlbumTrackIds` reads `discNumber` and `trackNumber` inside the
+membership transaction for Album creation, membership links and replacements,
+and applied existing-Album reviews. Import publication orders a new Album by
+its draft Track Numbers and an append by the stored numbers it reads, both
+with the same comparator, and outcome-unknown confirmation of an Album
+replacement compares the stored list with that exact order. Because a missing
+Disc Number counts as disc 1, an Album without Disc Numbers keeps its earlier
+Track Number order; `sortTrackIdsByEmbeddedTrackNumber` remains as the
+comparator's single-disc view for callers that know only Track Numbers. An
+administrator Disc or Track Number edit reorders the parent Album with it in
+the same transaction.
+
+### Verification
+
+`test/catalog/albumTrackNumberOrder.test.ts` replays the frozen pre-disc
+orders and covers disc-then-track order, a missing disc as disc 1, missing
+Track Numbers at the end of their disc and duplicate request IDs.
+`test/audio/audioMetadataService.test.ts` bounds the tag, and
+`test/audio/audioDiscNumberCapture.integration.ts` covers single, bulk and
+legacy uploads, ignored tags and publication retry. The MongoDB suites
+`test/catalog/albumLifecycle.integration.ts` and
+`test/administration/adminImportMedia.integration.ts` cover multi-disc
+membership writes, outcome-unknown confirmation and an import append, and
+`test/listener/listenerDtoShape.test.ts` keeps both numbers out of listener
+and legacy public responses.

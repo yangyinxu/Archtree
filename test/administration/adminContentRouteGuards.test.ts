@@ -87,6 +87,7 @@ test('Content Manager skips hourly quotas while retaining upload concurrency bou
         '/credits/add',
         '/credits/remove',
         '/credits/update-role',
+        '/credits/update-join-phrase',
         '/credits/reorder',
         '/credits/mark-unknown'
     ]) {

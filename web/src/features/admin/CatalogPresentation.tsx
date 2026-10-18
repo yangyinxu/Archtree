@@ -15,6 +15,7 @@ export function catalogMetadata(item: CatalogItem, t: ReturnType<typeof useAdmin
   const date = 'releaseDate' in item.fields ? item.fields.releaseDate : null;
   return [t(`field.${item.visibility}`), item.kind === 'organization' ? t(`organization.${item.fields.organizationType}`) : null,
     date ? compact ? date.year : reviewValueText(date) : null,
+    item.kind === 'audioTrack' && item.fields.discNumber ? `${t('field.discNumber')} ${item.fields.discNumber}` : null,
     item.kind === 'audioTrack' && item.fields.trackNumber ? `${t('field.trackNumber')} ${item.fields.trackNumber}` : null].filter(Boolean).join(' · ');
 }
 /** Reuses listener artwork geometry with private sources; Organizations retain their name mark. */

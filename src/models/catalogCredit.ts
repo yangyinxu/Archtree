@@ -6,7 +6,7 @@
  *   Functions: normalizeJoinPhrase, storedJoinPhrase, createCatalogCreditId, migratedCatalogCreditId,
  *              creditsForLegacyArtistIds, mergeLegacyArtistIdsIntoCredits, normalizeCatalogCredits,
  *              normalizeStoredCatalogCredits, invalidStoredJoinPhraseCreditIds, withoutJoinPhrase,
- *              retainStoredJoinPhrases, inheritedAlbumPrimaryCredits, validateAttribution,
+ *              keepJoinPhrasesWithSuccessors, inheritedAlbumPrimaryCredits, validateAttribution,
  *              legacyTrackArtistIdsFromCredits, legacyAlbumArtistIdsFromCredits, classifyArtistAlbumCredit
  *   Constants: catalogCreditSubjectTypes, catalogCreditRoles, maximumJoinPhraseLength
  * Internal
@@ -190,8 +190,8 @@ export const mergeLegacyArtistIdsIntoCredits = (
     existingValue: unknown,
     artistIds: readonly string[]
 ) => {
-    // Read tolerantly so an invalid stored phrase cannot block the edit; retained Credits keep
-    // their valid phrases.
+    // Read tolerantly so an invalid stored phrase cannot block the edit; a retained Credit keeps
+    // its valid phrase while the same Credit still follows it.
     const existing = Array.isArray(existingValue) ? normalizeStoredCatalogCredits(existingValue) : [];
     const requestedArtistIds = [...new Set(artistIds.map((id) => id.trim().toLowerCase()))];
     const retainedOrganizations = existing.filter((credit) => credit.subjectType === 'organization');
@@ -213,11 +213,11 @@ export const mergeLegacyArtistIdsIntoCredits = (
             role: 'legacyUnspecified' as const,
             order: 0
         }));
-    return normalizeCatalogCredits([
+    return keepJoinPhrasesWithSuccessors(existing, normalizeCatalogCredits([
         ...retainedArtists,
         ...addedArtists,
         ...retainedOrganizations
-    ]);
+    ]));
 };
 
 /** Validates one ordered Credit list, reading each join phrase with the given policy. */
@@ -322,23 +322,24 @@ export const withoutJoinPhrase = (credit: CatalogCredit): CatalogCredit => ({
 });
 
 /**
- * Carries stored join phrases into a proposed list by creditId for an editor that cannot see
- * phrases yet. Elements that are not objects with a known string creditId pass through
- * unchanged for normalization to judge. S1 only: S2b replaces this with explicit phrase editing.
+ * Keeps each rebuilt Credit's join phrase only while the Credit that followed it in the stored
+ * list still follows it. A phrase joins its name to the next one, so a removal, an addition after
+ * it, a reorder or a legacy rebuild that changes the next Credit clears the phrase instead of
+ * letting it introduce a name it was not written for (`A feat. X, B` loses X and becomes `A, B`).
+ * A Credit that stays last keeps its phrase, and a Credit new to the list keeps the phrase it was
+ * given. Role changes keep every phrase because creditIds and order do not change. Pure.
  */
-export const retainStoredJoinPhrases = (
-    proposed: unknown,
-    stored: readonly CatalogCredit[]
-): unknown => {
-    if (!Array.isArray(proposed)) return proposed;
-    const phrases = new Map(stored.flatMap((credit): Array<[string, string]> =>
-        credit.joinPhrase === undefined ? [] : [[credit.creditId, credit.joinPhrase]]));
-    return proposed.map((element) => {
-        if (!element || typeof element !== 'object' || Array.isArray(element)) return element;
-        const creditId = (element as Record<string, unknown>).creditId;
-        const joinPhrase = typeof creditId === 'string' ? phrases.get(creditId.trim()) : undefined;
-        return joinPhrase === undefined ? element : { ...element, joinPhrase };
-    });
+export const keepJoinPhrasesWithSuccessors = (
+    stored: readonly CatalogCredit[],
+    rebuilt: readonly CatalogCredit[]
+): CatalogCredit[] => {
+    const storedSuccessor = new Map(stored.map((credit, index) =>
+        [credit.creditId, stored[index + 1]?.creditId ?? null] as const));
+    return rebuilt.map((credit, index) => credit.joinPhrase === undefined
+        || !storedSuccessor.has(credit.creditId)
+        || storedSuccessor.get(credit.creditId) === (rebuilt[index + 1]?.creditId ?? null)
+        ? credit
+        : withoutJoinPhrase(credit));
 };
 
 /**

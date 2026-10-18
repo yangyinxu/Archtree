@@ -1,8 +1,8 @@
 /**
- * Administrator catalog Credit handling while join phrases are stored but not yet editable
- * (S1): the editor's strict Web schema still receives five-key Credits, stored phrases keep
- * changing the revision, and a PATCH that tries to write a phrase is rejected before any
- * transaction starts.
+ * Administrator catalog Credit handling with editable join phrases: snapshot fields carry each
+ * valid stored phrase (an invalid one reads as absent), every stored phrase change moves the
+ * revision, and a PATCH whose phrase is present but invalid is rejected synchronously, before
+ * any transaction or receipt, while valid phrases (Organization Credits included) are admitted.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -35,44 +35,55 @@ const album = (primaryPhrase?: unknown) => ({
     attributionStatus: 'documented', creditRevision: 3, credits: credits(primaryPhrase)
 });
 const fiveKeys = ['creditId', 'subjectType', 'subjectId', 'role', 'order'];
+const withPhrase = [...fiveKeys, 'joinPhrase'];
+const rejectsInput = (error: unknown) => error instanceof AdminCatalogError && error.statusCode === 400
+    && error.code === 'ADMIN_CATALOG_INVALID_INPUT';
 
-test('editable album fields expose five-key Credits whether stored phrases are valid or invalid', () => {
-    for (const primaryPhrase of [' & ', 'x\u200By', null, undefined]) {
-        const fields = adminCatalogEditableFields('album', album(primaryPhrase));
-        const editable = fields.credits as Array<Record<string, unknown>>;
-        assert.equal(editable.length, 3, JSON.stringify(primaryPhrase));
-        for (const credit of editable) assert.deepEqual(Object.keys(credit), fiveKeys);
+test('editable album fields carry each valid stored join phrase and read an invalid one as absent', () => {
+    const valid = adminCatalogEditableFields('album', album(' & ')).credits as Array<Record<string, unknown>>;
+    assert.deepEqual(valid.map((credit) => Object.keys(credit)), [withPhrase, withPhrase, fiveKeys]);
+    assert.deepEqual(valid.map((credit) => credit.joinPhrase), [' & ', ' feat. ', undefined]);
+    for (const primaryPhrase of ['x\u200By', null, undefined]) {
+        const editable = adminCatalogEditableFields('album', album(primaryPhrase)).credits as Array<Record<string, unknown>>;
+        assert.deepEqual(Object.keys(editable[0]), fiveKeys, JSON.stringify(primaryPhrase));
         assert.deepEqual(editable.map((credit) => credit.creditId), ['admin_primary_01', 'admin_featured_01', 'admin_label_01']);
     }
     // A structurally broken list stays a repairable absent list.
     assert.equal(adminCatalogEditableFields('album', { ...album(), credits: [{ subjectType: 'artist', role: 'singer' }] }).credits, null);
 });
 
-test('a stored phrase change still changes the catalog revision', () => {
-    assert.deepEqual(adminCatalogEditableFields('album', album(' & ')), adminCatalogEditableFields('album', album(' / ')));
+test('a stored join phrase change changes both the editable fields and the revision', () => {
+    assert.notDeepEqual(adminCatalogEditableFields('album', album(' & ')), adminCatalogEditableFields('album', album(' / ')));
     assert.notEqual(adminCatalogItemRevision('album', album(' & ')), adminCatalogItemRevision('album', album(' / ')));
     assert.notEqual(adminCatalogItemRevision('album', album(' & ')), adminCatalogItemRevision('album', album()));
+    // An invalid stored phrase reads as absent but is still a distinct stored record.
+    assert.deepEqual(adminCatalogEditableFields('album', album('x\u200By')), adminCatalogEditableFields('album', album()));
+    assert.notEqual(adminCatalogItemRevision('album', album('x\u200By')), adminCatalogItemRevision('album', album()));
 });
 
-test('a catalog PATCH that carries a join phrase is rejected before any transaction starts', async () => {
-    // The editor's five-key Credits, with an optional phrase on the first one.
-    const patchCredits = (joinPhrase?: unknown) => credits().map(({ joinPhrase: _stored, ...credit }, index) =>
-        index === 0 && joinPhrase !== undefined ? { ...credit, joinPhrase } : credit);
-    const body = (joinPhrase?: unknown) => ({
-        operationId: '00000000-0000-4000-8000-000000000001',
-        expectedRevision: `cr_${'A'.repeat(43)}`,
-        fields: { credits: patchCredits(joinPhrase), attributionStatus: 'documented' }
-    });
-    for (const primaryPhrase of [' & ', 'x\u200By', null]) {
-        assert.throws(
-            () => editAdminCatalogItem(ids.actor, 'album', ids.album, body(primaryPhrase)),
-            (error: unknown) => error instanceof AdminCatalogError && error.statusCode === 400
-                && error.code === 'ADMIN_CATALOG_INVALID_INPUT',
-            JSON.stringify(primaryPhrase)
-        );
+const body = (phrases: unknown[]) => ({
+    operationId: '00000000-0000-4000-8000-000000000001',
+    expectedRevision: `cr_${'A'.repeat(43)}`,
+    fields: {
+        credits: credits().map(({ joinPhrase: _stored, ...credit }, index) =>
+            phrases[index] === undefined ? credit : { ...credit, joinPhrase: phrases[index] }),
+        attributionStatus: 'documented'
     }
-    // Without phrases the synchronous parser admits the patch; the database step then fails here
-    // because this unit test has no connection.
-    const pending = editAdminCatalogItem(ids.actor, 'album', ids.album, body());
-    await assert.rejects(pending);
+});
+
+test('a catalog PATCH with a present but invalid join phrase is rejected before any transaction starts', () => {
+    for (const phrase of ['x\u200By', null, '', ' ', 'a'.repeat(17), 42]) {
+        assert.throws(() => editAdminCatalogItem(ids.actor, 'album', ids.album, body([phrase])), rejectsInput, JSON.stringify(phrase));
+        // The label Credit is validated the same way.
+        assert.throws(() => editAdminCatalogItem(ids.actor, 'album', ids.album, body([undefined, undefined, phrase])), rejectsInput, JSON.stringify(phrase));
+    }
+});
+
+test('valid join phrases, including one on a label Credit, pass the synchronous parser', async () => {
+    for (const phrases of [[' & '], ['、', ' feat. '], [undefined, undefined, ' / '], []]) {
+        // The parser admits the patch; the database step then fails here because this unit test
+        // has no connection.
+        const pending = editAdminCatalogItem(ids.actor, 'album', ids.album, body(phrases));
+        await assert.rejects(pending, (error: unknown) => !rejectsInput(error), JSON.stringify(phrases));
+    }
 });
