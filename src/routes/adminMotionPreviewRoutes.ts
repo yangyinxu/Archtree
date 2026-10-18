@@ -13,7 +13,6 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { isAdminCatalogEditingEnabled } from '../administration/adminCapabilityService';
 import { isMotionPreviewEnabled } from '../config/motionPreviewRollout';
 import { requireAdmin, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { requireUploadSize } from '../middleware/audioUpload';
@@ -49,14 +48,14 @@ const revisionField = (value: unknown) => {
 
 /**
  * Administrator motion-preview management for one Video MediaTrack. Auth, the current account
- * viewer, both feature flags, the track ID, and file bounds precede every operation.
+ * viewer, the motion-preview flag, the track ID, and file bounds precede every operation.
  */
 export function createAdminMotionPreviewRouter(dependencies: Partial<MotionPreviewLifecycleDependencies> = {}) {
     const router = express.Router();
     const base = '/catalog/audioTrack/:id/motion-preview';
     router.use(base, (_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
     router.use(base, requireAuth, requireAdmin, requireCurrentAccountViewer, (req, res, next) => {
-        if (!isMotionPreviewEnabled() || !isAdminCatalogEditingEnabled()) {
+        if (!isMotionPreviewEnabled()) {
             return res.status(404).json({ code: 'ADMIN_MOTION_PREVIEW_DISABLED' });
         }
         if (!trackIdPattern.test(String(req.params.id ?? ''))) {

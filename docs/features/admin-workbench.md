@@ -3,8 +3,12 @@
 The private administrator API is mounted at `/api/admin/v1`. It uses the current
 persisted `admin` role, same-origin cookie mutation protection, bounded parsers,
 account-viewer fencing and `no-store` responses. `GET /capabilities` advertises
-admission independently of the normal listener DTOs. All flags below default
-closed and accept only the literal `true`:
+admission independently of the normal listener DTOs. Existing catalog edits,
+visibility changes, clearing a cover, existing-Album reviews and local MP3
+conversion need only that role and have no deployment flag. Choosing a new
+cover also requires `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` and its
+distinct `ADMIN_IMPORT_S3_BUCKET_NAME` staging bucket. The remaining flags below
+default closed and accept only the literal `true`:
 
 | Configuration | Purpose |
 | --- | --- |
@@ -13,22 +17,16 @@ closed and accept only the literal `true`:
 | `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` | Optional existing provider routing; never returned to clients |
 | `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
 | `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` | Operator assertion that the staging bucket denies public/CDN access |
-| `FINITUDE_ADMIN_CATALOG_ENABLED` | Admit versioned edits to existing catalog metadata |
-| `FINITUDE_MOTION_PREVIEWS_ENABLED` | With catalog editing, show the Motion preview panel for Video MediaTracks |
-| `FINITUDE_ADMIN_VISIBILITY_ENABLED` | Admit explicit public/hidden changes |
-| `FINITUDE_HIDDEN_DELIVERY_ENFORCED` | Operator assertion that historical object URLs, S3 policies and CDN delivery deny hidden access |
+| `FINITUDE_MOTION_PREVIEWS_ENABLED` | Show the Motion preview panel for Video MediaTracks and serve public motion previews |
 
-Signing in as an administrator does not enable catalog writes. When
-`FINITUDE_ADMIN_CATALOG_ENABLED` is closed, the catalog editor is read-only and
-cannot create a new existing-Album review. Readback and authorized recovery of
-previous operations remain available. An existing Album review needs no staging
-bucket; starting Luna also requires the imports flag and configured provider.
+An existing Album review needs no staging bucket; starting Luna also requires
+the imports flag and configured provider.
 
-For an explicitly enabled local administrator session, use the existing ignored
+For a local administrator session with imports enabled, use the existing ignored
 `.env` for provider configuration, then start the application with:
 
 ```sh
-npx --no-install cross-env FINITUDE_ADMIN_CATALOG_ENABLED=true FINITUDE_ADMIN_IMPORTS_ENABLED=true npm run dev
+npx --no-install cross-env FINITUDE_ADMIN_IMPORTS_ENABLED=true npm run dev
 ```
 
 Restart the running server after configuration changes and refresh the browser's
@@ -37,9 +35,10 @@ over `.env`, so the explicit startup values above also override a closed parent
 shell flag. This command does not assert private staging storage or hidden delivery.
 
 A private ACL alone does not override a public bucket policy. Verify denied
-unauthenticated access to the staging prefix and historical canonical URLs
-before enabling the corresponding assertion. The application enforces hidden
-reads even when admission flags are rolled back. Old external artwork without
+unauthenticated access to the staging prefix before enabling that assertion.
+Hiding relies on the catalog bucket denying anonymous reads (verified for
+production on 2026-10-17): media and artwork reach clients only through
+visibility-checked application routes. Old external artwork without
 an owned asset must migrate before hiding its owner. Previously delivered files
 cannot be recalled. Private preview GET/HEAD accepts the account-viewer header,
 or a non-secret `viewer` query parameter for browser media elements; neither is
@@ -147,10 +146,8 @@ matching account-viewer identity:
   `POST` to the same path with `{slots: [uuid]}` checks only selected pending
   cache slots, allowing later members to progress under the bounded S3-read budget.
 
-`FINITUDE_ADMIN_CATALOG_ENABLED` advertises `localMp3Conversion` capability and
-admits new conversion operations. Turning it off does not prevent recovery of an
-already attached output or cleanup. No server encoding service or extra key is
-needed. Source files remain private authenticated media, not public S3 redirects.
+Every administrator may start conversion operations; no server encoding service
+or extra key is needed. Source files remain private authenticated media, not public S3 redirects.
 The isolated hashed conversion Worker alone receives `wasm-unsafe-eval`; the
 document keeps strict script policy. The LAME WASM module is bundled locally,
 with no runtime CDN fetch or COOP/COEP requirement.
@@ -253,8 +250,7 @@ Catalog review routes (relative to `/api/admin/v1`):
 - `POST /catalog-reviews`: `{operationId, albumId, expectedRevision}` captures a
   ready Album and up to 100 ready Audio members. Empty Albums are supported;
   malformed, missing, Video or inconsistent members are explicitly rejected.
-  Creation is controlled by `FINITUDE_ADMIN_CATALOG_ENABLED` and does not start
-  analysis. Original filenames are allowlisted basenames, never storage keys.
+  Creation does not start analysis. Original filenames are allowlisted basenames, never storage keys.
 - `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
   workbench pagination and private readback. `sourceStatus` distinguishes current,
   changed and unavailable sources. Old `/imports` routes exclude these projects;

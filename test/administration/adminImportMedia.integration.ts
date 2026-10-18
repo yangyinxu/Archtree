@@ -12,7 +12,7 @@
  *   - unknown copied acknowledgement is reconciled at original target with no second object or graph
  *   - unconfirmed copy retains fixed identities and cannot be silently resent by retry or worker restart
  *   - role loss after copied bytes prevents publication and keeps copy evidence for admin recovery
- *   - hidden publication fails closed until verified delivery gate, then parent hides independently public tracks
+ *   - hidden publication needs no delivery gate, and the parent hides independently public tracks
  *   - confirmed cleanup permits replacement while old cleanup replay cannot delete the new object
  *   - manual artwork has private exact-version preview and explicit selection; deleted candidates cannot preview
  *   - private artwork rechecks role after bytes arrive, withholding late response after revocation
@@ -71,7 +71,7 @@ beforeEach(async () => {
     for (const name of ['users', 'adminAlbumImports', 'adminImportAnalysisSlots', 'artists', 'albums', 'audioTracks', 'imageAssets']) await getDb()!.collection(name).deleteMany({});
     await getDb()!.collection('users').insertMany([{ _id: actor, email: 'media-import@example.test', role: 'admin' }, { _id: other, email: 'media-import-other@example.test', role: 'admin' }]); await initializeAdminImportStorage(getDb()!);
 });
-after(async () => { await harness?.stop(); for (const name of ['FINITUDE_ADMIN_IMPORTS_ENABLED', 'FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY', 'ADMIN_IMPORT_S3_BUCKET_NAME', 'S3_BUCKET_NAME', 'FINITUDE_ADMIN_CATALOG_ENABLED', 'FINITUDE_ADMIN_VISIBILITY_ENABLED', 'FINITUDE_HIDDEN_DELIVERY_ENFORCED']) delete process.env[name]; });
+after(async () => { await harness?.stop(); for (const name of ['FINITUDE_ADMIN_IMPORTS_ENABLED', 'FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY', 'ADMIN_IMPORT_S3_BUCKET_NAME', 'S3_BUCKET_NAME']) delete process.env[name]; });
 const create = async () => { const slotId = randomUUID(); return createAdminImport(actor.toHexString(), { operationId: randomUUID(), manifest: { rootLabel: 'Synthetic Album', files: [{ slotId, filename: file().originalname, relativePath: file().originalname, byteLength: file().size }] } }); };
 async function prepared(storage: Storage, visibility: 'public' | 'hidden' = 'public') {
     const created = await create(); const slotId = created.item.manifest.files[0].slotId; const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, mutation(1), file(), storage);
@@ -124,9 +124,8 @@ test('role loss after copied bytes prevents publication and keeps copy evidence 
     storage.afterCopy = async () => { await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); };
     await runAdminImportPublicationOnce(storage); assert.equal(await getDb()!.collection('albums').countDocuments(), 0); const retained = await getAdminImport(other.toHexString(), project.item.id); assert.equal(retained.item.publication, 'needsAttention'); assert.equal(storage.objects.size, 2);
 });
-test('hidden publication fails closed until verified delivery gate, then parent hides independently public tracks', async () => {
-    const storage = new Storage(), project = await prepared(storage, 'hidden'); await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)), code('ADMIN_IMPORT_HIDDEN_DELIVERY_NOT_READY'));
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED = 'true'; process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'true';
+test('hidden publication needs no delivery gate, and the parent hides independently public tracks', async () => {
+    const storage = new Storage(), project = await prepared(storage, 'hidden');
     await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage); const done = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete');
     const [artist, album, track] = await Promise.all(['artists', 'albums', 'audioTracks'].map(name => getDb()!.collection(name).findOne({}))); assert.equal(artist!.visibility, 'hidden'); assert.equal(album!.visibility, 'hidden'); assert.equal(track!.visibility, 'public');
 });
@@ -186,7 +185,6 @@ test('verified byte candidates bind SHA to current object version and identify o
 });
 test('append rejects hidden draft into public target without changing draft visibility', async () => {
     const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing);
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED = 'true'; process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'true';
     const draft = structuredClone(project.item.draft); draft.album.visibility = 'hidden'; const edited = await editAdminImport(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), draft });
     await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, mutation(edited.item.revision)), code('ADMIN_IMPORT_DUPLICATE_STALE')); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.draft.album.visibility, 'hidden');
 });
@@ -197,7 +195,6 @@ test('legacy ready defaults tolerate reference touches, and hidden Artist Album 
     const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
     await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $set: { lifecycleStatus: 'ready', visibility: 'public' }, $inc: { referenceRevision: 1 } });
     await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'complete');
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true'; process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED = 'true'; process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'true';
     await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $set: { visibility: 'hidden' } }); await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { visibility: 'hidden' } });
     const hidden = await appendProject(storage, existing); const draft = structuredClone(hidden.item.draft); draft.album.visibility = 'hidden';
     const edited = await editAdminImport(actor.toHexString(), hidden.item.id, { ...mutation(hidden.item.revision), draft });

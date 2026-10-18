@@ -21,7 +21,7 @@ import { formatDuration } from '../../services/audio/audioMetadataService';
 import { ROOM_AUDIO_ANALYSIS_VERSION } from '../../models/mediaRepresentation';
 import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
 import { readAdminCatalogRecord, withCurrentAdministrator } from '../catalog/adminCatalogService';
-import { assertConversionSource, requireConversionFeature } from './conversionSources';
+import { assertConversionSource } from './conversionSources';
 import { AdminConversionError, conversionDigest, conversionFail, conversionId, conversionOperationId, parseConversionIntent,
     type ConversionIntent, type ConversionOperationResponse, type ConversionPublicationState, type ConversionUploadState } from './conversionContract';
 import { defaultConversionStorage, type ConversionObjectStorage, type ConversionStorageIdentity, type ConversionStorageTarget } from './conversionStorage';
@@ -120,7 +120,7 @@ export async function prepareConversionOperation(actor: string, trackId: string,
         return getConversionOperation(actor, trackId, intent.operationId, dependencies);
     }
     const source = await withCurrentAdministrator(actor, async session => {
-        requireConversionFeature(); const track = await assertConversionSource(trackId, intent, session);
+        const track = await assertConversionSource(trackId, intent, session);
         if (track.pendingS3Key || track.storageCleanupS3Key) return conversionFail(409, 'ADMIN_CONVERSION_STORAGE_BUSY');
         const bucket = String(process.env.S3_BUCKET_NAME ?? '').trim();
         if (!bucket) return conversionFail(503, 'ADMIN_CONVERSION_STORAGE_UNAVAILABLE');
@@ -133,7 +133,7 @@ export async function prepareConversionOperation(actor: string, trackId: string,
     await withCurrentAdministrator(actor, async session => {
         const previous = await operations().findOne({ actor, operationId: intent.operationId }, { session });
         if (previous) { if (previous.fingerprint !== fingerprint) conversionFail(409, 'ADMIN_CONVERSION_IDEMPOTENCY_CONFLICT'); return; }
-        requireConversionFeature(); const track = await assertConversionSource(trackId, intent, session);
+        const track = await assertConversionSource(trackId, intent, session);
         if (activeMediaObjectKeyForTrack(track) !== source.key || track.pendingS3Key || track.storageCleanupS3Key) return conversionFail(409, 'ADMIN_CONVERSION_STORAGE_BUSY');
         await tracks().updateOne({ _id: track._id }, { $inc: { conversionAdmissionRevision: 1 } }, { session });
         if (await operations().countDocuments({ actor, stage: { $nin: ['attached', 'cancelled'] }, $or: [{ stage: { $ne: 'prepared' } }, { grantExpiresAt: { $gt: now() } }] }, { session, limit: 256 }) >= 256) return conversionFail(429, 'ADMIN_CONVERSION_OPERATION_LIMIT');
@@ -151,7 +151,7 @@ async function claim(actor: string, trackId: string, operationId: string, metada
         const op = await readOperation(actor, trackId, operationId, session);
         if (!available(op)) return conversionFail(409, 'ADMIN_CONVERSION_BUSY');
         if (op.stage === 'cancelled') return op;
-        if (op.stage !== 'attached' && !op.cancelRequested) { approved(op); requireConversionFeature(); }
+        if (op.stage !== 'attached' && !op.cancelRequested) approved(op);
         const leaseOwner = randomUUID(), leaseUntil = new Date(Date.now() + 300_000);
         const update = { leaseOwner, leaseUntil, updatedAt: now(), ...(metadata ? { metadata } : {}) };
         await operations().updateOne({ _id: op._id }, { $set: update }, { session });
@@ -162,8 +162,8 @@ async function checkpoint(actor: string, op: ConversionOperation, update: Partia
     return withCurrentAdministrator(actor, async session => {
         const current = await readOperation(actor, op.trackId, op.operationId, session);
         if (current.leaseOwner !== op.leaseOwner || !current.leaseUntil || current.leaseUntil <= now()) return conversionFail(409, 'ADMIN_CONVERSION_BUSY');
-        // The storage HEAD between reservation and dispatch may outlive an approval or rollout change.
-        if (update.stage === 'sent') { requireConversionFeature(); approved(current); }
+        // The storage HEAD between reservation and dispatch may outlive the approval.
+        if (update.stage === 'sent') approved(current);
         await operations().updateOne({ _id: op._id, leaseOwner: op.leaseOwner }, { $set: { ...update, updatedAt: now() } }, { session });
         if (update.identity && outputMatches(current, update.identity)) {
             await tracks().updateOne({ _id: new ObjectId(op.trackId), pendingS3Key: op.target.key }, { $set: {
@@ -178,7 +178,7 @@ async function checkpoint(actor: string, op: ConversionOperation, update: Partia
 export async function requireConversionUploadAccess(actor: string, trackId: string, operationId: string) {
     requireAddress(trackId, operationId);
     await withCurrentAdministrator(actor, async session => {
-        requireConversionFeature(); const op = await readOperation(actor, trackId, operationId, session);
+        const op = await readOperation(actor, trackId, operationId, session);
         if (op.cancelRequested || op.stage === 'cancelled') return conversionFail(409, 'ADMIN_CONVERSION_CANCELLED');
         if (op.stage !== 'attached') approved(op);
         if (!available(op)) return conversionFail(409, 'ADMIN_CONVERSION_BUSY');
@@ -195,7 +195,7 @@ async function sourceStillStored(op: ConversionOperation, storage: ConversionObj
 }
 async function reserve(actor: string, op: ConversionOperation) {
     return withCurrentAdministrator(actor, async session => {
-        approved(op); requireConversionFeature(); const track = await assertConversionSource(op.trackId, op.intent, session);
+        approved(op); const track = await assertConversionSource(op.trackId, op.intent, session);
         if (track.storageCleanupS3Key || track.pendingS3Key && track.pendingS3Key !== op.target.key) return conversionFail(409, 'ADMIN_CONVERSION_STORAGE_BUSY');
         const current = await readOperation(actor, op.trackId, op.operationId, session);
         if (current.leaseOwner !== op.leaseOwner || current.cancelRequested || !current.leaseUntil || current.leaseUntil <= now()) return conversionFail(409, 'ADMIN_CONVERSION_BUSY');
@@ -214,7 +214,7 @@ async function reserve(actor: string, op: ConversionOperation) {
 /** Promotion, room invalidation and the installed-output receipt commit in one transaction. */
 async function attach(actor: string, op: ConversionOperation, identity: ConversionStorageIdentity) {
     return withCurrentAdministrator(actor, async session => {
-        requireConversionFeature(); approved(op);
+        approved(op);
         const current = await readOperation(actor, op.trackId, op.operationId, session);
         if (current.stage === 'attached') return current;
         if (current.leaseOwner !== op.leaseOwner || current.cancelRequested || !current.leaseUntil || current.leaseUntil <= now()) return conversionFail(409, 'ADMIN_CONVERSION_BUSY');
@@ -292,7 +292,7 @@ async function confirmAttachedPublication(actor: string, op: ConversionOperation
         }
         if (track!.publicationStatus === 'ready' || track!.publicationStatus === undefined) return true;
         if (!['pending', 'failed'].includes(track!.publicationStatus)) return false;
-        requireConversionFeature(); approved(current);
+        approved(current);
         if (albumId) await touchReadyAlbumReferences([albumId], session);
         const result = await tracks().updateOne({ _id: track!._id, s3Key: current.target.key, mediaType: 'audio', uploadStatus: 'ready',
             albumId: track!.albumId ?? null, mediaRepresentation: track!.mediaRepresentation, mediaByteHash: track!.mediaByteHash,
@@ -327,7 +327,7 @@ export async function uploadConversionOutput(actor: string, trackId: string, ope
     const previous = await withCurrentAdministrator(actor, session => readOperation(actor, trackId, operationId, session));
     if (previous.stage === 'attached' || previous.stage === 'stored') return reconcileConversionOperation(actor, trackId, operationId, dependencies);
     if (previous.cancelRequested || previous.stage === 'cancelled') return conversionFail(409, 'ADMIN_CONVERSION_CANCELLED');
-    requireConversionFeature(); approved(previous);
+    approved(previous);
     const metadata = await (dependencies.validate ?? validateConversionMp3)(file, previous.intent.output, signal);
     let op = await claim(actor, trackId, operationId, metadata);
     const storage = dependencies.storage ?? defaultConversionStorage;

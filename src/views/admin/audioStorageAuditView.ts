@@ -93,7 +93,7 @@ const renderMotionPreviewSection = (storage: any) => {
     );
 
     return `<div class="section-heading"><div><p class="eyebrow">Media namespace</p><h2>Motion preview storage</h2></div></div>
-    <p class="muted">The Motion preview panel opens in the Finitude Web catalog editor, which needs catalog editing and motion previews enabled.</p>
+    <p class="muted">The Motion preview panel opens in the Finitude Web catalog editor while motion previews are enabled.</p>
     <section class="grid audit-metrics" aria-label="Motion preview storage summary">
       ${metric('ph-database', 'MongoDB', 'databasePreviewTrackCount', 'Video MediaTracks with a preview')}
       ${metric('ph-cloud', 'S3', 's3ObjectCount', 'Objects under <code>motion-preview/</code>')}

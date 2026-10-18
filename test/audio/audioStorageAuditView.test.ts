@@ -212,7 +212,7 @@ test('motion preview audit sends deletion-owned evidence to a deletion retry and
     assert.match(html, /MediaTrack upload is not ready/);
     assert.match(html, /MediaTrack is no longer a Video/);
     assert.match(html, /No longer bound to the active Video/);
-    assert.match(html, /needs catalog editing and motion previews enabled/);
+    assert.match(html, /catalog editor while motion previews are enabled/);
 });
 
 test('a malformed preview key keeps the investigate advice even while its MediaTrack is being deleted', () => {

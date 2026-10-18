@@ -698,9 +698,8 @@ The wire protocol and operational bounds are documented in
   its configured name, type and source mode, reports missing or unsupported
   references, and confirms the current and proposed visibility of that exact
   placement. Renaming or changing its source invalidates a previous approval.
-  They cannot be enabled until
-  direct S3/CDN delivery and historical public URL policy are verified. Public
-  and private application responses never redirect to hidden object locations.
+  Media storage stays private, and public and private application responses
+  never redirect to hidden object locations.
 - On Web, admins switch between Admin and User views without signing out or rebuilding
   listening state. User view is the default; leaving Admin view hides private
   presentation, cancels private reads and stops previews. Unsaved drafts and

@@ -85,7 +85,7 @@ A Video MediaTrack may carry one muted hover preview for Finitude Web, behind
 objects live under `motion-preview/<trackId>/<ObjectId>`, a namespace no audio
 or video classifier touches.
 
-- Admin-only API (also requires `FINITUDE_ADMIN_CATALOG_ENABLED`):
+- Admin-only API (the persisted admin role; no catalog flag):
   `GET|POST|DELETE /api/admin/v1/catalog/audioTrack/:id/motion-preview` and
   `POST …/motion-preview/reconcile`. `GET` returns eligibility, an opaque
   `sourceToken`, the current revision, and preview facts, never keys or

@@ -2,12 +2,12 @@
 const enabled = (value: string | undefined) => value === 'true';
 
 export const isAdminImportsEnabled = () => enabled(process.env.FINITUDE_ADMIN_IMPORTS_ENABLED);
-export const isAdminCatalogEditingEnabled = () => enabled(process.env.FINITUDE_ADMIN_CATALOG_ENABLED);
-export const isAdminVisibilityEditingEnabled = () => isAdminCatalogEditingEnabled()
-    && enabled(process.env.FINITUDE_ADMIN_VISIBILITY_ENABLED)
-    && enabled(process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED);
 
-/** Reports capabilities, never provider secrets or organization/project identifiers. */
+/**
+ * Reports capabilities, never provider secrets or organization/project identifiers.
+ * Catalog editing, visibility and local conversion need only the persisted admin role checked by the caller;
+ * hidden media stays private because every byte is delivered through visibility-checked server routes.
+ */
 export const getAdminCapabilities = () => ({
     schemaVersion: 1 as const,
     admin: true as const,
@@ -18,13 +18,13 @@ export const getAdminCapabilities = () => ({
         maxFiles: 100
     },
     catalog: {
-        editing: isAdminCatalogEditingEnabled(),
-        visibility: isAdminVisibilityEditingEnabled()
+        editing: true as const,
+        visibility: true as const
     },
     localMp3Conversion: {
-        enabled: isAdminCatalogEditingEnabled(),
-        readSources: isAdminCatalogEditingEnabled(),
-        replace: isAdminCatalogEditingEnabled(),
+        enabled: true as const,
+        readSources: true as const,
+        replace: true as const,
         preset: 'mp3-320' as const,
         maxFiles: 100
     }

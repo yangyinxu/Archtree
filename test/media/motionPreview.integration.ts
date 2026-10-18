@@ -56,7 +56,7 @@ const storage: Partial<MotionPreviewLifecycleDependencies> = {
     validate: async (file) => ({ durationMs: 6_000, width: 854, height: 480, byteLength: file.size, sha256: 'b'.repeat(64) })
 };
 
-const flags = ['FINITUDE_MOTION_PREVIEWS_ENABLED', 'FINITUDE_ADMIN_CATALOG_ENABLED', 'S3_BUCKET_NAME'] as const;
+const flags = ['FINITUDE_MOTION_PREVIEWS_ENABLED', 'S3_BUCKET_NAME'] as const;
 const previous = Object.fromEntries(flags.map((key) => [key, process.env[key]]));
 const db = () => getDb()!;
 const path = `/api/admin/v1/catalog/audioTrack/${track}/motion-preview`;
@@ -92,7 +92,6 @@ before(async () => {
 beforeEach(async () => {
     for (const collection of ['users', 'authSessions', 'audioTracks']) await db().collection(collection).deleteMany({});
     process.env.FINITUDE_MOTION_PREVIEWS_ENABLED = 'true';
-    process.env.FINITUDE_ADMIN_CATALOG_ENABLED = 'true';
     process.env.S3_BUCKET_NAME = 'synthetic-motion-preview-bucket';
     const adminUser = { _id: admin, role: 'admin', emailVerified: true, email: 'preview-admin@example.test' };
     const ordinary = { _id: listener, role: 'user', emailVerified: true, email: 'preview-user@example.test' };

@@ -4,15 +4,14 @@
  *              editCatalogReview, analyzeCatalogReview, adoptCatalogReview, cancelCatalogReviewAnalysis,
  *              parseCatalogReviewFields, applyCatalogReview, listCatalogReviews
  * Internal
- *   Functions: fail, missing, conflict, admitted, reviewId, currentRevision, publicReceipt, response,
- *              membership, tracksForAlbum, mediaEvidence, catalogReviewSourceStatus, storedDate
+ *   Functions: fail, missing, conflict, reviewId, currentRevision, publicReceipt, response, membership,
+ *              tracksForAlbum, mediaEvidence, catalogReviewSourceStatus, storedDate
  *   Constants: reviewFilter, policy, filters
  * @end-catalog */
 
 import { randomUUID } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDb } from '../../infrastructure/database';
-import { isAdminCatalogEditingEnabled } from '../adminCapabilityService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
 import { touchReadyAlbumReferences } from '../../services/catalog/albumReferenceFenceService';
@@ -28,7 +27,6 @@ import type { CatalogReviewDetail, CatalogReviewField, CatalogReviewReceipt, Cat
 const fail = (status: number, code: string): never => { throw new AdminImportError(status, code); };
 const missing = (): never => fail(404, 'ADMIN_CATALOG_REVIEW_NOT_FOUND');
 const conflict = (): never => fail(409, 'ADMIN_CATALOG_REVIEW_SOURCE_CHANGED');
-const admitted = () => { if (!isAdminCatalogEditingEnabled()) fail(503, 'ADMIN_CATALOG_EDITING_UNAVAILABLE'); };
 const reviewFilter = { purpose: 'catalogReview' as const };
 const reviewId = (id: string) => objectId(id) ? new ObjectId(id) : missing();
 const currentRevision = (value: unknown): value is string => typeof value === 'string' && /^cr_[A-Za-z0-9_-]{43}$/.test(value);
@@ -42,7 +40,7 @@ export async function catalogReviewDto(doc: AdminImportDocument, actor: string, 
         id: shared.id, revision: shared.revision, createdAt: shared.createdAt, updatedAt: shared.updatedAt,
         startedByMe: shared.startedByMe, sourceStatus, state: doc.catalogApplied ? 'applied' : 'reviewing',
         source: doc.catalogSource, draft: doc.draft, analysis: shared.analysis, suggestions: shared.suggestions,
-        capabilities: { analysis: !doc.catalogApplied && shared.capabilities.analysis, apply: !doc.catalogApplied && sourceStatus === 'current' && isAdminCatalogEditingEnabled() },
+        capabilities: { analysis: !doc.catalogApplied && shared.capabilities.analysis, apply: !doc.catalogApplied && sourceStatus === 'current' },
         applied: doc.catalogApplied ?? null, receipts: doc.receipts.map(publicReceipt)
     };
 }
@@ -102,7 +100,6 @@ export async function createCatalogReview(actor: string, raw: unknown): Promise<
     return withImportAdmin(actor, async session => {
         const prior = await importCollection().findOne({ _id, ...reviewFilter }, { session });
         if (prior) { const receipt = prior.receipts[0]; if (receipt.hash !== hash || receipt.actorId !== actor) return fail(409, 'ADMIN_IMPORT_OPERATION_CONFLICT'); return response(prior, actor, receipt, session); }
-        admitted();
         const album = await readAdminCatalogRecord('album', input.albumId as string, session); if (!album) return missing();
         if (adminCatalogItemRevision('album', album) !== input.expectedRevision) return conflict();
         const tracks = await tracksForAlbum(album, session), fields = adminCatalogEditableFields('album', album);
@@ -158,7 +155,6 @@ const storedDate = (date: ImportDate | null) => date ? { year: date.year, ...(da
 export function applyCatalogReview(actor: string, id: string, raw: unknown): Promise<CatalogReviewResponse> {
     const body = parseAdminProjectMutation(raw, ['fields']), selected = parseCatalogReviewFields(body.fields);
     return mutateAdminProject(actor, id, body, 'apply', async (doc, session) => {
-        admitted();
         if (['queued', 'running'].includes(doc.analysis.state) || doc.analysis.chunks.some(chunk => chunk.state === 'inflight')) return fail(409, 'ADMIN_IMPORT_ANALYSIS_ACTIVE');
         const source = doc.catalogSource!, album = await readAdminCatalogRecord('album', source.album.id, session);
         if (!album || adminCatalogItemRevision('album', album) !== source.album.revision) return conflict();

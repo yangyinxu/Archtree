@@ -7,7 +7,7 @@
  *   - malformed legacy editor values become bounded repairable fields without rewriting source records
  *   - admin snapshots deny ordinary users, anonymous and revoked roles and expose allowlisted fields
  *   - metadata patches detect legacy changes and replay the exact saved intent
- *   - visibility requires delivery admission, inherits without storing cascades, and rejects external-art migration gaps
+ *   - visibility needs only the admin role, inherits without storing cascades, and rejects external-art migration gaps
  *   - Credits updates retain the canonical primary Artist membership and reject arbitrary fields
  *   - one Page placement visibility is independent of its reused collection and order
  *   - private Page snapshots identify ready, missing and unsupported definitions with allowlisted metadata
@@ -43,7 +43,7 @@ import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mo
 
 let harness: MongoReplicaSetHarness, server: Server, base = '', token = '', userToken = '';
 const admin = new ObjectId(), user = new ObjectId(), album = new ObjectId(), artist = new ObjectId(), track = new ObjectId();
-const flags = ['FINITUDE_ADMIN_CATALOG_ENABLED', 'FINITUDE_ADMIN_VISIBILITY_ENABLED', 'FINITUDE_HIDDEN_DELIVERY_ENFORCED', 'FINITUDE_ARTIST_FOLLOWS_ENABLED'] as const;
+const flags = ['FINITUDE_ARTIST_FOLLOWS_ENABLED'] as const;
 const previous = Object.fromEntries(flags.map(key => [key, process.env[key]]));
 const db = () => getDb()!;
 const code = (expected: string) => (error: any) => error.code === expected;
@@ -107,12 +107,9 @@ test('metadata patches detect legacy changes and replay the exact saved intent',
     assert.deepEqual((await db().collection('albums').findOne({ _id: album }))?.audioTrackIds, [track.toHexString()]);
 });
 
-test('visibility requires delivery admission, inherits without storing cascades, and rejects external-art migration gaps', async () => {
+test('visibility needs only the admin role, inherits without storing cascades, and rejects external-art migration gaps', async () => {
     let item = (await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item;
     const mutation = () => ({ operationId: randomUUID(), expectedRevision: item.revision, visibility: 'hidden' });
-    process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'false';
-    await assert.rejects(editAdminCatalogItem(admin.toHexString(), 'album', album.toHexString(), mutation()), code('ADMIN_VISIBILITY_UNAVAILABLE'));
-    process.env.FINITUDE_HIDDEN_DELIVERY_ENFORCED = 'true';
     await db().collection('albums').updateOne({ _id: album }, { $set: { coverArtUrl: 'https://example.test/old-public-art' } });
     item = (await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item;
     await assert.rejects(editAdminCatalogItem(admin.toHexString(), 'album', album.toHexString(), mutation()), code('ADMIN_VISIBILITY_STORAGE_MIGRATION_REQUIRED'));
