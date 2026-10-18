@@ -33,7 +33,8 @@ import { createRequire } from 'node:module';
 import { captureAccountOperation } from '../../api/accountEpoch';
 import type { ImportDetail } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
-import { importUploadQueue, importUploadRequest, matchReselection, type ImportUploadQueue } from './importUploadQueue';
+import { importUploadQueue, importUploadRequest, type ImportUploadQueue } from './importUploadQueue';
+import { matchReselection } from './importUploadRules';
 import { deferred, detail, json, slotId, slotTwo, viewer } from './adminFixtures.testSupport';
 
 const hashes = vi.hoisted(() => new Map<string, string>());

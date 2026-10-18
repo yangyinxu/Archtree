@@ -95,13 +95,15 @@ export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink
       client.removeQueries({ queryKey: ['admin-catalog-reviews'] });
     }
   }), [client]);
-  useEffect(() => { if (state.mode !== 'admin' && location.pathname.startsWith('/admin')) {
-    // A direct User-view link shows the gate; only leaving an active workspace navigates Home.
-    if (adminWorkspace.buffer<string>('lastRoute') === location.pathname) navigate('/', { replace: true });
-  } }, [state.mode, location.pathname, navigate]);
-  useEffect(() => { if (state.authorized && state.mode === 'admin' && location.pathname.startsWith('/admin')) {
-    adminWorkspace.retain('lastRoute', location.pathname, state);
-  } }, [location.pathname, state.mode, state.authorized]);
+  /**
+   * Only the explicit switch away from an active workspace navigates Home, as a new history entry: Back then
+   * returns to the administration page, which shows the Admin view gate like any User-view visit to it.
+   */
+  const leaveAdminView = () => {
+    const leaving = adminWorkspace.getSnapshot().mode === 'admin';
+    adminWorkspace.select('user');
+    if (leaving && adminWorkspace.getSnapshot().mode === 'user' && location.pathname.startsWith('/admin')) navigate('/');
+  };
   if (!viewerId || capabilities.isFetching) return null;
   if (state.reloadRequired && !state.authorized) return <button className={styles.button} type="button" title={t('common.reload')} onClick={() => window.location.reload()}>{t('common.reload_action')}</button>;
   if (!state.authorized || state.viewerId !== viewerId || state.epoch !== epoch) return <button className={styles.button} type="button" title={t('view.required')} onClick={() => void capabilities.refetch()}>{t('common.retry')}</button>;
@@ -111,7 +113,7 @@ export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink
       onClick={() => setOpen(!open)}><AdminViewLabel label={viewLabel} role={t(`view.${state.mode}`)} /></button>
     {open && <div id="admin-view-options" className={styles.menu} onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false); }}>
       {(['admin', 'user'] as const).map(mode => <button key={mode} aria-pressed={state.mode === mode}
-        className={styles.button} type="button" onClick={() => { if (mode === 'admin') void enterAdminView(); else adminWorkspace.select(mode); setOpen(false); }}>
+        className={styles.button} type="button" onClick={() => { if (mode === 'admin') void enterAdminView(); else leaveAdminView(); setOpen(false); }}>
         {t(`view.${mode}`)}</button>)}
     </div>}
     {state.mode === 'admin' && !hideWorkbenchLink && <Link aria-label={t('workbench.title')} title={t('workbench.title')} className={`${styles.link} ${styles.workbenchLink}`} to="/admin/imports"><Icon name="library" /><span>{t('workbench.title')}</span></Link>}

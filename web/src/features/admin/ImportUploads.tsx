@@ -3,11 +3,12 @@ import type { ImportDetail } from './adminApi';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
 import { useOnline } from './useAdminOnline';
-import { matchReselection, uploadPublicationLocked, type useImportUploadQueue } from './importUploadQueue';
+import { matchReselection, uploadPublicationLocked } from './importUploadRules';
+import type { ImportUploadQueueView } from './useImportUploadQueue';
 import styles from './adminStyles';
 
 /** Progress, reselection and Resume for incomplete files; Resume is the only control that sends file bytes. */
-export function ImportUploads({ item, uploads, onReselect }: { item: ImportDetail; uploads: ReturnType<typeof useImportUploadQueue>; onReselect: () => void }) {
+export function ImportUploads({ item, uploads, onReselect }: { item: ImportDetail; uploads: ImportUploadQueueView; onReselect: () => void }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline();
   const folder = useRef<HTMLInputElement>(null), files = useRef<HTMLInputElement>(null);
   const [mismatched, setMismatched] = useState<string[] | null>(null);

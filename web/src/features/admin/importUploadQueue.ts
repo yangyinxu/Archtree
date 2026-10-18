@@ -2,18 +2,17 @@
  * Exports
  *   Types: UploadFileState, UploadFileStatus, UploadStopReason, UploadQueueSnapshot
  *   Classes: ImportUploadQueue
- *   Functions: uploadPublicationLocked, importUploadRequest, reconcileImportUpload, matchReselection,
- *              importUploadQueue, useImportUploadQueue
+ *   Functions: importUploadRequest, reconcileImportUpload, importUploadQueue
  * Internal
  *   Types: Asset, Intent, Outcome
- *   Functions: status, liveAsset, mediaType
+ *   Functions: status, mediaType
  * @end-catalog */
 
-import { useState, useSyncExternalStore } from 'react';
 import { ApiError } from '../../api/client';
 import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 import { adminRequest, importPath, type AdminGuard } from './adminTransport';
 import { responseSchema, type ImportDetail, type ImportResponse } from './adminApi';
+import { liveAsset, uploadPublicationLocked } from './importUploadRules';
 
 /** One administrator approval uploads every selected file sequentially; each file keeps its own intent and outcome. */
 export type UploadFileState = 'queued' | 'uploading' | 'ready' | 'unknown' | 'failed' | 'refused' | 'stopped';
@@ -27,10 +26,6 @@ type Intent = { operationId: string; expectedRevision: number };
 interface Outcome { status: UploadFileStatus; stop?: UploadStopReason }
 
 const status = (state: UploadFileState, operationId: string | null = null, code: string | null = null): UploadFileStatus => ({ state, code, operationId });
-const liveAsset = (item: ImportDetail, slotId: string) => item.assets.find(asset => asset.slotId === slotId && asset.state !== 'deleted');
-/** Staged sources stay locked while a publication is active or its cancelled cleanup is pending. */
-export const uploadPublicationLocked = (item: ImportDetail) => ['preparing', 'needsAttention', 'complete'].includes(item.publication)
-  || (item.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending));
 const mediaType = (file: File) => {
   const types: Record<string, string> = { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/ogg', aif: 'audio/aiff', aiff: 'audio/aiff', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
   return types[file.name.split('.').at(-1)?.toLowerCase() ?? ''] ?? 'application/octet-stream';
@@ -49,18 +44,6 @@ export function importUploadRequest(file: File, operationId: string, expectedRev
 export function reconcileImportUpload(importId: string, slotId: string, operationId: string, guard: AdminGuard): Promise<ImportResponse> {
   return adminRequest(`${importPath(importId)}/assets/${encodeURIComponent(slotId)}/reconcile`, responseSchema, { method: 'POST', body: JSON.stringify({ operationId }) }, guard);
 }
-/** Reselected files resume only incomplete slots whose relative path and size both match the saved manifest. */
-export function matchReselection(item: ImportDetail, files: readonly File[]): { matched: Record<string, File>; mismatched: string[] } {
-  const matched: Record<string, File> = {}, mismatched: string[] = [];
-  for (const file of files) {
-    const path = file.webkitRelativePath || file.name, entry = item.manifest.files.find(entry => entry.relativePath === path);
-    if (!entry) { if (/\.(mp3|m4a|aac|wav|flac|ogg|opus|aif|aiff)$/iu.test(file.name)) mismatched.push(path); continue; }
-    if (liveAsset(item, entry.slotId)?.state === 'ready') continue;
-    if (file.size < 1 || entry.byteLength !== null && entry.byteLength !== file.size) mismatched.push(path); else matched[entry.slotId] = file;
-  }
-  return { matched, mismatched };
-}
-
 /** The per-import upload queue: an observable store whose drain loop owns the only in-flight upload request. */
 export class ImportUploadQueue {
   private state: UploadQueueSnapshot = { running: false, current: null, stopped: null, files: {}, latest: null };
@@ -226,9 +209,4 @@ export function importUploadQueue(importId: string, guard: AdminGuard = adminWor
   const key = `upload-queue:${importId}`, found = adminWorkspace.buffer<ImportUploadQueue>(key);
   if (found) return found;
   const queue = new ImportUploadQueue(importId, guard); adminWorkspace.retain(key, queue, guard); return queue;
-}
-/** Subscribes a component to the retained queue for one import without creating or restarting work. */
-export function useImportUploadQueue(importId: string) {
-  const [queue] = useState(() => importUploadQueue(importId));
-  return { queue, ...useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot) };
 }

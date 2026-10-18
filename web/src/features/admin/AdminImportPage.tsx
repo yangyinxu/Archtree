@@ -14,7 +14,7 @@ import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, importPath, responseSchema, type ImportDetail, type ImportDraft } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { useAdminMutation } from './useAdminMutation';
-import { useImportUploadQueue } from './importUploadQueue';
+import { useImportUploadQueue } from './useImportUploadQueue';
 import { ImportStages, MutationStatus, useOnline } from './AdminShared';
 import { ImportDraftEditor } from './ImportDraftEditor';
 import { AdminNav } from './AdminNav';
@@ -59,7 +59,7 @@ function ImportProject({ id }: { id: string }) {
     if (!item) return;
     accept(item); uploads.queue.observe(item);
     // Reopening reconciles uploads of unknown outcome once, without bytes.
-    if (!opened.current) { opened.current = true; void uploads.queue.reconcileOnOpen(item, adminWorkspace.capture()); }
+    if (!opened.current) { opened.current = true; uploads.queue.reconcileOnOpen(item, adminWorkspace.capture()); }
   }, [query.data]);
   useEffect(() => { if (uploads.latest) accept(uploads.latest); }, [uploads.latest]);
   useEffect(() => {
@@ -133,7 +133,7 @@ function ImportProject({ id }: { id: string }) {
       {reviewVisited && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDuplicates key={item.revision} item={item} disabled={savedOnly || Boolean(active)} onSave={decisions => mutate('decisions', { decisions })} /></Suspense>}
       </div>
       {(['files', 'publication'] as const).map(value => <div key={value} hidden={stage !== value} role="tabpanel" id={`import-panel-${value}`} aria-labelledby={`import-tab-${value}`}>
-      <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={value} active={stage === value} item={item} operation={mutation.operation} disabled={locked || editor.dirty || conflict || Boolean(active)} /></Suspense>
+      <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={value} active={stage === value} item={item} operation={mutation.operation} uploads={uploads} disabled={locked || editor.dirty || conflict || Boolean(active)} /></Suspense>
       </div>)}
     </>}
   </section>;

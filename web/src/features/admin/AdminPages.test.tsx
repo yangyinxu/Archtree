@@ -137,6 +137,9 @@ test('folder intake keeps the editable folder name', async () => {
   const song = new File(['synthetic bytes'], 'Song.mp3', { type: 'audio/mpeg' }); Object.defineProperty(song, 'webkitRelativePath', { value: 'Selected Album/Song.mp3' });
   fireEvent.change(picker, { target: { files: [song] } });
   const field = screen.getByRole('textbox', { name: 'Folder or Album context' }); expect(field).toHaveValue('Selected Album');
+  // Browsers compile `pattern` with the v flag, where an unescaped `/` in a class is a syntax error that silently disables the check.
+  const folderPattern = new RegExp(`^(?:${field.getAttribute('pattern')})$`, 'v');
+  expect(['Selected Album', 'a/b', 'a\\b'].map(value => folderPattern.test(value))).toEqual([true, false, false]);
   fireEvent.change(field, { target: { value: '' } }); expect(screen.getByRole('button', { name: 'Create import and upload files' })).toBeDisabled();
   fireEvent.change(field, { target: { value: 'Edited Album context' } }); fireEvent.click(screen.getByRole('button', { name: 'Create import and upload files' }));
   await waitFor(() => expect(server.uploads).toHaveLength(1));

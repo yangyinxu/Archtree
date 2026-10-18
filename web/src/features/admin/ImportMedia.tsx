@@ -15,7 +15,9 @@ import { importPath } from './adminApi';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
 import { useOnline } from './useAdminOnline';
-import { reconcileImportUpload, uploadPublicationLocked, useImportUploadQueue, type UploadFileStatus } from './importUploadQueue';
+import type { UploadFileStatus } from './importUploadQueue';
+import { uploadPublicationLocked } from './importUploadRules';
+import type { ImportUploadQueueView } from './useImportUploadQueue';
 import { ImportUploads } from './ImportUploads';
 import type { AdminMutation } from './useAdminMutation';
 import styles from './adminStyles';
@@ -32,9 +34,12 @@ const assetStamp = (asset: ImportDetail['assets'][number] | undefined) => asset 
 /** A refusal names its reason on the row; its badge keeps the server state. */
 const refusal: Record<string, string> = { content_changed: 'upload.refused_changed', file_changed: 'media.invalid', cleanup_pending: 'upload.refused_cleanup' };
 
-/** Uploads run in the one-approval queue; this section shows each file's outcome and its explicit recovery actions. */
-export function ImportMedia({ item, operation, disabled, view, active = true }: { item: ImportDetail; operation: AdminMutation; disabled: boolean; view?: 'files' | 'publication'; active?: boolean }) {
-  const t = useAdminText(), access = useAdminAccess(), online = useOnline(), uploads = useImportUploadQueue(item.id);
+/**
+ * Uploads run in the one-approval queue; this section shows each file's outcome and its explicit recovery actions.
+ * The import page owns the queue subscription and passes it in, which keeps the queue engine out of this panel's bundle.
+ */
+export function ImportMedia({ item, operation, uploads, disabled, view, active = true }: { item: ImportDetail; operation: AdminMutation; uploads: ImportUploadQueueView; disabled: boolean; view?: 'files' | 'publication'; active?: boolean }) {
+  const t = useAdminText(), access = useAdminAccess(), online = useOnline();
   const [confirmation, setConfirmation] = useState<MediaConfirmation | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
@@ -61,8 +66,10 @@ export function ImportMedia({ item, operation, disabled, view, active = true }: 
   };
   const checkAgain = async (slotId: string, operationId: string) => {
     setChecking(slotId);
-    try { uploads.queue.observe((await reconcileImportUpload(item.id, slotId, operationId, adminWorkspace.capture())).item); }
-    catch { /* The row keeps its unknown state; permission and reload failures are handled by the transport. */ }
+    try {
+      const guard = adminWorkspace.capture(), { reconcileImportUpload } = await import('./importUploadQueue');
+      uploads.queue.observe((await reconcileImportUpload(item.id, slotId, operationId, guard)).item);
+    } catch { /* The row keeps its unknown state; the transport handles permission and reload failures, and the next check retries a failed engine load. */ }
     finally { setChecking(null); }
   };
   const covers = item.assets.filter(asset => asset.contentType.startsWith('image/') && asset.state === 'ready');

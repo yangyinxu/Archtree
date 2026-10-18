@@ -9,12 +9,13 @@
  *   - account epoch synchronously erases private presentation and buffers, including same-user ABA
  *   - an unfamiliar view label stays complete without a guessed line break
  *   - reconnecting neither rechecks capability nor suspends the Admin view a running upload queue depends on
+ *   - leaving Admin view opens Home as a new entry, so Back returns to the gated administration page
  *   - an outdated capability schema offers a page reload instead of an ordinary retry
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { AdminControls, AdminGate, AdminViewLabel } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
 import { adminRequest } from './adminApi';
@@ -117,6 +118,23 @@ test('reconnecting neither rechecks capability nor suspends the Admin view a run
   await act(async () => { await client.invalidateQueries({ queryKey: ['admin-capabilities'], refetchType: 'none' }); onlineManager.setOnline(false); onlineManager.setOnline(true); await new Promise(resolve => setTimeout(resolve, 10)); });
   expect(fetch).toHaveBeenCalledTimes(calls); expect(adminWorkspace.getSnapshot()).toMatchObject({ authorized: true, mode: 'admin', generation });
   expect(screen.getByText('Private workbench')).toBeVisible();
+});
+test('leaving Admin view opens Home as a new entry, so Back returns to the gated administration page', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json(capabilities)));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
+  const Probe = () => { const location = useLocation(), navigate = useNavigate(); return <><output aria-label="Path">{location.pathname}</output><button type="button" onClick={() => navigate(-1)}>Back</button></>; };
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/admin/imports/new', '/admin/imports/x']} initialIndex={1}><AdminControls /><AdminGate><p>Private workbench</p></AdminGate><Probe /></MemoryRouter></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Switch to Admin view' })); await screen.findByText('Private workbench');
+  fireEvent.click(screen.getByRole('button', { name: 'Current view: Admin' })); fireEvent.click(screen.getByRole('button', { name: 'User' }));
+  expect(screen.getByRole('status', { name: 'Path' })).toHaveTextContent(/^\/$/);
+  // Replacing the administration entry would make Back skip it, or leave the app when it was the first entry.
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  await waitFor(() => expect(screen.getByRole('status', { name: 'Path' })).toHaveTextContent('/admin/imports/x'));
+  // The returning User view sees the gate and stays on the page instead of being sent Home again.
+  expect(await screen.findByRole('button', { name: 'Switch to Admin view' })).toBeVisible();
+  expect(screen.queryByText('Private workbench')).not.toBeInTheDocument();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  expect(screen.getByRole('status', { name: 'Path' })).toHaveTextContent('/admin/imports/x');
 });
 test('an outdated capability schema offers a page reload instead of an ordinary retry', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => json({ ...capabilities, futureCapability: true }))); mount(); expect(await screen.findByRole('button', { name: 'Reload page' })).toBeVisible(); expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument(); expect(adminWorkspace.getSnapshot()).toMatchObject({ reloadRequired: true, authorized: false });

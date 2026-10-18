@@ -4,7 +4,7 @@ import type { ImportDetail } from './adminApi';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
 import type { AdminGuard } from './adminTransport';
-import { importUploadQueue } from './importUploadQueue';
+import { loadImportUploadQueue } from './useImportUploadQueue';
 import { namingManifest, type NamingManifest } from './manifest';
 import { useAdminMutation, type AdminMutation } from './useAdminMutation';
 import { MutationStatus, useOnline } from './AdminShared';
@@ -15,11 +15,15 @@ import styles from './adminStyles';
 let openPages = 0;
 /**
  * Runs when Create is confirmed, mounted or not: the selected files move to the new import and its queue starts once,
- * under the Create click's guard, so a view changed since then stops it before any file is sent.
+ * under the Create click's guard, so a view changed since then stops it before any file is sent. The queue engine loads
+ * on demand; if it cannot, the retained files wait for Resume on the import page.
  */
 function handOff(item: ImportDetail, approval: AdminGuard) {
   const sources = adminWorkspace.buffer<Record<string, File>>('create-files');
-  if (sources) { adminWorkspace.retain(`files:${item.id}`, sources, approval); importUploadQueue(item.id, approval).start(item, sources, approval); }
+  if (sources) {
+    adminWorkspace.retain(`files:${item.id}`, sources, approval);
+    loadImportUploadQueue().then(({ importUploadQueue }) => importUploadQueue(item.id, approval).start(item, sources, approval), () => {});
+  }
   adminWorkspace.forget('create-files'); adminWorkspace.forget('create-manifest');
   if (!openPages) adminWorkspace.forget('mutation:create');
 }
@@ -69,7 +73,7 @@ function CreateImport() {
       {invalid && <p role="alert">{t('import.invalid_files')}</p>}
       {manifest && <>
         {needsFolder && <>
-          <label className={styles.field}>{t('import.root')}<input className={styles.input} required maxLength={200} pattern="[^/\\\\]+" value={manifest.rootLabel} disabled={locked} onChange={event => setManifest({ ...manifest, rootLabel: event.target.value })} /></label>
+          <label className={styles.field}>{t('import.root')}<input className={styles.input} required maxLength={200} pattern="[^\/\\]+" value={manifest.rootLabel} disabled={locked} onChange={event => setManifest({ ...manifest, rootLabel: event.target.value })} /></label>
           <p className={styles.muted}>{t('import.root_help')}</p>
         </>}
         <p>{t('import.file_count', { count: manifest.files.length })}</p>

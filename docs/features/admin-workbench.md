@@ -293,7 +293,10 @@ its own confirmation. All `/finitude/admin/*` pages use a dedicated administrati
 layout with management navigation, language/account controls and the Admin/User
 view switch. Listener navigation, global music search and playback controls are
 absent. Switching back to User view restores the listener layout while retaining
-the authenticated session, playback state and active Room connection.
+the authenticated session, playback state and active Room connection. Switching
+to User view on an administration page opens Home as a new history entry, so
+browser Back returns to that page, which shows the Admin view gate as any User
+view visit does and never restarts a stopped upload queue.
 The catalog uses artwork/name entries for Albums, Artists, MediaTracks and
 Organizations, with management actions on their detail pages. The inventory
 loads separately from editing controls. Its optional `kind=artist`,
